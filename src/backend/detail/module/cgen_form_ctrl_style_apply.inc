@@ -253,23 +253,17 @@
                 break;
             }
             case FrmControlType::Slider: {
-                // C29-SL-a: msctls_trackbar32 的创建样式。
-                //   · Orientation: 0=sldHorizontal(默认) / 1=sldVertical → TBS_VERT(0x0002)。
-                //     立在创建参数里，但**不是只能创建时给** —— 探针实测运行期写 TBS_VERT +
-                //     SWP_FRAMECHANGED 之后滑块的位移轴真的跟着换（与"创建时就是垂直"逐字相同），
-                //     所以写侧也登记了 setter（见 cgen_util_ctrl.cpp 的 Slider 那一格）。
-                //     ⚠ 第一发探针拿 TBM_GETCHANNELRECT 的长短边判方向，得出过"运行期改不动"的
-                //     错结论 —— 那条消息的 rect 永远把行程长度放在 x 分量，压根不随方向旋转。
+                // C29-SL-a/h: msctls_trackbar32 的创建样式。折算整个搬进 sliderStyleBits
+                // （上面 controlTypeStyleBits 的 Slider 那一格共用它）—— 顶层这条路过去自己
+                // 写一份、容器子控件那条路一份都没写，正是账 #83 说的那两张表各写各的。
+                // 三条实测口径抄在 vb6forms_slider.c 的 C29-SL-h 那一格与 029 §九：
+                //   · Orientation 运行期写样式位**是有效的**（第一发探针拿 channel 矩形判
+                //     方向，得出过"只能创建时给"的错结论 —— 那条消息不随方向旋转）。
                 //   · TBS_AUTOTICKS(0x0001) 一律挂上：VB6 的 Slider 默认就画刻度。
-                //     TickStyle 那四档与 TBS_TOP/BOTTOM/LEFT/RIGHT/BOTH/NOTICKS 的对应
-                //     **本机拿不到 VB6 真值**（OCX 未注册、typelib 读不到），刻意不做，
-                //     押后等口径（见 029 §九 C29-SL-0 那一格末）。
+                //   · TickStyle 四档 ↔ TBS_TOP(0x4)/BOTH(0x8)/NOTICKS(0x10)/那三位全清，
+                //     数值读自 OCX 自带的类型库（探针 .build/slprobe/sltlb.cpp），非猜。
                 createCaption = "";
-                style |= 0x0001L;                       // TBS_AUTOTICKS
-                auto slOr = ctrl.properties.find("Orientation");
-                if (slOr != ctrl.properties.end() && (int)slOr->second.intValue != 0) {
-                    style |= 0x0002L;                   // TBS_VERT
-                }
+                style |= sliderStyleBits(ctrl);
                 break;
             }
             case FrmControlType::RichTextBox: {
@@ -309,6 +303,17 @@
             default:
                 break;
         }
+
+        // 账 #83(a)（C29-SL-r）: VB6 默认 TabStop = True，而这一位以前两条创建路都没立
+        // （读数见 029 的 C29-SL-r-0）。判断只在 controlTabStopStyleBit 一处，容器那趟共用。
+        style |= controlTabStopStyleBit(ctrl);
+
+        // 账 #158（按钮那一半）: BUTTON 类不挂 `BS_NOTIFY` 就不把焦点变化作为 `WM_COMMAND`
+        // 报给父窗（裸码实测见 `controlButtonNotifyStyleBit` 的定义处）。判断只在那一处，容器那趟共用。
+        style |= controlButtonNotifyStyleBit(ctrl);
+        // 账 #83(b2): 容器挂 WS_EX_CONTROLPARENT —— 没有这一位，`IsDialogMessage` 不会
+        // 走进 Frame/PictureBox/SSTab，里面的控件连 tab 序都进不了（顶层这一条路）。
+        exStyle |= controlContainerExStyleBit(ctrl);
 
         // Bug3-Fix: TextBox/ComboBox 延迟设置初始文本，避免 EN_CHANGE 在句柄赋值前触发
         // C29-RT-a: RichTextBox 同因加入 —— 它也是文本控件，.frm 里的初值走 Text 那一条。
@@ -359,6 +364,8 @@
             emitDesignerStyleProps(ctrl, dsHwnd);
             emitDesignerStateProps(ctrl, dsHwnd);  // 账 #125: Enabled / Visible / Value
             emitDesignerStringProps(ctrl, dsHwnd);  // 账 #142: ToolTipText / Tag（非空才发）
+            emitDesignerFontProps(ctrl, dsHwnd);    // 账 #154: FontName / FontSize（写过才发）
+            emitDesignerTabIndexProp(ctrl, dsHwnd, tabIndexFallback);  // 账 #160: 设计期 TabIndex（顶层这条路）
 
             // Fix 187: 设计期 ForeColor/BackColor — 此前从未发射, .frm 的初始色
             // 全部落空 (picBackColor &H00F8CCB1& 淡蓝被显示成 BTNFACE 灰, 颜色
@@ -389,22 +396,16 @@
             c_.emitLine("SendMessageW((HWND)" + hwndVar + ", WM_SETTEXT, 0, (LPARAM)L\"" + delayedText + "\");");
         }
 
-        // Fix 162c-extlist: CheckBox/OptionButton 设计期 Value —— .frm 里
-        // `Value = -1  'True` 此前从不消费, Option1(0) 默认选中态丢失
-        // (extlist 参考图第一个单选钮是实心点, 我们全空)。VB6 的 Value 只有两态,
-        // 非 0 即勾上 → BM_SETCHECK(BST_CHECKED)。
-        if (ctrl.controlType == FrmControlType::CheckBox ||
-            ctrl.controlType == FrmControlType::OptionButton) {
-            auto vIt162c = ctrl.properties.find("Value");
-            if (vIt162c != ctrl.properties.end() && vIt162c->second.intValue != 0) {
-                std::string vNLower = ctrl.controlName; std::transform(vNLower.begin(), vNLower.end(), vNLower.begin(), ::tolower);
-                std::string vHwnd = knownControlArrays_.count(vNLower) ?
-                    ("vb6_CtrlArr_GetAt(&vb6_arr_" + cIdent(ctrl.controlName) + ", " +
-                     std::to_string(ctrl.index >= 0 ? ctrl.index : 0) + ")") :
-                    ("vb6_hwnd_" + cIdent(ctrl.controlName));
-                c_.emitLine("vb6_SetCheckValue((void*)" + vHwnd + ", 1);  /* design Value=True */");
-            }
-        }
+        // Fix 162c-extlist 那条"顶层控件设计期 Value"的旧块**已删**(2026-09-30)。
+        // 它和上面第 360 行的 `emitDesignerStateProps(ctrl, dsHwnd)` 是**同一件事的两个出口**,
+        // 而两条口径不一致 —— 旧块 `CheckBox || OptionButton` 共用 `vb6_SetCheckValue`:
+        //   · OptionButton 的 Value 在 VB6 是 Boolean(账 #128-b 单开了 vb6_SetOptionValue);
+        //   · CheckBox 的 Value 是三态(0/1/2), 旧块把 Grayed(2) 也压成 1。
+        // 于是 `obOn` 会同时拿到 `vb6_SetOptionValue` 与 `vb6_SetCheckValue` 两条
+        // (实测门 #233 的 `cs_emitc_selectivity` 就是钉这条错形状的), 读数取决于谁最后落地。
+        // 现在设计期状态属性**只有一处出口** = `emitDesignerStateProps`, 两条创建路
+        // (顶层 cgen_form_ctrl_style_apply.inc / 容器 cgen_form_frame_menu.inc) 各调一次。
+        // ⚠ 这条纪律与账 #125 的注释同源: 设计期属性按"属性"分出口, 不按"控件类型"分出口。
 
         // Fix 162c-extlist: Label 设计期 AutoSize=True —— 此前从不消费
         // (extlist 的 Label2/3/4 按设计期 caption "Label2" 的宽度留在原地)。
@@ -608,11 +609,9 @@
             c_.emitLine("vb6_DTP_Init((void*)" + dtHwnd + ", L\"" + esc + "\");");
         }
 
-        // C29-SL-a/b: Slider 设计期值面下发（Init 十参，-999 哨兵 = .frm 没写过 ⇒ 那一条消息
-        // 不发，保持控件默认；Init 本身照发，让发码形状稳定 —— 同 vb6_TreeView_Init 那条）。
-        // 参数顺序不是随便排的，是 .build/slprobe/slmeasure6.c 量出来的：改 range 会把 pos 顶到
-        // 新下限、把 page 从 20 重算成 18、把 selstart 跟到新下限 ⇒ range → line/page → pos →
-        // 刻度 → Sel 这个序，任何一端先动都会把后面的吃掉。
+        // C29-SL-a/b: Slider 设计期值面下发。C29-SL-o 起这段本身搬进 emitSliderDesignTimeInit
+        // （账 #83 的 Slider 半边 —— 容器子控件那条创建路以前压根不发这一条，参数序与 -999
+        // 哨兵的口径只在这一处，别在这里复制第二份）。
         if (ctrl.controlType == FrmControlType::Slider) {
             std::string slLower = ctrl.controlName;
             std::transform(slLower.begin(), slLower.end(), slLower.begin(), ::tolower);
@@ -620,16 +619,7 @@
                 ("vb6_CtrlArr_GetAt(&vb6_arr_" + cIdent(ctrl.controlName) + ", " +
                  std::to_string(ctrl.index >= 0 ? ctrl.index : 0) + ")") :
                 ("vb6_hwnd_" + cIdent(ctrl.controlName));
-            auto slProp = [&](const char* key) -> std::string {
-                auto it = ctrl.properties.find(key);
-                if (it == ctrl.properties.end()) return "-999";
-                return std::to_string((long long)(int)it->second.intValue) + "L";
-            };
-            c_.emitLine("vb6_Slider_Init((void*)" + slHwnd + ", "
-                        + slProp("Min") + ", " + slProp("Max") + ", " + slProp("Value") + ", "
-                        + slProp("SmallChange") + ", " + slProp("LargeChange") + ", "
-                        + slProp("TickFrequency") + ", " + slProp("SelStart") + ", "
-                        + slProp("SelEnd") + ", " + slProp("SelectRange") + ");");
+            emitSliderDesignTimeInit(ctrl, slHwnd);
         }
 
         // C29-MV-a: MonthView 设计期的多月平铺。原生没有"行/列"这条消息 —— 平铺几个月完全

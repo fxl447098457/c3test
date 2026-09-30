@@ -185,10 +185,34 @@ void vb6_SetToolTipText(void* hwnd, void* bstrText) {
     }
 }
 
+// C29-SL-j 判据证人（账 #148）：**这枚控件的 ToolTipText 到底进没进 tooltip 宿主**。
+// 上面那条 vb6_SetToolTipText 走的是"存一份拷贝 + 往共享宿主登记工具"两步；存的那一步
+// 一直有判据读（SE/CP 那几组读的就是 GetPropW 回来的串），**登记那一步以前没人验过**。
+// 这里改问宿主：TTM_GETTEXT 能把工具文本读回来 = 登记成立。
+// 为什么要在产物里验而不是探针：裸编的 C 探针不嵌 Common-Controls 6.0 的 manifest ⇒ 走 v5，
+// 而 v5 里 TTM_ADDTOOLW 直接返回失败（实测 .build/slprobe/slmeasure15.c），拿它定罪会冤枉产品。
+int vb6_ToolTipRegistered(void* hwnd) {
+    HWND host;
+    TOOLINFOW ti;
+    wchar_t buf[128];
+    LRESULT rc;
+    if (!hwnd) return 0;
+    host = vb6_GetToolTipCtrl();
+    if (!host) return 0;
+    memset(&ti, 0, sizeof(ti));
+    ti.cbSize = sizeof(ti);
+    ti.uFlags = TTF_IDISHWND | TTF_SUBCLASS;
+    ti.hwnd = GetParent((HWND)hwnd);
+    ti.uId = (UINT_PTR)hwnd;
+    ti.lpszText = buf;
+    buf[0] = 0;
+    rc = SendMessageW(host, TTM_GETTEXTW, 0, (LPARAM)&ti);
+    return (rc > 0 || buf[0]) ? -1 : 0;   // VB6: True = -1
+}
+
 // ============================================================
 // P13.9: Tag
 // ============================================================
-
 wchar_t* vb6_GetControlTag(void* hwnd) {
     if (!hwnd) return SysAllocString(L"");
     HANDLE hProp = GetPropW((HWND)hwnd, L"VB6_Tag");

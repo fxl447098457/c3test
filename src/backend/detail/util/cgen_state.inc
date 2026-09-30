@@ -674,6 +674,30 @@
             }
         }
         if (statusBarVars_.count(objExpr)) return objExpr;
+        // 2026-09-30 (门 #233 / c29sbevt): **宿主槽本身**也是这个函数的输入之一。
+        // 集合形态 (`Panels.Add` / `Panels.Count`) 一直走上面那两段; 而 `StatusBar1.SimClick`
+        // 这类**直接落在宿主槽上**的成员调用送进来的是 `vb6_hwnd_StatusBar1` —— 以前这里只有
+        // `statusBarVars_.count(objExpr)`(拿带前缀的槽名去比裸控件名, 恒假) ⇒ 函数答空
+        // ⇒ 宿主被当成"不是 StatusBar", 成员被当 COM 占位属性读 (`SimClick` 于是编成
+        // `ComCallObject(ComGetObjectProp(hwnd, L"SimClick"), L"Item", …)`: 编得过、跑起来
+        // 一条事件都不发)。姊妹函数 `treeViewNameOfExpr` / `toolbarNameOfExpr` 是拿
+        // `vb6_hwnd_<裸名>` 扫子串的, 所以它们认得这一形 —— 只有 StatusBar 这一路漏了。
+        // 这里补的正是"裸槽"那一形, 判据仍是登记表 (不是按前缀猜): 剥掉 hwnd_/com_/arr_
+        // 前缀后必须真的在 `statusBarVars_` 里。
+        {
+            static const char* kSlotPrefixes[] = { "vb6_hwnd_", "vb6_com_", "vb6_arr_" };
+            for (const char* pf : kSlotPrefixes) {
+                size_t pl = strlen(pf);
+                if (objExpr.size() > pl && objExpr.compare(0, pl, pf) == 0) {
+                    std::string bare = objExpr.substr(pl);
+                    // 只有"整串就是那个槽"才算宿主 (带成员/下标的走集合那两段)
+                    if (bare.find_first_of("[(. ") == std::string::npos
+                        && statusBarVars_.count(bare)) {
+                        return bare;
+                    }
+                }
+            }
+        }
         return "";
     }
     // C29-5a: Toolbar 的裸名登记 (设计期发射那侧 insert)。认法比 StatusBar 那套窄得多 ——
@@ -717,6 +741,27 @@
     // 访问器 `vb6_form_ctrl_<Form>_<Ctrl>()` 时在这里登记 (键=值=访问器文本),
     // 供 Nodes 集合两条路 (resolveComMember / resolveComValue) 认领。
     mutable std::unordered_map<std::string, std::string> externalTreeViewAccs_;
+    // <vbeclipse>: 控件的**集合对象表达式** —— 它的值已经是那个集合本身了 (真 IDispatch
+    // 或原生复刻的集合)，对它点成员是**方法调用** (`Nodes.Add(…)` 调的就是 Add)，不是
+    // "再取一次集合属性 + Item 下标"。
+    // 判据一律按**开头**认，绝不按子串：集合表达式里嵌着宿主槽 `vb6_hwnd_tv1`，而
+    // treeViewNameOfExpr / toolbarNameOfExpr / isListViewHostExpr 都是子串扫的 —— 按子串
+    // 判"这是不是宿主槽"会把集合对象也算成宿主槽，于是 `Nodes.Add(…)` 编成
+    // vb6_ComCallObject(vb6_ComGetObjectProp(vb6_TreeView_Nodes(…), L"Add"), L"Item", …)：
+    // 节点根本没被加进去，Index 全部读空。实测 12 条控件回读红
+    // (ctrltreeview / ctrltoolbar / c29listview / c29sbevt 各 x64+x86)。
+    // dev 那边是靠 `comObjExpr_.find("vb6_hwnd_") == 0` 这个**前缀锚**挡住的；本条把
+    // 这件事写成一处有名字的话，免得下一个控件再加一路子串判据时又把它冲掉。
+    bool isControlCollectionExpr(const std::string& expr) const {
+        static const std::vector<std::string> heads = {
+            "vb6_TreeView_Nodes(", "vb6_Toolbar_Buttons(", "vb6_ImageList_ListImages(",
+            "vb6_ListView_ListItems(", "vb6_ListView_ColumnHeaders(",
+        };
+        for (const auto& h : heads) {
+            if (expr.size() >= h.size() && expr.compare(0, h.size(), h) == 0) return true;
+        }
+        return false;
+    }
     // C29-DT-c: DTPicker 的裸名登记。认法照 treeViewNameOfExpr —— 它也是真窗口，
     // 判据方法 (SimChange/SimDropDown/SimCloseUp) 的宿主槽只会是 `vb6_hwnd_<裸名>`，
     // 名字比对同样要过标识符边界 (dt1 不能命中 dt10)。

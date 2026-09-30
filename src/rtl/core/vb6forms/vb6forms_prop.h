@@ -39,6 +39,13 @@ void vb6_SetControlVisible(void* hwnd, int visible);
 int vb6_GetControlEnabled(void* hwnd);
 void vb6_SetControlEnabled(void* hwnd, int enabled);
 
+// C29-SL-l（账 #143）: VB6 的 `控件.SetFocus`。之前这一形从没登记过，两形（带括号与不带括号）
+// 都落进 vb6_ComCall(裸 HWND, L"SetFocus", NULL, 0) —— 原生控件槽里是句柄不是 IDispatch，
+// 于是编得过、链接得过、跑起来一声不响。RTL 就一句 SetFocus(hwnd)（焦点属于线程输入队列，
+// 与窗口可见/激活无关，所以无头跑里也真能拿到 —— C29-SL-g 的 SimStdEvent kind=4 走同一条路，
+// 实测会发 WM_SETFOCUS）。拿不到焦点时原生就是回 NULL 什么都不做，本项目不伪造、不重试。
+void vb6_SetControlFocus(void* hwnd);
+
 // P11.8: Position/Size attributes (all visible controls, in pixels)
 // VB6 uses twips internally, but Win32 uses pixels; RTL handles conversion
 int vb6_GetControlLeft(void* hwnd);
@@ -59,9 +66,14 @@ void* vb6_GetControlHwnd(void* hwnd);
 // FontName: returns BSTR (caller responsible for SysFreeString)
 void* vb6_GetControlFontName(void* hwnd);
 void vb6_SetControlFontName(void* hwnd, void* bstrName);
+// C29-SL-q（账 #154）: 设计期那一条 —— 字体名是生成码里的 C 字面量，不是 BSTR。
+void vb6_SetControlFontNameW(void* hwnd, const wchar_t* name);
 // FontSize: returns VB6 Single (points) as float
 float vb6_GetControlFontSize(void* hwnd);
 void vb6_SetControlFontSize(void* hwnd, float sizePt);
+// C29-SL-p 判据证人（不是 VB6 属性）：窗口真在用的字体像素高度。
+// 字号那条判据只问自存的数就是自洽假绿，得同时问窗口一次（#148 那条教训）。
+int vb6_ControlFontPixelHeight(void* hwnd);
 // FontBold: VB6 True=-1, False=0
 int vb6_GetControlFontBold(void* hwnd);
 void vb6_SetControlFontBold(void* hwnd, int bold);

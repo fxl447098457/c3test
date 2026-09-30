@@ -84,6 +84,15 @@ Begin VB.Form CtrlStateForm
       Top             =   840
       Width           =   1800
    End
+   Begin VB.CheckBox cbNoTab 
+      Caption         =   "跳格"
+      TabStop         =   0  'False
+      Height          =   300
+      Left            =   2160
+      TabIndex        =   12
+      Top             =   2400
+      Width           =   1800
+   End
    Begin VB.CheckBox cbDef 
       Caption         =   "默认"
       Height          =   300
@@ -165,6 +174,14 @@ Private Sub tProbe_Timer()
     v = obOn.Value
     Debug.Print "DS11=" & CStr(obDef.Value) & "/" & TypeName(obOn.Value) & "/" & CStr(VarType(v))
     Debug.Print "DS12=" & TF(obOn.Value = True And obDef.Value = False)
+    ' 账 #83(a)（C29-SL-r）: VB6 的 TabStop 默认是 True，而以前**两条创建路都不立 WS_TABSTOP**
+    ' （029 的 C29-SL-r-0：顶层按钮、Frame 里的按钮与文本框一律读回 0）。ST1 一次问四枚 ——
+    ' 顶层 / 容器里 / 容器里那枚 Label（拿不到焦点，不该立）/ 显式写了 `TabStop = 0` 的那枚。
+    ' 这一格问的是窗口本身（`vb6_GetTabStop` 读 GWL_STYLE），没有自存 ⇒ 不存在"读我们存的数"那种自洽假绿。
+    ' ST2 是读侧那半（#124 同族）：登记成 Boolean 之前 VarType 是 3（Integer）、TypeName 也是整数那一头。
+    Debug.Print "ST1-tab=" & CStr(cbOut.TabStop) & "/" & CStr(cbIn.TabStop) & "/" _
+        & CStr(lbIn.TabStop) & "/" & CStr(cbNoTab.TabStop)
+    Debug.Print "ST2-bool=" & CStr(VarType(cbOut.TabStop)) & "/" & TypeName(cbOut.TabStop)
     Debug.Print "CTRLSTATE-DONE"
     Unload Me
 End Sub

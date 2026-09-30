@@ -91,6 +91,21 @@ static inline vb6_VARIANT vb6_VariantDouble(double val) {
     v.vt = vb6_vtDouble; v.dblVal = val; return v;
 }
 
+// <vbeclipse>: VB6 的 Single 是 VT_R4 (VarType=4)、Date 是 VT_DATE (VarType=7)。
+// 以前没有这两档构造器: _Generic 里 `float → vb6_VariantDouble` ⇒ Single 一律装箱成
+// VT_R8, 而 Date 在 C 侧就是 double, 只能靠 VB 类型说话 (见 codegen 的 boxToVariant)。
+// 注意本仓已有路径**已经**会产 VT_DATE (vb6rtl_com.c 的 VARIANT DATE 转换), 而 TypeName
+// /IsDate/Format 也早有 vtDate 档 —— 缺的正是这两枚构造器和数值提取端 (见 vb6rtl.c)。
+static inline vb6_VARIANT vb6_VariantSingle(float val) {
+    vb6_VARIANT v; memset(&v, 0, sizeof(v));
+    v.vt = vb6_vtSingle; v.fltVal = val; return v;
+}
+
+static inline vb6_VARIANT vb6_VariantDate(double val) {
+    vb6_VARIANT v; memset(&v, 0, sizeof(v));
+    v.vt = vb6_vtDate; v.dblVal = val; return v;   // 与 vtDate 的既有约定同: 序列号放 dblVal
+}
+
 static inline vb6_VARIANT vb6_VariantString(BSTR val) {
     vb6_VARIANT v; memset(&v, 0, sizeof(v));
     v.vt = vb6_vtBSTR; v.bstrVal = val; return v;
@@ -165,7 +180,7 @@ static inline vb6_VARIANT vb6_VariantIdentity(vb6_VARIANT v) { return v; }
     long long:            vb6_VariantLongLong, \
     unsigned long long:   vb6_VariantLong, \
     wchar_t:              vb6_VariantLong, \
-    float:                vb6_VariantDouble, \
+    float:                vb6_VariantSingle, \
     double:               vb6_VariantDouble, \
     wchar_t*:             vb6_VariantString, \
     struct vb6_SafeArray1D*: vb6_VariantArray, \
@@ -186,7 +201,7 @@ static inline vb6_VARIANT vb6_VariantIdentity(vb6_VARIANT v) { return v; }
     long long:            vb6_VariantLongLong, \
     unsigned long long:   vb6_VariantLong, \
     wchar_t:              vb6_VariantLong, \
-    float:                vb6_VariantDouble, \
+    float:                vb6_VariantSingle, \
     double:               vb6_VariantDouble, \
     wchar_t*:             vb6_VariantString, \
     struct vb6_SafeArray1D*: vb6_VariantArray, \

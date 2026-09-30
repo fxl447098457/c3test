@@ -198,8 +198,15 @@ void CCodeGen::visit(CallStmt& node) {
                                     // 登记在 knownDoubleVars_, isDoubleExpr 会抢先命中并
                                     // 打成序列号 46023; 按 VB6 应是短日期串。
                                     c_.emitLine("vb6_DebugWriteBSTR(vb6_CStrDate((double)(" + val + ")));");
-                                } else if (isDoubleExpr(val)) {
+                                } else if (isDoubleExpr(val)
+                                    || inferExprType(*call.positional[j]) == Vb6Type::Double
+                                    || inferExprType(*call.positional[j]) == Vb6Type::Single) {
                                     // 浮点数, 用DebugWriteDouble输出
+                                    // <vbeclipse>: isDoubleExpr 是一张**函数名前缀清单**, 清单外的
+                                    // 浮点表达式以前一律落到 DebugWriteLong((int32_t)(x)) ——
+                                    // 实测 `Debug.Print CDbl(v)` (发的是 vb6_CDblV) 把 1.5 打成 1,
+                                    // VB6 打 1.5。判定改按 AST 类型走 (同上面 BSTR/Date/Boolean
+                                    // 三档已有的口径), 名字清单只当补充。
                                     c_.emitLine("vb6_DebugWriteDouble((double)(" + val + "));");
                                 } else if (isVariantVal091r(val)) {
                                     // Fix 090x: Debug.Print x (x As Variant 变量 /
@@ -378,6 +385,25 @@ void CCodeGen::visit(CallStmt& node) {
                         c_.emitLine("vb6_ControlPrint((void*)vb6_hwnd_" + ctrlNamePic + ", 0);  /* PictureBox.Print */");
                     }
                     return;
+                }
+            }
+            // C29-SL-l（账 #143）: **不带括号**的控件零实参方法 —— `Text1.SetFocus` /
+            // `Slider1.ClearSel` 这一形由 parser 直接交付 CallStmt(callee=MemberAccessExpr)，
+            // 到不了上面那条表达式路，所以在这里用同一张表再拦一次（`controlZeroArgMethod`）。
+            // 不接这头的形状是 `vb6_ComCall(裸 HWND, L"SetFocus", NULL, 0)`：对假 IDispatch 发
+            // Invoke ⇒ 编得过、链接过、跑起来一声不响，零诊断。
+            {
+                std::string zaHwnd;
+                FrmControlType zaType = FrmControlType::Unknown;
+                std::string zaMem = Symbol::toLower(comMemberName_);
+                if (formCtrlSlot(comObjExpr_, zaType, zaHwnd)) {
+                    std::string zaFn = controlZeroArgMethod(zaType, zaMem);
+                    if (!zaFn.empty()) {
+                        comObjExpr_.clear();
+                        comMemberName_.clear();
+                        c_.emitLine(zaFn + "((void*)" + zaHwnd + ");  /* " + zaMem + " */");
+                        return;
+                    }
                 }
             }
             // 无括号的COM方法调用: obj.Method → vb6_ComCall(obj, L"Method", NULL, 0)

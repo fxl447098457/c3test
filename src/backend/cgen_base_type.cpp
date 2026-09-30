@@ -151,6 +151,65 @@ Symbol* CCodeGen::lookupTypeSymbol(const std::string& name) const {
     return nullptr;
 }
 
+// <vbeclipse>: 只有**声明名**、拿不到 AST 类型引用的发射器（dll/COM 入口的 extern 原型
+// 就是：它手上只有符号表的 ParameterInfo）用这一条。实现是把名字合成一次 SimpleTypeRef
+// 再走 mapTypeRef —— 故意的，不复制那份映射。
+// 为什么要它：`As DemoShape` 这类工程类形参在符号表里被折成 Vb6Type::Variant（类名丢了），
+// 于是 dll 入口的 extern 把它写成 vb6_VARIANT，而类模块自己发的定义是 vb6_cls_DemoShape*：
+// 同一方法两份原型。调用点照 extern 那份去装箱 ⇒ C2440（实测 cc_demo / itf_via /
+// cls_inh / modulemethod 一系）。Fix 184 当年只补了返回类型，形参是同一处毛病。
+std::string CCodeGen::cTypeForDeclaredTypeName(const std::string& name) {
+    SimpleTypeRef tr(SourceLocation{}, name);
+    return mapTypeRef(&tr);
+}
+
+// <vbeclipse>: "这个形参槽在 C 侧收不收类实例指针" 的**唯一**回答处。判定完全走
+// cTypeForDeclaredTypeName → mapTypeRef，也就是类模块发定义时用的那一份映射，所以
+// 本条与定义侧不可能各说一套（这正是它要修的毛病）。
+// 见 cgen_helpers.inc 声明处的注释：只认 vb6_cls_ / vb6_ivref_，其余一律空串。
+std::string CCodeGen::cParamClassPtrType(const ParameterInfo& p) {
+    if (p.type != Vb6Type::Variant || p.typeRefName.empty()) return {};
+    const std::string t = cTypeForDeclaredTypeName(p.typeRefName);
+    if (t.compare(0, 8, "vb6_cls_") == 0 || t.compare(0, 11, "vb6_ivref_") == 0) {
+        return t;
+    }
+    return {};
+}
+
+// <vbeclipse>: 这个名字是不是**本工程的一个类/窗体模块** —— 它的 prop_let_/prop_set_/
+// 成员函数真的会被发出来。判法 = 名字命中"本模块 ∪ 驱动下发的其它模块", 且
+// mapTypeRef 把它映射成 vb6_cls_* (与 cParamClassPtrType 同一口径)。
+// 为什么不能只查符号表: stdole.StdFont / Font / IPicture 这些在 RTL/typelib 里也有
+// "类"的痕迹 (RTL 侧就有 `typedef vb6_ComIface_Font vb6_cls_StdFont;`), 但它们**没有**
+// 类模块去发 prop_let_ 定义, 按类实例发码等于调一个不存在的函数 ⇒ LNK2019
+// (实测 Charts 2020 四个 UserControl 的 `Property Set Font`: vb6_StdFont_prop_let_* 全无定义)。
+bool CCodeGen::isProjectClassName(const std::string& name) {
+    if (name.empty()) return false;
+    const std::string lk = Symbol::toLower(name);
+    bool isModule = Symbol::toLower(moduleName_) == lk;
+    if (!isModule) {
+        for (const auto& m : externalModules_) {
+            if (Symbol::toLower(m) == lk) { isModule = true; break; }
+        }
+    }
+    if (!isModule) return false;
+    return cTypeForDeclaredTypeName(name).compare(0, 8, "vb6_cls_") == 0;
+}
+
+// <vbeclipse>: 把一个实参**交付**给 cParamClassPtrType 认出来的类槽。规则只有一条：
+// 实参在 C 侧已经是 vb6_VARIANT 值 (晚绑定取回来的对象、属性读结果…) 就先剥出
+// IDispatch 再换实例指针；其余一律原样直传 —— 类变量的 C 值本来就是 vb6_cls_X*，
+// Nothing 是 NULL，加一层强制转换只会把真正的类型错配 (接口薄指针喂给类槽) 变成
+// 静默的坏指针。不套 boxToVariant：那是"目标槽收 VARIANT"时才有的动作。
+std::string CCodeGen::deliverToClassSlot(const std::string& clsPtr,
+                                         const std::string& argVal) const {
+    if (!clsPtr.empty() && clsPtr.compare(0, 8, "vb6_cls_") == 0 && cExprIsVariant(argVal)) {
+        return "(" + clsPtr + ")vb6_ComObject_GetInstance("
+               "vb6_VariantToObjectVal(" + argVal + "))";
+    }
+    return argVal;
+}
+
 std::string CCodeGen::mapTypeRef(ASTNode* typeRef) {
     if (!typeRef) return "vb6_VARIANT";  // 未指定类型 = Variant
 

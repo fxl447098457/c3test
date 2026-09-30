@@ -3,7 +3,7 @@
 // Win32 forwarding stubs for VB6 `Declare ... Lib "x"` (Fix 076 scheme: C3 emits
 // `extern <ret> __stdcall vb6_di_<alias>(...)` and the RTL implements it).
 //
-// Family: com   (libs: ole32, oleaut32, advapi32, comdlg32)   stubs: 171
+// Family: com   (libs: ole32, oleaut32, advapi32, comdlg32)   stubs: 181
 //
 // Each stub reproduces C3's own generated prototype verbatim (that is the ABI the
 // caller uses: ByVal Long is widened to intptr_t, ByVal Single stays float, ByRef
@@ -12,7 +12,7 @@
 // types while preserving the register/memory passing class of every argument.
 //
 // generated from: a C3 compile session (pass -SessionDir to regenerate)
-// date: 2026-09-29 03:51
+// date: 2026-09-29 23:09
 //
 // Hand-maintained special cases stay in vb6_di_stubs.c (ordinals, msvbvm60 runtime,
 // dynamically loaded DLLs). Re-run the generator after a build exposes new symbols.
@@ -53,19 +53,9 @@ void WINAPI RtlZeroMemory(void*, size_t);
 #pragma comment(lib, "comdlg32.lib")
 #pragma comment(lib, "comdlg32.lib")
 
-/* RegOpenKeyExA */
-intptr_t __stdcall vb6_di_RegOpenKeyExA(intptr_t HKey, BSTR lpSubKey, intptr_t ulOptions, intptr_t samDesired, int32_t* phkResult) {
-    return ((intptr_t (WINAPI *)(intptr_t, BSTR, intptr_t, intptr_t, int32_t*))RegOpenKeyExA)(HKey, lpSubKey, ulOptions, samDesired, phkResult);
-}
-
-/* RegQueryValueExA */
-intptr_t __stdcall vb6_di_RegQueryValueExA(intptr_t HKey, BSTR lpValueName, intptr_t lpReserved, int32_t* lpType, BSTR lpData, int32_t* lpcbData) {
-    return ((intptr_t (WINAPI *)(intptr_t, BSTR, intptr_t, int32_t*, BSTR, int32_t*))RegQueryValueExA)(HKey, lpValueName, lpReserved, lpType, lpData, lpcbData);
-}
-
-/* RegCloseKey */
-intptr_t __stdcall vb6_di_RegCloseKey(intptr_t HKey) {
-    return ((intptr_t (WINAPI *)(intptr_t))RegCloseKey)(HKey);
+/* GetUserNameA */
+intptr_t __stdcall vb6_di_GetUserNameA(BSTR lpBuffer, int32_t* nSize) {
+    return ((intptr_t (WINAPI *)(BSTR, int32_t*))GetUserNameA)(lpBuffer, nSize);
 }
 
 /* ChooseColorW */
@@ -184,6 +174,18 @@ intptr_t __stdcall vb6_di_OleLoadPicturePath(intptr_t lpszPath, intptr_t pUnkCal
 intptr_t __stdcall vb6_di_OleTranslateColor(intptr_t lOleColor, intptr_t lHPalette, intptr_t lColorRef) {
     return ((intptr_t (WINAPI *)(intptr_t, intptr_t, intptr_t))OleTranslateColor)(lOleColor, lHPalette, lColorRef);
 }
+/* RegCloseKey */
+intptr_t __stdcall vb6_di_RegCloseKey(intptr_t HKey) {
+    return ((intptr_t (WINAPI *)(intptr_t))RegCloseKey)(HKey);
+}
+/* RegOpenKeyExA */
+intptr_t __stdcall vb6_di_RegOpenKeyExA(intptr_t HKey, BSTR lpSubKey, intptr_t ulOptions, intptr_t samDesired, int32_t* phkResult) {
+    return ((intptr_t (WINAPI *)(intptr_t, BSTR, intptr_t, intptr_t, int32_t*))RegOpenKeyExA)(HKey, lpSubKey, ulOptions, samDesired, phkResult);
+}
+/* RegQueryValueExA */
+intptr_t __stdcall vb6_di_RegQueryValueExA(intptr_t HKey, BSTR lpValueName, intptr_t lpReserved, int32_t* lpType, BSTR lpData, int32_t* lpcbData) {
+    return ((intptr_t (WINAPI *)(intptr_t, BSTR, intptr_t, int32_t*, BSTR, int32_t*))RegQueryValueExA)(HKey, lpValueName, lpReserved, lpType, lpData, lpcbData);
+}
 /* SysAllocString */
 intptr_t __stdcall vb6_di_SysAllocString(intptr_t lpString) {
     return ((intptr_t (WINAPI *)(intptr_t))SysAllocString)(lpString);
@@ -235,4 +237,34 @@ void __stdcall vb6_di_VariantInit(void* pvarg) {
 /* VariantTimeToSystemTime */
 intptr_t __stdcall vb6_di_VariantTimeToSystemTime(double vTime, void* lpSystemTime) {
     return ((intptr_t (WINAPI *)(double, void*))VariantTimeToSystemTime)(vTime, lpSystemTime);
+}
+
+
+/* === 恢复 dev@69845a9 有、本批重生成 di 桩时丢掉的定义 ===
+ * 生成器是按"那次跑它时的引用面"发桩的, 换一个会话重生成就会**静默丢掉**上一个会话
+ * 引用过的桩 (实测丢 9 个: comdlg32/winspool 那一族 + ChooseColorA/GetUserNameW/WinHelpA,
+ * Charts 2020 的 vb6_di_ChooseColorA 因此 LNK2019)。这里按 dev 原文补回; 生成器侧要
+ * 改成"全语料并集"才不会再丢 —— 在那之前这张清单就是这次的证据。 */
+intptr_t __stdcall vb6_di_ChooseColorA(void* pChoosecolor) {
+    return ((intptr_t (WINAPI *)(void*))ChooseColorA)(pChoosecolor);
+}
+
+/* ChooseFontA — Task #44 SSTabEx cDlg.cls:33 (comdlg32 字体对话框) */
+intptr_t __stdcall vb6_di_ChooseFontA(void* pChoosefont) {
+    return ((intptr_t (WINAPI *)(void*))ChooseFontA)(pChoosefont);
+}
+
+/* GetSaveFileNameA — Task #44 SSTabEx cDlg.cls:42 */
+intptr_t __stdcall vb6_di_GetSaveFileNameA(void* pOpenfilename) {
+    return ((intptr_t (WINAPI *)(void*))GetSaveFileNameA)(pOpenfilename);
+}
+
+/* PrintDlgA — Task #44 SSTabEx cDlg.cls:45 */
+intptr_t __stdcall vb6_di_PrintDlgA(void* pPrintdlg) {
+    return ((intptr_t (WINAPI *)(void*))PrintDlgA)(pPrintdlg);
+}
+
+/* CommDlgExtendedError — Task #44 SSTabEx cDlg.cls:49 */
+intptr_t __stdcall vb6_di_CommDlgExtendedError(void) {
+    return ((intptr_t (WINAPI *)(void))CommDlgExtendedError)();
 }

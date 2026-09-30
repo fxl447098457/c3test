@@ -20,8 +20,17 @@
         // _Generic 在编译期按实类型选择 ctor: 标量->VariantLong/Int/Double, BSTR->String,
         // SafeArray1D*->Array, void*/class ptr->Object, vb6_VARIANT->Identity(no-op).
         // 仅对 ByVal Variant 生效 (ByRef Variant 走上面复合字面量路径, 取地址需左值).
+        // <vbeclipse>: 但 "p.type == Variant" 里有第二种槽 —— 工程类形参 (`ByVal h As
+        // DemoShape`): 类名只留在 typeRefName, C 侧形参是 vb6_cls_X*, 装箱喂进去就是
+        // C2440。这一种先按**槽**交付, 不参与下面的装箱。判据与 dll 入口 extern 共用
+        // cParamClassPtrType 一处, 原型和调用点不再各说一套。
+        if (!isByRef && i < calleeParams.size() && calleeParams[i].isByVal) {
+            const std::string cp091t = cParamClassPtrType(calleeParams[i]);
+            if (!cp091t.empty()) argVal = deliverToClassSlot(cp091t, argVal);
+        }
         if (!isByRef && i < calleeParams.size() && calleeParams[i].isByVal
-            && calleeParams[i].type == Vb6Type::Variant) {
+            && calleeParams[i].type == Vb6Type::Variant
+            && cParamClassPtrType(calleeParams[i]).empty()) {
             // Fix 084d: 实参若是类对象表达式 (如 me->Database, 类方法返回类对象),
             // 保持对象指针直传, 不要套 vb6_VariantFromValue — 符号表可能把类类型
             // 参数误记为 Variant, 若包装成 vb6_VARIANT 传给 vb6_cls_cXxx* 参数
@@ -52,7 +61,8 @@
                 std::string on091s2 = Symbol::toLower(
                     static_cast<IdentifierExpr&>(*node.positional[i]).name);
                 if (knownObjectVars_.count(on091s2) || knownTypedComVars_.count(on091s2)) {
-                    argVal = "vb6_VariantFromValue(" + argVal + ")";
+                    // 同 arg_emit 那一处: 装箱只走 boxToVariant 这一权威 (见该处注释)
+                    argVal = boxToVariant(node.positional[i].get(), argVal);
                 }
             }
         }

@@ -83,6 +83,13 @@ inline bool isPropertyKind(SymbolKind k) {
 struct ParameterInfo {
     std::string name;
     Vb6Type type = Vb6Type::Variant;
+    // <vbeclipse>: `As <类型名>` 里的那个**名字**（工程类/接口/CoClass 才有值，内建类型为空）。
+    // resolveTypeOrDefault 把工程类形参折成 Vb6Type::Variant —— 类名就在这一步丢了, 于是任何
+    // 只拿 Vb6Type 说话的发射器（dll 入口的 extern 原型就是）只能把它写成 vb6_VARIANT,
+    // 与类模块自己发的 vb6_cls_X* 定义 ABI 不符：调用点照着 vb6_VARIANT 那份原型去装箱,
+    // 直接 C2440（实测 cc_demo/itf_via/cls_inh/modulemethod 一系全在这一条上）。
+    // 与 MemberInfo::typeRefName 同思路：类型名要跟着符号走, 不要在下游客串里再造一遍。
+    std::string typeRefName;
     bool isByVal = false;
     bool isOptional = false;
     bool isParamArray = false;

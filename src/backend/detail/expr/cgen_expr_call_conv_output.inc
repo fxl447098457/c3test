@@ -80,7 +80,8 @@
         // Fix 036: Format fallback — 未匹配类型 (Currency/Unknown 等, 非 Variant) 用
         // vb6_VariantFromValue 包装. Variant 类型无需包装 (已是 vb6_VARIANT).
         else if (argType != Vb6Type::Variant) {
-            args[0] = "vb6_VariantFromValue(" + args[0] + ")";
+            // 装箱走 boxToVariant 权威 (上面 Boolean 档已经是它)
+            args[0] = boxToVariant(node.positional[0].get(), args[0]);
         }
         argList.clear();
         for (size_t i = 0; i < args.size(); i++) {

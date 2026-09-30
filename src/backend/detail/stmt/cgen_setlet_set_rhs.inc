@@ -72,8 +72,10 @@
     // Fix 090af: targetIsVariant 判定上移共用 (含 Variant 数组元素 LHS).
     if (targetIsVariant
         && value.find("vb6_VariantFromValue(") != 0
-        && value.find("vb6_VariantFromComResult(") != 0) {
-        value = "vb6_VariantFromValue(" + value + ")";
+        && value.find("vb6_VariantFromComResult(") != 0
+        && value.find("vb6_VariantBool(") != 0) {
+        // 装箱走 boxToVariant 这一权威 (按 VB 类型选档; 未知才让 _Generic 猜)
+        value = boxToVariant(node.value.get(), value);
     }
 
     // Fix 098: Set 左值是函数调用表达式 → 非左值 (C2106), 且多半缺参 (C2198).

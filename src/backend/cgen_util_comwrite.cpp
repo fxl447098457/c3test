@@ -549,7 +549,8 @@ std::string CCodeGen::packLetValueArg(const ParameterInfo& lastP, Expr* valueExp
                 return val;
         }
     }
-    if (lastP.isByVal) return "vb6_VariantFromValue(" + val + ")";
+    // 装箱走 boxToVariant 这一权威 (按 VB 声明类型选档, 未知才让 C 的 _Generic 猜)
+    if (lastP.isByVal) return boxToVariant(valueExpr, val);
     // ByRef Variant 形参需要可寻址的 vb6_VARIANT*.
     // (&(vb6_VARIANT){vb6_VariantFromValue(x)}) 是非法 C (结构体复合字面量
     // 不能用另一个结构值初始化 → C2440 "vb6_VARIANT→vb6_vartype"), 必须按实参

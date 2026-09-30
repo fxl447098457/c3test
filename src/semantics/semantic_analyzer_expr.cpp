@@ -145,9 +145,13 @@ void SemanticAnalyzer::visit(IdentifierExpr& node) {
         lastExprType_ = sym->type;
     } else {
         // 未找到标识符
-        // 类继承 (tB, B07b): 命中祖先声明的成员 → 升格为错误。裸名这条路会静默少一段
-        // 代码 (发码侧认不出这个名字), 比报错糟得多; v1 要求写成 Me.<名字>。
-        if (pass_ == 2 && declaredByAncestor(node.name)) {
+        // <vbeclipse>: 但"工程级已经有这个名字"不算未找到 —— 标准模块的 Public 过程
+        // (裸名位) 与模块名 (`Mod.成员` 的限定符位) 都不能落成下面的隐式 Variant 声明，
+        // 判据与两种后果都写在 SemanticAnalyzer::namesProjectLevel 的声明处。
+        // 放在最前面：Option Explicit 那条 3001 警告同样不该为这两个位出。
+        if (pass_ == 2 && namesProjectLevel(node.name)) {
+            // 什么都不做 —— 不是变量，也不是未声明标识符；名字的含义由发码层按工程解析。
+        } else if (pass_ == 2 && declaredByAncestor(node.name)) {
             diag_.error(DiagnosticID::SemInheritsNotSupported, node.loc,
                 "Inherited member '" + node.name + "' cannot be called unqualified in this build"
                 " (write Me." + node.name + "; v1 merges inherited members onto the class symbol only)");
@@ -176,7 +180,13 @@ void SemanticAnalyzer::visit(IdentifierExpr& node) {
 }
 
 void SemanticAnalyzer::visit(MemberAccessExpr& node) {
+    // <vbeclipse>: 接收者子表达式站在"限定符位"上 (见 visit(IdentifierExpr) 的豁免条)。
+    // 嵌套 A.B.C 由本处的 save/restore 自然传递: 外层先把 ctx 置真, 内层 MemberAccess
+    // 再自己覆盖一次并复原，最左的那个裸标识符最终看到的正是"我在限定符位上"。
+    const bool savedMemberObjCtx = memberObjCtx_;
+    memberObjCtx_ = true;
     Vb6Type objType = analyzeExpr(*node.object);
+    memberObjCtx_ = savedMemberObjCtx;
     // ai/084a M1/M2: 成员访问级别守卫 —— obj 为 Me / 类类型变量时解析接收者类,
     // Private 成员越界报 3028 (家族内放行; 解析不出接收者 → 静默, 维持旧行为)。
     checkMemberAccessGuard(*node.object, node.memberName, node.loc);

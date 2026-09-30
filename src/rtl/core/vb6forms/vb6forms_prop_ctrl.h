@@ -84,6 +84,9 @@ void vb6_SetCausesValidation(void* hwnd, int causes);
 // 刻意继续写 `void*` —— 那两条本来就是对象，装成对象是对的。）
 wchar_t* vb6_GetToolTipText(void* hwnd);
 void vb6_SetToolTipText(void* hwnd, void* bstrText);
+// C29-SL-j 判据证人（账 #148，**不是 VB6 属性**）：问共享 tooltip 宿主 TTM_GETTEXT，
+// 能把这枚控件的工具文本读回来 = 登记成立（存一份拷贝那一步 SE/CP 早有判据，登记那一步没有）。
+int32_t vb6_ToolTipRegistered(void* hwnd);
 
 // P13.9: Tag (returns BSTR, stored as window property) —— 返回型同上一条的理由。
 wchar_t* vb6_GetControlTag(void* hwnd);
@@ -863,6 +866,38 @@ void    vb6_Slider_SetSelEnd(void* hwnd, int32_t v);
 // TravelIsVert 的正解是把滑块推到量程两端各读一次 TBM_GETTHUMBRECT，看位移落在哪根轴。
 int32_t vb6_Slider_TravelIsVert(void* hwnd);
 int32_t vb6_Slider_TickPresent(void* hwnd);
+// C29-SL-h：TickStyle 四档。VB6 那一张枚举的真值是从 OCX 自带的类型库读出来的
+// （0=sldBottomRight 1=sldTopLeft 2=sldBoth 3=sldNoTicks，探针 .build/slprobe/sltlb.cpp），
+// 与原生样式位 1:1（TBS_TOP==TBS_LEFT==0x4、TBS_BOTH==0x8、TBS_NOTICKS==0x10）。
+// 读侧读窗口当前的样式位 ⇒ 答出去的数就是窗口真在走的那一档（与 Orientation 同口径）。
+// GetNumTicks 是 VB6 那一面（dispid 0x000f，只读）；ChannelTop 是 C3 扩展的判据证人
+// —— ts=3 只能用 GetNumTicks 证（TickPresent 在那一档照旧答"有"，实测），
+// 0/1/2 三档靠 chan.top 的相对高低分。四条读数实测于 .build/slprobe/slmeasure12.c。
+int32_t vb6_Slider_GetTickStyle(void* hwnd);
+void    vb6_Slider_SetTickStyle(void* hwnd, int32_t tickStyle);
+int32_t vb6_Slider_GetNumTicks(void* hwnd);
+int32_t vb6_Slider_ChannelTop(void* hwnd);
+// C29-SL-i：类型库读出来的 VB6 选区面 —— **SelStart + SelLength**（dispid 0x0007/0x0008，两条 VT_I4）
+// 与方法 ClearSel（0x000e，文档原话"Sets the SelLength to 0"）。VB6 那一面**没有 SelEnd 这个名字**，
+// 上面那条 SelEnd 是 SL-b 按原生 TBM_SETSELEND 自己加的口，留着是因为存量夹具在用。
+// 实测（.build/slprobe/slmeasure13.c）：默认态 GETSELSTART 答的是**量程下限**而 GETSELEND 答 0
+// ⇒ 终点比起点小，所以 SelLength 一律折成 0；远端超量程由控件夹住；CLEARSEL 之后两端都答 -1。
+int32_t vb6_Slider_GetSelLength(void* hwnd);
+void    vb6_Slider_SetSelLength(void* hwnd, int32_t len);
+void    vb6_Slider_ClearSel(void* hwnd);
+// C29-SL-k：VB6 的 `Text`（0x0010，BSTR —— 文档原话"滑块位置变化时那颗 ToolTip 里显示的串"）与
+// `TextPosition`（0x0011，枚举 sldAboveLeft=0 / sldBelowRight=1）。走的是我们自己持的一枚
+// TRACK 型 tooltip（轨道条自带那枚 TBS_TOOLTIPS 服务不了自定义串，而且只在创建时才建 ——
+// 实测 .build/slprobe/slmeasure17.c 的 v5/v6 两份）。派发那边一条 BubbleNotify 管摆出/收回。
+// 三条判据证人都是 C3 扩展（不是 VB6 属性）：摆没摆出来、气泡上边、宿主里此刻那句文本。
+wchar_t* vb6_Slider_GetText(void* hwnd);
+void     vb6_Slider_SetText(void* hwnd, void* bstrText);
+int32_t  vb6_Slider_GetTextPosition(void* hwnd);
+void     vb6_Slider_SetTextPosition(void* hwnd, int32_t pos);
+void     vb6_Slider_BubbleNotify(void* hwnd, int32_t code, int32_t value);
+int32_t  vb6_Slider_BubbleVisible(void* hwnd);
+int32_t  vb6_Slider_BubbleTop(void* hwnd);
+wchar_t* vb6_Slider_BubbleText(void* hwnd);
 // C29-SL-c：事件面。Slider 与 ScrollBar 共用同一条通道 —— 控件给**父窗**发 WM_HSCROLL（横杆）
 // / WM_VSCROLL（竖杆），wParam 低字是 TB_* 码、高字带当前值，lParam 就是控件句柄
 // （实测 .build/slprobe/slmeasure7/8.c：真拖一次收到 5×N → 4 → 8；方向键收到 0 → 8；

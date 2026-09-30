@@ -175,7 +175,8 @@
                         std::string one092u;
                         if (pi.type == Vb6Type::Variant) {
                             if (pi.isByVal) {
-                                one092u = "vb6_VariantFromValue(" + argExpr + ")";
+                                // 装箱走 boxToVariant 这一权威 (按 VB 类型选档)
+                                one092u = boxToVariant(argNode, argExpr);
                             } else {
                                 // ByRef Variant 需可寻址: 先落到栈变量再取址
                                 // (复合字面量 {Variant值} 触发 C2440)
@@ -317,11 +318,12 @@
                             std::string oneDef;
                             if (pi.type == Vb6Type::Variant) {
                                 if (pi.isByVal) {
-                                    oneDef = "vb6_VariantFromValue(" + argExpr + ")";
+                                    // 同上: 装箱走 boxToVariant 权威
+                                    oneDef = boxToVariant(argNode, argExpr);
                                 } else {
                                     std::string tv = tmpDef + std::to_string(slotDef++);
-                                    c_.emitLine("vb6_VARIANT " + tv + " = vb6_VariantFromValue("
-                                                + argExpr + ");");
+                                    c_.emitLine("vb6_VARIANT " + tv + " = "
+                                                + boxToVariant(argNode, argExpr) + ";");
                                     oneDef = "&" + tv;
                                 }
                             } else if (pi.type == Vb6Type::String && cExprIsVariant(argExpr)) {

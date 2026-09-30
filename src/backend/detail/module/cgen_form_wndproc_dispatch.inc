@@ -4,8 +4,13 @@
 
     // P18-B: GotFocus/LostFocus events (EN_SETFOCUS/EN_KILLFOCUS/CBN_SETFOCUS/CBN_KILLFOCUS)
     {
-        ctrlId = 100;
-        for (const auto& ctrl : frmDesc.formControl.children) {
+        // 账 #158：这张焦点码表**只写一遍**，顶层与容器子控件**两条创建路共用**。以前只有顶层
+        // 那一趟（ID 100+）⇒ 放在 Frame/PictureBox 里的按钮与文本框连 arm 都没发过
+        // —— 发码侧的读数：同一份 `.frm`，`cmdTop_GotFocus` 有 `id == 101 && code == 6`、
+        // `cmdIn_GotFocus` 一条都没有（容器子控件的 ID 从 200 起，那一趟根本没被遍历）。
+        // ID 口径与创建循环一致（跳过 Menu 与没有 Win32 窗口类的控件，DFS 顺序同步）。
+        auto emitFocusArms158 = [&](const FrmControl& ctrl, int focusId) {
+            int ctrlId = focusId;
             std::string gotFn = cProcName(ctrl.controlName + "_GotFocus", AccessLevel::Private);
             std::string lostFn = cProcName(ctrl.controlName + "_LostFocus", AccessLevel::Private);
             bool hasGot = symTab_.lookup(ctrl.controlName + "_GotFocus") != nullptr;
@@ -17,9 +22,12 @@
                     if (hasGot) c_.emitLine("if (id == " + std::to_string(ctrlId) + " && code == 256) { extern void " + gotFn + "(); " + gotFn + "(); }");
                     if (hasLost) { if (hasValidate) c_.emitLine("if (id == " + std::to_string(ctrlId) + " && code == 512 && !GetPropW((HWND)lParam, L\"VB6_ValidateCancel\")) { extern void " + lostFn + "(); " + lostFn + "(); }"); else c_.emitLine("if (id == " + std::to_string(ctrlId) + " && code == 512) { extern void " + lostFn + "(); " + lostFn + "(); }"); }
                 } else if (ctrl.controlType == FrmControlType::ComboBox) {
-                    // CBN_SETFOCUS=1024, CBN_KILLFOCUS=2048
-                    if (hasGot) c_.emitLine("if (id == " + std::to_string(ctrlId) + " && code == 1024) { extern void " + gotFn + "(); " + gotFn + "(); }");
-                    if (hasLost) { if (hasValidate) c_.emitLine("if (id == " + std::to_string(ctrlId) + " && code == 2048 && !GetPropW((HWND)lParam, L\"VB6_ValidateCancel\")) { extern void " + lostFn + "(); " + lostFn + "(); }"); else c_.emitLine("if (id == " + std::to_string(ctrlId) + " && code == 2048) { extern void " + lostFn + "(); " + lostFn + "(); }"); }
+                    // 账 #158：这里原本发的是 1024 / 2048 —— 那是 **CBEM_*（发给 ComboBoxEx 窗口的
+                    // 消息号）**，根本不是 WM_COMMAND 的 notification code，所以这两个分支永远等不到。
+                    // 真正的码表是 `CBN_SETFOCUS=3` / `CBN_KILLFOCUS=4`（对照同一段里
+                    // EN_=256/512、LBN_=4/5、BN_=6/7 都是对的 —— 只有 Combo 这一格抄错了表）。
+                    if (hasGot) c_.emitLine("if (id == " + std::to_string(ctrlId) + " && code == 3) { extern void " + gotFn + "(); " + gotFn + "(); }");
+                    if (hasLost) { if (hasValidate) c_.emitLine("if (id == " + std::to_string(ctrlId) + " && code == 4 && !GetPropW((HWND)lParam, L\"VB6_ValidateCancel\")) { extern void " + lostFn + "(); " + lostFn + "(); }"); else c_.emitLine("if (id == " + std::to_string(ctrlId) + " && code == 4) { extern void " + lostFn + "(); " + lostFn + "(); }"); }
                 } else if (ctrl.controlType == FrmControlType::ListBox) {
                     // LBN_SETFOCUS=4, LBN_KILLFOCUS=5
                     if (hasGot) c_.emitLine("if (id == " + std::to_string(ctrlId) + " && code == 4) { extern void " + gotFn + "(); " + gotFn + "(); }");
@@ -34,7 +42,32 @@
                 // Label: no GotFocus/LostFocus in VB6 (windowless control)
                 // PictureBox: GotFocus/LostFocus handled via subclassing (P18-F)
             }
+        };
+        ctrlId = 100;
+        for (const auto& ctrl : frmDesc.formControl.children) {
+            emitFocusArms158(ctrl, ctrlId);
             ctrlId++;
+        }
+        int childFocusId158 = 200;
+        auto walkFocusChildren158 = [&](auto&& self, const FrmControl& container) -> void {
+            for (const auto& child : container.children) {
+                if (child.controlType == FrmControlType::Menu) continue;
+                if (!FrmParser::controlTypeToWin32Class(child.controlType)) continue;
+                emitFocusArms158(child, childFocusId158);
+                childFocusId158++;
+                if (!child.children.empty() &&
+                    (child.controlType == FrmControlType::Frame ||
+                     child.controlType == FrmControlType::PictureBox)) {
+                    self(self, child);
+                }
+            }
+        };
+        for (const auto& ctrl : frmDesc.formControl.children) {
+            if (!ctrl.children.empty() &&
+                (ctrl.controlType == FrmControlType::Frame ||
+                 ctrl.controlType == FrmControlType::PictureBox)) {
+                walkFocusChildren158(walkFocusChildren158, ctrl);
+            }
         }
     }
     c_.emitLine("break;");
@@ -443,23 +476,11 @@
         // 不同步就是"装了不拆"或"发了不装"。C29-SL-g 把三份一起对齐：焦点档改成按
         // "有没有另一条原生来源"排除，并补上 C29-SL-d 那一条 `_Click`（上一批只同步了
         // 前两份，这一份漏了 —— 漏了不会崩，只是拆的时候少拆一枚，记在这里免得再漏）。
+        // C29-SL-n（账 #141）: 这份「要不要子类化」原本在这里又抄了一遍，而且比发 arm 那一趟
+        // 少了 `_DblClick` 与 `_Paint` ⇒ 只挂这两条处理器之一的控件，子类过程与消息臂都生成了、
+        // 却一次也没被 install（编得过、永不触发）。三份现在共用 controlNeedsSubclass。
         auto needsSubclass = [&](const FrmControl& ctrl) -> bool {
-            return (!controlFocusFromNativeNotify(ctrl.controlType) &&
-                    (symTab_.lookup(ctrl.controlName + "_GotFocus") ||
-                     symTab_.lookup(ctrl.controlName + "_LostFocus")))
-                || symTab_.lookup(ctrl.controlName + "_MouseEnter")
-                || symTab_.lookup(ctrl.controlName + "_MouseLeave")
-                || symTab_.lookup(ctrl.controlName + "_MouseDown")
-                || symTab_.lookup(ctrl.controlName + "_MouseUp")
-                || symTab_.lookup(ctrl.controlName + "_MouseMove")
-                || symTab_.lookup(ctrl.controlName + "_KeyPress")
-                || symTab_.lookup(ctrl.controlName + "_KeyDown")
-                || symTab_.lookup(ctrl.controlName + "_KeyUp")
-              || symTab_.lookup(ctrl.controlName + "_Validate")
-                || symTab_.lookup(ctrl.controlName + "_MouseHover")
-                // C29-SL-d 的那一条：只挂 `_Click` 的控件也会被装，拆的时候同一张表得认。
-                || (!controlClickFromNativeNotify(ctrl.controlType) &&
-                    symTab_.lookup(ctrl.controlName + "_Click"));
+            return controlNeedsSubclass(ctrl);
         };
         std::unordered_set<std::string> subEmitted;
         for (const auto& ctrl : frmDesc.formControl.children) {
@@ -549,6 +570,17 @@
     }
     if (hasScrollBar) {
     c_.emitLine("{ void* scrollHwnd = (void*)lParam; int scrollCode = LOWORD(wParam);");
+    // C29-SL-k: VB6 的 Slider 在拖滑块时把那颗气泡摆出来（ISlider.Text = 0x0010 就是气泡里那句
+    // 串），而原生轨道条自己那枚 TBS_TOOLTIPS 服务不了自定义串（实测 slmeasure17.c：它自带一条
+    // 工具、TTM_POP 无头里什么都不触发）⇒ 气泡由 RTL 自己持一枚 TRACK 型 tooltip 来摆。
+    // 这一条**只发一次、不按控件展开**：RTL 里按窗口类名把 ScrollBar 筛掉。值取 wParam 高字
+    // （实测 4/5 两档带新值、8 那档为 0 ⇒ 传 0 时 RTL 自己现问 TBM_GETPOS）。
+    bool hasSlider = false;
+    for (const auto& ctrl : frmDesc.formControl.children) {
+        if (ctrl.controlType == FrmControlType::Slider) { hasSlider = true; break; }
+    }
+    if (hasSlider)
+        c_.emitLine("vb6_Slider_BubbleNotify(scrollHwnd, scrollCode, HIWORD(wParam));");
     for (const auto& ctrl : frmDesc.formControl.children) {
         if (ctrl.controlType == FrmControlType::HScrollBar || ctrl.controlType == FrmControlType::VScrollBar) {
             std::string ctrlHwnd = "vb6_hwnd_" + cIdent(ctrl.controlName);

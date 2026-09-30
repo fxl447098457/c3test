@@ -3,7 +3,7 @@
 // Win32 forwarding stubs for VB6 `Declare ... Lib "x"` (Fix 076 scheme: C3 emits
 // `extern <ret> __stdcall vb6_di_<alias>(...)` and the RTL implements it).
 //
-// Family: win32   (libs: kernel32, winmm)   stubs: 447
+// Family: win32   (libs: kernel32, winmm)   stubs: 466
 //
 // Each stub reproduces C3's own generated prototype verbatim (that is the ABI the
 // caller uses: ByVal Long is widened to intptr_t, ByVal Single stays float, ByRef
@@ -12,7 +12,7 @@
 // types while preserving the register/memory passing class of every argument.
 //
 // generated from: a C3 compile session (pass -SessionDir to regenerate)
-// date: 2026-09-29 03:51
+// date: 2026-09-29 23:10
 //
 // Hand-maintained special cases stay in vb6_di_stubs.c (ordinals, msvbvm60 runtime,
 // dynamically loaded DLLs). Re-run the generator after a build exposes new symbols.
@@ -50,40 +50,19 @@ void WINAPI RtlZeroMemory(void*, size_t);
 #pragma comment(lib, "kernel32.lib")
 #pragma comment(lib, "winmm.lib")
 #pragma comment(lib, "comdlg32.lib")
-
-/* GetTickCount */
-intptr_t __stdcall vb6_di_GetTickCount() {
-    return ((intptr_t (WINAPI *)(void))GetTickCount)();
-}
-
-/* RtlMoveMemory */
-void __stdcall vb6_di_RtlMoveMemory(void* Destination, void* Source, intptr_t Length) {
-    ((void (WINAPI *)(void*, void*, intptr_t))RtlMoveMemory)(Destination, Source, Length);
-}
+// winspool.lib: DeviceCapabilitiesA (winspool.drv) 那一档要用。本批重生成 di 桩时连同
+// 该桩一起被丢掉 (生成器按"那次跑它的引用面"发桩/发 lib), 补回 —— Charts 2020 的
+// vb6_di_DeviceCapabilitiesA 曾因此 LNK2019 (__imp_DeviceCapabilitiesA 未解析)。
+#pragma comment(lib, "winspool.lib")
 
 /* GetModuleHandleA */
 intptr_t __stdcall vb6_di_GetModuleHandleA(BSTR lpModuleName) {
     return ((intptr_t (WINAPI *)(BSTR))GetModuleHandleA)(lpModuleName);
 }
 
-/* GetProcAddress */
-intptr_t __stdcall vb6_di_GetProcAddress(intptr_t hModule, BSTR lpProcName) {
-    return ((intptr_t (WINAPI *)(intptr_t, BSTR))GetProcAddress)(hModule, lpProcName);
-}
-
-/* GlobalAlloc */
-intptr_t __stdcall vb6_di_GlobalAlloc(intptr_t wFlags, intptr_t dwBytes) {
-    return ((intptr_t (WINAPI *)(intptr_t, intptr_t))GlobalAlloc)(wFlags, dwBytes);
-}
-
-/* GlobalFree */
-intptr_t __stdcall vb6_di_GlobalFree(intptr_t hMem) {
-    return ((intptr_t (WINAPI *)(intptr_t))GlobalFree)(hMem);
-}
-
-/* VirtualProtect */
-intptr_t __stdcall vb6_di_VirtualProtect(void* lpAddress, intptr_t dwSize, intptr_t flNewProtect, int32_t* lpflOldProtect) {
-    return ((intptr_t (WINAPI *)(void*, intptr_t, intptr_t, int32_t*))VirtualProtect)(lpAddress, dwSize, flNewProtect, lpflOldProtect);
+/* GetModuleFileNameA */
+intptr_t __stdcall vb6_di_GetModuleFileNameA(intptr_t hModule, BSTR lpFilename, intptr_t nSize) {
+    return ((intptr_t (WINAPI *)(intptr_t, BSTR, intptr_t))GetModuleFileNameA)(hModule, lpFilename, nSize);
 }
 
 /* BuildCommDCBA */
@@ -242,6 +221,10 @@ intptr_t __stdcall vb6_di_GetModuleFileNameW(intptr_t hModule, intptr_t lpFileNa
 intptr_t __stdcall vb6_di_GetModuleHandleW(intptr_t lpModuleName) {
     return ((intptr_t (WINAPI *)(intptr_t))GetModuleHandleW)(lpModuleName);
 }
+/* GetProcAddress */
+intptr_t __stdcall vb6_di_GetProcAddress(intptr_t hModule, BSTR lpProcName) {
+    return ((intptr_t (WINAPI *)(intptr_t, BSTR))GetProcAddress)(hModule, lpProcName);
+}
 /* GetProcessHeap */
 intptr_t __stdcall vb6_di_GetProcessHeap() {
     return ((intptr_t (WINAPI *)(void))GetProcessHeap)();
@@ -265,6 +248,10 @@ void __stdcall vb6_di_GetSystemTime(void* lpSystemTime) {
 /* GetSystemWindowsDirectoryW */
 intptr_t __stdcall vb6_di_GetSystemWindowsDirectoryW(intptr_t lpBuffer, intptr_t nSize) {
     return ((intptr_t (WINAPI *)(intptr_t, intptr_t))GetSystemWindowsDirectoryW)(lpBuffer, nSize);
+}
+/* GetTickCount */
+intptr_t __stdcall vb6_di_GetTickCount() {
+    return ((intptr_t (WINAPI *)(void))GetTickCount)();
 }
 /* GetTimeZoneInformation */
 intptr_t __stdcall vb6_di_GetTimeZoneInformation(void* utc_lpTimeZoneInformation) {
@@ -293,6 +280,14 @@ intptr_t __stdcall vb6_di_GetVolumeInformationW(intptr_t lpRootPathName, intptr_
 /* GetVolumePathNameW */
 intptr_t __stdcall vb6_di_GetVolumePathNameW(intptr_t lpFileName, intptr_t lpVolumePathName, intptr_t cch) {
     return ((intptr_t (WINAPI *)(intptr_t, intptr_t, intptr_t))GetVolumePathNameW)(lpFileName, lpVolumePathName, cch);
+}
+/* GlobalAlloc */
+intptr_t __stdcall vb6_di_GlobalAlloc(intptr_t wFlags, intptr_t dwBytes) {
+    return ((intptr_t (WINAPI *)(intptr_t, intptr_t))GlobalAlloc)(wFlags, dwBytes);
+}
+/* GlobalFree */
+intptr_t __stdcall vb6_di_GlobalFree(intptr_t hMem) {
+    return ((intptr_t (WINAPI *)(intptr_t))GlobalFree)(hMem);
 }
 /* GlobalLock */
 intptr_t __stdcall vb6_di_GlobalLock(intptr_t hMem) {
@@ -410,6 +405,10 @@ intptr_t __stdcall vb6_di_ResetEvent(intptr_t hEvent) {
 void __stdcall vb6_di_RtlFillMemory(void* Destination, intptr_t Length, uint8_t Fill) {
     ((void (WINAPI *)(void*, intptr_t, uint8_t))RtlFillMemory)(Destination, Length, Fill);
 }
+/* RtlMoveMemory */
+void __stdcall vb6_di_RtlMoveMemory(void* Destination, void* Source, intptr_t Length) {
+    ((void (WINAPI *)(void*, void*, intptr_t))RtlMoveMemory)(Destination, Source, Length);
+}
 /* RtlZeroMemory */
 void __stdcall vb6_di_RtlZeroMemory(void* Destination, intptr_t Length) {
     ((void (WINAPI *)(void*, intptr_t))RtlZeroMemory)(Destination, Length);
@@ -514,6 +513,10 @@ intptr_t __stdcall vb6_di_VirtualAlloc(intptr_t lpAddress, intptr_t dwSize, intp
 intptr_t __stdcall vb6_di_VirtualFree(intptr_t lpAddress, intptr_t dwSize, intptr_t dwFreeType) {
     return ((intptr_t (WINAPI *)(intptr_t, intptr_t, intptr_t))VirtualFree)(lpAddress, dwSize, dwFreeType);
 }
+/* VirtualProtect */
+intptr_t __stdcall vb6_di_VirtualProtect(void* lpAddress, intptr_t dwSize, intptr_t flNewProtect, int32_t* lpflOldProtect) {
+    return ((intptr_t (WINAPI *)(void*, intptr_t, intptr_t, int32_t*))VirtualProtect)(lpAddress, dwSize, flNewProtect, lpflOldProtect);
+}
 /* WaitCommEvent */
 intptr_t __stdcall vb6_di_WaitCommEvent(intptr_t hFile, int32_t* lpEventMask, void* lpOverlapped) {
     return ((intptr_t (WINAPI *)(intptr_t, int32_t*, void*))WaitCommEvent)(hFile, lpEventMask, lpOverlapped);
@@ -525,4 +528,24 @@ intptr_t __stdcall vb6_di_WaitForSingleObject(intptr_t hHandle, intptr_t dwMilli
 /* WriteFile */
 intptr_t __stdcall vb6_di_WriteFile(intptr_t hFile, void* lpBuffer, intptr_t nNumberOfBytesToWrite, int32_t* lpNumberOfBytesWritten, intptr_t lpOverlapped) {
     return ((intptr_t (WINAPI *)(intptr_t, void*, intptr_t, int32_t*, intptr_t))WriteFile)(hFile, lpBuffer, nNumberOfBytesToWrite, lpNumberOfBytesWritten, lpOverlapped);
+}
+
+
+/* === 恢复 dev@69845a9 有、本批重生成 di 桩时丢掉的定义 ===
+ * 生成器是按"那次跑它时的引用面"发桩的, 换一个会话重生成就会**静默丢掉**上一个会话
+ * 引用过的桩 (实测丢 9 个: comdlg32/winspool 那一族 + ChooseColorA/GetUserNameW/WinHelpA,
+ * Charts 2020 的 vb6_di_ChooseColorA 因此 LNK2019)。这里按 dev 原文补回; 生成器侧要
+ * 改成"全语料并集"才不会再丢 —— 在那之前这张清单就是这次的证据。 */
+intptr_t __stdcall vb6_di_GetUserNameW(intptr_t lpBuffer, intptr_t pnSize) {
+    return ((intptr_t (WINAPI *)(intptr_t, intptr_t))GetUserNameW)(lpBuffer, pnSize);
+}
+
+/* GetLocaleInfoA — Task #44 SSTabEx cDlg.cls:51 */
+intptr_t __stdcall vb6_di_GetLocaleInfoA(intptr_t Locale, intptr_t LCType, intptr_t lpLCData, intptr_t cchData) {
+    return ((intptr_t (WINAPI *)(intptr_t, intptr_t, intptr_t, intptr_t))GetLocaleInfoA)(Locale, LCType, lpLCData, cchData);
+}
+
+/* DeviceCapabilitiesA (winspool.drv) — Task #44 SSTabEx cDlg.cls:24 */
+intptr_t __stdcall vb6_di_DeviceCapabilitiesA(intptr_t lpDeviceName, intptr_t lpPort, intptr_t iIndex, void* lpOutput, void* pDevMode) {
+    return ((intptr_t (WINAPI *)(intptr_t, intptr_t, intptr_t, void*, void*))DeviceCapabilitiesA)(lpDeviceName, lpPort, iIndex, lpOutput, pDevMode);
 }

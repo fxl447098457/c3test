@@ -109,9 +109,10 @@
                             (symTab_.lookup(ctrl.controlName + "_Paint") != nullptr);
 
             // 只要有任一子类化事件需求就加入列表
-            if (info.hasGotFocus || info.hasLostFocus || info.hasMouseEnter || info.hasMouseLeave ||
-                info.hasMouseDown || info.hasMouseUp || info.hasMouseMove ||
-                info.hasKeyPress || info.hasKeyDown || info.hasKeyUp || info.hasDblClick || info.hasClick || info.hasValidate || info.hasMouseHover || info.hasPaint) {
+            // C29-SL-n（账 #141）: 这一趟原本自己按 info.hasXxx 汇一遍，与"装/拆"那两份各抄一遍
+            // ⇒ 抄漏的那形（`_DblClick`、`_Paint`）就变成"arm 发了、没人 install"。三份共用
+            // controlNeedsSubclass 之后，info.hasXxx 只管"发哪几条 arm"，"装不装"只有一处。
+            if (controlNeedsSubclass(ctrl)) {
                 subclassCtrls.push_back(std::move(info));
             }
         }
@@ -159,9 +160,8 @@
                 info.hasMouseHover = symTab_.lookup(child.controlName + "_MouseHover") != nullptr;
                 info.hasPaint = (child.controlType == FrmControlType::PictureBox) &&
                                 (symTab_.lookup(child.controlName + "_Paint") != nullptr);  // Fix 185
-                if (info.hasGotFocus || info.hasLostFocus || info.hasMouseEnter || info.hasMouseLeave ||
-                    info.hasMouseDown || info.hasMouseUp || info.hasMouseMove ||
-                    info.hasKeyPress || info.hasKeyDown || info.hasKeyUp || info.hasDblClick || info.hasClick || info.hasValidate || info.hasMouseHover || info.hasPaint) {
+                // C29-SL-n: 容器子控件这一趟与上面顶层那趟共用同一份判据（原来是第二次抄写）。
+                if (controlNeedsSubclass(child)) {
                     subclassCtrls.push_back(std::move(info));
                 }
             }
@@ -335,7 +335,18 @@
             // P1-13修复: DblClick (WM_LBUTTONDBLCLK)
             if (info.hasDblClick) {
                 std::string fn = cProcName(info.ctrlName + "_DblClick", AccessLevel::Private);
-                c_.emitLine("if (msg == WM_LBUTTONDBLCLK) { extern void " + fn + "(); " + fn + "(); }");
+                // C29-SL-n（账 #141）: VB6 的签名是 `Sub X_DblClick(Cancel As Integer)`，
+                // 而这一条 arm 以前**写死无参** ⇒ 按标准签名写的处理器在产物里撞
+                // `C2198: 用于调用的参数太多`（实测：声明是 `static void vb6_sldM6_DblClick(int16_t* Cancel)`，
+                // arm 里却 `extern void vb6_sldM6_DblClick(); …`）。存量工程两种都见过
+                // （本仓夹具就写着无参的 `sld6_DblClick()`），所以按**处理器自己声明的形参数**发。
+                const Symbol* symDc = symTab_.lookup(info.ctrlName + "_DblClick");
+                if (symDc && !symDc->params.empty()) {
+                    c_.emitLine("if (msg == WM_LBUTTONDBLCLK) { int16_t vb6_dblcancel = 0;"
+                                " extern void " + fn + "(int16_t*); " + fn + "(&vb6_dblcancel); }");
+                } else {
+                    c_.emitLine("if (msg == WM_LBUTTONDBLCLK) { extern void " + fn + "(); " + fn + "(); }");
+                }
             }
             // C29-SL-d: 常规 Click (WM_LBUTTONUP)。VB6 的 Click 是"按下并抬起"之后发的，
             // 抬起这一条就是它的原生落点（探针 .build/slprobe/slmeasure10.c 实测：真手势的

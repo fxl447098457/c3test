@@ -119,6 +119,10 @@
             }
         }
     }
+    // 账 #157: VB6 显示窗体时把焦点交给 TabIndex 最小那枚。目标在发码期算好（运行期排不出序 ——
+    // 设计期的 TabIndex 从没下发到窗口），存到窗体句柄上，由 vb6_ShowForm 在激活之后应用一次。
+    // 放在 Timer 那一趟之后：此时每枚控件的句柄全局已经赋完了。
+    emitFormInitialFocus(frmDesc.formControl);
     c_.emitLine("break;");
     c_.dedent();
     c_.emitLine("}");
@@ -236,7 +240,9 @@
             ctrl.controlType == FrmControlType::OptionButton) {
             if (symTab_.lookup(ctrl.controlName + "_Click")) {
                 std::string clickFn = cProcName(ctrl.controlName + "_Click", AccessLevel::Private);
-                c_.emitLine("if (id == " + std::to_string(ctrlId) + ") {");
+                // 账 #158：**只认 BN_CLICKED=0** —— 按钮族现在挂了 `BS_NOTIFY`，同一个 id 还会
+                // 携着 `code=6/7`（焦点变化）进来，不过滤就把一次焦点移动算成一次点击。
+                c_.emitLine("if (id == " + std::to_string(ctrlId) + " && code == 0) {");
                 c_.indent();
                 if (isArrayCtrl) {
                     // 控件数组: 事件处理带Index参数
