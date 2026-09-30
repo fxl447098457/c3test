@@ -1882,8 +1882,13 @@ if ($Category -in @("all", "run", "vbp")) {
     # 账 #168 的方向键那一半也在这条夹具上：`AK-pre / down / wrap / up` 四证人 = 同容器同型单选钮
     #   按 `TabIndex` 走（optA→optB）、到尾回绕（optB 再 VK_DOWN 回 optA）、VK_UP 反向回绕；
     #   `optA=N/optB=Y` 钉的是勾选真的交接过去了（走 `BM_CLICK`，组里别人被自动取消）。
-    #   `clicks=` **只钉字段存在、不钉数值** —— 实测一声方向键发两条 `_Click`（容器子类重发 +
-    #   窗体自己派发，账 #161 同族）；把 6 钉进针面就是替那条缺陷再固化一份读数。
+    #   `clicks=` 从账 #171 起**钉数值 3**（三步方向键 = 三声，先前实测是 6）：那多出来的三条是
+    #   **焦点进入组内另一枚时单选钮自己替父窗发的那条 `BN_CLICKED`**（六轮量到底：两条 SetFocus 路
+    #   同形、关掉 `IsDialogMessage` 一字不变、这两枚单选钮一次子类化都没挂 ⇒ 不是 #161 那一族的
+    #   「子类重发」，是 OS 按焦点移动发的通知）。口径 = 「来这条通知时它自己勾上了没有」，
+    #   落在 RTL 唯一一处 `vb6_RadioClickCounts`，发码侧只对 OptionButton 的 arm 加这一道筛。
+    #   负控两头都在：**BASE 编译器**读出 `clicks=6` 且 `BF-noclick=False`（`btnfocus` 的 optA 计数），
+    #   自家改动若把筛选过头（真点击也不发了）则 `clicks=0` —— 两个方向都会当场红，不是单侧的绿灯。
     # ⚠ 夹具自己的坑，先写在这条路上别踩第二次：`TabWalkApp.vbp` 的 `ExeName32` **必须等于 vbp 文件名**，
     #   否则 `Test-Vbp` 按 vbp 名去找 exe ⇒ 本地怎么都过（我手动跑的是 TabWalk.exe）、CI 两条架构一起
     #   `FAIL (no exe)`（门 #218 就是这么红的）。要么改名一致，要么显式传 `-ExeName`。
@@ -1891,7 +1896,7 @@ if ($Category -in @("all", "run", "vbp")) {
                     "TW-in1=Y/in2=Y", "TW-deep=Y/inpic=Y", "TW-picstop=Y",
                     "TW-orenter=N",
                     "TW-order=cmdIn1,cmdIn2,cmdDeep,cmdTop2,cmdInPic,cmdTop1,",
-                    "AK-pre=optA/down=optB/wrap=optA/up=optB/optA=N/optB=Y/clicks=")
+                    "AK-pre=optA/down=optB/wrap=optA/up=optB/optA=N/optB=Y/clicks=3")
     Test-Vbp "tabwalk" "$Tests\tabwalk\TabWalkApp.vbp" $twNeedles
     Test-Vbp "tabwalk_x86" "$Tests\tabwalk\TabWalkApp.vbp" $twNeedles -Arch "x86"
     Test-EmitcShape "tw_emitc_cparent" @("$Tests\tabwalk\TabWalkApp.vbp") @(

@@ -105,6 +105,15 @@ void vb6_SetControlFocus(void* hwnd) {
     if (!hwnd) return;
     SetFocus((HWND)hwnd);
 }
+
+/* 账 #171（C29-FS-h）：单选钮的 `Click` 只在「这一枚真被选中」时才算数。见 vb6forms_prop.h 的注释。
+   非单选钮一律放行 —— 这一处是那条口径的**唯一**落点，发码侧只对 OptionButton 的 arm 调它。 */
+int vb6_RadioClickCounts(void* hwndFrom) {
+    HWND h = (HWND)hwndFrom;
+    if (!h || !IsWindow(h)) return 1;
+    if ((GetWindowLongW(h, GWL_STYLE) & BS_TYPEMASK) != BS_AUTORADIOBUTTON) return 1;
+    return (SendMessageW(h, BM_GETCHECK, 0, 0) == BST_CHECKED) ? 1 : 0;
+}
 // Position/size properties use twips on both reads and writes.
 // Codegen calls these getters directly without pixel-to-twip conversion.
 // Match the existing vb6_TwipToX/Y setters (15 twips per logical pixel).

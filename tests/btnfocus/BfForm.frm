@@ -101,6 +101,10 @@ Option Explicit
 '   BF-noclick               = **挂上 BS_NOTIFY 之后焦点移动不许算成点击** —— 同一个 id
 '                              现在会携 code=6/7 进来，Click 那条 arm 不加 `code == 0`
 '                              过滤的话，这三枚按钮的 `_Click` 会被焦点各点一次
+'                              账 #171 补上**单选钮那一半**：optA 本夹具里没勾着、第 3 拍把焦点
+'                              移进它 —— OS 替父窗发的就是 `BN_CLICKED`（号 0），光按 code 筛不掉，
+'                              要按「来路自己勾上了没有」筛（RTL `vb6_RadioClickCounts`）。
+'                              修之前这一条读 False（焦点移动被算成一次点击），修后 True。
 '   BF-each                  = 十二个计数器各自恰好 1（双发检查，本线已知缺陷族 #161）
 Private gTick As Long
 Private gCmdGot As Long
@@ -110,6 +114,7 @@ Private gChkGot As Long
 Private gChkLost As Long
 Private gChkClk As Long
 Private gOptGot As Long
+Private gOptClk As Long
 Private gOptLost As Long
 Private gTxGot As Long
 Private gTxLost As Long
@@ -154,6 +159,12 @@ End Sub
 
 Private Sub chkA_Click()
     gChkClk = gChkClk + 1
+End Sub
+
+Private Sub optA_Click()
+    ' 账 #171：单选钮是这一格里唯一「焦点进入也会送来 `BN_CLICKED`」的一型
+    ' （#158 那道 `code == 0` 对它无效，因为号本身就是 0）⇒ 这一枚计数器就是那条口径的证人。
+    gOptClk = gOptClk + 1
 End Sub
 
 Private Sub optA_GotFocus()
@@ -241,7 +252,7 @@ Private Sub t1_Timer()
         Log1 "BF-in=" & CStr(gInGot) & "/" & CStr(gInLost)
         Log1 "BF-intx=" & CStr(gInTxGot) & "/" & CStr(gInTxLost)
         Log1 "BF-both=" & TF(gCmdGot = gInGot And gCmdLost = gInLost And gTxGot = gInTxGot)
-        Log1 "BF-noclick=" & TF(gCmdClk = 0 And gChkClk = 0 And gInClk = 0)
+        Log1 "BF-noclick=" & TF(gCmdClk = 0 And gChkClk = 0 And gInClk = 0 And gOptClk = 0)
         Log1 "BF-each=" & TF(gCmdGot = 1 And gCmdLost = 1 And gChkGot = 1 And gChkLost = 1 _
                               And gOptGot = 1 And gOptLost = 1 And gTxGot = 1 And gTxLost = 1 _
                               And gInGot = 1 And gInLost = 1 And gInTxGot = 1 And gInTxLost = 1)
