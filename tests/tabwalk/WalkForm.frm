@@ -167,7 +167,8 @@ Option Explicit
 '      （针见 run_tests.ps1 的 `tw_emitc_cparent` / `tw_emitc_notplain`）。
 '   `AK-*` —— optFrame 里两枚 `TabStop = 0` 的 OptionButton：按 VB6 的口径它们不进 tab 序，
 '      但方向键该在组内走。实测 `pre=optA`（焦点确实给了）而 `down=cmdTop1`、optB 依旧 False ⇒
-'      **组内方向键压根不走**（也另在 #164 里记着）。挂 CONTROLPARENT 前后这条一字不变。
+'      **组内方向键压根不走**（这条从账 #164 里分出来单记 = **账 #168**，本批没碰、门 #230 工件里
+'      那一行与 #227 逐字节相同）。挂 CONTROLPARENT 前后这条一字不变。
 ' ⚠ 顺序**不钉**：`IsDialogMessage` 走 z-order 不是 VB6 的 TabIndex（账 #163），
 ' ⚠ `TW-new`（走到的**新站数**）也**不是判据**：同一个 exe 连跑三次读过 3、3、4，换架构也会变（与 WS17 那条"条数是时序不是不变量"同一类）。
 '   这里只钉"走得到"，把整串序列另打一条当读数。
