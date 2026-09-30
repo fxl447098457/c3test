@@ -158,6 +158,10 @@ Option Explicit
 '      `IsDialogMessage` 也认这条消息（探针里同一种树会跳），唯独不换到容器里的兄弟。
 '      根因没找到，另开 **账 #165**；所以本夹具的 `TW-in2 / TW-deep / TW-inpic` 现在读的是 **N**，
 '      那是**缺陷读数**，不是判据胜利 —— #165 落地时这三条必须翻成 Y（它们红了就是那条账结了）。
+'      2026-09-30 又排掉一批（`BS_NOTIFY`、`WS_CLIPSIBLINGS`（容器/孩子/两边）、"树在 ShowWindow 之后才建"），
+'      并把**两边的窗口链逐条对形**（探针 `Z-grpkids / Z-formkids` vs 产品侧最简拓扑夹具
+'      `.build/twmin` 的 `MIN-fr1kids / MIN-formkids`）—— 拓扑同形、样式位对上了，产品照样一跳就跳到窗体级。
+'      读法与剩下的候选写在 029 的「账 #165 在测」那一格。
 ' 夹具还顺手读两件别的事：
 '   `TW-picstop` —— VB6 的 PictureBox 拿不到焦点、本该不在 tab 序里，而 `controlTabStopStyleBit`
 '      排除表里**以前没有它** ⇒ 它自己在 tab 序里占一站（账 #164，本批修掉）。
