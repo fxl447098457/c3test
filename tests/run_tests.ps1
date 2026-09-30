@@ -1747,17 +1747,20 @@ if ($Category -in @("all", "run", "vbp")) {
     #   否则 `Test-Vbp` 按 vbp 名去找 exe ⇒ 本地怎么都过（我手动跑的是 TabWalk.exe）、CI 两条架构一起
     #   `FAIL (no exe)`（门 #218 就是这么红的）。要么改名一致，要么显式传 `-ExeName`。
     $twNeedles = @("TABWALK-DONE", "TW-walked=Y", "TW-top=Y", "TW-shy=Y",
-                    "TW-in1=Y/in2=N", "TW-deep=N/inpic=N", "TW-picstop=N")
+                    "TW-in1=Y/in2=N", "TW-deep=N/inpic=N", "TW-picstop=Y")
     Test-Vbp "tabwalk" "$Tests\tabwalk\TabWalkApp.vbp" $twNeedles
     Test-Vbp "tabwalk_x86" "$Tests\tabwalk\TabWalkApp.vbp" $twNeedles -Arch "x86"
     Test-EmitcShape "tw_emitc_cparent" @("$Tests\tabwalk\TabWalkApp.vbp") @(
         '1409286151L, 262144L,',          # 顶层 Frame（Frame1 与 optFrame 两处）
-        '1417740814L, 262144L,',          # 顶层 PictureBox
+        '1417675278L, 262144L,',          # 顶层 PictureBox（账 #164：这一串已不含 WS_TABSTOP）
+        '1350566414L, 262144L,',          # 容器里的 PictureBox（picDeep）—— 第二条创建路同口径
         '1342177287L, 262144L,'           # 容器里的容器 —— 第二条创建路也给了这一位
     )
     Test-EmitcAbsent "tw_emitc_notplain" @("$Tests\tabwalk\TabWalkApp.vbp") @(
         '1342242816L, 262144L,',          # 容器里的普通按钮不该挂这一位
-        '1409351680L, 262144L,'           # 顶层按钮同样不该挂
+        '1409351680L, 262144L,',          # 顶层按钮同样不该挂
+        '1417740814L, 262144L,',          # 账 #164: 顶层 PictureBox 又立回 WS_TABSTOP
+        '1350631950L, 262144L,'           # 容器里那枚又立回来（第二条创建路）
     )
     # 账 #166: 这条用例**本身就是那条红的固化** —— 工程文件叫 `NameProbe.vbp`，而产物叫
     # `RenamedProbe.exe`（`.vbp` 里 `ExeName32="RenamedProbe.exe"`，故意与文件名不同、还带后缀）。

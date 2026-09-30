@@ -97,6 +97,14 @@ Begin VB.Form WalkForm
             Top             =   240
             Width           =   720
          End
+         Begin VB.PictureBox picDeep 
+            Height          =   360
+            Left            =   120
+            ScaleWidth      =   1680
+            TabIndex        =   3
+            Top             =   1200
+            Width           =   1740
+         End
          Begin VB.CommandButton cmdShy 
             Caption         =   "S"
             Enabled         =   0   'False
@@ -152,11 +160,16 @@ Option Explicit
 '      那是**缺陷读数**，不是判据胜利 —— #165 落地时这三条必须翻成 Y（它们红了就是那条账结了）。
 ' 夹具还顺手读两件别的事：
 '   `TW-picstop` —— VB6 的 PictureBox 拿不到焦点、本该不在 tab 序里，而 `controlTabStopStyleBit`
-'      的排除表里**没有它** ⇒ 实测它自己占一站（账 #164）。
+'      排除表里**以前没有它** ⇒ 它自己在 tab 序里占一站（账 #164，本批修掉）。
+'      账 #164 落地之后这一条翻绿（`TW-picstop=Y`，`TW-seq` 里也没了 pic1 这一站）。
+'      Frame2 里那枚 `picDeep` 是为第二条创建路补的证人：容器里的 PictureBox 同样不能立 `WS_TABSTOP`。
+'      它在容器里，而 #165 还没结（对话框管理器不下钻）⇒ 跳格根本走不到它，所以这一格只能在发码面证
+'      （针见 run_tests.ps1 的 `tw_emitc_cparent` / `tw_emitc_notplain`）。
 '   `AK-*` —— optFrame 里两枚 `TabStop = 0` 的 OptionButton：按 VB6 的口径它们不进 tab 序，
 '      但方向键该在组内走。实测 `pre=optA`（焦点确实给了）而 `down=cmdTop1`、optB 依旧 False ⇒
 '      **组内方向键压根不走**（也另在 #164 里记着）。挂 CONTROLPARENT 前后这条一字不变。
 ' ⚠ 顺序**不钉**：`IsDialogMessage` 走 z-order 不是 VB6 的 TabIndex（账 #163），
+' ⚠ `TW-new`（走到的**新站数**）也**不是判据**：同一个 exe 连跑三次读过 3、3、4，换架构也会变（与 WS17 那条"条数是时序不是不变量"同一类）。
 '   这里只钉"走得到"，把整串序列另打一条当读数。
 Private gTick As Long
 Private gSeen As String

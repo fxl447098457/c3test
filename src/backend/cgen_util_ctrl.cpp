@@ -1500,6 +1500,10 @@ void CCodeGen::emitSliderDesignTimeInit(const FrmControl& ctrl, const std::strin
 // （`vb6_GetTabStop` 里 `!hwnd` 就回 -1），缺的只是创建时把这一位立上。
 // 读侧就是 `GetWindowLong(GWL_STYLE) & WS_TABSTOP` ⇒ 问的是窗口自己，我们没有另存一份。
 // 排除的是拿不到焦点的那几类；`Unknown`（uc 实例与没登记的 OCX）也不立 —— 那些可能压根没有窗口。
+// 账 #164：`PictureBox` 也进排除表。裸码实测 `.build/picstop/picstop.c`：同一棵里
+// `STATIC` 挂上 `WS_TABSTOP` 就会被对话框管理器当成一站（`B1 → Static'PIC' → B2`），
+// 摘掉这一位就变成 `B1 → B2` —— 机制全在这一位上，不用碰派发。
+// 上面那个"写了照发"的分支仍优先：`.frm` 真写了 `TabStop` 就按写的来。
 long CCodeGen::controlTabStopStyleBit(const FrmControl& ctrl) const {
     constexpr long kWsTabStop = 0x00010000L;
     auto tsIt = ctrl.properties.find("TabStop");
@@ -1511,6 +1515,7 @@ long CCodeGen::controlTabStopStyleBit(const FrmControl& ctrl) const {
     case FrmControlType::Image:
     case FrmControlType::Shape:
     case FrmControlType::Line:
+    case FrmControlType::PictureBox:  // 账 #164: VB6 的 PictureBox 拿不到焦点，不该进 tab 序
     case FrmControlType::Frame:
     case FrmControlType::Timer:
     case FrmControlType::Menu:
