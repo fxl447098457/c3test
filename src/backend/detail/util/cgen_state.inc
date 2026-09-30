@@ -666,6 +666,30 @@
             }
         }
         if (statusBarVars_.count(objExpr)) return objExpr;
+        // 2026-09-30 (门 #233 / c29sbevt): **宿主槽本身**也是这个函数的输入之一。
+        // 集合形态 (`Panels.Add` / `Panels.Count`) 一直走上面那两段; 而 `StatusBar1.SimClick`
+        // 这类**直接落在宿主槽上**的成员调用送进来的是 `vb6_hwnd_StatusBar1` —— 以前这里只有
+        // `statusBarVars_.count(objExpr)`(拿带前缀的槽名去比裸控件名, 恒假) ⇒ 函数答空
+        // ⇒ 宿主被当成"不是 StatusBar", 成员被当 COM 占位属性读 (`SimClick` 于是编成
+        // `ComCallObject(ComGetObjectProp(hwnd, L"SimClick"), L"Item", …)`: 编得过、跑起来
+        // 一条事件都不发)。姊妹函数 `treeViewNameOfExpr` / `toolbarNameOfExpr` 是拿
+        // `vb6_hwnd_<裸名>` 扫子串的, 所以它们认得这一形 —— 只有 StatusBar 这一路漏了。
+        // 这里补的正是"裸槽"那一形, 判据仍是登记表 (不是按前缀猜): 剥掉 hwnd_/com_/arr_
+        // 前缀后必须真的在 `statusBarVars_` 里。
+        {
+            static const char* kSlotPrefixes[] = { "vb6_hwnd_", "vb6_com_", "vb6_arr_" };
+            for (const char* pf : kSlotPrefixes) {
+                size_t pl = strlen(pf);
+                if (objExpr.size() > pl && objExpr.compare(0, pl, pf) == 0) {
+                    std::string bare = objExpr.substr(pl);
+                    // 只有"整串就是那个槽"才算宿主 (带成员/下标的走集合那两段)
+                    if (bare.find_first_of("[(. ") == std::string::npos
+                        && statusBarVars_.count(bare)) {
+                        return bare;
+                    }
+                }
+            }
+        }
         return "";
     }
     // C29-5a: Toolbar 的裸名登记 (设计期发射那侧 insert)。认法比 StatusBar 那套窄得多 ——

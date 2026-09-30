@@ -5,6 +5,30 @@
     // --- COM后期绑定检测 (P6.2) + 前期绑定检测 (P6.3) + P6.4接口调用 ---
     // MemberAccessExpr为COM对象设置isComMarker_标志 + comObjExpr_/comMemberName_
     if (isComMarker_) {
+        // 2026-09-30 (门 #233 c29sbevt): **控件的判据专用方法先落地**。
+        // 位置: 必须在下面**所有**分支 (Sim 汇总那一块 / axSlotObj / Data / OLE) **之前** ——
+        // 这些分支的顺序改过好几轮, 而 `StatusBar1.SimClick 1, 0` 一旦落进 axSlotObj 那条
+        // "裸控件槽 + 取属性 + Item" 的路, 就编成
+        //   vb6_ComCallObject(vb6_ComGetObjectProp(hwnd, L"SimClick"), L"Item", …)
+        // 编得过、跑起来一条事件都不发 (CI 上 `c29sbevt` / `_x86` 的 `Got:` 只有 SB1-COUNT=3)。
+        // 判据只用**登记表** (`statusBarNameOfExpr`, 它认宿主槽本身与两种集合形), 不靠前缀猜。
+        {
+            std::string sbHost = statusBarNameOfExpr(comObjExpr_);
+            if (!sbHost.empty() && Symbol::toLower(comMemberName_) == "simclick") {
+                isComMarker_ = false;
+                std::vector<std::string> sa;
+                for (size_t i = 0; i < node.positional.size(); i++) {
+                    emitExpr(*node.positional[i]);
+                    sa.push_back(lastExpr_);
+                }
+                lastExpr_ = "vb6_StatusBar_SimClick((void*)vb6_hwnd_" + sbHost + ", "
+                          + (sa.size() > 0 ? sa[0] : std::string("0")) + ", "
+                          + (sa.size() > 1 ? sa[1] : std::string("0")) + ")";
+                comObjExpr_.clear();
+                comMemberName_.clear();
+                return;
+            }
+        }
         // ActiveX控件COM属性: 先获取属性对象, 再用Item(idx)索引
         // comObjExpr_以"vb6_com_"开头 = ActiveX控件变量
         // C29-7: ListView 是**真窗口** (`vb6_hwnd_X`), 而 ImageList 是 `vb6_com_X` ——

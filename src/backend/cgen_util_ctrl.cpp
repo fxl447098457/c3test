@@ -1922,10 +1922,12 @@ std::string CCodeGen::wrapVariantValue(ASTNode* valueNode, const std::string& cE
         auto& lit = static_cast<LiteralExpr&>(*valueNode);
         if (lit.literalKind == LiteralKind::Null) return "vb6_VariantNull()";
         if (lit.literalKind == LiteralKind::Empty) return "vb6_VariantEmpty()";
-        if (lit.literalKind == LiteralKind::Boolean) {
-            // 与 boxToVariant 的 Boolean 档同一个写法 (显式收窄), 免得两份表各写一形
-            return "vb6_VariantBool((int16_t)(" + cExpr + "))";
-        }
+        // Boolean 字面量**不再在这里单独成档**(2026-09-30): 原先这一支写的是
+        // `vb6_VariantBool((int16_t)(…))`, 而末尾的 boxToVariant 的 Boolean 档写的是同一形
+        // —— 两份表又回来了(账 #123/Fix 198 那条"同一类型两条路两种结果"的老坑)。
+        // 现在字面量也落到 inferExprType → boxToVariant 这一处权威: 后者对 Boolean
+        // 发的是同一个 `(int16_t)` 收窄形, 所以发码逐字节不变, 但**档位只有一份**。
+        // (字面量落在 inferExprType 的白名单里, 见下面那个 kind 判断。)
     }
 
     // Fix 090d2: C 表达式顶层已是 vb6_VARIANT 时直接返回, 不再包装 —

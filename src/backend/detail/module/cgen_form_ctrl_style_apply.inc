@@ -396,22 +396,16 @@
             c_.emitLine("SendMessageW((HWND)" + hwndVar + ", WM_SETTEXT, 0, (LPARAM)L\"" + delayedText + "\");");
         }
 
-        // Fix 162c-extlist: CheckBox/OptionButton 设计期 Value —— .frm 里
-        // `Value = -1  'True` 此前从不消费, Option1(0) 默认选中态丢失
-        // (extlist 参考图第一个单选钮是实心点, 我们全空)。VB6 的 Value 只有两态,
-        // 非 0 即勾上 → BM_SETCHECK(BST_CHECKED)。
-        if (ctrl.controlType == FrmControlType::CheckBox ||
-            ctrl.controlType == FrmControlType::OptionButton) {
-            auto vIt162c = ctrl.properties.find("Value");
-            if (vIt162c != ctrl.properties.end() && vIt162c->second.intValue != 0) {
-                std::string vNLower = ctrl.controlName; std::transform(vNLower.begin(), vNLower.end(), vNLower.begin(), ::tolower);
-                std::string vHwnd = knownControlArrays_.count(vNLower) ?
-                    ("vb6_CtrlArr_GetAt(&vb6_arr_" + cIdent(ctrl.controlName) + ", " +
-                     std::to_string(ctrl.index >= 0 ? ctrl.index : 0) + ")") :
-                    ("vb6_hwnd_" + cIdent(ctrl.controlName));
-                c_.emitLine("vb6_SetCheckValue((void*)" + vHwnd + ", 1);  /* design Value=True */");
-            }
-        }
+        // Fix 162c-extlist 那条"顶层控件设计期 Value"的旧块**已删**(2026-09-30)。
+        // 它和上面第 360 行的 `emitDesignerStateProps(ctrl, dsHwnd)` 是**同一件事的两个出口**,
+        // 而两条口径不一致 —— 旧块 `CheckBox || OptionButton` 共用 `vb6_SetCheckValue`:
+        //   · OptionButton 的 Value 在 VB6 是 Boolean(账 #128-b 单开了 vb6_SetOptionValue);
+        //   · CheckBox 的 Value 是三态(0/1/2), 旧块把 Grayed(2) 也压成 1。
+        // 于是 `obOn` 会同时拿到 `vb6_SetOptionValue` 与 `vb6_SetCheckValue` 两条
+        // (实测门 #233 的 `cs_emitc_selectivity` 就是钉这条错形状的), 读数取决于谁最后落地。
+        // 现在设计期状态属性**只有一处出口** = `emitDesignerStateProps`, 两条创建路
+        // (顶层 cgen_form_ctrl_style_apply.inc / 容器 cgen_form_frame_menu.inc) 各调一次。
+        // ⚠ 这条纪律与账 #125 的注释同源: 设计期属性按"属性"分出口, 不按"控件类型"分出口。
 
         // Fix 162c-extlist: Label 设计期 AutoSize=True —— 此前从不消费
         // (extlist 的 Label2/3/4 按设计期 caption "Label2" 的宽度留在原地)。

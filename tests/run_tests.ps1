@@ -1370,7 +1370,12 @@ if ($Category -in @("all", "run", "bas")) {
         "VB-asg-bool=11/Boolean", "VB-asg-byte=17/Byte", "VB-asg-date=7", "VB-call-date=7/Date",
         "VB-date-clng=46023", "VB-date-cdbl=46023", "VB-date-isdate=True", "VB-date-cdate=True",
         "VB-sin-cdbl=1.5", "VB-sin-clng=2", "VB-DONE")
-    Add-BasTest "test_variant_boxing" "$Tests	est_variant_boxing.bas" $boxNeedles
+    # ⚠ 这里曾经是字面 TAB: `"$Tests<TAB>est_variant_boxing.bas"`。
+    # PowerShell 的 "" 里 **`\t` 不是转义**（转义是反引号），所以只要有人把 `\t` 写成真 TAB,
+    # 路径就变成 `tests` + TAB + `est_...` —— 门里读到的是 `error VB1006: 无法打开文件`,
+    # 而本机 `Get-ChildItem` 永远看不到它（文件明明在）。判据见文件末尾的
+    # `Assert-TestRegistry`（注册表自检: 每条 Add-* 的 .bas/.vbp 必须真存在）。
+    Add-BasTest "test_variant_boxing" "$Tests\test_variant_boxing.bas" $boxNeedles
     # <vbeclipse>: vbTextCompare 六个入口对表 (InStr 两形/InStrRev/Replace/Split/Filter/
     # StrComp)。修复前 RTL 5 处 (void)compare + InStr 第 4 参被截、三参"字符串优先"形
     # 错接槽位 (实测段错误)；另修 Debug.Print StrComp(...) 被 "vb6_Str" 前缀误判成 BSTR
@@ -1563,6 +1568,33 @@ if ($Category -in @("all", "run", "bas")) {
         "OVF-GOTO err=6", "OVERFLOW-DONE")
     Add-BasTest "test_overflow" "$Tests\test_overflow.bas" $ovfNeedles
     Add-BasTest "test_overflow_x86" "$Tests\test_overflow.bas" $ovfNeedles -Arch "x86"
+
+    # ---- 注册表自检 (2026-09-30, 门 #233 的教训) --------------------------------
+    # 为什么单开一道: `test_variant_boxing` 那条注册里 `\t` 被写成了**真 TAB**
+    # (`"$Tests<TAB>est_variant_boxing.bas"`), PowerShell 把它原样传给了 C3 ⇒ 门里读到
+    # `error VB1006: 无法打开文件: …tests<TAB>est_variant_boxing.bas`, 而本机
+    # `Get-ChildItem tests\*.bas` 一定看得到这个文件 —— 两边看到的世界不一样, 于是这条红
+    # 只在 GA 上出现、本地怎么点都点不出来。自检放在**分片与执行之前**: 路径不成立就整条
+    # 用例队列都不许跑, 而不是等某个分片跑到它才红。
+    # 判据两条: ① 路径里不许有控制字符 (`\t`/`\n`/`\r`) —— 这类字符在控制台看起来就是空白;
+    #          ② 文件必须真的存在 (相对 $Tests)。
+    $regErrors = @()
+    foreach ($t in $basQueue) {
+        $src = [string]$t.Source
+        if ($src -match '[\x00-\x1F]') {
+            $shown = $src -replace '[\x00-\x1F]', { '<0x{0:X2}>' -f [int][char]$_.Value }
+            $regErrors += "Add-BasTest '$($t.Name)': 路径里有控制字符 (看起来像空白): $shown"
+        } elseif (-not (Test-Path -LiteralPath $src)) {
+            $regErrors += "Add-BasTest '$($t.Name)': 源文件不存在: $src"
+        }
+    }
+    if ($regErrors.Count -gt 0) {
+        Write-Host ""
+        Write-Host "  [FATAL] bas 用例注册表自检不通过 ($($regErrors.Count) 条):" -ForegroundColor Red
+        foreach ($e in $regErrors) { Write-Host "    - $e" -ForegroundColor Red }
+        $script:fail += $regErrors.Count
+        exit 1
+    }
 
     # 分片: CI 用多 runner 并行跑 bas 用例时, 各 runner 只取第 BasShard 片
     if ($BasShardTotal -gt 1) {
@@ -2047,11 +2079,14 @@ if ($Category -in @("all", "run", "vbp")) {
         'vb6_SetOptionValue((void*)vb6_hwnd_obOn, 1);',   # OptionButton 的 Value=-1 折成 BST_CHECKED
         # 账 #124: 控件布尔属性按 Boolean 解封 —— CStr 折成 vb6_CStrBool，装箱走 vb6_VariantBool。
         # 修复前这两处分别是 vb6_CStrLong 与 vb6_VariantFromValue（TypeName 也就跟着给 Long）。
-        # 装箱那两处形状不同是有意的：赋值点走 wrapVariantValue（不加窄化），
-        # 实参点（TypeName 那条）走 boxToVariant（自带 (int16_t) 收窄）。
+        # 2026-09-30: 两条装箱都带 `(int16_t)` 收窄了 —— 以前"赋值点不窄化"是**两份表**的产物
+        # (wrapVariantValue 自己的 Boolean 档 vs boxToVariant 的 Boolean 档), 而那正是账 #123/
+        # Fix 198 那条"同一类型两条路两种结果"的老坑。现在字面量与属性读都落到 boxToVariant
+        # 这一处权威 ⇒ 两形合并; 断言跟着改成实际形状 (收窄在 C 侧也是必需的: vb6_VariantBool
+        # 形参是 int16_t, 而属性 getter 返回 int)。
         'vb6_CStrBool(vb6_GetControlEnabled(',
         'vb6_VariantBool((int16_t)(vb6_GetControlEnabled(',
-        'v = vb6_VariantBool(vb6_GetControlVisible(',
+        'v = vb6_VariantBool((int16_t)(vb6_GetControlVisible(',
         'vb6_CStrBool(vb6_GetOptionValue('
     )
     Test-EmitcShape "cs_emitc_tabstop" @("$Tests\ctrlstate\CtrlState.vbp") @(
