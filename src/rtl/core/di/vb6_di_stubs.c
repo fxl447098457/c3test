@@ -93,27 +93,6 @@ intptr_t __stdcall vb6_di_SetWindowTheme(intptr_t hWnd, intptr_t pszSubAppName, 
     return 0;
 }
 
-/* 通用动态导出解析器 (Fix <vbeclipse>)
- *
- * 背景: 生成器产出的 vb6_di_user32_stubs.c:370 有一处**手写**特例
- * (非 gen_di_stubs.ps1 产出 —— 脚本的动态分支只发单参 vb6_di_gdiplus_proc),
- * 它调用 vb6_di_dllproc("comctl32.dll", "DllGetVersion") 取函数地址, 但该函数
- * 在整个 RTL 里**从未定义** → 链接期 LNK2019
- * "无法解析的外部符号 vb6_di_dllproc" (引用者 vb6_di_DllGetVersion)。
- * 该桩当前无调用方 (休眠), 但只要 TU 被链接进可执行文件/DLL 就必然报错。
- *
- * 按本文件既有口径 (见上方 SetWindowTheme 等"动态解析避免引入额外 .lib"的
- * 惯例) 补上实体: LoadLibraryW + GetProcAddress, 取不到返回 NULL 由调用方兜底。
- * DLL 句柄刻意**不 FreeLibrary** —— 进程期内重复 LoadLibrary/FreeLibrary 同一
- * 模块会抖动引用计数, 且解析结果被调用方缓存在 static 局部变量里。
- */
-void* vb6_di_dllproc(const char* dllName, const char* procName) {
-    if (!dllName || !procName) return NULL;
-    HMODULE h = GetModuleHandleA(dllName);
-    if (!h) h = LoadLibraryA(dllName);
-    if (!h) return NULL;
-    return (void*)GetProcAddress(h, procName);
-}
 
 /* KERNEL32 forwarding stubs */
 intptr_t __stdcall vb6_di_WideCharToMultiByte(intptr_t a, intptr_t b, intptr_t c, intptr_t d, void* e, intptr_t f, intptr_t g, intptr_t h) {

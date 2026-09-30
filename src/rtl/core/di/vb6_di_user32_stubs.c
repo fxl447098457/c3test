@@ -365,6 +365,23 @@ intptr_t __stdcall vb6_di_DispatchMessageA(void* lpMsg) {
 intptr_t __stdcall vb6_di_DispatchMessageW(void* lpMsg) {
     return ((intptr_t (WINAPI *)(void*))DispatchMessageW)(lpMsg);
 }
+// FATAL-HANDOFF merge: static helper used by the DllGetVersion block below (fan/dev)
+/* GDI+ flat API (and DllGetVersion) are not declared for C by the SDK
+ * headers, so those symbols are resolved by name at first use.
+ * 必须与使用它的桩**同处一个 TU 且是 static** (原先就是这个形态)。本文件由
+ * gen_di_stubs.ps1 重生成时只按符号搬运各桩, 上面这段 static 助手不在其列, 曾被漏掉 ⇒
+ * 调用点看不到原型, MSVC 按隐式声明当 `int` 返回 —— x64 下把函数指针截成 32 位,
+ * `fn(pdvi)` 跳到垃圾地址, 实测 declare_byref_udt_out 0xC0000005 (dev 绿、这条分支崩,
+ * 两端生成码逐字相同)。重生成后请确认这段还在。 */
+static void* vb6_di_dllproc(const char* dll, const char* name) {
+    static HMODULE mod = NULL;
+    static const char* dllname = NULL;
+    if (mod != NULL && dllname != NULL && strcmp(dll, dllname) != 0) { mod = NULL; }
+    if (mod == NULL) { mod = LoadLibraryA(dll); dllname = dll; }
+    if (mod == NULL) { return NULL; }
+    return (void*)GetProcAddress(mod, name);
+}
+
 /* DllGetVersion */
 intptr_t __stdcall vb6_di_DllGetVersion(void* pdvi) {
     intptr_t (WINAPI *fn)(void*) = (intptr_t (WINAPI *)(void*))vb6_di_dllproc("comctl32.dll", "DllGetVersion");
