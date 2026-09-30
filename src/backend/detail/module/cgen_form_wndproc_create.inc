@@ -431,17 +431,13 @@
                 if (!childClass142) continue;
                 emitCommandDispatch142(child, childCmdId142);
                 childCmdId142++;
-                if (!child.children.empty() &&
-                    (child.controlType == FrmControlType::Frame ||
-                     child.controlType == FrmControlType::PictureBox)) {
+                if (!child.children.empty() && controlIsContainerType(child)) {   // 账 #167: 原来少认 SSTab
                     self(self, child);
                 }
             }
         };
         for (const auto& ctrl : frmDesc.formControl.children) {
-            if (!ctrl.children.empty() &&
-                (ctrl.controlType == FrmControlType::Frame ||
-                 ctrl.controlType == FrmControlType::PictureBox)) {
+            if (!ctrl.children.empty() && controlIsContainerType(ctrl)) {   // 账 #167: 原来少认 SSTab
                 walkCmdChildren142(walkCmdChildren142, ctrl);
             }
         }

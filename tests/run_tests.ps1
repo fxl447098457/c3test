@@ -3055,6 +3055,10 @@ if ($Category -in @("all", "run", "vbp")) {
         "TS27-AT1-P0VIS=False P1VIS=True P2VIS=False", "TS28-AT2-P0VIS=False P1VIS=False P2VIS=True",
         "TS29-SETTAB2=2", "TS29B-SETTAB0=0",
         "TS34=True/Boolean/11",
+        # 账 #167：容器清单收成**一处权威**之前的读数 —— BASE 上两步都是 `0/0`（容器子控件在
+        # 创建侧与派发侧数到不同的 id，BN_SETFOCUS 带的那个号找不到自己的 arm）。两步反向都钉，
+        # 免得「全指到同一枚」那种假绿蒙过去。
+        "TS35-ARM-TAB=1/0", "TS36-ARM-FRAME=0/1",
         "CTRLSSTAB-DONE", "CTRLSSTAB-VISDONE", "CTRLSSTAB-CLICKDONE")
 
     # --- P20-43/44: 窗体事件面 + OLE 拖放 (目标侧 Drop + 源侧 OLEDrag) ---
@@ -3106,6 +3110,62 @@ if ($Category -in @("all", "run", "vbp")) {
         Write-Host "FAIL (ANSI/非默认 charset 残留)" -ForegroundColor Red
         $ansiBad | Select-Object -First 5 | ForEach-Object {
             Write-Host ("    " + $_.Filename + ":" + $_.LineNumber + "  " + $_.Line.Trim()) -ForegroundColor Red
+        }
+    }
+
+    # --- 账 #167: 「谁是容器」只许有一处权威（结构性哨兵，钉的是**不许再抄**）---
+    # 这一族的病根不是某一格写错，是同一张清单在好几处各抄一遍、每处抄的还不齐：
+    # 创建那两路认 SSTab，事件派发那两路只认 Frame/PictureBox，拆子类那一路连 PictureBox 都漏。
+    # 抄漏的后果不是崩，是**容器里的孩子收不到自己的事件**（子控件在两侧数到不同的 id）。
+    # 判据：源码里任何一条布尔表达式中同时出现 {Frame, PictureBox, SSTab} 里的两型以上
+    # = 有人又把容器清单手写了一遍。唯一权威 `controlIsContainerType` 自己是 switch-case 写的，
+    # 这个形状扫不到它 ⇒ 不误伤。
+    # 两向验过：收口前（HEAD）这份扫出 **10 处**，收口后 **0 处**。
+    # ⚠ 它管不到「只写了一型」的那种漏（dispatch 里 `!= FrmControlType::Frame` 就是这一形）——
+    #   那一格由上面的运行期证人 TS35/TS36 兜：容器少认一类，容器里的孩子就没有 _GotFocus。
+    if (Enter-VbpShard) {
+        $script:total++
+        Write-Host -NoNewline "  [SRC] container_list_single_authority ... "
+        $beRoot = Join-Path (Split-Path $PSScriptRoot -Parent) "src\backend"
+        $copyBad = @()
+        if (Test-Path $beRoot) {
+            # 先把 `child.controlType` 这种「对象.成员」折成一个记号 CTL，这样两条比较之间
+            # 只剩空白 / || / && / 括号 / ! 就说明它们同属一条布尔表达式（跨行续行也算）。
+            $objRe = [regex] '\b[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*\.controlType\b'
+            $cmpRe = [regex] '\bCTL\b\s*(?:==|!=)\s*FrmControlType::(Frame|PictureBox|SSTab)\b'
+            $glueRe = [regex] '^[\s()!&|]*$'
+            foreach ($f in @(Get-ChildItem -Path $beRoot -Recurse -File -Include *.c, *.cpp, *.h, *.inc)) {
+                $txt = $objRe.Replace([IO.File]::ReadAllText($f.FullName), 'CTL')
+                $ms = @($cmpRe.Matches($txt))
+                $i = 0
+                while ($i -lt $ms.Count) {
+                    $j = $i + 1
+                    $kinds = New-Object System.Collections.Generic.HashSet[string]
+                    [void]$kinds.Add($ms[$i].Groups[1].Value)
+                    while ($j -lt $ms.Count) {
+                        # ⚠ `$ms[$k].End` 在 PS 5.1 里取回来是**空**（Match.End 没被绑定上），
+                        #   Substring 就以 0 起、gap 变成整个文件 ⇒ 永远不判红。改成 Index+Length。
+                        $prevEnd = $ms[$j - 1].Index + $ms[$j - 1].Length
+                        $gap = $txt.Substring($prevEnd, $ms[$j].Index - $prevEnd)
+                        if (-not $glueRe.IsMatch($gap)) { break }
+                        [void]$kinds.Add($ms[$j].Groups[1].Value)
+                        $j++
+                    }
+                    if ($kinds.Count -ge 2) {
+                        $ln = ($txt.Substring(0, $ms[$i].Index) -split "`n").Count
+                        $copyBad += ($f.Name + ":" + $ln + " [" + (($kinds | Sort-Object) -join ",") + "]")
+                    }
+                    $i = $j
+                }
+            }
+        }
+        if ($copyBad.Count -eq 0) {
+            $script:pass++
+            Write-Host "PASS" -ForegroundColor Green
+        } else {
+            $script:fail++
+            Write-Host "FAIL (容器清单被手抄了 $($copyBad.Count) 处)" -ForegroundColor Red
+            $copyBad | Select-Object -First 8 | ForEach-Object { Write-Host ("    " + $_) -ForegroundColor Red }
         }
     }
 
