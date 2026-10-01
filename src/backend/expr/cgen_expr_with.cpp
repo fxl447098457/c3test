@@ -260,7 +260,7 @@ void CCodeGen::visit(WithMemberExpr& node) {
             if (memLower == "lastdllerror") { lastExpr_ = "GetLastError()";       return; }
             if (memLower == "helpfile")    { lastExpr_ = "(BSTR)0";              return; }
             if (memLower == "helpcontext") { lastExpr_ = "0";                    return; }
-            if (memLower == "clear")       { lastExpr_ = "vb6_ErrClear";         return; }
+            if (memLower == "clear")       { lastExpr_ = "vb6_ErrClear()";       return; }
             if (memLower == "raise")       { lastExpr_ = "vb6_ErrRaise";         return; }
         }
         // Fallback: unknown builtin member
