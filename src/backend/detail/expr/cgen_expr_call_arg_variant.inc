@@ -32,10 +32,10 @@
             && calleeParams[i].type == Vb6Type::Variant
             && cParamClassPtrType(calleeParams[i]).empty()
             // <vbeclipse> <VBFlexGridDemo> (同 arg_emit Fix 210 那条): 形参是
-            // 类型化 COM 接口指针 (vb6_ComIface_X*) 时不能装箱 —— TLB 里的 ComClass
-            // 让 resolveTypeRef 兜底成 Variant, 装了 typed* 槽收到 vb6_VARIANT → C2172。
-            && !(calleeParams[i].typeRefName.size() > 0
-                 && cTypeForDeclaredTypeName(calleeParams[i].typeRefName).compare(0, 13, "vb6_ComIface_") == 0)) {
+            // 类型化 COM 接口指针 (vb6_ComIface_X*) 时不能装箱 —— 走**全局**
+            // symTab_.lookup 的那份判据 (cParamTypedComIfaceCType)，绕开
+            // mapTypeRef 截短名只看当前模块的坑。
+            && cParamTypedComIfaceCType(calleeParams[i]).empty()) {
             // Fix 084d: 实参若是类对象表达式 (如 me->Database, 类方法返回类对象),
             // 保持对象指针直传, 不要套 vb6_VariantFromValue — 符号表可能把类类型
             // 参数误记为 Variant, 若包装成 vb6_VARIANT 传给 vb6_cls_cXxx* 参数
@@ -215,12 +215,10 @@
                 || calleeParams[i].type == Vb6Type::Empty)
             // <vbeclipse> <VBFlexGridDemo> 同族 guard (与 arg_emit Fix 210 /
             // arg_variant 上方 091s 一致)：类型化 COM 接口形参 vb6_ComIface_X*
-            // 不能装箱。CI 的 TLB 全加载路径让 resolveTypeRef 把 `As IOleControl`
-            // 兜底成 Variant, 三条 wrap 各自装一次 → 双装 vb6_VariantFromValue(
-            // vb6_VariantFromValue(This)) → cl 19.51 C2172 一片。判据都走同一份
-            // cTypeForDeclaredTypeName, 与定义侧 mapTypeRef 同源。
-            && !(calleeParams[i].typeRefName.size() > 0
-                 && cTypeForDeclaredTypeName(calleeParams[i].typeRefName).compare(0, 13, "vb6_ComIface_") == 0)) {
+            // 不能装箱。走 cParamTypedComIfaceCType 的全局 symTab_.lookup，
+            // 绕开 mapTypeRef 截短名只看当前模块的坑 (CI dbg210 dump 实测:
+            // tn=OLEGuids.IOleControl ct=void* cls=<empty> —— 三条 guard 全落空)。
+            && cParamTypedComIfaceCType(calleeParams[i]).empty()) {
             bool alreadyVariant = cExprIsVariant(argVal);
             if (!alreadyVariant && node.positional[i]->kind == ASTNodeKind::IdentifierExpr) {
                 auto& idArg86 = static_cast<IdentifierExpr&>(*node.positional[i]);
@@ -462,17 +460,14 @@
         // cl 19.51 直接 C2172 "actual parameter is not a pointer" (VTableHandle.bas
         // `Call ReplaceIOleControl(This)` 六处一次爆红)。VB6 语义本就是 Object →
         // Interface 的 QI 转换，这里做的是**类型层的显式化**，不改运行期行为。
-        // 判据共用 cTypeForDeclaredTypeName (定义侧 mapTypeRef 同一份映射) ——
-        // 与 cParamClassPtrType 同族，避免"调用点/定义点各说一套"的经典回归。
+        // 判据走 cParamTypedComIfaceCType (全局 symTab_.lookup)，与 wrap guard
+        // 那三条同源 —— cTypeForDeclaredTypeName 走 mapTypeRef 只看当前模块，
+        // CI 上 TLB 接口挂全局那一份查不到, 会兜底成 void* (dbg210 实测)。
         if (i < calleeParams.size() && !isByRef) {
-            const auto& cp185 = calleeParams[i];
-            if (!cp185.typeRefName.empty()) {
-                const std::string ifaceCT = cTypeForDeclaredTypeName(cp185.typeRefName);
-                if (ifaceCT.size() > 13 && ifaceCT.compare(0, 13, "vb6_ComIface_") == 0
-                    && ifaceCT.back() == '*') {
-                    if (argVal.rfind("(" + ifaceCT + ")", 0) != 0) {
-                        argVal = "(" + ifaceCT + ")" + argVal;
-                    }
+            const std::string ifaceCT = cParamTypedComIfaceCType(calleeParams[i]);
+            if (!ifaceCT.empty()) {
+                if (argVal.rfind("(" + ifaceCT + ")", 0) != 0) {
+                    argVal = "(" + ifaceCT + ")" + argVal;
                 }
             }
         }

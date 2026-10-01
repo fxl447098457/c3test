@@ -163,6 +163,32 @@ std::string CCodeGen::cTypeForDeclaredTypeName(const std::string& name) {
     return mapTypeRef(&tr);
 }
 
+// <vbeclipse> <VBFlexGridDemo>: 形参槽的类型名是不是一个**类型化 COM 接口指针**
+// (vb6_ComIface_X*)。这里不能用 cTypeForDeclaredTypeName —— mapTypeRef 内的
+// 限定名截短 (line 282) 走 `symTab_.lookupModule(shortName)`，只看当前模块，
+// 而 TLB 注入的 IOleControl 通常挂在**全局**符号表；调用点侧当前模块查不到，
+// mapTypeRef 兜底给 "void*" —— 于是 "形参 C 类型是 vb6_ComIface_X*" 这个真值
+// 在 caller 侧被吞了 (CI t2 一次性 dbg210 dump 实测: tn=OLEGuids.IOleControl
+// ct=void*, 而 callee proc 签名同一模块那一份是 vb6_ComIface_IOleControl*)。
+// 本函数按 "先看截短名, 再看全名, 都试全局 symTab_.lookup 找 ComClass/ComInterface"
+// 走，不受当前模块作用域影响，与 callee proc 签名那一份同源。返回非空的
+// "vb6_ComIface_<X>*" 表示这个槽收 typed ptr；空串表示不是接口槽。
+std::string CCodeGen::cParamTypedComIfaceCType(const ParameterInfo& p) {
+    if (p.typeRefName.empty()) return {};
+    std::string shortNm = p.typeRefName;
+    size_t dotPos = shortNm.find('.');
+    if (dotPos != std::string::npos) shortNm = shortNm.substr(dotPos + 1);
+    Symbol* clsSym = symTab_.lookup(shortNm);
+    if (!clsSym) clsSym = symTab_.lookup(p.typeRefName);
+    if (!clsSym) return {};
+    if (clsSym->kind != SymbolKind::ComClass
+        && clsSym->kind != SymbolKind::ComInterface) return {};
+    std::string ifaceNm = (clsSym->kind == SymbolKind::ComClass
+        && !clsSym->comDefaultIfaceName.empty())
+        ? clsSym->comDefaultIfaceName : clsSym->name;
+    return "vb6_ComIface_" + cIdent(ifaceNm) + "*";
+}
+
 // <vbeclipse>: "这个形参槽在 C 侧收不收类实例指针" 的**唯一**回答处。判定完全走
 // cTypeForDeclaredTypeName → mapTypeRef，也就是类模块发定义时用的那一份映射，所以
 // 本条与定义侧不可能各说一套（这正是它要修的毛病）。

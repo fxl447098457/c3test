@@ -436,6 +436,11 @@
     // SimpleTypeRef 走 mapTypeRef, 不复制那份映射。dll/COM 入口的 extern 原型用它，
     // 以便工程类形参与类模块的定义给出同一个类型。详见 cgen_base_type.cpp 定义处注释。
     std::string cTypeForDeclaredTypeName(const std::string& name);
+    // <vbeclipse> <VBFlexGridDemo>: 与 cTypeForDeclaredTypeName 平行的一条判据 ——
+    // 专问"这个形参槽是不是类型化 COM 接口 (vb6_ComIface_X*)"，走全局 symTab_.lookup
+    // 绕开当前模块作用域 (mapTypeRef 的截短名只看当前模块，TLB 注入的接口挂在
+    // 全局，caller 侧就查不到 → 兜底 void*)。空串 = 不是接口槽。
+    std::string cParamTypedComIfaceCType(const ParameterInfo& p);
 
     // <vbeclipse>: 该形参槽在 **C 侧**是否收工程类/接口的**实例指针**。是 → 返回那个
     // 指针类型 (mapTypeRef 的原样结果, 不含 ByRef 的再取址)；否 → 空串。
