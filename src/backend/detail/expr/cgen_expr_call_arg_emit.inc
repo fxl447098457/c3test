@@ -257,36 +257,18 @@
             // <vbeclipse>: 工程类形参的槽 p.type 也是 Variant (见 arg_variant 同一处注释),
             // 这里不能装箱 —— 判据共用 cParamClassPtrType, 与 dll 入口的 extern 同源。
             && cParamClassPtrType(calleeParams[i]).empty()
-            // Fix <vbeclipse> <VBFlexGridDemo>: 类型化 COM 接口形参 (VB `As IOleControl`,
-            // C 侧形参 vb6_ComIface_X*) 同款 —— resolveTypeRef 命中 TLB 里的 ComClass 时
-            // p.type 会兜底成 Variant，本条若还装箱，调用点就发成
-            // `Replace(vb6_VariantFromValue(This))` → 形参 typed* 收到 vb6_VARIANT
-            // → cl 19.51 C2172 "actual parameter is not a pointer" (VBFlexGrid CI 实测)。
-            // 判据走**新**的 cParamTypedComIfaceCType —— 走全局 symTab_.lookup 绕开
-            // 当前模块作用域；cTypeForDeclaredTypeName 走 mapTypeRef 的截短名只看
-            // 当前模块，CI 上 TLB 挂在**全局**，caller 侧那一份 mapTypeRef 会兜底
-            // 成 void*，把"形参其实是 typed*"这个真值吞掉 (dbg210 dump 实测)。
-            && cParamTypedComIfaceCType(calleeParams[i]).empty()
+            // Fix <vbeclipse> <VBFlexGridDemo>: 只要 callee 形参**声明过具体类型**
+            // (`p.typeRefName` 非空 —— VB 里 `As IOleControl` / `As cMyClass` / `As SomeUDT`
+            // 都会在 semantic_analyzer_decl.cpp 落 `pi.typeRefName = <名>`), 这条槽
+            // 就**不是真 Variant 槽**。装 vb6_VARIANT 会与 callee 侧 typed 槽错位
+            // (VTableHandle.bas 6 处 `Call Replace*(This)`, cl 19.51 C2172 一片)。
+            // resolveTypeRef 把 p.type 兜底成 Variant 是符号查表时序产物 (b5f681ed
+            // dbg210b 定位: caller 侧 symTab_.lookup / lookupModule 双 miss, 而
+            // 同 module 的 callee proc 签名又解析出 vb6_ComIface_X*); 而**声明名**
+            // 在 AST 上始终在场 —— 用它当"是不是 Variant 槽"的唯一权威, 不再依赖
+            // 符号查表时序。三条 wrap guard 同一份判据。
+            && calleeParams[i].typeRefName.empty()
             && !cExprIsVariant(argVal)) {
-            // 一次性诊断 (出结果即删): 记录 helper 判定值, 摸 CI 上 helper 是否也在
-            // 兜底空 (kind 不是 ComClass/ComInterface, 或 lookup 全落空)。
-            {
-                const auto& cp999 = calleeParams[i];
-                std::string t999 = cParamTypedComIfaceCType(cp999);
-                Symbol* s999 = cp999.typeRefName.empty() ? nullptr
-                    : symTab_.lookup(cp999.typeRefName);
-                if (!s999 && cp999.typeRefName.find('.') != std::string::npos) {
-                    std::string sn = cp999.typeRefName.substr(cp999.typeRefName.find('.') + 1);
-                    s999 = symTab_.lookup(sn);
-                }
-                std::string k999 = s999 ? std::to_string(static_cast<int>(s999->kind)) : "<null>";
-                argVal += " /* dbg210b ct='" + (t999.empty() ? "<empty>" : t999)
-                        + "' kind=" + k999 + " */";
-            }
-            // 装箱一律走 boxToVariant 这一处权威 (按 VB 声明类型选 ctor)。
-            // 直接手写 vb6_VariantFromValue 是让 C 的 _Generic 猜类型: VB 的 Boolean
-            // 在 C 侧是 int32_t/int16_t, 于是 VarType(True) 报 3(Long) 而不是 11
-            // (实测 DT43 / MV41 / test_bool_display 三条同时红)。
             // 装箱一律走 boxToVariant 这一处权威 (按 VB 声明类型选 ctor)。
             // 直接手写 vb6_VariantFromValue 是让 C 的 _Generic 猜类型: VB 的 Boolean
             // 在 C 侧是 int32_t/int16_t, 于是 VarType(True) 报 3(Long) 而不是 11
