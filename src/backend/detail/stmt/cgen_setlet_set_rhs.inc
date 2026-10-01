@@ -37,16 +37,19 @@
         const std::string udtFldC = udtFieldCTypeOfTarget(node.target.get());
         if (udtFldC.rfind("vb6_cls_", 0) != 0) {
             targetIsVariant = (inferUdtFieldVb6Type(node.target.get()) == Vb6Type::Variant);
-            // <vbeclipse> <VBFlexGridDemo>: 只要 UDT 字段有具体声明类型名
-            // (`As IOleInPlaceActiveObject` 一类), 这条槽**不是** Variant 容器 ——
-            // TLB 命中让 inferUdtFieldVb6Type 兜底成 Variant, 装 vb6_VARIANT 会与
-            // 字段真实 typed ptr 类型错位 (CI 实测 Set VTableIPAOData.OriginalIOleIPAO
-            // = This 落 C2440 两条)。判据与 arg_emit / arg_variant 三条 wrap
-            // guard 一致 (都在问 "声明槽是不是真 Variant"), 都只看 AST 上的类型名,
-            // 不看符号查表结果。
-            if (targetIsVariant
-                && !udtFieldTypeRefNameOfTarget(node.target.get()).empty()) {
-                targetIsVariant = false;
+            // <vbeclipse> <VBFlexGridDemo>: 判据看 mapTypeRef 那份**具体 C 类型**,
+            // 与 arg_emit / arg_variant 三条 wrap guard 同一份权威 —— VTableHandle.bas
+            // `Set VTableIPAOData.OriginalIOleIPAO = This` 一条, 字段声明
+            // `As OLEGuids.IOleInPlaceActiveObject`, TLB 命中让 inferUdtFieldVb6Type
+            // 兜底成 Variant → 装箱 → 字段 typed ptr 收 VARIANT → C2440。
+            // 但"As Variant"字段本身 resolveTypeName 也给 vb6_VARIANT, 装箱是必须的,
+            // 不能一并挡掉。所以判据不能只看 typeRefName 是否非空, 要问那份 C 类型。
+            if (targetIsVariant) {
+                const std::string fldTRN = udtFieldTypeRefNameOfTarget(node.target.get());
+                if (!fldTRN.empty()
+                    && cTypeForDeclaredTypeName(fldTRN) != "vb6_VARIANT") {
+                    targetIsVariant = false;
+                }
             }
         }
     }

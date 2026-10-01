@@ -257,17 +257,17 @@
             // <vbeclipse>: 工程类形参的槽 p.type 也是 Variant (见 arg_variant 同一处注释),
             // 这里不能装箱 —— 判据共用 cParamClassPtrType, 与 dll 入口的 extern 同源。
             && cParamClassPtrType(calleeParams[i]).empty()
-            // Fix <vbeclipse> <VBFlexGridDemo>: 只要 callee 形参**声明过具体类型**
-            // (`p.typeRefName` 非空 —— VB 里 `As IOleControl` / `As cMyClass` / `As SomeUDT`
-            // 都会在 semantic_analyzer_decl.cpp 落 `pi.typeRefName = <名>`), 这条槽
-            // 就**不是真 Variant 槽**。装 vb6_VARIANT 会与 callee 侧 typed 槽错位
-            // (VTableHandle.bas 6 处 `Call Replace*(This)`, cl 19.51 C2172 一片)。
-            // resolveTypeRef 把 p.type 兜底成 Variant 是符号查表时序产物 (b5f681ed
-            // dbg210b 定位: caller 侧 symTab_.lookup / lookupModule 双 miss, 而
-            // 同 module 的 callee proc 签名又解析出 vb6_ComIface_X*); 而**声明名**
-            // 在 AST 上始终在场 —— 用它当"是不是 Variant 槽"的唯一权威, 不再依赖
-            // 符号查表时序。三条 wrap guard 同一份判据。
-            && calleeParams[i].typeRefName.empty()
+            // Fix <vbeclipse> <VBFlexGridDemo>: 只要 callee 形参**声明了具体类型名**
+            // 且 mapTypeRef 那份权威不认它是 `vb6_VARIANT`, 这条槽**就不是 Variant
+            // 容器** —— 装 vb6_VARIANT 会与 callee 侧 typed 槽错位 (VTableHandle.bas
+            // 六处 `Call Replace*(This)` → cl 19.51 C2172; VBFlexGrid.c(3032) 与
+            // MainForm.c(1044) 的 `As Variant` 形参如果被一起挡 → 反向 C2440)。
+            // 关键: 判据必须是 **mapTypeRef 的 C 类型结果** 而不是"typeRefName 是否
+            // 非空" —— `As Variant` 的形参 typeRefName 也是非空 ("Variant"), 前者
+            // 会误伤。mapTypeRef 认 "Variant" → "vb6_VARIANT", 认 "IOleControl" (未
+            // 命中) → "void*", 认工程类 → "vb6_cls_X*" —— 只有前者才是 Variant 槽。
+            && (calleeParams[i].typeRefName.empty()
+                || cTypeForDeclaredTypeName(calleeParams[i].typeRefName) == "vb6_VARIANT")
             && !cExprIsVariant(argVal)) {
             // 装箱一律走 boxToVariant 这一处权威 (按 VB 声明类型选 ctor)。
             // 直接手写 vb6_VariantFromValue 是让 C 的 _Generic 猜类型: VB 的 Boolean

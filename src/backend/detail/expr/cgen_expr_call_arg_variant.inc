@@ -31,11 +31,11 @@
         if (!isByRef && i < calleeParams.size() && calleeParams[i].isByVal
             && calleeParams[i].type == Vb6Type::Variant
             && cParamClassPtrType(calleeParams[i]).empty()
-            // <vbeclipse> <VBFlexGridDemo> (与 arg_emit / 下方 Fix 086 同族):
-            // 只要 callee 形参有**具体声明类型** (typeRefName 非空)，就不是真
-            // Variant 槽，不能装 vb6_VARIANT。判据不依赖符号查表, CI caller 侧
-            // 无论 TLB 是否命中都不会漏。
-            && calleeParams[i].typeRefName.empty()) {
+            // <vbeclipse> <VBFlexGridDemo> 同 arg_emit / Fix 086: 判据是 mapTypeRef
+            // 出的 C 类型 (不是"名字是否非空")。"As Variant" 会得 vb6_VARIANT, 装箱
+            // 照旧; "As IOleControl"/接口 等得 void*/vb6_ComIface_X*, 不装。
+            && (calleeParams[i].typeRefName.empty()
+                || cTypeForDeclaredTypeName(calleeParams[i].typeRefName) == "vb6_VARIANT")) {
             // Fix 084d: 实参若是类对象表达式 (如 me->Database, 类方法返回类对象),
             // 保持对象指针直传, 不要套 vb6_VariantFromValue — 符号表可能把类类型
             // 参数误记为 Variant, 若包装成 vb6_VARIANT 传给 vb6_cls_cXxx* 参数
@@ -213,12 +213,10 @@
         if (!isByRef && i < calleeParams.size() && calleeParams[i].isByVal
             && (calleeParams[i].type == Vb6Type::Variant
                 || calleeParams[i].type == Vb6Type::Empty)
-            // <vbeclipse> <VBFlexGridDemo> 同族 guard (与 arg_emit / 上方 091s 一致):
-            // 只要 callee 形参有具体声明类型 (typeRefName 非空) 就不是真 Variant 槽,
-            // 不装 vb6_VARIANT。判据不依赖符号查表 (CI dbg210 dump 实测:
-            // tn=OLEGuids.IOleControl ct=void* cls=<empty> —— cTypeForDeclaredTypeName
-            // 与 cParamTypedComIfaceCType 都漏, 唯有 AST 上落下的 typeRefName 稳)。
-            && calleeParams[i].typeRefName.empty()) {
+            // <vbeclipse> <VBFlexGridDemo> 同族 guard (arg_emit / 091s): 判据
+            // 看 mapTypeRef 那份 C 类型是不是 vb6_VARIANT, 不是才不装。
+            && (calleeParams[i].typeRefName.empty()
+                || cTypeForDeclaredTypeName(calleeParams[i].typeRefName) == "vb6_VARIANT")) {
             bool alreadyVariant = cExprIsVariant(argVal);
             if (!alreadyVariant && node.positional[i]->kind == ASTNodeKind::IdentifierExpr) {
                 auto& idArg86 = static_cast<IdentifierExpr&>(*node.positional[i]);
