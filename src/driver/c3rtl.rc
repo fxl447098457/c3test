@@ -1,4 +1,10 @@
 // c3rtl.rc - RTL runtime library embedded as resources
+// Fix <vbeclipse> <VBFlexGridDemo>: vb6_Clipboard_SetData 加 int32_t format 形参
+//   (VB6 允许 `Clipboard.SetData data, [format]` 二形; format=vbCF* 常量,
+//    2=vbCFBitmap, 3=vbCFMetafile, 8=vbCFDIB, 14=vbCFEMetafile; 0/未指定=Bitmap)。
+//   此前 RTL 只接 (void*) 一参, VBFlexGridDemo.MainForm Command7_Click 里的
+//   `Clipboard.SetData VBFlexGrid1.Picture, IIf(...)` 直接 C2197 too many args。
+//   此文件改动即触发 RTL 重嵌入, 见 memory [[rtl-reembed-c3rtl-rc-landmine]]。
 // Fix <vbeclipse> rev18: 宿主模型认 **UserControl 实例指针** + 自有属性按名桥 + 真 Move。
 //   ① 三处分派入口 (uc_hostmodel_{call,getprop,setprop}.inc) 加
 //      `void* h=vb6_UC_HwndOf(obj); if(h) obj=h;` 归一 —— 晚绑定调用点

@@ -259,7 +259,7 @@ BSTR vb6_App_HelpFile(void); // App.HelpFile - 帮助文件名(无App COM对象,
 void   vb6_Clipboard_SetText(BSTR text);
 BSTR   vb6_Clipboard_GetText(void);
 void   vb6_Clipboard_Clear(void);
-void   vb6_Clipboard_SetData(void* pPicture);
+void   vb6_Clipboard_SetData(void* pPicture, int32_t format);  // format: 0=auto, 2=vbCFBitmap, 14=vbCFEMetafile
 int32_t vb6_Clipboard_GetFormat(int32_t format);  // 1=vbCFText, 2=vbCFBitmap, etc.
 
 // P18-C: Screen 对象

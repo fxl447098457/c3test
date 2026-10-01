@@ -303,7 +303,10 @@ void vb6_Clipboard_Clear(void) {
 }
 
 // Fix 056: Clipboard.SetData — copy IPicture bitmap to clipboard
-void vb6_Clipboard_SetData(void* pPicture) {
+// <vbeclipse> 补 format: VB6 有 `Clipboard.SetData data, [format]` 二形；
+// format 走 vbCF* 常量 (2=vbCFBitmap, 3=vbCFMetafile, 14=vbCFEMetafile, 8=vbCFDIB)。
+// 0/未指定按 vbCFBitmap 处理 (历史行为)。
+void vb6_Clipboard_SetData(void* pPicture, int32_t format) {
     if (!pPicture) return;
     if (!OpenClipboard(NULL)) return;
     EmptyClipboard();
@@ -315,7 +318,11 @@ void vb6_Clipboard_SetData(void* pPicture) {
     pPic->lpVtbl->get_Handle(pPic, &hOleHandle);
     hBmp = (HBITMAP)(uintptr_t)hOleHandle;
     if (hBmp) {
-        SetClipboardData(CF_BITMAP, hBmp);
+        UINT cf = CF_BITMAP;
+        if (format == 14) cf = CF_ENHMETAFILE;
+        else if (format == 3) cf = CF_METAFILEPICT;
+        else if (format == 8) cf = CF_DIB;
+        SetClipboardData(cf, hBmp);
     }
     CloseClipboard();
 }

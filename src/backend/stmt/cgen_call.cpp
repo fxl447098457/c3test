@@ -442,6 +442,22 @@ void CCodeGen::visit(CallStmt& node) {
             // 才能正确填充 Optional 默认参数.
             else if (node.callee && node.callee->kind == ASTNodeKind::MemberAccessExpr) {
                 auto& maExpr = static_cast<MemberAccessExpr&>(*node.callee);
+                // Fix 092z 姊妹路 (见 cgen_expr_call_callee_params.inc 同名清单) ——
+                // VB6 内置全局对象的成员调用不来自当前模块，若拿 lookupModule(memberName)
+                // 要形参表会命中同名模块符号 (VBFlexGrid.Public Sub Clear(Optional Where,
+                // Optional What))，把 bare `vb6_Clipboard_Clear` 补成 `(0,0,0,0)` → C2197。
+                // 两条 padding 路径共用同一张表；改动请同步另一侧的 builtinGlobalObjs092z。
+                bool builtinGlobalObjCS = false;
+                if (maExpr.object && maExpr.object->kind == ASTNodeKind::IdentifierExpr) {
+                    static const std::unordered_set<std::string> builtinGlobalObjsCS = {
+                        "clipboard", "screen", "printer", "forms", "debug", "err",
+                        "app", "controls", "console"};
+                    builtinGlobalObjCS = builtinGlobalObjsCS.count(
+                        Symbol::toLower(static_cast<IdentifierExpr&>(*maExpr.object).name)) > 0;
+                }
+                if (builtinGlobalObjCS) {
+                    calleeIsBuiltin = true;
+                } else {
                 Symbol* sym = symTab_.lookupModule(maExpr.memberName);
                 if (sym && (sym->kind == SymbolKind::Sub || sym->kind == SymbolKind::Function
                     || sym->kind == SymbolKind::PropertyGet || sym->kind == SymbolKind::PropertyLet
@@ -466,6 +482,7 @@ void CCodeGen::visit(CallStmt& node) {
                             calleeIsBuiltin = clsBuiltin;
                         }
                     }
+                }
                 }
             }
             // Fix 090s: With 块内无括号类方法调用 (.Start — callee=WithMemberExpr,

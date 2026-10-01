@@ -395,6 +395,16 @@
             argList += "-1";
         }
     }
+    // Fix <vbeclipse> <VBFlexGridDemo>: Clipboard.SetData 二形 data / data, format
+    //   VB 语义 `[format]` 可省, 但 RTL 已扩成 2 参 (format=vbCF* 常量, 0=Bitmap)。
+    //   1 参调用直接补 format=0，与 `vb6_Clipboard_SetData(void*, int32_t)` 对齐。
+    if (callee == "vb6_Clipboard_SetData" && args.size() < 2) {
+        while (args.size() < 2) {
+            args.push_back("0");
+            if (!argList.empty()) argList += ", ";
+            argList += "0";
+        }
+    }
     // Fix 092w: StrConv(Byte数组, vbUnicode) → vb6_StrConvFromByteArray
     // 反向转换: Byte() -> String. 第一实参为已知 Byte 数组变量 (vb6_SafeArray1D*)
     // 时, RTL vb6_StrConv 期望 BSTR 会类型不匹配; 改用返回 BSTR 的 helper.
