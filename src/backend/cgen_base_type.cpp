@@ -178,14 +178,17 @@ std::string CCodeGen::cParamTypedComIfaceCType(const ParameterInfo& p) {
     std::string shortNm = p.typeRefName;
     size_t dotPos = shortNm.find('.');
     if (dotPos != std::string::npos) shortNm = shortNm.substr(dotPos + 1);
-    // 用 lookupTypeSymbol (与 callee proc 签名那一份 mapTypeRef 里 line 305
-    // 同一函数) 而不是裸 symTab_.lookup —— 后者只查全局一层；typeKind 符号
-    // (ComClass/ComInterface) 常常只在 lookupModuleByKind / lookupLocalByKind
-    // 的回退里命中。b5f681ed 的 dbg210b dump 就是踩在这条上：symTab_.lookup
-    // 双 miss 得到 kind=<null>, 但同一 module 里 callee proc 的
-    // mapTypeRef 走 lookupTypeSymbol 却拿到 ComInterface → vb6_ComIface_X*.
+    // 三张网都撒: (1) 全局 symTab_.lookup; (2) 当前模块 symTab_.lookupModule
+    // (typelib 注入的 ComInterface 常在当前模块作用域, 见 driver_semantics.cpp
+    // line 114-188 每个模块分析阶段都 define 一遍); (3) lookupTypeSymbol 的
+    // kind-specific 回退。任一路命中 ComClass/ComInterface 就算接口槽。b5f681ed
+    // 的 dbg210b 定位到 raw symTab_.lookup 双 miss, 而 callee proc 签名同一
+    // typeName 却解出 vb6_ComIface_X* —— 差就差在 mapTypeRef line 286 用的
+    // 是 lookupModule (module scope), 不是 lookup (global)。
     Symbol* clsSym = lookupTypeSymbol(shortNm);
     if (!clsSym) clsSym = lookupTypeSymbol(p.typeRefName);
+    if (!clsSym || clsSym->name.empty()) clsSym = symTab_.lookupModule(shortNm);
+    if (!clsSym && shortNm != p.typeRefName) clsSym = symTab_.lookupModule(p.typeRefName);
     if (!clsSym) return {};
     if (clsSym->kind != SymbolKind::ComClass
         && clsSym->kind != SymbolKind::ComInterface) return {};
