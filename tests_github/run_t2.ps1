@@ -561,6 +561,22 @@ function Test-GuiCompileOnly {
             Write-Host "  --- c3-error.log tail 40 ---"
             $c3Lines | Select-Object -Last 40 | ForEach-Object { Write-Host "  $_" }
         }
+        # <vbeclipse> <VBFlexGridDemo> 一次性诊断: 把 VTableHandle.c 关键行 dump
+        # 出来 (CI cl 19.51 报 C2172/C2440/C2224 的行)。若 kept 路径在, 读
+        # 55-100 / 350-365 / 445-545 三段。跑通就删。
+        if ($keptLine -and $keptLine -match 'intermediates kept at: (.+)$') {
+            $keptDir = $Matches[1].Trim()
+            $vthFile = Join-Path $keptDir "VTableHandle.c"
+            if (Test-Path $vthFile) {
+                $vth = @(Get-Content $vthFile)
+                Write-Host "  --- VTableHandle.c diagnostic dump (session $keptDir) ---"
+                foreach ($r in @(@(50, 100), @(355, 365), @(455, 475))) {
+                    $lo = $r[0]; $hi = [Math]::Min($r[1], $vth.Count)
+                    Write-Host "  == lines $lo-$hi =="
+                    for ($k = $lo; $k -le $hi; $k++) { Write-Host ("  {0,4}: {1}" -f $k, $vth[$k-1]) }
+                }
+            }
+        }
     }
     if ($LASTEXITCODE -eq 0 -and $It.Run3s) {
         # 3 秒存活自检: 启动后若 3 秒内自行退出 -> 视为启动崩溃 (FAIL); 存活则强杀后 PASS
