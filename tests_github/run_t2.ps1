@@ -510,10 +510,38 @@ function Test-GuiCompileOnly {
     } else {
         $script:fail++
         Write-Host "FAIL" -ForegroundColor Red
-        # 可观测性约定: FAIL 必须带错误输出, 不依赖 -Verbose
+        # 可观测性约定: FAIL 必须带**真正的错** (不是 tail 的 VB3001 警告)。
+        # C3.exe 前端 warning 会灌满 tail-25, 把 cl/link 的 error C/LNK/D 挤出可视区。
+        # 三条独立通道一起打:
+        #   (a) 按错误模式过滤 $result (stdout+stderr), 前 15 条 error|fatal;
+        #   (b) c3-error.log 头 (=== Command === / === MSVC Output === 段就在文件头);
+        #   (c) c3-error.log 尾 40 行 (兜底, 覆盖没走 MSVC Output 段的情况)。
+        $errPat = 'error\s+[CDL][0-9]+|fatal\s+error|unresolved\s+external|Permission\s+denied|cannot\s+open|C[0-9]{4}\s*:'
+        $errLines = @($result | ForEach-Object { "$_" } | Where-Object { $_ -match $errPat } | Select-Object -First 15)
+        if ($errLines.Count -gt 0) {
+            Write-Host "  --- error-pattern matches (stdout+stderr) ---"
+            $errLines | ForEach-Object { Write-Host "  $_" }
+        }
         $result | Select-Object -Last 25 | ForEach-Object { Write-Host "  $_" }
         $c3err = Join-Path $OutDir "c3-error.log"
-        if (Test-Path $c3err) { Get-Content $c3err -Tail 25 | ForEach-Object { Write-Host "  $_" } }
+        # (b) 若 C3.exe 报了 "intermediates kept at: <path>" (msvc_driver.cpp 的
+        # c3-error.log 会落在 objDir 而不是 outputDir), 也从那里读一次。
+        $keptLine = ($result | ForEach-Object { "$_" } | Where-Object { $_ -match 'intermediates kept at: (.+)$' } | Select-Object -First 1)
+        if ($keptLine -and $keptLine -match 'intermediates kept at: (.+)$') {
+            $keptErr = Join-Path $Matches[1].Trim() "c3-error.log"
+            if ((Test-Path $keptErr) -and ($keptErr -ne $c3err)) { $c3err = $keptErr }
+        }
+        if (Test-Path $c3err) {
+            $c3Lines = @(Get-Content $c3err)
+            $msvcIdx = [Array]::IndexOf($c3Lines, "=== MSVC Output ===")
+            if ($msvcIdx -lt 0) { $msvcIdx = $c3Lines.Count }
+            if ($msvcIdx -gt 0) {
+                Write-Host "  --- c3-error.log head (Command / Response File) ---"
+                $c3Lines[0..([Math]::Min($msvcIdx, $c3Lines.Count)-1)] | Select-Object -First 30 | ForEach-Object { Write-Host "  $_" }
+            }
+            Write-Host "  --- c3-error.log tail 40 ---"
+            $c3Lines | Select-Object -Last 40 | ForEach-Object { Write-Host "  $_" }
+        }
     }
     if ($LASTEXITCODE -eq 0 -and $It.Run3s) {
         # 3 秒存活自检: 启动后若 3 秒内自行退出 -> 视为启动崩溃 (FAIL); 存活则强杀后 PASS
