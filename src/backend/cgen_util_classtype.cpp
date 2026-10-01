@@ -528,6 +528,39 @@ std::string CCodeGen::udtFieldObjCType(const std::string& udtCType,
                                            : moduleName_;
                 return "vb6_cls_" + cIdent(clsCanon) + "*";
             }
+            // Fix <VBFlexGridDemo>: 与 struct **字段声明侧同源**的一条判据 —— 拿
+            // mapTypeRef (定义侧权威, 见 cgen_base_type.cpp:340 ComInterface 分支) 会
+            // 用的那份符号查找决定 C 类型. 只要结果是**指针**类符号 (ComInterface /
+            // ComClass / Class 皆归此档, 前两者发 vb6_ComIface_X*, 后者上面 Class
+            // 那支已经处理过), 语义上这个字段就是一个对象槽, 返回 "void*" 让
+            // appendUdtObjFieldMarker 追加 `/* udt objfield void* */` 标记 → 外层
+            // MemberAccessExpr 消费走 vb6_ComCall 晚绑定
+            // (cgen_expr_member_generic_access.inc:222 那一支)。
+            // CI 现场: `OriginalIOleIPAO As OLEGuids.IOleInPlaceActiveObject` 在
+            // `Type VTableIPAODataStruct` 的 pass 1 语义分析时, resolveTypeRef
+            // (semantic_analyzer_typeref.cpp:99/116) 只查 `symTab_.lookupModule`,
+            // 而 TLB 注入的 ComInterface 常在全局作用域 (driver_semantics.cpp:221
+            // `analyzer->symbolTable().define`) → 两处 lookupModule 双 miss →
+            // mi.type 落 Variant 兜底, typeRefName 存的是全限定名
+            // "OLEGuids.IOleInPlaceActiveObject"; 旧逻辑这里 symTab_.lookupModule(tn)
+            // 也 miss (全限定名不是键) → return "" → 无 marker → 外层 MAE fallback
+            // (cgen_expr_member_class_fallback.inc:297/300) 发裸
+            // `(*This).OriginalIOleIPAO.QueryInterface(...)` → C2224 ×13 + 级联
+            // C2197/C2198 (VTableHandle.c 459/462/470/476/482/488/510/512/516/
+            // 524/530/536/542, GA t2 shard 2/2). local 同一份代码走的是**不同**的
+            // pass 1 时序 (mi.type 已经是 Object), 从 line 515 直接返回 "void*",
+            // 所以之前从没暴露这条. 这里把 caller 侧的判据收敛到与 mapTypeRef 同源
+            // 的 lookupTypeSymbol + dot-split, local/CI 两侧就都吃同一份真值.
+            {
+                std::string lookupNm = tn;
+                size_t dotP = lookupNm.find('.');
+                if (dotP != std::string::npos) lookupNm = lookupNm.substr(dotP + 1);
+                Symbol* ptrSym = lookupTypeSymbol(lookupNm);
+                if (ptrSym && (ptrSym->kind == SymbolKind::ComInterface
+                               || ptrSym->kind == SymbolKind::ComClass)) {
+                    return "void*";
+                }
+            }
             return "";
         }
         // Fix 177: String 字段 → "BSTR"。调用方 appendUdtObjFieldMarker 只对
