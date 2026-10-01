@@ -634,7 +634,16 @@ std::string CCodeGen::appendUdtObjFieldMarker(const std::string& objExpr,
     // 仅对象字段 (项目类 vb6_cls_* / Collection·COM void*) 才追加标记;
     // 嵌套 UDT (vb6_type_*) 与标量/字符串等原样返回 — 嵌套 UDT 继续由
     // inferUdtTypeOfExpr / 普通字段拼接处理, 标记残留会干扰函数参数等上下文.
-    if (fieldCType != "void*" && fieldCType.rfind("vb6_cls_", 0) != 0) return fieldAccess;
+    if (fieldCType != "void*" && fieldCType.rfind("vb6_cls_", 0) != 0) {
+        // dbg212: 一次性诊断, 摸 VBFlexGridDemo CI 上 OriginalIOleIPAO 那条字段
+        // 走到 udtFieldObjCType 时 fc 到底是什么 (49ed1b22 加了 Variant 兜底,
+        // 若仍落这里, 说明分支没进/进了但 ptrSym 双 miss), 拿完就删.
+        if (member.size() >= 8 && member.compare(0, 8, "Original") == 0) {
+            return fieldAccess + "  /* dbg212-fc='" + fieldCType
+                 + "' uc='" + udtCType + "' */";
+        }
+        return fieldAccess;
+    }
     return fieldAccess + "  /* udt objfield " + fieldCType + " */";
 }
 

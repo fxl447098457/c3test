@@ -294,6 +294,16 @@
                 lastExpr_ = std::string("vb6_VariantFromComResult(vb6_ComGetProp(vb6_VariantToObjectVal(")
                           + obj + "), " + memLit + "))";
             } else {
+                // dbg212: 一次性诊断 (VBFlexGridDemo GA t2 shard 2/2), 只给 VTableHandle.bas
+                // 那 13 处 C2224 加一条注释, 摸 CI 到底走哪条 else 分支进来 (udtChainType
+                // 空 / objIsAsObjectMemberV8 空 / cExprIsVariant 空, 三选一), 拿到就删。
+                if (node.memberName.size() >= 8
+                    && node.memberName.compare(0, 8, "Original") == 0) {
+                    lastExpr_ = obj + "." + cIdent(node.memberName)
+                              + "  /* dbg212 obj='" + obj + "' chainType=<"
+                              + inferUdtTypeOfExpr(*node.object) + "> */";
+                    return;
+                }
                 lastExpr_ = obj + "." + cIdent(node.memberName);
             }
         } else {
