@@ -105,8 +105,22 @@ Vb6Type CCodeGen::inferExprType(Expr& expr) const {
             auto* sym = symTab_.lookup(id.name);
             if (!sym) sym = symTab_.lookupModule(id.name);
             // Fix <VBFlexGridDemo>: 属性遮蔽内置函数时按内置函数的类型答 (见文件头注释)。
+            // 但**函数体内 `Name = expr` 引用返回槽**这一支例外 —— VB6 里 `Left = Extender.Left`
+            // 在 `Public Property Get Left() As Single` 内部指的是 vb6_ret_Left (float),
+            // 不是内置 Left$()。判据同 cgen_assign_value_sem.inc:5-12 —— currentProc_ 是
+            // Function/PropertyGet 且名字等于本标识符时, 走返回槽 (sym->type)。
+            // 修前: inferExprType 答 String ⇒ vb6_BSTR_AssignMove(&vb6_ret_Left, vb6_CStrDbl(...))
+            //       ⇒ BSTR_Free 把 float 位当指针 ⇒ MainForm Form_Resize 一调 VBFlexGrid1.Left
+            //       即 0xC0000005, 启动看不到界面。
+            // 只改 IdentifierExpr 分支; IndexOrCallExpr 那一支 (本文件 178 行附近) 不动 ——
+            // 那里 Left(Temp, 1) 就是真·内置函数调用。
             if (sym && isPropShadowingBuiltinFunc(sym, id.name)) {
-                return cgenTypeForShadowedBuiltin(id.name);
+                const bool isRetSlotSelfRef =
+                    currentProc_
+                    && (currentProc_->kind == SymbolKind::Function
+                        || currentProc_->kind == SymbolKind::PropertyGet)
+                    && Symbol::toLower(currentProc_->name) == Symbol::toLower(id.name);
+                if (!isRetSlotSelfRef) return cgenTypeForShadowedBuiltin(id.name);
             }
             if (sym) return sym->type;
             break;
