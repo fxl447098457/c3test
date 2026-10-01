@@ -178,8 +178,14 @@ std::string CCodeGen::cParamTypedComIfaceCType(const ParameterInfo& p) {
     std::string shortNm = p.typeRefName;
     size_t dotPos = shortNm.find('.');
     if (dotPos != std::string::npos) shortNm = shortNm.substr(dotPos + 1);
-    Symbol* clsSym = symTab_.lookup(shortNm);
-    if (!clsSym) clsSym = symTab_.lookup(p.typeRefName);
+    // 用 lookupTypeSymbol (与 callee proc 签名那一份 mapTypeRef 里 line 305
+    // 同一函数) 而不是裸 symTab_.lookup —— 后者只查全局一层；typeKind 符号
+    // (ComClass/ComInterface) 常常只在 lookupModuleByKind / lookupLocalByKind
+    // 的回退里命中。b5f681ed 的 dbg210b dump 就是踩在这条上：symTab_.lookup
+    // 双 miss 得到 kind=<null>, 但同一 module 里 callee proc 的
+    // mapTypeRef 走 lookupTypeSymbol 却拿到 ComInterface → vb6_ComIface_X*.
+    Symbol* clsSym = lookupTypeSymbol(shortNm);
+    if (!clsSym) clsSym = lookupTypeSymbol(p.typeRefName);
     if (!clsSym) return {};
     if (clsSym->kind != SymbolKind::ComClass
         && clsSym->kind != SymbolKind::ComInterface) return {};
