@@ -730,6 +730,9 @@
     // (`vb6_cls_X*` / `void*` / "" = 不是对象字段或推不出)。判"这个左值到底是不是 Variant
     // 容器"用它 —— `mi.type` 那条口径对跨模块的 `As <项目类>` 会说是 Variant。
     std::string udtFieldCTypeOfTarget(const ASTNode* target) const;
+    // <vbeclipse> <VBFlexGridDemo>: UDT 左值字段的**声明类型名** (`mi.typeRefName`),
+    // 空 = 真 Variant 槽, 非空 = 声明过具体类型 (Object/接口/类/UDT)。
+    std::string udtFieldTypeRefNameOfTarget(const ASTNode* target) const;
 
     // Fix 084o: 若 C 表达式为 Variant (字符串级检测或已知 Variant 变量), 返回
     // vb6_VariantToLong(...) 包装, 否则原样返回. 用于需要 int32_t 的上下文:

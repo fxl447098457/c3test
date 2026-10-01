@@ -400,6 +400,46 @@ Vb6Type CCodeGen::inferUdtFieldVb6Type(const ASTNode* target) const {
     return Vb6Type::Unknown;
 }
 
+// <vbeclipse> <VBFlexGridDemo>: 返回左值 UDT 字段的**声明类型名** (`mi.typeRefName`)。
+// 空串 = 无声明类型 (真 Variant 槽), 非空 = 声明了具体类型 (Object/接口/类/UDT)。
+// 与 Set-RHS 装箱 guard 配套 —— VTableHandle.bas `Set VTableIPAOData.OriginalIOleIPAO = This`
+// 一条, 字段声明 `As OLEGuids.IOleInPlaceActiveObject`, TLB 命中的 caller 侧
+// resolveTypeRef 把 mi.type 兜底成 Variant (同 arg_emit Fix 210 那条同源问题), 若
+// 装箱就发出 `field = vb6_VariantFromValue(This)` → 字段是 typed ptr 收 VARIANT →
+// C2440。用**声明名**做判据: 只要非空, 这条槽就不是 Variant 容器。
+std::string CCodeGen::udtFieldTypeRefNameOfTarget(const ASTNode* target) const {
+    if (!target) return std::string();
+    std::string udtCType, memName;
+    if (target->kind == ASTNodeKind::MemberAccessExpr) {
+        auto& ma = static_cast<const MemberAccessExpr&>(*target);
+        if (!ma.object) return std::string();
+        udtCType = inferUdtTypeOfExpr(*ma.object);
+        memName = ma.memberName;
+    } else if (target->kind == ASTNodeKind::WithMemberExpr) {
+        if (withObjectInfoStack_.empty() || withObjectVars_.empty()) return std::string();
+        const auto& info = withObjectInfoStack_.back();
+        if (info.kind != WithObjKind::Unknown) return std::string();
+        memName = static_cast<const WithMemberExpr&>(*target).memberName;
+        auto it = knownUdtVars_.find(Symbol::toLower(withObjectVars_.back()));
+        if (it == knownUdtVars_.end()) return std::string();
+        udtCType = it->second;
+    } else {
+        return std::string();
+    }
+    const std::string prefix = "vb6_type_";
+    if (memName.empty() || udtCType.size() <= prefix.size()
+        || udtCType.compare(0, prefix.size(), prefix) != 0)
+        return std::string();
+    std::string udtName = udtCType.substr(prefix.size());
+    Symbol* udtSym = symTab_.lookupModule(udtName);
+    if (!udtSym || udtSym->kind != SymbolKind::UserDefinedType) return std::string();
+    std::string memLower = Symbol::toLower(memName);
+    for (auto& mi : udtSym->udtMembers) {
+        if (Symbol::toLower(mi.name) == memLower) return mi.typeRefName;
+    }
+    return std::string();
+}
+
 
 // ai/022 B08f-1 (D37): 与上一条走同一条 UDT 解析路, 但返回字段在 **C 里的对象类型**
 // (`vb6_cls_X*` / `void*` / "" = 不是对象字段或推不出)。为什么不直接改 inferUdtFieldVb6Type
