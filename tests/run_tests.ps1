@@ -4055,9 +4055,13 @@ if ($Category -in @("all", "syntax")) {
     # ai/028 V2 的发码形状: 插值必须** literally ** 发成手写的 & CStr() / Format$ 形状 ——
     # 注意第二枚读数挑的是 vb6_CStrLong (按实参类型改发专用 CStr), 这正是"降级成真 AST"
     # 才继承得到的东西 (计划书 R2/R3 的实测面)。
+    # de67e089 之后 vb6_Format 走 VB 完整 4 形 (expr, fmt, fdow, fwoy), 2 参 VB 调用
+    # 会补 `, 1, 1` (vbSunday / vbFirstJan1) —— 与 VBFlexGrid.ctl:20425 的
+    # `Format$(Text, Col.Format, vbUseSystemDayOfWeek, vbUseSystem)` 共用一张签名, 否则
+    # cl 19.51 C2197 too many args。这里第二枚针一起带四参尾巴, 才与 emit 对齐。
     Test-EmitcShape "ri_emitc_shape" @("$Tests\test_interp.bas") @(
         'vb6_BSTR_Concat(vb6_BSTR_FromStr(L"n="), vb6_CStrLong(n))',
-        'vb6_Format(vb6_VariantLong(n), vb6_BSTR_FromStr(L"#,##0"))')
+        'vb6_Format(vb6_VariantLong(n), vb6_BSTR_FromStr(L"#,##0"), 1, 1)')
     Test-EmitcShape "rs_emitc_shape" @("$Tests\test_rawstr.bas") @(
         'vb6_BSTR_FromStr(L"line1\r\nline2")',
         '#define RS_CONST (vb6_BSTR_FromStr(L"k1\r\nk2 = \"v\""))',
