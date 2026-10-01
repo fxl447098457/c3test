@@ -1,4 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
+# cache-bust 2026-10-01-19 (VBFlexGridDemo / a280e00f emit-shape 排疑, 一次票)
 
 # Version single source of truth: VERSION file at the repo root (stripped).
 file(READ "${CMAKE_CURRENT_LIST_DIR}/VERSION" VB6C3_VERSION_RAW)
