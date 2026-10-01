@@ -228,7 +228,12 @@ static BSTR vb6_fmtDateSerial(double serial, BSTR fmt) {
     return vb6_BSTR_FromStr(out);
 }
 
-BSTR vb6_Format(vb6_VARIANT expr, BSTR fmt) {
+BSTR vb6_Format(vb6_VARIANT expr, BSTR fmt, int32_t firstDayOfWeek, int32_t firstWeekOfYear) {
+    // <vbeclipse> 扩到 VB6 完整 4 形 (expr[, fmt[, FirstDayOfWeek[, FirstWeekOfYear]]]).
+    // 现有格式解析不消费这两个日期参数 (Date 分支走系统默认周)；VBFlexGrid.ctl:
+    // 20425/20428 `Format$(Text, Col.Format, vbUseSystemDayOfWeek, vbUseSystem)`
+    // 直接 C2197 too many args —— 补上签名即可，语义与旧 2 参实现等价。
+    (void)firstDayOfWeek; (void)firstWeekOfYear;
 #include "vb6rtl_format_extract.inc"
 #include "vb6rtl_format_parse.inc"
 #include "vb6rtl_format_string.inc"

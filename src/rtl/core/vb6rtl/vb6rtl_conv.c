@@ -178,7 +178,7 @@ int16_t vb6_CIntBSTR(BSTR s) { return (int16_t)round(vb6_Val(s)); }
 double  vb6_CCurBSTR(BSTR s) { double d = vb6_Val(s); return round(d * 10000.0) / 10000.0; }
 
 BSTR vb6_CStr(vb6_VARIANT x) {
-    return vb6_Format(x, NULL);
+    return vb6_Format(x, NULL, 1, 1);
 }
 
 // M22: typed CStr overloads (C has no overloading, use suffix)
@@ -187,7 +187,7 @@ BSTR vb6_CStr(vb6_VARIANT x) {
 #endif
 BSTR vb6_CStrLong(int32_t x) {
     vb6_VARIANT v; memset(&v, 0, sizeof(v)); v.vt = (vb6_vartype)VT_I4; v.lVal = x;
-    return vb6_Format(v, NULL);
+    return vb6_Format(v, NULL, 1, 1);
 }
 // Fix 158q: 生成代码可能产出 vb6_CStrLong(<vb6_VARIANT 表达式>) —— With 后端 COM 属性
 // (vb6_VariantFromComResult(vb6_ComGetProp(...))) 原生返回 VARIANT 却被当 Long 转 BSTR
@@ -201,7 +201,7 @@ BSTR vb6_CStrLongFromVariant(vb6_VARIANT v) {
 #endif
 BSTR vb6_CStrDbl(double x) {
     vb6_VARIANT v; memset(&v, 0, sizeof(v)); v.vt = (vb6_vartype)VT_R8; v.dblVal = x;
-    return vb6_Format(v, NULL);
+    return vb6_Format(v, NULL, 1, 1);
 }
 // vbeclipse: 后期绑定 COM 读到的数值属性, codegen 会发成
 //   vb6_CStrDbl(vb6_ComGetStringProp(_vb6_with_N, L"Ratio"))
@@ -230,15 +230,15 @@ BSTR vb6_CStrLongLong(int64_t x) {
 // CSng(21.1) 会像 Double 一样打印成 "21.1000003814697"。
 BSTR vb6_CStrSingle(float x) {
     vb6_VARIANT v; memset(&v, 0, sizeof(v)); v.vt = (vb6_vartype)VT_R4; v.fltVal = x;
-    return vb6_Format(v, NULL);
+    return vb6_Format(v, NULL, 1, 1);
 }
 BSTR vb6_CStrBool(int16_t x) {
     vb6_VARIANT v; memset(&v, 0, sizeof(v)); v.vt = (vb6_vartype)VT_BOOL; v.boolVal = x;
-    return vb6_Format(v, NULL);
+    return vb6_Format(v, NULL, 1, 1);
 }
 BSTR vb6_CStrByte(uint8_t x) {
     vb6_VARIANT v; memset(&v, 0, sizeof(v)); v.vt = (vb6_vartype)VT_UI1; v.bVal = x;
-    return vb6_Format(v, NULL);
+    return vb6_Format(v, NULL, 1, 1);
 }
 BSTR vb6_CStrDate(double x) {
     // Fix 175: VB6 的 CStr(Date) 在**时间分量为 0** 时只给短日期, 而共享的
@@ -256,7 +256,7 @@ BSTR vb6_CStrDate(double x) {
         }
     }
     vb6_VARIANT v; memset(&v, 0, sizeof(v)); v.vt = (vb6_vartype)VT_DATE; v.dblVal = x;
-    return vb6_Format(v, NULL);
+    return vb6_Format(v, NULL, 1, 1);
 }
 // ============================================================
 // 类型检查

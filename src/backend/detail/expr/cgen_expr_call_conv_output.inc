@@ -88,10 +88,17 @@
             if (i > 0) argList += ", ";
             argList += args[i];
         }
-        // <vbeclipse>: Format(expression[, format]) — RTL 签名 vb6_Format(vb6_VARIANT, BSTR),
-        // 省略 format 时此前发的是 1 参 → cl C2198 参数太少 (实测 s = Format(Now))。缺省 NULL
-        // 即"无格式串"那一形, RTL 内部各处也传 NULL (vb6rtl_conv.c:181+)。补在上面重建之后。
-        if (args.size() == 1) argList += ", NULL";
+        // <vbeclipse>: Format(expression[, format[, FirstDayOfWeek[, FirstWeekOfYear]]])
+        // RTL 签名 vb6_Format(vb6_VARIANT, BSTR, int32_t, int32_t) 与 VB6 完整 4 形对齐
+        // (VBFlexGrid.ctl:20425/20428 直接 `Format$(Text, Col.Format, vbUseSystemDayOfWeek, vbUseSystem)`,
+        // 2 参签会 C2197 too many args)。缺省 FirstDayOfWeek=vbSunday(1), FirstWeekOfYear=vbFirstJan1(1)。
+        // 省略 format 那一形补 NULL ("无格式串"，RTL 内部各处也传 NULL, vb6rtl_conv.c:181+)。
+        while (args.size() < 4) {
+            if (args.size() == 1) { args.push_back("NULL"); }
+            else                 { args.push_back("1"); }
+            if (!argList.empty()) argList += ", ";
+            argList += args.back();
+        }
     }
     // Fix 036: CStr fallback — 当特殊分支未匹配 (Boolean/Byte/Date/Currency/常量/
     // 未注册函数返回值/Const BSTR 等), callee 仍为 vb6_CStr (接 vb6_VARIANT). 用

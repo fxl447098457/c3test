@@ -53,7 +53,7 @@ double vb6_Val(BSTR s);
 // Fix 090d: VB6 类型转换函数的字符串解析 (支持 &H/&O 前缀, 见 vb6rtl.c)
 double vb6_NumVal(BSTR s);
 BSTR vb6_Str(int32_t n);
-BSTR vb6_Format(vb6_VARIANT expr, BSTR fmt);
+BSTR vb6_Format(vb6_VARIANT expr, BSTR fmt, int32_t firstDayOfWeek, int32_t firstWeekOfYear);
 #ifndef __cplusplus
 #define vb6_LTrim(x) _Generic((x), \
     vb6_VARIANT: vb6_LTrimVar, \

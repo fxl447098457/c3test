@@ -5,6 +5,11 @@
 //   此前 RTL 只接 (void*) 一参, VBFlexGridDemo.MainForm Command7_Click 里的
 //   `Clipboard.SetData VBFlexGrid1.Picture, IIf(...)` 直接 C2197 too many args。
 //   此文件改动即触发 RTL 重嵌入, 见 memory [[rtl-reembed-c3rtl-rc-landmine]]。
+// Fix <vbeclipse> <VBFlexGridDemo>: vb6_Format 扩到 VB6 完整 4 形
+//   (expr[, fmt[, FirstDayOfWeek[, FirstWeekOfYear]]])。VBFlexGrid.ctl:20425/20428
+//   `Format$(Text, Col.Format, vbUseSystemDayOfWeek, vbUseSystem)` 直接 C2197。
+//   新两参 (fdow / fwoy) 走签名但不消费 (现有日期分支用系统默认周);
+//   conv.c 内部 7 处 2 参调用同步补 `, 1, 1` (=vbSunday / vbFirstJan1)。
 // Fix <vbeclipse> rev18: 宿主模型认 **UserControl 实例指针** + 自有属性按名桥 + 真 Move。
 //   ① 三处分派入口 (uc_hostmodel_{call,getprop,setprop}.inc) 加
 //      `void* h=vb6_UC_HwndOf(obj); if(h) obj=h;` 归一 —— 晚绑定调用点
