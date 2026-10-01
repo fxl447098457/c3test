@@ -594,11 +594,16 @@ function Invoke-GuiSetParallel {
     Write-Host "  (parallel gui: $($results.Count) worker(s), pass=$sumPass fail=$sumFail)"
 }
 
-if ($Jobs -gt 1 -and $PSVersionTable.PSVersion.Major -ge 7 -and $script:guiQueue.Count -gt 0) {
-    Invoke-GuiSetParallel -Items $script:guiQueue -Jobs $Jobs -DirTag "guicompile"
-} else {
-    foreach ($it in $script:guiQueue) { Test-GuiCompileOnly $it }
-}
+# GUI 段一律串行, 不走 ForEach-Object -Parallel。
+#   1) VBFlexGridDemo 一份 63k 行 VBFlexGrid.c, cl 单进程 /MP 就能吃满 runner 全部核;
+#      同 runner 上再叠一枚 GUI (Charts2020 x86 / ExtShow 之类) 并行, 两批 cl 的
+#      c1.exe 会共享 %TEMP% 落 _CL_*.tmp 互相踩 (D8050 / C1083 Permission denied)。
+#      C3.exe 侧已经按 session objDir 隔离了 TMP/TEMP (Fix <vbeclipse> D8050),
+#      但同 runner 上多枚 GUI 一起编时 wall-clock 与内存都吃紧, 收益也有限。
+#   2) 串行下 tail-25 的可观测性也够 —— 单条用例失败, 不用去区分是哪个并行 worker
+#      的 stdout 交错。
+# 恢复并行前先给 Test-GuiCompileOnly 独立 -OutDir, 并把 Jobs 上限压到 2。
+foreach ($it in $script:guiQueue) { Test-GuiCompileOnly $it }
 Write-Host ""
 
 # === 汇总 (vbp 7 + gui 只编译 4 = 11) ===
