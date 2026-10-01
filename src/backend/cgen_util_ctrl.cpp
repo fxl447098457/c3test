@@ -2044,6 +2044,28 @@ bool CCodeGen::cExprIsVariantCarrier(const std::string& cExpr) const {
 // 不显式改写的 (Integer/Long/Double/String/Object) 在 _Generic 下与 VB6 同档, 保持
 // 原样以免动到存量发码。
 std::string CCodeGen::boxToVariant(Expr* expr, const std::string& cExpr) const {
+    // Fix <VBFlexGridDemo>: 实参是裸 COM 调用结果 (vb6_ComCall / vb6_ComGetProp /
+    // vb6_ComGetObjectProp 返回 void*, 承载一个 COM VARIANT*) 时, 必须先用
+    // vb6_VariantFromComResult 解引用成 vb6_VARIANT (深拷贝并释放原 VARIANT*),
+    // 绝不能用 vb6_VariantFromValue —— 后者对 void* 走 _Generic 的
+    // vb6_VariantObject 档, 把 COM VARIANT* 当成 IDispatch 对象去 AddRef, 当
+    // VARIANT 实际是 BSTR/数值时 *(void**)variantPtr == 0x8 触发
+    // IsBadReadPtr(0x8) → 0xC0000005 "内存不能为 read"
+    // (VBFlexGridDemo ReadProperties: PropClipSeparators =
+    //  VarToStr(PropBag.ReadProperty("ClipSeparators", "")) 启动即崩).
+    // 与 conv_cstr (Fix 121) / arg_variant (Fix 113) 既有口径一致.
+    {
+        // 精确匹配裸 vb6_ComCall( / vb6_ComGetProp( / vb6_ComGetObjectProp(
+        // (12/15/21 字符含左括号); 不误伤 vb6_ComCallInt/BSTR/Double/Object/ByDispid.
+        size_t cs = 0;
+        while (cs < cExpr.size()
+               && (cExpr[cs] == '(' || cExpr[cs] == ' ' || cExpr[cs] == '\t'
+                   || cExpr[cs] == '\n' || cExpr[cs] == '\r')) cs++;
+        bool comRes = (cExpr.compare(cs, 12, "vb6_ComCall(") == 0)
+                   || (cExpr.compare(cs, 15, "vb6_ComGetProp(") == 0)
+                   || (cExpr.compare(cs, 21, "vb6_ComGetObjectProp(") == 0);
+        if (comRes) return "vb6_VariantFromComResult(" + cExpr + ")";
+    }
     if (!expr) return "vb6_VariantFromValue(" + cExpr + ")";
     // 已经是 VARIANT 的表达式交给 _Generic 的 vb6_VariantIdentity 档恒等直传,
     // 绝不再按 VB 类型强装 (否则就是上面那条双装)。
