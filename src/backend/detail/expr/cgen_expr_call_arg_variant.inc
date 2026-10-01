@@ -443,6 +443,26 @@
                 argVal = "(&(vb6_VARIANT){.vt=VT_BOOL, .boolVal=(int16_t)(" + inner113j + ")})";
             }
         }
+        // Fix <vbeclipse> <VBFlexGridDemo>: 形参 C 类型是 `vb6_ComIface_X*` (VB
+        // `As SomeInterface`, 从 TLB 或工程接口来)，而实参是 void* (VB `As Object`
+        // 后期绑定值) 时，显式补一层 (T*) —— cl 19.29 静默隐式转 void*→typed*,
+        // cl 19.51 直接 C2172 "actual parameter is not a pointer" (VTableHandle.bas
+        // `Call ReplaceIOleControl(This)` 六处一次爆红)。VB6 语义本就是 Object →
+        // Interface 的 QI 转换，这里做的是**类型层的显式化**，不改运行期行为。
+        // 判据共用 cTypeForDeclaredTypeName (定义侧 mapTypeRef 同一份映射) ——
+        // 与 cParamClassPtrType 同族，避免"调用点/定义点各说一套"的经典回归。
+        if (i < calleeParams.size() && !isByRef) {
+            const auto& cp185 = calleeParams[i];
+            if (!cp185.typeRefName.empty()) {
+                const std::string ifaceCT = cTypeForDeclaredTypeName(cp185.typeRefName);
+                if (ifaceCT.size() > 13 && ifaceCT.compare(0, 13, "vb6_ComIface_") == 0
+                    && ifaceCT.back() == '*') {
+                    if (argVal.rfind("(" + ifaceCT + ")", 0) != 0) {
+                        argVal = "(" + ifaceCT + ")" + argVal;
+                    }
+                }
+            }
+        }
         args.push_back(std::move(argVal));
     }
 
