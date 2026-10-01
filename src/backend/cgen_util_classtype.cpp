@@ -560,6 +560,15 @@ std::string CCodeGen::udtFieldObjCType(const std::string& udtCType,
                                || ptrSym->kind == SymbolKind::ComClass)) {
                     return "void*";
                 }
+                // dbg212c: 一次性摸 ptrSym 双 miss 的成因 —— 把 kind 名与
+                // lookupNm 都塞进 fieldCType 返回串, 供 appendUdtObjFieldMarker
+                // 的 fc 标记带出。
+                {
+                    std::string k = ptrSym ? ptrSym->kindName() : "<null>";
+                    return "/*ptrSym=" + k + " ln=" + lookupNm
+                         + " trn=" + mi.typeRefName
+                         + " mt=" + std::to_string(static_cast<int>(mi.type)) + "*/";
+                }
             }
             return "";
         }
@@ -568,6 +577,12 @@ std::string CCodeGen::udtFieldObjCType(const std::string& udtCType,
         // 供 udtFieldIsBstrInCTarget 判定"该字段赋值必须走 vb6_BSTR_Assign 深拷贝"。
         if (mi.type == Vb6Type::String) return "BSTR";
         // 标量/数组等非对象字段
+        // dbg212c: 一次性摸 mt (走到这里说明 Variant 分支条件 line 521 都没进,
+        // 或进了但 trn 空)
+        if (memberLower.size() >= 8 && memberLower.compare(0, 8, "original") == 0) {
+            return "/*skipMt=" + std::to_string(static_cast<int>(mi.type))
+                 + " trn=" + mi.typeRefName + "*/";
+        }
         return "";
     }
     return "";
