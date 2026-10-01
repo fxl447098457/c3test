@@ -395,7 +395,14 @@ bool MsvcDriver::compileAndLink(const MsvcDriverOptions& options) {
 
     // P11.4: Prepend vcvarsall.bat setup if cl.exe not in PATH
     std::string vcvarsPrefix = buildVcvarsPrefix(options.arch);
-    std::string fullCmd = vcvarsPrefix + cl + " @\"" + rspPath + "\" > \"" + tmpLogPath + "\" 2>&1";
+    // Fix <vbeclipse> D8050: 每次 cl 调用带独立 TMP/TEMP (= 本次编译的 objDir,
+    // 由 session 目录保证唯一)。GA t2 的两个 GUI worker (Charts2020 x86 +
+    // VBFlexGridDemo x64) 同 runner 上并行跑 /MP 时, 两批 c1.exe 会往同一个
+    // 系统 %TEMP% 落 _CL_*.tmp 互相踩 (D8050 unable to write temporary file /
+    // 亦表现为 C1083 Permission denied)。给每次编译一份隔离目录, 从根上断掉
+    // 跨进程冲突; session 结束时目录连带被清理, 不留残留。
+    std::string tmpIsolation = "set \"TMP=" + tmpLogDir + "\" && set \"TEMP=" + tmpLogDir + "\" && ";
+    std::string fullCmd = vcvarsPrefix + tmpIsolation + cl + " @\"" + rspPath + "\" > \"" + tmpLogPath + "\" 2>&1";
 
     int ret = executeCommand(fullCmd);
     if (ret != 0) {
