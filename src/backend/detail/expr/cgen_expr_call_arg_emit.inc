@@ -251,6 +251,29 @@
         // 且实参**已经是** vb6_VARIANT 时走 vb6_VariantIdentity (原样透传), 所以
         // 不必先判 cExprIsVariant —— 装了也无害, 还能顺带修掉推断成 Variant 的
         // 标量 (CStrDbl/LenB 那类), 与 Fix 024 的用法一致。
+        // 一次性诊断 (VBFlexGridDemo CI 上 guard 判定值, 出结果即删): 只要 callee
+        // 形参是 p.type=Variant/Empty (即 Fix 210 判定域), 就在实参尾附一条
+        // /* dbg210 tn=... ct=... */; t2 harness dump 会带出。
+        // 一次性诊断 (VBFlexGridDemo CI 上 guard 判定值, 出结果即删): 只要 callee
+        // 形参是 p.type=Variant/Empty (即 Fix 210 判定域), 就在实参尾附一条
+        // /* dbg210 tn=... ct=... cls=... */; t2 harness dump 会带出。
+        // 放在 wrap 之后 → 无论 wrap 是否触发都能观察到 guard 的输入。
+        if (i < calleeParams.size() && calleeParams[i].isByVal
+            && (calleeParams[i].type == Vb6Type::Variant
+                || calleeParams[i].type == Vb6Type::Empty)
+            && !isDeclareAnsiCall
+            && argVal.find("dbg210") == std::string::npos) {
+            const auto& cp210d = calleeParams[i];
+            std::string tn210d = cp210d.typeRefName;
+            std::string ct210d = tn210d.empty() ? std::string("<empty>")
+                                                : cTypeForDeclaredTypeName(tn210d);
+            if (ct210d.empty()) ct210d = "<empty>";
+            std::string cls210d = cParamClassPtrType(cp210d);
+            if (cls210d.empty()) cls210d = "<empty>";
+            argVal += " /* dbg210 tn=" + (tn210d.empty() ? std::string("<empty>") : tn210d)
+                    + " ct=" + ct210d + " cls=" + cls210d + " */";
+        }
+
         if (!isDeclareAnsiCall && i < calleeParams.size() && calleeParams[i].isByVal
             && (calleeParams[i].type == Vb6Type::Variant
                 || calleeParams[i].type == Vb6Type::Empty)
@@ -266,6 +289,10 @@
             && !(calleeParams[i].typeRefName.size() > 0
                  && cTypeForDeclaredTypeName(calleeParams[i].typeRefName).compare(0, 13, "vb6_ComIface_") == 0)
             && !cExprIsVariant(argVal)) {
+            // 装箱一律走 boxToVariant 这一处权威 (按 VB 声明类型选 ctor)。
+            // 直接手写 vb6_VariantFromValue 是让 C 的 _Generic 猜类型: VB 的 Boolean
+            // 在 C 侧是 int32_t/int16_t, 于是 VarType(True) 报 3(Long) 而不是 11
+            // (实测 DT43 / MV41 / test_bool_display 三条同时红)。
             // 装箱一律走 boxToVariant 这一处权威 (按 VB 声明类型选 ctor)。
             // 直接手写 vb6_VariantFromValue 是让 C 的 _Generic 猜类型: VB 的 Boolean
             // 在 C 侧是 int32_t/int16_t, 于是 VarType(True) 报 3(Long) 而不是 11
