@@ -529,47 +529,33 @@ std::string CCodeGen::udtFieldObjCType(const std::string& udtCType,
                 return "vb6_cls_" + cIdent(clsCanon) + "*";
             }
             // Fix <VBFlexGridDemo>: 与 struct **字段声明侧同源**的一条判据 —— 拿
-            // mapTypeRef (定义侧权威, 见 cgen_base_type.cpp:340 ComInterface 分支) 会
-            // 用的那份符号查找决定 C 类型. 只要结果是**指针**类符号 (ComInterface /
-            // ComClass / Class 皆归此档, 前两者发 vb6_ComIface_X*, 后者上面 Class
-            // 那支已经处理过), 语义上这个字段就是一个对象槽, 返回 "void*" 让
-            // appendUdtObjFieldMarker 追加 `/* udt objfield void* */` 标记 → 外层
-            // MemberAccessExpr 消费走 vb6_ComCall 晚绑定
+            // mapTypeRef (定义侧权威, 见 cgen_base_type.cpp:340 ComInterface 分支,
+            // 未识别类型 line 478 兜底 return "void*") 会**发**出的那份 C 类型决定
+            // marker 归属. 只要字段 C 类型是**指针**, 语义 = 对象槽, 返回 "void*"
+            // 让 appendUdtObjFieldMarker 追加 `/* udt objfield void* */` 标记 →
+            // 外层 MemberAccessExpr 消费走 vb6_ComCall 晚绑定
             // (cgen_expr_member_generic_access.inc:222 那一支)。
-            // CI 现场: `OriginalIOleIPAO As OLEGuids.IOleInPlaceActiveObject` 在
-            // `Type VTableIPAODataStruct` 的 pass 1 语义分析时, resolveTypeRef
-            // (semantic_analyzer_typeref.cpp:99/116) 只查 `symTab_.lookupModule`,
-            // 而 TLB 注入的 ComInterface 常在全局作用域 (driver_semantics.cpp:221
-            // `analyzer->symbolTable().define`) → 两处 lookupModule 双 miss →
-            // mi.type 落 Variant 兜底, typeRefName 存的是全限定名
-            // "OLEGuids.IOleInPlaceActiveObject"; 旧逻辑这里 symTab_.lookupModule(tn)
-            // 也 miss (全限定名不是键) → return "" → 无 marker → 外层 MAE fallback
-            // (cgen_expr_member_class_fallback.inc:297/300) 发裸
-            // `(*This).OriginalIOleIPAO.QueryInterface(...)` → C2224 ×13 + 级联
-            // C2197/C2198 (VTableHandle.c 459/462/470/476/482/488/510/512/516/
-            // 524/530/536/542, GA t2 shard 2/2). local 同一份代码走的是**不同**的
-            // pass 1 时序 (mi.type 已经是 Object), 从 line 515 直接返回 "void*",
-            // 所以之前从没暴露这条. 这里把 caller 侧的判据收敛到与 mapTypeRef 同源
-            // 的 lookupTypeSymbol + dot-split, local/CI 两侧就都吃同一份真值.
-            {
-                std::string lookupNm = tn;
-                size_t dotP = lookupNm.find('.');
-                if (dotP != std::string::npos) lookupNm = lookupNm.substr(dotP + 1);
-                Symbol* ptrSym = lookupTypeSymbol(lookupNm);
-                if (ptrSym && (ptrSym->kind == SymbolKind::ComInterface
-                               || ptrSym->kind == SymbolKind::ComClass)) {
-                    return "void*";
-                }
-                // dbg212c: 一次性摸 ptrSym 双 miss 的成因 —— 把 kind 名与
-                // lookupNm 都塞进 fieldCType 返回串, 供 appendUdtObjFieldMarker
-                // 的 fc 标记带出。
-                {
-                    std::string k = ptrSym ? ptrSym->kindName() : "<null>";
-                    return "/*ptrSym=" + k + " ln=" + lookupNm
-                         + " trn=" + mi.typeRefName
-                         + " mt=" + std::to_string(static_cast<int>(mi.type)) + "*/";
-                }
-            }
+            // CI 现场 (diag212b 的 VTableHandle.h + c3-error.log 双 dump 实证):
+            // GA windows-latest runner **没有** SysWOW64\OLEGuids.tlb, 且注册表
+            // {5A2B9220-...} 也没登记 (VB4001 warning ×2 直证), 于是 driver
+            // 层 typelibRefs 双 miss (loadByClsid + loadByPath) → TLB 里的
+            // `IOleInPlaceActiveObject` 从未进符号表 → semantic_analyzer_typeref.cpp:99/116
+            // 两处 lookupModule 也 miss → resolveTypeRef 落 line 134 Variant 兜底,
+            // typeRefName 存 "OLEGuids.IOleInPlaceActiveObject"。同份字段 mapTypeRef
+            // 也 miss → line 478 兜底 → 结构里的字段 C 类型就是 **void***。旧
+            // udtFieldObjCType 这条 Variant 分支返回 "" (无 marker) → 外层 MAE
+            // fallback (class_fallback.inc:297/300) 发裸 `(*This).OriginalIOleIPAO
+            // .QueryInterface(...)` → C2224 ×13 + 级联 C2197/C2198 (VTableHandle.c
+            // 459/462/470/476/482/488/510/512/516/524/530/536/542, GA t2 2/2).
+            // local 同一份代码走的是**不同**的 TLB 载入结果 (SysWOW64 文件在、
+            // 注册表 GUID 在): TLB load → ComInterface 进模块符号表 → pass 1
+            // 认得 → mi.type = Object → line 494 分支返回 "void*" → marker 生效
+            // → 49ed1b22 那条 lookupTypeSymbol(短名) 兜底本地也不 fire (它已经
+            // 从 Object 分支出); 而 CI 上 lookupTypeSymbol 也 miss (TLB 没 load
+            // 就没这个符号) —— 所以判据**不能靠符号命中**, 得回到"限定名 (含 '.')
+            // 在 VB6 语境里就是 COM 引用库的类型"这条**语法**事实: 无论符号表有
+            // 没有, 只要 mapTypeRef 会兜底 "void*", 字段 C 类型就是 void*。
+            if (tn.find('.') != std::string::npos) return "void*";
             return "";
         }
         // Fix 177: String 字段 → "BSTR"。调用方 appendUdtObjFieldMarker 只对
@@ -577,12 +563,6 @@ std::string CCodeGen::udtFieldObjCType(const std::string& udtCType,
         // 供 udtFieldIsBstrInCTarget 判定"该字段赋值必须走 vb6_BSTR_Assign 深拷贝"。
         if (mi.type == Vb6Type::String) return "BSTR";
         // 标量/数组等非对象字段
-        // dbg212c: 一次性摸 mt (走到这里说明 Variant 分支条件 line 521 都没进,
-        // 或进了但 trn 空)
-        if (memberLower.size() >= 8 && memberLower.compare(0, 8, "original") == 0) {
-            return "/*skipMt=" + std::to_string(static_cast<int>(mi.type))
-                 + " trn=" + mi.typeRefName + "*/";
-        }
         return "";
     }
     return "";
@@ -649,16 +629,7 @@ std::string CCodeGen::appendUdtObjFieldMarker(const std::string& objExpr,
     // 仅对象字段 (项目类 vb6_cls_* / Collection·COM void*) 才追加标记;
     // 嵌套 UDT (vb6_type_*) 与标量/字符串等原样返回 — 嵌套 UDT 继续由
     // inferUdtTypeOfExpr / 普通字段拼接处理, 标记残留会干扰函数参数等上下文.
-    if (fieldCType != "void*" && fieldCType.rfind("vb6_cls_", 0) != 0) {
-        // dbg212: 一次性诊断, 摸 VBFlexGridDemo CI 上 OriginalIOleIPAO 那条字段
-        // 走到 udtFieldObjCType 时 fc 到底是什么 (49ed1b22 加了 Variant 兜底,
-        // 若仍落这里, 说明分支没进/进了但 ptrSym 双 miss), 拿完就删.
-        if (member.size() >= 8 && member.compare(0, 8, "Original") == 0) {
-            return fieldAccess + "  /* dbg212-fc='" + fieldCType
-                 + "' uc='" + udtCType + "' */";
-        }
-        return fieldAccess;
-    }
+    if (fieldCType != "void*" && fieldCType.rfind("vb6_cls_", 0) != 0) return fieldAccess;
     return fieldAccess + "  /* udt objfield " + fieldCType + " */";
 }
 
