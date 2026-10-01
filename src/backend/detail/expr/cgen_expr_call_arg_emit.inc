@@ -268,6 +268,21 @@
             // 成 void*，把"形参其实是 typed*"这个真值吞掉 (dbg210 dump 实测)。
             && cParamTypedComIfaceCType(calleeParams[i]).empty()
             && !cExprIsVariant(argVal)) {
+            // 一次性诊断 (出结果即删): 记录 helper 判定值, 摸 CI 上 helper 是否也在
+            // 兜底空 (kind 不是 ComClass/ComInterface, 或 lookup 全落空)。
+            {
+                const auto& cp999 = calleeParams[i];
+                std::string t999 = cParamTypedComIfaceCType(cp999);
+                Symbol* s999 = cp999.typeRefName.empty() ? nullptr
+                    : symTab_.lookup(cp999.typeRefName);
+                if (!s999 && cp999.typeRefName.find('.') != std::string::npos) {
+                    std::string sn = cp999.typeRefName.substr(cp999.typeRefName.find('.') + 1);
+                    s999 = symTab_.lookup(sn);
+                }
+                std::string k999 = s999 ? std::to_string(static_cast<int>(s999->kind)) : "<null>";
+                argVal += " /* dbg210b ct='" + (t999.empty() ? "<empty>" : t999)
+                        + "' kind=" + k999 + " */";
+            }
             // 装箱一律走 boxToVariant 这一处权威 (按 VB 声明类型选 ctor)。
             // 直接手写 vb6_VariantFromValue 是让 C 的 _Generic 猜类型: VB 的 Boolean
             // 在 C 侧是 int32_t/int16_t, 于是 VarType(True) 报 3(Long) 而不是 11
