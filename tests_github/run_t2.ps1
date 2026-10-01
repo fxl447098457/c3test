@@ -534,10 +534,29 @@ function Test-GuiCompileOnly {
         if (Test-Path $c3err) {
             $c3Lines = @(Get-Content $c3err)
             $msvcIdx = [Array]::IndexOf($c3Lines, "=== MSVC Output ===")
-            if ($msvcIdx -lt 0) { $msvcIdx = $c3Lines.Count }
+            Write-Host "  --- c3-error.log head (Command / Response File) ---"
             if ($msvcIdx -gt 0) {
-                Write-Host "  --- c3-error.log head (Command / Response File) ---"
                 $c3Lines[0..([Math]::Min($msvcIdx, $c3Lines.Count)-1)] | Select-Object -First 30 | ForEach-Object { Write-Host "  $_" }
+            } else {
+                $c3Lines | Select-Object -First 30 | ForEach-Object { Write-Host "  $_" }
+            }
+            # MSVC Output 段整块打 (cl/link 真错就在这里; 前端 VB3001 warning 是
+            # driver_args.cpp writeErrorLog 之后追加的 === C3 Diagnostics === 段,
+            # 会挤爆 tail-40, 掩盖 cl/link 侧的信息)。
+            if ($msvcIdx -ge 0) {
+                $diagIdx = -1
+                for ($k = $msvcIdx + 1; $k -lt $c3Lines.Count; $k++) {
+                    if ($c3Lines[$k] -like "=== C3 Diagnostics*") { $diagIdx = $k; break }
+                }
+                $upper = if ($diagIdx -ge 0) { $diagIdx - 1 } else { $c3Lines.Count - 1 }
+                $msvcBody = @()
+                if ($upper -ge $msvcIdx) { $msvcBody = $c3Lines[$msvcIdx..$upper] }
+                Write-Host "  --- c3-error.log MSVC section ($($msvcBody.Count) lines) ---"
+                if ($msvcBody.Count -eq 0) {
+                    Write-Host "  (cl/link returned non-zero without any stdout/stderr output)"
+                } else {
+                    $msvcBody | ForEach-Object { Write-Host "  $_" }
+                }
             }
             Write-Host "  --- c3-error.log tail 40 ---"
             $c3Lines | Select-Object -Last 40 | ForEach-Object { Write-Host "  $_" }
