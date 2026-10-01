@@ -212,7 +212,15 @@
         // vb6_VARIANT 方向的 C2440.
         if (!isByRef && i < calleeParams.size() && calleeParams[i].isByVal
             && (calleeParams[i].type == Vb6Type::Variant
-                || calleeParams[i].type == Vb6Type::Empty)) {
+                || calleeParams[i].type == Vb6Type::Empty)
+            // <vbeclipse> <VBFlexGridDemo> 同族 guard (与 arg_emit Fix 210 /
+            // arg_variant 上方 091s 一致)：类型化 COM 接口形参 vb6_ComIface_X*
+            // 不能装箱。CI 的 TLB 全加载路径让 resolveTypeRef 把 `As IOleControl`
+            // 兜底成 Variant, 三条 wrap 各自装一次 → 双装 vb6_VariantFromValue(
+            // vb6_VariantFromValue(This)) → cl 19.51 C2172 一片。判据都走同一份
+            // cTypeForDeclaredTypeName, 与定义侧 mapTypeRef 同源。
+            && !(calleeParams[i].typeRefName.size() > 0
+                 && cTypeForDeclaredTypeName(calleeParams[i].typeRefName).compare(0, 13, "vb6_ComIface_") == 0)) {
             bool alreadyVariant = cExprIsVariant(argVal);
             if (!alreadyVariant && node.positional[i]->kind == ASTNodeKind::IdentifierExpr) {
                 auto& idArg86 = static_cast<IdentifierExpr&>(*node.positional[i]);
