@@ -145,35 +145,6 @@
         // vb6_ComCall(vb6_hwnd_MainForm, L"ScaleX", …))。ScaleX/ScaleY 不可能是集合。
         const std::string axMemLower = Symbol::toLower(comMemberName_);
         const bool axIsScaleMethod = (axMemLower == "scalex" || axMemLower == "scaley");
-        // Fix <VBFlexGridDemo>: Me.ScaleX/UserControl.ScaleX(x, fromScale, toScale)
-        // 是**纯单位换算方法**, 必须直接调 RTL 自由函数 vb6_UserControl_ScaleX/Y,
-        // 绝不能落到 vb6_ComCall(...) —— 窗体/控件不是 COM 对象, 对 hwnd 做 IDispatch
-        // 分发必败 (返回垃圾或 0xC0000005 访问违规, 启动即崩)。
-        // 实参: arg0=x(double), arg1=fromScale(int32), arg2=toScale(int32); 属性读取
-        // (如 Me.ScaleMode) 是 COM 结果(void* 承载 Variant), 先 vb6_VariantFromComResult
-        // 再 vb6_VariantToLong/Double; 字面量/UDT 字段为裸标量, 直接透传(C 隐式转换)。
-        if (axIsScaleMethod && node.positional.size() >= 3) {
-            const char* fn = (axMemLower == "scalex") ? "vb6_UserControl_ScaleX"
-                                                     : "vb6_UserControl_ScaleY";
-            std::vector<std::string> scArgs;
-            for (size_t i = 0; i < node.positional.size(); i++) {
-                emitExpr(*node.positional[i]);
-                scArgs.push_back(lastExpr_);
-            }
-            auto scConv = [&](const std::string& a, const char* rt) -> std::string {
-                bool comRes = (a.compare(0, 12, "vb6_ComCall(") == 0)
-                           || (a.compare(0, 15, "vb6_ComGetProp(") == 0)
-                           || (a.compare(0, 21, "vb6_ComGetObjectProp(") == 0);
-                if (!comRes) return a;  // 裸标量(字面量/UDT字段)直接透传
-                return std::string(rt) + "(vb6_VariantFromComResult(" + a + "))";
-            };
-            std::string scX = scConv(scArgs[0], "vb6_VariantToDouble");
-            std::string scF = scConv(scArgs[1], "vb6_VariantToLong");
-            std::string scT = scConv(scArgs[2], "vb6_VariantToLong");
-            lastExpr_ = std::string(fn) + "(" + scX + ", " + scF + ", " + scT + ")";
-            isComMarker_ = false;
-            return;
-        }
         if (axSlotObj && !node.positional.empty() && !axIsScaleMethod) {
             std::string axObjExpr = std::move(comObjExpr_);
             std::string axMember = std::move(comMemberName_);
