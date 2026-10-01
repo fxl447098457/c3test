@@ -257,6 +257,14 @@
             // <vbeclipse>: 工程类形参的槽 p.type 也是 Variant (见 arg_variant 同一处注释),
             // 这里不能装箱 —— 判据共用 cParamClassPtrType, 与 dll 入口的 extern 同源。
             && cParamClassPtrType(calleeParams[i]).empty()
+            // Fix <vbeclipse> <VBFlexGridDemo>: 类型化 COM 接口形参 (VB `As IOleControl`,
+            // C 侧形参 vb6_ComIface_X*) 同款 —— resolveTypeRef 命中 TLB 里的 ComClass 时
+            // p.type 会兜底成 Variant，本条若还装箱，调用点就发成
+            // `Replace(vb6_VariantFromValue(This))` → 形参 typed* 收到 vb6_VARIANT
+            // → cl 19.51 C2172 "actual parameter is not a pointer" (VBFlexGrid CI 实测)。
+            // 判据与 arg_variant 里 cast 那处同源 (cTypeForDeclaredTypeName)。
+            && !(calleeParams[i].typeRefName.size() > 0
+                 && cTypeForDeclaredTypeName(calleeParams[i].typeRefName).compare(0, 13, "vb6_ComIface_") == 0)
             && !cExprIsVariant(argVal)) {
             // 装箱一律走 boxToVariant 这一处权威 (按 VB 声明类型选 ctor)。
             // 直接手写 vb6_VariantFromValue 是让 C 的 _Generic 猜类型: VB 的 Boolean

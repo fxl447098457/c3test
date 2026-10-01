@@ -30,7 +30,12 @@
         }
         if (!isByRef && i < calleeParams.size() && calleeParams[i].isByVal
             && calleeParams[i].type == Vb6Type::Variant
-            && cParamClassPtrType(calleeParams[i]).empty()) {
+            && cParamClassPtrType(calleeParams[i]).empty()
+            // <vbeclipse> <VBFlexGridDemo> (同 arg_emit Fix 210 那条): 形参是
+            // 类型化 COM 接口指针 (vb6_ComIface_X*) 时不能装箱 —— TLB 里的 ComClass
+            // 让 resolveTypeRef 兜底成 Variant, 装了 typed* 槽收到 vb6_VARIANT → C2172。
+            && !(calleeParams[i].typeRefName.size() > 0
+                 && cTypeForDeclaredTypeName(calleeParams[i].typeRefName).compare(0, 13, "vb6_ComIface_") == 0)) {
             // Fix 084d: 实参若是类对象表达式 (如 me->Database, 类方法返回类对象),
             // 保持对象指针直传, 不要套 vb6_VariantFromValue — 符号表可能把类类型
             // 参数误记为 Variant, 若包装成 vb6_VARIANT 传给 vb6_cls_cXxx* 参数
