@@ -575,6 +575,36 @@ function Test-GuiCompileOnly {
                     Write-Host "  == lines $lo-$hi =="
                     for ($k = $lo; $k -le $hi; $k++) { Write-Host ("  {0,4}: {1}" -f $k, $vth[$k-1]) }
                 }
+                # diag212b: 一次性加更多 dump 摸 OriginalIOleIPAO 字段两侧的
+                # 权威真值 —— VTableHandle.h 的 struct typedef (mapTypeRef 落
+                # 地的字段 C 类型, 与 caller 侧 udtFieldObjCType 必须同源), 以
+                # 及 c3-error.log 里 OLEGuids / typelib 的行 (摸 TLB 到底在 CI
+                # 上有没有 loadByClsid 成功, 因为整条 49ed1b22 判据的立足点
+                # 就是"CI 上 mi.type=Variant 因 TLB 符号不在 module scope")。
+                $vthH = Join-Path $keptDir "VTableHandle.h"
+                if (Test-Path $vthH) {
+                    $h = @(Get-Content $vthH)
+                    Write-Host "  --- VTableHandle.h VTableIPAODataStruct typedef ---"
+                    $i0 = 0
+                    for ($k = 0; $k -lt $h.Count; $k++) {
+                        if ($h[$k] -match 'typedef struct vb6_type_VTableIPAODataStruct') {
+                            $i0 = $k; break
+                        }
+                    }
+                    if ($i0 -gt 0) {
+                        $hi = [Math]::Min($i0 + 10, $h.Count - 1)
+                        for ($k = $i0; $k -le $hi; $k++) { Write-Host ("  {0,4}: {1}" -f ($k+1), $h[$k]) }
+                    } else {
+                        Write-Host "  (VTableIPAODataStruct typedef not found)"
+                    }
+                }
+                if (Test-Path $c3err) {
+                    $tlb = @(Get-Content $c3err | Where-Object { $_ -match 'OLEGuids|typelib|loadByClsid|loadByPath|CoCreateInstance' } | Select-Object -First 12)
+                    if ($tlb.Count -gt 0) {
+                        Write-Host "  --- c3-error.log typelib/OLEGuids lines ---"
+                        $tlb | ForEach-Object { Write-Host "  $_" }
+                    }
+                }
             }
         }
     }
