@@ -880,6 +880,11 @@
     // P6.4+: interface -> single implementer map (injected by driver)
     const std::map<std::string, std::string>* interfaceImplementers_ = nullptr;
 
+    // Fix <vbeclipse>: interface -> **全部**实现类 (小写接口名 → 实现类规范名列表),
+    // driver 侧预扫描提供。接口成员桩靠它把调用转进实现类的槽表 —— 单实现映射
+    // (interfaceImplementers_) 在多实现接口上是空的, 不能用于分派。
+    const std::map<std::string, std::vector<std::string>>* interfaceAllImplementers_ = nullptr;
+
     // Interface 契约 (tB, ai/022 B04): stage 2.7 建好的工程级只读登记表 (driver 注入).
     // 槽表/适配器/薄指针类型都由它驱动, 与 legacy 的 implementsNames 口径互不影响.
     const IfaceRegistry* ivreg_ = nullptr;

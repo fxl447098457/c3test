@@ -144,7 +144,8 @@
     void emitIfaceMemberStub(const SubDecl& node, const std::string& sig, bool returnsValue);
     void emitIfaceMemberStub(const FunctionDecl& node, const std::string& sig, bool returnsValue);
     void emitIfaceMemberStub(const PropertyDecl& node, const std::string& sig, bool returnsValue);
-    void emitIfaceStubBody(const std::string& sig, const std::string& retType);
+    void emitIfaceStubBody(const std::string& sig, const std::string& retType,
+                           const std::string& slotKey, bool takesArgs);
 
     // 生成类工厂函数 (New/Destroy)
     void emitClassFactory(Module& module);
