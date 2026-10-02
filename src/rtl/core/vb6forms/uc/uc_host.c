@@ -389,25 +389,33 @@ int32_t vb6_UC_OwnMethodCall(void* obj, const wchar_t* name, int32_t argc,
     for (int32_t i = 0; i < r->desc->methodCount; i++) {
         const vb6_UcMethodDesc* md = &r->desc->methods[i];
         if (!md->name || !md->fn || _wcsicmp(md->name, name) != 0) continue;
-        /* 第 12 层留档 (探针已跑完并撤除, 结论):
-         *   症状 = frmViewProperties / frmViewTasks 停在 0x0。
-         *   探针实测: ShowView 收到的 ViewId 依次是 **空 / Views / Help / Diagnose /
-         *   Events**, 而 frmMain.frm 里各 folder 配的 ActiveViewId 是
-         *   Perspectives / Help / Tasks / ToolBox —— **逐个对不上**。
-         *   断点在第三方 `Folder.cls:140-160` 的 getter:
-         *       If Not Views.Contains(m_ActiveViewId) Then m_ActiveViewId = vbNullString
-         *       If Len(m_ActiveViewId) = 0 Then m_ActiveViewId = Views.Item(0)
-         *   CreateFolder(`ucPerspective.ctl:1776`) 的 `.ShowView Folder.ActiveViewId`
-         *   拿到的就是被这段过滤换掉的值。
-         *   疑似更深一层在 `List.cls`: `Add` 是 `Idx = Count + 1` 后
-         *   `ReDim Preserve (0 To Idx)`, 而 `Count = UBound(m_Keys)`。我们的
-         *   `vb6_SafeArrayReDimPreserve1D_T` 会**无条件缩到 newUBound**, 于是每加
-         *   一次跳一格, 0 号格永远空 ⇒ `Item(0)` 返回空槽。
-         *   **暂不改**: (a) 第三方源码用户要求先不动; (b) 要改就得动 `ReDim Preserve`
-         *   的"缩小=恒等"语义, 那是**全局**语义, 而现有测试(`tests/arr_cls` AC5)只覆盖
-         *   **扩大**, 不足以证明 VB6 真实语义 ⇒ 推断错了会波及所有数组使用者。
-         *   下一步应先用 `win32-abi-probe` 思路做一个**只含 ReDim Preserve 缩小**的
-         *   最小夹具, 在真 VB6 与 C3 下各跑一遍定标, 再决定改哪一侧。*/
+        /* 第 12 层留档 (探针已跑完并撤除; **下面三段是已被实测排除的假设, 别再走回头路**):
+         *
+         *   症状: frmViewProperties / frmViewTasks 停在 0x0。
+         *   硬数据: 经本方法桥(`vb6_ComCall` 晚绑定)的 ShowView 恰好 5 次, id 依次
+         *   **空 / Views / Help / Diagnose / Events**; frmMain.frm:404-434 配的
+         *   ActiveViewId 是 Perspectives / Help / Tasks / ToolBox —— 只有 Help 对上。
+         *
+         *   ❌ 已排除① `List.cls` 的 Add/Count 口径: 把**原版** List.cls / Folder.cls /
+         *      Rectangle.cls 拷进夹具跑 C3, `Contains=True` / `Item(0..2)=Events/Tasks/
+         *      Diagnose` / `ActiveViewId` 读回 `Tasks` —— **全对**(夹具在
+         *      C:\Users\Administrator\vbework\redim_probe\)。
+         *   ❌ 已排除② `ReDim Preserve` 缩小语义: 微软官方文档明说「把数组做得比原本更小,
+         *      被删除的元素中的数据将会丢失」⇒ **真缩小**, 我们
+         *      `vb6_SafeArrayReDimPreserve1D_T` 的无条件缩小**本来就是对的**。
+         *      (曾误以为是"恒等", 别再改。)
+         *   ❌ 已排除③ COM 装箱往返: `vb6_ComObject_FromInstance` / `GetInstance`
+         *      同一实例(C3_IV_TRACE 下 REJECT=0), 存回取回 ActiveViewId 一致。
+         *
+         *   ⇒ 剩下的唯一事实: `vb6_Folder_prop_get_ActiveViewId(Folder)` 在
+         *   `CreateFolder`(`ucPerspective.ctl:1776`)被调时, 返回的不是配置里写的值。
+         *   而该getter 只有两条路能换值: `Views.Contains` 不中 → 清空 → 回落
+         *   `Views.Item(0)`。既然 ① 已证明 List/Folder 逻辑本身正确, 那就只剩一种可能:
+         *   **传进去的 `Folder` 指针不是 frmMain 配的那个实例** ——
+         *   即 `CreateFolder(ByRef Folder As Folder)` 的实参绑定错了。
+         *   下一步探针: 在 `vb6_ucPerspective_CreateFolder` 入口打 `*Folder`
+         *   (指针 + `m_FolderId` + `m_ActiveViewId`), 与 `Perspective.m_Folders`
+         *   里各 Folder 的同一组值对照, 即可定位是"哪个实例被换掉了"。*/
         if (md->argc != argc) return 0;   /* 实参个数对不上 ⇒ 不猜, 交回调用方 */
         return md->fn(r->me, argc, argv, outRet) ? 1 : 0;
     }
