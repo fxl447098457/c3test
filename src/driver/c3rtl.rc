@@ -58,6 +58,15 @@
 //     W=8505 (= ViewArea 设计期宽 8655 - 30 - 2*margin), 停在同一个 567x423。
 //   修后: frmViewHelp 253x219 (容器 253x219)、frmViewSnapshot 778x190 (容器
 //     778x190) —— 视图窗体尺寸**精确等于**各自容器。
+// Fix <vbeclipse> rev23: 子控件 Resize 事件**排到消息循环**里跑 (SetTimer 一轮)。
+//   rev22 直接在 WM_SIZE尾部跑, 事件确实跑了 (ucFolder 10 次 WM_SIZE、30 次触发),
+//   但拿到的是**设计期**尺寸: `vb6_GetControlWidth(ViewArea)` 同一 hwnd 读出
+//   1515 / 8505 / 6375→8505→9330 三个阶段 —— 因为 WM_SIZE 是 SetWindowPos/MoveWindow
+//   的**同步** SendMessage, 一整串嵌套 Move 全在同一个调用栈里跑完才返回, 而
+//   ViewArea 的最终尺寸 (583/253/778) 来自 ucFolder.ctl `UserControl_Resize` 里
+//   **最后**那句 `ViewArea.Move 20,20,ScaleWidth-30,…`。⇒ `ViewArea_Resize` 按设计期
+//   宽度 Move 视图窗体 (恒 W=8505 = 8655-30-2*margin), 视图窗体停 0x0 / 超出容器。
+//   SetTimer 天然去重(同 id 重置计时器), 一串嵌套 Move 只排一条。
 // Fix <vbeclipse> rev16: Variant **槽位赋值**改"接管"语义 —— 新增
 // vb6_VariantAssign(dst, src) = vb6_VariantClear(dst) + vb6_VariantCopy(dst,&src)
 // (BSTR 另分配 / Dispatch AddRef / x86 DECIMAL 另分配)。

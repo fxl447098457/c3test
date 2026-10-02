@@ -590,6 +590,55 @@ int32_t vb6_UC_RunDesignResize(const void* hwnd) {
     return 1;
 }
 
+// Fix <vbeclipse> rev23: 子控件 Resize 事件要**延到本轮布局收尾后**才跑。
+//
+// 探针实测 (play78 --arch x86): rev22 把触发挂在 WM_SIZE 尾部。ucFolder 收到 10 次
+// WM_SIZE、设计期槽位齐全、`RunDesignResize` 在它身上跑了 30 次 —— 事件确实在跑。
+// 但 `vb6_GetControlWidth(ViewArea)` 的读数是**三个阶段混在一起**: 同一 hwnd 先读到
+// 1515 再读到 8505 (设计期), 另一个读到 6375 → 8505 → 9330。而 ViewArea 的**最终**
+// 尺寸 (窗口树里的 583/253/778) 来自 ucFolder.ctl `UserControl_Resize` 内部那句
+// `ViewArea.Move 20, 20, ScaleWidth-30, …` —— 它发生在**整串嵌套 Move 的末尾**。
+// ⇒ 事件跑的时候 ViewArea 自己还没拿到最终尺寸, 于是 `ViewArea_Resize` 按当时读到的
+//   宽度去 Move 视图窗体 (恒为设计期 8505), 视图窗体停0x0 / 超出容器。
+//
+// 为什么延后一轮能解决: `SetWindowPos`/`MoveWindow` 触发的 WM_SIZE 是**同步**
+// SendMessage, 一整串嵌套 Move 全在同一个调用栈里跑完才返回; 延后触发要等**回到
+// 消息循环**, 那时 ViewArea 已是最终尺寸。
+//
+// 实现: `SetTimer` 一轮即触发 (50ms 的定时器粒度在这里足够, 且不引新结构字段 ——
+// rec 是**按值数组**不是指针数组, 加字段会让布局式初始化的跨边界契约再踩一次
+// rev22 那个错位坑)。timer proc 里再调一次 `RunDesignResize`。
+int32_t vb6_UC_QueueDesignResize(const void* inst) {
+    if (!inst) return 0;
+    vb6_UCRec* r = vb6_uc_findByInstance(inst);
+    if (!r || !r->hwnd || !IsWindow(r->hwnd)) return 0;
+    /* ⚠ 为什么用 PostMessage 而不是 SetTimer: 宿主窗口过程里**没有 WM_TIMER 分支**
+     * (uc_host_window.c 只处理 NCCREATE/SIZE/SHOWWINDOW/鼠标), DefWindowProc 对
+     * WM_TIMER 不会替我们做事 —— 实测 drain 一次都没跑。改成 PostMessage 一个自定义
+     * WM_APP, 由 vb6_uc_wndproc 里新增的 case 接住 (与 WM_SIZE 同一条链的思路)。
+     *
+     * 去重靠窗口属性而不是 rec 字段: rec 是**按值数组**, 加字段会再碰一次 rev22
+     * 那个"跨边界布局式初始化的字段顺序"坑。窗口属性是 Win32 自带的关联存储。*/
+    if (GetPropW(r->hwnd, VB6_UC_DR_PROP)) return 1;    // 已在队列里 ⇒ 不重复排
+    if (!SetPropW(r->hwnd, VB6_UC_DR_PROP, (HANDLE)1)) return 0;
+    if (!PostMessageW(r->hwnd, VB6_UC_DR_MSG, 0, 0)) {
+        RemovePropW(r->hwnd, VB6_UC_DR_PROP);
+        return 0;
+    }
+    return 1;
+}
+
+// WM_APP 消息的处理入口 (由 vb6_uc_wndproc 调用): 布局已收尾, 各设计期子控件尺寸已定。
+void vb6_UC_DrainDesignResize(void* hwnd) {
+    HWND h = (HWND)hwnd;
+    if (!h) return;
+    RemovePropW(h, VB6_UC_DR_PROP);                // 先清标志, 允许事件体再排新一轮
+    vb6_UCRec* r = vb6_uc_findByHwnd(h);
+    if (!r) return;
+    for (int32_t i = 0; i < r->designCount; i++)
+        if (r->design[i].value) vb6_UC_RunDesignResize(r->design[i].value);
+}
+
 void** vb6_UC_DesignSlot(const char* name) {
     return vb6_UC_DesignSlotOf(NULL, name);
 }

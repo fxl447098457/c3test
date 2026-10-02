@@ -187,6 +187,18 @@ int32_t vb6_UC_DesignCtrlOwner(const void* hwnd, void** outInst, const char** ou
 //   TU 会 segfault, 见该文件里的说明), 故它靠一条 extern 原型看见本声明。
 int32_t vb6_UC_RunDesignResize(const void* hwnd);
 
+// Fix <vbeclipse> rev23: 把该 UC 的所有设计期子控件 Resize 事件**排到消息循环**
+// 里跑 (SetTimer 一轮即触发)。存在的理由: 直接在 WM_SIZE 里跑会拿到**设计期**
+// 尺寸 —— 那一整串嵌套 Move 都是同步 SendMessage, 跑完才返回, 而 ViewArea 的最终
+// 尺寸是最后那次 `ViewArea.Move` 给的。详见 uc_host.c 里的注释。
+int32_t vb6_UC_QueueDesignResize(const void* inst);
+
+// Fix <vbeclipse> rev23: 排在消息队列里的那条消息 (WM_APP+0x51) 与它的窗口属性名,
+// 以及宿主窗口过程里对应的处理入口。去重用窗口属性而不是 rec 字段 (见uc_host.c 注释)。
+#define VB6_UC_DR_MSG  (WM_APP + 0x51)
+#define VB6_UC_DR_PROP L"C3_UC_DR_PENDING"
+void vb6_UC_DrainDesignResize(void* hwnd);
+
 // Fix <vbeclipse> rev21: UserControl 自有 Public Sub 的按名桥 (晚绑定方法调用)。
 // obj 收 UC 实例指针或宿主 HWND; argv 是 vb6_VARIANT* 数组、argc 是实参个数。
 // 命中且已执行返回 1; 未命中 / 实参个数对不上返回 0 (交回调用方, 语义同改动前)。

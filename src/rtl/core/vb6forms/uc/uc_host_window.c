@@ -52,13 +52,22 @@ static LRESULT CALLBACK vb6_uc_wndproc(HWND hwnd, UINT msg, WPARAM wParam, LPARA
              * 判据不会误挡本调用 —— 它是唯一允许在上下文外触发的入口。
              * 且它内部有同控件重入短路, 事件体里 Move 别的控件再发 WM_SIZE 也不会
              * 无限展开 (那一层 g_uc_current 非空, 直接被挡)。*/
-            for (int32_t di = 0; di < r->designCount; di++) {
-                void* ctrlH = r->design[di].value;
-                if (ctrlH) vb6_UC_RunDesignResize(ctrlH);
-            }
+            /* Fix <vbeclipse> rev23: 这里**只排队**, 不直接跑 —— WM_SIZE 是
+             * SetWindowPos/MoveWindow 的**同步** SendMessage, 一整串嵌套 Move 全在
+             * 同一个调用栈里跑完才返回, 那时 ucFolder 的 ViewArea 还没拿到最终尺寸
+             * ⇒ `ViewArea_Resize` 按设计期宽度去 Move 视图窗体 (实测恒 W=8505)。
+             * 排到消息循环里跑, 各控件尺寸才是最终值。详见 vb6_UC_QueueDesignResize。*/
+            vb6_UC_QueueDesignResize(r->me);
             InvalidateRect(hwnd, NULL, FALSE);
             return 0;
         }
+        /* Fix <vbeclipse> rev23: 排队的子控件 Resize 事件在这里接住。
+         * 必须排在消息循环里 (不能直接在 WM_SIZE 里跑) —— WM_SIZE 是
+         * SetWindowPos/MoveWindow 的**同步** SendMessage, 一整串嵌套 Move 全在同
+         * 一个调用栈里跑完才返回, 那时 ucFolder 的 ViewArea 还没拿到最终尺寸。*/
+        case VB6_UC_DR_MSG:
+            vb6_UC_DrainDesignResize(hwnd);
+            return 0;
         case WM_SHOWWINDOW:
             if (r && r->ready && wParam && r->desc && r->desc->show) {
                 vb6_UCSaved saved;
