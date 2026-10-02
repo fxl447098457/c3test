@@ -389,6 +389,25 @@ int32_t vb6_UC_OwnMethodCall(void* obj, const wchar_t* name, int32_t argc,
     for (int32_t i = 0; i < r->desc->methodCount; i++) {
         const vb6_UcMethodDesc* md = &r->desc->methods[i];
         if (!md->name || !md->fn || _wcsicmp(md->name, name) != 0) continue;
+        /* 第 12 层留档 (探针已跑完并撤除, 结论):
+         *   症状 = frmViewProperties / frmViewTasks 停在 0x0。
+         *   探针实测: ShowView 收到的 ViewId 依次是 **空 / Views / Help / Diagnose /
+         *   Events**, 而 frmMain.frm 里各 folder 配的 ActiveViewId 是
+         *   Perspectives / Help / Tasks / ToolBox —— **逐个对不上**。
+         *   断点在第三方 `Folder.cls:140-160` 的 getter:
+         *       If Not Views.Contains(m_ActiveViewId) Then m_ActiveViewId = vbNullString
+         *       If Len(m_ActiveViewId) = 0 Then m_ActiveViewId = Views.Item(0)
+         *   CreateFolder(`ucPerspective.ctl:1776`) 的 `.ShowView Folder.ActiveViewId`
+         *   拿到的就是被这段过滤换掉的值。
+         *   疑似更深一层在 `List.cls`: `Add` 是 `Idx = Count + 1` 后
+         *   `ReDim Preserve (0 To Idx)`, 而 `Count = UBound(m_Keys)`。我们的
+         *   `vb6_SafeArrayReDimPreserve1D_T` 会**无条件缩到 newUBound**, 于是每加
+         *   一次跳一格, 0 号格永远空 ⇒ `Item(0)` 返回空槽。
+         *   **暂不改**: (a) 第三方源码用户要求先不动; (b) 要改就得动 `ReDim Preserve`
+         *   的"缩小=恒等"语义, 那是**全局**语义, 而现有测试(`tests/arr_cls` AC5)只覆盖
+         *   **扩大**, 不足以证明 VB6 真实语义 ⇒ 推断错了会波及所有数组使用者。
+         *   下一步应先用 `win32-abi-probe` 思路做一个**只含 ReDim Preserve 缩小**的
+         *   最小夹具, 在真 VB6 与 C3 下各跑一遍定标, 再决定改哪一侧。*/
         if (md->argc != argc) return 0;   /* 实参个数对不上 ⇒ 不猜, 交回调用方 */
         return md->fn(r->me, argc, argv, outRet) ? 1 : 0;
     }
