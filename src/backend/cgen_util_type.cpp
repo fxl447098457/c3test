@@ -100,6 +100,23 @@ Vb6Type CCodeGen::inferExprType(Expr& expr) const {
             if (knownByteVars_.count(lower)) return Vb6Type::Byte;
             if (knownLongVars_.count(lower)) return Vb6Type::Long;
             if (knownLongPtrVars_.count(lower)) return Vb6Type::LongPtr;
+            // Fix <vbeclipse> rev20: 设计器 (.ctl/.pag) 模块内裸写的 ScaleWidth/
+            // ScaleHeight 是**宿主伪属性**, C 侧是 `extern int32_t`(vb6rtl_userctl.h),
+            // **不是** vb6_VARIANT。此前它们落到下面的符号表回退 —— 符号表里没有
+            // (不是 VB6 声明的变量), 于是答 Variant。
+            // 后果 (ucTabStrip.ctl:146 `l_TabStripWidth > ScaleWidth`):
+            //   `vb6_VarCmpLongLt(&vb6_UserControl_ScaleWidth, …)` —— 拿 **int32_t\***
+            //   当 **vb6_VARIANT\*** 传 (RTL 签名是 vb6_VARIANT*, 16 字节),
+            //   读 4 字节对象的头 16 字节当 vt + lVal ⇒ 比较结果是垃圾。
+            //   此前能编过只是因为 MSVC 把它当 C4133 指针类型不兼容警告放行。
+            // 必须先于符号表回退判(与 cgen_expr_ident_builtin.inc:212 的
+            // isDesignerModule_ 门同口径: 那里判"是宿主成员", 这里判"是数值型")。
+            // 判据用 lower 且要求无同名局部 (Dim ScaleWidth As Long 要保住自己的类型,
+            // 与该文件 212 行的 knownLocalVars_ 门一致)。
+            if (isDesignerModule_ && !knownLocalVars_.count(lower)
+                && (lower == "scalewidth" || lower == "scaleheight")) {
+                return Vb6Type::Long;
+            }
             if (knownVariantVars_.count(lower)) return Vb6Type::Variant;
             // 检查符号表
             auto* sym = symTab_.lookup(id.name);

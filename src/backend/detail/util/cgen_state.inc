@@ -933,6 +933,11 @@
     // 填 vb6_UserControlDesc.props/propCount 时读 (同一次 decl-pass 内, 前者先跑 ——
     // 见 cgen_base_generate_decl_pass.inc:40 与 :46)。
     int32_t ucHostPropCount_ = 0;
+
+    // Fix <vbeclipse> rev21: 本模块发出去的 UserControl 自有 **Public Sub 方法桥**条数。
+    // 与 ucHostPropCount_ 同一对生命周期: cgen_form_uc_methods.inc 算表时写入,
+    // emitDesignerControlDecls 填 vb6_UserControlDesc.methods/methodCount 时读。
+    int32_t ucHostMethodCount_ = 0;
     const std::map<std::string, FrmFile>* designerFiles_ = nullptr;
 
     // Fix 143: vbp Object= 的 OCX 文件表 (CLSID 小写去花括号 → ocx 绝对路径)

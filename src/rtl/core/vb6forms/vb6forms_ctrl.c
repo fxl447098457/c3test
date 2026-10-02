@@ -205,7 +205,41 @@ void vb6_ControlMove(void* hwnd, double L, double T, double W, double H, int mas
     int y = (mask & 2) ? vb6_TwipToY((int)(T + (T >= 0 ? 0.5 : -0.5))) : rc.top;
     int w = (mask & 4) ? vb6_TwipToX((int)(W + (W >= 0 ? 0.5 : -0.5))) : rc.right - rc.left;
     int h = (mask & 8) ? vb6_TwipToY((int)(H + (H >= 0 ? 0.5 : -0.5))) : rc.bottom - rc.top;
+
+    /* Fix <vbeclipse> rev22: 尺寸真变了就触发该设计期子控件的 Resize 事件。
+     *
+     * 为什么要这一下: VB6 里 `Private Sub ViewArea_Resize()` 是 PictureBox 的
+     * **Resize 事件**, 由运行时在该控件尺寸变化时自动跑。C3 的 RTL 以前没有这条
+     * 转发, 于是 .ctl 写在子控件事件里的布局代码只会在"谁恰好手工调了它"时跑一次
+     * —— 而那一次通常**早于布局就绪**。
+     *
+     * 实证 play78 (--arch x86, 探针实测): 每个 ucFolder 的 WM_SIZE 序列是
+     *   设计期 (569,441) → 中间 (320,309) → 最终 (468,405)
+     * `ViewArea` 每换一次尺寸, ucFolder.ctl:529 `ViewArea_Resize` 都该跑一次并按
+     * **当时**的 ViewArea.Width 重摆视图窗体; 但 C3 只在 Refresh 里裸调一次, 而
+     * Refresh 由 frmMain 在 Form_Load 期跑 —— 那时 rec 还没收到任何 WM_SIZE,
+     * ViewArea.Width 还是设计期 8655 缇 ⇒ 五个 folder 的视图窗体**全都**只拿到
+     * W=8505 (= 8655-30-2*margin), 停在同一个 567x423。
+     *
+     * 放在 vb6_ControlMove 而不是 uc_hostmodel_call.inc 的 Move 分派里: ViewArea /
+     * ViewTabs 这些是 cgen **直调** vb6_ControlMove 的 (不过宿主分派), 那里打不到。
+     * vb6_ControlMove 是所有摆位的唯一收口, 两类调用都从这里过。
+     *
+     * ⚠ 只在**尺寸真的变了**时触发, 否则每次 Move 都跑一遍事件 ⇒ 递归 Move 风暴
+     *   (ucFolder.ViewArea_Resize 里自己就 Move 视图窗体)。*/
+    int sizeChanged = ((w != rc.right - rc.left) || (h != rc.bottom - rc.top));
     SetWindowPos(hW, NULL, x, y, w, h, SWP_NOZORDER | SWP_NOACTIVATE);
+    /* rev22 留档: 设计期子控件 `<Ctrl>_Resize` 事件的触发**故意不在这里**。
+     *
+     * 这里曾挂过一版 (本函数是所有摆位的唯一收口, 看起来最自然的挂点), 结果
+     * **递归**:`ViewArea.Move …` 正是 ucFolder `UserControl_Resize` 内部发的,
+     * 而那个过程本身就经 WM_SIZE → vb6_uc_push → resize → Move 链进来 ⇒
+     * Move 里再跑子控件事件 ⇒ 又 Move ⇒ 无限展开。
+     * 实测 play78 (--arch x86): 视图窗体尺寸确实对上了容器 (frmViewHelp 253x219
+     * / frmViewSnapshot 778x190), 但**整个窗口上下颠倒 + 文字镜像** —— 各层控件
+     * 被反复推挤, 坐标系翻转。两害相权: 宁可尺寸停在中间值 (rev21 状态) 也不能递归。
+     * 正确挂点是 uc_host_window.c 的 WM_SIZE 分支 (尺寸赋值 + resize 之后)。*/
+    (void)sizeChanged;
 }
 
 // P11.8: hWnd attribute (read-only)

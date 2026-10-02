@@ -373,6 +373,28 @@ int32_t vb6_UC_OwnPropSet(void* obj, const wchar_t* name, const void* inV) {
     return pd->set(inst, inV) ? 1 : 0;
 }
 
+// Fix <vbeclipse> rev21: UserControl **自有 Public Sub 的按名桥**。见
+// vb6forms_controls.h 里 vb6_UcMethodDesc 的说明 (为什么缺了它视图窗体停在 0x0)。
+// 与 props 桥同一套定位: 先按实例找 rec, 找不到再按宿主 HWND 找 —— 两种形态的
+// 调用点都有 (原生 vb6_cls_X* 与被 VB6 包一层的 Variant)。
+// ⚠ 形参实参是 **vb6_VARIANT** 数组, 而 cgen 发的 thunk 按 VB6 声明类型拆箱;
+//   引擎只负责"按名 + 按实例"路由与**实参个数核对** (Optional 缺省要能对上)。
+int32_t vb6_UC_OwnMethodCall(void* obj, const wchar_t* name, int32_t argc,
+                             const void* argv[], void* outRet) {
+    void* inst = NULL;
+    if (!obj || !name) return 0;
+    vb6_UCRec* r = vb6_uc_findByInstance(obj);
+    if (!r) r = vb6_uc_findByHwnd(obj);
+    if (!r || !r->desc || !r->desc->methods || r->desc->methodCount <= 0) return 0;
+    for (int32_t i = 0; i < r->desc->methodCount; i++) {
+        const vb6_UcMethodDesc* md = &r->desc->methods[i];
+        if (!md->name || !md->fn || _wcsicmp(md->name, name) != 0) continue;
+        if (md->argc != argc) return 0;   /* 实参个数对不上 ⇒ 不猜, 交回调用方 */
+        return md->fn(r->me, argc, argv, outRet) ? 1 : 0;
+    }
+    return 0;
+}
+
 // ---- 设计器子控件: .ctl 设计面上的 TextBox → 每实例一个真实 EDIT 子窗口 ----
 void* vb6_UC_CreateDesignEdit(int32_t left, int32_t top, int32_t width, int32_t height) {
     HWND parent = (HWND)vb6_UserControl_hWnd;
@@ -503,8 +525,113 @@ void** vb6_UC_DesignSlotOf(void* inst, const char* name) {
     return slot ? slot : &orphan;
 }
 
+// Fix <vbeclipse> rev22: 给定一个**设计期子控件窗口**, 反查它属于哪个 UC 实例 +
+// 它在设计期槽位里的名字。vb6_ControlMove 改完尺寸后用它决定要不要触发
+// `<Ctrl>_Resize` 事件 (VB6 语义: 该控件尺寸变化 ⇒ 其 Resize 事件跑一次)。
+// 线性扫 rec 表 —— UC 实例数个位数, 且只在 Move 之后调用, 不在热路径。
+// ⚠ 必须要求槽位里的窗口**就是** hwnd: 同一 UC 里可能有多个 HWND, 而 VB6 的事件
+//   只认"那个被改了尺寸的控件", 不能凭"同属一个 UC"就全体触发。
+int32_t vb6_UC_DesignCtrlOwner(const void* hwnd, void** outInst, const char** outName) {
+    if (!hwnd) return 0;
+    for (int32_t i = 0; i < g_uc_recCount; i++) {
+        vb6_UCRec* r = &g_uc_recs[i];
+        for (int j = 0; j < r->designCount; j++) {
+            if (r->design[j].value == (void*)hwnd) {
+                if (outInst) *outInst = r->me;
+                if (outName) *outName = r->design[j].name;
+                return 1;
+            }
+        }
+    }
+    return 0;
+}
+
+// Fix <vbeclipse> rev22: 在**正确**的宿主上下文里跑一次设计期子控件的 Resize 事件。
+// 单独开这个口 (而不是让 vb6_forms_ctrl.c 自己 push/pop) 的原因: push/pop 要
+// vb6_UCSaved 完整类型, 而把 vb6forms_uc_internal.h include 进 vb6forms_ctrl.c
+// 会连带 vb6rtl.h, 三头在同一 TU 里对同一批宿主伪属性的可见性不同 ⇒ 实测直接
+// segfault (0xC0000005)。saved 在本单元栈上分配, 天然满足"事件体里 Move 别的
+// 控件会再进一层, 共享一块 saved 会被内层 pop 掉外层值"的隔离要求。
+// 返回 1 = 事件跑了; 0 = 没跑 (无宿主上下文 / 不是设计期子控件 / 未 ready)。
+//
+// ⚠ 调用方 (vb6_ControlMove) 必须**已经**判过"不在 UC 上下文里" (g_uc_current
+//   为空), 否则这里 push 会与外层 push 打架: 内层 pop 把 g_uc_current 恢复成
+//   外层 push 前的值, 外层继续往下走就踩空。
+int32_t vb6_UC_RunDesignResize(const void* hwnd) {
+    void* inst = NULL;
+    const char* ctrlName = NULL;
+    if (!hwnd) return 0;
+    if (!vb6_UC_DesignCtrlOwner(hwnd, &inst, &ctrlName)) return 0;
+    if (!inst) return 0;                              // HostCreate 早期 me 还没赋值
+    vb6_UCRec* r = vb6_uc_findByInstance(inst);
+    // ready 之前不跑: HostCreate 里槽位是在 ready=1 之前填的 (uc_host_create.inc
+    // :30 desc → :102 me → :106 ready), 那段窗口还带着设计期尺寸。
+    if (!r || !r->ready || !r->desc || !r->desc->designResize) return 0;
+    /* 重入防护靠"**同控件**"而不是"有没有 UC 上下文"。
+     * ⚠ 别加 `if (g_uc_current) return 0` —— 那样等于永不触发:
+     *   实测 (play78 --arch x86) WM_SIZE 处理尾部 g_uc_current 仍**非空**, 因为
+     *   WM_SIZE 是 SetWindowPos 触发的同步 SendMessage, 它在 vb6_uc_pop 之前
+     *   就跑完了。而 ViewArea_Resize 恰恰需要在这里被调。
+     *   换句话说: "已在 UC 上下文里" 正是本调用点的**常态**, 不是异常。
+     * 真正的风险是递归 (事件体 Move 别的控件 → 又发 WM_SIZE → 又调事件),
+     * 那个由"同控件不重入 + 深度上限"两层挡住。*/
+    static int inEvt = 0;
+    static const void* inEvtHwnd = NULL;
+    if (inEvt && inEvtHwnd == hwnd) return 0;          // 同控件重入 ⇒ 跳过
+    if (inEvt >= 8) return 0;                          // 深度硬上限兜底
+    vb6_UCSaved saved;
+    const void* prevHwnd = inEvtHwnd;
+    int prevIn = inEvt;
+    inEvt++; inEvtHwnd = hwnd;
+    vb6_uc_push(r, &saved);
+    r->desc->designResize(inst, ctrlName);
+    vb6_uc_pop(&saved);
+    inEvt = prevIn; inEvtHwnd = prevHwnd;
+    return 1;
+}
+
 void** vb6_UC_DesignSlot(const char* name) {
     return vb6_UC_DesignSlotOf(NULL, name);
+}
+
+// ============================================================
+// Fix <vbeclipse> rev20: UserControl.ScaleWidth/ScaleHeight 按实例解析
+// ------------------------------------------------------------
+// 这两个属性在 RTL 里是**进程级全局** (vb6_UserControl_ScaleWidth, 由
+// vb6_uc_push 写/ vb6_uc_pop 还原), 于是所有 UC 实例共享一份。
+//
+// 问题不在 push/pop 本身配对没错, 而在**有一整类调用根本不经过 push**:
+// cgen 生成的 UC 实例方法之间是**裸 C 调用**, 不走宿主分派, 所以没有
+// 谁替它换入上下文。实测 play78: `ucPerspective.c:518` 等 11 处直接
+// `vb6_ucFolder_Refresh(l_ucFolder)`, 而 Refresh (ucFolder.ctl:382) 第一句
+// 就是 `ViewArea_Resize` + `UserControl_Resize`, 后者全部按
+// `ViewArea.Move 20, 20, ScaleWidth - 30, ScaleHeight - 30` 摆子控件 ——
+// 读的是**全局**值。加上 `vb6_UC_Enter` 明确"有意不弹栈"(当前实例语义 =
+// 最近进入者), 全局值就永久停在**最后进入的那个实例**上。
+//
+// 数值证据 (play78): ViewArea 收到的 Move 里 `W=8505` 反复出现,
+// 8505 = 8535 - 30, 而 8535 tw = 569 px 恰是 **ucPerspective 的设计期
+// 宽度**, 不是 ucFolder 的运行期宽度 ⇒ 跨实例串味, 子控件停在设计期尺寸。
+//
+// 为什么这里能按实例取值: cgen 在 .ctl 模块里为每个实例方法都发射了形参
+// `me` (类实例指针), 且 vb6_uc_findByInstance(me) 就是该实例的 rec —— 与
+// 同一个文件里 vb6_UC_DesignSlotOf(me, ...) 的做法一致 (那里也是靠 `me`
+// 才正确, 修的是同一个"多实例共享"家族问题)。r->scaleWidth/Height 一律
+// 存**像素** (HostCreate 的 vb6_TwipToX / WM_SIZE 的 LOWORD(lParam)),
+// 对外必须按 .ctl 声明的 ScaleMode=1 交**缇**, 故走 vb6_XToTwipX/YToTwipY。
+//
+// 回落: inst 为空 / 查不到 rec 时退回进程级全局, 保持单实例与设计期
+// 路径 (vb6_UC_HostCreate 里的 InitProperties 等尚无 me 的场景) 的原行为。
+int32_t vb6_UC_ScaleWidthOf(void* inst) {
+    vb6_UCRec* r = inst ? vb6_uc_findByInstance(inst) : NULL;
+    if (r) return vb6_XToTwipX(r->scaleWidth);
+    return vb6_UserControl_ScaleWidth;
+}
+
+int32_t vb6_UC_ScaleHeightOf(void* inst) {
+    vb6_UCRec* r = inst ? vb6_uc_findByInstance(inst) : NULL;
+    if (r) return vb6_YToTwipY(r->scaleHeight);
+    return vb6_UserControl_ScaleHeight;
 }
 
 void* vb6_UC_CreateDesignTimer(void (*cb)(void*), void* ctx) {

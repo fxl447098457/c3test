@@ -117,6 +117,46 @@ typedef struct vb6_UcPropDesc {
     int32_t (*set)(void* inst, const void* inV);            // NULL = 只读
 } vb6_UcPropDesc;
 
+// Fix <vbeclipse> rev21: UserControl **自有 Public Sub 的按名桥** (晚绑定方法调用用)。
+// 为什么需要 (与上面 props 桥同族, 但缺了它整个停靠区摆不出来):
+//   工程里 `Set l_ucFolder = Controls.Item(id)` 之后调 `l_ucFolder.ShowView ViewId`
+//   是**晚绑定**, cgen 发的是 `vb6_ComCall(实例, L"ShowView", …)`。而宿主模型的
+//   方法分派 (uc_hostmodel_call.inc) 只有一张 **Win32 内建成员**表 (Refresh/Cls/
+//   Move/Show/Hide/ZOrder/…) —— `ShowView` 是 .ctl 里自己写的 Public Sub, 不在表里
+//   ⇒ 落进末尾"未知方法一律空实现"被**静默丢弃**。
+//   实证 play78 (--arch x86): 5 处 `vb6_ComCall(ucFolder实例, L"ShowView", …)` 全落空
+//   ⇒ ucFolder.ShowView 里那句 `l_View.View.Visible = True` 从未执行 ⇒ 所有视图窗体
+//   永远 Visible=False ⇒ ucFolder.ViewArea_Resize 的 `If .Visible Then .Move …`
+//   闸门永闭 ⇒ 视图窗体停在 0x0 / 设计期尺寸 ⇒ 子面板空白。
+//   注意这一条与 ScaleWidth 隔离 (rev20) 无关: 那是"读到别的实例", 这是"根本没调"。
+//
+// 判据 (cgen 侧, 见 cgen_form_uc_methods.inc): 只发**形参全是 ByVal 标量**
+// (String/Long/Integer/Boolean/Double/Single/Byte/LongPtr) 的 Public Sub;
+// 带 ByRef 形参 / 对象 / Picture / Variant 的不发 —— 那些在 VB6 侧有落临时与
+// VariantClear 语义, 桥里没法安全还原 (同 rev18 props 桥的取舍)。缺席 = 保持
+// 改动前的"静默丢弃", 不会更糟。
+//
+// ABI: 形参一律 `const void* argv[]` (元素是 vb6_VARIANT*), 由 cgen 发的 thunk
+// 负责按 VB6 声明类型拆箱; 返回值写 `void* outRet` (可以是 NULL —— 多数 Sub 无返回)。
+// thunk 返回非 0 = 命中并已执行。
+typedef int32_t (*vb6_UcMethodFn)(void* inst, int32_t argc, const void* argv[], void* outRet);
+
+// 生成代码 (cgen_form_uc_methods.inc 发的 thunk) 拆箱 String 实参用: 从
+// vb6_VARIANT 借出 BSTR, **不 VariantClear / 不 SysFreeString** —— 生命周期归
+// 调用方那个实参 Variant, 与上面 props 桥的 String setter 同取舍。
+// 本头只 include <stdint.h>, 不拖 vb6rtl/windows 进来 (同 vb6_UcPropDesc 的理由);
+// BSTR 一律写成 `wchar_t*` (它就是 wchar_t*), 形参声明成 `const void*`,
+// 调用点自己转成 vb6_VARIANT*。
+// 另有一份强类型原型 (const vb6_VARIANT*) 在 vb6forms_uc_internal.h, 供 RTL 内部
+// 使用 —— C 里两者类型相同, 同一 TU 同时 include 两头时也一致 (BSTR == wchar_t*)。
+wchar_t* vb6_ho_variantToBstr(const void* v);
+
+typedef struct vb6_UcMethodDesc {
+    const wchar_t* name;                                   // 方法名 (VB6 原名)
+    int32_t       argc;                                    // 形参个数 (含 Optional 缺省后的实参数)
+    vb6_UcMethodFn fn;
+} vb6_UcMethodDesc;
+
 typedef struct vb6_UserControlDesc {
     const char* typeName;             // VB6 control type name, e.g. "ucChartBar"
     int32_t     scaleMode;            // .ctl design-time ScaleMode (1=Twip 3=Pixel)
@@ -137,6 +177,31 @@ typedef struct vb6_UserControlDesc {
     // C 的"初始化式少于成员数"会把它们补 0 ⇒ 行为与改动前逐字节一致) ----
     const vb6_UcPropDesc* props;
     int32_t               propCount;
+    // ---- Fix <vbeclipse> rev21: 自有 Public Sub 按名桥 (同为"旧 cgen 不发 ⇒ 补 0") ----
+    const vb6_UcMethodDesc* methods;
+    int32_t                 methodCount;
+    // ---- Fix <vbeclipse> rev22: **设计期子控件的 Resize 事件**转发 (可为 NULL) ----
+    //
+    // VB6 里 `Private Sub ViewArea_Resize()` 是 ViewArea 这个 PictureBox 的 Resize
+    // 事件, 由运行时在**该控件尺寸变化时**自动触发。RTL 以前完全没有这条转发
+    // (只有上面那个 UC 自身的 resize), 于是 .ctl 写在子控件事件里的布局代码
+    // 永远不跑 —— 除非谁恰好手工调了一次, 而那一次的取值可能早于布局就绪。
+    //
+    // 实证 play78 (--arch x86, 探针实测): ucFolder.ctl:529 `ViewArea_Resize` 里
+    // 唯一那句 `View.View.Move 0+margin, 0+margin, ViewArea.Width-margin*2, …`
+    // 是把视图窗体摆进 ViewArea 的**唯一**驱动。每个 ucFolder 的 WM_SIZE 序列是
+    //   设计期 (569,441) → 中间 (320,309) → 最终 (468,405)
+    // 而那一次手工调用发生在 Form_Load 期, 早于任何 WM_SIZE ⇒ ViewArea.Width 还是
+    // 设计期 8655 缇 ⇒ 五个 folder 的视图窗体全都只拿到 W=8505, 停在同一个 567x423。
+    //
+    // ⚠⚠ **必须放在结构体最后**: 这个结构体是**布局式初始化** (C 的"初始化式项数
+    //   少于成员数会把余下的补 0"), 所以 **RTL 与 cgen 的字段顺序必须逐字一致**。
+    //   rev22 首次实现时把本槽插在 dblClick 之后 / props 之前, 而 cgen 把它发在最后
+    //   ⇒ methods/methodCount 与本槽错位一整个指针宽 ⇒ `vb6_UC_OwnPropSet` 拿到
+    //   垃圾 propCount/指针 ⇒ 实测 play78 直接 av read 0xa (rc=0xC0000005),
+    //   栈 CreateFolder→ComSetProp→Host_SetProp→UC_OwnPropSet。
+    //   **加槽一律追加到末尾**, 别按"语义分组"插到中间。
+    void      (*designResize)(void* me, const char* ctrlName);
 } vb6_UserControlDesc;
 
 // .ctl module self-registration (type name case-insensitive, duplicate ignored)

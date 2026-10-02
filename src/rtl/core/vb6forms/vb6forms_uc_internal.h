@@ -170,8 +170,40 @@ vb6_UCRec* vb6_uc_findByInstance(const void* inst);
 // obj 收 UC 实例指针或宿主 HWND; 命中返回 1。见 vb6forms_controls.h 的 vb6_UcPropDesc。
 int32_t vb6_UC_OwnPropGet(void* obj, const wchar_t* name, void* outV);
 int32_t vb6_UC_OwnPropSet(void* obj, const wchar_t* name, const void* inV);
+
+// Fix <vbeclipse> rev22: 反查一个设计期子控件窗口属于哪个 UC 实例 + 槽位名。
+// vb6_ControlMove 改完尺寸后用它决定要不要触发 `<Ctrl>_Resize` 事件
+// (见 vb6forms_controls.h 里 designResize 槽的说明)。要求槽位里的窗口**就是**
+// hwnd —— 同一 UC 里可能有多个 HWND, 事件只认被改尺寸的那个。
+int32_t vb6_UC_DesignCtrlOwner(const void* hwnd, void** outInst, const char** outName);
+
+// Fix <vbeclipse> rev22: 在正确宿主上下文里跑一次 `<Ctrl>_Resize`。
+// 返回 1 = 事件跑了。护栏: 槽位窗口就是 hwnd / rec->me 非空 (HostCreate 早期还没
+// 赋值) / rec->ready (创建期不算) / 同控件不重入; push-pop 的 saved 在本函数栈上。
+// ⚠ **不要**加"g_uc_current 非空就跳过"这种判据 —— `ViewArea.Move` 恰恰总在 UC
+//   上下文内 (UserControl_Resize 本身就是 WM_SIZE→push→resize 链进来的), 那样
+//   等于本条永不触发 (首次实现就踩了, 表现为"事件装上了但尺寸没变")。
+// ⚠ vb6_ControlMove (vb6forms_ctrl.c) 调它时**不能** include 本头 (三头混一个
+//   TU 会 segfault, 见该文件里的说明), 故它靠一条 extern 原型看见本声明。
+int32_t vb6_UC_RunDesignResize(const void* hwnd);
+
+// Fix <vbeclipse> rev21: UserControl 自有 Public Sub 的按名桥 (晚绑定方法调用)。
+// obj 收 UC 实例指针或宿主 HWND; argv 是 vb6_VARIANT* 数组、argc 是实参个数。
+// 命中且已执行返回 1; 未命中 / 实参个数对不上返回 0 (交回调用方, 语义同改动前)。
+// 见 vb6forms_controls.h 的 vb6_UcMethodDesc —— 缺了它 ucFolder.ShowView 这类
+// 自有方法会落进"未知方法一律空实现", 视图窗体永远 Visible=False ⇒ 停在 0x0。
+int32_t vb6_UC_OwnMethodCall(void* obj, const wchar_t* name, int32_t argc,
+                             const void* argv[], void* outRet);
 void vb6_uc_push(vb6_UCRec* r, vb6_UCSaved* saved);
 void vb6_uc_pop(const vb6_UCSaved* saved);
+
+// Fix <vbeclipse> rev20: UserControl.ScaleWidth/ScaleHeight 的**按实例**取值口。
+// 这两个宿主伪属性在 RTL 里是进程级全局 (vb6_uc_push/pop 维护), 而 cgen 生成的
+// UC 实例方法之间是裸 C 调用、不经过 push ⇒ 多实例共享一份值, 跨实例串味。
+// cgen 在 .ctl 模块里对实例方法发射形参 `me`, 由它定位 rec 即为正解。
+// 查不到 rec 时回落全局 (保持单实例/设计期路径原行为)。定义见 uc_host.c。
+int32_t vb6_UC_ScaleWidthOf(void* inst);
+int32_t vb6_UC_ScaleHeightOf(void* inst);
 
 // --- uc_host_window.c ---
 // wndproc 内的每个 WM_PAINT/事件分支都要 push/pop 宿主状态，dumpFormComposite

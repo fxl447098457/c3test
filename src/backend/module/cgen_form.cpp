@@ -210,6 +210,29 @@ void CCodeGen::emitDesignerControlDecls(const FrmFormDesc& frmDesc) {
         c_.emitLine("#define vb6_hwnd_" + n114
                   + " (*vb6_UC_DesignSlotOf(me, \"" + child.controlName + "\"))");
     }
+    // Fix <vbeclipse> rev20: ScaleWidth/ScaleHeight 同样必须**按实例**取, 否则
+    // 多实例共享进程级全局 (vb6_uc_push/pop 维护) ⇒ 子控件 Move 拿到别的实例的
+    // 尺寸。ucFolder.ctl 的 `ViewArea.Move 20,20,ScaleWidth-30,ScaleHeight-30`
+    // 是这类布局的主力, 读错就整块面板停在设计期尺寸。
+    //
+    // 用 #undef/#define 而不是改赋值侧: `ScaleWidth = x` 这种写法在 VB6 里
+    // 只出现在设计期属性块 (由 driver 消费, 不进 cgen 的赋值路径), 代码里的
+    // ScaleWidth/ScaleHeight 一律是**读** —— 故重定义为按 me 取值的函数调用是安全的。
+    // (唯一会写它的是 RTL 的 vb6_UserControl_Size / vb6_uc_push, 都在 RTL 侧,
+    //  不经过本宏。)
+    //
+    // `me` 的可得性: 本函数只对 .ctl/.pag 的**实例方法**发射, cgen 为每个实例
+    // 方法都加了 `me` 形参 (类实例指针) —— 与上面 vb6_hwnd_* 宏依赖 `me` 是
+    // 同一个前提。实测 VbEclipse 全部生成 .c 里 ScaleWidth/Height 的 71 处引用
+    // 100% 落在带 `me` 的函数体内 (无一处落在模块级初始化表达式)。
+    if (!isPropertyPageDesigner_) {
+        c_.emitLine("extern int32_t vb6_UC_ScaleWidthOf(void* inst);");
+        c_.emitLine("extern int32_t vb6_UC_ScaleHeightOf(void* inst);");
+        c_.emitLine("#undef vb6_UserControl_ScaleWidth");
+        c_.emitLine("#define vb6_UserControl_ScaleWidth vb6_UC_ScaleWidthOf((void*)me)");
+        c_.emitLine("#undef vb6_UserControl_ScaleHeight");
+        c_.emitLine("#define vb6_UserControl_ScaleHeight vb6_UC_ScaleHeightOf((void*)me)");
+    }
     c_.emitBlank();
 
     // 3) Fix 112: UserControl (.ctl) 宿主描述 — 让窗体可以把本控件实例挂到子窗口.
@@ -246,6 +269,34 @@ void CCodeGen::emitDesignerControlDecls(const FrmFormDesc& frmDesc) {
                 c_.emitLine("    vb6_" + ctl + "_" + cn + "_Timer((vb6_cls_" + ctl + "*)ctx);");
                 c_.emitLine("}");
             }
+        }
+        // Fix <vbeclipse> rev22: 设计期子控件的 `<Ctrl>_Resize` 事件转发。
+        // VB6 里 `Private Sub ViewArea_Resize()` 是 PictureBox 的 Resize 事件,
+        // 运行时在该控件尺寸变化时自动跑。RTL 的 desc 以前没有这个槽, 于是 .ctl
+        // 写在子控件事件里的布局代码永远不跑 (ucFolder.ctl:529 ViewArea_Resize
+        // 是把视图窗体摆进 ViewArea 的唯一驱动)。
+        // 收集判据: 模块 scope 里有 Public/Private 的 `<子控件名>_Resize` Sub,
+        // 且该子控件名确实是本 .ctl 设计面上的控件 (否则跨模块重名会误收)。
+        std::vector<std::string> designResizeCtrls;
+        for (const auto& child : frmDesc.formControl.children) {
+            if (child.controlName.empty()) continue;
+            std::string procName = child.controlName + "_Resize";
+            if (hasProc(procName.c_str()))
+                designResizeCtrls.push_back(cIdent(child.controlName));
+        }
+        if (!designResizeCtrls.empty()) {
+            for (const std::string& cn : designResizeCtrls)
+                c_.emitLine("static void vb6_" + ctl + "_" + cn + "_Resize(vb6_cls_" + ctl + "* me);");
+            c_.emitLine("static void vb6_" + ctl + "_ucHostDesignResize(void* me, const char* ctrlName) {");
+            c_.emitLine("    vb6_cls_" + ctl + "* m = (vb6_cls_" + ctl + "*)me;");
+            c_.emitLine("    if (!m || !ctrlName) return;");
+            // ⚠ 纯 ASCII 字符串字面量: 这段代码跑在 C locale 的 stderr 打印路径上,
+            //   非 ASCII 会让 fprintf 截断, 把"最后一行"伪装成崩溃点 (见 MEMORY)。
+            for (const std::string& cn : designResizeCtrls) {
+                c_.emitLine("    if (strcmp(ctrlName, \"" + cn + "\") == 0) { "
+                            + "vb6_" + ctl + "_" + cn + "_Resize(m); return; }");
+            }
+            c_.emitLine("}");
         }
         c_.emitLine("static void vb6_" + ctl + "_ucHostInit(void* me) {");
         // czUI fix: 设计器子控件 (.ctl 设计面上的 TextBox 等) 属于每个实例 —
@@ -347,8 +398,13 @@ void CCodeGen::emitDesignerControlDecls(const FrmFormDesc& frmDesc) {
         }
 
         // Fix <vbeclipse> rev18: 自有属性按名桥 (表 + thunk) —— 必须在本 desc 之前发。
-        // (.ctl 不走 emitFormFramework, 所以只能落在这个函数里; 见该 .inc 头部说明。)
+        // (.ctl 不走 emitFormFramework, 所以只能落在这个函数里; 见该 .inc 头部说明.)
 #include "backend/detail/module/cgen_form_uc_props.inc"
+
+        // Fix <vbeclipse> rev21: 自有 Public Sub 按名桥 (表 + thunk) —— 同样必须在本 desc 之前.
+        // 缺了它 `l_ucFolder.ShowView ViewId` 这类晚绑定方法调用会落进宿主模型的
+        // "未知方法一律空实现" ⇒ 视图窗体永远 Visible=False ⇒ 停在 0x0 空白。
+#include "backend/detail/module/cgen_form_uc_methods.inc"
 
         c_.emitLine("static const vb6_UserControlDesc vb6_" + ctl + "_ucHostDesc = {");
         c_.emitLine("    \"" + moduleName_ + "\", " + std::to_string(ucScaleMode) + ",");
@@ -360,10 +416,21 @@ void CCodeGen::emitDesignerControlDecls(const FrmFormDesc& frmDesc) {
         // (cgen_form_uc_props.inc) 先发; 那里把条数记进 ucHostPropCount_, 这里只引用.
         c_.emitLine("    vb6_" + ctl + "_ucHostMouseMove, vb6_" + ctl + "_ucHostDblClick,"
                     + (ucHostPropCount_ <= 0
-                           ? std::string(" NULL, 0")
+                           ? std::string(" NULL, 0,")
                            : (" vb6_" + ctl + "_ucProps, "
-                              + std::to_string(ucHostPropCount_)))
+                              + std::to_string(ucHostPropCount_) + ","))
                     + "  /* Fix <vbeclipse> rev18: 自有属性按名桥 */");
+        // Fix <vbeclipse> rev21: 自有 Public Sub 按名桥 (紧跟 props/propCount 之后两槽)。
+        c_.emitLine("    " + (ucHostMethodCount_ <= 0
+                           ? std::string("NULL, 0,")
+                           : ("vb6_" + ctl + "_ucMethods, "
+                              + std::to_string(ucHostMethodCount_) + ","))
+                    + "  /* Fix <vbeclipse> rev21: 自有方法按名桥 */");
+        // Fix <vbeclipse> rev22: 设计期子控件 Resize 事件转发 (rev21 之后最后一槽)。
+        c_.emitLine("    " + (designResizeCtrls.empty()
+                           ? std::string("NULL")
+                           : ("vb6_" + ctl + "_ucHostDesignResize"))
+                    + "  /* Fix <vbeclipse> rev22: 子控件 Resize 事件 */");
         c_.emitLine("};");
         c_.emitLine("void vb6_" + ctl + "_RegisterHost(void) { vb6_UC_Register(&vb6_" + ctl + "_ucHostDesc); }");
         // Fix <vbeclipse> rev14: 让每个 .ctl 在**本模块的 init 函数**里自注册宿主描述。

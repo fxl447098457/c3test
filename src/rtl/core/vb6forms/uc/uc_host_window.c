@@ -34,6 +34,28 @@ static LRESULT CALLBACK vb6_uc_wndproc(HWND hwnd, UINT msg, WPARAM wParam, LPARA
                 vb6_uc_trace("resize.end", r->desc->typeName, r->me);
                 vb6_uc_pop(&saved);
             }
+            /* Fix <vbeclipse> rev22: 本 UC 的尺寸变了 ⇒ 它每个**设计期子控件**的
+             * 尺寸也快变了 ⇒ 该跑它们的 `<Ctrl>_Resize` 事件 (VB6 语义)。
+             *
+             * 为什么挂在这里而不是 vb6_ControlMove (那是所有摆位的收口):
+             *   放在 Move 里会**递归**。`ViewArea.Move …` 正是 ucFolder 的
+             *   `UserControl_Resize` 内部发的, 而那个过程就是经
+             *   WM_SIZE → vb6_uc_push → resize → Move 这条链进来的 ⇒ Move 里再跑
+             *   子控件事件 ⇒ 又 Move ⇒ 无限递归。
+             *   实测 play78 (rev22 首次实现): 视图窗体尺寸确实对上了容器
+             *   (frmViewHelp 253x219 / frmViewSnapshot 778x190), 但**整个窗口
+             *   上下颠倒 + 文字镜像** —— 递归 Move 把各层控件反复推挤, 坐标系翻转。
+             *   两害相权: 宁可尺寸停在中间值 (rev21 状态) 也不能递归。
+             *
+             * 为什么放在 pop **之后** 是安全的: 此时 g_uc_current 已还原成外层值
+             * (通常 NULL), 所以 vb6_UC_RunDesignResize 里 "上下文内就不跑" 的
+             * 判据不会误挡本调用 —— 它是唯一允许在上下文外触发的入口。
+             * 且它内部有同控件重入短路, 事件体里 Move 别的控件再发 WM_SIZE 也不会
+             * 无限展开 (那一层 g_uc_current 非空, 直接被挡)。*/
+            for (int32_t di = 0; di < r->designCount; di++) {
+                void* ctrlH = r->design[di].value;
+                if (ctrlH) vb6_UC_RunDesignResize(ctrlH);
+            }
             InvalidateRect(hwnd, NULL, FALSE);
             return 0;
         }

@@ -23,6 +23,41 @@
 //      ucPerspective.Refresh 的 `l_ucFolder.Move .LeftPos, .TopPos, …`。现走
 //      vb6_ControlMove (缇→像素 + 子窗坐标), 并补 Show/Hide。
 //   修前 play78: 7 个 ucFolder 宿主全停在设计期 569x441、重叠在左上角。
+// Fix <vbeclipse> rev21: UserControl **自有 Public Sub 的按名桥**。
+//   ① vb6forms_controls.h 加 vb6_UcMethodDesc/vb6_UcMethodFn; vb6_UserControlDesc
+//      追加 methods/methodCount 两槽 (旧 cgen 不发 ⇒ C 补 0 ⇒ 逐字节同改动前)。
+//   ② uc_host.c 新增 vb6_UC_OwnMethodCall (先 findByInstance 再 findByHwnd),
+//      uc_hostmodel_call.inc 在**实例归一成 HWND 之前**、且**内建 Refresh 之前**查它
+//      —— 同名时真 VB6 走用户写的那个 (它负责重排子控件, 内建重绘只是顺带)。
+//   ③ cgen_form_uc_methods.inc 为每个 .ctl 发 {名字, argc, fn} 表 + 拆箱 thunk。
+//   修前 play78: 5 处 `vb6_ComCall(ucFolder实例, L"ShowView", …)` 全落进
+//   "未知方法一律空实现" ⇒ ucFolder.ShowView 里 `l_View.View.Visible = True`
+//   从未执行 ⇒ 视图窗体永远 Visible=False ⇒ ViewArea_Resize 的
+//   `If .Visible Then .Move …` 闸门永闭 ⇒ 视图窗体停在 0x0/设计期尺寸
+//   ⇒ 子面板空白。判据: 窗口树里 VB6_Form_frmViewProperties / frmViewTasks = 0x0。
+// [C3_MV22] 临时探针 (排完删): uc_hostmodel_{call,getprop}.inc 打 Move 的调用时刻
+//   实参+前后尺寸、Visible 的 style+读数, 门控 C3_UC_TRACE。
+// Fix <vbeclipse> rev22: **设计期子控件的 Resize 事件**转发。
+//   ① vb6forms_controls.h 加 designResize 槽 —— ⚠ **必须追加在结构体末尾**:
+//      该结构体是布局式初始化, RTL 与 cgen 的字段顺序必须逐字一致。首版把它插在
+//      dblClick 之后/props 之前而 cgen 发在末尾 ⇒ methods/methodCount 错位一整个
+//      指针宽 ⇒ vb6_UC_OwnPropSet 拿到垃圾 propCount ⇒ 实测 av read 0xa (栈
+//      CreateFolder→ComSetProp→Host_SetProp→UC_OwnPropSet)。
+//   ② uc_host.c 加 vb6_UC_DesignCtrlOwner(按 hwnd 反查 UC 实例+槽位名) 与
+//      vb6_UC_RunDesignResize(push/pop + 同控件重入短路 + 深度上限)。
+//   ③ 挂在 uc_host_window.c 的 **WM_SIZE 尾部** (尺寸赋值+resize 之后), 遍历本 UC
+//      各设计期子控件各调一次。**不能挂 vb6_ControlMove** (所有摆位的收口, 看似
+//      最自然) —— `ViewArea.Move` 正是 UserControl_Resize 内部发的, 而那个过程经
+//      WM_SIZE→push→resize→Move 链进来 ⇒ Move 里再跑子控件事件 = 无限递归。
+//      也不能加 `if (g_uc_current) return 0` —— 实测 WM_SIZE 尾部 g_uc_current
+//      仍**非空** (WM_SIZE 是 SetWindowPos 的同步 SendMessage, 跑在 pop 之前),
+//      那道判据等于永不触发。
+//   修前 play78: ucFolder.ctl:529 `ViewArea_Resize` (ViewArea 的 Resize 事件, 是把
+//     视图窗体摆进 ViewArea 的唯一驱动) 只在 Refresh 里被裸调一次, 且那一次在
+//     Form_Load 期 —— 早于任何 WM_SIZE ⇒ 五个 folder 的视图窗体全都只拿到
+//     W=8505 (= ViewArea 设计期宽 8655 - 30 - 2*margin), 停在同一个 567x423。
+//   修后: frmViewHelp 253x219 (容器 253x219)、frmViewSnapshot 778x190 (容器
+//     778x190) —— 视图窗体尺寸**精确等于**各自容器。
 // Fix <vbeclipse> rev16: Variant **槽位赋值**改"接管"语义 —— 新增
 // vb6_VariantAssign(dst, src) = vb6_VariantClear(dst) + vb6_VariantCopy(dst,&src)
 // (BSTR 另分配 / Dispatch AddRef / x86 DECIMAL 另分配)。
@@ -326,4 +361,5 @@
 
 /* designslot-by-instance re-embed 1790916522 */
 
-/* visible-selfstyle-not-chain re-embed 1790919492 */
+/* Fix <vbeclipse> rev20: 新增 vb6_UC_ScaleWidthOf/ScaleHeightOf (按 me 解析实例)
+   re-embed 1790930401 */
