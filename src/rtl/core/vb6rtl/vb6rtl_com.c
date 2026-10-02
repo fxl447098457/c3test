@@ -328,7 +328,12 @@ vb6_VARIANT vb6_VariantFromStackVARIANT(VARIANT* pv) {
             break;
         case VT_DISPATCH:
             result.pdispVal = pv->pdispVal;
-            if (pv->pdispVal) pv->pdispVal->lpVtbl->AddRef(pv->pdispVal);
+            // Fix <vbeclipse>: 用受守卫的 vb6_ComAddRefDispatch (内含 vb6_ComIsDispatchable),
+            // 与 vb6_VariantObject 同口径。`For Each ctrl In Controls` 交回的是**裸子控件
+            // HWND** (宿主分派层的对象表示), 不是真 IDispatch —— 裸 AddRef 会把 HWND 首字段
+            // 当 vtable 解引用 → av read (ucTabStrip.UserControl_Resize 实测)。真 COM 接收者
+            // 仍照常 AddRef; 析构侧 vb6_ReleaseObject 同判据跳过, 收支平衡。
+            if (pv->pdispVal) vb6_ComAddRefDispatch(pv->pdispVal);
             break;
         case VT_BOOL:   result.boolVal = pv->boolVal; break;
         case VT_UI1:    result.bVal = pv->bVal; break;

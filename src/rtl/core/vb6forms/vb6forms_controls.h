@@ -178,6 +178,12 @@ void  vb6_UC_SetPendingFont(void* f);
 void* vb6_UC_CreateDesignEdit(int32_t left, int32_t top, int32_t width, int32_t height);
 // 设计器 Timer: cb(ctx) 在每次 WM_TIMER 触发 (受 vb6_SetTimerEnabled/Interval 属性控制)
 void* vb6_UC_CreateDesignTimer(void (*cb)(void*), void* ctx);
+// Fix <vbeclipse>: 设计器子控件 VB.PictureBox → STATIC 子窗 (视图窗体 SetParent 的容器)
+void* vb6_UC_CreateDesignPicture(int32_t left, int32_t top, int32_t width, int32_t height);
+// Fix <vbeclipse>: 设计器子控件里"工程内 UserControl" → 宿主子窗 (复用 HostCreate, 可递归);
+// typeName 非已登记 UC 时返回 NULL (第三方 OCX 子控件走这条, 与不建等价)。
+void* vb6_UC_CreateDesignUserControl(const char* typeName, const char* ctrlName,
+                                     int32_t left, int32_t top, int32_t width, int32_t height);
 // ---- czUI fix: 轻量 PropertyBag (IDispatch) ----
 // 供生成的 UserControl_ReadProperties 在运行期以 VB6 语义读取设计期持久化属性,
 // 使 .ctl 内部"读取后同步"逻辑 (如 toggle 的 m_AnimPos 与 Checked 同步) 得以执行。

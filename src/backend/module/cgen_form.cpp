@@ -200,12 +200,15 @@ void CCodeGen::emitDesignerControlDecls(const FrmFormDesc& frmDesc) {
     emitControlHandleDecls(frmDesc);
     // czUI fix: 设计器子控件句柄改为按实例槽位 — 全局句柄被最后创建的实例覆盖,
     // 导致 11 个实例只有最后一个的 timer/textbox 生效 (开关动画死、文本框错乱)。
-    c_.emitLine("extern void** vb6_UC_DesignSlot(const char* name);");
+    // Fix VbEclipse: 必须传 `me` — UC 实例方法多由外部模块直接 C 调用发起,
+    // 此时全局 g_uc_current 已 pop 成 NULL, 只按上下文的旧签名会退化成共享
+    // orphan 槽 (恒 NULL), 面板 SetParent/Move 全部落空。
+    c_.emitLine("extern void** vb6_UC_DesignSlotOf(void* inst, const char* name);");
     for (const auto& child : frmDesc.formControl.children) {
         std::string n114 = cIdent(child.controlName);
         c_.emitLine("#undef vb6_hwnd_" + n114);
         c_.emitLine("#define vb6_hwnd_" + n114
-                  + " (*vb6_UC_DesignSlot(\"" + child.controlName + "\"))");
+                  + " (*vb6_UC_DesignSlotOf(me, \"" + child.controlName + "\"))");
     }
     c_.emitBlank();
 
@@ -254,19 +257,15 @@ void CCodeGen::emitDesignerControlDecls(const FrmFormDesc& frmDesc) {
         // Timer 等暂不实例化 (相关 API 对 NULL 安全)。
         const bool noKids = getenv("C3_NO_DESIGNKIDS") != nullptr;
         for (const auto& child : frmDesc.formControl.children) {
+            auto iprop = [&](const char* k, int defv) -> int {
+                auto itc = child.properties.find(k);
+                return itc != child.properties.end() ? (int)itc->second.intValue : defv;
+            };
             if (!noKids && child.controlType == FrmControlType::TextBox) {
-                auto iprop = [&](const char* k, int defv) -> int {
-                    auto itc = child.properties.find(k);
-                    return itc != child.properties.end() ? (int)itc->second.intValue : defv;
-                };
                 c_.emitLine("    vb6_hwnd_" + cIdent(child.controlName) + " = vb6_UC_CreateDesignEdit("
                     + std::to_string(iprop("Left", 0)) + ", " + std::to_string(iprop("Top", 0)) + ", "
                     + std::to_string(iprop("Width", 2000)) + ", " + std::to_string(iprop("Height", 400)) + ");");
             } else if (!noKids && child.controlType == FrmControlType::Timer) {
-                auto tprop = [&](const char* k, int defv) -> int {
-                    auto itc = child.properties.find(k);
-                    return itc != child.properties.end() ? (int)itc->second.intValue : defv;
-                };
                 c_.emitLine("    vb6_hwnd_" + cIdent(child.controlName) + " = vb6_UC_CreateDesignTimer("
                     + "vb6_" + ctl + "_ucTimerThunk_" + cIdent(child.controlName) + ", me);");
                 // Fix <vbeclipse>: 设计器 Timer 的 Enabled/Interval 是权威初值, 必须像
@@ -275,9 +274,27 @@ void CCodeGen::emitDesignerControlDecls(const FrmFormDesc& frmDesc) {
                 // tmrDrag 被当成开着的 → 每 tick 里 `Interval = 1` 自激 → Controls.Item
                 // 洪泛 (~95k 次) 把消息循环饿死, 停靠面板全不刷新。
                 c_.emitLine("    vb6_SetTimerInterval(vb6_hwnd_" + cIdent(child.controlName) + ", "
-                    + std::to_string(tprop("Interval", 60000)) + ");");
+                    + std::to_string(iprop("Interval", 60000)) + ");");
                 c_.emitLine("    vb6_SetTimerEnabled(vb6_hwnd_" + cIdent(child.controlName) + ", "
-                    + std::to_string(tprop("Enabled", 0)) + ");");
+                    + std::to_string(iprop("Enabled", 0)) + ");");
+            } else if (!noKids && child.controlType == FrmControlType::PictureBox) {
+                // Fix <vbeclipse>: ucFolder.ViewArea 等 PictureBox 设计子控件 → STATIC 子窗,
+                // 视图窗体靠 SetParent 挂进它。旧循环不建 → ViewArea 恒 NULL → 面板全空。
+                c_.emitLine("    vb6_hwnd_" + cIdent(child.controlName) + " = vb6_UC_CreateDesignPicture("
+                    + std::to_string(iprop("Left", 0)) + ", " + std::to_string(iprop("Top", 0)) + ", "
+                    + std::to_string(iprop("Width", 2000)) + ", " + std::to_string(iprop("Height", 1500)) + ");");
+            } else if (!noKids && child.controlType == FrmControlType::Unknown
+                       && child.controlTypeName.find('.') != std::string::npos) {
+                // Fix <vbeclipse>: 设计子控件里"工程内 UserControl" (parseControlType 认不出的
+                // 限定名, 如 VbEclipse.ucTabStrip / VbEclipse.ucCaption) → 复用 HostCreate 逐实例
+                // 建宿主子窗。非登记 UC (第三方 OCX) 时 helper 内 findDesc 落空返回 NULL, 与不建
+                // 等价, 不影响别的夹具 (它们没有这类设计子控件)。
+                std::string tn = child.controlTypeName;
+                for (char& ch : tn) { if (ch == '"' || ch == '\\') ch = ' '; }
+                c_.emitLine("    vb6_hwnd_" + cIdent(child.controlName) + " = vb6_UC_CreateDesignUserControl("
+                    + "\"" + tn + "\", \"" + child.controlName + "\", "
+                    + std::to_string(iprop("Left", 0)) + ", " + std::to_string(iprop("Top", 0)) + ", "
+                    + std::to_string(iprop("Width", 2000)) + ", " + std::to_string(iprop("Height", 1500)) + ");");
             }
         }
         if (hasInit) c_.emitLine("    vb6_" + ctl + "_UserControl_Initialize((vb6_cls_" + ctl + "*)me);");

@@ -45,7 +45,15 @@ static int32_t vb6_ComIsCodePtr(const void* p) {
 }
 
 int32_t vb6_ComIsDispatchable(const void* disp) {
-    if (!disp || IsBadReadPtr(disp, sizeof(void*))) return 0;
+    if (!disp) return 0;
+    // Fix <vbeclipse>: 窗口句柄 (HWND) 是内核索引, 不是指向 IDispatch 对象的指针。
+    // 宿主 Controls 枚举 (`For Each ctrl In Controls`) 把子控件的**裸 HWND** 放进
+    // VT_DISPATCH 槽; 下面 `*(void**)disp` 会把 HWND 当指针读堆内存, 若那块内存
+    // 恰好看着像 vtable 就误判"可分派" → 调伪 AddRef → 跳到垃圾地址崩
+    // (ucTabStrip.UserControl_Resize 实测, PC=野值)。真窗口句柄一律非 COM 分派对象,
+    // 由宿主模型 (IsHostObject/IsWindow) 单独应答, 这里直接判否。
+    if (IsWindow((HWND)disp)) return 0;
+    if (IsBadReadPtr(disp, sizeof(void*))) return 0;
     void* vtbl = *(void**)disp;
     /* IDispatch: QueryInterface/AddRef/Release/GetTypeInfoCount/
      * GetTypeInfo/GetIDsOfNames/Invoke — 前 7 槽必须在可执行页里 */

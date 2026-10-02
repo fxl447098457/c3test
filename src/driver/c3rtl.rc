@@ -319,3 +319,9 @@
 /* objprop bridge + timer/formload re-embed 1790903170 */
 
 /* loadform dedup re-embed 1790903414 */
+
+/* nesteduc reapply re-embed 1790913567 */
+
+/* enum-wrap-hostdispatch re-embed 1790913967 */
+
+/* designslot-by-instance re-embed 1790916522 */

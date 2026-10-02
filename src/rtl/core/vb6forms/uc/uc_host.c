@@ -323,8 +323,15 @@ void* vb6_UC_InstanceOf(void* hwnd) {
 }
 
 void* vb6_UC_HwndOf(void* instance) {
+    if (!instance) return NULL;
+    // 已经就是 HWND 就别再查表 —— vb6_uc_findByInstance 只比指针, 地址空间
+    // 碰撞时会把一个真实窗口 HWND 认成某个 UC 实例, 换出那个 rec 里未初始化
+    // 的 hwnd 垃圾值, 后续 IsWindow/ShowWindow 全部作用在无效句柄上
+    // (实测 frmView* 窗体 Visible=True 静默失效, 停靠面板 0x0)。
+    if (IsWindow((HWND)instance)) return instance;
     vb6_UCRec* r = vb6_uc_findByInstance(instance);
-    return r ? (void*)r->hwnd : NULL;
+    if (r && IsWindow((HWND)r->hwnd)) return (void*)r->hwnd;
+    return NULL;
 }
 
 int32_t vb6_UC_IsHostHwnd(void* hwnd) {
@@ -383,7 +390,34 @@ void* vb6_UC_CreateDesignEdit(int32_t left, int32_t top, int32_t width, int32_t 
     return edit;
 }
 
-// ---- czUI fix: 设计器 Timer (.ctl 设计面上的 VB.Timer) 逐实例实例化 ----
+// ---- Fix <vbeclipse>: 设计器子控件 VB.PictureBox → 每实例一个 STATIC 子窗口 ----
+// ucFolder 的 ViewArea 就是一个 PictureBox：视图窗体靠 `SetParent view.hWnd,
+// ViewArea.hWnd` 挂到它里面。旧设计子控件循环只建 TextBox/Timer，ViewArea 恒 NULL
+// → 视图无处可挂 → 停靠面板全空。WS_CLIPCHILDREN 让子窗体不被容器重绘覆盖。
+void* vb6_UC_CreateDesignPicture(int32_t left, int32_t top, int32_t width, int32_t height) {
+    HWND parent = (HWND)vb6_UserControl_hWnd;
+    if (!parent) return NULL;
+    HINSTANCE hInst = (HINSTANCE)GetWindowLongPtrW(parent, GWLP_HINSTANCE);
+    HWND pic = CreateWindowExW(0, L"STATIC", L"",
+                               WS_CHILD | WS_VISIBLE | WS_CLIPCHILDREN | SS_NOTIFY,
+                               vb6_TwipToX(left), vb6_TwipToY(top),
+                               vb6_TwipToX(width), vb6_TwipToY(height),
+                               parent, NULL, hInst, NULL);
+    return pic;
+}
+
+// ---- Fix <vbeclipse>: 设计器子控件里"工程内 UserControl" → 每实例一个宿主子窗口 ----
+// ucFolder 的 ViewTabs(ucTabStrip)/ViewCaption(ucCaption) 是**另一个 UserControl**。
+// 复用 Controls.Add 走的 vb6_UC_HostCreate (它自带 push/pop 宿主上下文, 可安全递归)。
+// typeName 不是已登记 UC (如第三方 OCX 子控件) 时 findDesc 返回 NULL → 本函数返回
+// NULL, 与"从没建"一致, 不会更糟。parent = 当前 UC 的宿主窗口。
+void* vb6_UC_CreateDesignUserControl(const char* typeName, const char* ctrlName,
+                                     int32_t left, int32_t top, int32_t width, int32_t height) {
+    HWND parent = (HWND)vb6_UserControl_hWnd;
+    if (!parent || !typeName) return NULL;
+    HINSTANCE hInst = (HINSTANCE)GetWindowLongPtrW(parent, GWLP_HINSTANCE);
+    return vb6_UC_HostCreate(typeName, left, top, width, height, parent, hInst, ctrlName, -1);
+}
 // 隐藏窗口 + 真实 SetTimer; WM_TIMER 时按 VB6_TimerEnabled/Interval 属性决定
 // 是否回调 (vb6_SetTimerEnabled/Interval 已把这些值写进窗口属性)。
 // 这让 czUI 的 toggle 滑动动画 / 全屏自动隐藏标题栏真正运转起来。
@@ -434,22 +468,43 @@ static LRESULT CALLBACK vb6_uc_timerProc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
 // czUI fix: 设计器子控件槽位 — 按当前 UC 上下文存取, 替代被多实例共享的
 // 全局句柄变量 (11 个实例只有最后一个的 timer/textbox 生效的根因)。
 // 用法: cgen 把设计器子控件句柄变量 emit 成
-//   #define vb6_hwnd_txtEmbed (*vb6_UC_DesignSlot("txtEmbed"))
+//   #define vb6_hwnd_txtEmbed (*vb6_UC_DesignSlotOf(me, "txtEmbed"))
 // 无上下文时指向孤儿槽 (NULL), 行为与旧全局一致。
-void** vb6_UC_DesignSlot(const char* name) {
-    static void* orphan = NULL;
-    if (!g_uc_current) return &orphan;
-    for (int i = 0; i < g_uc_current->designCount; i++) {
-        if (strcmp(g_uc_current->design[i].name, name) == 0)
-            return &g_uc_current->design[i].value;
+//
+// Fix VbEclipse: 原签名只吃 name, 依赖全局 g_uc_current。但 cgen 生成的
+// UC 实例方法 (vb6_ucFolder_AddView 等) 绝大多数是**直接 C 调用**, 由外部
+// 模块 (ucPerspective.CreateFolder) 在任意上下文里发起 —— 此时 g_uc_current
+// 已被 pop 成 NULL ⇒ 槽位退化成共享 orphan 槽 (实测恒为 NULL) ⇒
+// SetParent(view, NULL) 落空, 视图窗体留在桌面顶层, 停靠面板一片空白。
+// 拆成两个入口: Of(inst) 按实例定位 (方法体内有 me, 可靠), 无 inst 的
+// 旧入口保留给事件回调等确实只有 hwnd 上下文的场景。
+static void** vb6_uc_designSlotIn(vb6_UCRec* r, const char* name) {
+    for (int i = 0; i < r->designCount; i++) {
+        if (strcmp(r->design[i].name, name) == 0)
+            return &r->design[i].value;
     }
-    if (g_uc_current->designCount < VB6_UC_DESIGN_SLOTS) {
-        Vb6UcDesignSlot* sl = &g_uc_current->design[g_uc_current->designCount++];
+    if (r->designCount < VB6_UC_DESIGN_SLOTS) {
+        Vb6UcDesignSlot* sl = &r->design[r->designCount++];
         snprintf(sl->name, sizeof(sl->name), "%s", name);
         sl->value = NULL;
         return &sl->value;
     }
-    return &orphan;
+    return NULL;   // 槽位耗尽
+}
+
+void** vb6_UC_DesignSlotOf(void* inst, const char* name) {
+    static void* orphan = NULL;
+    vb6_UCRec* r = inst ? vb6_uc_findByInstance(inst) : NULL;
+    // 回退到窗口上下文: 事件回调/设计期路径只拿得到 hwnd, 或 inst 尚未登记
+    // (HostCreate 里 desc->init(r->me) 之前 rec->me 才刚赋值, 见 uc_host_create.inc)。
+    if (!r) r = g_uc_current;
+    if (!r) return &orphan;
+    void** slot = vb6_uc_designSlotIn(r, name);
+    return slot ? slot : &orphan;
+}
+
+void** vb6_UC_DesignSlot(const char* name) {
+    return vb6_UC_DesignSlotOf(NULL, name);
 }
 
 void* vb6_UC_CreateDesignTimer(void (*cb)(void*), void* ctx) {
