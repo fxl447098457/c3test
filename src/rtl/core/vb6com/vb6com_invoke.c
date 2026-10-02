@@ -622,6 +622,20 @@ void vb6_ComSetRef(void* disp, const wchar_t* propName, void* objRef) {
     if (!disp) return;
     IDispatch* pDisp = (IDispatch*)disp;
 
+    // Fix <vbeclipse>: 宿主对象 (原生 vb6_cls_X* UC 实例 / HWND) 不是真 IDispatch,
+    // 走下面的 getDispid+Invoke 必 "not found"。与 vb6_ComSetProp (line 526) 同口径:
+    // 先把 objRef 包成 VT_DISPATCH 的 Win VARIANT, 转成 vb6_VARIANT 交给 Host_SetProp,
+    // 后者落到 vb6_UC_OwnPropSet 的名字桥 (uc_hostmodel_setprop.inc)。
+    if (vb6_Host_IsHostObject(disp)) {
+        VARIANT winObj; VariantInit(&winObj);
+        winObj.vt = VT_DISPATCH; winObj.pdispVal = (IDispatch*)objRef;
+        char hin[64];
+        vb6_Host_FromWinVariant(&winObj, hin);
+        vb6_Host_SetProp(disp, propName, hin);
+        vb6_Host_ClearVariant(hin);
+        return;
+    }
+
     DISPID dispid = vb6_getDispid(pDisp, propName);
     if (dispid == DISPID_UNKNOWN) {
         fwprintf(stderr, L"vb6_ComSetRef: property \"%ls\" not found\n", propName);

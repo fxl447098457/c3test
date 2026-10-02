@@ -16,18 +16,18 @@
             ownerExpr = "vb6_Forms_GetActive()";
         }
     }
-    c_.emitLine("// === " + formName + " Show ===");
-    c_.emitLine("void " + showFn + "(void* hMDIClient, int modal) {");
+    c_.emitLine("// === " + formName + " Load (create hidden, fire Form_Load) ===");
+    c_.emitLine("void vb6_form_load_" + cIdent(formName) + "(void) {");
     c_.indent();
-    c_.emitLine("(void)hMDIClient;");
+    c_.emitLine("if (vb6_hwnd_" + cIdent(formName) + ") return;  /* 已 Load */");
     c_.emitLine("void* hInst = vb6_GetAppInstance();");
+    c_.emitLine("void* hMDIClient = NULL;");
     if (isMDIForm) {
         c_.emitLine("vb6_RegisterMDIFormClass(\"" + clsName + "\", (void*)" + wndProc + ", hInst, 0);");
         c_.emitLine("vb6_hwnd_" + cIdent(formName) + " = vb6_CreateMDIFormWindow(");
         c_.indent();
         c_.emitLine("\"" + clsName + "\", \"" + caption + "\",");
         if (startupPos == 2) {
-            // M22-Issue2: StartUpPosition=2 CenterScreen
             c_.emitLine("-1, -1,  /* M22-Issue2: CenterScreen, RTL handles pixel calc */");
         } else if (startupPos == 3) {
             c_.emitLine("CW_USEDEFAULT, CW_USEDEFAULT,");
@@ -39,7 +39,6 @@
         c_.dedent();
     } else if (isMDIChild) {
         if (formBackColor >= 0) {
-            // czUI fix: 窗体级 BackColor → 类背景刷 + Ambient.BackColor
             c_.emitLine("vb6_RegisterFormClassBg(\"" + clsName + "\", (void*)" + wndProc + ", hInst, 0, " + std::to_string(formBackColor) + ");");
         } else {
             c_.emitLine("vb6_RegisterFormClass(\"" + clsName + "\", (void*)" + wndProc + ", hInst, 0);");
@@ -48,7 +47,6 @@
         c_.indent();
         c_.emitLine("\"" + clsName + "\", \"" + caption + "\",");
         if (startupPos == 2) {
-            // M22-Issue2: StartUpPosition=2 CenterScreen
             c_.emitLine("-1, -1,  /* M22-Issue2: CenterScreen, RTL handles pixel calc */");
         } else if (startupPos == 3) {
             c_.emitLine("CW_USEDEFAULT, CW_USEDEFAULT,");
@@ -60,7 +58,6 @@
         c_.dedent();
     } else {
         if (formBackColor >= 0) {
-            // czUI fix: 窗体级 BackColor → 类背景刷 + Ambient.BackColor
             c_.emitLine("vb6_RegisterFormClassBg(\"" + clsName + "\", (void*)" + wndProc + ", hInst, 0, " + std::to_string(formBackColor) + ");");
         } else {
             c_.emitLine("vb6_RegisterFormClass(\"" + clsName + "\", (void*)" + wndProc + ", hInst, 0);");
@@ -69,7 +66,6 @@
         c_.indent();
         c_.emitLine("\"" + clsName + "\", \"" + caption + "\",");
         if (startupPos == 2) {
-            // M22-Issue2: StartUpPosition=2 CenterScreen
             c_.emitLine("-1, -1,  /* M22-Issue2: CenterScreen, RTL handles pixel calc */");
         } else if (startupPos == 3) {
             c_.emitLine("CW_USEDEFAULT, CW_USEDEFAULT,");
@@ -80,6 +76,15 @@
         c_.emitLine("hInst, " + ownerExpr + ", " + std::to_string(formBorderStyle) + ");");
         c_.dedent();
     }
+    c_.emitLine("vb6_LoadForm(vb6_hwnd_" + cIdent(formName) + ");");
+    c_.dedent();
+    c_.emitLine("}");  // Load
+    c_.emitBlank();
+    c_.emitLine("// === " + formName + " Show ===");
+    c_.emitLine("void " + showFn + "(void* hMDIClient, int modal) {");
+    c_.indent();
+    c_.emitLine("(void)hMDIClient;");
+    c_.emitLine("vb6_form_load_" + cIdent(formName) + "();");
     c_.emitLine("vb6_ShowForm(vb6_hwnd_" + cIdent(formName) + ", modal);");
     c_.dedent();
     c_.emitLine("}");  // Show

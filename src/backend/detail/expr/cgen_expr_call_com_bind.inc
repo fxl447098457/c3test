@@ -692,7 +692,25 @@
                 std::string packFn = comPackExpr(*argExpr);
                 emitExpr(*argExpr);
                 { std::string resolved = resolveComMarkerForPack(packFn); if (!resolved.empty()) lastExpr_ = resolved; }
-                packedArgs.push_back(packFn + "(" + lastExpr_ + ")");
+                // Fix <vbeclipse>: 实参表达式本身已返回**堆 VARIANT*** (ComGetProp /
+                // ComCall / ComGetObjectProp … 返回 void* 承载一个 COM VARIANT) 时, 它
+                // 已经是 ComCall 形参数组要的东西, 不能再包一层 vb6_ComPackObject —— 那会
+                // 把这个 VARIANT* 当 IDispatch*, 读其头 4 字节 (VT_EMPTY 时 vt+reserved=0)
+                // 为 lpVtbl=NULL, 再 NULL+4 取 AddRef 槽 → av read target=0x4。
+                // (ucPerspective 停靠: ucTab.Add 的 Icon 实参 = View.Icon 晚绑定读数。)
+                bool argIsVariantPtr =
+                       lastExpr_.compare(0, 15, "vb6_ComGetProp(") == 0
+                    || lastExpr_.compare(0, 17, "vb6_ComGetPropArg(") == 0
+                    || lastExpr_.compare(0, 12, "vb6_ComCall(") == 0
+                    || lastExpr_.compare(0, 18, "vb6_ComCallObject(") == 0
+                    || lastExpr_.compare(0, 18, "vb6_ComGetObjectProp(") == 0
+                    || lastExpr_.compare(0, 23, "vb6_ComGetPropertyObject(") == 0
+                    || lastExpr_.compare(0, 23, "vb6_ComGetPropertyVariant(") == 0;
+                if (argIsVariantPtr && packFn == "vb6_ComPackObject") {
+                    packedArgs.push_back(lastExpr_);   // 已是 VARIANT*, 直接作实参 (ComCall 会 VariantClear+free)
+                } else {
+                    packedArgs.push_back(packFn + "(" + lastExpr_ + ")");
+                }
             };
             for (size_t pos = 0; pos < node.positional.size(); pos++) {
                 if (node.omittedArgs.count(pos)) {

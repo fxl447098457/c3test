@@ -29,9 +29,22 @@
 //   - 只发 0 参 Property Get 与 1 参 ByVal Property Let/Set; 带参默认属性与 ByRef 形参不发。
 
 {
-    struct UcPropPick { std::string name; std::string vbType; std::string getFn; std::string setFn; };
+    struct UcPropPick { std::string name; std::string vbType; std::string getFn; std::string setFn; std::string objCType; };
     std::vector<UcPropPick> ucProps;
     ucHostPropCount_ = 0;
+
+    // Fix <vbeclipse>: 对象属性桥 (`.Folder = Folder` 这类 Property Set/Let 收
+    // 工程类或 Object)。标量档 (vbScalarOf*) 认不出的, 若声明类型解析成指针类
+    // C 类型 (vb6_cls_X* 工程类 / void* 通用 Object), 就按对象属性发**只写**桥:
+    // setter 从 VARIANT 的 pdispVal 取回裸实例指针交给原生 prop_set_X(me, <cls>**),
+    // 不 AddRef/不 VariantClear (借用, 所有权归调用方), 避开 rev18 注释警告的
+    // "裸结构体指针当 VT_DISPATCH → VariantClear 把 __comObj 当 vtable" 崩溃族。
+    auto objCTypeOf = [this](const std::string& tn, Vb6Type t) -> std::string {
+        std::string ct = tn.empty() ? std::string() : cTypeForDeclaredTypeName(tn);
+        if (!ct.empty() && ct.rfind("vb6_cls_", 0) == 0) return ct;   // 工程类实例指针
+        if (t == Vb6Type::Object) return "void*";                     // 通用 Object 槽
+        return std::string();
+    };
 
     auto vbScalarOfName = [](const std::string& n) -> std::string {
         const std::string l = Symbol::toLower(n);
@@ -95,10 +108,18 @@
             } else if (ps->kind == SymbolKind::PropertyLet || ps->kind == SymbolKind::PropertySet) {
                 if (ps->params.size() != 1) continue;
                 const ParameterInfo& pi = ps->params[0];
-                if (!pi.isByVal) continue;                      // ByRef 形参要落临时, 不作为
                 pick.vbType = vbScalarOfName(pi.typeRefName);
                 if (pick.vbType.empty()) pick.vbType = vbScalarOfType(pi.type);
-                if (pick.vbType.empty()) continue;
+                if (!pick.vbType.empty()) {
+                    if (!pi.isByVal) continue;                  // 标量 ByRef 形参要落临时, 不作为
+                } else {
+                    // 标量不中 → 试对象档 (工程类 / Object)。对象 Property Set 形参在 VB6
+                    // 天然 ByRef (C 侧 <cls>**), 但桥 setter 用本地 _o 取址传下去即"落临时",
+                    // 不受 isByVal 限制。只发 setter, getter 留 NULL (对象 getter 装箱有
+                    // VariantClear 把 __comObj 当 vtable 的崩溃风险, 见 objCTypeOf 注释)。
+                    pick.objCType = objCTypeOf(pi.typeRefName, pi.type);
+                    if (pick.objCType.empty()) continue;
+                }
                 pick.setFn = "vb6_" + ctl + "_ucPropSet_" + cIdent(ps->name);
             } else {
                 continue;
@@ -115,6 +136,8 @@
                 if (Symbol::toLower(m.name) == Symbol::toLower(p.name)) {
                     if (!p.getFn.empty()) m.getFn = p.getFn;
                     if (!p.setFn.empty()) m.setFn = p.setFn;
+                    if (!p.vbType.empty()) m.vbType = p.vbType;
+                    if (!p.objCType.empty()) m.objCType = p.objCType;
                     hit = true;
                     break;
                 }
@@ -139,12 +162,23 @@
             c_.emitLine("}");
         }
         if (!p.setFn.empty()) {
+            if (!p.objCType.empty()) {
+                // 对象属性 setter: 从 VARIANT 借裸实例指针, 交给原生 prop_set/let(me, <cls>**)。
+                c_.emitLine("static int32_t " + p.setFn + "(void* inst, const void* inV) {");
+                c_.emitLine("    " + p.objCType + " _o = (" + p.objCType
+                            + ")((const vb6_VARIANT*)inV)->pdispVal;");
+                c_.emitLine("    vb6_" + ctl + "_prop_set_" + cIdent(p.name) + "((vb6_cls_" + ctl
+                            + "*)inst, &_o);");
+                c_.emitLine("    return 1;");
+                c_.emitLine("}");
+            } else {
             c_.emitLine("static int32_t " + p.setFn + "(void* inst, const void* inV) {");
             c_.emitLine("    vb6_" + ctl + "_prop_let_" + cIdent(p.name) + "((vb6_cls_" + ctl
                         + "*)inst, "
                         + unboxUcSetter(p.vbType, "(*(const vb6_VARIANT*)inV)") + ");");
             c_.emitLine("    return 1;");
             c_.emitLine("}");
+            }
         }
     }
     if (!ucProps.empty()) {

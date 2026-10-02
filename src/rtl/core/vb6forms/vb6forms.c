@@ -1288,6 +1288,21 @@ static void vb6_ApplyInitialFocus(HWND hwnd) {
     if (t && IsWindow(t)) SetFocus(t);
 }
 
+// Fix <vbeclipse>: VB6 的 `Load frmX` (含隐式: 把窗体默认实例当对象引用/传参)
+// 建窗并触发 Form_Load, 但**不显示** —— 窗体停在隐藏态, 等调用方 SetParent/ShowWindow。
+// 编译器把 Form_Load 用 PostMessageW(hwnd, 0x7FF0) 延迟到队列 (见 cgen_form_wndproc_create),
+// vb6_ShowForm 在 ShowWindow 前抽干它; 这里做同样的抽干但不 ShowWindow, 让"只 Load"的
+// 窗体 (如停靠视图 frmViewViews) 在交给 ucFolder 之前已完成 Form_Load 初始化。
+void vb6_LoadForm(void* hwnd) {
+    if (!hwnd) return;
+    const UINT kDeferredFormLoad = 0x7FF0;
+    MSG msg;
+    while (PeekMessageW(&msg, (HWND)hwnd, kDeferredFormLoad, kDeferredFormLoad, PM_REMOVE)) {
+        TranslateMessage(&msg);
+        DispatchMessageW(&msg);
+    }
+}
+
 void vb6_ShowForm(void* hwnd, int modal) {
     vb6_installCrashTrace();
     if (GetEnvironmentVariableW(L"C3_OCX_TRACE", NULL, 0) > 0) {

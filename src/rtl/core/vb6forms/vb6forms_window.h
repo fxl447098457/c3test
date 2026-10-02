@@ -142,6 +142,9 @@ void vb6_SetAppInstance(void* hInstance);
 // 模态时: 禁用父窗口, 进入本地消息循环直到窗体关闭
 void vb6_ShowForm(void* hwnd, int modal);
 
+// Fix <vbeclipse>: 只 Load 不 Show —— 抽干延迟 Form_Load, 窗体保持隐藏
+void vb6_LoadForm(void* hwnd);
+
 // 卸载窗体
 void vb6_UnloadForm(void* hwnd);
 

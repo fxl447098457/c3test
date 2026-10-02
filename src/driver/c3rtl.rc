@@ -313,3 +313,9 @@
 196 RCDATA "../rtl/core/di/gdiplus/vb6_di_gdiplus_brush_stubs.c"
 197 RCDATA "../rtl/core/di/gdiplus/vb6_di_gdiplus_path_stubs.c"
 205 RCDATA "../rtl/core/di/vb6_di_unknown_stubs.c"
+
+/* objprop bridge re-embed */
+
+/* objprop bridge + timer/formload re-embed 1790903170 */
+
+/* loadform dedup re-embed 1790903414 */

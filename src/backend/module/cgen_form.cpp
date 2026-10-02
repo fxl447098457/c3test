@@ -263,8 +263,21 @@ void CCodeGen::emitDesignerControlDecls(const FrmFormDesc& frmDesc) {
                     + std::to_string(iprop("Left", 0)) + ", " + std::to_string(iprop("Top", 0)) + ", "
                     + std::to_string(iprop("Width", 2000)) + ", " + std::to_string(iprop("Height", 400)) + ");");
             } else if (!noKids && child.controlType == FrmControlType::Timer) {
+                auto tprop = [&](const char* k, int defv) -> int {
+                    auto itc = child.properties.find(k);
+                    return itc != child.properties.end() ? (int)itc->second.intValue : defv;
+                };
                 c_.emitLine("    vb6_hwnd_" + cIdent(child.controlName) + " = vb6_UC_CreateDesignTimer("
                     + "vb6_" + ctl + "_ucTimerThunk_" + cIdent(child.controlName) + ", me);");
+                // Fix <vbeclipse>: 设计器 Timer 的 Enabled/Interval 是权威初值, 必须像
+                // 上面的 TextBox 一样在 ucHostInit 落盘。vb6_GetTimerEnabled 对"从没设过"
+                // 返回 True (VB6 Timer 的真实默认是 False), 于是 `Enabled = 0 'False` 的
+                // tmrDrag 被当成开着的 → 每 tick 里 `Interval = 1` 自激 → Controls.Item
+                // 洪泛 (~95k 次) 把消息循环饿死, 停靠面板全不刷新。
+                c_.emitLine("    vb6_SetTimerInterval(vb6_hwnd_" + cIdent(child.controlName) + ", "
+                    + std::to_string(tprop("Interval", 60000)) + ");");
+                c_.emitLine("    vb6_SetTimerEnabled(vb6_hwnd_" + cIdent(child.controlName) + ", "
+                    + std::to_string(tprop("Enabled", 0)) + ");");
             }
         }
         if (hasInit) c_.emitLine("    vb6_" + ctl + "_UserControl_Initialize((vb6_cls_" + ctl + "*)me);");

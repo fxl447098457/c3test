@@ -573,11 +573,9 @@ void vb6_SavePicture(void* hBitmap, BSTR filename) {
 #endif
 }
 
-// Load Form — 预加载窗体 (不显示). 本运行时的窗体默认实例由
-// vb6_form_show_<Form>() 首次调用时创建, 对象恒可用, 无独立预加载阶段.
-void vb6_LoadForm(void* hwnd) {
-    (void)hwnd;
-}
+// Load Form — 预加载窗体 (建窗+触发 Form_Load, 不显示)。实现见 vb6forms.c 的
+// vb6_LoadForm (抽干延迟 Form_Load 消息); 本 TU 旧版是空桩, 与 vb6forms.c 真实版
+// 重定义 (LNK2005), 故删除桩, 单一权威定义落在 vb6forms.c。
 
 // ============================================================
 // Fix 105: UserControl/PropertyPage host built-in objects
