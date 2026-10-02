@@ -103,8 +103,30 @@
                 if (!ps->params.empty()) continue;              // 带参默认属性不走桥
                 pick.vbType = vbScalarOfName(ps->variableTypeName);
                 if (pick.vbType.empty()) pick.vbType = vbScalarOfType(ps->type);
-                if (pick.vbType.empty()) continue;
-                pick.getFn = "vb6_" + ctl + "_ucPropGet_" + cIdent(ps->name);
+                if (pick.vbType.empty()) {
+                    // Fix <vbeclipse> rev25: **对象返回型 Property Get 也要发桥**。
+                    // __comObj 当 vtable"正是 `vb6_ComObject_FromInstance` 要解决的问题:
+                    // 它包成真 IDispatch 再转 VARIANT, 引用计数随 VARIANT 走。
+                    //
+                    // 实证 play78 (--arch x86): `ucTabStrip.ctl:232`
+                    //     Public Property Get Tabs() As List
+                    //        Set Tabs = m_Tabs
+                    // 是对象返回属性, 当年没桥 ⇒ `vb6_ComGetObjectProp(ViewTabs, "Tabs")`
+                    // 返 NULL ⇒ `ucFolder.ContainsView` 里 `vb6_List_Count(NULL)` 得到 -98
+                    // ⇒ **对任何 ViewId 都返 False**。
+                    // 后果: `ucPerspective.ShowView` 的"这个 folder 含该视图吗"判定全不中
+                    // ⇒ 落到 `ucPerspective.ctl:2273` 的 not-visible 分支
+                    // ⇒ 把视图塞进 `Folders.Item(Folders.Count)`(= 最后一个 folder)
+                    // ⇒ `frmViewViews`/`frmViewEvents` 抢了 `Left_Folder` 的位置。
+                    pick.objCType = objCTypeOf(ps->variableTypeName, ps->type);
+                    // 对象 **getter** 只认工程类 (`vb6_cls_*`): 通用 `void*` 槽拿不到
+                    // coclass 名, 后面 FindCoClassDesc 会拿空串去查 ⇒ NULL。
+                    if (pick.objCType.rfind("vb6_cls_", 0) != 0) pick.objCType.clear();
+                    if (pick.objCType.empty()) continue;
+                    pick.getFn = "vb6_" + ctl + "_ucPropGetObj_" + cIdent(ps->name);
+                } else {
+                    pick.getFn = "vb6_" + ctl + "_ucPropGet_" + cIdent(ps->name);
+                }
             } else if (ps->kind == SymbolKind::PropertyLet || ps->kind == SymbolKind::PropertySet) {
                 if (ps->params.size() != 1) continue;
                 const ParameterInfo& pi = ps->params[0];
@@ -154,15 +176,46 @@
 
     for (auto& p : ucProps) {
         if (!p.getFn.empty()) {
+            // ⚠ 只在 getter **自己**是对象返回时才走对象 thunk。若 getter 是标量而
+            // setter 是对象 (合并后 objCType 非空), 这里必须走标量分支 ——
+            // 否则会用 `vb6_ComObject_FromInstance` 去包一个 long。
+            bool objGet = !p.objCType.empty() && p.vbType.empty();
+            if (objGet) {
+                // Fix <vbeclipse> rev25: **对象返回型 getter**。原生 prop_get_X 返回
+                // `vb6_cls_List*` 之类的裸实例指针, 直接塞 VARIANT 会让 VariantClear
+                // 把首字段 (`__comObj`) 当 vtable 解引用 —— 必须经 vb6_ComObject_FromInstance
+                // 包成真 IDispatch, 引用计数随 VARIANT 走 (那个函数的头文件就是为这个存在的)。
+                c_.emitLine("static void* " + p.getFn + "(void* inst, void* outV) {");
+                c_.emitLine("    " + p.objCType + " _o = vb6_" + ctl + "_prop_get_"
+                            + cIdent(p.name) + "((vb6_cls_" + ctl + "*)inst);");
+                c_.emitLine("    if (!_o) { *(vb6_VARIANT*)outV = vb6_VariantEmpty(); return outV; }");
+                c_.emitLine("    vb6_VARIANT* _pv = (vb6_VARIANT*)outV;");
+                c_.emitLine("    _pv->vt = VT_DISPATCH;");
+                // FromInstance 返回的引用直接交给这个 VARIANT (引用计数转移, 不再 AddRef),
+                // 调用方 VariantClear 时正好归零 —— 与 vb6_ComPackVB6InstanceRaw 同款取舍。
+                // 类名从 "vb6_cls_List*" 里切出 "List": 去掉前缀 "vb6_cls_" 与尾 '*'。
+                // ⚠ 别用 substr(6) —— 短于 6 的 C 类型会抛 std::out_of_range,
+                //   实测直接把 C3 打进 ICE (invalid string position + 崩溃)。
+                c_.emitLine("    _pv->pdispVal = (IDispatch*)vb6_ComObject_FromInstance(");
+                c_.emitLine("        vb6_FindCoClassDesc(\""
+                            + p.objCType.substr(std::string("vb6_cls_").size(),
+                                                p.objCType.size()
+                                                - std::string("vb6_cls_").size() - 1)
+                            + "\"), (void*)_o);");
+                c_.emitLine("    return outV;");
+                c_.emitLine("}");
+            } else {
             c_.emitLine("static void* " + p.getFn + "(void* inst, void* outV) {");
             c_.emitLine("    *(vb6_VARIANT*)outV = "
                         + boxUcGetter(p.vbType, "vb6_" + ctl + "_prop_get_" + cIdent(p.name)
                                                 + "((vb6_cls_" + ctl + "*)inst)") + ";");
             c_.emitLine("    return outV;");
             c_.emitLine("}");
+            }
         }
         if (!p.setFn.empty()) {
-            if (!p.objCType.empty()) {
+            // 同上: 只有 setter **自己**是对象形参时才走对象分支 (vbType 空 = 标量档不中)。
+            if (!p.objCType.empty() && p.vbType.empty()) {
                 // 对象属性 setter: 从 VARIANT 借裸实例指针, 交给原生 prop_set/let(me, <cls>**)。
                 c_.emitLine("static int32_t " + p.setFn + "(void* inst, const void* inV) {");
                 c_.emitLine("    " + p.objCType + " _o = (" + p.objCType
