@@ -229,17 +229,29 @@ void vb6_ControlMove(void* hwnd, double L, double T, double W, double H, int mas
      *   (ucFolder.ViewArea_Resize 里自己就 Move 视图窗体)。*/
     int sizeChanged = ((w != rc.right - rc.left) || (h != rc.bottom - rc.top));
     SetWindowPos(hW, NULL, x, y, w, h, SWP_NOZORDER | SWP_NOACTIVATE);
-    /* rev22 留档: 设计期子控件 `<Ctrl>_Resize` 事件的触发**故意不在这里**。
+    /* Fix <vbeclipse> rev24: 设计期子控件的 `<Ctrl>_Resize` 事件在这里**排队**
+     * (rev22 曾直接在这里跑 ⇒ 递归; rev23 把触发改到宿主 WM_SIZE, 但那只覆盖
+     * "**宿主自己**尺寸变了"这一种 —— 见下面为什么不够)。
      *
-     * 这里曾挂过一版 (本函数是所有摆位的唯一收口, 看起来最自然的挂点), 结果
-     * **递归**:`ViewArea.Move …` 正是 ucFolder `UserControl_Resize` 内部发的,
-     * 而那个过程本身就经 WM_SIZE → vb6_uc_push → resize → Move 链进来 ⇒
-     * Move 里再跑子控件事件 ⇒ 又 Move ⇒ 无限展开。
-     * 实测 play78 (--arch x86): 视图窗体尺寸确实对上了容器 (frmViewHelp 253x219
-     * / frmViewSnapshot 778x190), 但**整个窗口上下颠倒 + 文字镜像** —— 各层控件
-     * 被反复推挤, 坐标系翻转。两害相权: 宁可尺寸停在中间值 (rev21 状态) 也不能递归。
-     * 正确挂点是 uc_host_window.c 的 WM_SIZE 分支 (尺寸赋值 + resize 之后)。*/
-    (void)sizeChanged;
+     * 为什么宿主的 WM_SIZE 不够 (play78 --arch x86 探针实测):
+     *   ucFolder 的宿主窗口在第一轮布局后**尺寸再没变过**, 所以 rev23 的 drain
+     *   全部挤在启动那一段跑完 (探针: 15 次 Queue / 15 次 Drain, 行号 50-68 连成一片),
+     *   而 ViewArea 的最终尺寸 (567→318/136/425/101) 是**之后**才由
+     *   `UserControl_Resize` 里的 `ViewArea.Move …` 定下的 —— 那发的是
+     *   **ViewArea 自己**的 WM_SIZE, 不会回到宿主 ⇒ 宿主那条排队链再没机会跑。
+     *   结果 `ViewArea_Resize` 全程只读到设计期宽度 567px (= 8505 缇)。
+     *
+     * 为什么现在挂这里不会递归 (rev22 踩过的坑):
+     *   rev22 是**直接调用** `desc->designResize(...)`, 而 `ViewArea_Resize` 内部
+     *   自己就 Move 视图窗体 ⇒ 又进来 ⇒ 无限展开。
+     *   现在只 `PostMessage` **排队**(rev23 的机制), 真正的调用发生在**回到消息
+     *   循环之后**, 那时本轮 Move 早已全部返回, 不存在栈上的重入。
+     *   `vb6_UC_QueueDesignResize` 自带窗口属性去重, 一串嵌套 Move 只排一条。
+     */
+    if (sizeChanged) {
+        extern int32_t vb6_UC_QueueDesignResizeForCtrl(const void* hwnd);
+        vb6_UC_QueueDesignResizeForCtrl(hW);
+    }
 }
 
 // P11.8: hWnd attribute (read-only)

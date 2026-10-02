@@ -58,6 +58,18 @@
 //     W=8505 (= ViewArea 设计期宽 8655 - 30 - 2*margin), 停在同一个 567x423。
 //   修后: frmViewHelp 253x219 (容器 253x219)、frmViewSnapshot 778x190 (容器
 //     778x190) —— 视图窗体尺寸**精确等于**各自容器。
+// Fix <vbeclipse> rev24: 设计期子控件 Resize 的排队点补到 **vb6_ControlMove**。
+//   rev23 把触发挂在宿主窗口的 WM_SIZE, 只能覆盖"**宿主自己**尺寸变了"。实测
+//   (play78 --arch x86 探针): ucFolder 宿主启动后再没变过尺寸 ⇒ 15 次 Queue /
+//   15 次 Drain 全挤在启动那一段(Drain 行号 50-68 连成一片)就跑完了; 而 ViewArea
+//   的最终尺寸 (567→318/136/425/101) 是**之后**才由 `UserControl_Resize` 里
+//   `ViewArea.Move …` 定下的 —— 那发的是 **ViewArea 自己**的 WM_SIZE, 不冒泡到宿主。
+//   ⇒ `ViewArea_Resize` 全程只读到设计期宽度 567px (= 8505 缇), 视图窗体停 0x0。
+//   修法: 新增 vb6_UC_QueueDesignResizeForCtrl(hwnd) —— 由 vb6_ControlMove 在
+//   **该子控件**尺寸真变了时调 (rev22 曾在这里**直接调用**事件 ⇒ 递归 Move 风暴 /
+//   整窗上下颠倒; 现在只 PostMessage 排队, 真正调用发生在回到消息循环之后, 无栈上重入)。
+//   判据: 视图窗体尺寸 == 其 ViewArea 容器尺寸 (探针打 P3 UserControl_Resize 的
+//   ScaleW: 8535→4800/2070/2070/6405/1545 各不同 ⇒ rev20 的按实例 ScaleWidth 是好的)。
 // Fix <vbeclipse> rev23: 子控件 Resize 事件**排到消息循环**里跑 (SetTimer 一轮)。
 //   rev22 直接在 WM_SIZE尾部跑, 事件确实跑了 (ucFolder 10 次 WM_SIZE、30 次触发),
 //   但拿到的是**设计期**尺寸: `vb6_GetControlWidth(ViewArea)` 同一 hwnd 读出

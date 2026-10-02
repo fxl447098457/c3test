@@ -192,6 +192,10 @@ int32_t vb6_UC_RunDesignResize(const void* hwnd);
 // 尺寸 —— 那一整串嵌套 Move 都是同步 SendMessage, 跑完才返回, 而 ViewArea 的最终
 // 尺寸是最后那次 `ViewArea.Move` 给的。详见 uc_host.c 里的注释。
 int32_t vb6_UC_QueueDesignResize(const void* inst);
+// rev24: 按子控件 HWND 排队它所属 UC 的设计期 Resize 事件 (vb6_ControlMove 调)。
+// 宿主 WM_SIZE 那条链只覆盖"**宿主自己**变了", 而停靠布局里变的是**子控件**,
+// 它的 WM_SIZE 不冒泡 ⇒ 视图窗体停在设计期尺寸 (详见 vb6forms_ctrl.c 的注释)。
+int32_t vb6_UC_QueueDesignResizeForCtrl(const void* hwnd);
 
 // Fix <vbeclipse> rev23: 排在消息队列里的那条消息 (WM_APP+0x51) 与它的窗口属性名,
 // 以及宿主窗口过程里对应的处理入口。去重用窗口属性而不是 rec 字段 (见uc_host.c 注释)。

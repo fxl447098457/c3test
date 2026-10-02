@@ -635,6 +635,36 @@ int32_t vb6_UC_RunDesignResize(const void* hwnd) {
 // 实现: `SetTimer` 一轮即触发 (50ms 的定时器粒度在这里足够, 且不引新结构字段 ——
 // rec 是**按值数组**不是指针数组, 加字段会让布局式初始化的跨边界契约再踩一次
 // rev22 那个错位坑)。timer proc 里再调一次 `RunDesignResize`。
+// Fix <vbeclipse> rev24: 按**子控件 HWND** 排队它所属 UC 的设计期 Resize 事件。
+// vb6_ControlMove (vb6forms_ctrl.c) 调它 —— 那个单元不能 include 本头, 故走 extern。
+//
+// 为什么需要这一层 (宿主 WM_SIZE 那条链不够, 见 vb6forms_ctrl.c 的注释):
+//   宿主窗口尺寸在启动后就不再变, 而子控件尺寸**一直在变** —— 变的是子控件自己,
+//   它发自己的 WM_SIZE, 不会冒泡到宿主。所以触发点必须在"**该子控件**尺寸变了"。
+int32_t vb6_UC_QueueDesignResizeForCtrl(const void* hwnd) {
+    void* inst = NULL;
+    const char* ctrlName = NULL;
+    if (!hwnd) return 0;
+    if (vb6_UC_DesignCtrlOwner(hwnd, &inst, &ctrlName) && inst)
+        return vb6_UC_QueueDesignResize(inst);
+    /* ⚠ Fix <vbeclipse> rev24: **宿主窗口自身**的 Move 也必须排队。
+     *   停靠布局里 ucFolder 宿主是被 `l_ucFolder.Move 1, 1, ScaleWidth, ScaleHeight`
+     *   (ucPerspective.c:2292/2322) 摆到最终尺寸的 —— 那一发走 host 分派 →
+     *   vb6_ControlMove(宿主)。但**宿主自己不在任何 rec 的 design[] 里**
+     *   (design[] 只装设计期子控件: ViewTabs/ViewArea/ViewCaption), 所以上面
+     *   按 hwnd 反查必然落空。
+     *   而它才是**第一因**: 宿主尺寸变 → 其 WM_SIZE → UserControl_Resize →
+     *   `ViewArea.Move …` 把 ViewArea 摆到最终尺寸。排队的目的正是让
+     *   `ViewArea_Resize` 在**这之后**再跑一次, 那时它读到的才是最终宽度。
+     *   探针实测 (play78): 反查失败的恰好是 `569x441 → 320x309` / `138x291` /
+     *   `101x...` 这些"把 ViewArea 摆到最终尺寸"那一族, 27 次全部 q=0。*/
+    {
+        vb6_UCRec* hr = vb6_uc_findByHwnd((HWND)hwnd);
+        if (hr) return vb6_UC_QueueDesignResize(hr->me);
+    }
+    return 0;
+}
+
 int32_t vb6_UC_QueueDesignResize(const void* inst) {
     if (!inst) return 0;
     vb6_UCRec* r = vb6_uc_findByInstance(inst);
