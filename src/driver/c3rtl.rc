@@ -1,4 +1,42 @@
 // c3rtl.rc - RTL runtime library embedded as resources
+// Fix <vbeclipse> rev35: UC **属性**桥的对象型 setter 改用 vb6_VariantToObjectVal 拆箱。
+//   症状: `ucTabStrip.Add` 六个属性写到最后 `Icon` 时 0xC0000005。旧 thunk 无条件
+//   `(inV)->pdispVal`, 不判 vt —— vt 不是 Dispatch 时读到的是 union 里另一成员
+//   (栈上残留野值), 当 IDispatch 传进 vb6_SetControlPictureFromCom ⇒ 崩。
+//   改动: src/backend/detail/module/cgen_form_uc_props.inc (纯 cgen 侧), 本资源未变。
+//   ⚠ **实测修正(别照旧注释下结论)**: rev35 生效后 Add 的六个属性**全部写通**
+//     (探针 P37 实测顺序 Orientation→ToolTip→ViewId→Icon, Caption/Visible 走宿主内建表),
+//     但进程**仍**以 0xC0000005 结束, 崩点后移到 `SetPic` 内部, 且此时
+//     `OwnPropSet n=Icon vt=9` 配的 `pdispVal` **是非 NULL 的野值**(实测 010FEE6C,
+//     不是先前推断的 NULL)。⇒ 野值来自**调用点侧的实参打包**, 不是桥的拆箱;
+//     已排除: vb6_ComPackObject(NULL) 走 calloc+VariantInit 必得 NULL(P37 复核);
+//     HW_QI 对 IID_IPicture 正确返回 E_NOINTERFACE(包装器不是野值来源)。
+//     下一步: 查 ucTabStrip.Add 的**调用点**如何把 `Optional Icon As Picture`
+//     (省略实参) 打成 VT_DISPATCH + 非 NULL pdispVal。
+// Fix <vbeclipse> rev34: UC 方法桥 thunk 的**对象形参**改用 vb6_VariantToObjectVal
+//   拆箱。`argv[i]` 本身是 `VARIANT*` (vb6_ComGetProp 的返回值), 而原生形参要的是
+//   **对象指针**, 差一层解引用 —— rev31 原样传 `argv[idx]`, 崩在 `Image` 上。
+//   纯 cgen 侧改动 (src/backend/detail/module/cgen_form_uc_methods.inc), 本资源未变。
+// Fix <vbeclipse> rev33: UC 方法桥 thunk 的 `_has_<name>` 标记改为**追加到参数表末尾**
+//   (对齐 makeParamList / cgen_expr_call_opt_pad.inc 的全局约定)。rev31 按形参紧跟插入,
+//   遇到 optional 形参不在末位时整段错位 —— ucTabStrip.Add(ViewId, Caption,
+//   Optional Icon, Optional ToolTipText) 实参变成 (a0,a1,a2,1,a3,1) ⇒ ToolTipText 收到
+//   Icon 位 ⇒ .ToolTip = ToolTipText 拿到 Picture 指针当 BSTR ⇒ 0xC0000005。
+//   纯 cgen 侧改动 (src/backend/detail/module/cgen_form_uc_methods.inc), 本资源未变;
+//   在此登记仅为让 rev32/rev33 的时间线在 rc 顶部连续可读。
+// Fix <vbeclipse> rev32: 新增 vb6_UC_CreateDesignLabel / vb6_UC_CreateDesignImage。
+//   ucTab.ctl 的设计面只有 imgIcon( VB.Image) + lblCaption(VB.Label), 而 ucHostInit
+//   的发射循环只覆盖 TextBox/Timer/PictureBox/限定名 UC ⇒ 两个子控件恒 NULL
+//   (实测: ucCaption/ucTabStrip/ucFolder 各有 1~3 个 CreateDesign*, ucTab = 0)
+//   ⇒ `ucTab.ToolTip` setter `lblCaption.ToolTipText = …` 对 NULL 写属性
+//   ⇒ 0xC0000005, 崩在 ucTabStrip.Add 的 `.ToolTip = ToolTipText`。
+// Fix <vbeclipse> rev30: 裸工程类实例 (`vb6_cls_X*`) 的晚绑定方法直派。
+//   症状链 (探针逐级实测): `vb6_ComCall(Tabs实例, L"Contains", …)` 拿到 **vt=0
+//   (VT_EMPTY)** ⇒ `List.Contains` 恒 0 ⇒ `ucPerspective.ShowView` 遍历 5 个 folder
+//   全部 ContainsView=0 ⇒ 没有 folder 被激活 ⇒ 停靠面板全空。
+//   根因: 裸实例首字段 `__comObj` 恒 NULL ⇒ 无真 vtable ⇒ vb6_ComIsDispatchable 判否
+//   ⇒ GetIDsOfNames 失败。修: cgen 在类工厂登记「实例→coclass desc」, RTL 的
+//   vb6_ComCall 查表后直接调 desc->methods[].invokeFunc (不经 IDispatch)。
 // Fix <vbeclipse> rev29: 窗体 Form_Resize 的**直调**通道 (vb6_RegisterFormResize +
 //   vb6_InvokeFormResize)。探针实测停靠视图窗体一生只收 1 次 WM_SIZE(0x0), rev28 的
 //   case VB6_FORM_FR_MSG 永远等不到 ⇒ Form_Resize 跑 0 次, tvwViews 停在设计期

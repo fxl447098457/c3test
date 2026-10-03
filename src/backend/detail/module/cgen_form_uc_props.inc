@@ -27,6 +27,10 @@
 //     VariantClear 把首字段 (`__comObj`) 当 vtable 解引用 (见 cgen_setlet Fix 179a 一族),
 //     UDT/数组/Variant 各有所有权与落临时语义。缺席即保持改动前行为 (返回 Empty), 不会更糟。
 //   - 只发 0 参 Property Get 与 1 参 ByVal Property Let/Set; 带参默认属性与 ByRef 形参不发。
+//
+// rev35: 对象型 setter 改走 vb6_VariantToObjectVal 拆箱(详见下方 Fix <vbeclipse> rev35)。
+//       ⚠ 它修的是「桥不该裸读 pdispVal」, 已实测让 Add 的六个属性全部写通, 但 Icon
+//         崩溃的最终根因在**调用点侧**的实参打包, 尚未定位 —— 见下方说明。
 
 {
     struct UcPropPick { std::string name; std::string vbType; std::string getFn; std::string setFn; std::string objCType; };
@@ -216,10 +220,24 @@
         if (!p.setFn.empty()) {
             // 同上: 只有 setter **自己**是对象形参时才走对象分支 (vbType 空 = 标量档不中)。
             if (!p.objCType.empty() && p.vbType.empty()) {
-                // 对象属性 setter: 从 VARIANT 借裸实例指针, 交给原生 prop_set/let(me, <cls>**)。
+                // Fix <vbeclipse> rev35: 借 vb6_VariantToObjectVal 拆箱, **不裸读 pdispVal**。
+                //   原症状: `ucTabStrip.Add(…, Optional Icon)` 的 `.Icon = Icon` 崩在
+                //   vb6_SetControlPictureFromCom 内的 QueryInterface (0xC0000005)。
+                //   旧代码无条件 `(inV)->pdispVal`, **不判 vt** —— vt 不是 Dispatch 时读到的
+                //   是 union 里另一成员(栈上残留), 当 IDispatch 传下去必崩。
+                //   与 cgen_form_uc_methods.inc 的 rev34 同款修法; 原生 prop_set_X 侧的
+                //   `!pPictureDisp` 分支负责"清旧图", 语义与 VB6 一致。
+                //
+                // ⚠ 实测边界(**别扩大结论**): rev35 让 Add 的六个属性**全部写通**(探针实测
+                //   Orientation→ToolTip→ViewId→Icon, Caption/Visible 走宿主内建成员表),
+                //   但进程**仍** 0xC0000005, 崩点后移到 SetControlPictureFromCom 内部 ——
+                //   且此时 `pdispVal` 是**非 NULL 的野值**(实测 010FEE6C), 不是 NULL。
+                //   ⇒ 本条修的是"桥不该裸读 union", **不是**"Icon 崩溃的最终根因";
+                //   野值来自**调用点侧**对 `Optional Icon As Picture`(省略实参)的打包,
+                //   那才是下一步要查的地方。别因为 rev35 在链上就认为 Icon 已经修好。
                 c_.emitLine("static int32_t " + p.setFn + "(void* inst, const void* inV) {");
                 c_.emitLine("    " + p.objCType + " _o = (" + p.objCType
-                            + ")((const vb6_VARIANT*)inV)->pdispVal;");
+                            + ")vb6_VariantToObjectVal(*(const vb6_VARIANT*)inV);");
                 c_.emitLine("    vb6_" + ctl + "_prop_set_" + cIdent(p.name) + "((vb6_cls_" + ctl
                             + "*)inst, &_o);");
                 c_.emitLine("    return 1;");

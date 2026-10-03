@@ -455,6 +455,32 @@ void* vb6_UC_CreateDesignPicture(int32_t left, int32_t top, int32_t width, int32
     return pic;
 }
 
+// ---- Fix <vbeclipse> rev32: 设计器子控件里的 VB.Label / VB.Image ----
+// ucTab.ctl 的设计面只有 imgIcon(VB.Image) + lblCaption(VB.Label), 而 ucHostInit
+// 的发射循环只覆盖 TextBox/Timer/PictureBox/限定名 UC ⇒ 两个槽恒 NULL
+// (实测: ucCaption/ucTabStrip/ucFolder 各有 1~3 个 CreateDesign*, ucTab = 0)
+// ⇒ `ucTab.ToolTip` setter 里 `lblCaption.ToolTipText = …` 对 NULL 写属性
+// ⇒ 0xC0000005, 崩在 ucTabStrip.Add 的 `.ToolTip = ToolTipText`。
+// Label 走 SS_LEFT 静态文本; Image 走 SS_NOTIFY(与 Picture 同族, 便于子类化收鼠标)。
+void* vb6_UC_CreateDesignLabel(int32_t left, int32_t top, int32_t width, int32_t height) {
+    HWND parent = (HWND)vb6_UserControl_hWnd;
+    if (!parent) return NULL;
+    HINSTANCE hInst = (HINSTANCE)GetWindowLongPtrW(parent, GWLP_HINSTANCE);
+    return CreateWindowExW(0, L"STATIC", L"", WS_CHILD | WS_VISIBLE | SS_LEFT,
+                           vb6_TwipToX(left), vb6_TwipToY(top),
+                           vb6_TwipToX(width), vb6_TwipToY(height),
+                           parent, NULL, hInst, NULL);
+}
+void* vb6_UC_CreateDesignImage(int32_t left, int32_t top, int32_t width, int32_t height) {
+    HWND parent = (HWND)vb6_UserControl_hWnd;
+    if (!parent) return NULL;
+    HINSTANCE hInst = (HINSTANCE)GetWindowLongPtrW(parent, GWLP_HINSTANCE);
+    return CreateWindowExW(0, L"STATIC", L"", WS_CHILD | WS_VISIBLE | SS_NOTIFY,
+                           vb6_TwipToX(left), vb6_TwipToY(top),
+                           vb6_TwipToX(width), vb6_TwipToY(height),
+                           parent, NULL, hInst, NULL);
+}
+
 // ---- Fix <vbeclipse>: 设计器子控件里"工程内 UserControl" → 每实例一个宿主子窗口 ----
 // ucFolder 的 ViewTabs(ucTabStrip)/ViewCaption(ucCaption) 是**另一个 UserControl**。
 // 复用 Controls.Add 走的 vb6_UC_HostCreate (它自带 push/pop 宿主上下文, 可安全递归)。

@@ -1026,6 +1026,46 @@ std::string CCodeGen::narrowCheckAssign(Expr* target, Expr* value,
     auto& id = static_cast<IdentifierExpr&>(*target);
     std::string lower = id.name;
     std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+
+    // Fix <vbeclipse> rev36: **Byte 数组成员**不是标量, 绝不套窄整型溢出检查。
+    //
+    // 症状 (Charts 2020 实测, LabelPlus.ctl `Dim m_Caption() As Byte` +
+    // `Property Let Caption`): 生成
+    //   me->m_Caption = vb6_ChkByte(vb6_StringToByteArray((*New_Caption)));
+    // vb6_StringToByteArray 返回 `vb6_SafeArray1D*` (头文件 vb6rtl_builtin.h:362),
+    // x86 下这个指针被当 Byte 值送进 vb6_ChkByte ⇒ 必然落在 0~255 之外 ⇒
+    // run-time error 6 "Overflow", 启动即弹框 (实测 exit=0x00000006)。
+    // ⚠ 右侧**转换本身是对的** (Fix 140 已把 BSTR → vb6_StringToByteArray 改写对),
+    //   错的只是外面多套的那层标量检查 —— 对照 getter 是 `vb6_ByteArrayToString(me->m_Caption)`,
+    //   没有检查。所以这里必须**只**去掉检查, 不要动右值改写。
+    //
+    // 为什么在这里拦: 下面所有分支都只认**标量**类型表 (knownByteVars_ 等装的
+    // 是 `As Byte` 标量), 数组成员一个都不在 ⇒ 落到 `inferExprType` 兜底,
+    // 而它按元素类型答 Byte ⇒ 被当标量。`knownByteArrayVars_` /
+    // `classByteArrayMembers_` 正是为"这是字节数组"准备的登记表(Fix 140 起),
+    // 全代码库十几处消费点都在查它, **唯独这里漏了** —— 那才是本条的真根因。
+    // `classByteArrayMembers_` 要一并查: 类字段在过程入口从 knownByteArrayVars_
+    // copy 回, 但那是 copy 不是同一容器, 且保守起见两张都查。
+    //
+    // 判据用 `lower` 全名(含 m_ 前缀)。属性形参(如 New_Caption)不在这两张表里,
+    // 不受影响 —— 只有**被赋值的左值**进这条路径。
+    //
+    // ⚠ `id.name` 的形态要归一: 成员赋值的目标在这里既可能带 `me->` 前缀也可能不带,
+    //   而 classByteArrayMembers_ 登记的是 `m_X` / `X` 两种**裸名**(见
+    //   cgen_base_generate_state_scan.inc:53-54 的 mLower/oLower)。三处都试一遍,
+    //   否则带前缀的那条(实测就是它)永远命不中 —— 漏这一步会让本修复看起来"没生效"。
+    if (knownByteArrayVars_.count(lower) || classByteArrayMembers_.count(lower))
+        return cValue;
+    {
+        std::string bare = lower;
+        if (bare.compare(0, 4, "me->") == 0) bare = bare.substr(4);
+        else if (bare.size() > 4 && bare[0] == '(' && bare[1] == '*'
+                 && bare.back() == ')') bare = bare.substr(2, bare.size() - 3);
+        if (bare != lower
+            && (knownByteArrayVars_.count(bare) || classByteArrayMembers_.count(bare)))
+            return cValue;
+    }
+
     if (knownByteVars_.count(lower))        tt = Vb6Type::Byte;
     else if (knownIntVars_.count(lower))    tt = Vb6Type::Integer;
     else if (knownBoolVars_.count(lower))   return cValue;   // 值域只有 -1/0

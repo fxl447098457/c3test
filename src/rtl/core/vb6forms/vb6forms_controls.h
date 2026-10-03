@@ -245,6 +245,12 @@ void* vb6_UC_CreateDesignEdit(int32_t left, int32_t top, int32_t width, int32_t 
 void* vb6_UC_CreateDesignTimer(void (*cb)(void*), void* ctx);
 // Fix <vbeclipse>: 设计器子控件 VB.PictureBox → STATIC 子窗 (视图窗体 SetParent 的容器)
 void* vb6_UC_CreateDesignPicture(int32_t left, int32_t top, int32_t width, int32_t height);
+
+// Fix <vbeclipse> rev32: 设计器 Label / Image 子控件 (ucTab 的 lblCaption / imgIcon)。
+// 此前 ucHostInit 的发射循环不覆盖这两个种类 ⇒ ucTab 的两个子控件恒 NULL ⇒
+// `ToolTip` setter 对 NULL 写属性直接 0xC0000005。详见 uc_host.c 里同号注释。
+void* vb6_UC_CreateDesignLabel(int32_t left, int32_t top, int32_t width, int32_t height);
+void* vb6_UC_CreateDesignImage(int32_t left, int32_t top, int32_t width, int32_t height);
 // Fix <vbeclipse>: 设计器子控件里"工程内 UserControl" → 宿主子窗 (复用 HostCreate, 可递归);
 // typeName 非已登记 UC 时返回 NULL (第三方 OCX 子控件走这条, 与不建等价)。
 void* vb6_UC_CreateDesignUserControl(const char* typeName, const char* ctrlName,

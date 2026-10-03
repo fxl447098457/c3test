@@ -334,6 +334,20 @@ void CCodeGen::emitDesignerControlDecls(const FrmFormDesc& frmDesc) {
                 c_.emitLine("    vb6_hwnd_" + cIdent(child.controlName) + " = vb6_UC_CreateDesignPicture("
                     + std::to_string(iprop("Left", 0)) + ", " + std::to_string(iprop("Top", 0)) + ", "
                     + std::to_string(iprop("Width", 2000)) + ", " + std::to_string(iprop("Height", 1500)) + ");");
+            } else if (!noKids && child.controlType == FrmControlType::Label) {
+                // Fix <vbeclipse> rev32: 设计子控件里的 **VB.Label** (ucTab.lblCaption)。
+                // 此前这个种类不在发射循环里 ⇒ ucTab 的设计面一个子控件都没建
+                // (对照: ucCaption/ucTabStrip/ucFolder 各有 CreateDesign*, ucTab = 0)
+                // ⇒ `vb6_hwnd_lblCaption` 恒 NULL, 而 `ucTab.ToolTip` setter 是
+                // `lblCaption.ToolTipText = NewToolTip` ⇒ 对 NULL 写属性 0xC0000005。
+                c_.emitLine("    vb6_hwnd_" + cIdent(child.controlName) + " = vb6_UC_CreateDesignLabel("
+                    + std::to_string(iprop("Left", 0)) + ", " + std::to_string(iprop("Top", 0)) + ", "
+                    + std::to_string(iprop("Width", 2000)) + ", " + std::to_string(iprop("Height", 400)) + ");");
+            } else if (!noKids && child.controlType == FrmControlType::Image) {
+                // 同上: **VB.Image** (ucTab.imgIcon)。`ucTab.Icon` setter 写它。
+                c_.emitLine("    vb6_hwnd_" + cIdent(child.controlName) + " = vb6_UC_CreateDesignImage("
+                    + std::to_string(iprop("Left", 0)) + ", " + std::to_string(iprop("Top", 0)) + ", "
+                    + std::to_string(iprop("Width", 2000)) + ", " + std::to_string(iprop("Height", 1500)) + ");");
             } else if (!noKids && child.controlType == FrmControlType::Unknown
                        && child.controlTypeName.find('.') != std::string::npos) {
                 // Fix <vbeclipse>: 设计子控件里"工程内 UserControl" (parseControlType 认不出的

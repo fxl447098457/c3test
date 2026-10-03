@@ -29,11 +29,14 @@
 //   - 只收 `SymbolKind::Sub` 且 `access == Public`、`isExternal == false`（本模块自有）。
 //     Event（MouseDown/Click/…）由 desc 里既有的 mouseDown/… 槽转发, 不在此表。
 //   - 形参必须**逐个**满足: ByVal + 标量（String/Long/Integer/Boolean/Double/
-//     Single/Byte/LongPtr/Date）。ByRef 形参、Object/工程类/Picture/Variant/
-//     UDT/数组/ParamArray 一律不发 —— 那些在 VB6 侧有落临时、所有权与
-//     VariantClear 语义, thunk 里还原不了（同 rev18 props 桥的取舍）。
+//     Single/Byte/LongPtr/Date）**或 rev31 新增的对象类**（Picture / Object /
+//     工程类，见下面 rev31 注释）。ByRef 形参、Variant/UDT/数组/ParamArray 一律不发。
+//     对象位的 argv 形态已实测确认（不是 VARIANT 值，是 GetProp 的裸 void*），
+//     thunk 原样转发、不接管所有权。
 //   - 有 Optional 形参时, 引擎按**实参个数**匹配（md->argc = 形参总数, 含 Optional）;
-//     尾叁 `_has_<name>` 缺省标记由 thunk 自己按 "argc > 该形参序号" 推出来。
+//     `_has_<name>` 标记按**全局约定统一追加到参数表末尾**（与 cgen_decl.cpp 的
+//     makeParamList / cgen_expr_call_opt_pad.inc 同口径, rev33 修 —— 详见下面
+//     call 构造处的注释: 按形参紧跟插入会与声明端错位一整段）。
 //   - 只发 **最多 4 个形参**的（超过 4 个的桥收益低、代码量大, 缺席不改变症状）。
 
 {
@@ -96,6 +99,36 @@
         if (vb == "string")  return "vb6_ho_variantToBstr(argv[" + std::to_string(idx) + "])";
         return std::string();
     };
+    // Fix <vbeclipse> rev31/rev34: 对象形参的拆箱。
+    //
+    // ⚠ argv[i] 对**对象位**不是 VARIANT 值本身, 而是 `vb6_ComGetProp` 之类返回的
+    //   **裸指针** (指向一个 VARIANT)。实测生成的 C (`ucFolder.c`):
+    //     vb6_ComCall(…, L"Add", {BSTR, BSTR, vb6_ComGetProp(…, L"Icon"), BSTR}, 4)
+    //   第三个实参**没有**经过 vb6_ComPackValue —— 它就是 GetProp 的 void* 返回。
+    //   rev26 就是在这里按"值"解而崩的 (0xC0000374)。
+    //
+    // Fix <vbeclipse> rev34: 但**不能**把这个裸指针原样当对象指针转发。
+    //   argv[i] 的类型是 `VARIANT*`, 而原生形参 (`vb6_ComIface_Picture*` /
+    //   `vb6_cls_X*`) 要的是**对象指针** —— 两者差一层解引用。rev31 原样转发后:
+    //     ucTabStrip.Add 的 `Optional Icon As Picture` 位收到一个指向 VARIANT 的指针,
+    //     `vb6_ucTab_prop_set_Icon` → `vb6_SetControlPictureFromCom(hwnd, NewIcon)`
+    //     把 VARIANT 当 IPicture 调 `lpVtbl->…` ⇒ **0xC0000005**。
+    //   正确口径: 按 `vb6_VARIANT` 读出 vt, vt==Dispatch 才取 pdispVal ——
+    //   与 `vb6_VariantToObjectVal` (vb6rtl.c) 同款, 但**按值**收参以兼容
+    //   `argv[i]` 这个右值。vt 不对 (Empty/Null/取不到) ⇒ NULL, 原生侧判空即可。
+    //   **不接管所有权**: argv 是引擎 `vb6_ComCall` 建的实参, 生命周期归它。
+    //
+    // 用现成的 `vb6_VariantToObjectVal`（vb6rtl_variant.h:280, 按值收 vb6_VARIANT,
+    // 内部判 vt==vb6_vtDispatch 才给 pdispVal）而不是手写 `(vt==9 ? pdispVal : 0)`:
+    //   - `argv[i]` 是右值（GetProp 的返回值），`vb6_VariantToObject` 要左值，取不了址
+    //     —— 这正是 Fix 029 加 `…Val` 按值版的原因；
+    //   - 少一处魔数就不会漂（`vb6_vtDispatch=9` 与 Windows `VT_DISPATCH=9` 同值，
+    //     但语义归属不同，写死数字会掩盖"这到底是哪套 vt"这个问题）。
+    //   生成的 TU 里该函数已在用（Perspective.c / SubClass.c 的 `l_Folder = …`），
+    //   声明可见，无需额外 extern。
+    auto unboxObject = [](int32_t idx) -> std::string {
+        return "vb6_VariantToObjectVal(*(vb6_VARIANT*)argv[" + std::to_string(idx) + "])";
+    };
 
     if (symTab_.moduleScope()) {
         for (auto& kv : symTab_.moduleScope()->symbols()) {
@@ -117,7 +150,27 @@
                 if (pi.isParamArray) { ok = false; break; }
                 std::string vt = vbScalarOfName(pi.typeRefName);
                 if (vt.empty()) vt = vbScalarOfType(pi.type);
-                if (vt.empty() || cTypeOfVbScalar(vt).empty()) { ok = false; break; }
+                // Fix <vbeclipse> rev31: 对象形参 (Picture / Object / 工程类) 也发桥。
+                //
+                // 判据只收**这三类** (其余 Variant/UDT/数组仍不发, 理由见文件头):
+                //   - `Picture` / `Object`: C 侧就是 `void*` 包装器, thunk 原样转发;
+                //   - 工程类 (`As List` 等): 同样是包装器/实例指针, 同一口径。
+                // 为什么现在才做 (rev26 曾试过并崩在 0xC0000374, 已回退):
+                //   当时**没先确定 argv 里对象位的形态**就动手。实测生成的 C 后拿到铁证:
+                //     vb6_ComCall(…, L"Add", {BSTR, BSTR, vb6_ComGetProp(…, L"Icon"), BSTR}, 4)
+                //   ⇒ **对象位是 `vb6_ComGetProp` 的裸 `void*` 裸返回值, 指向一个
+                //      VARIANT, 且未经 vb6_ComPackValue 包装**。形态不同 ⇒ 解包方式不同。
+                //   现在按这个已验证的形态解, 不再猜。
+                if (vt.empty()) {
+                    std::string tn = pi.typeRefName;
+                    std::transform(tn.begin(), tn.end(), tn.begin(), ::tolower);
+                    const std::string tlow = Symbol::toLower(pi.typeRefName);
+                    if (tlow == "picture" || tlow == "object"
+                        || !projectClassNameOf(pi.typeRefName).empty()) {
+                        vt = "object";
+                    }
+                }
+                if (vt.empty() || (cTypeOfVbScalar(vt).empty() && vt != "object")) { ok = false; break; }
                 pick.paramVb.push_back(vt);
                 isOpt.push_back(pi.isOptional);
             }
@@ -161,16 +214,46 @@
         // 逐形参拆箱。Optional 形参: 实参没给到这一位就落 VB6 缺省值。
         // 引擎已按 md->argc == 形参总数匹配, 所以 argv 一定够长。
         for (int32_t i = 0; i < n; i++) {
-            c_.emitLine("    " + cTypeOfVbScalar(types[i]) + " a" + std::to_string(i) + " = "
-                        + unboxArg(types[i], i) + ";");
+            // rev31: 对象形参用 `void*` (原样转发 argv[i] 这个裸指针), 不拆 VARIANT。
+            const std::string cT = (types[i] == "object")
+                ? std::string("void*")
+                : cTypeOfVbScalar(types[i]);
+            const std::string uB = (types[i] == "object")
+                ? unboxObject(i)
+                : unboxArg(types[i], i);
+            c_.emitLine("    " + cT + " a" + std::to_string(i) + " = " + uB + ";");
         }
         std::string call = "vb6_" + ctl + "_" + cIdent(m.name) + "(me";
         for (int32_t i = 0; i < n; i++) {
             call += (i == 0 ? ", " : ", ") + std::string("a") + std::to_string(i);
-            // Optional 形参的 C 签名带一个 `int _has_<name>` 尾叁（约定见
-            // cgen_expr_call_callee_params.inc）。VB6 语义: 没传 ⇒ 该位 0,
-            // 原生 Sub 内部自己读 `_has_` 决定用缺省值。
-            if (opt[i]) call += ", 1";
+        }
+        // Fix <vbeclipse> rev33: Optional 形参的 `_has_<name>` 标记**统一追加到参数表
+        // 末尾**, 不是紧跟各自的形参。
+        //
+        // 为什么 (这是 0xC0000005 的直接根因, 探针逐级实测):
+        //   全局约定在**声明端与调用端是一致的**, 两处都追加到末尾:
+        //     - 声明: cgen_decl.cpp makeParamList —— `for(params) if(optional) += ", int _has_X"`
+        //     - 常规调用: cgen_expr_call_opt_pad.inc —— 同样 for(params) 追加到 argList 末
+        //   rev31 的 thunk 却按"紧跟形参"插, 于是一旦 optional 形参**不在末位**,
+        //   实参与形参就**错位一整段**。实测 ucTabStrip.ctl:
+        //     Public Sub Add(ViewId, Caption, Optional Icon, Optional ToolTipText)
+        //   rev31 发出 `Add(me, a0, a1, a2, 1, a3, 1)` —— ToolTipText 收到 Icon 位,
+        //   而 `int _has_Icon` 位收到一个 BSTR (`vb6_ComIface_Picture*` 形参位置),
+        //   再往后的位全部平移 ⇒ `vb6_ucTabStrip_Add` 里 `.ToolTip = ToolTipText`
+        //   拿到的是被当作 Picture 的整数 ⇒ 崩在 0xC0000005。
+        //   ⚠ 之前没炸是因为 **rev31 之前 optional Icon/Picture 形参一律不发桥**
+        //     (rev31 同一笔才放开), 也就是说这条路径**从未被合法生成过** ——
+        //     不是"改动引起的回归", 是新路径第一次真正跑到 optional 尾参。
+        //   修法就是回到全局约定: 所有 `_has_` 追加到末尾, 顺序与形参顺序一致。
+        //   恒为 1 是对的: 引擎已按 md->argc == 形参总数匹配, 走到这里的 optional 位
+        //   是"调用方确实给了值" (缺省时引擎自己补零值并给 0 —— 见 opt_pad 的
+        //   `(i < args.size())` 判据, 那是常规调用点的口径)。
+        bool anyOpt = false;
+        for (int32_t i = 0; i < n; i++) if (opt[i]) { anyOpt = true; break; }
+        if (anyOpt) {
+            for (int32_t i = 0; i < n; i++) {
+                if (opt[i]) call += ", 1";
+            }
         }
         call += ");";
         c_.emitLine("    " + call);
