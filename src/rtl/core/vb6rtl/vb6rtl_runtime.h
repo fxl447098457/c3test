@@ -22,7 +22,7 @@ void vb6_PA_SetLong(SAFEARRAY* psa, int32_t index, int32_t val);
 void vb6_PA_SetLongPtr(SAFEARRAY* psa, int32_t index, intptr_t val);  /* Fix 082: x64-safe VarPtr parameter */
 void vb6_PA_SetDouble(SAFEARRAY* psa, int32_t index, double val);
 void vb6_PA_SetBSTR(SAFEARRAY* psa, int32_t index, BSTR val);
-VARIANT vb6_PA_GetVariant(SAFEARRAY* psa, int32_t index);
+vb6_VARIANT vb6_PA_GetVariant(SAFEARRAY* psa, int32_t index);  /* Fix rev37: 返回 vb6_VARIANT 供 _Generic 装箱 */
 int32_t vb6_PA_GetLong(SAFEARRAY* psa, int32_t index);
 double vb6_PA_GetDouble(SAFEARRAY* psa, int32_t index);
 BSTR vb6_PA_GetBSTR(SAFEARRAY* psa, int32_t index);

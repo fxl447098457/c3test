@@ -627,6 +627,12 @@ bool CCodeGen::cExprIsVariant(const std::string& cExpr) const {
         // ("*" 对于 struct 非法; Charts 2020 ClsResizer.cls:142/148
         //  CallByName(oCtrl, ..., VbGet) * 100).
         "vb6_CallByName(",
+        // Fix <vbeclipse> rev37: ParamArray 元素按**声明类型**解包 (rev37 前一律
+        //   GetLong ⇒ String 实参静默读成 0)。Variant 元素的解包函数返回整只
+        //   VARIANT, 必须登记成 Variant 表达式, 否则下游 BSTR/Variant 目标
+        //   不会走 vb6_VariantToString / wrapVariantValue, 直接 C2440
+        //   (ClsResizer.AddControlFont 的 `.PropFont = PropFont(i)`)。
+        "vb6_PA_GetVariant(",
     };
     for (const auto& prefix : variantPrefixes) {
         if (cExpr.compare(start, prefix.size(), prefix) == 0) return true;

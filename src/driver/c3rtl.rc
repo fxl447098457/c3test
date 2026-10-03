@@ -1,4 +1,7 @@
 // c3rtl.rc - RTL runtime library embedded as resources
+// Fix <vbeclipse> rev37: vb6_PA_GetVariant 改返回 vb6_VARIANT (与生成码的
+//   _Generic 装箱口径一致; 原返回 Windows VARIANT 会落到 default: vb6_VariantObject
+//   要 void* ⇒ C2172)。另撤净 P48 临时探针。
 // Fix <vbeclipse> rev35: UC **属性**桥的对象型 setter 改用 vb6_VariantToObjectVal 拆箱。
 //   症状: `ucTabStrip.Add` 六个属性写到最后 `Icon` 时 0xC0000005。旧 thunk 无条件
 //   `(inV)->pdispVal`, 不判 vt —— vt 不是 Dispatch 时读到的是 union 里另一成员
