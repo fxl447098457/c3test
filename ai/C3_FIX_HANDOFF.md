@@ -209,6 +209,17 @@ UDT"），带名字的是 **Class 符号专属**的 `memberReturnTypes`（`unord
 出处 = 账 #175 的跨门工件对形 #300→#301：`oledd_test.txt`(s4) 从 `hdrop FAIL hr=0x1` 变成
 `hdrop first=C:\a.txt` —— 两边都不红，因为 `run_tests.ps1` 里 grep 不到 `hdrop`/`oledd`，
 它是夹具自己写的日志文件。首拖成败正是这类测试最容易漂的地方 ⇒ 值得挑一轮把它翻成针面。
+### B25 账 #179：`UserControl` 的一整批宿主成员仍随**调用路径**变值（#178 只治了量纲那两条）
+出处 = 账 #178 落地后同一枚夹具的补量（探针是往 `tests/ve_units` 里加一个 `Public Function Ctx()`，把 `ScaleMode/.ScaleWidth/.TextWidth/.hWnd/.Enabled` 拼成一行；控件侧在 `UserControl_Initialize` 里打、容器侧在 `Form_Load` 里调，量完即撤 —— 钉住 `mode=3` 就是把错的值钉成基线）。
+· 实测（缇型那一枚 uTw，`ScaleMode=1`）：
+    控件自己里 "I-CTX=mode=1 sw=2400 tw=600 hasdc=False en=-1"
+    容器调它时 "U-CTX-TWIP=mode=3 sw=2400 tw=600 hasdc=False en=-1"
+  ⇒ `sw/tw` 已经对了（#175/#178 的按实例出口），`mode` 读到的是**上一枚控件留下的残值**（3 = 先初始化的那枚像素型控件），`hasdc` 两侧都是 False ⇒ `UserControl.hWnd` 在宿主上下文换入的那一刻还没填（VbEclipse 的 ucTab.ctl 正是靠 `UserControl.hDC/HasDC` 那一族）。
+· 根因还是 #178 那条，只是覆盖面比两条出口大得多：`vb6_uc_push` 的换入点只有窗口消息 / HostCreate / Refresh / dump 四类，**容器直调控件公共成员时没人换入**，而宿主成员里只有 ScaleWidth/ScaleHeight/TextWidth/TextHeight 改成了按 `me` 取，其余（`ScaleMode/hWnd/hDC/Font/Enabled/Extender.*/BackColor` 等）仍是进程级全局。
+· 两条路，代价不同（**这一条要用户拍板，别顺手挑便宜的**）：
+  路 A = 照 rev20/#178 的形状把剩下的成员逐个补成 `#define X  vb6_UC_XOf((void*)me)`，机械、无栈帧风险，但那是把同一个决定再抄十几遍（正是 #178 批评为"点状绕法"的那种东西）。
+  路 B = 先做 **T31-A（任务 #92：`Exit Sub/Function/Property` 改走统一出口尾）**，之后每个 UC 方法体两端一对 `vb6_UC_Enter/Leave` 就一次性覆盖全部成员 —— 也是 Try/Catch 那条线的先决。现在不做配对的原因就是这条：提前返回会漏弹栈。
+· 另记一条与它无关但同一夹具量到的：`UserControl.hWnd` 在 `vb6_uc_push` 之后仍为 0（`hasdc=False` 两侧同值），要么 push 时 `r->hwnd` 未填、要么 `HasDC` 的宏看的不是同一个槽位；追 #179 时顺手定它。
 ### B22 隐式函数声明（C4013）现在没有**守卫**，只有 census
 出处 = 账 #173 / #174。两格都已出（#173 补 `vb6com_internal.h` 的 `extern double vb6_VariantToDouble(VARIANT)`；#174 把裸名 `SelectedControls` 接进 `kPropertyPageHostMembers`），`tests/Charts 2020` 整个构建的 C4013 从 **14 → 0**。但**没有任何东西阻止它再长回来**：
 · 为什么必须当缺陷：x86 cdecl 下被隐式声明的函数按 `int` 取返回值，而 `double` 返回值躺在 x87 栈 ST0 上、调用方永不 `fstp` ⇒ 每调一次漏一层栈，八层之后栈满、之后任何浮点取值得 QNaN `0x7FF8...`（#173 的炸法）。x64 走 XMM0，全静默。
