@@ -2859,6 +2859,8 @@ if ($Category -in @("all", "run", "vbp")) {
     $rtNeedles = @("CTRLRICHTEXT-DONE") + (1..89 | ForEach-Object { "RT$_=Y" })
     # 128-a: ReadOnly / WordWrap 的 CStr 与 TypeName (rt1 设计期就没开换行)
     $rtNeedles += @("RT90=True/False/Boolean")
+    # 账 #161: 只动选区不该发 Change (RT91) / 一次赋值恰好一条 (RT92)
+    $rtNeedles += @("RT91=Y", "RT92=Y")
     Test-Vbp "ctrlrichtextbox" "$Tests\ctrlrichtextbox\RtfApp.vbp" $rtNeedles
     Test-Vbp "ctrlrichtextbox_x86" "$Tests\ctrlrichtextbox\RtfApp.vbp" $rtNeedles -Arch "x86"
     # 发码正面：类名 + 四位创建样式逐枚钉（1409286148 = 基+ES_MULTILINE，rt2 全默认；
