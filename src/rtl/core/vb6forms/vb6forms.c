@@ -213,21 +213,23 @@ int vb6_YToTwipY(int px) { return MulDiv(px, 1440, vb6_DpiY()); }
 
 // ============================================================
 // 账 #175: 控件坐标的**单位**只有一个来源 —— 容器声明的 ScaleMode
-// (VB6: 控件的 Left/Top/Width/Height、Move、鼠标 X/Y、ScaleWidth 都按
-//  所在容器 (窗体或 UserControl) 的 ScaleMode)。此前这些点位一律按缇,
+// (VB6: 控件的 Left/Top/Width/Height、Move、鼠标 X/Y、ScaleWidth、TextWidth/TextHeight
+//  都按所在容器 (窗体或 UserControl) 的 ScaleMode 交/收单位)。此前这些点位一律按缇,
 //  而 .ctl 全部声明 3=Pixel ⇒ 像素型 UC 里 ScaleWidth(缇) 比绘图 DC(像素)
 //  大 15 倍, Charts 2020 的饼/柱/面积/矩形整幅画在画布外 (空白)。
 // 缇那一路必须与今天逐字节等价, 所以 mode==1 直接复用上面那对 MulDiv。
+// 枚举值以 src/semantics/builtin/builtin_consts_ext.inc 的 vbMillimeters=6 /
+// vbCentimeters=7 为准 (别按"6 比 7 大 ⇒ 6 是厘米"猜)。
 // ============================================================
 
-static double vb6_ScaleUnitsPerPx(int32_t mode, int vert) {
+double vb6_ScaleUnitsPerPx(int32_t mode, int vert) {
     double dpi = (double)(vert ? vb6_DpiY() : vb6_DpiX());
     switch (mode) {
         case 1:  return 1440.0 / dpi;               // Twip
         case 2:  return   72.0 / dpi;               // Point
         case 5:  return    1.0 / dpi;               // Inch
-        case 6:  return    2.54 / dpi;              // Centimeter
-        case 7:  return   10.0 / dpi;               // Millimeter
+        case 6:  return   25.4 / dpi;               // Millimeter
+        case 7:  return    2.54 / dpi;              // Centimeter
         default: return    1.0;                     // 3=Pixel; 0=User/4=Character 暂按像素
     }
 }

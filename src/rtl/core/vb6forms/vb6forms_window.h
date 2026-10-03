@@ -57,6 +57,9 @@ int vb6_YToTwipY(int px);
 // 禁止再默认缇。
 double vb6_ScalePxToUser(double px, int32_t mode, int vert);
 int    vb6_ScaleUserToPx(double user, int32_t mode, int vert);
+// 1 设备像素 = 多少该 ScaleMode 单位 (vb6rtl_com.c 的 ScaleX/ScaleY 也读这一张表,
+// 账 #177: 全 RTL 只留这一份单位表)。
+double vb6_ScaleUnitsPerPx(int32_t mode, int vert);
 // 目标窗口的容器 ScaleMode: 容器是 UserControl 宿主 → 它的 .ctl ScaleMode;
 // 否则读窗体的 VB6_ScaleMode 属性 (缺省 1=缇)。
 int32_t vb6_ContainerScaleMode(void* hwndParent);

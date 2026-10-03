@@ -232,6 +232,17 @@ void CCodeGen::emitDesignerControlDecls(const FrmFormDesc& frmDesc) {
         c_.emitLine("#define vb6_UserControl_ScaleWidth vb6_UC_ScaleWidthOf((void*)me)");
         c_.emitLine("#undef vb6_UserControl_ScaleHeight");
         c_.emitLine("#define vb6_UserControl_ScaleHeight vb6_UC_ScaleHeightOf((void*)me)");
+        // 账 #177/#178: UserControl.TextWidth/.TextHeight 同一个坑、同一味药 —— 量出来是
+        // 设备像素, 折算单位必须按**这一枚控件**声明的 ScaleMode 取。读进程级
+        // vb6_UserControl_ScaleMode 不够: 容器直调控件公共成员时没人换入宿主上下文
+        // (实测 ve_units: 控件自己 Initialize 里 600 缇, 容器调同一个函数拿到 40 像素)。
+        // 只在 .ctl 里重定向, 所以取的是带 `me` 的实例方法体 —— 与上面两条同一前提。
+        c_.emitLine("extern int32_t vb6_UC_TextWidthOf(void* inst, BSTR text);");
+        c_.emitLine("extern int32_t vb6_UC_TextHeightOf(void* inst, BSTR text);");
+        c_.emitLine("#undef vb6_UserControl_TextWidth");
+        c_.emitLine("#define vb6_UserControl_TextWidth(t) vb6_UC_TextWidthOf((void*)me, (t))");
+        c_.emitLine("#undef vb6_UserControl_TextHeight");
+        c_.emitLine("#define vb6_UserControl_TextHeight(t) vb6_UC_TextHeightOf((void*)me, (t))");
     }
     c_.emitBlank();
 

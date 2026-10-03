@@ -684,6 +684,12 @@ const int32_t BF = 2;
 // 像素, 而 .ctl 的布局常数(PT16=(SW+SH)*2.5/100 等)是按 VB6 的 TWIP 语义推的,
 // 两者本就不同源; 换成更大的字体度量后饼图被图例挤没、柱图 X 轴标签裁切更重
 // (见离屏 dump ucPieChart/ucChartBar). 故保留原"默认 DC 字体测量"行为.
+/* 账 #177: 控件坐标/文字量纲的单位表只剩一份权威, 在 vb6forms.c。vb6rtl 与 vb6forms
+   是两个模块、不互相 include 头, 故就地 extern (同 vb6com_internal.h 里
+   extern vb6_RaiseError 的做法)。 */
+extern double vb6_ScalePxToUser(double px, int32_t mode, int vert);
+extern double vb6_ScaleUnitsPerPx(int32_t mode, int vert);
+
 static int32_t vb6_uc_measureText(BSTR text, int wantWidth) {
     if (!text) return 0;
     HDC hdc = GetDC(NULL);
@@ -723,11 +729,27 @@ static int32_t vb6_uc_measureText(BSTR text, int wantWidth) {
 }
 
 int32_t vb6_UserControl_TextWidth(BSTR text) {
-    return vb6_uc_measureText(text, 1);
+    /* 账 #177: VB6 的 TextWidth/TextHeight 交的是**控件 ScaleMode 单位**, 不是设备像素。
+       vb6_uc_measureText 量的是 GetDC(NULL) 上的像素, 所以这里必须折算一次:
+       缇型控件 (语料里 FontMemRes / VbEclipse 的 ucFolder·ucPerspective 那一族) 此前
+       拿到的是像素 ⇒ 比同一枚控件的 ScaleWidth 小 15 倍, 图例/标题全挤在一起。
+       像素型控件 (Charts 2020 / czUI / VBFlexGrid) 折算系数为 1 ⇒ 读数逐字节不变。
+       ⚠ 这一对读的是进程级 vb6_UserControl_ScaleMode, 只在宿主上下文已换入时正确;
+       控件代码里请走按实例的那一对 (vb6_UC_TextWidthOf, 账 #178, 由 cgen 用 #define
+       把 UserControl.TextWidth 重定向过去)。 */
+    return (int32_t)vb6_ScalePxToUser((double)vb6_uc_measureText(text, 1),
+                                      vb6_UserControl_ScaleMode, 0);
 }
 
 int32_t vb6_UserControl_TextHeight(BSTR text) {
-    return vb6_uc_measureText(text, 0);
+    return (int32_t)vb6_ScalePxToUser((double)vb6_uc_measureText(text, 0),
+                                      vb6_UserControl_ScaleMode, 1);
+}
+
+/* 账 #177/#178: 原始像素量 (不做单位折算), 给"按实例取 ScaleMode"的那一对宿主出口用。
+   vb6_uc_measureText 是本文件 static, 外面只能从这里拿。 */
+int32_t vb6_UC_MeasureTextPx(BSTR text, int wantWidth) {
+    return vb6_uc_measureText(text, wantWidth);
 }
 
 // UserControl.Size: VB6 `UserControl.Size width, height` (unit = ScaleMode).
@@ -766,44 +788,28 @@ void vb6_UserControl_Line(double x1, double y1, double x2, double y2, int32_t co
 // Fix 111: UserControl built-in methods (declared in vb6rtl_userctl.h).
 //
 // ScaleX/ScaleY: convert x from fromScale to toScale (VB6 ScaleMode constants).
-// 96dpi baseline: Twip = 1/15 px, Point = 96/72 px, Inch = 96 px ...
-// User(0)/ContainerPosition(8)/ContainerSize(9,10)/unknown are treated as
-// pixels -- matching Charts 2020 usage (Extender.Left is already container
-// pixels; target UserControl.ScaleMode = 3 = Pixel -> identity).
-static double vb6_ucScaleToPixels(int32_t mode) {
-    // Fix 184: 单位表必须用**真实 DPI**。此前整张表按 96 写死，而容器侧
-    // (vb6_TwipToX / vb6_XToTwipX) 已按 DPI，于是 UserControl 内部每做一次
-    // 缇<->像素往返就缩 20% (VBFlexGrid 内层窗口 914px -> 731px)。
-    static double s_dpi = 0.0;
-    double dpi;
-    if (s_dpi <= 0.0) {
-        HDC dc = GetDC(NULL);
-        int d = dc ? GetDeviceCaps(dc, LOGPIXELSX) : 96;
-        if (dc) ReleaseDC(NULL, dc);
-        s_dpi = (d > 0) ? (double)d : 96.0;
-    }
-    dpi = s_dpi;
-    switch (mode) {
-        case 1: return dpi / 1440.0;    /* Twips */
-        case 2: return dpi / 72.0;      /* Points */
-        case 3: return 1.0;             /* Pixels */
-        case 4: return 1.0;             /* Characters (approx) */
-        case 5: return dpi;             /* Inches */
-        case 6: return dpi / 25.4;      /* Millimeters */
-        case 7: return dpi / 2.54;      /* Centimeters */
-        default: return 1.0;            /* User / Container* / unknown */
-    }
+// 账 #177: 单位表**只剩一份** —— vb6forms.c 的 vb6_ScaleUnitsPerPx (Fix 184 把它
+// 接上真实 DPI 时, 这里另抄了一张, 于是同一件事两处口径: 那张表纵向也用 LOGPIXELSX,
+// 而权威按 vert 分 X/Y)。vb6rtl 与 vb6forms 是两个模块、不互相 include 头,
+// 故就地 extern (同 vb6com_internal.h 里 extern vb6_RaiseError 的做法)。
+// User(0)/ContainerPosition(8)/ContainerSize(9,10)/unknown 仍按像素 —— 与 Charts 2020
+// 的用法一致 (Extender.Left 已是容器像素; 目标 ScaleMode=3=Pixel ⇒ 恒等)。
+extern double vb6_ScaleUnitsPerPx(int32_t mode, int vert);
+
+static double vb6_ucScaleToPixels(int32_t mode, int vert) {
+    double u = vb6_ScaleUnitsPerPx(mode, vert);
+    return (u == 0.0) ? 1.0 : (1.0 / u);
 }
 
 double vb6_UserControl_ScaleX(double x, int32_t fromScale, int32_t toScale) {
-    double px = x * vb6_ucScaleToPixels(fromScale);
-    double f = vb6_ucScaleToPixels(toScale);
+    double px = x * vb6_ucScaleToPixels(fromScale, 0);
+    double f = vb6_ucScaleToPixels(toScale, 0);
     return (f == 0.0) ? x : (px / f);
 }
 
 double vb6_UserControl_ScaleY(double y, int32_t fromScale, int32_t toScale) {
-    double px = y * vb6_ucScaleToPixels(fromScale);
-    double f = vb6_ucScaleToPixels(toScale);
+    double px = y * vb6_ucScaleToPixels(fromScale, 1);
+    double f = vb6_ucScaleToPixels(toScale, 1);
     return (f == 0.0) ? y : (px / f);
 }
 

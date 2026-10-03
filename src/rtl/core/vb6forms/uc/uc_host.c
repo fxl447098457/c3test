@@ -360,15 +360,27 @@ int32_t vb6_UC_OwnPropGet(void* obj, const wchar_t* name, void* outV) {
     void* inst = NULL;
     const vb6_UcPropDesc* pd = vb6_uc_ownPropLookup(obj, name, &inst);
     if (!pd || !pd->get || !inst) return 0;
+    /* 账 #178: 容器→控件的每一次进入都要先把该控件的宿主上下文换进来 (见
+       vb6_UC_OwnMethodCall 里那条口径的完整说明)。 */
+    vb6_UCRec* r = vb6_uc_findByInstance(inst);
+    vb6_UCSaved saved;
+    if (r) vb6_uc_push(r, &saved);
     pd->get(inst, outV);
+    if (r) vb6_uc_pop(&saved);
     return 1;
 }
 
 int32_t vb6_UC_OwnPropSet(void* obj, const wchar_t* name, const void* inV) {
     void* inst = NULL;
+    int32_t ok;
     const vb6_UcPropDesc* pd = vb6_uc_ownPropLookup(obj, name, &inst);
     if (!pd || !pd->set || !inst) return 0;
-    return pd->set(inst, inV) ? 1 : 0;
+    vb6_UCRec* r = vb6_uc_findByInstance(inst);
+    vb6_UCSaved saved;
+    if (r) vb6_uc_push(r, &saved);
+    ok = pd->set(inst, inV) ? 1 : 0;
+    if (r) vb6_uc_pop(&saved);
+    return ok;
 }
 
 // Fix <vbeclipse> rev21: UserControl **自有 Public Sub 的按名桥**。见
@@ -415,7 +427,23 @@ int32_t vb6_UC_OwnMethodCall(void* obj, const wchar_t* name, int32_t argc,
          *   (指针 + `m_FolderId` + `m_ActiveViewId`), 与 `Perspective.m_Folders`
          *   里各 Folder 的同一组值对照, 即可定位是"哪个实例被换掉了"。*/
         if (md->argc != argc) return 0;   /* 实参个数对不上 ⇒ 不猜, 交回调用方 */
-        return md->fn(r->me, argc, argv, outRet) ? 1 : 0;
+        /* 账 #178: **容器→控件的每一次进入都必须先把该控件的宿主上下文换进来。**
+         * VB6 里控件代码不知道自己是被谁调的: UserControl.ScaleMode / .ScaleWidth /
+         * .hDC / .Font / TextWidth 这些宿主成员读的是"当前控件"的状态。本文件里
+         * 换入的时机原先只有四类 (窗口消息 paint/mouse/show/size、HostCreate 的
+         * init/props、Refresh、composite dump) —— 从容器里直接调控件的公共成员/属性
+         * 走的是下面这两个桥, 谁都没换 ⇒ 控件代码读到的是进程级残值。
+         * 实测 (tests/ve_units, 两枚同尺寸 UC 只差 ScaleMode):
+         *   控件自己的 Initialize 里  I-MODE=1 I-TW=600   (缇, 对)
+         *   容器里调 uTw.TW("MMMM")   tw=40               (像素, 因为 ScaleMode 残值 0)
+         * 同一段代码两个答案 ⇒ 口径必须收在这里, 而不是让每个控件自己按实例取
+         * (rev20 给 ScaleWidth 补的 vb6_UC_ScaleWidthOf(me) 就是被这个坑逼出来的
+         * 点状绕法; 换入之后那条路仍然有效, 两者读的是同一个 rec)。*/
+        vb6_UCSaved saved178;
+        vb6_uc_push(r, &saved178);
+        int32_t hit178 = md->fn(r->me, argc, argv, outRet) ? 1 : 0;
+        vb6_uc_pop(&saved178);
+        return hit178;
     }
     return 0;
 }
@@ -773,6 +801,31 @@ int32_t vb6_UC_WindowScaleMode(const void* hwnd) {
     vb6_UCRec* r = vb6_uc_findByHwnd(hwnd);
     if (!r || !r->desc) return 0;
     return r->desc->scaleMode;
+}
+
+/* 账 #177/#178: UserControl.TextWidth / .TextHeight 的**按实例**出口 —— 量出来的是
+   设备像素, 折算用的必须是"这一枚控件"声明的 ScaleMode。
+   为什么不能读进程级 vb6_UserControl_ScaleMode: 容器直接调控件的公共成员时
+   (实测 tests/ve_units 里 frmUnits 调 uTw.TW("MMMM")) 走的是发码**直调**, 不经过
+   本文件任何一个 push 点 ⇒ 全局是残值 0 ⇒ 同一句 UserControl.TextWidth 在控件自己的
+   Initialize 里给 600 (缇)、被容器调时给 40 (像素)。rev20 给 ScaleWidth 补
+   vb6_UC_ScaleWidthOf(me) 治的就是同一个坑, 这里照同一形状办。
+   回落与 ScaleWidthOf 一致: 查不到 rec 时用进程级全局。 */
+extern int32_t vb6_UC_MeasureTextPx(BSTR text, int wantWidth);
+
+static int32_t vb6_uc_textMeasureOf(void* inst, BSTR text, int wantWidth) {
+    vb6_UCRec* r = inst ? vb6_uc_findByInstance(inst) : NULL;
+    int32_t px = vb6_UC_MeasureTextPx(text, wantWidth);
+    int32_t mode = (r && r->desc) ? r->desc->scaleMode : vb6_UserControl_ScaleMode;
+    return (int32_t)vb6_ScalePxToUser((double)px, mode, wantWidth ? 0 : 1);
+}
+
+int32_t vb6_UC_TextWidthOf(void* inst, BSTR text) {
+    return vb6_uc_textMeasureOf(inst, text, 1);
+}
+
+int32_t vb6_UC_TextHeightOf(void* inst, BSTR text) {
+    return vb6_uc_textMeasureOf(inst, text, 0);
 }
 
 void* vb6_UC_CreateDesignTimer(void (*cb)(void*), void* ctx) {

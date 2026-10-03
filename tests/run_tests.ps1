@@ -3499,6 +3499,15 @@ if ($Category -in @("all", "run", "vbp")) {
     Test-Vbp "iface_wrap" "$Tests\iface_wrap\IfaceWrap.vbp" $ifaceWrapExpected
     Test-Vbp "iface_wrap_x86" "$Tests\iface_wrap\IfaceWrap.vbp" $ifaceWrapExpected -Arch "x86"
 
+    # <vbeclipse> 回归夹子 (ve_units): 控件**自己的坐标系**读数。两枚 UC 同尺寸、同字体,
+    # 只差 .ctl 声明的 ScaleMode (1=缇 / 3=像素)。判据写成「缇型 = 像素型 x TwipsPerPixelX」
+    # ⇒ 与 DPI 无关, 换机器不会漂。钉的是账 #175 (ScaleWidth) 与账 #177 (TextWidth/TextHeight)
+    # 同一族口径: 控件宿主交出去的每一个量纲都得跟着它声明的 ScaleMode 走。
+    # 改前实测: U-SW=True 而 U-TW/U-TH=False (文字量纲交的是设备像素)。
+    $veUnitsExpected = @("U-SW=True", "U-TW=True", "U-TH=True", "U-DONE")
+    Test-Vbp "ve_units" "$Tests\ve_units\Units.vbp" $veUnitsExpected
+    Test-Vbp "ve_units_x86" "$Tests\ve_units\Units.vbp" $veUnitsExpected -Arch "x86"
+
     # test_vbman 用于验证外部 COM 组件 VBMANLIB (x86 DLL, 供 32 位程序调用)
     # ai/022 B07b: INH2..INH11 cover the merged member face + prefix-copied fields +
     # forwarding stubs (private Long/UDT/BSTR fields, Optional params, Property Get/Let,

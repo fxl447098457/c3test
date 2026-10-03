@@ -21,6 +21,9 @@ $deny = @(
     @{ File = "src/rtl/core/vb6forms/vb6forms_widget.c"; Pat = "vb6_TwipToX\(|vb6_TwipToY\(|vb6_XToTwipX\(|vb6_YToTwipY\(" },
     @{ File = "src/rtl/core/vb6forms/uc/uc_host.c";      Pat = "=\s*vb6_XToTwipX\(|=\s*vb6_YToTwipY\(" },
     @{ File = "src/rtl/core/vb6forms/uc/uc_host_window.c"; Pat = "\*\s*15\.0f" }
+    # 账 #177: 单位表只剩一份。vb6rtl_com.c 里那份 (Fix 184 时抄的) 已改成转调权威,
+    # 再出现 1440 这个缇系数就说明有人抄回第二张表。
+    @{ File = "src/rtl/core/vb6rtl/vb6rtl_com.c";          Pat = "1440" }
 )
 $viol = @()
 foreach ($d in $deny) {
@@ -37,6 +40,7 @@ $must = @(
     @{ File = "src/rtl/core/vb6forms/vb6forms.c";       Pat = "int vb6_ScaleUserToPx\(double user, int32_t mode, int vert\) \{" },
     @{ File = "src/rtl/core/vb6forms/vb6forms_window.h"; Pat = "vb6_ScalePxToUser" },
     @{ File = "src/rtl/core/vb6forms/vb6forms_window.h"; Pat = "vb6_ScaleUserToPx" }
+    @{ File = "src/rtl/core/vb6rtl/vb6rtl_com.c";        Pat = "vb6_ScaleUnitsPerPx" }
 )
 foreach ($m in $must) {
     $p = Join-Path $Root $m.File
