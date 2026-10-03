@@ -163,6 +163,21 @@ void vb6_LoadForm(void* hwnd);
 int32_t vb6_QueueFormResize(void* hwnd);
 void   vb6_DrainFormResize(void* hwnd);
 
+// Fix <vbeclipse> rev29: 窗体 Form_Resize 的**直调**通道。
+// 存的是 cgen 生成的 `vb6_<Form>_Form_Resize` 的地址 (通过窗口属性关联到 HWND),
+// 供 RTL 在 vb6_ControlMove 收口处同步调用 —— 不依赖 WM_SIZE, 也就绕开了
+// "启动期不在消息循环里 ⇒ PostMessage 无人 Dispatch" 这个死结。
+//
+// 为什么不走排队 (rev29 前一版实测失败, 留档):
+//   停靠视图窗体一生只收到 1 次 WM_SIZE(0x0), rev28 的 case VB6_FORM_FR_MSG
+//   永远等不到; 改在 vb6_ControlMove 里 PostMessage 也不行 —— 排队那一刻还在
+//   Form_Load 的同步栈里, 消息没人 Dispatch, 且实测堆损坏 0xC0000374。
+// 直调为何安全: SetWindowPos 已完成, Form_Resize 读到的是**终值**; 它内部再 Move
+// 子控件时由 sizeChanged 判据收敛。
+#define VB6_FORM_RESIZE_PROP L"C3_FORM_RESIZE_FN"
+void vb6_RegisterFormResize(void* hwnd, void* fn);
+int32_t vb6_InvokeFormResize(void* hwnd);
+
 // 卸载窗体
 void vb6_UnloadForm(void* hwnd);
 

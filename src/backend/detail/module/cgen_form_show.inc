@@ -76,6 +76,33 @@
         c_.emitLine("hInst, " + ownerExpr + ", " + std::to_string(formBorderStyle) + ");");
         c_.dedent();
     }
+    // Fix <vbeclipse> rev29: 把本窗体的 Form_Resize 入口注册到 HWND 上, 让 RTL
+    // 能在**任意时刻直接调用**它 (`vb6_InvokeFormResize`), 不必等 WM_SIZE。
+    //
+    // 为什么必须这样 (探针实测, play78 --arch x86):
+    //   停靠视图窗体 (frmViewViews 等) 由 ucFolder.ViewArea_Resize 用
+    //   `vb6_ComCall(视图窗体, L"Move", …)` 摆到最终尺寸 —— 尺寸**确实变了**
+    //   (探针: rect 0x0 → 318x291 → 202x364 …), 但它**一生只收到 1 次 WM_SIZE
+    //   且那次是建窗时的 0x0** ⇒ rev28 那条 `case VB6_FORM_FR_MSG` 永远等不到
+    //   ⇒ `Form_Resize` 跑 0 次 ⇒ `frmViewViews.frm:66`
+    //   `tvwViews.Move 0, 0, ScaleWidth, ScaleHeight` 永不执行
+    //   (树控件停在设计期 251x211, 比它 188x484 的窗体还宽 = 溢出)。
+    //   rev29 试过在 `vb6_ControlMove` 里 PostMessage 排队, 结果**堆损坏 0xC0000374**:
+    //   排队那一刻根本**不在主消息循环里** (还在 Form_Load 的同步调用栈中), 消息
+    //   进了队列却没人 Dispatch ⇒ 该手法在启动期不成立, 已回退。
+    //
+    // 所以改成**直接调用**: 存函数指针 → RTL 在 Move 收口处同步调。
+    // 同步调为什么安全: `vb6_ControlMove` 此刻已经 `SetWindowPos` 完, 目标窗体的
+    // **最终**尺寸已定型, Form_Resize 读到的就是终值 (不是中间态); 而且
+    // Form_Resize 内部自己 Move 子控件是**在同一个 hwnd 上**的第二次 Move,
+    // 由 `sizeChanged` 判据保证只在真变化时再进一层 ⇒ 收敛。
+    {
+        std::string resizeFn29 = cProcName("Form_Resize", AccessLevel::Private);
+        if (symTab_.lookup(formName + "_Resize") || symTab_.lookup("Form_Resize")) {
+            c_.emitLine("{ extern void " + resizeFn29 + "(); vb6_RegisterFormResize(vb6_hwnd_"
+                        + cIdent(formName) + ", (void*)" + resizeFn29 + "); }  /* Fix <vbeclipse> rev29 */");
+        }
+    }
     c_.emitLine("vb6_LoadForm(vb6_hwnd_" + cIdent(formName) + ");");
     c_.dedent();
     c_.emitLine("}");  // Load

@@ -251,6 +251,32 @@ void vb6_ControlMove(void* hwnd, double L, double T, double W, double H, int mas
     if (sizeChanged) {
         extern int32_t vb6_UC_QueueDesignResizeForCtrl(const void* hwnd);
         vb6_UC_QueueDesignResizeForCtrl(hW);
+        /* Fix <vbeclipse> rev29: 目标是**窗体**时, 直接调它的 Form_Resize。
+         *
+         * 为什么必须"直调"而不是 PostMessage 排队 (rev29 前一版实测失败, 留档):
+         *   停靠视图窗体 (frmViewViews 等) 被 `vb6_ComCall(视图窗体, L"Move", …)`
+         *   摆到最终尺寸 —— 尺寸**确实变了** (探针: rect 0x0 → 318x291 → 202x364),
+         *   但它**一生只收到 1 次 WM_SIZE 且那次是建窗时的 0x0** ⇒ rev28 那条
+         *   `case VB6_FORM_FR_MSG` 永远等不到, Form_Resize 跑 0 次。
+         *   改在 `vb6_ControlMove` 里 PostMessage 也不行: 排队那一刻还在
+         *   Form_Load 的同步调用栈中、**根本不在主消息循环里**, 消息进队列没人
+         *   Dispatch, 实测还堆损坏 `0xC0000374`。已回退。
+         *
+         * 为什么现在直调是安全的:
+         *   ① 时机对 —— `SetWindowPos` 已在上面执行完, 目标窗体拿到的是**最终**尺寸,
+         *      Form_Resize 里 `vb6_GetScaleWidth(hwnd)` 读到的就是终值, 不是中间态
+         *      (这正是 rev23/rev28 花两版才解决的问题, 现在在 Move 收口处天然成立)。
+         *   ② 不递归 —— `vb6_InvokeFormResize` 有"同窗体重入"闸; 且 Form_Resize
+         *      内部 Move 的是**子控件**(另一个 HWND), 那一发进来时本窗体已出栈,
+         *      靠 `sizeChanged` 判据收敛。实测栈深 ≤ 2。
+         *   ③ 收窄到窗体 —— 只有 `vb6_form_load_<F>` 注册过的 HWND 才有那个属性,
+         *      原生控件 (TreeView/ListView/Edit) 根本没注册 ⇒ 自动跳过。
+         *      这一点很关键: rev29 前一版给**所有**控件 PostMessage 自定义消息,
+         *      它们的窗口过程是 Windows 自带的, 不认那条消息, 纯浪费去重名额。*/
+        {
+            extern int32_t vb6_InvokeFormResize(void* hwnd);
+            vb6_InvokeFormResize(hW);
+        }
     }
 }
 

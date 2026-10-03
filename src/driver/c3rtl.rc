@@ -1,4 +1,11 @@
 // c3rtl.rc - RTL runtime library embedded as resources
+// Fix <vbeclipse> rev29: 窗体 Form_Resize 的**直调**通道 (vb6_RegisterFormResize +
+//   vb6_InvokeFormResize)。探针实测停靠视图窗体一生只收 1 次 WM_SIZE(0x0), rev28 的
+//   case VB6_FORM_FR_MSG 永远等不到 ⇒ Form_Resize 跑 0 次, tvwViews 停在设计期
+//   251x211 比窗体 188x484 还宽。改 PostMessage 也不行: 排队时还在 Form_Load 同步栈里、
+//   不在主消息循环, 消息无人 Dispatch, 且实测堆损坏 0xC0000374 (已回退)。
+//   直调在 vb6_ControlMove 收口处: SetWindowPos 之后 ⇒ 读到终值; 同窗体重入闸防递归;
+//   只有注册过的窗体 HWND 有该属性 ⇒ 原生控件自动跳过。
 // Fix <vbeclipse> rev28: 窗体 Form_Resize 延后到消息循环跑 (WM_SIZE 里只排队)
 //   停靠布局里 ucPerspective → ucFolder → ViewArea → 视图窗体 一整串嵌套 Move 全在
 //   同一个调用栈里跑完才返回 (WM_SIZE 是同步 SendMessage), 此刻各控件才有最终尺寸。

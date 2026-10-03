@@ -1328,6 +1328,33 @@ void vb6_DrainFormResize(void* hwnd) {
     RemovePropW((HWND)hwnd, VB6_FORM_FR_PROP);
 }
 
+// Fix <vbeclipse> rev29: Form_Resize 直调通道。详见 vb6forms_window.h 的注释。
+void vb6_RegisterFormResize(void* hwnd, void* fn) {
+    if (!hwnd || !fn) return;
+    SetPropW((HWND)hwnd, VB6_FORM_RESIZE_PROP, (HANDLE)fn);
+}
+
+// 返回 1 = 调过了 (无论有没有 Form_Resize), 0 = 该窗体没注册。
+//
+// ⚠ **重入防护**: Form_Resize 内部自己会 Move 子控件, 那又回到本函数。
+//   用一个 thread-local 深度闸: 已经在同一个窗体的事件里就不再进第二层。
+//   不用深度数值而用"同一个 hwnd"判重 —— 不同窗体嵌套是合法的
+//   (A 的 Form_Resize Move 了 B, B 的 Form_Resize 又 Move 回 A 的兄弟),
+//   那时仍需要各跑各的。
+static __declspec(thread) void* g_formResizeIn = NULL;
+int32_t vb6_InvokeFormResize(void* hwnd) {
+    if (!hwnd) return 0;
+    HWND h = (HWND)hwnd;
+    if (g_formResizeIn == (void*)h) return 1;      // 同窗体重入 ⇒ 跳过
+    HANDLE fn = GetPropW(h, VB6_FORM_RESIZE_PROP);
+    if (!fn) return 0;                              // 没 Form_Resize 过程
+    void* prev = g_formResizeIn;
+    g_formResizeIn = (void*)h;
+    ((void (*)(void))fn)();
+    g_formResizeIn = prev;
+    return 1;
+}
+
 void vb6_ShowForm(void* hwnd, int modal) {
     vb6_installCrashTrace();
     if (GetEnvironmentVariableW(L"C3_OCX_TRACE", NULL, 0) > 0) {
