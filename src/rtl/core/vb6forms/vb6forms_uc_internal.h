@@ -90,7 +90,7 @@ typedef struct vb6_UCRec {
 typedef struct vb6_UCSaved {
     int32_t scaleWidth, scaleHeight, scaleMode;
     void*   hDC;
-    int32_t containerHwnd;
+    void*   containerHwnd;   // 账 #180: 与 vb6_UserControl_ContainerHwnd 同宽 (HWND)
     int16_t enabled;
     void*   font;
     void*   ambientFont;

@@ -66,6 +66,13 @@ Private Sub Form_Load()
     hvP = uPix.HwVs()
     Debug.Print "U-HW-RAW twip=" & hoT & "/" & hvT & " pix=" & hoP & "/" & hvP
     Debug.Print "U-HW=" & CStr(hoT = "True" And hvT = "True" And hoP = "True" And hvP = "True")
+    ' 账 #180: 容器句柄的契约读数 (两枚控件的容器都必须是同一个非零窗口, 且不是自己)。
+    Dim ck1 As String, ck2 As String, cs1 As String
+    ck1 = uTw.CntOk()
+    ck2 = uPix.CntOk()
+    cs1 = uTw.CntStr()
+    Debug.Print "U-CNT-RAW ok=" & ck1 & "/" & ck2 & " cnt=" & cs1
+    Debug.Print "U-CNT=" & CStr(ck1 = "True" And ck2 = "True" And cs1 <> "")
     Debug.Print "U-DONE"
     Unload Me
 End Sub

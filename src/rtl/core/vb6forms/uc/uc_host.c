@@ -175,7 +175,7 @@ void vb6_uc_push(vb6_UCRec* r, vb6_UCSaved* saved) {
     vb6_UserControl_ScaleHeight = (int32_t)vb6_ScalePxToUser((double)r->scaleHeight, ucMode175, 1);
     vb6_UserControl_ScaleMode = ucMode175;
     vb6_UserControl_hDC = r->hdc;
-    vb6_UserControl_ContainerHwnd = (int32_t)(intptr_t)r->parent;
+    vb6_UserControl_ContainerHwnd = r->parent;   // 账 #180: 不再折成 int32_t
     vb6_UserControl_Enabled = r->enabled;
     if (r->font) {
         vb6_UserControl_Font = (vb6_ComIface_Font*)r->font;

@@ -46,7 +46,11 @@ extern void*   vb6_UserControl_hDC;          // 绘制 DC (Windowless: 容器客
 // VB6 语义 = 当前是否有可用绘制 DC; 生成代码按**变量**读 (vb6_ret_HasDC = ...),
 // 故用宏而不是函数, 与 hDC 的赋值点天然同步 (无需在 uc_host.c 各赋值处维护).
 #define vb6_UserControl_HasDC (vb6_UserControl_hDC ? 1 : 0)
-extern int32_t vb6_UserControl_ContainerHwnd;// 容器 HWND
+// 账 #180 (B19): 容器 HWND 必须是**指针宽度**。此前它是 int32_t, 而写入点递进来的是
+// HWND (x64 = 64 位) ⇒ 高 32 位当场丢掉; 语料里 VBFlexGrid.ctl 把它直接当 HWND 传给
+// MapWindowPoints / GetWindowLongW (实测产物 5 处), 那是把截断后的值交给窗口管理器。
+// 与 vb6_UserControl_hWnd / _hDC 同档 (两者本来就是 void*)。
+extern void*   vb6_UserControl_ContainerHwnd;// 容器 HWND (指针宽度)
 extern int16_t vb6_UserControl_Enabled;
 extern int32_t vb6_UserControl_MousePointer;
 extern void*   vb6_UserControl_MouseIcon;

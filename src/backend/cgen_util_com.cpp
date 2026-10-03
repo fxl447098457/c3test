@@ -473,7 +473,7 @@ const HostPseudoRow kHostPseudoRows[] = {
     {"usercontrol", "backcolor",       "BackColor",       Vb6Type::Long,     HPF_NONE},
     {"usercontrol", "cancelasyncread", "CancelAsyncRead", Vb6Type::Unknown,  HPF_METHOD},
     {"usercontrol", "cls",             "Cls",             Vb6Type::Unknown,  HPF_METHOD},
-    {"usercontrol", "containerhwnd",   "ContainerHwnd",   Vb6Type::Long,     HPF_BARE},
+    {"usercontrol", "containerhwnd",   "ContainerHwnd",   Vb6Type::LongPtr,  HPF_BARE},
     {"usercontrol", "controls",        "Controls",        Vb6Type::Unknown,  HPF_BARE},
     {"usercontrol", "enabled",         "Enabled",         Vb6Type::Boolean,  HPF_BARE},
     {"usercontrol", "extender",        "Extender",        Vb6Type::Unknown,  HPF_NONE},
