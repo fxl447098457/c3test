@@ -448,7 +448,7 @@ function Resolve-VbpExeBase {
 # GUI smoke: require a visible main window, then close only the process we launch.
 # This checks startup, not screenshot correctness or QR decoding.
 function Test-GuiVbp {
-    param([string]$Name, [string]$VbpFile, [string]$ExeName = "", [string]$Arch = "", [int]$AutoExitSec = 0, [string]$ShardGroup = "")
+    param([string]$Name, [string]$VbpFile, [string]$ExeName = "", [string]$Arch = "", [int]$AutoExitSec = 0, [string]$ShardGroup = "", [int]$DumpMinColors = 0)
     # vbp 分片: 本片不跑这例 —— 闸门必须在任何副作用之前 (建目录/起进程)。
     if (-not (Enter-VbpShard -Group $ShardGroup)) { return }
     $script:total++
@@ -479,6 +479,13 @@ function Test-GuiVbp {
     $exe = Join-Path $guiOut ($exeBase + ".exe")
     $proc = $null
     try {
+        # 账 #175: 子进程继承本进程环境 ⇒ 用前先设、finally 里清, 不漏给后面的用例
+        $dumpDir = ""
+        if ($DumpMinColors -gt 0) {
+            $dumpDir = Join-Path $guiOut "ucdump"
+            New-Item -ItemType Directory -Force -Path $dumpDir | Out-Null
+            $env:C3_UC_DUMPDIR = $dumpDir
+        }
         $proc = Start-Process -FilePath $exe -WorkingDirectory $guiOut -PassThru -ErrorAction Stop
         $watch = [Diagnostics.Stopwatch]::StartNew()
         $windowSeen = $false
@@ -511,6 +518,7 @@ function Test-GuiVbp {
                 Write-Host "PASS (compile, window, self-exit at ~${selfSec}s, code 0)" -ForegroundColor Green
             } else {
                 $proc.Kill(); $proc.WaitForExit(5000) | Out-Null
+                if ($DumpMinColors -gt 0) { Assert-UcDumpPainted -Dir $dumpDir -MinColors $DumpMinColors }
                 Write-Host "PASS (compile, window, auto-exit after ${AutoExitSec}s)" -ForegroundColor Green
             }
             $script:pass++
@@ -526,7 +534,52 @@ function Test-GuiVbp {
         $script:fail++
         Write-Host "FAIL ($($_.Exception.Message))" -ForegroundColor Red
     } finally {
+        if ($DumpMinColors -gt 0) { Remove-Item Env:\C3_UC_DUMPDIR -ErrorAction SilentlyContinue }
         if ($proc -and -not $proc.HasExited) { $proc.Kill(); $proc.WaitForExit() }
+    }
+}
+
+# 账 #175: 读 C3_UC_DUMPDIR 落下的每控件绘制缓冲, 数**不同颜色**个数。
+# 为什么用这个读数: 图体空白在「窗口出来了」「退出码 0」两条判据下都是绿的 —— 只有
+# 缓冲本身能说话。BASE (改前) 实测个位数, NEW 实测 >=63, 阈值取 40 留两侧余量。
+function Assert-UcDumpPainted {
+    param([string]$Dir, [int]$MinColors, [int]$MinFiles = 3)
+    $files = @(Get-ChildItem $Dir -Filter *.bmp -ErrorAction SilentlyContinue | Where-Object { $_.Name -notlike 'FORM_*' })
+    if ($files.Count -lt $MinFiles) { throw "ucdump: only $($files.Count) bmp (< $MinFiles) in $Dir" }
+    foreach ($f in $files) {
+        $b = [IO.File]::ReadAllBytes($f.FullName)
+        if ($b.Length -lt 54) { throw ("ucdump: " + $f.Name + " too short") }
+        $off = [BitConverter]::ToInt32($b, 10)
+        $w = [BitConverter]::ToInt32($b, 18)
+        $h = [BitConverter]::ToInt32($b, 22)
+        $bpp = [BitConverter]::ToInt16($b, 28)
+        $bytes = $bpp / 8
+        $stride = ((($w * $bpp) + 31) / 32) * 4
+        $set = @{}
+        for ($y = 0; $y -lt $h; $y += 2) {
+            $row = $off + $y * $stride
+            for ($x = 0; $x -lt $w; $x += 2) {
+                $k = $row + $x * $bytes
+                if ($k + 2 -lt $b.Length) { $set[[int]$b[$k] * 65536 + [int]$b[$k+1] * 256 + [int]$b[$k+2]] = 1 }
+            }
+        }
+        if ($set.Count -lt $MinColors) {
+            throw ("ucdump blank: " + $f.Name + " " + $w + "x" + $h + " distinct=" + $set.Count + " (< " + $MinColors + ")")
+        }
+    }
+}
+
+function Test-UcScaleUnitsCensus {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] uc_scale_units_census ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\check_uc_scale_units.ps1" 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        $out | Select-Object -Last 14 | ForEach-Object { Write-Host "  $_" }
     }
 }
 
@@ -3337,7 +3390,8 @@ if ($Category -in @("all", "run", "vbp")) {
     Test-ProductManifest "balloon_manifest_is_user_supplied" "$OutDir\BalloonTooltips\BalloonTooltips.exe" 1 "dpiAware" -ShardGroup "balloon"
     # Charts 2020 demo (3rd-party UserControl charts): windowless chart controls (x86 first;
     # x64 after LongPtr port of API pointers/handles in the .ctl/.cls sources).
-    Test-GuiVbp "Charts2020" "$Tests\Charts 2020\Proyecto1.vbp" -Arch "x86" -AutoExitSec 3
+    # 账 #175: 除"起窗口 + 退出码 0"外, 再验每控件的绘制缓冲真画了东西 (>=40 色)
+    Test-GuiVbp "Charts2020" "$Tests\Charts 2020\Proyecto1.vbp" -Arch "x86" -AutoExitSec 3 -DumpMinColors 40
     # czUI (czForm): 自定义 GDI+ UserControl (.ctl) 无边框窗体 demo, 需 -Arch x86 (32 位)
     Test-GuiVbp "czUI" "$Tests\czUI-main\czFormDemo.vbp" -Arch "x86" -AutoExitSec 3
     # NewTab: 第三方 OCX 控件 (NewTab01.ocx, 32 位) 真宿主验证. 免注册便携部署 (OCX 在工程目录, 由 harness 复制到 exe 旁, 不依赖本机注册);
@@ -3750,6 +3804,7 @@ if ($Category -in @("all", "compile")) {
     # 这里改成每次 compile 段都静态对一遍基线 (不编译、不跑程序)。
     Write-Host "--- Static Checks ---" -ForegroundColor Yellow
     Test-DiStubCensus
+    Test-UcScaleUnitsCensus
     Write-Host ""
 
     # --- 综合测试 (编译+运行, 以 Main 为程序入口) ---

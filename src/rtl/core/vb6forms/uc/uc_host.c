@@ -162,20 +162,18 @@ void vb6_uc_push(vb6_UCRec* r, vb6_UCSaved* saved) {
     saved->displayName = (void*)vb6_Ambient_DisplayName;
 
     vb6_uc_defaultFont();
-    // Fix <vbeclipse> rev18: UserControl.ScaleWidth/ScaleHeight 按**缇**交出去。
-    // r->scaleWidth/height 一路存的是**像素** (uc_host_create.inc 的
-    // `vb6_TwipToX(width)` / `rc.right`、uc_host_window.c WM_SIZE 的 LOWORD(lParam)),
-    // 而 desc->scaleMode 声明的是 1 (缇), 而且全链路的坐标都按缇:
-    //   · `vb6_ControlMove` (所有 `子控件.Move 20,20,ScaleWidth-30,…` 都经它) 收缇;
-    //   · `vb6_UC_CreateDesignEdit` 的 .ctl 设计期 Left/Top/Width/Height 是缇;
-    //   · ucPerspective 的 `LeftPos = UserControl.ScaleWidth` 之后要
-    //     `LeftPos / Screen.TwipsPerPixelX` 才是像素 (见 CalculateFolderPositionByRef)。
-    // 只有这两处是像素 ⇒ `ViewCaption.Move 20, 20, ScaleWidth - 30, …` 会得到 35px 宽的
-    // 子控件, 停靠区 7 个文件夹宿主也只算出 27x27/42x8 那一批 (实测 play78 r24)。
-    // (对照: 宿主对象路径的 `obj.ScaleWidth` 走 vb6_ho_clientTwips, 本来就是缇。)
-    vb6_UserControl_ScaleWidth = vb6_XToTwipX(r->scaleWidth);
-    vb6_UserControl_ScaleHeight = vb6_YToTwipY(r->scaleHeight);
-    vb6_UserControl_ScaleMode = r->desc ? r->desc->scaleMode : 1;
+    /* Fix <vbeclipse> rev18 → 账 #175: UserControl.ScaleWidth/ScaleHeight 按
+       **.ctl 声明的 ScaleMode** 交出去 (r->scaleWidth/height 一律存设备像素)。
+       rev18 当时按"desc->scaleMode 声明的是 1 (缇)"写了无条件 像素→缇, 那个前提
+       是错的: 语料里 9 份 .ctl 有 8 份声明 3=Pixel (第 9 份没写、VB6 默认值也是
+       1... 实测见 ai 账 #175), 于是像素型控件的 ScaleWidth 比绘图 DC 大 15 倍,
+       Charts 2020 的饼/柱/面积/矩形全画在画布外 (空白)。
+       缇那一档 (ucPerspective/ucFolder 那条链) 仍走 vb6_ScalePxToUser 的 mode==1
+       分支, 与 rev18 逐字节等价。 */
+    int32_t ucMode175 = r->desc ? r->desc->scaleMode : 1;
+    vb6_UserControl_ScaleWidth = (int32_t)vb6_ScalePxToUser((double)r->scaleWidth, ucMode175, 0);
+    vb6_UserControl_ScaleHeight = (int32_t)vb6_ScalePxToUser((double)r->scaleHeight, ucMode175, 1);
+    vb6_UserControl_ScaleMode = ucMode175;
     vb6_UserControl_hDC = r->hdc;
     vb6_UserControl_ContainerHwnd = (int32_t)(intptr_t)r->parent;
     vb6_UserControl_Enabled = r->enabled;
@@ -750,20 +748,31 @@ void** vb6_UC_DesignSlot(const char* name) {
 // 同一个文件里 vb6_UC_DesignSlotOf(me, ...) 的做法一致 (那里也是靠 `me`
 // 才正确, 修的是同一个"多实例共享"家族问题)。r->scaleWidth/Height 一律
 // 存**像素** (HostCreate 的 vb6_TwipToX / WM_SIZE 的 LOWORD(lParam)),
-// 对外必须按 .ctl 声明的 ScaleMode=1 交**缇**, 故走 vb6_XToTwipX/YToTwipY。
+// 对外按 .ctl 声明的 ScaleMode 交出 (账 #175; rev18 曾无条件按缇)。
 //
 // 回落: inst 为空 / 查不到 rec 时退回进程级全局, 保持单实例与设计期
 // 路径 (vb6_UC_HostCreate 里的 InitProperties 等尚无 me 的场景) 的原行为。
 int32_t vb6_UC_ScaleWidthOf(void* inst) {
     vb6_UCRec* r = inst ? vb6_uc_findByInstance(inst) : NULL;
-    if (r) return vb6_XToTwipX(r->scaleWidth);
+    if (r) return (int32_t)vb6_ScalePxToUser((double)r->scaleWidth,
+                                             r->desc ? r->desc->scaleMode : 1, 0);
     return vb6_UserControl_ScaleWidth;
 }
 
 int32_t vb6_UC_ScaleHeightOf(void* inst) {
     vb6_UCRec* r = inst ? vb6_uc_findByInstance(inst) : NULL;
-    if (r) return vb6_YToTwipY(r->scaleHeight);
+    if (r) return (int32_t)vb6_ScalePxToUser((double)r->scaleHeight,
+                                             r->desc ? r->desc->scaleMode : 1, 1);
     return vb6_UserControl_ScaleHeight;
+}
+
+// 账 #175: 该 HWND 是 UserControl 宿主 → 它 .ctl 声明的 ScaleMode; 否则 0
+// (=不是 UC, 由 vb6_ContainerScaleMode 落回窗体的 ScaleMode)。
+int32_t vb6_UC_WindowScaleMode(const void* hwnd) {
+    if (!hwnd) return 0;
+    vb6_UCRec* r = vb6_uc_findByHwnd(hwnd);
+    if (!r || !r->desc) return 0;
+    return r->desc->scaleMode;
 }
 
 void* vb6_UC_CreateDesignTimer(void (*cb)(void*), void* ctx) {

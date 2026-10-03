@@ -114,18 +114,33 @@ int vb6_RadioClickCounts(void* hwndFrom) {
     if ((GetWindowLongW(h, GWL_STYLE) & BS_TYPEMASK) != BS_AUTORADIOBUTTON) return 1;
     return (SendMessageW(h, BM_GETCHECK, 0, 0) == BST_CHECKED) ? 1 : 0;
 }
-// Position/size properties use twips on both reads and writes.
-// Codegen calls these getters directly without pixel-to-twip conversion.
-// Match the existing vb6_TwipToX/Y setters (15 twips per logical pixel).
-// Returning pixels here makes Form_Resize mix ScaleWidth/Height twips with
-// pixel margins, pushing stretched Image controls outside the parent client.
+/* 账 #175: 位置/尺寸属性的单位 = **所在容器的 ScaleMode** (VB6 语义), 不是恒为缇。
+   此前这八个点位 + vb6_ControlMove 全按缇, 而 .ctl 一律声明 3=Pixel ⇒ 像素型
+   UserControl 里"读来的数"和"写回去的数"彼此自洽, 却与 ScaleWidth/绘图 DC 差 15 倍。
+   容器是窗体时 vb6_ContainerScaleMode 给 1 (缇), 与改动前逐字节等价。 */
+
+// 容器 ScaleMode 的唯一取法: UserControl 宿主窗口 → 它 .ctl 声明的 ScaleMode;
+// 窗体 → 窗体的 VB6_ScaleMode 属性 (缺省 1=缇); 非窗口 (NULL) → 1。
+int32_t vb6_ContainerScaleMode(void* hwndParent) {
+    int32_t m = vb6_UC_WindowScaleMode(hwndParent);
+    if (m) return m;
+    return vb6_GetScaleMode(hwndParent);
+}
+
+// 账 #175: 窗口**自身**的 ScaleMode (ScaleWidth/ScaleHeight/CurrentX 那一族读法的单位)。
+int32_t vb6_WindowScaleModeSelf(void* hwnd) {
+    int32_t m = vb6_UC_WindowScaleMode(hwnd);
+    if (m) return m;
+    return vb6_GetScaleMode(hwnd);
+}
+
 int vb6_GetControlLeft(void* hwnd) {
     if (!hwnd) return 0;
     RECT rc;
     GetWindowRect((HWND)hwnd, &rc);
     POINT pt = { rc.left, rc.top };
     ScreenToClient(GetParent((HWND)hwnd), &pt);
-    return vb6_XToTwipX(pt.x);
+    return (int)vb6_ScalePxToUser((double)pt.x, vb6_ContainerScaleMode(GetParent((HWND)hwnd)), 0);
 }
 
 void vb6_SetControlLeft(void* hwnd, int left) {
@@ -134,7 +149,8 @@ void vb6_SetControlLeft(void* hwnd, int left) {
     GetWindowRect((HWND)hwnd, &rc);
     POINT pt = { rc.left, rc.top };
     ScreenToClient(GetParent((HWND)hwnd), &pt);
-    SetWindowPos((HWND)hwnd, NULL, vb6_TwipToX(left), pt.y, 0, 0, SWP_NOSIZE | SWP_NOZORDER);
+    SetWindowPos((HWND)hwnd, NULL, vb6_ScaleUserToPx((double)left, vb6_ContainerScaleMode(GetParent((HWND)hwnd)), 0),
+                 pt.y, 0, 0, SWP_NOSIZE | SWP_NOZORDER);
 }
 
 int vb6_GetControlTop(void* hwnd) {
@@ -143,7 +159,7 @@ int vb6_GetControlTop(void* hwnd) {
     GetWindowRect((HWND)hwnd, &rc);
     POINT pt = { rc.left, rc.top };
     ScreenToClient(GetParent((HWND)hwnd), &pt);
-    return vb6_YToTwipY(pt.y);
+    return (int)vb6_ScalePxToUser((double)pt.y, vb6_ContainerScaleMode(GetParent((HWND)hwnd)), 1);
 }
 
 void vb6_SetControlTop(void* hwnd, int top) {
@@ -152,35 +168,41 @@ void vb6_SetControlTop(void* hwnd, int top) {
     GetWindowRect((HWND)hwnd, &rc);
     POINT pt = { rc.left, rc.top };
     ScreenToClient(GetParent((HWND)hwnd), &pt);
-    SetWindowPos((HWND)hwnd, NULL, pt.x, vb6_TwipToY(top), 0, 0, SWP_NOSIZE | SWP_NOZORDER);
+    SetWindowPos((HWND)hwnd, NULL, pt.x,
+                 vb6_ScaleUserToPx((double)top, vb6_ContainerScaleMode(GetParent((HWND)hwnd)), 1),
+                 0, 0, SWP_NOSIZE | SWP_NOZORDER);
 }
 
 int vb6_GetControlWidth(void* hwnd) {
     if (!hwnd) return 0;
     RECT rc;
     GetWindowRect((HWND)hwnd, &rc);
-    return vb6_XToTwipX(rc.right - rc.left);
+    return (int)vb6_ScalePxToUser((double)(rc.right - rc.left), vb6_ContainerScaleMode(GetParent((HWND)hwnd)), 0);
 }
 
 void vb6_SetControlWidth(void* hwnd, int width) {
     if (!hwnd) return;
     RECT rc;
     GetWindowRect((HWND)hwnd, &rc);
-    SetWindowPos((HWND)hwnd, NULL, 0, 0, vb6_TwipToX(width), rc.bottom - rc.top, SWP_NOMOVE | SWP_NOZORDER);
+    SetWindowPos((HWND)hwnd, NULL, 0, 0,
+                 vb6_ScaleUserToPx((double)width, vb6_ContainerScaleMode(GetParent((HWND)hwnd)), 0),
+                 rc.bottom - rc.top, SWP_NOMOVE | SWP_NOZORDER);
 }
 
 int vb6_GetControlHeight(void* hwnd) {
     if (!hwnd) return 0;
     RECT rc;
     GetWindowRect((HWND)hwnd, &rc);
-    return vb6_YToTwipY(rc.bottom - rc.top);
+    return (int)vb6_ScalePxToUser((double)(rc.bottom - rc.top), vb6_ContainerScaleMode(GetParent((HWND)hwnd)), 1);
 }
 
 void vb6_SetControlHeight(void* hwnd, int height) {
     if (!hwnd) return;
     RECT rc;
     GetWindowRect((HWND)hwnd, &rc);
-    SetWindowPos((HWND)hwnd, NULL, 0, 0, rc.right - rc.left, vb6_TwipToY(height), SWP_NOMOVE | SWP_NOZORDER);
+    SetWindowPos((HWND)hwnd, NULL, 0, 0, rc.right - rc.left,
+                 vb6_ScaleUserToPx((double)height, vb6_ContainerScaleMode(GetParent((HWND)hwnd)), 1),
+                 SWP_NOMOVE | SWP_NOZORDER);
 }
 
 // Fix 162a-extlist: VB6 `obj.Move Left[, Top[, Width[, Height]]]` —— 语言级方法
@@ -201,10 +223,11 @@ void vb6_ControlMove(void* hwnd, double L, double T, double W, double H, int mas
         ScreenToClient(GetParent(hW), &p1);
         rc.left = p0.x; rc.top = p0.y; rc.right = p1.x; rc.bottom = p1.y;
     }
-    int x = (mask & 1) ? vb6_TwipToX((int)(L + (L >= 0 ? 0.5 : -0.5))) : rc.left;
-    int y = (mask & 2) ? vb6_TwipToY((int)(T + (T >= 0 ? 0.5 : -0.5))) : rc.top;
-    int w = (mask & 4) ? vb6_TwipToX((int)(W + (W >= 0 ? 0.5 : -0.5))) : rc.right - rc.left;
-    int h = (mask & 8) ? vb6_TwipToY((int)(H + (H >= 0 ? 0.5 : -0.5))) : rc.bottom - rc.top;
+    int32_t cm = vb6_ContainerScaleMode(child ? GetParent(hW) : NULL);
+    int x = (mask & 1) ? vb6_ScaleUserToPx(L, cm, 0) : rc.left;
+    int y = (mask & 2) ? vb6_ScaleUserToPx(T, cm, 1) : rc.top;
+    int w = (mask & 4) ? vb6_ScaleUserToPx(W, cm, 0) : rc.right - rc.left;
+    int h = (mask & 8) ? vb6_ScaleUserToPx(H, cm, 1) : rc.bottom - rc.top;
 
     /* Fix <vbeclipse> rev22: 尺寸真变了就触发该设计期子控件的 Resize 事件。
      *

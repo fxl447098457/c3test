@@ -155,10 +155,11 @@ int32_t vb6_GetScaleWidth(void* hwnd) {
     if (!hwnd) return 0;
     RECT rc;
     if (GetClientRect((HWND)hwnd, &rc)) {
-        /* VB6 ScaleWidth: client width in twips (1 twip = 1/1440 inch) */
-        /* Fix 184: 与 vb6_TwipToX 同一 DPI 源 (此前此处按真实 DPI、setter 按写死
-           的 15，Form_Resize 把两者混算后控件被缩小 20%)。 */
-        return vb6_XToTwipX(rc.right - rc.left);
+        /* VB6 ScaleWidth: 客户区宽度, 单位 = 该窗口自己的 ScaleMode (账 #175)。
+           Fix 184: 缇那一档仍走同一个 DPI 源 (vb6_ScalePxToUser 的 mode==1 分支
+           就是 vb6_XToTwipX), 所以窗体 (缺省 1=缇) 的读数与改动前逐字节相同。 */
+        return (int32_t)vb6_ScalePxToUser((double)(rc.right - rc.left),
+                                          vb6_WindowScaleModeSelf(hwnd), 0);
     }
     return 0;
 }
@@ -167,8 +168,9 @@ int32_t vb6_GetScaleHeight(void* hwnd) {
     if (!hwnd) return 0;
     RECT rc;
     if (GetClientRect((HWND)hwnd, &rc)) {
-        /* VB6 ScaleHeight: client height in twips */
-        return vb6_YToTwipY(rc.bottom - rc.top);
+        /* VB6 ScaleHeight: 客户区高度, 单位同上 (账 #175)。 */
+        return (int32_t)vb6_ScalePxToUser((double)(rc.bottom - rc.top),
+                                          vb6_WindowScaleModeSelf(hwnd), 1);
     }
     return 0;
 }

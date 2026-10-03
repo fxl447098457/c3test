@@ -51,6 +51,20 @@ int vb6_DpiY(void);
 int vb6_XToTwipX(int px);
 int vb6_YToTwipY(int px);
 
+// 账 #175: 控件坐标的单位 = 所在容器的 ScaleMode (窗体或 UserControl 的 .ctl/.frm
+// 声明值)。这一对是**唯一**的像素<->容器单位换算入口; 缇 (mode 1) 那一档与上面的
+// vb6_TwipToX/XToTwipX 逐字节等价。RTL 里任何"读/写控件几何"的点位都走这一对,
+// 禁止再默认缇。
+double vb6_ScalePxToUser(double px, int32_t mode, int vert);
+int    vb6_ScaleUserToPx(double user, int32_t mode, int vert);
+// 目标窗口的容器 ScaleMode: 容器是 UserControl 宿主 → 它的 .ctl ScaleMode;
+// 否则读窗体的 VB6_ScaleMode 属性 (缺省 1=缇)。
+int32_t vb6_ContainerScaleMode(void* hwndParent);
+// 窗口自身的 ScaleMode (ScaleWidth/ScaleHeight 那一族读法的单位)。
+int32_t vb6_WindowScaleModeSelf(void* hwnd);
+// 该 HWND 是 UserControl 宿主时返回它 .ctl 声明的 ScaleMode, 否则 0。
+int32_t vb6_UC_WindowScaleMode(const void* hwnd);
+
 // ============================================================
 // 控件创建
 // ============================================================

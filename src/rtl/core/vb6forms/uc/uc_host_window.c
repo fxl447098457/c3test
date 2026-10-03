@@ -101,8 +101,10 @@ static LRESULT CALLBACK vb6_uc_wndproc(HWND hwnd, UINT msg, WPARAM wParam, LPARA
             else if (msg == WM_LBUTTONUP || msg == WM_RBUTTONUP) ReleaseCapture();
             float sx = (float)(short)LOWORD(lParam);
             float sy = (float)(short)HIWORD(lParam);
-            // 坐标换算到控件当前 ScaleMode (1=Twip 3=Pixel, 其他按像素)
-            if (vb6_UserControl_ScaleMode == 1) { sx *= 15.0f; sy *= 15.0f; }
+            // 坐标换算到控件当前 ScaleMode 单位 (账 #175: 与 ScaleWidth/Move 同一个权威)
+            int32_t ucSm175 = r->desc->scaleMode;
+            sx = (float)vb6_ScalePxToUser((double)sx, ucSm175, 0);
+            sy = (float)vb6_ScalePxToUser((double)sy, ucSm175, 1);
             vb6_UCSaved saved;
             vb6_uc_push(r, &saved);
             // czUI fix: 回调只更新状态; 视觉刷新统一走 WM_PAINT 双缓冲
