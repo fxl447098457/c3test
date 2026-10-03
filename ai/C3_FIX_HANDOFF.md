@@ -192,6 +192,21 @@ UDT"），带名字的是 **Class 符号专属**的 `memberReturnTypes`（`unord
 - VARIANT ↔ typed 转换族（含 160-F 的重估结论）。
 - Extender / Ambient 成员访问器的剩余小簇（Fix 161/162/183 之后仍有零星无赋值路径）。
 
+### B22 属性页里 `SelectedControls(i)` 的裸名调用发成**隐式声明**（账 #174）
+出处 = 账 #173 的 census。`tests/Charts 2020/LabelPlus/PropPagLP.pag:445` 与
+`ppProgressCircular.pag:379` 的 `Set m_oUCImage = SelectedControls(0)` 现在发成裸
+`SelectedControls(0)` → cl `C4013「未定义；假设外部返回 int」`。**别把它当噪声**：
+x86 cdecl 下 double 返回值留在 x87 栈上不弹，八次之后任何浮点取值得 QNaN
+（账 #173 就是这么炸的，见 `vb6com_internal.h` 那条注释）。出口其实早就位：
+RTL 侧 Fix 153 的 `vb6_PropertyPage_SelectedControls(int32_t)`（`vb6rtl_userctl.h:182`，
+static inline 返 NULL）+ 成员访问形态的识别（`cgen_expr_member_generic_access.inc:118`），
+**缺的只是名单里那一名** —— 唯一出口 `cgen_expr_ident_builtin.inc:239` 的
+`kPropertyPageHostMembers`（现只有 hwnd/changed/scalemode/scaleheight 四项），
+由 `isPropertyPageDesigner_`（`cgen_form.cpp:175`，认 `.pag` 的 controlTypeName）选表。
+开工前先量一件事：`Set x = f(0)` 这条语句路是否真走 ident 支路（若不走，补名单无效，
+要在调用发射那侧接同一张表）。判据＝本构建 C4013 从 2 降到 0；数法见记忆库
+「数 cl 的警告必须自己重跑 cl」。
+
 ## C. 仍在生效的口径与工具事实（与本文档等长的一半价值在这里；完整版见记忆库）
 
 1. **RTL 是嵌进 `C3.exe` 的 RCDATA**：改 `src/rtl/**` 必须重编 C3.exe 才生效，真凭据是构建日志里
@@ -264,3 +279,5 @@ UDT"），带名字的是 **Class 符号专属**的 `memberReturnTypes`（`unord
 | §43 | Fix 189（**仅测试侧**）：门禁 `Test-GuiVbp -AutoExitSec` 无条件 `pass++`，窗口出现后自退崩溃照记 PASS；现改为区分"我们杀的"与"它自己退的"并读退出码 | 已落地（同节两条遗留 → B6/B3） |
 | §44 | Fix 190：`As Any` ByRef 实参的 `[]` 下标链判为非左值 → 把元素**值**当 memcpy 目的地址（悬停即写 0x0）；Fix 191：`As LongPtr` 数组按 Variant 载体分配打断手写伪 vtable + `AddRef/Release` 直发槽 1 + `vb6_ComIsDispatchable` 守卫 | 已落地 `1465da1`（遗留 → B4/B20） |
 | 合并块 2858–2867 | EXE 工程类 IDispatch 桥接（`VBMAN_DEMO` 启动即崩 → 通过），提交 `3dd3689/17f349a/df42abc/3b797f9` | 已提交（未覆盖面 → B5） |
+
+| 账 #173（提交 `332f6363` = <vbeclipse> rev38，门 #299） | x86 上 `vb6_VariantToDouble` 无原型 → x87 栈泄漏 → Charts 2020 启动即 error 6「Overflow」；补真实原型 + 同族 census （C4013 14→2，剩 B22 那两处） | 已提交并过门 |
