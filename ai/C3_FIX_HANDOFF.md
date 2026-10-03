@@ -200,8 +200,10 @@ UDT"），带名字的是 **Class 符号专属**的 `memberReturnTypes`（`unord
   「两边都崩」足以说明与本刀无关，但要坐实「与本刀无关」的更强形式（同生成器两侧），
   下一轮追时补 Ninja 侧 BASE。
 · 为什么它一直没响：`tests/run_tests.ps1` 里 **没有 VBFlexGridDemo 的 `Test-GuiVbp` 用例**
-  （grep `flexgrid` 只命中一条注释）⇒ 这个 demo 完全在回归之外。修它之前先把它挂进门
-  （`Test-GuiVbp "vbflexgrid" ... -Arch "x86" -AutoExitSec 3`），否则修好了也守不住。
+  （grep `flexgrid` 只命中一条注释）⇒ 这个 demo 完全在回归之外。
+  同一份产物连跑三次：崩 / 崩 / 活（`-g` 那份），不崩时窗口标题正常（`VBFlexGrid Demo`）⇒ **这是条未定序的堆损坏，不是`挂进门就会红`的确定缺陷** —— 现在挂 `Test-GuiVbp` 只会给门添一条随机红。
+  下一步该做的是**归因**：`C3_PAGEHEAP=1`（`vb6forms.c` 的 `vb6_installCrashTrace` 里就有这一档，开堆页让损坏当场变 AV 带栈）
+  + `-g` 产物的 map/pdb 拿栈，再谈修法；修好之后再挂用例。
 
 ### B24 OLE 拖放的 `hdrop` 旁路日志没人钉
 出处 = 账 #175 的跨门工件对形 #300→#301：`oledd_test.txt`(s4) 从 `hdrop FAIL hr=0x1` 变成
