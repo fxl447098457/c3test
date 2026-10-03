@@ -200,6 +200,7 @@ UDT"），带名字的是 **Class 符号专属**的 `memberReturnTypes`（`unord
   下一步该做的是**归因**：`C3_PAGEHEAP=1`（`vb6forms.c` 的 `vb6_installCrashTrace` 里就有这一档，开堆页让损坏当场变 AV 带栈）（**账 #181 之后这条才真能用**：以前轨迹器在爆栈/重入时会把同一份现场写好几遍、真正的第一现场被压到最后；现在每进程只记一次，第一段就是原始故障）
   + `-g` 产物的 map/pdb 拿栈，再谈修法；修好之后再挂用例。
 · **2026-10-04 追加读数（账 #183 那轮顺带，别把两件事并成一件）**：本条说的是 **x86 起窗期** 的堆损坏（`-g` 那台 2/3 跑 `rc=0xC0000374`）；同一台把 #183 那一刀**退回去**单验 —— 照样起不来，首段现场 `HEAP CORRUPTION code=0xC0000374`、`FAULT ntdll.dll+0xFC9CF`、`#00 = 本 exe off 0x136E76` ⇒ **本条与 #182/#183 无关，继续开着**。抓手换了：账 #182 之后 x64/x86 都能打出应用帧（`st+N rva=` / `[sp+N] rva=`），下一轮直接对 **x86 `-g` 那台**（`b182gx86/VBFlexGridDemo.map` 在手边）取同一次构建的偏移符号化 —— 注意偏移与产物**必须同一次编译**，无 `-g` 那台的 0x136E76 不能拿去查 `-g` 的表。另：本机有 x64dbg（`D:\ProgramData\snapshot_2026-05-27_12-11\release\{x64,x32}`，含 `headless.exe`），需要现场栈时先用它，别再往产品里加插桩。
+· 2026-10-04 又一读数（拿账 #182 的工具直接量到的，工件 = `.build/b184x86g/c3_crash.txt`，产物同名带 `.map`）：x86 `-g` 那台首段现场是 `HEAP CORRUPTION code=0xC0000374`，`FAULT ntdll.dll+0xFC9CF`，栈里第一段应用帧在 `off=0x1E5966 / 0x19AEEE / 0x1E372D / 0x1AAE41 / 0x22BC3A`，外面套着 `COMCTL32+0x1A3CB → USER32 派发` ⇒ 损坏是在一次**消息派发里由 ntdll free/alloc 检出来**的，不是自己爆的。⚠ 这五个 off **现在认不出函数名**：`-g` 产物是 `/INCREMENTAL`，最近的 public 匹配会给出 `+0x35f6` 这种假偏移，而生成码里的过程全是 `static`（map 的 Publics by Value 根本不列）⇒ 下一轮要么换 **非增量** 的构建拿符号，要么直接上 x64dbg/headless，别把 nearest-symbol 当事实（这条老教训在 §记忆里）。
 
 ### B24 OLE 拖放的 `hdrop` 旁路日志没人钉
 出处 = 账 #175 的跨门工件对形 #300→#301：`oledd_test.txt`(s4) 从 `hdrop FAIL hr=0x1` 变成
