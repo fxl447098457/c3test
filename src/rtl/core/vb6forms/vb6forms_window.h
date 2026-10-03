@@ -145,6 +145,24 @@ void vb6_ShowForm(void* hwnd, int modal);
 // Fix <vbeclipse>: 只 Load 不 Show —— 抽干延迟 Form_Load, 窗体保持隐藏
 void vb6_LoadForm(void* hwnd);
 
+// Fix <vbeclipse> rev28: 窗体 Form_Resize 的**延后触发**口 (WM_SIZE 里排, 消息循环里跑)。
+//
+// 为什么需要: WM_SIZE 是 SetWindowPos/MoveWindow 的**同步** SendMessage, 停靠布局里
+// 一整串嵌套 Move (ucPerspective → ucFolder → ViewArea → 视图窗体) 全在同一个调用栈里
+// 跑完才返回。等它返回时, 各控件才拿到**最终**尺寸。所以 Form_Resize 必须延到本轮
+// 布局收尾后再跑, 否则它按**同步中间态**去摆子控件。
+// 实证 (play78 --arch x86, 探针): 直接在 WM_SIZE 里跑, frmViewViews 的
+// `tvwViews.Move 0, 0, ScaleWidth, ScaleHeight` 拿到的是 0x0 ⇒ 树控件被摆成 0x0。
+// 这与 UserControl 侧的 vb6_UC_QueueDesignResize (rev23) 是**同一类问题的两个面**。
+//
+// 与 UC 侧同款做法: PostMessage 一个 WM_APP 消息 + 窗口属性去重 (rec/结构体都不动,
+// 避开"跨边界布局式初始化的字段顺序"那个坑)。cgen 侧在窗体 WndProc 里发一条
+// `case VB6_FORM_FR_MSG:` 调 vb6_DrainFormResize(hwnd) 即可。
+#define VB6_FORM_FR_MSG  (WM_APP + 0x61)
+#define VB6_FORM_FR_PROP L"C3_FORM_FR_PENDING"
+int32_t vb6_QueueFormResize(void* hwnd);
+void   vb6_DrainFormResize(void* hwnd);
+
 // 卸载窗体
 void vb6_UnloadForm(void* hwnd);
 

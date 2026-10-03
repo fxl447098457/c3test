@@ -1303,6 +1303,31 @@ void vb6_LoadForm(void* hwnd) {
     }
 }
 
+// Fix <vbeclipse> rev28: 窗体 Form_Resize 排到消息循环 (与 UC 侧 rev23 同理)。
+// 详见 vb6forms_window.h 里 VB6_FORM_FR_MSG 的注释: WM_SIZE 是同步 SendMessage,
+// 停靠布局那串嵌套 Move 跑完才返回, 此刻各控件才有最终尺寸。
+// 去重靠窗口属性 (不碰任何结构体, 避开跨边界字段顺序那个坑)。
+int32_t vb6_QueueFormResize(void* hwnd) {
+    if (!hwnd || !IsWindow((HWND)hwnd)) return 0;
+    HWND h = (HWND)hwnd;
+    if (GetPropW(h, VB6_FORM_FR_PROP)) return 1;      // 已在队列 ⇒ 不重复排
+    if (!SetPropW(h, VB6_FORM_FR_PROP, (HANDLE)1)) return 0;
+    if (!PostMessageW(h, VB6_FORM_FR_MSG, 0, 0)) {
+        RemovePropW(h, VB6_FORM_FR_PROP);
+        return 0;
+    }
+    return 1;
+}
+
+// 消息循环里接住排队的那一条: 先清标志 (允许事件体再排新一轮), 再让 cgen 生成的
+// case 回调 Form_Resize。**不直接调 Form_Resize** —— 它是生成代码的 static 函数,
+// RTL 拿不到地址; 由 cgen 在 WndProc 里 `case VB6_FORM_FR_MSG: vb6_DrainFormResize(hwnd); break;`
+// 转交。
+void vb6_DrainFormResize(void* hwnd) {
+    if (!hwnd) return;
+    RemovePropW((HWND)hwnd, VB6_FORM_FR_PROP);
+}
+
 void vb6_ShowForm(void* hwnd, int modal) {
     vb6_installCrashTrace();
     if (GetEnvironmentVariableW(L"C3_OCX_TRACE", NULL, 0) > 0) {

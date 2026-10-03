@@ -1,4 +1,13 @@
 // c3rtl.rc - RTL runtime library embedded as resources
+// Fix <vbeclipse> rev28: 窗体 Form_Resize 延后到消息循环跑 (WM_SIZE 里只排队)
+//   停靠布局里 ucPerspective → ucFolder → ViewArea → 视图窗体 一整串嵌套 Move 全在
+//   同一个调用栈里跑完才返回 (WM_SIZE 是同步 SendMessage), 此刻各控件才有最终尺寸。
+//   同步跑 Form_Resize 会按中间态摆子控件 —— 实测 frmViewViews 的
+//   `tvwViews.Move 0,0,ScaleWidth,ScaleHeight` 拿到 0x0, 树控件被摆成 0x0。
+//   新增 vb6_QueueFormResize / vb6_DrainFormResize + VB6_FORM_FR_MSG (WM_APP+0x61),
+//   与 UC 侧 rev23 的 vb6_UC_QueueDesignResize 同一问题的两个面。
+//   另: cgen 侧 WM_SIZE 的 "等 Form_Load 完成" 那个门改为**只在真有 Form_Load 时**
+//   才发 —— 否则没有 Form_Load 过程的窗体永远过不了, Form_Resize 一次都不跑。
 // Fix <vbeclipse> <VBFlexGridDemo>: vb6_Clipboard_SetData 加 int32_t format 形参
 //   (VB6 允许 `Clipboard.SetData data, [format]` 二形; format=vbCF* 常量,
 //    2=vbCFBitmap, 3=vbCFMetafile, 8=vbCFDIB, 14=vbCFEMetafile; 0/未指定=Bitmap)。

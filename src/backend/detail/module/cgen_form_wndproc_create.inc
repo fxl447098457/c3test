@@ -219,6 +219,13 @@
         c_.dedent();
         c_.emitLine("}");
     }
+    // ⚠ **不要**在这里给"没有 Form_Load 的窗体"补置 vb6_formLoaded_ = 1。
+    //   (rev28 曾这么试过, 探针实测**该代码从未执行** —— 停靠视图这类窗体由
+    //    vb6_CreateFormWindowB 走自己的路径建出来, 压根不进这条 WndProc 的
+    //    WM_CREATE 分支, WM_CREATE 探针零条输出即是铁证。)
+    //   真正的修法在 cgen_form_wndproc_dispatch.inc 的 WM_SIZE 转发上:
+    //   "等 Form_Load 完成"这个门**只对真的有 Form_Load 的窗体**存在。
+    //   没有 Form_Load 的窗体, Form_Resize 由每次 WM_SIZE 直接驱动 (VB6 语义)。
 
     // WM_COMMAND: 按钮点击等 (P7.6: 支持控件数组Index参数)
     c_.emitLine("case WM_COMMAND: {");
