@@ -104,26 +104,42 @@ static LONG CALLBACK vb6_CrashTraceVEH(PEXCEPTION_POINTERS ep) {
                     ep->ExceptionRecord->ExceptionInformation[0] ? "write" : "read",
                     (unsigned long long)ep->ExceptionRecord->ExceptionInformation[1]);
         }
+        /* 账 #182: 帧不落在本 exe 镜像里时**照实标出来**。VEH 里 CaptureStackBackTrace
+         * 拿到的是派发链自己（ntdll 若干帧 + 处理器的返回地址），旧写法把它们一律减掉
+         * 本模块基址打成 "rva=0x4376..."，看着像本模块的符号、实际是隔壁 DLL 的地址。 */
+        PIMAGE_DOS_HEADER exeDos = (PIMAGE_DOS_HEADER)hSelf;
+        PIMAGE_NT_HEADERS exeNt = (PIMAGE_NT_HEADERS)((char*)hSelf + exeDos->e_lfanew);
+        char* exeLo = (char*)hSelf;
+        char* exeHi = exeLo + exeNt->OptionalHeader.SizeOfImage;
         for (USHORT i = 0; i < n; i++) {
-            fprintf(stderr, "[C3_CRASH] #%u rva=0x%lx\n", (unsigned)i,
-                    (unsigned long)((char*)frames[i] - (char*)hSelf));
+            if ((char*)frames[i] >= exeLo && (char*)frames[i] < exeHi) {
+                fprintf(stderr, "[C3_CRASH] #%u rva=0x%lx\n", (unsigned)i,
+                        (unsigned long)((char*)frames[i] - exeLo));
+            } else {
+                fprintf(stderr, "[C3_CRASH] #%u %p (outside exe)\n", (unsigned)i, frames[i]);
+            }
         }
-#ifdef _M_IX86
-        /* x86 上 CaptureStackBackTrace 常常只返回 VEH/异常派发链(4 帧), 应用侧调用者全丢。
-         * 追加一次 Esp 线性扫描, 打印落在本模块镜像内的候选返回地址(按栈深度标 st+N)。 */
+#if defined(_M_IX86) || defined(_M_X64)
+        /* x86/x64 上 CaptureStackBackTrace 都只返回 VEH/异常派发链, 应用侧调用者全丢
+         * (账 #182 之前这段只编 x86 ⇒ x64 的崩溃现场一条应用帧都没有)。
+         * 追加一次栈指针线性扫描, 打印落在本模块镜像内的候选返回地址(按栈深度标 st+N)。 */
         {
-            PIMAGE_DOS_HEADER dos = (PIMAGE_DOS_HEADER)hSelf;
-            PIMAGE_NT_HEADERS nt = (PIMAGE_NT_HEADERS)((char*)hSelf + dos->e_lfanew);
-            char* lo = (char*)hSelf;
-            char* hi = lo + nt->OptionalHeader.SizeOfImage;
+#ifdef _M_IX86
             DWORD* sp = (DWORD*)ep->ContextRecord->Esp;
+#else
+            ULONG_PTR* sp = (ULONG_PTR*)ep->ContextRecord->Rsp;
+#endif
             int printed = 0;
             for (int k = 0; k < 512 && printed < 24; k++) {
+#ifdef _M_IX86
                 DWORD v;
+#else
+                ULONG_PTR v;
+#endif
                 __try { v = sp[k]; }
                 __except (EXCEPTION_EXECUTE_HANDLER) { break; }
-                if ((char*)v >= lo && (char*)v < hi) {
-                    fprintf(stderr, "[C3_CRASH]   st+%d rva=0x%lx\n", k, (unsigned long)((char*)v - lo));
+                if ((char*)v >= exeLo && (char*)v < exeHi) {
+                    fprintf(stderr, "[C3_CRASH]   st+%d rva=0x%lx\n", k, (unsigned long)((char*)v - exeLo));
                     printed++;
                 }
             }

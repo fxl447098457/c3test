@@ -988,9 +988,12 @@ static int vb6_vehScanStackForImage(char* buf, int n, int bufsz,
         if (v >= (ULONG_PTR)imgBase &&
             v < (ULONG_PTR)imgBase + imgSize) {
 #ifdef _WIN64
-            n += wsprintfA(buf + n, "  [sp+%d] 0x%016llX -> %s+0x%llX\r\n",
-                           i, (unsigned long long)v, imgName,
-                           (unsigned long long)(v - (ULONG_PTR)imgBase));
+            /* 账 #182: 这里原本写 `0x%016llX` —— 用户态 wsprintfA **不认 `ll`**（它只有
+             * Win16 时代的 l/h 修饰符），于是这条一直打成 "0xlX -> <一串字节>+0xlX"。
+             * 这段 x64 分支以前从没被执行到（栈扫描整个被"故障地址所属模块"那一问挡住），
+             * 改成扫主 exe 之后才露出来。偏移用 32 位 RVA 打，符号化只需要它。 */
+            n += wsprintfA(buf + n, "  [sp+%d] rva=0x%08lX\r\n",
+                           i, (unsigned long)(v - (ULONG_PTR)imgBase));
 #else
             n += wsprintfA(buf + n, "  [sp+%d] 0x%08lX -> %s+0x%08lX\r\n",
                            i, (unsigned long)v, imgName,
@@ -1022,9 +1025,13 @@ static LONG WINAPI vb6_heapCorruptVEH(EXCEPTION_POINTERS* ep) {
             n = wsprintfA(buf, "=== HEAP CORRUPTION code=0xC0000374 addr=%p ===\r\n",
                           ep->ExceptionRecord->ExceptionAddress);
         else
+            /* 账 #182: ExceptionInformation[0] 的 8 = **执行(DEP)**, 不是写。
+             * 旧写法一律 `? "WRITE" : "READ"` 把跳飞(rip=0x1 这类)打成 "WRITE"，
+             * 与 vb6rtl.c 里 Fix 187 已经修过的同一个误导 —— 两处现在同一口径。 */
             n = wsprintfA(buf, "=== AV code=0xC0000005 addr=%p %s %p ===\r\n",
                           ep->ExceptionRecord->ExceptionAddress,
-                          ep->ExceptionRecord->ExceptionInformation[0] ? "WRITE" : "READ",
+                          ep->ExceptionRecord->ExceptionInformation[0] == 8 ? "EXECUTE(DEP)" :
+                          (ep->ExceptionRecord->ExceptionInformation[0] ? "WRITE" : "READ"),
                           (void*)ep->ExceptionRecord->ExceptionInformation[1]);
         {   /* 模块名+运行时基址+偏移 (x86 ASLR 下基址随机, 符号化必须配对基址) */
             HMODULE hm = NULL;
@@ -1083,22 +1090,17 @@ static LONG WINAPI vb6_heapCorruptVEH(EXCEPTION_POINTERS* ep) {
             }
         }
         if (isAV) {
-            /* 栈扫描: 找镜像范围内的返回地址 (需要 FAULT 模块的基址与大小) */
-            HMODULE hm = NULL;
-            if (GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
-                                   GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-                                   (LPCWSTR)ep->ExceptionRecord->ExceptionAddress, &hm) && hm) {
+            /* 账 #182: 扫描目标改成**主 exe 镜像**，不再问"故障地址落在哪个模块"。
+             * 旧写法在 `call` 跳飞（rip=0x1 这类）时拿不到模块句柄 ⇒ 整段栈扫描被跳过，
+             * 而现场恰恰只有这一种形态需要它；且生成代码全在 exe 里，扫系统模块没有用处。 */
+            HMODULE hm = GetModuleHandleA(NULL);
+            if (hm) {
                 MODULEINFO mi;
-                wchar_t wp[MAX_PATH] = {0};
-                char nm[80] = "?";
-                GetModuleFileNameW(hm, wp, MAX_PATH);
-                { const wchar_t* b = wcsrchr(wp, L'\\');
-                  WideCharToMultiByte(CP_ACP, 0, b ? b + 1 : wp, -1, nm, sizeof(nm), NULL, NULL); }
                 if (K32GetModuleInformation(GetCurrentProcess(), hm, &mi, sizeof(mi))) {
-                    n += wsprintfA(buf + n, "  -- stack scan (%s imgsize=0x%lX) --\r\n",
-                                   nm, (unsigned long)mi.SizeOfImage);
+                    n += wsprintfA(buf + n, "  -- stack scan (exe imgsize=0x%lX) --\r\n",
+                                   (unsigned long)mi.SizeOfImage);
                     n = vb6_vehScanStackForImage(buf, n, (int)sizeof(buf) - 256,
-                                                 ep->ContextRecord, nm,
+                                                 ep->ContextRecord, "exe",
                                                  (const char*)mi.lpBaseOfDll,
                                                  mi.SizeOfImage);
                 }
