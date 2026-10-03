@@ -885,6 +885,9 @@
     bool isDesignerModule_ = false;
     // Fix 110f: true = PropertyPage (.pag), false = UserControl (.ctl)
     bool isPropertyPageDesigner_ = false;
+    // 账 #179: 只有 UserControl 的实例方法要成对换入宿主上下文 (体首 Push / 统一出口尾 Pop)。
+    // 谓词写在这一处, 三个发射点 (func/proc/prop) 共用 —— 别再各抄一遍条件。
+    bool ucCtxScoped() const { return isDesignerModule_ && !isPropertyPageDesigner_; }
 
     // P6.4+: interface -> single implementer map (injected by driver)
     const std::map<std::string, std::string>* interfaceImplementers_ = nullptr;

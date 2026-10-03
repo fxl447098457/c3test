@@ -222,6 +222,10 @@ int32_t vb6_UC_IsHostHwnd(void* hwnd);
 
 // Switch in an instance's host state (vb6_UserControl_*) before calling its public members.
 void vb6_UC_Enter(void* hwnd);
+// 账 #179: 成对版 —— 发码在每个 .ctl 实例方法的体首 Push、统一出口尾 Pop, 让控件代码
+// 不管被谁调都跑在自己的宿主上下文里 (ScaleMode/hWnd/hDC/Font/Enabled/Extender.* 一族)。
+void vb6_UC_PushInstance(void* inst);
+void vb6_UC_PopInstance(void);
 void vb6_UC_RefreshCurrent(void);
 
 // ---- host object model (form/control HWND, Controls collection, Font object) ----

@@ -236,6 +236,65 @@ void vb6_UC_Enter(void* hwnd) {
     vb6_uc_push(r, &saved);   // 有意不弹栈: "当前实例"语义 = 最近进入者
 }
 
+// ============================================================
+// 账 #179: **成对**的换入/换出 —— 控件代码不管被谁调都跑在自己的宿主上下文里
+//
+// 上面那个 vb6_UC_Enter 只在"窗体创建控件"之后换入一次且不弹栈, 于是进程级全局
+// (vb6_UserControl_ScaleMode / .hWnd / .hDC / .Font / .Enabled / Extender.* /
+//  .BackColor ...) 停在"最近创建的那枚控件"上。实测 (tests/ve_units): 缇型那一枚
+// 控件在自己 Initialize 里读 ScaleMode=1, 被容器调同一个方法时读到 3 —— 那是另一枚
+// 像素型控件留下的值。同一个坑 #178 用"按实例取"的出口治了 ScaleWidth/TextWidth 两条,
+// 但那是逐个成员抄一遍; 这一对是**一处口径**: 发码在每个 .ctl 实例方法的体首
+// Push、统一出口尾 Pop, 于是整批成员一次性归位。
+// 能这么做的前提: Exit Function/Property 已经走 vb6_proc_exit 统一出口尾
+// (cgen_decl_func.cpp / _proc.cpp / _prop.cpp 的"Fix <vbeclipse>: 统一出口"),
+// 所以提前返回不会漏弹。
+//
+// 栈是 RTL 自己的 (生成码只见到两个 void 函数, 不需要 vb6_UCSaved 的定义)。
+// 溢出/查不到实例时压一个"原样快照", Pop 时等值还原 ⇒ 与不换入等价, 且配平不破。
+// ============================================================
+#define VB6_UC_CTX_DEPTH 64
+static vb6_UCSaved g_uc_ctxStack[VB6_UC_CTX_DEPTH];
+static uint8_t g_uc_ctxReal[VB6_UC_CTX_DEPTH];   // 1 = 真换入过, 需要还原
+static int32_t g_uc_ctxDepth = 0;
+
+static void vb6_uc_snapshot(vb6_UCSaved* s) {
+    // 把当前全局原样抄一份 (不改变任何值): Pop 时等值还原
+    vb6_UCRec* cur = g_uc_current;
+    if (cur) { vb6_uc_push(cur, s); return; }     // 已知实例: 重推一次即可自洽
+    s->scaleWidth = vb6_UserControl_ScaleWidth;
+    s->scaleHeight = vb6_UserControl_ScaleHeight;
+    s->scaleMode = vb6_UserControl_ScaleMode;
+    s->hDC = vb6_UserControl_hDC;
+    s->containerHwnd = vb6_UserControl_ContainerHwnd;
+    s->enabled = vb6_UserControl_Enabled;
+    s->font = vb6_UserControl_Font;
+    s->ambientFont = vb6_Ambient_Font;
+    s->extLeft = vb6_Extender_Left;
+    s->extTop = vb6_Extender_Top;
+    s->extWidth = vb6_Extender_Width;
+    s->extHeight = vb6_Extender_Height;
+    s->hWnd = vb6_UserControl_hWnd;
+    s->autoRedraw = vb6_UserControl_AutoRedraw;
+    s->ext = vb6_UserControl_Extender;
+    s->current = g_uc_current;
+    s->displayName = (void*)vb6_Ambient_DisplayName;
+}
+
+void vb6_UC_PushInstance(void* inst) {
+    if (g_uc_ctxDepth >= VB6_UC_CTX_DEPTH) return;   // 溢出: 整对空转
+    vb6_UCRec* r = inst ? vb6_uc_findByInstance(inst) : NULL;
+    int32_t slot = g_uc_ctxDepth++;
+    if (r) { vb6_uc_push(r, &g_uc_ctxStack[slot]); g_uc_ctxReal[slot] = 1; }
+    else   { vb6_uc_snapshot(&g_uc_ctxStack[slot]); g_uc_ctxReal[slot] = 0; }
+}
+
+void vb6_UC_PopInstance(void) {
+    if (g_uc_ctxDepth <= 0) return;
+    int32_t slot = --g_uc_ctxDepth;
+    if (g_uc_ctxReal[slot]) vb6_uc_pop(&g_uc_ctxStack[slot]);
+}
+
 void vb6_UC_RefreshCurrent(void) {
     // czUI fix: 不能 invalidate+update — UserControl_Paint/RedrawControl 末尾的
     // `If AutoRedraw Then UserControl.Refresh` 会在 WM_PAINT 内强制同步重绘,

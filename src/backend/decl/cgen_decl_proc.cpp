@@ -361,6 +361,8 @@ void CCodeGen::visit(SubDecl& node) {
             }
         }
     }
+    // 账 #179: 控件代码运行在自己的宿主上下文里 (与下面的 PopInstance 成对)。
+    if (ucCtxScoped()) c_.emitLine("vb6_UC_PushInstance((void*)me);");
     emitStmtList(node.body, hasResume_);
 
     // Fix <vbeclipse>: 过程统一出口。Exit Sub 发的 `goto vb6_proc_exit;` 落在这里,
@@ -386,6 +388,7 @@ void CCodeGen::visit(SubDecl& node) {
     emitIvrefScopeRelease();
 
     // 正常退出守卫 - 防止落入dispatch switch
+    if (ucCtxScoped()) c_.emitLine("vb6_UC_PopInstance();");   // 账 #179: 与体首成对
     c_.emitLine("return;");
 
     // P14.1.2: Resume dispatch switch - 仅通过goto可达

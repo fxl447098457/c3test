@@ -24,6 +24,12 @@ Private Sub UserControl_Initialize()
     Debug.Print "I-MODE=" & UserControl.ScaleMode & " I-TW=" & UserControl.TextWidth("MMMM") & " I-SW=" & UserControl.ScaleWidth
 End Sub
 
+Public Function Ctx() As String
+    ' 账 #179: 这两个值必须**不随调用方变** —— 容器里调也要读到这一枚控件自己的
+    ' ScaleMode/ScaleWidth。改前实测容器里调 uTw.Ctx() 得到 mode=3 (另一枚控件留下的
+    ' 残值), 控件自己调得到 mode=1。hWnd 那一族不在这里钉 (那是台账 #159)。
+    Ctx = UserControl.ScaleMode & "/" & UserControl.ScaleWidth
+End Function
 Public Function TW(ByVal s As String) As Long
     TW = UserControl.TextWidth(s)
 End Function

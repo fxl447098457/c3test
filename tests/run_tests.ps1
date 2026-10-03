@@ -3504,7 +3504,7 @@ if ($Category -in @("all", "run", "vbp")) {
     # ⇒ 与 DPI 无关, 换机器不会漂。钉的是账 #175 (ScaleWidth) 与账 #177 (TextWidth/TextHeight)
     # 同一族口径: 控件宿主交出去的每一个量纲都得跟着它声明的 ScaleMode 走。
     # 改前实测: U-SW=True 而 U-TW/U-TH=False (文字量纲交的是设备像素)。
-    $veUnitsExpected = @("U-SW=True", "U-TW=True", "U-TH=True", "U-DONE")
+    $veUnitsExpected = @("U-SW=True", "U-TW=True", "U-TH=True", "U-CTX=True", "U-DONE")
     Test-Vbp "ve_units" "$Tests\ve_units\Units.vbp" $veUnitsExpected
     Test-Vbp "ve_units_x86" "$Tests\ve_units\Units.vbp" $veUnitsExpected -Arch "x86"
 

@@ -315,6 +315,8 @@ void CCodeGen::visit(PropertyDecl& node) {
             }
         }
     }
+    // 账 #179: 控件代码运行在自己的宿主上下文里 (与下面的 PopInstance 成对)。
+    if (ucCtxScoped()) c_.emitLine("vb6_UC_PushInstance((void*)me);");
     emitStmtList(node.body);
 
     // Fix <vbeclipse>: Property 的统一出口 + **缺失的错误状态恢复**。
@@ -338,6 +340,9 @@ void CCodeGen::visit(PropertyDecl& node) {
 
     // tB Interface B05: 接口变量持有引用, 正常出口处经槽 Release
     emitIvrefScopeRelease();
+
+    // 账 #179: 与体首 PushInstance 成对 (Property Get/Let/Set 三条路都落到这里)
+    if (ucCtxScoped()) c_.emitLine("vb6_UC_PopInstance();");
 
     // Property Get: 隐式返回 vb6_ret_<propName>
     if (node.propKind == ProcKind::PropertyGet && node.returnType) {
