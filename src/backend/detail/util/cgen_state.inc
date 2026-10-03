@@ -71,6 +71,15 @@
 
     // P14.3.1: Dim As New自动实例化变量集合 (小写key → 类名C标识)
     std::unordered_map<std::string, std::string> knownNewVars_;
+    // Fix <vbeclipse> rev27: `Dim X As New <窗体名>` 的窗体实例化集合
+    // (小写**变量名** → 窗体名的 C 标识)。
+    // 与 knownNewVars_ 分开是因为**发的东西不同**: 窗体没有 vb6_cls_<F>_New(),
+    // 它的运行时入口是 cgen_form_ctrl_registry.inc 发的 vb6_form_hwnd_<F>()
+    // (首次引用即隐式 Load = VB6 `New <窗体>` 语义)。判据 = knownFormModuleNames_。
+    // 之所以要存**窗体名**而不是从变量名推: VB6 惯例变量名与窗体同名但**不保证**
+    // (`Dim frm As New frmEditorText` 完全合法), 推错就会发成
+    // vb6_form_hwnd_frm() → C2065 未声明。
+    std::unordered_map<std::string, std::string> knownNewFormVars_;
     // Fix 090v: 模块/类级 As New 变量持久注册 (knownNewVars_ 在函数入口清理,
     // 需从本表恢复; 局部 As New 由 LocalDeclStmt 每函数重注册) — 否则跨函数
     // 同名局部变量 (如 cColl 的 Dim A As New cCollection vs JsonStr 的
