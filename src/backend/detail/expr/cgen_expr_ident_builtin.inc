@@ -236,6 +236,11 @@
             {"changed", "Changed"},
             {"scalemode", "ScaleMode"},
             {"scaleheight", "ScaleHeight"},
+            // 账 #174 (台账 B22): `Set m_oUCImage = SelectedControls(0)` 此前落空 → 发成
+            // 裸 `SelectedControls(0)` → cl C4013「假设外部返回 int」。隐式声明在 x86 不是
+            // 噪声而是缺陷 (x87 返回值不弹栈, 见 vb6com_internal.h 那条) —— 出口 RTL 早有:
+            // vb6rtl_userctl.h 的 static inline vb6_PropertyPage_SelectedControls(index)。
+            {"selectedcontrols", "SelectedControls"},
         };
         const auto& hostMembers = isPropertyPageDesigner_ ? kPropertyPageHostMembers
                                                           : kUserControlHostMembers;

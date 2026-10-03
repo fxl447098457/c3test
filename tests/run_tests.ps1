@@ -4068,6 +4068,17 @@ if ($Category -in @("all", "syntax")) {
         'vb6_BSTR_FromStr(L"\u59D3\u540D: \u5F20\u4E09\r\n\u5907\u6CE8: \"vip\"")',
         'vb6_BSTR_FromStr(L"C:\\note\\{x}\\n")')
 
+    # 账 #174: 属性页里裸名 `SelectedControls(i)` 必须走宿主内建那张表 (cgen_expr_ident_builtin.inc 的
+    # kPropertyPageHostMembers)，发射成 RTL 出口 vb6_PropertyPage_SelectedControls(...)。
+    # 钉这一格的理由不是「值对不对」，而是 **发射成裸名 = 隐式函数声明**：cl 只给 C4013
+    # 「未定义；假设外部返回 int」就编过，而 x86 cdecl 的 double 返回值放在 ST0 —— 调用方
+    # 按 int 取值就**永不弹 x87 栈**，八次之后栈满，之后任何浮点取值得 QNaN（账 #173 的
+    # Charts 2020 启动即 error 6「Overflow」就是这么炸的，见 vb6com_internal.h 那条注释）。
+    # 发射面单文件就能验，所以用 emitc 形状针而不是运行产物。**红侧实测过**：基线编译器
+    # 编同一份 .pag 发射 `= SelectedControls(0);` 且没有这根针。
+    Test-EmitcShape "pp_selctrl_hostmember" @("$Tests\Charts 2020\LabelPlus\PropPagLP.pag") @(
+        'vb6_PropertyPage_SelectedControls(0)')
+
     # B07a positive guard: a base class in another module resolves and stays silent.
     if (Test-Path "$Tests\cls_neg\ci_pos_base.cls") {
         Test-SyntaxMulti "ci_pos_pair" @("$Tests\cls_neg\ci_pos_base.cls", "$Tests\cls_neg\ci_pos_derived.cls")
