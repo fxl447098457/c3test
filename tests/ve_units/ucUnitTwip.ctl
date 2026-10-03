@@ -41,3 +41,16 @@ End Function
 Public Function SW() As Long
     SW = UserControl.ScaleWidth
 End Function
+
+Public Function HwOk() As String
+    ' 账 #159: 这条比较改前发成 vb6_VarCmpLongNe(&vb6_UserControl_hWnd, 0) —— 拿
+    ' 8 字节 void* 全局的**地址**当 vb6_VARIANT* 传 (RTL 签名第一形参是
+    ' vb6_VARIANT*) ⇒ 读到的是越界垃圾, 恒不勾。现在类型由 kHostPseudoRows 答
+    ' LongPtr ⇒ 走 C 直比 (-(vb6_UserControl_hWnd != 0))。
+    HwOk = CStr(UserControl.hWnd <> 0)
+End Function
+Public Function HwVs() As String
+    ' 第二头证人: 同一条读法再问一次「hWnd 与 hDC 是不是两个不同的值」。
+    ' 只钉 HwOk 一条时, 「两个成员都被读成同一个垃圾」也能蒙过去。
+    HwVs = CStr(UserControl.hWnd <> UserControl.hDC)
+End Function

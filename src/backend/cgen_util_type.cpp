@@ -100,22 +100,23 @@ Vb6Type CCodeGen::inferExprType(Expr& expr) const {
             if (knownByteVars_.count(lower)) return Vb6Type::Byte;
             if (knownLongVars_.count(lower)) return Vb6Type::Long;
             if (knownLongPtrVars_.count(lower)) return Vb6Type::LongPtr;
-            // Fix <vbeclipse> rev20: 设计器 (.ctl/.pag) 模块内裸写的 ScaleWidth/
-            // ScaleHeight 是**宿主伪属性**, C 侧是 `extern int32_t`(vb6rtl_userctl.h),
-            // **不是** vb6_VARIANT。此前它们落到下面的符号表回退 —— 符号表里没有
-            // (不是 VB6 声明的变量), 于是答 Variant。
-            // 后果 (ucTabStrip.ctl:146 `l_TabStripWidth > ScaleWidth`):
-            //   `vb6_VarCmpLongLt(&vb6_UserControl_ScaleWidth, …)` —— 拿 **int32_t\***
-            //   当 **vb6_VARIANT\*** 传 (RTL 签名是 vb6_VARIANT*, 16 字节),
-            //   读 4 字节对象的头 16 字节当 vt + lVal ⇒ 比较结果是垃圾。
-            //   此前能编过只是因为 MSVC 把它当 C4133 指针类型不兼容警告放行。
-            // 必须先于符号表回退判(与 cgen_expr_ident_builtin.inc:212 的
-            // isDesignerModule_ 门同口径: 那里判"是宿主成员", 这里判"是数值型")。
-            // 判据用 lower 且要求无同名局部 (Dim ScaleWidth As Long 要保住自己的类型,
-            // 与该文件 212 行的 knownLocalVars_ 门一致)。
-            if (isDesignerModule_ && !knownLocalVars_.count(lower)
-                && (lower == "scalewidth" || lower == "scaleheight")) {
-                return Vb6Type::Long;
+            // Fix <vbeclipse> rev20 → 账 #159: 设计器 (.ctl/.pag) 模块内裸写的宿主
+            // 伪成员 (ScaleWidth / hDC / hWnd / ScaleMode / Enabled …) 在 C 侧是 RTL
+            // 全局量 (extern int32_t 等, vb6rtl_userctl.h), **不是** vb6_VARIANT。
+            // 此前它们落到下面的符号表回退 —— 符号表里没有 (不是 VB6 声明的变量),
+            // 于是答 Variant, 比较就发成 `vb6_VarCmpLongLt(&vb6_UserControl_ScaleWidth,
+            // …)` (ucTabStrip.ctl:146 实测): 拿 int32_t* 当 vb6_VARIANT* 传 (RTL 签名
+            // 是 vb6_VARIANT*, 16 字节), 读 4 字节对象的头 16 字节当 vt + lVal ⇒ 比较
+            // 结果是垃圾。此前能编过只是因为 MSVC 把它当 C4133 指针类型不兼容警告放行。
+            // 成员名与类型现在由 kHostPseudoRows 一处回答; requireBare=true 与本文件
+            // 发射侧的 HPF_BARE 门同口径 (两条路必须答同一个数)。判据要求无同名局部
+            // (Dim ScaleWidth As Long 要保住自己的类型), 与发射侧的 knownLocalVars_ 门一致。
+            if (isDesignerModule_ && !knownLocalVars_.count(lower)) {
+                Vb6Type hpT = Vb6Type::Unknown;
+                if (hostPseudoValueType(isPropertyPageDesigner_ ? "PropertyPage" : "UserControl",
+                                        lower, hpT, true)) {
+                    return hpT;
+                }
             }
             if (knownVariantVars_.count(lower)) return Vb6Type::Variant;
             // 检查符号表
@@ -302,22 +303,20 @@ Vb6Type CCodeGen::inferExprType(Expr& expr) const {
                     if (memLower == "lastdllerror") return Vb6Type::Long;
                 }
             }
-            // czUI fix: 宿主伪对象成员类型 — UserControl.ScaleWidth/Height 等
-            // 是 RTL int32_t 全局 (vb6rtl_userctl.h)。此前推断为 Variant,
-            // 比较时被取地址当 vb6_VARIANT* 读垃圾值 (MouseUp 里
-            // X < ScaleWidth 恒假 → RaiseEvent Click 永不触发 → Connect 无响应)。
+            // 账 #159: 限定形态的宿主伪成员 (<UserControl|PropertyPage|Extender|
+            // Ambient>.<成员>) 与裸名那一路**同源** —— 都问 kHostPseudoRows。
+            // 此前这里是第五份成员名清单 (7 枚, 一律答 Long, 且不含 hWnd/hDC/
+            // ScaleMode/Extender/Ambient) ⇒ 同一个值写 `ScaleWidth` 答 Long、写
+            // `UserControl.hWnd` 两边都不答 ⇒ 装箱比较恒假。MouseUp 里
+            // `X < ScaleWidth` 恒假 → RaiseEvent Click 永不触发 (czUI 实测) 就是它。
             if (ma.object && ma.object->kind == ASTNodeKind::IdentifierExpr) {
-                auto& objIdCz = static_cast<IdentifierExpr&>(*ma.object);
-                std::string objLowerCz = objIdCz.name;
-                std::transform(objLowerCz.begin(), objLowerCz.end(), objLowerCz.begin(), ::tolower);
-                if (objLowerCz == "usercontrol" || objLowerCz == "propertypage") {
-                    std::string memLowerCz = ma.memberName;
-                    std::transform(memLowerCz.begin(), memLowerCz.end(), memLowerCz.begin(), ::tolower);
-                    if (memLowerCz == "scalewidth" || memLowerCz == "scaleheight"
-                        || memLowerCz == "left" || memLowerCz == "top"
-                        || memLowerCz == "width" || memLowerCz == "height"
-                        || memLowerCz == "enabled") {
-                        return Vb6Type::Long;
+                const IdentifierExpr& objIdHp = static_cast<const IdentifierExpr&>(*ma.object);
+                const std::string objLowerHp = Symbol::toLower(objIdHp.name);
+                if (objLowerHp == "usercontrol" || objLowerHp == "propertypage"
+                    || objLowerHp == "extender" || objLowerHp == "ambient") {
+                    Vb6Type hpT = Vb6Type::Unknown;
+                    if (hostPseudoValueType(objLowerHp, ma.memberName, hpT, false)) {
+                        return hpT;
                     }
                 }
             }

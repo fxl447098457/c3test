@@ -583,6 +583,23 @@ function Test-UcScaleUnitsCensus {
     }
 }
 
+# 账 #159: 宿主伪成员只有一张表 (名字 / 类型 / 可否裸写 / 赋值拆数值)。哨兵逐行把
+# 表与 src/rtl/core/vb6rtl/vb6rtl_userctl.h 的 extern 声明对照, 并禁止那五份旧清单
+# 回潮 (成员名字面量再出现在消费点 = 抄了第二份)。
+function Test-HostPseudoTableCensus {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] host_pseudo_table_census ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\check_host_pseudo_table.ps1" 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        $out | Select-Object -Last 14 | ForEach-Object { Write-Host "  $_" }
+    }
+}
+
 # === 编译冒烟测试 (编译+链接, 不运行生成物) ===
 function Test-Run {
     param(
@@ -3504,7 +3521,7 @@ if ($Category -in @("all", "run", "vbp")) {
     # ⇒ 与 DPI 无关, 换机器不会漂。钉的是账 #175 (ScaleWidth) 与账 #177 (TextWidth/TextHeight)
     # 同一族口径: 控件宿主交出去的每一个量纲都得跟着它声明的 ScaleMode 走。
     # 改前实测: U-SW=True 而 U-TW/U-TH=False (文字量纲交的是设备像素)。
-    $veUnitsExpected = @("U-SW=True", "U-TW=True", "U-TH=True", "U-CTX=True", "U-DONE")
+    $veUnitsExpected = @("U-SW=True", "U-TW=True", "U-TH=True", "U-CTX=True", "U-HW=True", "U-DONE")
     Test-Vbp "ve_units" "$Tests\ve_units\Units.vbp" $veUnitsExpected
     Test-Vbp "ve_units_x86" "$Tests\ve_units\Units.vbp" $veUnitsExpected -Arch "x86"
 
@@ -3814,6 +3831,7 @@ if ($Category -in @("all", "compile")) {
     Write-Host "--- Static Checks ---" -ForegroundColor Yellow
     Test-DiStubCensus
     Test-UcScaleUnitsCensus
+    Test-HostPseudoTableCensus
     Write-Host ""
 
     # --- 综合测试 (编译+运行, 以 Main 为程序入口) ---

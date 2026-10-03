@@ -584,6 +584,20 @@
     std::string canonicalHostPseudoMember(const std::string& pseudoObj,
                                            const std::string& memberName) const;
 
+    // 账 #159 = C29-CH-d: 上面那条规范化与下面三个问题, 全部由 cgen_util_com.cpp
+    // 里 kHostPseudoRows 这**一张表**回答 (成员名清单只此一处, 别处再抄就是回归):
+    //   hostPseudoBareName   — .ctl/.pag 里裸写的成员要不要接、接成哪个 RTL 符号
+    //   hostPseudoValueType  — 按值读时的 VB6 类型 (决定比较走不走装箱那一路)
+    //   hostPseudoIsNumeric  — 赋值时 RHS 是 Variant 要不要先拆成数值
+    // 每行的类型都必须与 src/rtl/core/vb6rtl/vb6rtl_userctl.h 的 extern 对上,
+    // 由 scripts/check_host_pseudo_table.ps1 逐行钉 (含负控)。
+    bool hostPseudoBareName(const std::string& pseudoObj, const std::string& memberName,
+                            std::string& outRtlName) const;
+    bool hostPseudoValueType(const std::string& pseudoObj, const std::string& memberName,
+                             Vb6Type& outType, bool requireBare) const;
+    bool hostPseudoIsNumeric(const std::string& pseudoObj,
+                             const std::string& memberName) const;
+
     // Fix 010r-16: COM/Property-Get 左值重写辅助
     // 当赋值语句(Let/Set/Assignment fallback)的 LHS 是非常量 C 表达式(非左值)时,
     // 尝试重写为 COM SetProp/SetPropArg 或 Property Let/Set 调用.

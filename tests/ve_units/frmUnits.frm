@@ -56,6 +56,16 @@ Private Sub Form_Load()
     cp = uPix.Ctx()
     Debug.Print "U-CTX-RAW twip=" & cm & " pix=" & cp
     Debug.Print "U-CTX=" & CStr(InStr(cm, "1/") = 1 And InStr(cp, "3/") = 1)
+    ' 账 #159: UserControl.hWnd 是 void* 全局, 此前类型 oracle 认不得它 ⇒ 答 Variant
+    ' ⇒ 比较走装箱那一路 (把全局的地址当 vb6_VARIANT* 递进去) ⇒ 恒假。两头判据:
+    ' 控件里直接比 0 (HwOk) + 与另一枚句柄成员比 (HwVs), 两边都必须 True。
+    Dim hoT As String, hvT As String, hoP As String, hvP As String
+    hoT = uTw.HwOk()
+    hvT = uTw.HwVs()
+    hoP = uPix.HwOk()
+    hvP = uPix.HwVs()
+    Debug.Print "U-HW-RAW twip=" & hoT & "/" & hvT & " pix=" & hoP & "/" & hvP
+    Debug.Print "U-HW=" & CStr(hoT = "True" And hvT = "True" And hoP = "True" And hvP = "True")
     Debug.Print "U-DONE"
     Unload Me
 End Sub
