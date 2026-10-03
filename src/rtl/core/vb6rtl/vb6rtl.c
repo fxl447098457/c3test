@@ -19,6 +19,7 @@
 
 
 #include "vb6rtl.h"
+#include "vb6rtl_crash.h"   /* 账 #181: vb6_CrashTraceClaim */
 #include <intrin.h>   // _ReturnAddress (未处理错误定位)
 #include <stdio.h>
 #include <stdlib.h>
@@ -81,6 +82,9 @@ double vb6_Pow(double base, double exp) {
 #ifdef _WIN32
 static LONG CALLBACK vb6_CrashTraceVEH(PEXCEPTION_POINTERS ep) {
     DWORD code = ep->ExceptionRecord->ExceptionCode;
+    /* 账 #181: 记轨迹本身会再触发异常 (栈溢出时 fprintf 拿 CRT 锁 /
+     * CaptureStackBackTrace 再读同一批页) ⇒ 每进程只记第一次。 */
+    if (!vb6_CrashTraceClaim(VB6_CRASH_CLAIM_STDERR)) return EXCEPTION_CONTINUE_SEARCH;
     if (code == EXCEPTION_ACCESS_VIOLATION || code == EXCEPTION_IN_PAGE_ERROR
         || code == EXCEPTION_ILLEGAL_INSTRUCTION || code == EXCEPTION_INT_DIVIDE_BY_ZERO
         || code == EXCEPTION_STACK_OVERFLOW) {
@@ -636,3 +640,10 @@ void vb6_RaiseError(int32_t errNum, BSTR description) {
     exit(errNum);
 }
 
+// 账 #181: 见 vb6rtl_runtime.h 里那条注释 —— 三个出口每进程各记一次。
+static volatile long vb6_crashClaim[4] = { 0, 0, 0, 0 };
+
+int vb6_CrashTraceClaim(int slot) {
+    if (slot < 0 || slot >= 4) return 1;           /* 未知槽位不拦 (宁可多记一份) */
+    return InterlockedCompareExchange(&vb6_crashClaim[slot], 1, 0) == 0;
+}

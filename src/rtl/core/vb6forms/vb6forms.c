@@ -16,6 +16,7 @@
 
 #include "vb6forms.h"
 #include "vb6forms_internal.h"
+#include "vb6rtl_crash.h"     /* 账 #181: 崩溃轨迹每进程只记一次 */
 #include <stdio.h>
 #include <stdarg.h>
 
@@ -917,7 +918,10 @@ void vb6_SetAppInstance(void* hInstance) {
 // 「模块+偏移」写进 c3_crash.txt。没有调试器也能一眼看出异常是从
 // Test.exe 自己的代码抛的, 还是逃出第三方 OCX (NewTab01.ocx) 的 VB6 代码。
 static LONG WINAPI vb6_crashFilter(EXCEPTION_POINTERS* ep) {
-    FILE* f = fopen("c3_crash.txt", "a");
+    FILE* f;
+    /* 账 #181: 第三道槽位 (过滤器天然只跑一次, 这里只是把口径收全)。 */
+    if (!vb6_CrashTraceClaim(VB6_CRASH_CLAIM_FILTER)) return EXCEPTION_EXECUTE_HANDLER;
+    f = fopen("c3_crash.txt", "a");
     if (!f) return EXCEPTION_EXECUTE_HANDLER;
     fprintf(f, "=== EXCEPTION code=0x%08lX addr=%p ===\n",
             (unsigned long)ep->ExceptionRecord->ExceptionCode,
@@ -1004,6 +1008,9 @@ static LONG WINAPI vb6_heapCorruptVEH(EXCEPTION_POINTERS* ep) {
     int isAV = (code == 0xC0000005);
     if (!isCorrupt && !isAV)
         return EXCEPTION_CONTINUE_SEARCH;
+    /* 账 #181: 这个出口以前无闸 —— 栈溢出时它自己会再 fault (CreateFileA/栈扫描),
+     * 于是同一份递归栈被写 4 遍、真正的第一现场排在最后。每进程只记第一次。 */
+    if (!vb6_CrashTraceClaim(VB6_CRASH_CLAIM_FILE)) return EXCEPTION_CONTINUE_SEARCH;
     HANDLE h = CreateFileA("c3_crash.txt", FILE_APPEND_DATA,
                            FILE_SHARE_READ | FILE_SHARE_WRITE, NULL,
                            OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);

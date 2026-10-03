@@ -185,6 +185,7 @@ static const RtlFileEntry kRtlFiles[] = {
     { RTL_VB6RTL_ARRAY_H,                 "vb6rtl_array.h" },
     { RTL_VB6RTL_CLASS_COM_H,             "vb6rtl_class_com.h" },
     { RTL_VB6RTL_RUNTIME_H,               "vb6rtl_runtime.h" },
+    { RTL_VB6RTL_CRASH_H,                 "vb6rtl_crash.h" },
 
     // vb6forms 家族再细分 (2026-09-17)
     { RTL_VB6FORMS_PICTURE_PROP_C,        "vb6forms_picture_prop.c" },

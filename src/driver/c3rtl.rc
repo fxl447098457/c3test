@@ -359,6 +359,7 @@
 136 RCDATA "../rtl/core/vb6rtl/vb6rtl_array.h"
 137 RCDATA "../rtl/core/vb6rtl/vb6rtl_class_com.h"
 138 RCDATA "../rtl/core/vb6rtl/vb6rtl_runtime.h"
+222 RCDATA "../rtl/core/vb6rtl/vb6rtl_crash.h"
 
 // vb6forms 家族再细分 (2026-09-17): Picture 属性 / Widget 属性
 139 RCDATA "../rtl/core/vb6forms/vb6forms_picture_prop.c"
