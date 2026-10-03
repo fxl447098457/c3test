@@ -225,12 +225,26 @@ UDT"），带名字的是 **Class 符号专属**的 `memberReturnTypes`（`unord
 String 档，下一轮可以试着让 `rewriteByteArrayValue` 改问表）。前四类是**规则**不是成员清单，不动它；
 最后一处是真正的第二份口径。
 
-### B27 czUI 的 **x64** 产物退出时 rc=0xC000041D（预存，与本刀无关）
-出处 = 账 #180 的真跑面。`czFormDemo.vbp` 用 x64 编出来能跑起来、14s 内在退出路径上抛
-`0xC000041D`（用户态回调里的未处理异常）。**A/B 已排除本刀**：拿改前的编译器（`C3_base180`）
-编同一份夹具，退出码**一模一样**；CI 那一格是 `Test-GuiVbp "czUI" -Arch "x86" -AutoExitSec 3`，
-x86 侧 12s 无崩 ⇒ 门从来没见过它。要追的话形状与 B23 同族（崩在关闭路径 / 非 -g 无栈），
-先 `-g` + `C3_PAGEHEAP=1` 拿栈再谈；判据得先把 x64 那档也纳入 GUI 用例（现在只跑 x86）。
+### B27 czUI 的 x64 产物启动期 AV —— **判掉：源码形状限制，不改编译器**
+出处 = 账 #180 的真跑面（A/B 已证与那一刀无关：拿改前的编译器编同一份夹具，退出码一模一样
+`0xC000041D`）。这一轮把它量到底了，结论是**这条不该由编译器修**：
+
+· 现场（`C3_CRASH_TRACE=1` + `-g` 的 .map 符号化）：AV 落在 `gdiplus.dll+0xF2E1`，读
+`0x14FE1F88` —— 一个 32 位量级的地址。栈：`vb6_form_create_frmDemo+0x1027` ←
+`vb6_czControl_prop_let_BackColor` ← …，全在 GDI+ 调用上。
+· 根因在**工程的 VB 源码**：`tests/czUI-main` 的 Declare 把指针一律写成 `As Long` ——
+`GdipCreateFromHDC(ByVal hDC As Long, ByRef graphics As Long)`（被调方把 64 位指针写进
+4 字节槽，高半截落到栈上别处）、`GdipDeleteGraphics(ByVal graphics As Long)`（把截断值
+递回给 API）、`GdiplusStartup(ByRef token As Long, ByRef inputbuf As Any, …)`。这类声明
+**62 行**，是 VB6 只在 32 位跑留下的形状。⇒ 要 x64 就得先把这些声明改成 `LongPtr`
+（**改 VB 代码的活**，与 tB 的口径一致：它也是要求源码用 LongPtr，而不是把 Long 偷偷加宽），
+不是往 RTL/发码里塞补偿。VB6 工程引用了 32 位 OCX 时同理，别去试 x64。
+· 所以本线口径：**czUI 只在 x86 那格钉**（CI 现状 `Test-GuiVbp "czUI" -Arch "x86"` 就是对的），
+x64 那档不补用例、不补产物；将来若要把 x64 立成目标，先改夹具源码，再谈别的。
+· 顺带留一条**独立**的观察（不在本条结案范围）：崩溃轨迹器 `vb6_CrashTraceVEH`
+（`vb6rtl.c:82`）在爆栈现场会**重入** —— 那份 c3_crash.txt 里同一递归栈打了 4 段，第一现场
+（gdiplus 那段）被压在最后。诊断工具一重入就把现场盖掉，值得单独挑一轮加个"每进程只记一次"
+的闸；但那是诊断面的质量，不影响任何产物行为。
 
 ### B22 隐式函数声明（C4013）现在没有**守卫**，只有 census
 出处 = 账 #173 / #174。两格都已出（#173 补 `vb6com_internal.h` 的 `extern double vb6_VariantToDouble(VARIANT)`；#174 把裸名 `SelectedControls` 接进 `kPropertyPageHostMembers`），`tests/Charts 2020` 整个构建的 C4013 从 **14 → 0**。但**没有任何东西阻止它再长回来**：
