@@ -282,6 +282,22 @@ void vb6_uc_dibDestroy(vb6_UCDib* d);
 void vb6_uc_dumpFormComposite(HWND root, const char* dumpDir);
 extern int32_t g_uc_dumpSeq;   // dump 文件序号
 
+// --- 账 #173 census: 内建 Collection 的成员面（uc_collection.c 定义）---
+// 以前这一族**没有集中声明** —— `uc_hostmodel_call.inc` / `uc_hostmodel_getprop.inc`
+// 直接调它们，MSVC 只给 C4013「未定义；假设外部返回 int」就放过。今天这些函数
+// 返回 void/int32_t，按 int 假设**恰好**不出错；但同一族的 `vb6_VariantToDouble`
+// （返回 double）在 x86 上因此把 x87 栈漏成溢出 —— 症状出现在完全不相干的算术里
+// （见 vb6com_internal.h 那条注释）。所以这里按**真实签名**登记，不留给编译器猜。
+void    vb6_Collection_Add(void* coll, const void* winVar);
+void    vb6_Collection_AddKeyed(void* coll, const void* winVar, const wchar_t* key);
+void    vb6_Collection_AddAt(void* coll, const void* winVar, int32_t pos1);
+void    vb6_Collection_AddKeyedAt(void* coll, const void* winVar, const wchar_t* key, int32_t pos1);
+void    vb6_Collection_Remove(void* coll, int32_t idx1);
+void    vb6_Collection_RemoveByKey(void* coll, const wchar_t* key);
+void    vb6_Collection_Item(void* coll, int32_t idx1, void* outV);
+int32_t vb6_Collection_ItemByKey(void* coll, const wchar_t* key, void* outV);
+int32_t vb6_Collection_Count(void* coll);
+
 #ifdef __cplusplus
 } // extern "C"
 #endif
