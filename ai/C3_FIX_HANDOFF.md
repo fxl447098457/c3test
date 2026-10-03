@@ -192,20 +192,11 @@ UDT"），带名字的是 **Class 符号专属**的 `memberReturnTypes`（`unord
 - VARIANT ↔ typed 转换族（含 160-F 的重估结论）。
 - Extender / Ambient 成员访问器的剩余小簇（Fix 161/162/183 之后仍有零星无赋值路径）。
 
-### B22 属性页里 `SelectedControls(i)` 的裸名调用发成**隐式声明**（账 #174）
-出处 = 账 #173 的 census。`tests/Charts 2020/LabelPlus/PropPagLP.pag:445` 与
-`ppProgressCircular.pag:379` 的 `Set m_oUCImage = SelectedControls(0)` 现在发成裸
-`SelectedControls(0)` → cl `C4013「未定义；假设外部返回 int」`。**别把它当噪声**：
-x86 cdecl 下 double 返回值留在 x87 栈上不弹，八次之后任何浮点取值得 QNaN
-（账 #173 就是这么炸的，见 `vb6com_internal.h` 那条注释）。出口其实早就位：
-RTL 侧 Fix 153 的 `vb6_PropertyPage_SelectedControls(int32_t)`（`vb6rtl_userctl.h:182`，
-static inline 返 NULL）+ 成员访问形态的识别（`cgen_expr_member_generic_access.inc:118`），
-**缺的只是名单里那一名** —— 唯一出口 `cgen_expr_ident_builtin.inc:239` 的
-`kPropertyPageHostMembers`（现只有 hwnd/changed/scalemode/scaleheight 四项），
-由 `isPropertyPageDesigner_`（`cgen_form.cpp:175`，认 `.pag` 的 controlTypeName）选表。
-开工前先量一件事：`Set x = f(0)` 这条语句路是否真走 ident 支路（若不走，补名单无效，
-要在调用发射那侧接同一张表）。判据＝本构建 C4013 从 2 降到 0；数法见记忆库
-「数 cl 的警告必须自己重跑 cl」。
+### B22 隐式函数声明（C4013）现在没有**守卫**，只有 census
+出处 = 账 #173 / #174。两格都已出（#173 补 `vb6com_internal.h` 的 `extern double vb6_VariantToDouble(VARIANT)`；#174 把裸名 `SelectedControls` 接进 `kPropertyPageHostMembers`），`tests/Charts 2020` 整个构建的 C4013 从 **14 → 0**。但**没有任何东西阻止它再长回来**：
+· 为什么必须当缺陷：x86 cdecl 下被隐式声明的函数按 `int` 取返回值，而 `double` 返回值躺在 x87 栈 ST0 上、调用方永不 `fstp` ⇒ 每调一次漏一层栈，八层之后栈满、之后任何浮点取值得 QNaN `0x7FF8...`（#173 的炸法）。x64 走 XMM0，全静默。
+· 现成的收口办法：对 RTL 源加 `/we4013`（`src/backend/msvc_driver.cpp` 那一条 `cmd << " /W3"` 旁边）。**前提**是生成码侧也零 C4013 —— 生成码的雷由 #174 那格清了，但只清了这一个名字，未解析裸名的**兜底仍然是发裸名**（`cgen_expr_ident_builtin.inc` 尾部的 Fix 110u 一族），别的工程换个名字就又会漏。
+· 所以顺序建议：先量「语料里还有没有别的未解析裸名调用」（`--emit-c` 全语料跑一遍 cl 数 C4013，数法见记忆库「数 cl 的警告必须自己重跑 cl」），再决定是上 `/we4013` 还是在 cgen 侧把未解析裸名**判死**（后者才是单一权威，但要先确认不会把「隐式 Variant 局部」那条兜底一起打掉 —— 它就是 Fix 110u 立着的理由）。
 
 ## C. 仍在生效的口径与工具事实（与本文档等长的一半价值在这里；完整版见记忆库）
 
@@ -281,3 +272,4 @@ static inline 返 NULL）+ 成员访问形态的识别（`cgen_expr_member_gener
 | 合并块 2858–2867 | EXE 工程类 IDispatch 桥接（`VBMAN_DEMO` 启动即崩 → 通过），提交 `3dd3689/17f349a/df42abc/3b797f9` | 已提交（未覆盖面 → B5） |
 
 | 账 #173（提交 `332f6363` = <vbeclipse> rev38，门 #299） | x86 上 `vb6_VariantToDouble` 无原型 → x87 栈泄漏 → Charts 2020 启动即 error 6「Overflow」；补真实原型 + 同族 census （C4013 14→2，剩 B22 那两处） | 已提交并过门 |
+| 账 #174（提交 `3684b1d7` = <vbeclipse> rev39，门 #300） | 属性页裸名 `SelectedControls(i)` 改走宿主内建裸名表，发射成 RTL 既有出口 `vb6_PropertyPage_SelectedControls`；新用例 `pp_selctrl_hostmember`，语料 A/B 118/120 一字不动 | 已提交并过门 |
