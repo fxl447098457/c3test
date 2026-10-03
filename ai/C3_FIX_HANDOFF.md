@@ -192,6 +192,21 @@ UDT"），带名字的是 **Class 符号专属**的 `memberReturnTypes`（`unord
 - VARIANT ↔ typed 转换族（含 160-F 的重估结论）。
 - Extender / Ambient 成员访问器的剩余小簇（Fix 161/162/183 之后仍有零星无赋值路径）。
 
+### B23 `VBFlexGridDemo` 起窗即堆损坏 `0xC0000374`，而且**门从来没见过它**
+出处 = 账 #175 的回归面扫描（同一次真跑量到，刻意没并进那一刀）。
+· 读数：`--target win-x86` 构建产物，`STATE=exited rc=0xC0000374`，窗口从未出现；
+  **BASE（`wt_base175` = `a1fed71c` 的冷编编译器）与 NEW 同形** ⇒ 不是 #175 带进来的。
+  ⚠ 归因口径：BASE 那份是 VS 生成器（产物在 `.build/Release/C3.exe`）、NEW 那份是 Ninja，
+  「两边都崩」足以说明与本刀无关，但要坐实「与本刀无关」的更强形式（同生成器两侧），
+  下一轮追时补 Ninja 侧 BASE。
+· 为什么它一直没响：`tests/run_tests.ps1` 里 **没有 VBFlexGridDemo 的 `Test-GuiVbp` 用例**
+  （grep `flexgrid` 只命中一条注释）⇒ 这个 demo 完全在回归之外。修它之前先把它挂进门
+  （`Test-GuiVbp "vbflexgrid" ... -Arch "x86" -AutoExitSec 3`），否则修好了也守不住。
+
+### B24 OLE 拖放的 `hdrop` 旁路日志没人钉
+出处 = 账 #175 的跨门工件对形 #300→#301：`oledd_test.txt`(s4) 从 `hdrop FAIL hr=0x1` 变成
+`hdrop first=C:\a.txt` —— 两边都不红，因为 `run_tests.ps1` 里 grep 不到 `hdrop`/`oledd`，
+它是夹具自己写的日志文件。首拖成败正是这类测试最容易漂的地方 ⇒ 值得挑一轮把它翻成针面。
 ### B22 隐式函数声明（C4013）现在没有**守卫**，只有 census
 出处 = 账 #173 / #174。两格都已出（#173 补 `vb6com_internal.h` 的 `extern double vb6_VariantToDouble(VARIANT)`；#174 把裸名 `SelectedControls` 接进 `kPropertyPageHostMembers`），`tests/Charts 2020` 整个构建的 C4013 从 **14 → 0**。但**没有任何东西阻止它再长回来**：
 · 为什么必须当缺陷：x86 cdecl 下被隐式声明的函数按 `int` 取返回值，而 `double` 返回值躺在 x87 栈 ST0 上、调用方永不 `fstp` ⇒ 每调一次漏一层栈，八层之后栈满、之后任何浮点取值得 QNaN `0x7FF8...`（#173 的炸法）。x64 走 XMM0，全静默。
@@ -273,3 +288,5 @@ UDT"），带名字的是 **Class 符号专属**的 `memberReturnTypes`（`unord
 
 | 账 #173（提交 `332f6363` = <vbeclipse> rev38，门 #299） | x86 上 `vb6_VariantToDouble` 无原型 → x87 栈泄漏 → Charts 2020 启动即 error 6「Overflow」；补真实原型 + 同族 census （C4013 14→2，剩 B22 那两处） | 已提交并过门 |
 | 账 #174（提交 `3684b1d7` = <vbeclipse> rev39，门 #300） | 属性页裸名 `SelectedControls(i)` 改走宿主内建裸名表，发射成 RTL 既有出口 `vb6_PropertyPage_SelectedControls`；新用例 `pp_selctrl_hostmember`，语料 A/B 118/120 一字不动 | 已提交并过门 |
+
+| 账 #175（提交 `e4bf2b17` = <vbeclipse> rev40，门 #301） | 控件坐标的**单位**收成「容器的 ScaleMode」一处权威（`vb6_ScalePxToUser` / `vb6_ScaleUserToPx` + `vb6_ContainerScaleMode` / `vb6_WindowScaleModeSelf`），替掉散在 12+ 处的写死缇；Charts 2020 的饼/柱/面积/矩形不再整幅画在画布外（图体空白），czUI 运行期 `Move` 的字面量恢复像素语义。判据 = `Test-GuiVbp -DumpMinColors`（数 `C3_UC_DUMPDIR` 每控件绘制缓冲的不同颜色；BASE 4..10 / NEW 63..512）+ 结构哨兵 `scripts/check_uc_scale_units.ps1`（BASE 树 20 处红）。同轮量到 #176（见 B23）、TextWidth 量纲（见 #177） |
