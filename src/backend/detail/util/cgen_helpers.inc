@@ -354,6 +354,10 @@
     // 账 #190: 事件处理器的 C 函数名 = 符号自己的拼写 (与 Sub 的写法一致); 没处理器返空串。
     std::string eventHandlerFn(const std::string& ctrlName,
                                const std::string& suffix) const;
+    // 账 #191: 工程内 UC 的实例成员访问 (Fix 112 的出口)。recvExpr = 该实例的宿主句柄表达式,
+    // 单枚控件与控件数组元素两条路只差这一个串。命中返回 true (已填 lastExpr_/pendingChainObj_)。
+    bool emitUcInstanceMemberExpr(const std::string& ucClass, const std::string& member,
+                                  const std::string& recvExpr);
     bool controlNeedsSubclass(const FrmControl& ctrl) const;
 
     // C29-SL-o（账 #83 的 Slider 半边）: Slider 的**设计期值面**下发。

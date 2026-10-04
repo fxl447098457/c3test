@@ -204,7 +204,6 @@
             if (knownControlArrays_.count(arrNameLower)) {
                 auto itCtrl = knownFormControls_.find(arrNameLower);
                 if (itCtrl != knownFormControls_.end()) {
-                    std::string readFn = getControlPropReadFn(itCtrl->second, node.memberName);
                     std::string idxArg;
                     if (!idxExpr.positional.empty()) {
                         emitExpr(*idxExpr.positional[0]);
@@ -212,15 +211,24 @@
                     } else {
                         idxArg = "0";
                     }
+                    std::string ctrlHwndArr = "vb6_CtrlArr_GetAt(&vb6_arr_" + cIdent(arrIdent.name) + ", " + idxArg + ")";
+                    // 账 #191: 工程内 UserControl 的**数组元素** —— 方法/属性必须与单枚控件走同一个
+                    // 出口 (`emitUcInstanceMemberExpr`, Fix 112 抽出来的那一个)。以前这条路上没有它,
+                    // `ucChartBar1(i).AddSerie ...` 就整条落进 COM 兜底 ⇒ 交回空值 (真工程实测)。
+                    auto itUcArr = knownUserControlCtrlVars_.find(arrNameLower);
+                    if (itUcArr != knownUserControlCtrlVars_.end()
+                        && emitUcInstanceMemberExpr(itUcArr->second, node.memberName, ctrlHwndArr)) {
+                        return;
+                    }
+                    std::string readFn = getControlPropReadFn(itCtrl->second, node.memberName);
                     if (!readFn.empty()) {
-                        lastExpr_ = readFn + "(vb6_CtrlArr_GetAt(&vb6_arr_" + cIdent(arrIdent.name) + ", " + idxArg + "))";
+                        lastExpr_ = readFn + "(" + ctrlHwndArr + ")";
                         return;
                     }
                     // Fix 0xx: OCX 控件数组元素属性 (如 NewTab1(c).Theme) — 内置 readFn
                     // 匹配不到 (第三方 ActiveX 特有属性), 走 COM 后期绑定读属性. 此前未
                     // 拦截, `NewTab1(c).Theme` 原样输出到 C → C2224. 数组元素取
                     // vb6_CtrlArr_GetAt 的 HWND 后按属性读取 (Theme 等返回 BSTR).
-                    std::string ctrlHwndArr = "vb6_CtrlArr_GetAt(&vb6_arr_" + cIdent(arrIdent.name) + ", " + idxArg + ")";
                     comObjExpr_ = ctrlHwndArr;
                     comMemberName_ = node.memberName;
                     isComMarker_ = true;

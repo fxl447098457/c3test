@@ -257,46 +257,10 @@
                 // IDispatch. 这里按 .ctl 模块解析成员, this 取宿主窗口的实例.
                 auto itUC = knownUserControlCtrlVars_.find(objLower);
                 if (itUC != knownUserControlCtrlVars_.end()) {
-                    std::string resolvedFn = resolveClassMemberCall(itUC->second, node.memberName);
-                    if (!resolvedFn.empty()) {
-                        std::string hwndArg = makeCtrlHwndArg(objLower, itCtrl->second);
-                        std::string thisArg =
-                            "(vb6_cls_" + cIdent(itUC->second) + "*)vb6_UC_InstanceOf(" + hwndArg + ")";
-                        if (asCallCallee_) {
-                            pendingChainObj_ = thisArg;
-                            lastExpr_ = resolvedFn;
-                        } else {
-                            // 值上下文无括号调用: 按形参表补 Optional 默认值 (同 Fix 089h)
-                            std::vector<ParameterInfo> paramsUC;
-                            bool isBuiltinUC = false;
-                            if (resolvedFn.find("_prop_") == std::string::npos
-                                && findClassMemberCallParams(itUC->second, node.memberName,
-                                                             paramsUC, isBuiltinUC)
-                                && !paramsUC.empty() && !isBuiltinUC) {
-                                std::string argListUC = thisArg;
-                                for (size_t i = 0; i < paramsUC.size(); i++) {
-                                    const auto& pm = paramsUC[i];
-                                    argListUC += ", ";
-                                    std::string defV = (pm.hasDefaultValue && !pm.defaultValueExpr.empty())
-                                                     ? pm.defaultValueExpr : defaultValue(pm.type);
-                                    if (pm.isByVal) argListUC += defV;
-                                    else {
-                                        std::string ct = mapType(pm.type);
-                                        if (pm.type == Vb6Type::Variant || pm.type == Vb6Type::Empty
-                                            || pm.type == Vb6Type::Null || pm.type == Vb6Type::Object)
-                                            argListUC += "&(" + ct + "){0}";
-                                        else argListUC += "&(" + ct + "){" + defV + "}";
-                                    }
-                                }
-                                for (size_t i = 0; i < paramsUC.size(); i++) {
-                                    if (paramsUC[i].isOptional && !paramsUC[i].isParamArray)
-                                        argListUC += ", 0";
-                                }
-                                lastExpr_ = resolvedFn + "(" + argListUC + ")";
-                            } else {
-                                lastExpr_ = resolvedFn + "(" + thisArg + ")";
-                            }
-                        }
+                    // 账 #191: 这段整体抽到 CCodeGen::emitUcInstanceMemberExpr —— 控件数组的元素
+                    // (`ucChartBar1(i).AddSerie ...`) 要走同一个出口，不能各抄一份。
+                    if (emitUcInstanceMemberExpr(itUC->second, node.memberName,
+                                                makeCtrlHwndArg(objLower, itCtrl->second))) {
                         return;
                     }
                 }

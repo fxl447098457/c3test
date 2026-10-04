@@ -666,6 +666,20 @@ function Test-EventHandlerNames {
     }
 }
 
+function Test-UcInstanceExit {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] uc_instance_exit ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\check_uc_instance_exit.ps1" 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        $out | Select-Object -First 6 | ForEach-Object { Write-Host "  $_" }
+    }
+}
+
 
 function Test-AddressOfThunkSites {
     $script:total++
@@ -3646,7 +3660,7 @@ if ($Category -in @("all", "run", "vbp")) {
     # 是 undeclared identifier (C2065), 同窗体时恒答 0。负控实测 (a4e3b574 的编译器 x86):
     #   frmUnits.c(214)/(220): error C2065 "vb6_hwnd_uArr": 未声明的标识符, BUILD rc=1。
     $veUnitsExpected = @("U-SW=True", "U-TW=True", "U-TH=True", "U-CTX=True", "U-HW=True", "U-CNT=True",
-        "U-ARR-RAW count=3 lb=0 ub=2", "U-ARR=True", "U-DONE")
+        "U-ARR-RAW count=3 lb=0 ub=2", "U-ARRM-methods=3", "U-ARR=True", "U-DONE")
     Test-Vbp "ve_units" "$Tests\ve_units\Units.vbp" $veUnitsExpected
     Test-Vbp "ve_units_x86" "$Tests\ve_units\Units.vbp" $veUnitsExpected -Arch "x86"
 
@@ -4000,6 +4014,7 @@ if ($Category -in @("all", "compile")) {
     Test-SubclassSlotSites
     Test-CtrlArrayMemberSites
     Test-EventHandlerNames
+    Test-UcInstanceExit
 
     Write-Host ""
 
@@ -4320,6 +4335,24 @@ if ($Category -in @("all", "syntax")) {
     Test-CodegenNote "fontsize_literal" @("$Tests\Charts 2020\ucChartBar\Proyecto1.vbp") @(
         "->Size = 12.0f;", "->Size = 8.25f;") @(
         "->Size = 12f;")
+
+    # 账 #191 的发码形状针: 控件数组元素的方法调用必须与单枚同走"直发生成函数"那条出口,
+    # 不能落 vb6_ComCall 兜底 (宿主值不是 IDispatch ⇒ 交回空值, 编得过、静默不干活)。
+    # 修前实测同一条语句发成 vb6_ComCall(vb6_CtrlArr_GetAt(&vb6_arr_uArr, aj), L"SW", NULL, 0)。
+    Test-CodegenNote "ucarr_member_call" @("$Tests\ve_units\Units.vbp") @(
+        "vb6_ucUnitPix_SW((vb6_cls_ucUnitPix*)vb6_UC_InstanceOf(vb6_CtrlArr_GetAt(&vb6_arr_uArr, aj)))") @(
+        "vb6_ComCall(vb6_CtrlArr_GetAt(&vb6_arr_uArr, aj)"
+    # 账 #191-b 的发码形状针 (钉在真实工程 Charts 2020/ucChartBar 的 Form2.frm:223 那一条上):
+    # 「对象型属性再往下一层的写」`ucChartBar1(i).Font.Size = ...` 必须发成
+    #   vb6_ComSetProp(vb6_ucChartBar_prop_get_Font(直发的实例), L"Size", pack(...)) —— 取回那枚
+    # StdFont 再对它写一层 (StdFont 本身是真 IDispatch)。修前实测两形都坏: 左值折叠那一路只取
+    # prop_get_ 那一段、把尾巴 `.Size` 整段丢掉 ⇒ 发成 prop_let_Font(elem, <double>), 值实参的槽
+    # 是 vb6_ComIface_Font*, Form2.c 471-477 四条 C2440, 整个工程编不过; 基线那台走 ComGetObjectProp
+    # 虽然编得过, 但 UC 不可分发时那条恒 NULL, 写上去是静默无效 (#191 要治的正是这一半)。
+    Test-CodegenNote "ucobj_chain_write" @("$Tests\Charts 2020\ucChartBar\Proyecto1.vbp") @(
+        "vb6_ComSetProp(vb6_ucChartBar_prop_get_Font((vb6_cls_ucChartBar*)vb6_UC_InstanceOf(vb6_CtrlArr_GetAt(&vb6_arr_ucChartBar1, i)))") @(
+        "vb6_ucChartBar_prop_let_Font((vb6_cls_ucChartBar*)vb6_UC_InstanceOf(vb6_CtrlArr_GetAt(&vb6_arr_ucChartBar1, i)), ((double")
+)
 
     # 账 #189 的发码形状针: 控件数组的整体成员必须发成 vb6_CtrlArr_*, 一条都不许再落在
     # 句柄变量的 COM 属性读上 (修前 `uArr.Count` 就是 vb6_ComGetIntProp(vb6_hwnd_uArr, L"Count"))。

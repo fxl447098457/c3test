@@ -102,16 +102,17 @@ Private Sub Form_Load()
     ' vb6_ComGetIntProp(vb6_hwnd_uArr, L"Count") ⇒ ①跨窗体引用时 undeclared identifier (C2065,
     ' Charts 2020 的 Form2 就是这么红的) ②同窗体时恒答 0 ⇒ 循环一格也不走。
     ' 两头判据: ①三个数各自对上 (3/0/2) ②拿 Count 当上界**真的**圈了三圈 (每圈记一格)。
-    ' 注: 数组元素的**成员访问** (uArr(i).SW() / uArr(i).Left) 另有一条独立缺陷 (空值/崩),
-    ' 不在本条判据里 —— 台账另开一账跟它, 这里刻意不碰, 免得两条缺陷互相掩盖。
+    ' 注: 数组元素的**方法**调用本轮 (账 #191) 已经接回单枚那条出口; 元素的 extender 属性
+    ' (Left/Top/Width/Height) 那半仍是独立缺陷 (读它直接崩) ⇒ 本轮证据只用 SW()。
     Dim ac As Long, al As Long, au As Long, aok As Long, aj As Long
     ac = uArr.Count
     al = uArr.LBound
     au = uArr.UBound
     Debug.Print "U-ARR-RAW count=" & ac & " lb=" & al & " ub=" & au
     For aj = uArr.LBound To uArr.Count - 1
-        aok = aok + 1
+        If uArr(aj).SW() > 0 Then aok = aok + 1
     Next
+    Debug.Print "U-ARRM-methods=" & aok
     Debug.Print "U-ARR=" & CStr(ac = 3 And al = 0 And au = 2 And aok = 3)
     Debug.Print "U-DONE"
     Unload Me
