@@ -609,6 +609,19 @@ function Test-HostPseudoTableCensus {
 # 账 #188: 浮点字面量的形状只有一个出口 (src/common/float_literal.hpp)。
 # 手拼 "f" 后缀这件事在 x86/x64 都不会有运行期症状 —— 它是**编不过**, 而带小数点的设计值 (8.25)
 # 恰好躲过, 所以必须静态钉。同一份脚本在 HEAD 的树上 R1~R3 全红 (R1 当场点出那 6 个手拼点)。
+function Test-IntSuffixSites {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] int_suffix_sites ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\check_int_suffix_sites.ps1" 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        $out | Select-Object -First 6 | ForEach-Object { Write-Host "  $_" }
+    }
+}
 function Test-IntLiteralShape {
     $script:total++
     Write-Host -NoNewline "  [STATIC] int_literal_shape ... "
@@ -4037,6 +4050,7 @@ if ($Category -in @("all", "compile")) {
     Test-AddressOfThunkSites
     Test-FloatLiteralShape
     Test-IntLiteralShape
+    Test-IntSuffixSites
     Test-SubclassSlotSites
     Test-CtrlArrayMemberSites
     Test-EventHandlerNames
@@ -4393,6 +4407,26 @@ if ($Category -in @("all", "syntax")) {
     Test-CodegenNote "optdef_default_shape_real" @("$Tests\Charts 2020\ucTreeMaps\Proyecto1.vbp") @(
         "if (!_has_FontIndex) (*FontIndex) = 0L;") @(
         "(*FontIndex) = 0&;")
+
+    # 账 #195: VB 的 Integer 类型后缀 `%` 以前在词法层就被拒 (case '%' 那一支只吃字符不置标志,
+    # 于是 `3%` 落回「无后缀十进制按数值大小定档」那一段, 残留的 % 让 parseIntLit 报「超出 64 位」并级联出
+    # 9-13 条诊断)。补上标志 + 三种进制扫描器认下这个后缀 + radixDigits 的剥离表加 %。
+    # 正例: 十进制/%H%/O%/B%/负数/表达式/参数默认值 七形都要过得了语法 (修前连一条 `y = 3%` 都过不去)。
+    Test-SyntaxMulti "int_suffix_forms" @("$Tests\intsuffix\IntSuffix.bas")
+
+    # 形状针: 三种进制的 % 必须按**数值**落地 (255 / 15 / 5), 参数默认值那形要接上 #194 那一处权威。
+    # Absent 是后缀漏进生成 C 那一形 (#194 修前实测) —— 两条规则钉在同一枚夹具上。
+    Test-CodegenNote "int_suffix_shape" @("$Tests\intsuffix\IntSuffix.bas") @(
+        "z = vb6_ChkInt(255);",
+        "z = vb6_ChkInt(15);",
+        "z = vb6_ChkInt(5);",
+        "if (!_has_a) a = 3;") @(
+        "a = 3%")
+
+    # 边界负例: 显式 `%` 就是 Integer 档 (-32768..32767)，超出必须报 —— 按 int32 收下再让 int16
+    # 去截是把值改错 (2147483648 静默回绕成 -2147483648)。针取消息里的 ASCII 片段 (GBK 口径)。
+    Test-SyntaxFailMulti "int_suffix_neg_range" @("$Tests\intsuffix_neg\IntSuffixNeg.bas") `
+        "(-32768..32767)"
 )
 
     # 账 #189 的发码形状针: 控件数组的整体成员必须发成 vb6_CtrlArr_*, 一条都不许再落在
