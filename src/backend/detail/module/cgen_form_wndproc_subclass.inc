@@ -367,8 +367,12 @@
 
             // Fix 185: 控件级 _Paint 派发 (PictureBox)。DC 用窗口属性传给
             // vb6_ControlPrint/vb6_ControlCls —— VB6 的 Print 在 _Paint 里画的正是
-            // 这次 BeginPaint 拿到的 DC。必须 return 0: 否则消息落到原 STATIC 过程
-            // 再 BeginPaint 一次，并且用户画的内容会被它的默认绘制覆盖。
+            // 这次 BeginPaint 拿到的 DC。
+            // 账 #185 把画的**序**也定在这里: 本层是最外层 (发码的 install 晚于 RTL 建窗时
+            // 那趟自绘子类), 所以 BeginPaint/EndPaint 只有这一处; 先把同一个 DC 经
+            // VB6_PaintDC 交给下面那层画表面 (BackColor + Picture), 再抬用户的 _Paint,
+            // 用户笔画落在表面之上 —— 与 VB6 一致。反过来 (先抬 _Paint 再转调) 会被表面盖掉。
+            // 必须 return 0: 尾巴上那句转调会把 WM_PAINT 第二次交给下面那层。
             if (info.hasPaint) {
                 std::string fn = cProcName(info.ctrlName + "_Paint", AccessLevel::Private);
                 c_.emitLine("if (msg == WM_PAINT) {");
@@ -378,6 +382,8 @@
                 c_.emitLine("if (vb6_hdc) {");
                 c_.indent();
                 c_.emitLine("SetPropW(hwnd, L\"VB6_PaintDC\", (HANDLE)vb6_hdc);");
+                c_.emitLine("{ WNDPROC vb6_below = (WNDPROC)vb6_GetOriginalWndProc((void*)hwnd);");
+                c_.emitLine("  if (vb6_below) CallWindowProcW(vb6_below, hwnd, msg, wp, lp); }");
                 c_.emitLine("{ extern void " + fn + "(); " + fn + "(); }");
                 c_.emitLine("RemovePropW(hwnd, L\"VB6_PaintDC\");");
                 c_.emitLine("EndPaint(hwnd, &vb6_ps);");

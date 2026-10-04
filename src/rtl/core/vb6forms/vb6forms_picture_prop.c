@@ -272,16 +272,21 @@ static void vb6_ImagePaintHelper(HWND hwnd, HDC hdc) {
 /* Image control subclass WndProc for WM_PAINT / WM_PRINTCLIENT rendering. */
 static LRESULT CALLBACK vb6_ImageSubclassProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     if (msg == WM_PAINT) {
+        // 账 #185: BeginPaint/EndPaint 归**最外层**那一趟 (生成代码里的 _Paint 臂)。
+        // 上层已经把 DC 放进 VB6_PaintDC 时本层只往那张 DC 上画表面 —— 否则一次绘制
+        // 出现两个 PAINTSTRUCT, 而且表面会画在用户笔画**之后**把它盖掉。
+        HDC given = (HDC)(INT_PTR)GetPropW(hwnd, L"VB6_PaintDC");
         PAINTSTRUCT ps;
-        HDC hdc = BeginPaint(hwnd, &ps);
+        HDC hdc = given;
+        if (!hdc) hdc = BeginPaint(hwnd, &ps);
         if (hdc) {
             if (GetEnvironmentVariableA("C3_FORMS_TRACE", NULL, 0) > 0)
-                fprintf(stderr, "[C3_F187] ImagePaint hwnd=%p bg=%06X set=%d\r\n",
+                fprintf(stderr, "[C3_F187] ImagePaint hwnd=%p bg=%06X set=%d shared=%d\r\n",
                         (void*)hwnd,
                         (unsigned)(UINT_PTR)GetPropW(hwnd, L"VB6_BackColor") & 0xFFFFFFu,
-                        GetPropW(hwnd, L"VB6_BackColorSet") ? 1 : 0);
+                        GetPropW(hwnd, L"VB6_BackColorSet") ? 1 : 0, given ? 1 : 0);
             vb6_ImagePaintHelper(hwnd, hdc);
-            EndPaint(hwnd, &ps);
+            if (!given) EndPaint(hwnd, &ps);
         }
         return 0;
     } else if (msg == WM_PRINTCLIENT) {
@@ -293,7 +298,7 @@ static LRESULT CALLBACK vb6_ImageSubclassProc(HWND hwnd, UINT msg, WPARAM wp, LP
         /* Capture the original WndProc BEFORE removing props, then forward the
          * message to it. The old code removed the prop and then looked it up
          * again at the fall-through, so WM_DESTROY was lost to DefWindowProc. */
-        WNDPROC origProc = (WNDPROC)GetPropW(hwnd, L"VB6_OrigProc");
+        WNDPROC origProc = (WNDPROC)GetPropW(hwnd, L"VB6_ImageOrigProc");
 
         IPicture* pPic = (IPicture*)GetPropW(hwnd, L"VB6_IPicture");
         if (pPic) {
@@ -302,13 +307,13 @@ static LRESULT CALLBACK vb6_ImageSubclassProc(HWND hwnd, UINT msg, WPARAM wp, LP
         }
         if (origProc) {
             SetWindowLongPtrW(hwnd, GWLP_WNDPROC, (LONG_PTR)origProc);
-            RemovePropW(hwnd, L"VB6_OrigProc");
+            RemovePropW(hwnd, L"VB6_ImageOrigProc");
             return CallWindowProcW(origProc, hwnd, msg, wp, lp);
         }
         return DefWindowProcW(hwnd, msg, wp, lp);
     }
     /* Fall through to original STATIC WndProc for all other messages. */
-    WNDPROC origProc = (WNDPROC)GetPropW(hwnd, L"VB6_OrigProc");
+    WNDPROC origProc = (WNDPROC)GetPropW(hwnd, L"VB6_ImageOrigProc");
     if (origProc) return CallWindowProcW(origProc, hwnd, msg, wp, lp);
     return DefWindowProcW(hwnd, msg, wp, lp);
 }
@@ -317,9 +322,9 @@ void vb6_InstallImageSubclass(void* hwnd) {
     if (!hwnd) return;
     HWND hw = (HWND)hwnd;
     /* Only install once */
-    if (GetPropW(hw, L"VB6_OrigProc")) return;
+    if (GetPropW(hw, L"VB6_ImageOrigProc")) return;
     WNDPROC origProc = (WNDPROC)SetWindowLongPtrW(hw, GWLP_WNDPROC, (LONG_PTR)vb6_ImageSubclassProc);
-    if (origProc) SetPropW(hw, L"VB6_OrigProc", (HANDLE)origProc);
+    if (origProc) SetPropW(hw, L"VB6_ImageOrigProc", (HANDLE)origProc);
     if (GetEnvironmentVariableA("C3_FORMS_TRACE", NULL, 0) > 0)
         fprintf(stderr, "[C3_F187] InstallImageSubclass hwnd=%p orig=%p installed=%d\r\n",
                 (void*)hw, (void*)origProc, origProc ? 1 : 0);

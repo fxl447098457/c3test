@@ -603,6 +603,24 @@ function Test-HostPseudoTableCensus {
 # 账 #184: AddressOf 交出去的必须是桩地址。口径收在 CCodeGen::addressOfTargetCName 一处,
 # 这条哨兵拦"又加一个把 (void*) 直接拼 cProcName 的取址出口" —— 那种写法 x64 毫无症状,
 # 只有 x86 运行期才炸, 所以必须静态钉住 (负控: 同一份脚本在 HEAD~1 的树上四条规则全红)。
+# 账 #185: 子类化分层的槽位哨兵 (一个属性名 = 一层, 谁都不许跟谁抢)。
+# 这一类缺陷的症状是「装了但没装」—— 编得过、发码对、事件一次也不响, 只有运行期看得见,
+# 所以静态钉住。同一份脚本在 HEAD 的树上 S1~S4 一起红 (实测 6 行)。
+function Test-SubclassSlotSites {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] subclass_slot_sites ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\check_subclass_slots.ps1" 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        $out | Select-Object -Last 14 | ForEach-Object { Write-Host "  $_" }
+    }
+}
+
+
 function Test-AddressOfThunkSites {
     $script:total++
     Write-Host -NoNewline "  [STATIC] addrof_thunk_sites ... "
@@ -3210,6 +3228,25 @@ if ($Category -in @("all", "run", "vbp")) {
         "EV24-OLE-DROP=OLE-TEST-DROP EFF=1", "EV25-OLE-OVER",
         "EV26-DRAG-DONE", "EV27-STARTDRAG", "EV29-COMPLETE=3") -Env "C3_OLEDDB_TEST=1"
 
+    # --- 账 #185: PictureBox/Image 的事件面 vs RTL 自绘子类的同名槽位碰撞 ---
+    # 两层子类以前把原始窗口过程存在同一个窗口属性名 (VB6_OrigProc) 上, 又都写「属性已存在就不装」
+    # ⇒ 后装的那层被静默丢掉: Paint / MouseDown / MouseUp / Click 一次也不响。
+    # 判据两头 (缺一头就是假绿):
+    #   ① 事件臂要响 —— PB02..PB05 只有事件层真装上才有; PB06 是 Label 的证人 (同为 STATIC,
+    #      但不含 SS_BITMAP ⇒ 没人跟它抢), 修复前后都该有 —— 它排除「夹具自己没驱动起来」这种红。
+    #   ② 表面不能丢 —— PB01 里那颗像素必须是设计期 BackColor 的红 (255)。画序定成「最外层
+    #      BeginPaint/EndPaint 一次, DC 经 VB6_PaintDC 交下去让自绘层画表面, 再抬用户的 _Paint」。
+    # 负控 = 修复前的编译器编同一份夹具: x64 与 x86 都只剩 PB00/PB06 两条,
+    #   汇总行读 mdown=0 mup=0 click=0 img=0 lb=1 paint_ok=0。
+    Test-Vbp "pbsub" "$Tests\pbsub\PbSub.vbp" @(
+        "PB01-PAINT px=255", "PB02-PIC-MDOWN x=20", "PB03-PIC-MUP", "PB04-PIC-CLICK",
+        "PB05-IMG-CLICK", "PB06-LB-MDOWN",
+        "PB-CNT mdown=1 mup=1 click=1 img=1 lb=1 paint_ok=1")
+    Test-Vbp "pbsub_x86" "$Tests\pbsub\PbSub.vbp" @(
+        "PB01-PAINT px=255", "PB02-PIC-MDOWN x=20", "PB03-PIC-MUP", "PB04-PIC-CLICK",
+        "PB05-IMG-CLICK", "PB06-LB-MDOWN",
+        "PB-CNT mdown=1 mup=1 click=1 img=1 lb=1 paint_ok=1") -Arch "x86"
+
     # --- P20-46: 控件字符串全程 W / 支持多国语言（用户要求）的源码面反例断言 ---
     # 判据两条:
     #   ① RTL 源码里不得**直接调 A 版 Win32 API** —— 编译已带 /DUNICODE /D_UNICODE /utf-8
@@ -3870,6 +3907,8 @@ if ($Category -in @("all", "compile")) {
     Test-UcScaleUnitsCensus
     Test-HostPseudoTableCensus
     Test-AddressOfThunkSites
+    Test-SubclassSlotSites
+
     Write-Host ""
 
     # --- 综合测试 (编译+运行, 以 Main 为程序入口) ---

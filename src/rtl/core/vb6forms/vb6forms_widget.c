@@ -24,7 +24,11 @@
 // P18-F: 控件子类化基础设施
 // ============================================================
 
-// 通用控件子类化安装 (复用VB6_OrigProc属性模式)
+// 通用控件子类化安装 (属性名 = 本层自己的槽位)
+// 账 #185 的口径: **每一层子类用自己的属性名**存它的原始窗口过程 (本层 = VB6_OrigProc,
+// RTL 自绘的 PictureBox/Image = VB6_ImageOrigProc, Frame = VB6_GBox_OrigProc,
+// 图形按钮 = VB6_GfxBtn_OrigProc, SSTab = VB6_SSTab_OrigProc)。两层同名 ⇒ 后装的那层
+// 看见"只装一次"那一问就直接返回, 于是它的事件臂一条也不响 (实测 PictureBox/Image 全灭)。
 void vb6_InstallControlSubclass(void* hwnd, void* subclassProc) {
     if (!hwnd) return;
     HWND hw = (HWND)hwnd;
