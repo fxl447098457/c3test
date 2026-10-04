@@ -345,6 +345,9 @@ private:
     // 泛型推断 fixpoint (G3): 收请求→物化→增量分析→再跨模块, 至收敛
     bool runGenericsFixpoint();
     bool runCrossModuleResolution();  // 跨模块符号链接
+    // AddressOf 取址的过程标成回调 (账 #184): stage 3.5a, 必须在跨模块链接之后
+    // (要读 3.5 灌好的 isExternal/sourceModule 才认得归属模块)。
+    void markAddressOfCallbacks();
     // 静态库引用校验 (ai/024 批次 T01): 遍历全部 Declare, 对静态形态的 Lib 串做
     // 寻址 + 后端格式匹配, 失败即报错。**本批次不发码** (T02 才接 codegen)。
     bool validateStaticLibRefs(const CompileOptions& options);

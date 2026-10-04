@@ -969,6 +969,9 @@
     // Delegate (tB 扩展): decl pass 登记的桩定义文本, epilogue 统一发射
     std::vector<std::string> delegateThunkDefs_;
 
+    // AddressOf 回调桩 (账 #184): 同上, 与委托桩同批后置发射
+    std::vector<std::string> addressOfThunkDefs_;
+
     // 重载调用变体 (O2): IndexOrCallExpr 发射 callee ident 前置入的符号键后缀,
     // 由 ident 发射路径消费并清空 ("" = 裸键 head, 产出不受影响)
     std::string pendingCalleeOvl_;

@@ -132,3 +132,7 @@
         }
     }
 
+    // 7.5 AddressOf 回调桩 (账 #184): 原型跟着过程原型同批发射 (类型依赖同一条顺序),
+    //     桩定义后置到 epilogue —— 与委托桩同一套拆分/转发口径。
+    emitAddressOfThunkDecls(module);
+

@@ -30,10 +30,13 @@
         Symbol* fnSym86 = symTab_.lookupModule(fnName86);
         if (!fnSym86) fnSym86 = symTab_.lookup(fnName86);
         if (fnSym86 && (fnSym86->kind == SymbolKind::Sub || fnSym86->kind == SymbolKind::Function)) {
-            lastExpr_ = "(void*)" + cProcName(fnName86, fnSym86->access,
-                fnSym86->isExternal ? fnSym86->sourceModule : "");
+            // 账 #184: 被取址过的过程交**桩**地址 (与 visit(AddressOfExpr) 同一处口径)
+            lastExpr_ = "(void*)" + addressOfTargetCName(fnSym86,
+                cProcName(fnName86, fnSym86->access,
+                          fnSym86->isExternal ? fnSym86->sourceModule : ""));
         } else {
-            lastExpr_ = "(void*)" + cProcName(fnName86, AccessLevel::Private);
+            lastExpr_ = "(void*)" + addressOfTargetCName(fnSym86,
+                                                         cProcName(fnName86, AccessLevel::Private));
         }
         return;
     }

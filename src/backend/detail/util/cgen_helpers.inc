@@ -119,6 +119,16 @@
     std::string ovlCSuffixFromKey(const std::string& suffixKey) const;
     void emitDelegateDecls(Module& module);
     void emitDelegateThunks();
+    // --- AddressOf 回调桩 (账 #184) ---
+    // VB6 的 AddressOf 交出去的是 __stdcall 调用桩, 不是本体地址。x86 下本体是
+    // __cdecl ⇒ 直接把本体给 OS/COM = 每次回调少弹 N*4 字节 (VBFlexGrid 起窗即
+    // 0xC0000374 的根因)。被标记的过程 (Symbol::addressOfCallback) 在**定义模块**
+    // 里另发一枚 __stdcall 桩, AddressOf 站点取桩地址; 本体约定一字不动 ⇒
+    // 现有直接调用与 RTL 的 cdecl 登记面完全不受影响。x64 忽略该约定。
+    std::string addressOfThunkName(const std::string& procCName);
+    std::string addressOfTargetCName(const Symbol* sym, const std::string& procCName);
+    void emitAddressOfThunkDecls(Module& module);   // decl pass: 桩原型
+    void emitAddressOfThunkDefs();                  // epilogue: 桩定义
     void emitDelegateCall(IndexOrCallExpr& node);
     // 委托桩目标过程声明查找 (O2: procFp 非空时按重载变体指纹精确匹配)
     Decl* findDelegateTargetDecl(Module& module, const std::string& name,

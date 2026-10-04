@@ -600,6 +600,23 @@ function Test-HostPseudoTableCensus {
     }
 }
 
+# 账 #184: AddressOf 交出去的必须是桩地址。口径收在 CCodeGen::addressOfTargetCName 一处,
+# 这条哨兵拦"又加一个把 (void*) 直接拼 cProcName 的取址出口" —— 那种写法 x64 毫无症状,
+# 只有 x86 运行期才炸, 所以必须静态钉住 (负控: 同一份脚本在 HEAD~1 的树上四条规则全红)。
+function Test-AddressOfThunkSites {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] addrof_thunk_sites ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\check_addressof_thunk_sites.ps1" 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        $out | Select-Object -Last 14 | ForEach-Object { Write-Host "  $_" }
+    }
+}
+
 # === 编译冒烟测试 (编译+链接, 不运行生成物) ===
 function Test-Run {
     param(
@@ -1647,6 +1664,15 @@ if ($Category -in @("all", "run", "bas")) {
     # Delegate (tB extension): typed function pointers, stdcall/cdecl thunks, both arches
     Add-BasTest "test_delegate" "$Tests\test_delegate.bas" @("CALL=Y", "INIT=Y", "REASSIGN=Y", "BITCMP=Y", "APICB=Y", "QSORT=Y", "MODVAR=Y", "DELEGATE-DONE")
     Add-BasTest "test_delegate_x86" "$Tests\test_delegate.bas" @("CALL=Y", "INIT=Y", "REASSIGN=Y", "BITCMP=Y", "APICB=Y", "QSORT=Y", "MODVAR=Y", "DELEGATE-DONE") -Arch "x86"
+    # 账 #184: `AddressOf` 取址的过程 = Win32/COM 回调, 交出去的必须是 __stdcall **桩**的地址
+    # (VB6 的 AddressOf 给的就是桩, 不是本体)。x86 下本体是 __cdecl ⇒ 每次回调把栈少弹 N*4 字节:
+    # VBFlexGrid 的 SUBCLASSPROC 有 6 个形参 (漏弹 24 字节) ⇒ 起窗即堆损坏 0xC0000374, 本地 3/4 复现。
+    # 这里钉"回调语义照旧"那半边: 两遍枚举计数相同 / lParam 逐字送到 / hWnd 非 0 / 返回 0 就停 /
+    # 没被取址的过程不受影响。判据不依赖"桌面上有几枚窗口"(全用自洽式), 所以两片不会因环境抖。
+    # "桩存在"那半边由 addrof_cb_shape 钉 —— 它的负控就是 BASE 的发码: 里面一个 aoThunk_ 都没有。
+    $aoNeedles = @("AC1-tag=Y", "AC2-echo=Y", "AC3-hwnd=Y", "AC4-stop=Y", "AC5-ret=Y", "AC6-plain=Y", "AC-DONE")
+    Add-BasTest "test_addrof_cb" "$Tests\test_addrof_cb.bas" $aoNeedles
+    Add-BasTest "test_addrof_cb_x86" "$Tests\test_addrof_cb.bas" $aoNeedles -Arch "x86"
     # Overloading (tB extension): same-name by-type/arity resolution, Optional span, Variant tier
     Add-BasTest "test_overload" "$Tests\test_overload.bas" @("F-L5", "F-Shi", "F-L6", "3", "5", "O0", "O17", "21", "OVERLOAD-DONE")
     Add-BasTest "test_overload_x86" "$Tests\test_overload.bas" @("F-L5", "F-Shi", "F-L6", "3", "5", "O0", "O17", "21", "OVERLOAD-DONE") -Arch "x86"
@@ -3418,6 +3444,10 @@ if ($Category -in @("all", "run", "vbp")) {
     Test-GuiVbp "Charts2020" "$Tests\Charts 2020\Proyecto1.vbp" -Arch "x86" -AutoExitSec 3 -DumpMinColors 40
     # czUI (czForm): 自定义 GDI+ UserControl (.ctl) 无边框窗体 demo, 需 -Arch x86 (32 位)
     Test-GuiVbp "czUI" "$Tests\czUI-main\czFormDemo.vbp" -Arch "x86" -AutoExitSec 3
+    # 账 #184 / B23: 这份 demo 每枚网格都经 comctl32 的 SetWindowSubclass 装了 SUBCLASSPROC,
+    # 而那个指针以前是 __cdecl 本体地址 ⇒ x86 起窗期堆损坏 (改前本地 3/4 崩、改后 14/14 起窗)。
+    # B23 当时记的是"这份 demo 完全在门禁之外 ⇒ 缺陷藏了很久", 修好之后就按它说的挂上来。
+    Test-GuiVbp "FlexGridX86" "$Tests\VBFlexGridDemo\VBFlexGridDemo.vbp" -Arch "x86" -AutoExitSec 3
     # NewTab: 第三方 OCX 控件 (NewTab01.ocx, 32 位) 真宿主验证. 免注册便携部署 (OCX 在工程目录, 由 harness 复制到 exe 旁, 不依赖本机注册);
     # 无边框窗体无关闭按钮/无自动退出逻辑, 用 -AutoExitSec 3 收尾避免阻塞后续测试
     Test-GuiVbp "NewTab" "$Tests\NewTab-test\Test.vbp" -Arch "x86" -AutoExitSec 3
@@ -3839,6 +3869,7 @@ if ($Category -in @("all", "compile")) {
     Test-DiStubCensus
     Test-UcScaleUnitsCensus
     Test-HostPseudoTableCensus
+    Test-AddressOfThunkSites
     Write-Host ""
 
     # --- 综合测试 (编译+运行, 以 Main 为程序入口) ---
@@ -4141,6 +4172,16 @@ if ($Category -in @("all", "syntax")) {
     }
     Test-CodegenNote "in_n3_undeclared_in_hole" @("$Tests\interp_neg\in_n3_undeclared_in_hole.bas") @("VB3001", "nopeHere")
     Test-CodegenNote "in_n4_second_hole_line" @("$Tests\interp_neg\in_n4_second_hole_line.bas") @("VB3001", "alsoNope", "(8,7)")
+    # 账 #184 的形状面: 被 AddressOf 取址的过程 → Private 的发 static 桩、Public 的发外链桩,
+    # 桩体逐字转调本体 (参数个数/宽度/顺序与本体一致, 只有约定不同); AddressOf 站点取桩地址;
+    # 本体**保持 cdecl** (直接调用那条路与 RTL 的 cdecl 登记面都不受牵连)。
+    # 两条 Absent 就是负控: BASE 的发码里取址点写的是 (void*)vb6_CountWin, 本体没有 __stdcall。
+    Test-CodegenNote "addrof_cb_shape" @("$Tests\test_addrof_cb.bas") @(
+        "static int32_t __stdcall aoThunk_vb6_CountWin(intptr_t hWnd, intptr_t lParam) { return vb6_CountWin(hWnd, lParam); }",
+        "int32_t __stdcall aoThunk_vb6_StopWin(intptr_t hWnd, intptr_t lParam) { return vb6_StopWin(hWnd, lParam); }",
+        "EnumWindows((void*)aoThunk_vb6_CountWin, 4242);") @(
+        "EnumWindows((void*)vb6_CountWin, 4242);",
+        "__stdcall vb6_CountWin(intptr_t hWnd, intptr_t lParam) {")
     # ai/028 V2 的发码形状: 插值必须** literally ** 发成手写的 & CStr() / Format$ 形状 ——
     # 注意第二枚读数挑的是 vb6_CStrLong (按实参类型改发专用 CStr), 这正是"降级成真 AST"
     # 才继承得到的东西 (计划书 R2/R3 的实测面)。

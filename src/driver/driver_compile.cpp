@@ -708,6 +708,11 @@ CompileResult Driver::compile(const CompileOptions& options) {
         return result;
     }
 
+    // === 阶段3.5c: AddressOf 取址的过程标记 (账 #184) ===
+    // 放在跨模块链接与泛型 fixpoint 之后: 两者都会改变符号归属, 而发码期各模块
+    // 只认自己符号表里的那份标记。
+    markAddressOfCallbacks();
+
     // === 阶段3.6: P6.4 标记接口类 ===
     // 遍历所有模块的类符号, 将被Implements引用的类标记为isInterface
     for (size_t i = 0; i < analyzers_.size(); i++) {

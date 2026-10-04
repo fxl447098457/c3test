@@ -508,10 +508,17 @@ void CCodeGen::visit(AddressOfExpr& node) {
     if (!aoSym) aoSym = symTab_.lookup(fnName);
     if (aoSym && (aoSym->kind == SymbolKind::Sub || aoSym->kind == SymbolKind::Function)
         && aoSym->isExternal && !aoSym->sourceModule.empty()) {
-        lastExpr_ = "(void*)" + cProcName(fnName, aoSym->access, aoSym->sourceModule);
+        // 账 #184: 被取址过的过程交**桩**地址 (x86 下 OS/COM 按 __stdcall 回调)。
+        lastExpr_ = "(void*)" + addressOfTargetCName(
+                        aoSym, cProcName(fnName, aoSym->access, aoSym->sourceModule));
         return;
     }
-    lastExpr_ = "(void*)" + cProcName(node.funcName, AccessLevel::Private);
+    // 账 #184: 本模块自有的过程同样走这一处口径 (标记在定义模块的符号上)。
+    {
+        Symbol* selfSym = symTab_.lookupModule(node.funcName);
+        std::string base = cProcName(node.funcName, AccessLevel::Private);
+        lastExpr_ = "(void*)" + addressOfTargetCName(selfSym, base);
+    }
 }
 
 void CCodeGen::visit(MeExpr& node) {
