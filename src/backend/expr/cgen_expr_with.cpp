@@ -83,6 +83,18 @@ void CCodeGen::visit(WithMemberExpr& node) {
             }
             return;
         }
+        // 账 #196: With 块里的**一个实参方法** —— `With picA : .TextHeight(Text)`。
+        // 同一条 Fix 090s 协议：交裸名 + pendingChainObj_，由调用点把 With 入口那枚 HWND
+        // **前置**到实参表前面（`vb6_ControlTextHeight((void*)_vb6_with_0, text)`，见
+        // cgen_expr_call_com_bind.inc 的 classMethodObjArg → cgen_expr_call_opt_pad.inc 的拼接）。
+        // 只有带括号那一形有实参表，所以这里只看 asCallCallee_；没进这一支的成员继续往下走。
+        std::string oaFnW = asCallCallee_ ? controlOneArgMethod(info.ctrlType, memLower)
+                                          : std::string();
+        if (!oaFnW.empty()) {
+            pendingChainObj_ = "(void*)" + tempVar;
+            lastExpr_ = oaFnW;
+            return;
+        }
         diag_.warn(DiagnosticID::CodeGenUnsupportedFeature, SourceLocation{},
             std::string("P17.1: Unknown control property '.'") + node.memberName + "' in With block");
         lastExpr_ = tempVar + "." + cIdent(node.memberName);

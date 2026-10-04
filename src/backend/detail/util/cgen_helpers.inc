@@ -343,6 +343,10 @@
                       std::string& outHwndExpr) const;
     std::string controlZeroArgMethod(FrmControlType ctrlType,
                                      const std::string& memberLower) const;
+    // 账 #196: **一个实参**的控件方法表（TextHeight / TextWidth）。只交名字，实参由码头拼 ——
+    // 与上面那张表同一套规矩，With 形与带括号裸形两条码头都要接。
+    std::string controlOneArgMethod(FrmControlType ctrlType,
+                                    const std::string& memberLower) const;
 
     // C29-SL-n（账 #141）: 「这枚控件要不要子类化」的**唯一一份**判据。
     // 这一趟原本被抄成三份：发 arm 的 `cgen_form_wndproc_subclass.inc`（按 info.hasXxx 汇总）、

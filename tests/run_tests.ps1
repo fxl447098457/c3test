@@ -3805,7 +3805,9 @@ if ($Category -in @("all", "run", "vbp")) {
     # 负控 = 改前那台真编同一份夹具: DcForm.c(167) error C2039 "hDC" 不是 "HWND__" 的成员，
     #   BUILD rc=1、一条读数都不出（物证 .build/b196neg/）。
     $dcSurfExpected = @("DS01-SAME=True", "DS02-SEP=True", "DS03-LIVE=True",
-        "DS04-PIXEL=True", "DS05-RAW", "DS-DONE")
+        "DS04-PIXEL=True", "DS05-RAW",
+        "TH01-TWOFORMS=True", "TH02-UNITS=True", "TH04-WIDTH=True",
+        "TH05-RAW", "TH06-FONTRAW", "DS-DONE")
     Test-Vbp "dcsurf" "$Tests\dcsurf\DcSurf.vbp" $dcSurfExpected
     Test-Vbp "dcsurf_x86" "$Tests\dcsurf\DcSurf.vbp" $dcSurfExpected -Arch "x86"
 
@@ -4572,6 +4574,22 @@ if ($Category -in @("all", "syntax")) {
     Test-CodegenNote "dc_read_real" @("$Tests\Charts 2020\ucTreeMaps\Proyecto1.vbp") @(
         "vb6_GetControlHDC(_vb6_with_0)") @(
         "_vb6_with_0.hDC")
+
+    # 形状针 (账 #196 第二条): 按 HWND 的 TextHeight/TextWidth 两形都落在那两个出口上，
+    # 实参表由码头拼 —— With 形走「裸名 + pendingChainObj_」那套协议(前置句柄)，裸形直接成串。
+    Test-CodegenNote "dcsurf_text_measure" @("$Tests\dcsurf\DcSurf.vbp") @(
+        "vb6_ControlTextHeight((void*)vb6_hwnd_picB,",
+        "vb6_ControlTextWidth((void*)vb6_hwnd_picB,",
+        "vb6_ControlTextHeight((void*)_vb6_with_0") @(
+        "_vb6_with_0.TextHeight",
+        "vb6_hwnd_picB.TextHeight",
+        'vb6_ComCall(vb6_hwnd_picB, L"TextHeight"')
+
+    # 同一刀钉在真工程上: ucTreeMaps 的 PropPagFMR.pag:265 `With Picture1 : .CurrentY + .TextHeight(Text)`
+    # —— 这是 #196 收完 hDC 之后 ucTreeMaps 仅剩的那条 C2039。
+    Test-CodegenNote "text_measure_real" @("$Tests\Charts 2020\ucTreeMaps\Proyecto1.vbp") @(
+        "vb6_ControlTextHeight((void*)_vb6_with_0)") @(
+        "_vb6_with_0.TextHeight")
 
     # 账 #195: VB 的 Integer 类型后缀 `%` 以前在词法层就被拒 (case '%' 那一支只吃字符不置标志,
     # 于是 `3%` 落回「无后缀十进制按数值大小定档」那一段, 残留的 % 让 parseIntLit 报「超出 64 位」并级联出

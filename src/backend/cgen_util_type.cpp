@@ -823,6 +823,11 @@ std::string CCodeGen::getRuntimeParamCType(const std::string& funcName, size_t p
         // 提取 → 传入 GetTextExtentPoint32W/字符串 API 崩溃. 注册 BSTR 形参.
         {"vb6_UserControl_TextWidth",      {"BSTR"}},
         {"vb6_UserControl_TextHeight",     {"BSTR"}},
+        // 账 #196: 控件那一对（Form / PictureBox 的 .TextWidth/.TextHeight）同一条规矩 ——
+        // 第一个实参是句柄(void*)，第二个必须是 BSTR；实参是 Variant 时缺这条就
+        // 把 vb6_VARIANT 结构体裸传给 GetTextExtentPoint32W ⇒ 崩（Fix 113 记的那一味）。
+        {"vb6_ControlTextWidth",           {"void*", "BSTR"}},
+        {"vb6_ControlTextHeight",          {"void*", "BSTR"}},
         {"vb6_UserControl_AsyncRead",      {"BSTR", "int32_t", "BSTR", "int32_t"}},
         {"vb6_UserControl_PropertyChanged", {"BSTR"}},
         {"vb6_UserControl_CancelAsyncRead", {"BSTR"}},

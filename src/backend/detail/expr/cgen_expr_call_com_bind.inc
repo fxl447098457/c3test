@@ -76,10 +76,13 @@
             // 账 #143 那条"编得过、跑了、什么都没发生"（本线踩过三次的那同一条）。
             std::string zaHwnd;
             FrmControlType zaType = FrmControlType::Unknown;
-            std::string zaFn = formCtrlSlot(comObjExpr_, zaType, zaHwnd)
-                ? controlZeroArgMethod(zaType, tvMem) : std::string();
+            bool zaSlot = formCtrlSlot(comObjExpr_, zaType, zaHwnd);
+            std::string zaFn = zaSlot ? controlZeroArgMethod(zaType, tvMem) : std::string();
+            // 账 #196: 同一个接收者问法下的**一个实参方法**（TextHeight/TextWidth）。
+            // 零实参那张表命中不了它，两条各查一次、各拼各的实参表（零实参只交句柄）。
+            std::string oaFn = zaSlot ? controlOneArgMethod(zaType, tvMem) : std::string();
             bool slClear = !zaFn.empty();
-            if (tvSim || tbSim || dtSim || mvSim || slSim || slClear) {
+            if (tvSim || tbSim || dtSim || mvSim || slSim || slClear || !oaFn.empty()) {
                 isComMarker_ = false;
                 std::vector<std::string> sa;
                 for (size_t i = 0; i < node.positional.size(); i++) {
@@ -88,7 +91,9 @@
                 }
                 std::string a0 = sa.size() > 0 ? sa[0] : std::string("0");
                 std::string a1 = sa.size() > 1 ? sa[1] : std::string("0");
-                lastExpr_ = slClear
+                lastExpr_ = !oaFn.empty()
+                    ? (oaFn + "((void*)" + zaHwnd + ", " + a0 + ")")
+                    : slClear
                     ? (zaFn + "((void*)" + zaHwnd + ")")
                     : slStd
                     ? ("vb6_Slider_SimStdEvent((void*)" + comObjExpr_ + ", " + a0 + ", " + a1 + ")")

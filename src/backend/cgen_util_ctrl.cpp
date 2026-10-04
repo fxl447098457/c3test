@@ -1488,6 +1488,26 @@ std::string CCodeGen::controlZeroArgMethod(FrmControlType ctrlType,
     return "";
 }
 
+// 账 #196（§B31 剩下的一半）: 控件的**一个实参方法**名表 —— VB6 的 TextHeight/TextWidth。
+// 与 controlZeroArgMethod 同一套规矩：**表只交名字，实参由码头拼**（三条码头都只有成员名与
+// 接收者，实参表在调用点手里）。档位同样**刻意不给通用行** —— VB6 只在画得上去的那几枚上
+// 有文字量（Form / PictureBox / UserControl / PropertyPage / Printer），给成通用 ⇒
+// `List1.TextHeight("x")` 也答一个数就是伪造成功（同 #192 的 CurrentX、#196 的 hDC）。
+// UserControl 那一档早就有（#177/#178 按实例那对），Printer 有 vb6_Printer_*，这里补的是
+// 窗体与 PictureBox —— 语料物证 ucTreeMaps 的 PropPagFMR.pag:265 `With Picture1 : .TextHeight(Text)`。
+std::string CCodeGen::controlOneArgMethod(FrmControlType ctrlType,
+                                          const std::string& memberLower) const {
+    if (memberLower != "textheight" && memberLower != "textwidth") return "";
+    switch (ctrlType) {
+        case FrmControlType::Form:
+        case FrmControlType::PictureBox:
+            return memberLower == "textheight" ? "vb6_ControlTextHeight"
+                                               : "vb6_ControlTextWidth";
+        default:
+            return "";
+    }
+}
+
 // C29-SL-n（账 #141）: 「这枚控件要不要子类化」的唯一一份判据 —— 内容与
 // `cgen_form_wndproc_subclass.inc` 汇总 info.hasXxx 那一趟逐条对应（改一边就得改另一边，
 // 否则又回到"arm 发了、没人 install"那一形）。装的那趟在 `cgen_form_frame_menu.inc`、

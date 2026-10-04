@@ -697,6 +697,43 @@ intptr_t vb6_GetControlHDC(void* hwnd) {
     return (intptr_t)hdc;
 }
 
+// 账 #196：按 HWND 的**文字量**（TextHeight / TextWidth）。两头都要对上才成立：
+// ① 量的是**这枚控件自己的字体** —— 与上面 Print 同一口径（WM_GETFONT），不是屏幕默认字体
+//    （Fix 129 在 UserControl 那一族栽过的同一件事）；DC 也从同一处权威拿，字体的 DPI 才与
+//    落笔的 DPI 同源。② 交回的单位是**这枚控件自己的 ScaleMode** —— 像素量完必须过
+//    vb6_ScalePxToUser（账 #177 那条：缇型对象上直接交像素，比同一枚控件的 ScaleWidth 小 15 倍）。
+// 语料物证：Charts 2020/ucTreeMaps 的 PropPagFMR.pag:265 `.CurrentY + .TextHeight(Text)` ——
+// 量出来的数是要加到画笔光标上的，单位错了行距就错了。
+static int vb6_ControlMeasureTextPx(void* hwnd, BSTR text, int wantWidth) {
+    HWND hw = (HWND)hwnd;
+    int len = text ? (int)SysStringLen(text) : 0;
+    if (!len) return 0;
+    BOOL fromPaint = FALSE;
+    HDC hdc = vb6_ControlDrawDC(hw, &fromPaint);
+    if (!hdc) return 0;
+    HFONT hFont = (HFONT)SendMessageW(hw, WM_GETFONT, 0, 0);
+    HFONT hOld = hFont ? (HFONT)SelectObject(hdc, hFont) : NULL;
+    SIZE sz = { 0, 0 };
+    GetTextExtentPoint32W(hdc, text, len, &sz);
+    if (hOld) SelectObject(hdc, hOld);
+    if (!fromPaint) ReleaseDC(hw, hdc);
+    return wantWidth ? sz.cx : sz.cy;
+}
+
+// 返回档刻意用 **float**：VB6 的 TextHeight/TextWidth 就是 Single，RTL 这头直接交 Single
+// 宽的数 ⇒ 生成 C 里 `t = picA.TextHeight(s)` 不必再靠 double→float 的隐式收窄（C4244）。
+float vb6_ControlTextWidth(void* hwnd, void* bstrText) {
+    if (!hwnd) return 0;
+    return (float)vb6_ScalePxToUser((double)vb6_ControlMeasureTextPx(hwnd, (BSTR)bstrText, 1),
+                                    vb6_WindowScaleModeSelf(hwnd), 0);
+}
+
+float vb6_ControlTextHeight(void* hwnd, void* bstrText) {
+    if (!hwnd) return 0;
+    return (float)vb6_ScalePxToUser((double)vb6_ControlMeasureTextPx(hwnd, (BSTR)bstrText, 0),
+                                    vb6_WindowScaleModeSelf(hwnd), 1);
+}
+
 void vb6_ControlCls(void* hwnd) {
     if (!hwnd) return;
     HWND hw = (HWND)hwnd;

@@ -69,10 +69,11 @@ if (Test-Path -LiteralPath $ctrl) {
 }
 
 # ---- D2: 调用点形状与条数 ----
+# 4 处: Cls / Print / GetControlHDC / ControlMeasureTextPx（账 #196 第二条把文字量也接到同一处口径上了）
 $calls = @($rtl | Where-Object { $_.Text.Contains("= vb6_ControlDrawDC(") })
-if ($calls.Count -ne 3) {
+if ($calls.Count -ne 4) {
     $bad += ("D2 call sites of the drawing-DC authority = " + $calls.Count +
-             " (want exactly 3: Cls / Print / GetControlHDC) -> " +
+             " (want exactly 4: Cls / Print / GetControlHDC / ControlMeasureTextPx) -> " +
              (($calls | ForEach-Object { $_.File + ":" + $_.Line }) -join " | "))
 }
 
@@ -134,10 +135,113 @@ if ($rows -ne 2) {
     $bad += ("D5 read-table rows for hdc = " + $rows + " (want exactly 2: PictureBox 与 Form; 给成通用行 = List1.hDC 也答一个数)")
 }
 
+# ---- D6~D9: 文字量那一半 (账 #196 的第二条: TextHeight / TextWidth) ----
+$oaDef = @($rtl | Where-Object { $_.Text.Contains("float vb6_ControlTextWidth(") -and -not $_.Text.EndsWith(";") })
+$oaDefH = @($rtl | Where-Object { $_.Text.Contains("float vb6_ControlTextHeight(") -and -not $_.Text.EndsWith(";") })
+if ($oaDef.Count -ne 1) { $bad += ("D6 vb6_ControlTextWidth defined " + $oaDef.Count + " times in src/rtl (want exactly 1; .h 里那条以 ; 结尾, 不算)") }
+if ($oaDefH.Count -ne 1) { $bad += ("D6 vb6_ControlTextHeight defined " + $oaDefH.Count + " times in src/rtl (want exactly 1)") }
+
+# D7: 后端那张"一个实参方法"表恰好定义一次, 两个成员名与两个出口名都还在
+$beDir2 = Join-Path $root "src\backend"
+$oaAuth = 0
+$oaAuthBody = ""
+$oaSites = @()
+foreach ($f in (Get-ChildItem -LiteralPath $beDir2 -Recurse -File | Where-Object { $_.Extension -in ".cpp", ".inc", ".hpp" })) {
+    $ln = 0
+    foreach ($line in ([System.IO.File]::ReadAllText($f.FullName) -split "`r?`n")) {
+        $ln++
+        $t = $line.Trim()
+        if ($t.StartsWith("//")) { continue }
+        if ($t -match 'std::string\s+CCodeGen::controlOneArgMethod\s*\(') { $oaAuth++; $oaAuthBody = $f.Name }
+        if ($t.Contains("controlOneArgMethod(") -and $t -notmatch 'std::string\s+CCodeGen::') {
+            $oaSites += ($f.Name + ":" + $ln)
+        }
+    }
+}
+if ($oaAuth -ne 1) { $bad += ("D7 controlOneArgMethod defined " + $oaAuth + " times (want exactly 1)") }
+if ($oaSites.Count -lt 2) {
+    $bad += ("D7 call sites of controlOneArgMethod = " + $oaSites.Count +
+             " (两条码头都要接: With 形与带括号裸形; 只接一头 = 编得过而另一头静默, 同 #143/#150) -> " +
+             ($oaSites -join " | "))
+}
+# 两条码头要**分属两个文件** —— 光数条数会被 cgen_helpers.inc 里那条声明凑够数
+$oaFiles = @($oaSites | ForEach-Object { ($_ -split ":")[0] } | Sort-Object -Unique)
+foreach ($need in @("cgen_expr_with.cpp", "cgen_expr_call_com_bind.inc")) {
+    if ($oaFiles -notcontains $need) {
+        $bad += ("D7 那条码头不再调用出口: " + $need + " (只接一头就是 #143 那一族)")
+    }
+}
+$authTxt = [System.IO.File]::ReadAllText((Join-Path $root "src\backend\cgen_util_ctrl.cpp"))
+$oaBlk = [regex]::Match($authTxt, 'CCodeGen::controlOneArgMethod\s*[\s\S]{0,700}?\r?\n\}')
+if (-not $oaBlk.Success) {
+    $bad += "D7 authority body not found"
+} else {
+    if ($oaBlk.Value -notmatch '"textheight"' -or $oaBlk.Value -notmatch '"textwidth"') {
+        $bad += "D7 the table no longer recognises both member names"
+    }
+    if ($oaBlk.Value -notmatch 'vb6_ControlTextHeight' -or $oaBlk.Value -notmatch 'vb6_ControlTextWidth') {
+        $bad += "D7 the table no longer points at the two RTL exits"
+    }
+    if ($oaBlk.Value -match 'default:\s*\r?\n\s*return\s+"vb6_Control') {
+        $bad += "D7 the table grew a generic row (List1.TextHeight 也答一个数 = 伪造成功)"
+    }
+}
+
+# D8: 两个出口名在 src/backend 只许以"名字"形式出现(表里 + 参数表), 不许别处手拼调用
+$hand2 = 0
+foreach ($f in (Get-ChildItem -LiteralPath $beDir2 -Recurse -File | Where-Object { $_.Extension -in ".cpp", ".inc", ".hpp" })) {
+    $ln = 0
+    foreach ($line in ([System.IO.File]::ReadAllText($f.FullName) -split "`r?`n")) {
+        $ln++
+        if ($line.Trim().StartsWith("//")) { continue }
+        if ($line.Contains('"vb6_ControlTextHeight(') -or $line.Contains('"vb6_ControlTextWidth(')) {
+            $hand2++
+            $bad += ("D8 hand-composed emit of the text-measure exit at " + $f.Name + ":" + $ln)
+        }
+    }
+}
+$paramRows = 0
+foreach ($f in (Get-ChildItem -LiteralPath $beDir2 -Recurse -File | Where-Object { $_.Extension -in ".cpp", ".inc", ".hpp" })) {
+    foreach ($line in ([System.IO.File]::ReadAllText($f.FullName) -split "`r?`n")) {
+        if ($line.Contains('{"vb6_ControlTextWidth"') -or $line.Contains('{"vb6_ControlTextHeight"')) { $paramRows++ }
+    }
+}
+if ($paramRows -ne 2) {
+    $bad += ("D8 实参签名表里那两行 = " + $paramRows + " (want 2; 缺了就等于把 Variant 裸喂给 GetTextExtentPoint32W = Fix 113 那一味)")
+}
+
+# D9: 文字量的两条语义不许丢 —— 必须过单位表(#177)、必须问这枚控件自己的字体/DC(#129)
+# 注意要**一个一个函数各自**取身体再判: 上一版这里把两个函数当成一段来抓, 结果宽度那个出口
+# 被改成"直接交像素"以后, 高度那半里的 vb6_ScalePxToUser 还在, 整段照样过 —— 假绿了一条。
+foreach ($fnName in @("vb6_ControlTextWidth", "vb6_ControlTextHeight")) {
+    if ($oaDef.Count -ne 1) { break }
+    $all = [System.IO.File]::ReadAllText($oaDef[0].Full)
+    $m = [regex]::Match($all, ('float\s+' + $fnName + '\s*\([\s\S]{0,600}?\r?\n\}'))
+    if (-not $m.Success) {
+        $bad += ("D9 " + $fnName + " 的函数体读不到")
+        continue
+    }
+    $body = $m.Value
+    if ($body -notmatch 'vb6_ScalePxToUser') {
+        $bad += ("D9 " + $fnName + " 不再折算单位 (缇型对象上交像素 = 账 #177 那一味)")
+    }
+    if ($body -notmatch 'vb6_WindowScaleModeSelf') {
+        $bad += ("D9 " + $fnName + " 不再读这枚窗口自己的 ScaleMode")
+    }
+    if ($body -notmatch 'vb6_ControlMeasureTextPx') {
+        $bad += ("D9 " + $fnName + " 没走那一个量像素的权威 (口径又分家)")
+    }
+    if ($body -match 'GetDC\(NULL\)') {
+        $bad += ("D9 " + $fnName + " 用屏幕 DC 量 (Fix 129: 量的是这枚控件自己的字体, 不是屏幕默认)")
+    }
+}
+
 if ($bad.Count -eq 0) {
     Write-Host ("PASS Control drawing DC: 定义 " + $defs.Count + " / 调用 " + $calls.Count +
                 " / 出口 " + $exitDef.Count + " / 槽位写 " + $wr.Count + " 归还 " + $rel.Count +
-                " 撤名 " + $rm.Count + " / 读表 " + $rows + " 手拼 " + $hand) -ForegroundColor Green
+                " 撤名 " + $rm.Count + " / 读表 " + $rows + " 手拼 " + $hand +
+                " / 文字量出口 " + ($oaDef.Count + $oaDefH.Count) + " 码头 " + $oaSites.Count +
+                " 签名表 " + $paramRows + " 手拼2 " + $hand2) -ForegroundColor Green
     exit 0
 }
 foreach ($b in $bad) { Write-Host ("FAIL " + $b) -ForegroundColor Red }
