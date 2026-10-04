@@ -266,6 +266,11 @@ asm 片打 `PASS=13 SKIP=0 TOTAL=14`（差 1），其余七片自洽。本轮 11
   所以没事 —— 两条路两套口径，正是这类的常态。正确修法不是就地补小数点：字面量的形状该由**一个**出口负责
   （`cgen_expr.cpp:15` 的 `floatingLiteral` 已经保证「没有 . 或 eE 就补 .0」，把 93 行那句 `+ "f"` 与这里的 `%.4g` 一起收进它，
   再加一条 census 哨兵：`src/backend` 里任何 `+ "f"` 前面必须是 `floatingLiteral` 的结果）。
+  **→ ① 已出 (本地提交 `33cb239a`，门待补：本轮 push 到 github/dev 被网络挡住，`github.com:443` 连不上而 gitcode 通 —— 提交在 `vbe-line` 上等着推)**。
+  改法按上面那条口径做: 新增 `src/common/float_literal.hpp` 作为**唯一出口** (`floatingLiteralText` / `floatSingleLiteral`，经典 locale + 「没有 `.` 或 `eE` 就补 `.0」`)，把五处手拼点全接过去 (设计期字体块、设计期 FontSize、属性袋 VT_R4、IFont 袋、语义层 Fix 133z 那段手写 `%.9g`+补点+拼 f)。字体块位数照旧 4 位 ⇒ 8.25 的写法一个字都不变。
+  配对读数 (同一份工程、两台编译器、x86): `ucChartBar` 的 C2059 **4 → 0** (只剩本条②的 1 条 C2065)，`ucProgressCircular` 的 C2059 **16 → 0** (剩③的 C2084/C2065/C2198)。
+  判据两面: 发码形状针 `fontsize_literal` 钉在**真实工程**上 (Needles `->Size = 12.0f;` + 证人 `->Size = 8.25f;`，Absent `->Size = 12f;` 就是改前的形状)；哨兵 `scripts/check_float_literal_shape.ps1` (R1 手拼后缀=0 / R2 权威头带着补点与经典 locale / R3 调用点>=4) 在缺这刀的树上 R1~R3 全红，R1 当场点出那 6 个手拼点。护栏 `--emit-c` A/B (BASE = 已发布的 `a4e3b574` 冷编) 8 工程 × 两架构 = 14 份逐字节相同，只有 ucChartBar 两片被改，且归一化浮点 token 后逐行相等、数值多重集相等、增删 0 行。
+
 · **② `ucChartBar`：宿主 UC 实例的句柄名发成了没声明的标识符** —— 生成码原文
   `int32_t i_end = (vb6_ComGetIntProp(vb6_hwnd_ucChartBar1, L"Count") - 1);`（`error C2065`）。
   `ucChartBar1` 是**控件数组里那一枚实例**，而实例句柄住在 `vb6_arr_ucChartBar` 里 ⇒ 与账 #157 那条同族
