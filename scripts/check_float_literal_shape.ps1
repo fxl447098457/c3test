@@ -10,7 +10,7 @@
 #
 # 规则 (改坏了会红, 不是装饰):
 #   R1  src/backend 与 src/semantics 里**手拼** f 后缀 = 0 处 (`+ "f"` / `<< "f"` / `to_string(...) + "f`)
-#   R2  权威头存在, 两个函数各只定义一次, 且必须带「没有 . 或 eE 就补 .0」那一步
+#   R2  权威头存在, 三个函数各只定义一次, 且必须带「没有 . 或 eE 就补 .0」那一步
 #   R3  调用点 >= 4 处 (只删调用者、把规则写回本地也算红)
 #
 # 用法:  pwsh -File scripts\check_float_literal_shape.ps1
@@ -51,7 +51,7 @@ if (-not (Test-Path -LiteralPath $hdr)) {
     $bad += "R2 src/common/float_literal.hpp is missing (the single authority)"
 } else {
     $h = [System.IO.File]::ReadAllText($hdr)
-    foreach ($fn in @("floatingLiteralText", "floatSingleLiteral")) {
+    foreach ($fn in @("floatingLiteralText", "floatSingleLiteral", "floatFixed6Literal")) {
         $defs = @([regex]::Matches($h, 'inline\s+std::string\s+' + $fn + '\s*\('))
         if ($defs.Count -ne 1) { $bad += ("R2 " + $fn + " defined " + $defs.Count + " times in the header (want 1)") }
     }
@@ -68,7 +68,7 @@ $calls = 0
 foreach ($f in @($files + @(Get-ChildItem -LiteralPath (Join-Path $root "src\common") -File -ErrorAction SilentlyContinue))) {
     if ($f.FullName -eq $hdr) { continue }
     $t = [System.IO.File]::ReadAllText($f.FullName)
-    $calls += @([regex]::Matches($t, 'floatSingleLiteral\s*\(')).Count
+    $calls += @([regex]::Matches($t, '(floatSingleLiteral|floatFixed6Literal)\s*\(')).Count
     $calls += @([regex]::Matches($t, 'floatingLiteralText\s*\(')).Count
 }
 if ($calls -lt 4) {

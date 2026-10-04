@@ -767,7 +767,7 @@
                                 + std::to_string(fv143.intValue) + ", 0, NULL, NULL, 0.0f, 0, 0, 0}");
                         } else if (fv143.type == FrmValueType::Float) {
                             bagLines143.push_back("{L\"" + escapeWideCString(pn143) + "\", 4/*VT_R4*/, 0, "
-                                + floatSingleLiteral(fv143.floatValue) + ", NULL, NULL, 0.0f, 0, 0, 0}");
+                                + floatFixed6Literal(fv143.floatValue) + ", NULL, NULL, 0.0f, 0, 0, 0}");
                         } else if (fv143.type == FrmValueType::String) {
                             std::string sv143 = fv143.rawText;
                             if (sv143.size() >= 2 && sv143.front() == '"' && sv143.back() == '"')
@@ -827,7 +827,7 @@
                             bagLines143.push_back("{L\"" + escapeWideCString(blk143.blockName)
                                 + "\", 9/*VT_DISPATCH(IFont)*/, 0, 0, NULL, L\""
                                 + escapeWideCString(fName143) + "\", "
-                                + floatSingleLiteral(fSize143) + ", "
+                                + floatFixed6Literal(fSize143) + ", "
                                 + std::to_string(fWeight143) + ", "
                                 + std::to_string(fCharset143) + ", "
                                 + std::to_string(fFlags143) + "}");

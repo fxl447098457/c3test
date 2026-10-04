@@ -31,4 +31,11 @@ inline std::string floatSingleLiteral(double value, int precision = 9) {
     return floatingLiteralText(value, precision) + "f";
 }
 
+// 另一种**已经合法**的书写: to_string 必带 6 位小数 ⇒ 后缀前一定有 '.'。
+// 门禁里 `sl_emitc_native` 钉的就是这个字节形状 (设计期 FontSize 那批), 所以这条保留原样,
+// 只是从「调用点手写 std::to_string(v) 再拼后缀」收进同一个出口 —— 形状规则集中在这里, 发码字节不动。
+inline std::string floatFixed6Literal(double value) {
+    return std::to_string(value) + "f";
+}
+
 } // namespace vb6c3

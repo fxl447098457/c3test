@@ -1233,7 +1233,7 @@ void CCodeGen::emitDesignerFontProps(const FrmControl& ctrl, const std::string& 
         // 0 与负数不是字号（VB6 的设计期也不会写这种数），发了只会把窗口打成"默认字体"那一档。
         if (pt > 0.0) {
             c_.emitLine("vb6_SetControlFontSize(" + hw + ", "
-                        + floatSingleLiteral(pt) + ");  /* design FontSize */");
+                        + floatFixed6Literal(pt) + ");  /* design FontSize */");
         }
     }
 
