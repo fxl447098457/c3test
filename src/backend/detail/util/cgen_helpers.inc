@@ -290,6 +290,10 @@
     void emitDesignerTabIndexProp(const FrmControl& ctrl, const std::string& hwndExpr,
                                   long declarationIndex);
 
+    // 账 #197: 设计期 `ScaleMode` 下发到窗口属性 `VB6_ScaleMode`（写了才发）。
+    // **三条落点共用这一处**：顶层创建路、容器子控件创建路、窗体自己的 WM_CREATE。
+    void emitDesignerScaleModeProp(const FrmControl& ctrl, const std::string& hwndExpr);
+
     // 返回控件类型相关的 Win32 样式位 (BS_*/SS_*/ES_*/CBS_*/LBS_*/WS_BORDER...)。
     // 顶层控件与容器(Frame/PictureBox)子控件必须使用同一套逻辑，否则子控件缺
     // SS_NOTIFY/BS_GROUPBOX 等样式会导致外观/交互 (含 tooltip) 异常。

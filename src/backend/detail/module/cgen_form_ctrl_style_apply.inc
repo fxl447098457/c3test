@@ -366,6 +366,7 @@
             emitDesignerStringProps(ctrl, dsHwnd);  // 账 #142: ToolTipText / Tag（非空才发）
             emitDesignerFontProps(ctrl, dsHwnd);    // 账 #154: FontName / FontSize（写过才发）
             emitDesignerTabIndexProp(ctrl, dsHwnd, tabIndexFallback);  // 账 #160: 设计期 TabIndex（顶层这条路）
+            emitDesignerScaleModeProp(ctrl, dsHwnd);  // 账 #197: 设计期 ScaleMode（顶层这条路）
 
             // Fix 187: 设计期 ForeColor/BackColor — 此前从未发射, .frm 的初始色
             // 全部落空 (picBackColor &H00F8CCB1& 淡蓝被显示成 BTNFACE 灰, 颜色

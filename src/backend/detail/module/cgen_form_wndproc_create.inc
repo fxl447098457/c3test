@@ -82,6 +82,9 @@
         if (wsIt != frmDesc.formControl.properties.end() && wsIt->second.intValue != 0) {
             c_.emitLine("vb6_SetWindowState((void*)hwnd, " + std::to_string((int)wsIt->second.intValue) + ");");
         }
+        // 账 #197: 窗体自己那一档走同一个出口 —— `ScaleMode = 3  'Pixel` 的窗体里控件几何、
+        // ScaleWidth、文字量纲全按这一档折算，以前恒答缇 (实测 czUI-main/frmDemo.frm:10)。
+        emitDesignerScaleModeProp(frmDesc.formControl, "hwnd");
     }
 
     // M22-fix: 在Form_Load之前先赋值vb6_hwnd_<Form>，这样Form_Load中

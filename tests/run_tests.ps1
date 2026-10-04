@@ -622,6 +622,19 @@ function Test-IntSuffixSites {
         $out | Select-Object -First 6 | ForEach-Object { Write-Host "  $_" }
     }
 }
+function Test-ScaleModeWriters {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] scalemode_writers ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\check_scalemode_writers.ps1" 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        $out | Select-Object -First 6 | ForEach-Object { Write-Host "  $_" }
+    }
+}
 function Test-IntLiteralShape {
     $script:total++
     Write-Host -NoNewline "  [STATIC] int_literal_shape ... "
@@ -3749,6 +3762,23 @@ if ($Category -in @("all", "run", "vbp")) {
     Test-Vbp "piccur" "$Tests\piccur\PicCur.vbp" $picCurExpected
     Test-Vbp "piccur_x86" "$Tests\piccur\PicCur.vbp" $picCurExpected -Arch "x86"
 
+    # 账 #197 (§B32): `VB6_ScaleMode` 这个窗口属性以前**读点齐全、写者为零** —— 缺省 1=缇，
+    # 而 ScaleWidth / 控件几何 (#175 那一族换算) / 文字量纲 (#177) 全按这一档折算，
+    # 所以它错起来不是"某一枚控件长歪"，是**量出来的数全是错的**。
+    # 两头判据（同 #153/#154 那条口径：存请求值 + 一枚问窗口的证人）：
+    #   SM01 设计期声明各自读回（修前三枚全答 1 = 缺省）；SM02/SM03 问窗口 —— 同尺寸的缇框
+    #   量出来必须比像素框大一个单位比（比值只取 >3，不钉绝对数，DPI 变了也不假红）；
+    #   SM04 运行期换档后两枚**逐数相等**（证明这数是活的，不是创建时烘死的）；
+    #   SM05 另一枚没被写坏（RTL 按 HWND 存，全局一份就露馅，同 #192 双向钉）；
+    #   SM06/SM07 Frame 里那枚 —— **第二条创建路**也发了这一句（账 #83/#151 那条"两条路都要打"）。
+    # 负控 = 改前那台真编同一份夹具：SmForm.c 166/182 两条 error C2039 "ScaleMode" 不是 "HWND__"
+    #   的成员 + C2198，rc=1、一条读数都不出（物证 .build/b197out/b64/c3-error.log）。
+    $scaleModeExpected = @("SM01-MODE=3/3/1", "SM02-UNIT=True", "SM03-CHILD=True",
+        "SM04-SWITCH=True", "SM05-OTHER=True", "SM06-NEST=True", "SM07-NESTCHILD=True",
+        "SM-DONE")
+    Test-Vbp "scalemode" "$Tests\scalemode\ScaleMode.vbp" $scaleModeExpected
+    Test-Vbp "scalemode_x86" "$Tests\scalemode\ScaleMode.vbp" $scaleModeExpected -Arch "x86"
+
     # 账 #187: Charts 2020 的三枚 UC 子工程真编真链 (x64 + x86)，只要求"编得过、出得了 exe"，不跑。
     # 本轮实测字节数 (当前这台)：x64 696,320 / 576,000 / 576,000；x86 496,128 / 498,176，
     # ucChartBar x86 = .build/b191new/ucChartBar/Proyecto1.exe。
@@ -4109,6 +4139,7 @@ if ($Category -in @("all", "compile")) {
     Test-FloatLiteralShape
     Test-IntLiteralShape
     Test-IntSuffixSites
+    Test-ScaleModeWriters
     Test-SubclassSlotSites
     Test-CtrlArrayMemberSites
     Test-EventHandlerNames
@@ -4475,6 +4506,23 @@ if ($Category -in @("all", "syntax")) {
         "_vb6_with_0.CurrentX",
         "_vb6_with_0.CurrentY",
         "_vb6_with_1.Clear()")
+
+    # 形状针 (账 #197): 设计块的 ScaleMode 必须发成那一句；读的那一头必须落回 #175 的单位权威
+    # (vb6_WindowScaleModeSelf)，不许再出现 HWND 取成员那一形（那是编译错，不是静默空转）。
+    Test-CodegenNote "scalemode_design_write" @("$Tests\scalemode\ScaleMode.vbp") @(
+        "vb6_SetScaleMode((void*)vb6_hwnd_picPix, 3);",
+        "vb6_SetScaleMode((void*)vb6_hwnd_picTwip, 1);",
+        "vb6_SetScaleMode((void*)hwnd, 3);",
+        "vb6_WindowScaleModeSelf(_vb6_with_") @(
+        "_vb6_with_0.ScaleMode",
+        "vb6_hwnd_picPix.ScaleMode",
+        "vb6_hwnd_picNest.ScaleMode")
+
+    # 同一刀钉在**真工程**上: ucTreeMaps 的 PropPagFMR.pag:256-266 `With Picture1 : .ScaleMode` ——
+    # 这一形以前是 PropPagFMR.c(74) 两条 C2039 的来源（本轮实测 C2039 4→2，剩 hDC/TextHeight = #196）。
+    Test-CodegenNote "scalemode_read_real" @("$Tests\Charts 2020\ucTreeMaps\Proyecto1.vbp") @(
+        "vb6_WindowScaleModeSelf(_vb6_with_0)") @(
+        "_vb6_with_0.ScaleMode")
 
     # 账 #195: VB 的 Integer 类型后缀 `%` 以前在词法层就被拒 (case '%' 那一支只吃字符不置标志,
     # 于是 `3%` 落回「无后缀十进制按数值大小定档」那一段, 残留的 % 让 parseIntLit 报「超出 64 位」并级联出

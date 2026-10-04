@@ -363,6 +363,7 @@ std::string CCodeGen::getControlPropReadFn(FrmControlType ctrlType, const std::s
         if (propLower == "windowstate") return "vb6_GetWindowState";
         if (propLower == "scalewidth") return "vb6_GetScaleWidth";
         if (propLower == "scaleheight") return "vb6_GetScaleHeight";
+        if (propLower == "scalemode") return "vb6_WindowScaleModeSelf";  // 账 #197: 与写侧成对
         break;
     case FrmControlType::WebBrowser:
         if (propLower == "url" || propLower == "locationurl") return "vb6_WebViewGetUrl";
@@ -392,6 +393,9 @@ std::string CCodeGen::getControlPropReadFn(FrmControlType ctrlType, const std::s
         // 那条 tempVar + "." + 成员名 的兜底 = C2039 (实测 ucTreeMaps PropPagFMR.c 74/75/76)。
         if (propLower == "currentx") return "vb6_GetCurrentX";
         if (propLower == "currenty") return "vb6_GetCurrentY";
+        // 账 #197: ScaleMode 的读法与几何换算必须是**同一处** (vb6_WindowScaleModeSelf)，
+        // 否则程序读到一个数、量出来按另一个数走。写侧成对登记。
+        if (propLower == "scalemode") return "vb6_WindowScaleModeSelf";
         if (propLower == "caption") return "vb6_GetControlText";
         if (propLower == "picture") return "vb6_GetControlPicture";
         if (propLower == "autosize") return "vb6_GetPictureAutoSize";
@@ -819,6 +823,7 @@ std::string CCodeGen::getControlPropWriteFn(FrmControlType ctrlType, const std::
         if (propLower == "caption") return "vb6_SetControlText";
         if (propLower == "visible") return "vb6_SetControlVisible";
         if (propLower == "enabled") return "vb6_SetControlEnabled";
+        if (propLower == "scalemode") return "vb6_SetScaleMode";  // 账 #197: Me.ScaleMode 写得动
         break;
     case FrmControlType::WebBrowser:
         if (propLower == "visible") return "vb6_SetControlVisible";
@@ -900,6 +905,7 @@ std::string CCodeGen::getControlPropWriteFn(FrmControlType ctrlType, const std::
         // 账 #192: 与读表成对（只给读侧的话 `.CurrentX = 0` 会落到 HWND 结构体字段上）。
         if (propLower == "currentx") return "vb6_SetCurrentX";
         if (propLower == "currenty") return "vb6_SetCurrentY";
+        if (propLower == "scalemode") return "vb6_SetScaleMode";  // 账 #197: 与读侧成对
         if (propLower == "caption") return "vb6_SetControlText";
         if (propLower == "picture") return "vb6_SetControlPicture";
         if (propLower == "autosize") return "vb6_SetPictureAutoSize";
@@ -1294,6 +1300,22 @@ void CCodeGen::emitDesignerTabIndexProp(const FrmControl& ctrl, const std::strin
     }
     c_.emitLine("vb6_SetTabIndex((void*)" + hwndExpr + ", " + std::to_string(tabIndex)
                 + ");  /* 账 #160: design TabIndex */");
+}
+
+// 账 #197（§B32）: 设计期写下的 `ScaleMode` 以前从来没有落到窗口上 —— 读的一侧早就齐了
+// (vb6_GetScaleMode / vb6_WindowScaleModeSelf / vb6_ContainerScaleMode，缺省 1=缇)，
+// 而写的一侧**全仓 0 个调用者** ⇒ 谁读 ScaleMode 都答缺省。这一档决定的是
+// **量出来的数对不对**（ScaleWidth/ScaleHeight、控件几何、文字量纲全按它折算，见账 #175/#177），
+// 不是某一枚控件的外观。语料普查 93 份设计块共 19 处 ScaleMode —— UserControl 10 处
+// （已由 .ctl 注册那条路接走，不在这儿）、PictureBox 6 处、Form 3 处，全是 VB6 真有此属性的型 ⇒
+// 口径收成「设计块写了就发」：不按值筛（声明 1 与没声明在产物里要分得开），也不按控件型再开一张
+// 白名单（Frame 那一类根本不写这一行，写了就是给人读的）。
+void CCodeGen::emitDesignerScaleModeProp(const FrmControl& ctrl, const std::string& hwndExpr) {
+    auto it = ctrl.properties.find("ScaleMode");
+    if (it == ctrl.properties.end() || it->second.type != FrmValueType::Integer) return;
+    c_.emitLine("vb6_SetScaleMode((void*)" + hwndExpr + ", "
+                + std::to_string((int)it->second.intValue)
+                + ");  /* 账 #197: design ScaleMode */");
 }
 
 // C29-SL-g: 这个控件的 **焦点事件**（`GotFocus` / `LostFocus`）是不是已经由原生通知送进来了。
