@@ -635,6 +635,19 @@ function Test-ScaleModeWriters {
         $out | Select-Object -First 6 | ForEach-Object { Write-Host "  $_" }
     }
 }
+function Test-ControlDC {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] control_dc ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\check_control_dc.ps1" 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        $out | Select-Object -First 6 | ForEach-Object { Write-Host "  $_" }
+    }
+}
 function Test-IntLiteralShape {
     $script:total++
     Write-Host -NoNewline "  [STATIC] int_literal_shape ... "
@@ -3779,6 +3792,23 @@ if ($Category -in @("all", "run", "vbp")) {
     Test-Vbp "scalemode" "$Tests\scalemode\ScaleMode.vbp" $scaleModeExpected
     Test-Vbp "scalemode_x86" "$Tests\scalemode\ScaleMode.vbp" $scaleModeExpected -Arch "x86"
 
+    # 账 #196 (绘图面那一半): RTL 早有一处「这枚控件的绘图 DC 从哪儿来」的口径 (Print/Cls 走它)，
+    # 但**句柄交不回 VB 代码** —— `.hDC` 没出口，只能撞 cgen_expr_with.cpp 那条 "hwnd.成员" 兜底
+    # = C2039（真工程物证 Charts 2020/ucTreeMaps 的 PropPagFMR.pag:258 `With Picture1 : TextOut .hDC`）。
+    # 四头判据（缺一头就是假绿）：
+    #   DS01 同一枚反复读 + With 那一形三个数彼此相等且非零（不缓存就每次换个句柄，没出口就全是 0）；
+    #   DS02 两枚互不相等（出口写成全局一份当场红，同 #192/#156 那条双向钉）；
+    #   DS03 GetDeviceCaps(hDC, LOGPIXELSX) > 0 —— 问的是 GDI，证明交回来是一张**活的 DC**，
+    #        不是数字或野句柄（DS05 只钉前缀：dpi 是函数的数，不钉绝对值）；
+    #   DS04 GetPixel 各自等于**自己那枚**的设计期底色（红/蓝）—— 这才证明这张 DC 指的是这一枚
+    #        控件的表面，而不是屏幕或别人的窗口。底色取设计期值，不与"谁最后落色"抢次序。
+    # 负控 = 改前那台真编同一份夹具: DcForm.c(167) error C2039 "hDC" 不是 "HWND__" 的成员，
+    #   BUILD rc=1、一条读数都不出（物证 .build/b196neg/）。
+    $dcSurfExpected = @("DS01-SAME=True", "DS02-SEP=True", "DS03-LIVE=True",
+        "DS04-PIXEL=True", "DS05-RAW", "DS-DONE")
+    Test-Vbp "dcsurf" "$Tests\dcsurf\DcSurf.vbp" $dcSurfExpected
+    Test-Vbp "dcsurf_x86" "$Tests\dcsurf\DcSurf.vbp" $dcSurfExpected -Arch "x86"
+
     # 账 #187: Charts 2020 的三枚 UC 子工程真编真链 (x64 + x86)，只要求"编得过、出得了 exe"，不跑。
     # 本轮实测字节数 (当前这台)：x64 696,320 / 576,000 / 576,000；x86 496,128 / 498,176，
     # ucChartBar x86 = .build/b191new/ucChartBar/Proyecto1.exe。
@@ -4140,6 +4170,7 @@ if ($Category -in @("all", "compile")) {
     Test-IntLiteralShape
     Test-IntSuffixSites
     Test-ScaleModeWriters
+    Test-ControlDC
     Test-SubclassSlotSites
     Test-CtrlArrayMemberSites
     Test-EventHandlerNames
@@ -4523,6 +4554,24 @@ if ($Category -in @("all", "syntax")) {
     Test-CodegenNote "scalemode_read_real" @("$Tests\Charts 2020\ucTreeMaps\Proyecto1.vbp") @(
         "vb6_WindowScaleModeSelf(_vb6_with_0)") @(
         "_vb6_with_0.ScaleMode")
+
+    # 形状针 (账 #196): `.hDC` 两形都必须落在那一个绘图 DC 出口上，不许再出现 HWND 取成员
+    # (那是编译错，With 形那一半的真红)，也不许再走晚绑定那条 `ComGetLongPtrProp(X, L"hDC")` ——
+    # 那条**实测是能用的 DC**（改前那台探针：HDC=671159075、DPI=96），但每读一次新取一张、从不归还，
+    # 与 VB6 的"一个对象一张"不符（.build/b196probe）。两条都钉住 = 两形同归一处口径。
+    Test-CodegenNote "dcsurf_dc_shape" @("$Tests\dcsurf\DcSurf.vbp") @(
+        "vb6_GetControlHDC(vb6_hwnd_picA)",
+        "vb6_GetControlHDC(_vb6_with_") @(
+        "_vb6_with_0.hDC",
+        "vb6_hwnd_picA.hDC",
+        'vb6_ComGetLongPtrProp(vb6_hwnd_picA, L"hDC")')
+
+    # 同一刀钉在**真工程**上: ucTreeMaps 的 PropPagFMR.pag:258 `With Picture1 : TextOut .hDC` ——
+    # 这一形以前是 PropPagFMR.c(74) 那条 C2039 的来源 (与 #197 那条 ScaleMode 同处，本轮实测
+    # C2039 由 2 条降到 1 条，只剩 TextHeight = #196 欠的那一半)。
+    Test-CodegenNote "dc_read_real" @("$Tests\Charts 2020\ucTreeMaps\Proyecto1.vbp") @(
+        "vb6_GetControlHDC(_vb6_with_0)") @(
+        "_vb6_with_0.hDC")
 
     # 账 #195: VB 的 Integer 类型后缀 `%` 以前在词法层就被拒 (case '%' 那一支只吃字符不置标志,
     # 于是 `3%` 落回「无后缀十进制按数值大小定档」那一段, 残留的 % 让 parseIntLit 报「超出 64 位」并级联出

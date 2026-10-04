@@ -76,6 +76,9 @@ int32_t vb6_GetAutoRedraw(void* hwnd);
 void vb6_SetAutoRedraw(void* hwnd, int32_t val);
 int32_t vb6_GetScaleMode(void* hwnd);
 void vb6_SetScaleMode(void* hwnd, int32_t val);
+// 账 #196: 控件的 `.hDC` —— 见 vb6forms_ctrl.c 那条注释：两档来源（_Paint 派发期用外层
+// 挂上的 VB6_PaintDC，否则窗口 DC），且**一个对象一张**，反复读回同一个句柄，销毁时归还。
+intptr_t vb6_GetControlHDC(void* hwnd);
 float vb6_GetCurrentX(void* hwnd);
 void vb6_SetCurrentX(void* hwnd, float val);
 float vb6_GetCurrentY(void* hwnd);

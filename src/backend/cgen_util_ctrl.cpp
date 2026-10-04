@@ -364,6 +364,7 @@ std::string CCodeGen::getControlPropReadFn(FrmControlType ctrlType, const std::s
         if (propLower == "scalewidth") return "vb6_GetScaleWidth";
         if (propLower == "scaleheight") return "vb6_GetScaleHeight";
         if (propLower == "scalemode") return "vb6_WindowScaleModeSelf";  // 账 #197: 与写侧成对
+        if (propLower == "hdc") return "vb6_GetControlHDC";  // 账 #196: Form.hDC 同一处出口
         break;
     case FrmControlType::WebBrowser:
         if (propLower == "url" || propLower == "locationurl") return "vb6_WebViewGetUrl";
@@ -393,6 +394,9 @@ std::string CCodeGen::getControlPropReadFn(FrmControlType ctrlType, const std::s
         // 那条 tempVar + "." + 成员名 的兜底 = C2039 (实测 ucTreeMaps PropPagFMR.c 74/75/76)。
         if (propLower == "currentx") return "vb6_GetCurrentX";
         if (propLower == "currenty") return "vb6_GetCurrentY";
+        // 账 #196: `.hDC` 的出口。跟 currentx 一样**不给通用行** —— VB6 只在画得上去的
+        // 那几枚上有 hDC，给成通用 ⇒ `List1.hDC` 也答一个数就是伪造成功。
+        if (propLower == "hdc") return "vb6_GetControlHDC";
         // 账 #197: ScaleMode 的读法与几何换算必须是**同一处** (vb6_WindowScaleModeSelf)，
         // 否则程序读到一个数、量出来按另一个数走。写侧成对登记。
         if (propLower == "scalemode") return "vb6_WindowScaleModeSelf";

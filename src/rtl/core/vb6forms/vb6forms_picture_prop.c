@@ -300,6 +300,14 @@ static LRESULT CALLBACK vb6_ImageSubclassProc(HWND hwnd, UINT msg, WPARAM wp, LP
          * again at the fall-through, so WM_DESTROY was lost to DefWindowProc. */
         WNDPROC origProc = (WNDPROC)GetPropW(hwnd, L"VB6_ImageOrigProc");
 
+        /* 账 #196: `.hDC` 交出去的那张窗口 DC 归本层缓存 (VB6 是一个对象一张)，
+           窗口销毁时在这里归还 —— 别在 vb6_GetControlHDC 里 ReleaseDC，那个句柄
+           已经给了 VB 代码。 */
+        {
+            HDC hObjDC = (HDC)GetPropW(hwnd, L"VB6_ObjectDC");
+            if (hObjDC) { ReleaseDC(hwnd, hObjDC); RemovePropW(hwnd, L"VB6_ObjectDC"); }
+        }
+
         IPicture* pPic = (IPicture*)GetPropW(hwnd, L"VB6_IPicture");
         if (pPic) {
             pPic->lpVtbl->Release(pPic);

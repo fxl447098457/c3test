@@ -669,19 +669,39 @@ LRESULT vb6_CtlColorBtnBrush(HWND child, HWND parent) {
 // 效，绝不能 ReleaseDC），否则回落 GetDC。VB6 允许在非 _Paint 时机 Print，效果就
 // 是画在屏幕上、下次重绘即消失，这里保持同样的宽松度。
 // 绘制光标 (PrintX/PrintY) 存窗口属性，Cls 归零 —— 等价于 VB6 的当前绘制位置。
+//
+// 账 #196：**「这枚控件的绘图 DC 从哪儿来」只有下面这一处口径**（与 `.hDC` 共用）。
+// 区别只在句柄归谁：Print/Cls 这类内部调用用完就 ReleaseDC；而交回给 VB 代码的
+// `.hDC` 必须留着 —— VB6 是一个对象一张 hDC，反复读要读回同一个值，所以那一档
+// 按 HWND 缓存进窗口属性 `VB6_ObjectDC`，由 PictureBox/Image 那层自己的 WM_DESTROY
+// 归还（见 vb6forms_picture_prop.c）。以前这条没处走：`.hDC` 只能撞
+// `cgen_expr_with.cpp` 那条 "hwnd.成员" 兜底 = C2039（真工程物证 ucTreeMaps PropPagFMR.c:74）。
 
-static HDC vb6_ControlPrintDC(HWND hw, BOOL* pFromPaint) {
+static HDC vb6_ControlDrawDC(HWND hw, BOOL* pFromPaint) {
     HDC hdc = (HDC)GetPropW(hw, L"VB6_PaintDC");
     *pFromPaint = (hdc != NULL) ? TRUE : FALSE;
     if (hdc) return hdc;
     return GetDC(hw);
 }
 
+intptr_t vb6_GetControlHDC(void* hwnd) {
+    if (!hwnd) return 0;
+    HWND hw = (HWND)hwnd;
+    BOOL fromPaint = FALSE;
+    HDC hdc = vb6_ControlDrawDC(hw, &fromPaint);   // 口径只有上面那一处
+    if (!hdc) return 0;
+    if (fromPaint) return (intptr_t)hdc;           // 派发期那张：既不缓存也不释放
+    HDC held = (HDC)GetPropW(hw, L"VB6_ObjectDC");
+    if (held) { ReleaseDC(hw, hdc); return (intptr_t)held; }   // 刚才那张是白拿的
+    SetPropW(hw, L"VB6_ObjectDC", (HANDLE)hdc);
+    return (intptr_t)hdc;
+}
+
 void vb6_ControlCls(void* hwnd) {
     if (!hwnd) return;
     HWND hw = (HWND)hwnd;
     BOOL fromPaint = FALSE;
-    HDC hdc = vb6_ControlPrintDC(hw, &fromPaint);
+    HDC hdc = vb6_ControlDrawDC(hw, &fromPaint);
     if (!hdc) return;
     RECT rc;
     GetClientRect(hw, &rc);
@@ -702,7 +722,7 @@ void vb6_ControlPrint(void* hwnd, void* bstrText) {
     // 未赋值的 As String 是 NULL BSTR，对 VB6 而言等价于 ""（空行 = 只推进光标）
     int len = text ? (int)SysStringLen(text) : 0;
     BOOL fromPaint = FALSE;
-    HDC hdc = vb6_ControlPrintDC(hw, &fromPaint);
+    HDC hdc = vb6_ControlDrawDC(hw, &fromPaint);
     if (!hdc) return;
     HFONT hFont = (HFONT)SendMessageW(hw, WM_GETFONT, 0, 0);
     HFONT hOld = hFont ? (HFONT)SelectObject(hdc, hFont) : NULL;
