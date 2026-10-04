@@ -1,5 +1,6 @@
 #include "backend/cgen.hpp"
 #include "common/float_literal.hpp"  // 账 #188: 浮点字面量的单一出口
+#include "common/int_literal.hpp"   // 账 #194: 整数字面量的单一出口
 #include <algorithm>
 #include <cctype>
 #include <iostream>
@@ -1511,7 +1512,7 @@ void CCodeGen::emitSliderDesignTimeInit(const FrmControl& ctrl, const std::strin
     auto slProp = [&](const char* key) -> std::string {
         auto it = ctrl.properties.find(key);
         if (it == ctrl.properties.end()) return "-999";
-        return std::to_string((long long)(int)it->second.intValue) + "L";
+        return intLiteralText(static_cast<int64_t>((int)it->second.intValue), true);
     };
     // C29-SL-i: VB6 那一面的选区是 **SelStart + SelLength**（类型库 dispid 0x0007/0x0008），
     // SelEnd 是我们 SL-b 按原生 TBM_SETSELEND 自己加的名字。所以 .frm 里只写了前两条时
@@ -1523,8 +1524,8 @@ void CCodeGen::emitSliderDesignTimeInit(const FrmControl& ctrl, const std::strin
         auto ssIt = ctrl.properties.find("SelStart");
         auto slIt = ctrl.properties.find("SelLength");
         if (ssIt != ctrl.properties.end() && slIt != ctrl.properties.end()) {
-            slEndArg = std::to_string((long long)(int)ssIt->second.intValue
-                                      + (int)slIt->second.intValue) + "L";
+            slEndArg = intLiteralText(static_cast<int64_t>((int)ssIt->second.intValue
+                                      + (int)slIt->second.intValue), true);
         }
     }
     c_.emitLine("vb6_Slider_Init((void*)" + hwndExpr + ", "

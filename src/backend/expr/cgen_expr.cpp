@@ -1,5 +1,6 @@
 #include "backend/cgen.hpp"
 #include "common/float_literal.hpp"
+#include "common/int_literal.hpp"   // 账 #194: 整数字面量的单一出口
 #include <algorithm>
 #include <cctype>
 #include <cstdint>
@@ -52,17 +53,13 @@ void CCodeGen::emitExpr(Expr& expr) {
 void CCodeGen::visit(LiteralExpr& node) {
     switch (node.literalKind) {
         case LiteralKind::Integer:
-            lastExpr_ = std::to_string(static_cast<int>(node.intValue));
+            lastExpr_ = intLiteralText(static_cast<int64_t>(node.intValue), false);
             break;
         case LiteralKind::Long:
             // 装不进 32 位的 Long 字面量必须补 LL: MSVC 的 long 是 32 位,
             // `2147483648L` 装不下会退成 unsigned long, 一元负号作用于无符号类型
-            // (C4146), 值也就跟着错。lexer 对超 32 位无后缀字面量走的就是这条路
-            // (`-2147483648` 的正数字面量 2147483648)。其余 Long 一律仍发 L, 不动。
-            if (node.longValue < INT32_MIN || node.longValue > INT32_MAX)
-                lastExpr_ = std::to_string(node.longValue) + "LL";
-            else
-                lastExpr_ = std::to_string(node.longValue) + "L";
+            // (C4146), 值也就跟着错。规则收在 common/int_literal.hpp (账 #194)。
+            lastExpr_ = intLiteralText(node.longValue, true);
             break;
         case LiteralKind::LongPtr:
             // Fix 082: VBA7 ^ 后缀. LongPtr 是平台相关宽度 (32 位机 4 字节, 64 位机 8 字节),

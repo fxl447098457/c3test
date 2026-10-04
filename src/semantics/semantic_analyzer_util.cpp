@@ -1,5 +1,6 @@
 #include "semantics/semantic_analyzer.hpp"
 #include "common/float_literal.hpp"  // 账 #188: 浮点字面量的单一出口
+#include "common/int_literal.hpp"   // 账 #194: 整数字面量的单一出口
 #include "semantics/interface_sig.hpp"  // tB Interface/继承线共用的小写键函数 (B07b)
 #include <algorithm>
 #include <cctype>
@@ -388,8 +389,12 @@ std::string SemanticAnalyzer::evalOptionalDefault(ASTNode* defaultValue, Vb6Type
     if (lit) {
         switch (lit->literalKind) {
             case LiteralKind::Integer:
+                // 账 #194: 按**数值**重打, 不抄 rawText —— 词法把 VB 的类型后缀 (`3%` / `0&` /
+                // `&H10&`) 留在 rawText 里, 抄进生成 C 就是 C2059 "bad suffix on number"
+                // (实测 ucTreeMaps PropPagFMR.c 723/923: `if (!_has_FontIndex) (*FontIndex) = 0&;`)。
+                return intLiteralText(static_cast<int64_t>(lit->intValue), false);
             case LiteralKind::Long:
-                return lit->rawText;  // "10", "-1" 等
+                return intLiteralText(lit->longValue, true);
             case LiteralKind::LongPtr: {
                 // Fix 082: rawText 带 VB 后缀 ("&H80000000^"), 原样返回会写进生成 C →
                 // C2059. 与 cgen_expr.cpp 的 LongPtr 分支同规则: LongPtr 是平台相关宽度

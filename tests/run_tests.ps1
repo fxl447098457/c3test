@@ -609,6 +609,19 @@ function Test-HostPseudoTableCensus {
 # 账 #188: 浮点字面量的形状只有一个出口 (src/common/float_literal.hpp)。
 # 手拼 "f" 后缀这件事在 x86/x64 都不会有运行期症状 —— 它是**编不过**, 而带小数点的设计值 (8.25)
 # 恰好躲过, 所以必须静态钉。同一份脚本在 HEAD 的树上 R1~R3 全红 (R1 当场点出那 6 个手拼点)。
+function Test-IntLiteralShape {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] int_literal_shape ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\check_int_literal_shape.ps1" 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        $out | Select-Object -First 6 | ForEach-Object { Write-Host "  $_" }
+    }
+}
 function Test-FloatLiteralShape {
     $script:total++
     Write-Host -NoNewline "  [STATIC] float_literal_shape ... "
@@ -3677,6 +3690,18 @@ if ($Category -in @("all", "run", "vbp")) {
     Test-Vbp "evtcase" "$Tests\evtcase\EvtCase.vbp" $evtCaseExpected
     Test-Vbp "evtcase_x86" "$Tests\evtcase\EvtCase.vbp" $evtCaseExpected -Arch "x86"
 
+    # <vbeclipse> 回归夹子 (optdef) 账 #194: VB 的整数类型后缀是**词法**，不许抄进生成 C。
+    # 语义层那份 Optional 默认值求值以前直接 return rawText，于是 `Optional ... As Long = 0&` 发成
+    # `(*FontIndex) = 0&;` = C2059 (真工程证据: Charts 2020/ucTreeMaps 的 PropPagFMR.pag:740/886)。
+    # 两头钉: OD-VAL 证明四个默认值各按声明落地 (十六进制那枚同时证明"按数值重打"没把值改错)，
+    # OD-EXPL 证明显式实参照样赢 —— 只钉前头那条的话，"恒取默认值"也是绿的。
+    # 负控 = 修复前的那台编译器 (ea3eeeec) 真编同一份夹具: OptForm.c 116/118/119 三条
+    #   error C2059 语法错误 ";" + C2065 "H10"，BUILD rc=1、一条读数都不出。
+    $optDefExpected = @("OD-RAW l=12 i=3 h=16 z=0", "OD-VAL=True",
+        "OD-SET l=1 i=5 h=32 z=9", "OD-EXPL=True", "OD-DONE")
+    Test-Vbp "optdef" "$Tests\optdef\OptDef.vbp" $optDefExpected
+    Test-Vbp "optdef_x86" "$Tests\optdef\OptDef.vbp" $optDefExpected -Arch "x86"
+
     # <vbeclipse> 回归夹子 (erase_sub) 账 #186: `Erase m_items(1).bvData` —— 销毁 **UDT 数组那一格里**
     # 的动态数组。修前 parser 一律 VB2001 "Erase 不支持带下标的形式"，把真工程挡在最前面
     # (Charts 2020/ucTreeMaps 的 PropPagFMR.pag:720 `Erase m_tvFiles(lIndex).bvData` 就卡在这)。
@@ -4011,6 +4036,7 @@ if ($Category -in @("all", "compile")) {
     Test-HostPseudoTableCensus
     Test-AddressOfThunkSites
     Test-FloatLiteralShape
+    Test-IntLiteralShape
     Test-SubclassSlotSites
     Test-CtrlArrayMemberSites
     Test-EventHandlerNames
@@ -4352,6 +4378,21 @@ if ($Category -in @("all", "syntax")) {
     Test-CodegenNote "ucobj_chain_write" @("$Tests\Charts 2020\ucChartBar\Proyecto1.vbp") @(
         "vb6_ComSetProp(vb6_ucChartBar_prop_get_Font((vb6_cls_ucChartBar*)vb6_UC_InstanceOf(vb6_CtrlArr_GetAt(&vb6_arr_ucChartBar1, i)))") @(
         "vb6_ucChartBar_prop_let_Font((vb6_cls_ucChartBar*)vb6_UC_InstanceOf(vb6_CtrlArr_GetAt(&vb6_arr_ucChartBar1, i)), ((double")
+
+    # 账 #194 的发码形状针: Optional 默认值那几条必须按**数值**发。Absent 是抄源码文本那一形。
+    Test-CodegenNote "optdef_default_shape" @("$Tests\optdef\OptDef.vbp") @(
+        "aL = 12L;",
+        "aH = 16L;",
+        "aZ = 0L;") @(
+        "aL = 12&",
+        "aH = &H10&",
+        "aZ = 0&")
+
+    # 同一刀钉在**真工程**上 (ucTreeMaps 的 PropPagFMR：`Optional ... As Long = 0&` 两处)。
+    # 这个工程今天还红着 (#192 那一族 C2039)，但发码面已过 —— 所以这条针现在就能红能绿。
+    Test-CodegenNote "optdef_default_shape_real" @("$Tests\Charts 2020\ucTreeMaps\Proyecto1.vbp") @(
+        "if (!_has_FontIndex) (*FontIndex) = 0L;") @(
+        "(*FontIndex) = 0&;")
 )
 
     # 账 #189 的发码形状针: 控件数组的整体成员必须发成 vb6_CtrlArr_*, 一条都不许再落在
