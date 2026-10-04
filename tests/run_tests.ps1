@@ -1524,6 +1524,11 @@ if ($Category -in @("all", "run", "bas")) {
     Add-BasTest "test_nested_udt_array" "$Tests\test_nested_udt_array.bas" @("NA1=1;NB1=D0;NC1=1.2", "NA5=5;NB5=D4;NC5=5.2", "HDR@ABC", "NESTED-DONE")
     Add-BasTest "test_udt_assign" "$Tests\test_udt_assign.bas" @("A1=1;S1=hello;N1=42", "A2=99;S2=world;N2=7", "H1=11;HS1=alpha", "E1=5;ES1=five", "L1=2;LS1=hello", "UDT-ASSIGN-DONE")
     Add-BasTest "test_date_display" "$Tests\test_date_display.bas" @("D1-noserial=Y", "D2-year=Y", "D2b-notime=Y", "D3-nextday=Y", "D4-nextyear=Y", "D5-diff0=Y", "D6-param=Y", "D7-longparam=Y", "D8-cstr=Y", "D9-format=Y", "DATE-DONE")
+    # 账 #172: 日期**字面量** #...# 的编译期折算。改前 parser 只挂原文、发码读没写过的联合体槽
+    # (Debug 恰好 0、Release / /RTCu 是垃圾)，所以针面两头钉：与 DateSerial 的运行期算法同值、
+    # 带 PM 的那条只比整日期多出不到一天。负控 = 旧编译器上 A/B/C/E/F/G/H/I/J/K 全 False、
+    # L-serial=-6.27743597849989e+66。
+    Add-BasTest "test_datelit" "$Tests\test_datelit.bas" @("A-eq2=True", "B-epoch=True", "C-maxday=True", "D-plus31=True", "E-pm-after=True", "F-pm-in-day=True", "M-pm-not-next=True", "G-leap=True", "H-y99=True", "I-y49=True", "J-dash-dmy=True", "K-case-hit=True", "L-serial=43832", "DL-DONE")
     Add-BasTest "test_variant" "$Tests\test_variant.bas" @("PASS1a", "PASS1c", "PASS5", "Done")
     # ai/022 W1: Boolean 的类型可见性 + 装箱口径。32 条读数逐条钉: 转字符串的四条路
     # (B1-B8)、类型标记 (B9-B14)、落进 Variant 的那一半 (B15-B20)、反向护栏 —— Integer /

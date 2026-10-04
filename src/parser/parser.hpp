@@ -355,4 +355,11 @@ private:
     void initBindingPowers();
 };
 
+// 账 #172: VB6 日期字面量折算成 OLE 自动化日期序列（epoch 1899-12-30 = 0.0）。
+// 改前这里**没人算过**：AST 节点只带原文，发码侧照 doubleValue 打出去 ⇒ 读到的是没写过的
+// 联合体高 4 字节（Debug 恰好 0.0、Release 是 -6.277e+66 这类垃圾，见账 #172）。
+// 认得的形状：#M/D/Y#、#D-M-Y#、#M/D/Y H:N[:S][ AM|PM]#、#H:N[:S][ AM|PM]#；两年份按 VB6 规则
+// （<50 → 2000s，≥50 → 1900s）。不认得就返回 false、out 不动，由调用方决定退路。
+bool foldDateLiteralToOADate(const std::string& raw, double& out);
+
 } // namespace vb6c3
