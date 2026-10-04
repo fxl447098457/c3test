@@ -1465,6 +1465,22 @@ std::string CCodeGen::ctrlArrayMetaMemberExpr(const std::string& arrName,
     return "";
 }
 
+// 账 #190 (B29⑤): 控件事件处理器的 C 函数名 —— 唯一出口。
+// VB6 的标识符大小写不敏感, 而 C 敏感: 过程定义发的是 **Sub 自己的拼写**
+// (`vb6_Form_<模块>_<Sub名>`), 所以臂里调用的也必须是那一个名字。以前这一手是拿
+// **控件的设计期名**现拼的 (`cProcName(ctrl.controlName + "_Click")`), 于是只要有人改了控件名
+// 而没改过程名 (VB6 里完全合法, 两枚照样配一对), 产物就是"引用一个没人定义的函数" ——
+// 链接期 LNK2019 (实测 Charts 2020/ucChartBar 的 Form1: 控件 ChkAxisY / 过程 ChkAxisy_Click,
+// 控件 cboLabelsPositions / 过程 CboLabelsPositions_Click, 正好 2 个无法解析的外部符号)。
+// 存在性那一步 (symTab_.lookup) 本来就是大小写无关的 —— 缺的只是"命中之后按谁的名字发"。
+// 返回空串 = 这个事件没有处理器, 调用方**不要**装这条臂。
+std::string CCodeGen::eventHandlerFn(const std::string& ctrlName,
+                                     const std::string& suffix) const {
+    auto* sym = symTab_.lookup(ctrlName + suffix);
+    if (!sym) return std::string();
+    return cProcName(sym->name, AccessLevel::Private);
+}
+
 bool CCodeGen::controlNeedsSubclass(const FrmControl& ctrl) const {
     auto has = [&](const char* ev) {
         return symTab_.lookup(ctrl.controlName + std::string(ev)) != nullptr;

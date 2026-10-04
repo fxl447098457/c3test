@@ -652,6 +652,20 @@ function Test-CtrlArrayMemberSites {
     }
 }
 
+function Test-EventHandlerNames {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] event_handler_names ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\check_event_handler_names.ps1" 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        $out | Select-Object -First 6 | ForEach-Object { Write-Host "  $_" }
+    }
+}
+
 
 function Test-AddressOfThunkSites {
     $script:total++
@@ -3636,6 +3650,19 @@ if ($Category -in @("all", "run", "vbp")) {
     Test-Vbp "ve_units" "$Tests\ve_units\Units.vbp" $veUnitsExpected
     Test-Vbp "ve_units_x86" "$Tests\ve_units\Units.vbp" $veUnitsExpected -Arch "x86"
 
+    # <vbeclipse> 回归夹子 (evtcase) 账 #190: 控件事件臂调用的函数名必须按 **Sub 自己的拼写** 发。
+    # VB6 的标识符大小写不敏感、C 敏感: 以前臂里那个名字是拿控件的设计期拼写现拼的, 于是
+    # "改了控件名没改过程名" (VB6 完全合法) 就变成引用一个没人定义的函数 —— 链接期 LNK2019。
+    # 三枚控件: cmdRun/CmdRun_Click 与 chkOpt/ChkOpt_Click 只差大小写 (本账的两条臂),
+    # cmdSame/cmdSame_Click 拼写一致 = **证人** (它排除"BM_CLICK 这条路自己没驱动起来"那种假红)。
+    # 负控 = 修复前的编译器 (ea5155af) 真编译同一份夹具:
+    #   CaseForm.obj : error LNK2019 无法解析的外部符号 _vb6_cmdRun_Click / _vb6_chkOpt_Click,
+    #   fatal LNK1120: 2 个  —— 恰好两枚, 证人那枚没有第三条。
+    $evtCaseExpected = @("EC01-RUN-CLICK", "EC02-CHK-CLICK chk=1", "EC03-SAME-CLICK",
+        "EC-CNT run=1 chk=1 same=1", "EC-DONE")
+    Test-Vbp "evtcase" "$Tests\evtcase\EvtCase.vbp" $evtCaseExpected
+    Test-Vbp "evtcase_x86" "$Tests\evtcase\EvtCase.vbp" $evtCaseExpected -Arch "x86"
+
     # test_vbman 用于验证外部 COM 组件 VBMANLIB (x86 DLL, 供 32 位程序调用)
     # ai/022 B07b: INH2..INH11 cover the merged member face + prefix-copied fields +
     # forwarding stubs (private Long/UDT/BSTR fields, Optional params, Property Get/Let,
@@ -3947,6 +3974,7 @@ if ($Category -in @("all", "compile")) {
     Test-FloatLiteralShape
     Test-SubclassSlotSites
     Test-CtrlArrayMemberSites
+    Test-EventHandlerNames
 
     Write-Host ""
 

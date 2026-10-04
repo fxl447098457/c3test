@@ -937,7 +937,7 @@
             // 绑定收集挪到 style_apply 循环外 (本控件段执行时被绑控件的 hwnd 可能还没创建)
             // ② Reposition (函数指针注册 —— 不可见控件没有 WM_NOTIFY 可借)
             if (symTab_.lookup(ctrl.controlName + "_Reposition")) {
-                std::string rpFn = cProcName(ctrl.controlName + "_Reposition", AccessLevel::Private);
+                std::string rpFn = eventHandlerFn(ctrl.controlName, "_Reposition");
                 c_.emitLine("vb6_Data_SetRepositionHandler((void*)" + dtHwnd + ", " + rpFn + ");");
             }
         }

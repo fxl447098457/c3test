@@ -351,6 +351,9 @@
     // 账 #189: 控件数组整体成员 (Count/LBound/UBound) 的唯一出口; 不是这三条返回空串。
     std::string ctrlArrayMetaMemberExpr(const std::string& arrName,
                                         const std::string& memberLower) const;
+    // 账 #190: 事件处理器的 C 函数名 = 符号自己的拼写 (与 Sub 的写法一致); 没处理器返空串。
+    std::string eventHandlerFn(const std::string& ctrlName,
+                               const std::string& suffix) const;
     bool controlNeedsSubclass(const FrmControl& ctrl) const;
 
     // C29-SL-o（账 #83 的 Slider 半边）: Slider 的**设计期值面**下发。

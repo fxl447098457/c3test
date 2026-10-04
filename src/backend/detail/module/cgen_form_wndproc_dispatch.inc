@@ -11,8 +11,8 @@
         // ID 口径与创建循环一致（跳过 Menu 与没有 Win32 窗口类的控件，DFS 顺序同步）。
         auto emitFocusArms158 = [&](const FrmControl& ctrl, int focusId) {
             int ctrlId = focusId;
-            std::string gotFn = cProcName(ctrl.controlName + "_GotFocus", AccessLevel::Private);
-            std::string lostFn = cProcName(ctrl.controlName + "_LostFocus", AccessLevel::Private);
+            std::string gotFn = eventHandlerFn(ctrl.controlName, "_GotFocus");
+            std::string lostFn = eventHandlerFn(ctrl.controlName, "_LostFocus");
             bool hasGot = symTab_.lookup(ctrl.controlName + "_GotFocus") != nullptr;
             bool hasLost = symTab_.lookup(ctrl.controlName + "_LostFocus") != nullptr;
             bool hasValidate = symTab_.lookup(ctrl.controlName + "_Validate") != nullptr;
@@ -582,8 +582,8 @@
     for (const auto& ctrl : frmDesc.formControl.children) {
         if (ctrl.controlType == FrmControlType::HScrollBar || ctrl.controlType == FrmControlType::VScrollBar) {
             std::string ctrlHwnd = "vb6_hwnd_" + cIdent(ctrl.controlName);
-            std::string scrollFn = cProcName(ctrl.controlName + "_Scroll", AccessLevel::Private);
-            std::string changeFn = cProcName(ctrl.controlName + "_Change", AccessLevel::Private);
+            std::string scrollFn = eventHandlerFn(ctrl.controlName, "_Scroll");
+            std::string changeFn = eventHandlerFn(ctrl.controlName, "_Change");
             bool hasScroll = symTab_.lookup(ctrl.controlName + "_Scroll") != nullptr;
             bool hasChange = symTab_.lookup(ctrl.controlName + "_Change") != nullptr;
             c_.emitLine("if (scrollHwnd == (void*)" + ctrlHwnd + ") {");
@@ -601,8 +601,8 @@
     for (const auto& ctrl : frmDesc.formControl.children) {
         if (ctrl.controlType != FrmControlType::Slider) continue;
         std::string slHwnd = "vb6_hwnd_" + cIdent(ctrl.controlName);
-        std::string slScrollFn = cProcName(ctrl.controlName + "_Scroll", AccessLevel::Private);
-        std::string slChangeFn = cProcName(ctrl.controlName + "_Change", AccessLevel::Private);
+        std::string slScrollFn = eventHandlerFn(ctrl.controlName, "_Scroll");
+        std::string slChangeFn = eventHandlerFn(ctrl.controlName, "_Change");
         bool slHasScroll = symTab_.lookup(ctrl.controlName + "_Scroll") != nullptr;
         bool slHasChange = symTab_.lookup(ctrl.controlName + "_Change") != nullptr;
         if (!slHasScroll && !slHasChange) continue;
