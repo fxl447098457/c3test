@@ -414,8 +414,13 @@ StmtPtr ASTCloner::cloneStmt(const Stmt* s) {
         if (x.targetExpr && !o->targetExpr) break;
         out = std::move(o); break;
     }
-    case ASTNodeKind::EraseStmt:
-        out = std::make_unique<EraseStmt>(s->loc, static_cast<const EraseStmt&>(*s).varNames); break;
+    case ASTNodeKind::EraseStmt: {
+        auto& x = static_cast<const EraseStmt&>(*s);
+        auto o = std::make_unique<EraseStmt>(s->loc, x.varNames);
+        // 账 #186: 复杂目标 (带下标的成员链) 也要跟着深拷贝, 否则克隆后静默退化成销毁整个数组
+        for (auto& e : x.targets) o->targets.push_back(cloneExprInner(e.get()));
+        out = std::move(o); break;
+    }
     case ASTNodeKind::LabelStmt:
         out = std::make_unique<LabelStmt>(s->loc, static_cast<const LabelStmt&>(*s).labelName); break;
     case ASTNodeKind::RaiseEventStmt: {

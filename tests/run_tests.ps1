@@ -3663,6 +3663,31 @@ if ($Category -in @("all", "run", "vbp")) {
     Test-Vbp "evtcase" "$Tests\evtcase\EvtCase.vbp" $evtCaseExpected
     Test-Vbp "evtcase_x86" "$Tests\evtcase\EvtCase.vbp" $evtCaseExpected -Arch "x86"
 
+    # <vbeclipse> 回归夹子 (erase_sub) 账 #186: `Erase m_items(1).bvData` —— 销毁 **UDT 数组那一格里**
+    # 的动态数组。修前 parser 一律 VB2001 "Erase 不支持带下标的形式"，把真工程挡在最前面
+    # (Charts 2020/ucTreeMaps 的 PropPagFMR.pag:720 `Erase m_tvFiles(lIndex).bvData` 就卡在这)。
+    # 两头钉 (缺一头就是假绿):
+    #   ①EA01-KEEP 别的格不受影响 (s0=30 / s2=50) —— 拦"静默退化成销毁整个数组";
+    #   ②EA02-RECYCLE 那一格还能重新分配并用 (s1=20 len=1) —— 拦"没置 NULL"：ReDim 自己会先销毁旧数组,
+    #     没置 NULL 就是双释放 (现场直接崩)；反过来"没真销毁"这里会读到残留的 40。
+    # 负控 = 修复前的编译器 (a159b85d) 编同一份夹具: VB2001 + VB2003, BUILD rc=1, 一条读数都不出现。
+    $eraseSubExpected = @("EA01-KEEP s0=30 s2=50", "EA02-RECYCLE s1=20 len=1",
+        "EA-CNT keep_ok=True recycle_ok=True", "EA-DONE")
+    Test-Vbp "erase_sub" "$Tests\erase_sub\EraseSub.vbp" $eraseSubExpected
+    Test-Vbp "erase_sub_x86" "$Tests\erase_sub\EraseSub.vbp" $eraseSubExpected -Arch "x86"
+
+    # 账 #186 的**边界**负例: `Erase m_list(1)` 这形 VB6 只在元素是 Variant(装着数组) 时合法,
+    # 本仓没那条通路 —— 静默降级成"销毁整个数组"会改变语义, 所以必须继续报诊断。
+    # 针面取消息里的英文片段 (GBK 控制台下中文会被折行/转码, 与既有 Test-CompileFail 同一口径)。
+    Test-CompileFail "erase_neg_indexed" @("$Tests\erase_neg\EraseNeg.bas") `
+        "indexed Erase target not supported here"
+
+    # 发码形状针 (账 #186): 元素成员数组的销毁必须走 VB6_SA_AT(...) 那一形, 不能退回整数组,
+    # 也不能漏掉置 NULL 那半 (双释放探测器)。
+    Test-CodegenNote "erase_member_shape" @("$Tests\erase_sub\EraseSub.vbp") @(
+        "vb6_SafeArrayDestroy1D(VB6_SA_AT(vb6_type_TElem, m_items, 1).bvData); VB6_SA_AT(vb6_type_TElem, m_items, 1).bvData = NULL;") @(
+        "vb6_SafeArrayDestroy1D(m_items);")
+
     # test_vbman 用于验证外部 COM 组件 VBMANLIB (x86 DLL, 供 32 位程序调用)
     # ai/022 B07b: INH2..INH11 cover the merged member face + prefix-copied fields +
     # forwarding stubs (private Long/UDT/BSTR fields, Optional params, Property Get/Let,

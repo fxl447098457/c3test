@@ -207,6 +207,9 @@ private:
     std::unique_ptr<ReturnStmt> parseReturnStmt();
     std::unique_ptr<ReDimStmt> parseReDimStmt();
     std::unique_ptr<EraseStmt> parseEraseStmt();
+    // 账 #186: 点链字符串 → 表达式树 (ReDim 与 Erase **共用这一处**，别再抄第二份)。
+    // 前置 '.' 表示 With 块成员 (WithMemberExpr)，其余逐段 MemberAccessExpr。
+    ExprPtr buildDottedNameExpr(const std::string& nm, SourceLocation loc);
     std::unique_ptr<RaiseEventStmt> parseRaiseEventStmt();
     std::unique_ptr<EndStmt> parseEndStmt();
     std::unique_ptr<StopStmt> parseStopStmt();

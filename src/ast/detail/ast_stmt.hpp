@@ -363,6 +363,13 @@ public:
 class EraseStmt : public Stmt {
 public:
     std::vector<std::string> varNames;
+    // 账 #186 (与 ReDimStmt 的 Fix 100 同一套机制): 下标 + 成员链那种目标
+    // (`Erase m_tvFiles(lIndex).bvData`) 用字符串表达不了 —— cIdent 会把 '.' 换成 '_'
+    // 且无法带下标。targets[i] 非空 ⇔ 该目标走 emitExpr 发左值
+    // (VB6_SA_AT(vb6_type_TFile, m_tvFiles, lIndex).bvData)，varNames[i] 仍存**去下标的点链名**
+    // (`m_tvFiles.bvData`)，供 Variant 成员那一问 (isVariantArrayTarget) 复用同一个判据。
+    // 两向量按目标一一对应；简单目标 (arr / arr() / obj.Field) 的 targets[i] 为空。
+    std::vector<ExprPtr> targets;
 
     EraseStmt(SourceLocation loc, std::vector<std::string> names)
         : Stmt(ASTNodeKind::EraseStmt, loc), varNames(std::move(names)) {}
