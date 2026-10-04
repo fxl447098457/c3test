@@ -1451,6 +1451,20 @@ std::string CCodeGen::controlZeroArgMethod(FrmControlType ctrlType,
 // 拆的那趟在 `cgen_form_wndproc_dispatch.inc`，两边各自抄了一份，实测**两份都漏了
 // `_DblClick` 与 `_Paint`** ⇒ 只挂这两条处理器之一的控件，子类过程与消息臂都生成得好好的，
 // 一次也没被 install（处理器编得过、永不触发）。
+// 账 #189 (B29②): 控件数组的**整体成员** —— VB6 里 `arr.Count / arr.LBound / arr.UBound`
+// 问的是数组本身, 不是某一枚控件的属性。以前只有 LBound/UBound 在成员读取那一路各写了一条 if,
+// Count 漏了 ⇒ 掉进 COM 兜底, 发成 vb6_ComGetIntProp(vb6_hwnd_arr1, L"Count")，
+// 而数组控件根本没有 vb6_hwnd_<数组名> 这个变量 (C2065，实测 Charts 2020/ucChartBar Form2)。
+// 与账 #157 同族：句柄类表达式必须走 vb6_arr_*，不许凭空拼 vb6_hwnd_。
+std::string CCodeGen::ctrlArrayMetaMemberExpr(const std::string& arrName,
+                                              const std::string& memberLower) const {
+    std::string arg = "&vb6_arr_" + cIdent(arrName);
+    if (memberLower == "count") return "vb6_CtrlArr_GetCount(" + arg + ")  /* ctrl array Count */";
+    if (memberLower == "lbound") return "vb6_CtrlArr_LBound(" + arg + ")  /* ctrl array LBound */";
+    if (memberLower == "ubound") return "vb6_CtrlArr_UBound(" + arg + ")  /* ctrl array UBound */";
+    return "";
+}
+
 bool CCodeGen::controlNeedsSubclass(const FrmControl& ctrl) const {
     auto has = [&](const char* ev) {
         return symTab_.lookup(ctrl.controlName + std::string(ev)) != nullptr;

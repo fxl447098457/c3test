@@ -300,22 +300,16 @@
                         return;
                     }
                 }
-                std::string readFn = getControlPropReadFn(itCtrl->second, node.memberName);
-                // Fix 0xx: 控件数组级操作 — VB6 中 `ctrlArr.LBound` / `ctrlArr.UBound`
-                // 返回数组下界/上界 (VB2001 For 循环常用), 不是 OCX 的 COM 属性.
-                // 此前裸标识符落到 COM 派发 → vb6_ComGetIntProp(vb6_hwnd_ctrl, L"LBound"),
-                // 而数组控件没有单个 vb6_hwnd_ 变量 (C2065). 数组级属性走 RTL 的
-                // vb6_CtrlArr_LBound/UBound(&vb6_arr_<Name>) (P7.6).
-                if (readFn.empty() && knownControlArrays_.count(objLower)) {
-                    if (memLower == "lbound") {
-                        lastExpr_ = "vb6_CtrlArr_LBound(&vb6_arr_" + cIdent(objIdent.name) + ")  /* ctrl array LBound */";
-                        return;
-                    }
-                    if (memLower == "ubound") {
-                        lastExpr_ = "vb6_CtrlArr_UBound(&vb6_arr_" + cIdent(objIdent.name) + ")  /* ctrl array UBound */";
+                // 账 #189: 数组整体成员先判 (Count 以前不在这里 ⇒ 掉进 COM 兜底拿
+                // vb6_hwnd_<数组名>，C2065)。这三条**永远不是**控件属性, 所以放在 readFn 之前。
+                if (knownControlArrays_.count(objLower)) {
+                    std::string metaExpr = ctrlArrayMetaMemberExpr(objIdent.name, memLower);
+                    if (!metaExpr.empty()) {
+                        lastExpr_ = metaExpr;
                         return;
                     }
                 }
+                std::string readFn = getControlPropReadFn(itCtrl->second, node.memberName);
                 if (!readFn.empty()) {
                     lastExpr_ = readFn + "(" + makeCtrlHwndArg(objLower, itCtrl->second) + ")  /* ctrl prop read */";
                     return;

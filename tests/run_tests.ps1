@@ -638,6 +638,20 @@ function Test-SubclassSlotSites {
     }
 }
 
+function Test-CtrlArrayMemberSites {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] ctrl_array_members ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\check_ctrl_array_members.ps1" 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        $out | Select-Object -First 6 | ForEach-Object { Write-Host "  $_" }
+    }
+}
+
 
 function Test-AddressOfThunkSites {
     $script:total++
@@ -3613,7 +3627,12 @@ if ($Category -in @("all", "run", "vbp")) {
     # ⇒ 与 DPI 无关, 换机器不会漂。钉的是账 #175 (ScaleWidth) 与账 #177 (TextWidth/TextHeight)
     # 同一族口径: 控件宿主交出去的每一个量纲都得跟着它声明的 ScaleMode 走。
     # 改前实测: U-SW=True 而 U-TW/U-TH=False (文字量纲交的是设备像素)。
-    $veUnitsExpected = @("U-SW=True", "U-TW=True", "U-TH=True", "U-CTX=True", "U-HW=True", "U-CNT=True", "U-DONE")
+    # 账 #189 加的两条针 (ve_units 里塞一枚 UC 控件数组 uArr(0..2)): 整体成员 Count/LBound/UBound
+    # 必须走 vb6_arr_<名>。修前这夹具**编不过** —— Count 发成对句柄变量的 COM 属性读, 跨窗体时
+    # 是 undeclared identifier (C2065), 同窗体时恒答 0。负控实测 (a4e3b574 的编译器 x86):
+    #   frmUnits.c(214)/(220): error C2065 "vb6_hwnd_uArr": 未声明的标识符, BUILD rc=1。
+    $veUnitsExpected = @("U-SW=True", "U-TW=True", "U-TH=True", "U-CTX=True", "U-HW=True", "U-CNT=True",
+        "U-ARR-RAW count=3 lb=0 ub=2", "U-ARR=True", "U-DONE")
     Test-Vbp "ve_units" "$Tests\ve_units\Units.vbp" $veUnitsExpected
     Test-Vbp "ve_units_x86" "$Tests\ve_units\Units.vbp" $veUnitsExpected -Arch "x86"
 
@@ -3927,6 +3946,7 @@ if ($Category -in @("all", "compile")) {
     Test-AddressOfThunkSites
     Test-FloatLiteralShape
     Test-SubclassSlotSites
+    Test-CtrlArrayMemberSites
 
     Write-Host ""
 
@@ -4247,6 +4267,14 @@ if ($Category -in @("all", "syntax")) {
     Test-CodegenNote "fontsize_literal" @("$Tests\Charts 2020\ucChartBar\Proyecto1.vbp") @(
         "->Size = 12.0f;", "->Size = 8.25f;") @(
         "->Size = 12f;")
+
+    # 账 #189 的发码形状针: 控件数组的整体成员必须发成 vb6_CtrlArr_*, 一条都不许再落在
+    # 句柄变量的 COM 属性读上 (修前 `uArr.Count` 就是 vb6_ComGetIntProp(vb6_hwnd_uArr, L"Count"))。
+    Test-CodegenNote "ctrlarr_member" @("$Tests\ve_units\Units.vbp") @(
+        "vb6_CtrlArr_GetCount(&vb6_arr_uArr)",
+        "vb6_CtrlArr_LBound(&vb6_arr_uArr)",
+        "vb6_CtrlArr_UBound(&vb6_arr_uArr)") @(
+        "vb6_ComGetIntProp(vb6_hwnd_uArr")
 
     # ai/028 V2 的发码形状: 插值必须** literally ** 发成手写的 & CStr() / Format$ 形状 ——
     # 注意第二枚读数挑的是 vb6_CStrLong (按实参类型改发专用 CStr), 这正是"降级成真 AST"

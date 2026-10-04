@@ -21,6 +21,30 @@ Begin VB.Form frmUnits
       Top             =   1440
       Width           =   2400
    End
+   Begin VeUnits.ucUnitPix uArr 
+      Height          =   1140
+      Index           =   0
+      Left            =   3600
+      TabIndex        =   5
+      Top             =   120
+      Width           =   1200
+   End
+   Begin VeUnits.ucUnitPix uArr 
+      Height          =   1140
+      Index           =   1
+      Left            =   3600
+      TabIndex        =   6
+      Top             =   1320
+      Width           =   1200
+   End
+   Begin VeUnits.ucUnitPix uArr 
+      Height          =   1140
+      Index           =   2
+      Left            =   3600
+      TabIndex        =   7
+      Top             =   2520
+      Width           =   1200
+   End
 End
 Attribute VB_Name = "frmUnits"
 Attribute VB_GlobalNameSpace = False
@@ -73,6 +97,22 @@ Private Sub Form_Load()
     cs1 = uTw.CntStr()
     Debug.Print "U-CNT-RAW ok=" & ck1 & "/" & ck2 & " cnt=" & cs1
     Debug.Print "U-CNT=" & CStr(ck1 = "True" And ck2 = "True" And cs1 <> "")
+    ' 账 #189: 控件数组的**整体成员** (Count/LBound/UBound) 必须走 vb6_arr_<名>, 不能被当成
+    ' 单枚句柄上的 COM 属性去读。修前实测 (同一份夹具 x86): 三处 Count 读发成
+    ' vb6_ComGetIntProp(vb6_hwnd_uArr, L"Count") ⇒ ①跨窗体引用时 undeclared identifier (C2065,
+    ' Charts 2020 的 Form2 就是这么红的) ②同窗体时恒答 0 ⇒ 循环一格也不走。
+    ' 两头判据: ①三个数各自对上 (3/0/2) ②拿 Count 当上界**真的**圈了三圈 (每圈记一格)。
+    ' 注: 数组元素的**成员访问** (uArr(i).SW() / uArr(i).Left) 另有一条独立缺陷 (空值/崩),
+    ' 不在本条判据里 —— 台账另开一账跟它, 这里刻意不碰, 免得两条缺陷互相掩盖。
+    Dim ac As Long, al As Long, au As Long, aok As Long, aj As Long
+    ac = uArr.Count
+    al = uArr.LBound
+    au = uArr.UBound
+    Debug.Print "U-ARR-RAW count=" & ac & " lb=" & al & " ub=" & au
+    For aj = uArr.LBound To uArr.Count - 1
+        aok = aok + 1
+    Next
+    Debug.Print "U-ARR=" & CStr(ac = 3 And al = 0 And au = 2 And aok = 3)
     Debug.Print "U-DONE"
     Unload Me
 End Sub

@@ -348,6 +348,9 @@
     // ⇒ 处理器编得过、永不触发（`Slider` 首当其冲，本页 §3 就写着 DblClick）。
     // ⚠ 内容与发 arm 那一趟的 info.hasXxx 逐条对应，**两边一起改**才有意义；
     //   焦点与 Click 那两条必须带排除表，否则同一次操作会从两条路各发一次（C29-SL-g / SL-d）。
+    // 账 #189: 控件数组整体成员 (Count/LBound/UBound) 的唯一出口; 不是这三条返回空串。
+    std::string ctrlArrayMetaMemberExpr(const std::string& arrName,
+                                        const std::string& memberLower) const;
     bool controlNeedsSubclass(const FrmControl& ctrl) const;
 
     // C29-SL-o（账 #83 的 Slider 半边）: Slider 的**设计期值面**下发。
