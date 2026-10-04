@@ -163,6 +163,9 @@ UDT"），带名字的是 **Class 符号专属**的 `memberReturnTypes`（`unord
 出处 §42 L2752–2759。`code=0xc0000005 / at rva=0x15a271 / av write target=0x0`，帧
 `#4 0x15a271 #5 0xa9df0 #6 0x5ed33 #7 0x138643`（同形态在 Fix 188 之前是 `rva=0x15a201`）。
 复现法记在 `.temp/teardown_av_note.md`（`demo_close_repeat.ps1 -Runs 20` + **同一次构建**的 PDB）。
+· **账 #184 之后先重测再决定去留**：本条与 B23（已出）是同一族——被 OS/COM 按 `__stdcall`
+  调的过程以前一律以 cdecl 发码。关闭路径正好走 `RemoveWindowSubclass` + 一批 subclass thunk，
+  所以这条的 1/16 有可能已经跟着 #184 一起没了；先跑那 20 次，别先动手改代码。
 
 ### B16 Date 可见性的三条**故意不做**的缺口（Fix 175 的边界）
 出处 §24 L1666–1672，已复核三条**全部仍未实现**：
@@ -186,23 +189,6 @@ UDT"），带名字的是 **Class 符号专属**的 `memberReturnTypes`（`unord
 ### B21 两条仍在推进中的族（无 Fix 号，任务列表里是 #9 / #12 / #19 的尾巴）
 - VARIANT ↔ typed 转换族（含 160-F 的重估结论）。
 - Extender / Ambient 成员访问器的剩余小簇（Fix 161/162/183 之后仍有零星无赋值路径）。
-
-### B23 `VBFlexGridDemo` 起窗即堆损坏 `0xC0000374`，而且**门从来没见过它**
-出处 = 账 #175 的回归面扫描（同一次真跑量到，刻意没并进那一刀）。
-· 读数：`--target win-x86` 构建产物，`STATE=exited rc=0xC0000374`，窗口从未出现；
-  **BASE（`wt_base175` = `a1fed71c` 的冷编编译器）与 NEW 同形** ⇒ 不是 #175 带进来的。
-  ⚠ 归因口径：BASE 那份是 VS 生成器（产物在 `.build/Release/C3.exe`）、NEW 那份是 Ninja，
-  「两边都崩」足以说明与本刀无关，但要坐实「与本刀无关」的更强形式（同生成器两侧），
-  下一轮追时补 Ninja 侧 BASE。
-· 为什么它一直没响：`tests/run_tests.ps1` 里 **没有 VBFlexGridDemo 的 `Test-GuiVbp` 用例**
-  （grep `flexgrid` 只命中一条注释）⇒ 这个 demo 完全在回归之外。
-  同一份产物连跑三次：崩 / 崩 / 活（`-g` 那份），不崩时窗口标题正常（`VBFlexGrid Demo`）⇒ **这是条未定序的堆损坏，不是`挂进门就会红`的确定缺陷** —— 现在挂 `Test-GuiVbp` 只会给门添一条随机红。
-  下一步该做的是**归因**：`C3_PAGEHEAP=1`（`vb6forms.c` 的 `vb6_installCrashTrace` 里就有这一档，开堆页让损坏当场变 AV 带栈）（**账 #181 之后这条才真能用**：以前轨迹器在爆栈/重入时会把同一份现场写好几遍、真正的第一现场被压到最后；现在每进程只记一次，第一段就是原始故障）
-  + `-g` 产物的 map/pdb 拿栈，再谈修法；修好之后再挂用例。
-· **2026-10-04 追加读数（账 #183 那轮顺带，别把两件事并成一件）**：本条说的是 **x86 起窗期** 的堆损坏（`-g` 那台 2/3 跑 `rc=0xC0000374`）；同一台把 #183 那一刀**退回去**单验 —— 照样起不来，首段现场 `HEAP CORRUPTION code=0xC0000374`、`FAULT ntdll.dll+0xFC9CF`、`#00 = 本 exe off 0x136E76` ⇒ **本条与 #182/#183 无关，继续开着**。抓手换了：账 #182 之后 x64/x86 都能打出应用帧（`st+N rva=` / `[sp+N] rva=`），下一轮直接对 **x86 `-g` 那台**（`b182gx86/VBFlexGridDemo.map` 在手边）取同一次构建的偏移符号化 —— 注意偏移与产物**必须同一次编译**，无 `-g` 那台的 0x136E76 不能拿去查 `-g` 的表。另：本机有 x64dbg（`D:\ProgramData\snapshot_2026-05-27_12-11\release\{x64,x32}`，含 `headless.exe`），需要现场栈时先用它，别再往产品里加插桩。
-· 2026-10-04 又一读数（拿账 #182 的工具直接量到的，工件 = `.build/b184x86g/c3_crash.txt`，产物同名带 `.map`）：x86 `-g` 那台首段现场是 `HEAP CORRUPTION code=0xC0000374`，`FAULT ntdll.dll+0xFC9CF`，栈里第一段应用帧在 `off=0x1E5966 / 0x19AEEE / 0x1E372D / 0x1AAE41 / 0x22BC3A`，外面套着 `COMCTL32+0x1A3CB → USER32 派发` ⇒ 损坏是在一次**消息派发里由 ntdll free/alloc 检出来**的，不是自己爆的。⚠ 这五个 off **现在认不出函数名**：`-g` 产物是 `/INCREMENTAL`，最近的 public 匹配会给出 `+0x35f6` 这种假偏移，而生成码里的过程全是 `static`（map 的 Publics by Value 根本不列）⇒ 下一轮要么换 **非增量** 的构建拿符号，要么直接上 x64dbg/headless，别把 nearest-symbol 当事实（这条老教训在 §记忆里）。
-· **2026-10-04 页堆之下这条不再「未定序」**（工件 = `.build/b185x86g/` 与生成码快照 `.build/b185gen/`）：给 IFEO 写 `GlobalFlag=0x02000000 / PageHeapFlags=2` 之后，同一份 x86 `-g` 产物 **6/6 同一处现场** —— `0xC0000005 av read target=<野值>`，故障地址 `COMCTL32.dll+0x1A89E`；应用侧帧链是按 PDB 行号取的（不是 nearest-symbol）：`vb6_di_CreateWindowExW`（rtl/vb6_di_stubs.c:76）← `vb6_VBFlexGrid_CreateScrollTip`（VBFlexGrid.c:8496，源 = `VBFlexGrid.ctl:5884`）← `vb6_VBFlexGrid_prop_let_ShowScrollTips`（VBFlexGrid.c:7673）← `vb6_form_create_MainForm`（MainForm.c:324，就是设计期那句 `ShowScrollTips = True`）← `WM_CREATE`（MainForm.c:167）。⇒ 「起窗期堆损坏」= **创建 `tooltips_class32` 那枚 Scroll Tip 时，comctl32 读到不属于我们的指针**；同一份产物不带页堆跑 8 次：2 次 `0xC0000374`、6 次静默退（都不出窗）⇒ **症状漂、现场不漂**。
-· 下一条**先证伪**的候选：x86 与 x64 进的是两套 comctl32 —— 工程自带 manifest 里 processorArchitecture 写死 x86（记忆里那条「load-or-tooltips 掷硬币」），⇒ x86 走 SxS 激活的 comctl32 v6、x64 静默退回 v5.82，于是同一句 `CreateWindowEx(tooltips_class32, …, App.hInstance, …)` 两侧进的是不同实现。在怪发码/编组之前，先用 x64dbg headless 或让 x86 也吃 v5 各跑一次，看现场跟不跟着走；工件都留着，下一轮不必重测。
 
 ### B24 OLE 拖放的 `hdrop` 旁路日志没人钉
 出处 = 账 #175 的跨门工件对形 #300→#301：`oledd_test.txt`(s4) 从 `hdrop FAIL hr=0x1` 变成
@@ -257,6 +243,19 @@ x64 那档不补用例、不补产物；将来若要把 x64 立成目标，先�
 · 所以顺序建议：先量「语料里还有没有别的未解析裸名调用」（`--emit-c` 全语料跑一遍 cl 数 C4013，数法见记忆库「数 cl 的警告必须自己重跑 cl」），再决定是上 `/we4013` 还是在 cgen 侧把未解析裸名**判死**（后者才是单一权威，但要先确认不会把「隐式 Variant 局部」那条兜底一起打掉 —— 它就是 Fix 110u 立着的理由）。
 
 ## C. 仍在生效的口径与工具事实（与本文档等长的一半价值在这里；完整版见记忆库）
+
+- **`AddressOf` 的调用约定口径（账 #184 起）**：VB6 的 `AddressOf` 交出去的是 **`__stdcall`
+  调用桩的地址**，不是本体地址；C3 现在按它在**定义模块**里发桩（口径一处：
+  `CCodeGen::addressOfTargetCName`），本体保持 `__cdecl`。判这类刀时记三条：
+  ① 小夹具不算红判据——MSVC 写的调用方有 EBP 帧，`leave` 会把 ESP 拉回来，所以
+  `EnumWindows(AddressOf cb)` 在改前也读数全对（实测 HEAD~1 与 HEAD 两份产物逐字相同）；
+  真判据要用**不自我吸收的调用链**（comctl32 的 `SetWindowSubclass` thunk）或发码形状针。
+  ② 页堆只能把「谁在读已释放堆块」钉成确定现场，钉不出「谁按 stdcall 调它」——
+  把归因钉死的是**一次「关掉一条路」的对照实验**（拷一份工程出去给 `FlexSetSubclass`
+  体首加 `Exit Sub`：崩溃 3/4 ⇒ 0/6）。
+  ③ A/B 分类器要允许「纯改名」这一类差异（判据 = 两边都把 `aoThunk_` 去掉再比），
+  并把 `C3:` 开头的诊断行滤掉——`--emit-c` 的 stdout 与 stderr 混流，census 行会伪装成
+  「多了一行」。
 
 1. **RTL 是嵌进 `C3.exe` 的 RCDATA**：改 `src/rtl/**` 必须重编 C3.exe 才生效，真凭据是构建日志里
    出现 `Building RC object CMakeFiles\c3.dir\src\driver\c3rtl.rc.res`。新增 RTL 文件还要同时进
@@ -342,3 +341,4 @@ x64 那档不补用例、不补产物；将来若要把 x64 立成目标，先�
 | 账 #182（提交 `0b13dcf6` = C29-CH-g，门 #308） | x64 的崩溃轨迹以前**一条应用帧都没有**，三处各自把路堵死：① `vb6forms.c` 那段栈扫描整段包在「故障地址属于哪个模块」那一问里 ⇒ `call` 跳飞（rip=0x1）时这一问直接失败、一个候选都不打；② `vb6rtl.c` 的栈指针线性扫描只在 `#ifdef _M_IX86` 里编；③ 扫描的 x64 分支用 `wsprintfA("0x%016llX")` —— 用户态 wsprintf **不认 `ll`**，一直打成 `0xlX -> <一串字节>+0xlX`（这段以前从没被执行到，①改完才露出来）。改法：扫描目标一律换成**主 exe 镜像**（生成代码都在 exe 里，扫系统模块没用）、扩到 `_M_X64`（取 `Rsp`、按 `ULONG_PTR` 步长）、偏移改打 32 位 RVA；顺手把不在本模块镜像里的帧照实标 `(outside exe)`（以前把 ntdll 的地址减掉自己的基址打成「rva=0x4376...」，看着像自己的符号），文件侧 AV 头把 `ExceptionInformation[0]==8` 认成 EXECUTE(DEP)（以前一律写 WRITE，与 vb6rtl.c 里 Fix 187 同口径）。读数：同一夹具同一 env，改前只有 5 帧派发链 + 零条扫描行；改后 `st+0 rva=0x2581ae` 落进 `vb6_ComCall`，`st+37/st+40/st+48` 落在工程自己的 `VTableHandle`（`IOleIPAO_EnableModeless` / `GetVTableIPAO` / `ActivateIPAO`）上 —— **账 #183 就靠这几行归的因**；B23/B15 那两条以前归不了因，根因也在这条工具哑火上 |
 | 账 #183（提交 `d9e34590` = C29-CH-h，门 #308） | Fix 191 那条「按名 `AddRef`/`Release` 直发槽位」**少绕了一层 vtable**：`((void**)disp)[1]` 读的是 `disp+8`（对象自己的第二个字段），槽位要先从对象首字读出 vtable 再取；同文件里 `vb6_ComIsDispatchable` 自己是两级读法 ⇒ 同一件事两套口径。在 `VTableHandle.bas` 手搭的伪 `IOleInPlaceActiveObject` 上，`VTableIPAODataStruct` 的第二字段恰好是 `RefCount As Long` ⇒ 读出来是 1 ⇒ `call 1`（AV EXECUTE(DEP) target=0x1）。触发条件量到是**确定的、不是偶发**：向 FlexGrid 子窗发**一条 WM_LBUTTONDOWN**（只这一条；`WM_LBUTTONUP` / 右键 / 滚轮都不发）再对主窗发 WM_CLOSE ⇒ x64 `-g` 与 x64 无 `-g` 各 16/16 复现。改成 `lpVtbl->AddRef/Release`（与 `vb6com.c` 里 `vb6_ReleaseObject`/`vb6_ComAddRefDispatch` 同形）后两台各 12 次关窗干净退出、零条崩溃现场；负控（改前那台）同条件 2/2 仍崩。census：`grep -E "\(\(void\s*\*\*\)" src/rtl` = **0** ⇒ 全 RTL 再无手写槽位读法，按 vtable 调一律 `->lpVtbl->`（218 处）。顺带把 `vb6_ComGetProp` 那条 `fallback to IDispatch` 从字体/Extender/宿主三个岔口**之前**挪到之后（它对根本不走 IDispatch 的调用也照打，本轮差点据此把嫌疑引向没执行过的路径）。四条判据面事实进 memory：崩溃后**退出码仍是 0**（判据只能看 `c3_crash.txt` / `[C3_CRASH]`）；`c3_crash.txt` 写在**被测进程当前目录**（相对路径）；`Start-Process -PassThru` 的 `.ExitCode` 在碰过 `.MainWindowHandle` 后拿到 `$null`；**产物架构读 PE 头别看目录名**（本轮一次漏传 `--arch x86`，目录名 `b182gx86n` 的产物其实是 x64，整条「x86 侧读数」当场作废）。x86 那台**起窗就 0xC0000374** 与本刀无关（把 #183 退回单验仍崩）⇒ B23 继续开着 |
 | 账 #172（提交 `3e7231c7`，门 #309（run 37165123051，head `3e7231c7`，attempt 1）= 11 job 全绿、非绿 0） | **真相不是「Date 默认值偶尔发垃圾」，是日期字面量 `#...#` 从来没有值**：parser 建 `LiteralExpr` 时只挂原文（`case TokenKind::DateLiteral` 一句 return），发码侧 Date 档照 `node.doubleValue` 打 —— 而构造函数只写了 `intValue(0)`，清的是 4 个字节，8 字节槽的高半从没人写过 ⇒ Ninja/Debug 恰好读到 0.0、VS 生成器/Release 读到 -6.277e+66。**所以改前 Debug 那台也不是对的**（VB6 里 `#1/1/1900#` 是 2.0），只是错得稳定。复现不需要另一台机器：同源码同生成器、只加 `/RTCu` 冷编一台 C3.exe，`--emit-c` 一比就把 4 处垃圾点钉出来（flex 的 ComboCalendar Min/MaxDate 的 ret 赋值 + 各自 `Select Case x To y` 折出的区间边界）；改后两台**逐行零差异**。修法：① 一处出口 `foldDateLiteralToOADate()`（定义 parser_helpers.cpp、声明 parser.hpp）—— 斜杠 M/D/Y、连字符 D-M-Y、带 `H:N[:S]` 与 AM/PM、两位年份 <50→2000s / ≥50→1900s、闰年与真日历校验、OLE epoch 1899-12-30=0.0 用 daysFromCivil 无循环算；② 构造函数改整体清零，把「只清半个联合体」这一类堵住。认不出的形状**照旧留 0、不发新诊断**（宁可不许把现在编得过的工程编红）。判据：新夹具 `tests/test_datelit.bas` 进 bas 队列 —— 新编译器 14 条读数全对（门工件 `test-logs-bas-1/job8/test_datelit.out` 原样可查、`.err` 0 字节）；负控 = 同一份测试喂改前的编译器：10 条变 False 且 `L-serial=-6.27743597849989e+66`。A/B 护栏（BASE=临时回退四份源文件重编、NEW=修复后，同配置同生成器，六工程 --emit-c）：charts/czui/ve_list/iface_wrap/ve_units **0 行变化**，flex 4 行且分类器要求「只有数字变」，新值只有 {2.0, 2958465.0, 2958465.999988426} 三个 OLE 序列 |
+| 账 #184（提交 `ab45e2d3`，门 #310（run 37172942961，head `ab45e2d3`，attempt 1）= 11 job 全绿、非绿 0） | **B23 的根因 = `AddressOf` 把本体的裸地址交给了 OS**：x86 上本体是 `__cdecl`（`ret` 不弹参），而 Win32/COM 回调是 `__stdcall` ⇒ 每回调一次把调用方的 ESP 少弹 N*4 字节。VBFlexGrid 每枚网格都经 comctl32 的 `SetWindowSubclass` 装了 6 形参的 SUBCLASSPROC ⇒ 每条消息少弹 24 字节 ⇒ 起窗期堆损坏 `0xC0000374`（改前本地 3/4~5/6 崩、窗口从来出不来；页堆之下现场 6/6 钉在创建 `tooltips_class32` 那一刀，因为 comctl32 正是那条消息链上第一个读到被踩坏的栈的人）。改法按 VB6 口径：被取址的标准模块过程在**定义模块**里另发一枚 `__stdcall` 转发桩（参数表逐字复制 `makeProcSignature` ⇒ 个数/宽度/顺序与本体一致，体内原样转调；Private→`static` 桩，Public→非 static 且原型进自家 `.h`），取址点交桩地址；**本体一个字不改** ⇒ 直接调用那条路与 RTL 那批 cdecl 登记面（Timer / Form_Resize / Winsock / OLE 拖放 / `vb6_di_qsort` 的 cmp）全不牵连。口径只在一处 `addressOfTargetCName`，与委托桩（a15c40b）共用同一套`splitProcSignature` / `thunkArgsFromParams`；标记趟 = stage 3.5c（必须晚于 3.5 跨模块链接才认得归属模块），绑定到 `Delegate` 的 `AddressOf` 一步都不碰。**FlexGridX86 从此挂进门禁**（B23 记的「这份 demo 完全在回归之外」就是它藏这么多轮的原因）。判据四面：`test_addrof_cb` 真跑 x64+x86（六条读数全 Y，CI 两片同值 136 枚窗口，判据写成自洽式 ⇒ 不依赖桌面有几枚窗口）+ `addrof_cb_shape` 发码形状针（两条 `Absent` 就是负控：HEAD~1 的发码里一个 `aoThunk_` 都没有、取址点写的是 `(void*)vb6_CountWin`）+ 静态哨兵 `scripts/check_addressof_thunk_sites.ps1`（同一份脚本在 HEAD~1 的树上 R1~R4 全红）+ A/B `--emit-c` 六工程两架构：**除 flex 外五份逐行相同**，flex `+81/−0` 且 40 处差异全是「取址点改交桩地址」，删除 0 行。另：本轮顺手把 `Test-GuiVbp` 的窗口标题读法从 ANSI 改回 Unicode（`CharSet.Ansi` 一直把类名/标题截成 `V|V`）。遗留：census 那句 `AddressOf callback procs: 49` 数的是**符号副本**（定义模块一份 + 每个引用模块一份），不是过程数（实际 36 枚桩），下轮有别的源码刀时顺手去重，不为它单开一轮门。 |
