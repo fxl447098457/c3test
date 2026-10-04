@@ -384,6 +384,14 @@ std::string CCodeGen::getControlPropReadFn(FrmControlType ctrlType, const std::s
         if (propLower == "enabled") return "vb6_GetTimerEnabled";
         break;
     case FrmControlType::PictureBox:
+        // 账 #192: 画笔光标 CurrentX / CurrentY —— VB6 只在"画得上去"的那几枚上有
+        // (Form / PictureBox / UserControl / PropertyPage / Printer)，所以**不给通用行**：
+        // 给成通用的话 `List1.CurrentX` 也会答一个 0，那是伪造成功。RTL 早就有
+        // (vb6forms_widget_prop.c 的 vb6_GetCurrentX/Y，按 HWND 存窗口属性 VB6_CurrentX/Y)，
+        // 后端这一档一直没登记 ⇒ 真工程里 `With Picture1 : .CurrentX` 撞 cgen_expr_with.cpp
+        // 那条 tempVar + "." + 成员名 的兜底 = C2039 (实测 ucTreeMaps PropPagFMR.c 74/75/76)。
+        if (propLower == "currentx") return "vb6_GetCurrentX";
+        if (propLower == "currenty") return "vb6_GetCurrentY";
         if (propLower == "caption") return "vb6_GetControlText";
         if (propLower == "picture") return "vb6_GetControlPicture";
         if (propLower == "autosize") return "vb6_GetPictureAutoSize";
@@ -889,6 +897,9 @@ std::string CCodeGen::getControlPropWriteFn(FrmControlType ctrlType, const std::
         if (propLower == "enabled") return "vb6_SetTimerEnabled";
         break;
     case FrmControlType::PictureBox:
+        // 账 #192: 与读表成对（只给读侧的话 `.CurrentX = 0` 会落到 HWND 结构体字段上）。
+        if (propLower == "currentx") return "vb6_SetCurrentX";
+        if (propLower == "currenty") return "vb6_SetCurrentY";
         if (propLower == "caption") return "vb6_SetControlText";
         if (propLower == "picture") return "vb6_SetControlPicture";
         if (propLower == "autosize") return "vb6_SetPictureAutoSize";
@@ -1443,6 +1454,11 @@ std::string CCodeGen::controlZeroArgMethod(FrmControlType ctrlType,
     }
     if (memberLower == "clearsel" && ctrlType == FrmControlType::Slider)
         return "vb6_Slider_ClearSel";
+    // 账 #192: ListBox / ComboBox 的 Clear。VB6 里它是方法而不是属性，且只有这两枚
+    // 有清空语义（TreeView/ListView 的清是各自那一族，另有出口）。
+    if (memberLower == "clear"
+        && (ctrlType == FrmControlType::ListBox || ctrlType == FrmControlType::ComboBox))
+        return "vb6_ClearList";
     return "";
 }
 

@@ -3703,6 +3703,19 @@ if ($Category -in @("all", "run", "vbp")) {
     Test-Vbp "evtcase" "$Tests\evtcase\EvtCase.vbp" $evtCaseExpected
     Test-Vbp "evtcase_x86" "$Tests\evtcase\EvtCase.vbp" $evtCaseExpected -Arch "x86"
 
+    # <vbeclipse> 回归夹子 (piccur) 账 #192: With 块里读写的那一枚必须是**它自己**的状态。
+    # 真工程那一形 = Charts 2020/ucTreeMaps 的 PropPagFMR.pag:256-266（`With Picture1 : .CurrentX /
+    # .CurrentY`）与 pag:618（`With lstFonts : Call .Clear`）—— 后端两张表从没登记过这三条，
+    # 于是全部落到 cgen_expr_with.cpp 那条 "tempVar + "." + 成员名" 的兜底 = C2039。
+    # 三头: PC01 写了读得回；PC02 **另一枚没被写坏**（RTL 按 HWND 存窗口属性，全局一份就露馅，
+    # 同 #156 那条双向钉）；PC03 清空前那个数确实是 2（拦住"Clear 什么都不做、本来就 0"那种假绿）。
+    # 负控 = 修复前那台编译器 (40bbef67) 真编同一份夹具：PicForm.c 150/151/160 三条
+    #   error C2039 "CurrentX"/"CurrentY"/"Clear" 不是 "HWND__" 的成员，BUILD rc=1、一条读数都不出。
+    $picCurExpected = @("PC01-CUR=True", "PC02-SEP=True aX=350 bX=0",
+        "PC03-CLEAR=True before=2 after=0", "PC-DONE")
+    Test-Vbp "piccur" "$Tests\piccur\PicCur.vbp" $picCurExpected
+    Test-Vbp "piccur_x86" "$Tests\piccur\PicCur.vbp" $picCurExpected -Arch "x86"
+
     # <vbeclipse> 回归夹子 (optdef) 账 #194: VB 的整数类型后缀是**词法**，不许抄进生成 C。
     # 语义层那份 Optional 默认值求值以前直接 return rawText，于是 `Optional ... As Long = 0&` 发成
     # `(*FontIndex) = 0&;` = C2059 (真工程证据: Charts 2020/ucTreeMaps 的 PropPagFMR.pag:740/886)。
@@ -4407,6 +4420,16 @@ if ($Category -in @("all", "syntax")) {
     Test-CodegenNote "optdef_default_shape_real" @("$Tests\Charts 2020\ucTreeMaps\Proyecto1.vbp") @(
         "if (!_has_FontIndex) (*FontIndex) = 0L;") @(
         "(*FontIndex) = 0&;")
+
+    # 形状针 (账 #192): With 那枚控件的属性读写与方法必须走两张表各自的出口，
+    # 不许再出现 tempVar + "." + 成员名 那一形（HWND__ 是结构体指针，那是编译错）。
+    Test-CodegenNote "with_ctrl_cursor_clear" @("$Tests\piccur\PicCur.vbp") @(
+        "vb6_SetCurrentY(_vb6_with_",
+        "vb6_ClearList((void*)_vb6_with_",
+        "vb6_GetCurrentX(vb6_hwnd_picA") @(
+        "_vb6_with_0.CurrentX",
+        "_vb6_with_0.CurrentY",
+        "_vb6_with_1.Clear()")
 
     # 账 #195: VB 的 Integer 类型后缀 `%` 以前在词法层就被拒 (case '%' 那一支只吃字符不置标志,
     # 于是 `3%` 落回「无后缀十进制按数值大小定档」那一段, 残留的 % 让 parseIntLit 报「超出 64 位」并级联出
