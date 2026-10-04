@@ -4580,7 +4580,7 @@ if ($Category -in @("all", "syntax")) {
     Test-CodegenNote "dcsurf_text_measure" @("$Tests\dcsurf\DcSurf.vbp") @(
         "vb6_ControlTextHeight((void*)vb6_hwnd_picB,",
         "vb6_ControlTextWidth((void*)vb6_hwnd_picB,",
-        "vb6_ControlTextHeight((void*)_vb6_with_0") @(
+        "vb6_ControlTextHeight((void*)_vb6_with_1") @(
         "_vb6_with_0.TextHeight",
         "vb6_hwnd_picB.TextHeight",
         'vb6_ComCall(vb6_hwnd_picB, L"TextHeight"')
@@ -4588,7 +4588,7 @@ if ($Category -in @("all", "syntax")) {
     # 同一刀钉在真工程上: ucTreeMaps 的 PropPagFMR.pag:265 `With Picture1 : .CurrentY + .TextHeight(Text)`
     # —— 这是 #196 收完 hDC 之后 ucTreeMaps 仅剩的那条 C2039。
     Test-CodegenNote "text_measure_real" @("$Tests\Charts 2020\ucTreeMaps\Proyecto1.vbp") @(
-        "vb6_ControlTextHeight((void*)_vb6_with_0)") @(
+        "vb6_ControlTextHeight((void*)_vb6_with_0,") @(
         "_vb6_with_0.TextHeight")
 
     # 账 #195: VB 的 Integer 类型后缀 `%` 以前在词法层就被拒 (case '%' 那一支只吃字符不置标志,
