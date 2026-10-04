@@ -1483,6 +1483,39 @@ function Test-VbpBuildFail {
 
 # ai/023 S05: build must SUCCEED but emit the given warning text (D7: 校验不拒收,
 # 警告必须可见 —— 成功路径吞警告的坑在 S01 已修, 本用例防回归).
+# 账 #187: 真工程「编得过、链得动、出得了 exe」的正面积。三个 helper 各管一头 ——
+# Test-Vbp 要跑起来并校验输出（这些第三方工程没有自退出口，CI 里会一直挂着）、
+# Test-VbpBuildFail 只钉"必须红"，中间那一格"必须绿"以前没人管：本轮 #188/#190/#191 三刀
+# 全落在 Charts 2020 的 UC 子工程上，而它们压根不在任何清单里，每次都靠手工真编译才看得见
+# （ucChartBar 的 LNK2019 就是手工编译才抓到的 —— 编不过的东西在门禁里连"红"都算不上，是根本不存在）。
+# 输出目录**按用例隔离**：这四份 .vbp 的 ExeName32 全写着 Proyecto1.exe，共用 $OutDir 会互相盖掉
+# （#166 那条"exe 名有两个权威"的姊妹坑：名字修对了还会串味）。先删干净再编，
+# 免得 Test-Path 命中上一轮的旧 exe —— 记忆里那条教训原话是「Test-Path $exe 不是构建成功的判据」。
+function Test-VbpBuild {
+    param([string]$Name, [string]$VbpFile, [string]$Arch = "")
+    $script:total++
+    if (-not (Enter-VbpShard)) { return }
+    Write-Host -NoNewline "  [VBP-BUILD] $Name ... "
+    $buildDir = Join-Path $OutDir ("build_" + $Name)
+    if (Test-Path $buildDir) { Remove-Item -Recurse -Force $buildDir }
+    New-Item -ItemType Directory -Force -Path $buildDir | Out-Null
+    $argList = '"' + $VbpFile + '" --output-dir "' + $buildDir + '"'
+    if ($Arch -ne "") { $argList += " --arch " + $Arch }
+    $result = & cmd /c ('"' + $C3 + '" ' + $argList + ' 2>&1')
+    $text = (($result | Out-String) -replace '\s+', ' ')
+    $rc = $LASTEXITCODE
+    $exePath = Join-Path $buildDir ((Resolve-VbpExeBase -VbpFile $VbpFile) + ".exe")
+    if ($rc -eq 0 -and (Test-Path $exePath)) {
+        $script:pass++
+        Write-Host ("PASS (" + (Get-Item $exePath).Length + " bytes)") -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host ("FAIL rc=" + $rc + " exe=" + (Test-Path $exePath)) -ForegroundColor Red
+        Write-Host ("    找的是 " + $exePath) -ForegroundColor DarkGray
+        if ($Verbose) { Write-Host $text }
+    }
+}
+
 function Test-VbpWarn {
     param([string]$Name, [string]$VbpFile, [string]$Needle)
     $script:total++
@@ -3715,6 +3748,18 @@ if ($Category -in @("all", "run", "vbp")) {
         "PC03-CLEAR=True before=2 after=0", "PC-DONE")
     Test-Vbp "piccur" "$Tests\piccur\PicCur.vbp" $picCurExpected
     Test-Vbp "piccur_x86" "$Tests\piccur\PicCur.vbp" $picCurExpected -Arch "x86"
+
+    # 账 #187: Charts 2020 的三枚 UC 子工程真编真链 (x64 + x86)，只要求"编得过、出得了 exe"，不跑。
+    # 本轮实测字节数 (当前这台)：x64 696,320 / 576,000 / 576,000；x86 496,128 / 498,176，
+    # ucChartBar x86 = .build/b191new/ucChartBar/Proyecto1.exe。
+    # ucProgressCircular / ucTreeMaps **刻意不列** —— 它们今天还红着 (B29③④ 与 #192/#196)，
+    # 列进来就是把已知红当门禁基线；编过之后再加，那一加就是"这个工程从此不许退回编不过"。
+    Test-VbpBuild "charts_ucChartBar"  "$Tests\Charts 2020\ucChartBar\Proyecto1.vbp"
+    Test-VbpBuild "charts_ucChartBar_x86" "$Tests\Charts 2020\ucChartBar\Proyecto1.vbp" -Arch "x86"
+    Test-VbpBuild "charts_ucChartArea"  "$Tests\Charts 2020\ucChartArea\Proyecto1.vbp"
+    Test-VbpBuild "charts_ucChartArea_x86" "$Tests\Charts 2020\ucChartArea\Proyecto1.vbp" -Arch "x86"
+    Test-VbpBuild "charts_ucPieChart"  "$Tests\Charts 2020\ucPieChart\Proyecto1.vbp"
+    Test-VbpBuild "charts_ucPieChart_x86" "$Tests\Charts 2020\ucPieChart\Proyecto1.vbp" -Arch "x86"
 
     # <vbeclipse> 回归夹子 (optdef) 账 #194: VB 的整数类型后缀是**词法**，不许抄进生成 C。
     # 语义层那份 Optional 默认值求值以前直接 return rawText，于是 `Optional ... As Long = 0&` 发成
