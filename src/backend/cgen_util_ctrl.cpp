@@ -1,4 +1,5 @@
 #include "backend/cgen.hpp"
+#include "common/float_literal.hpp"  // 账 #188: 浮点字面量的单一出口
 #include <algorithm>
 #include <cctype>
 #include <iostream>
@@ -1231,8 +1232,8 @@ void CCodeGen::emitDesignerFontProps(const FrmControl& ctrl, const std::string& 
         else if (szIt->second.type == FrmValueType::Integer) pt = (double)szIt->second.intValue;
         // 0 与负数不是字号（VB6 的设计期也不会写这种数），发了只会把窗口打成"默认字体"那一档。
         if (pt > 0.0) {
-            c_.emitLine("vb6_SetControlFontSize(" + hw + ", " + std::to_string(pt)
-                        + "f);  /* design FontSize */");
+            c_.emitLine("vb6_SetControlFontSize(" + hw + ", "
+                        + floatSingleLiteral(pt) + ");  /* design FontSize */");
         }
     }
 

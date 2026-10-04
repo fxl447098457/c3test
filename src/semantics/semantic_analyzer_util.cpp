@@ -1,4 +1,5 @@
 #include "semantics/semantic_analyzer.hpp"
+#include "common/float_literal.hpp"  // 账 #188: 浮点字面量的单一出口
 #include "semantics/interface_sig.hpp"  // tB Interface/继承线共用的小写键函数 (B07b)
 #include <algorithm>
 #include <cctype>
@@ -408,20 +409,11 @@ std::string SemanticAnalyzer::evalOptionalDefault(ASTNode* defaultValue, Vb6Type
                 return "((intptr_t)" + t + "ULL)";
             }
             case LiteralKind::Single: {
-                // Fix 133z: 单精度默认值 `1!` → C 浮点字面量 `1.0000000f`.
-                // 原样返回 rawText ("1!") 会写进生成 C → 语法错误
-                // (czUI.ctl: `Optional ByVal penWidth As Single = 1!` →
-                // `if (!_has_penWidth) penWidth = 1!;` → C2059).
-                float fv = lit->floatValue;
-                std::ostringstream oss133z;
-                char buf133z[64];
-                snprintf(buf133z, sizeof(buf133z), "%.9g", (double)fv);
-                oss133z << buf133z;
-                if (strchr(buf133z, '.') == nullptr && strchr(buf133z, 'e') == nullptr
-                    && strchr(buf133z, 'E') == nullptr)
-                    oss133z << ".0";
-                oss133z << "f";
-                return oss133z.str();
+                // Fix 133z: 单精度默认值 `1!` 必须打成 C 浮点字面量 —— 原样返回 rawText ("1!")
+                // 会写进生成 C → C2059 (czUI.ctl: `Optional ByVal penWidth As Single = 1!`)。
+                // 账 #188: 「后缀前必须有 '.' 或指数」这条形状不再在这里手写, 归
+                // common/float_literal.hpp 一处 (1! → `1.0f`)。
+                return floatSingleLiteral(lit->floatValue);
             }
             case LiteralKind::Double: {
                 // Fix 133z: parser 无 Single 字面量kind, `1!`/`0!` 以 Double 存储,

@@ -1,4 +1,5 @@
 #include "backend/cgen.hpp"
+#include "common/float_literal.hpp"  // 账 #188: 浮点字面量的单一出口
 #include <cstdio>
 #include <cstdlib>
 #include "project/frx_reader.hpp"

@@ -606,6 +606,24 @@ function Test-HostPseudoTableCensus {
 # 账 #185: 子类化分层的槽位哨兵 (一个属性名 = 一层, 谁都不许跟谁抢)。
 # 这一类缺陷的症状是「装了但没装」—— 编得过、发码对、事件一次也不响, 只有运行期看得见,
 # 所以静态钉住。同一份脚本在 HEAD 的树上 S1~S4 一起红 (实测 6 行)。
+# 账 #188: 浮点字面量的形状只有一个出口 (src/common/float_literal.hpp)。
+# 手拼 "f" 后缀这件事在 x86/x64 都不会有运行期症状 —— 它是**编不过**, 而带小数点的设计值 (8.25)
+# 恰好躲过, 所以必须静态钉。同一份脚本在 HEAD 的树上 R1~R3 全红 (R1 当场点出那 6 个手拼点)。
+function Test-FloatLiteralShape {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] float_literal_shape ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\check_float_literal_shape.ps1" 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        $out | Select-Object -First 6 | ForEach-Object { Write-Host "  $_" }
+    }
+}
+
+
 function Test-SubclassSlotSites {
     $script:total++
     Write-Host -NoNewline "  [STATIC] subclass_slot_sites ... "
@@ -3907,6 +3925,7 @@ if ($Category -in @("all", "compile")) {
     Test-UcScaleUnitsCensus
     Test-HostPseudoTableCensus
     Test-AddressOfThunkSites
+    Test-FloatLiteralShape
     Test-SubclassSlotSites
 
     Write-Host ""
@@ -4221,6 +4240,14 @@ if ($Category -in @("all", "syntax")) {
         "EnumWindows((void*)aoThunk_vb6_CountWin, 4242);") @(
         "EnumWindows((void*)vb6_CountWin, 4242);",
         "__stdcall vb6_CountWin(intptr_t hWnd, intptr_t lParam) {")
+    # 账 #188: 设计期字号是**整数**时, 发码以前会拼出 C 里的非法字面量 `12f` (C2059 bad suffix),
+    # 而 VB6 的默认字号 8.25 带小数点 ⇒ 门禁里从来没响过。钉在真实工程上 (Charts 2020/ucChartBar 的
+    # BeginProperty TitleFont Size=12): 改后必须是 `12.0f`, 且 8.25 那一族**一个字节都不许变**
+    # (证人不抖)。Absent 那条就是负控 —— HEAD 的发码里正是 `->Size = 12f;`。
+    Test-CodegenNote "fontsize_literal" @("$Tests\Charts 2020\ucChartBar\Proyecto1.vbp") @(
+        "->Size = 12.0f;", "->Size = 8.25f;") @(
+        "->Size = 12f;")
+
     # ai/028 V2 的发码形状: 插值必须** literally ** 发成手写的 & CStr() / Format$ 形状 ——
     # 注意第二枚读数挑的是 vb6_CStrLong (按实参类型改发专用 CStr), 这正是"降级成真 AST"
     # 才继承得到的东西 (计划书 R2/R3 的实测面)。

@@ -112,11 +112,11 @@
                   + " = (vb6_ComIface_Font*)vb6_UC_NewFont();");
         c_.emitLine("  if (" + varName + ") {");
         c_.emitLine("    " + varName + "->Name = vb6_BSTR_FromStr(L\"" + escapeWideCString(nm) + "\");");
-        {
-            char szBuf[64];
-            snprintf(szBuf, sizeof(szBuf), "%.4g", sz);
-            c_.emitLine("    " + varName + "->Size = " + std::string(szBuf) + "f;");
-        }
+        // 账 #188: 这里以前自己 snprintf("%.4g") 再拼 "f" —— 整数字号 (12/14/16…) 拼出来就是
+        // C 里的非法 token `12f` (C2059 bad suffix on number)。VB6 默认字号 8.25 带小数点,
+        // 所以门禁里一直看不见; 带设计期整数字号的工程 (Charts 2020 的 ucChartBar/ucProgressCircular)
+        // 直接编不过。形状归 common/float_literal.hpp 一处, 位数照旧 4 位 (8.25 的写法不变)。
+        c_.emitLine("    " + varName + "->Size = " + floatSingleLiteral(sz, 4) + ";");
         c_.emitLine("    " + varName + "->Weight = " + std::to_string(weight) + ";");
         c_.emitLine("    " + varName + "->Charset = " + std::to_string(charset) + ";");
         c_.emitLine("    " + varName + "->Bold = " + std::to_string(bBold) + ";");
@@ -767,7 +767,7 @@
                                 + std::to_string(fv143.intValue) + ", 0, NULL, NULL, 0.0f, 0, 0, 0}");
                         } else if (fv143.type == FrmValueType::Float) {
                             bagLines143.push_back("{L\"" + escapeWideCString(pn143) + "\", 4/*VT_R4*/, 0, "
-                                + std::to_string(fv143.floatValue) + "f, NULL, NULL, 0.0f, 0, 0, 0}");
+                                + floatSingleLiteral(fv143.floatValue) + ", NULL, NULL, 0.0f, 0, 0, 0}");
                         } else if (fv143.type == FrmValueType::String) {
                             std::string sv143 = fv143.rawText;
                             if (sv143.size() >= 2 && sv143.front() == '"' && sv143.back() == '"')
@@ -827,7 +827,7 @@
                             bagLines143.push_back("{L\"" + escapeWideCString(blk143.blockName)
                                 + "\", 9/*VT_DISPATCH(IFont)*/, 0, 0, NULL, L\""
                                 + escapeWideCString(fName143) + "\", "
-                                + std::to_string(fSize143) + "f, "
+                                + floatSingleLiteral(fSize143) + ", "
                                 + std::to_string(fWeight143) + ", "
                                 + std::to_string(fCharset143) + ", "
                                 + std::to_string(fFlags143) + "}");
