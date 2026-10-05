@@ -3423,11 +3423,11 @@ if ($Category -in @("all", "run", "vbp")) {
     Test-Vbp "pbsub" "$Tests\pbsub\PbSub.vbp" @(
         "PB01-PAINT px=255", "PB02-PIC-MDOWN x=20", "PB03-PIC-MUP", "PB04-PIC-CLICK",
         "PB05-IMG-CLICK", "PB06-LB-MDOWN",
-        "PB-CNT mdown=1 mup=1 click=1 img=1 lb=1 paint_ok=1")
+        "PB-CNT mdown=1 mup=1 click=1 img=1 lb=1 paint_ok=1", "PB-WAIT done=True")
     Test-Vbp "pbsub_x86" "$Tests\pbsub\PbSub.vbp" @(
         "PB01-PAINT px=255", "PB02-PIC-MDOWN x=20", "PB03-PIC-MUP", "PB04-PIC-CLICK",
         "PB05-IMG-CLICK", "PB06-LB-MDOWN",
-        "PB-CNT mdown=1 mup=1 click=1 img=1 lb=1 paint_ok=1") -Arch "x86"
+        "PB-CNT mdown=1 mup=1 click=1 img=1 lb=1 paint_ok=1", "PB-WAIT done=True") -Arch "x86"
 
     # --- P20-46: 控件字符串全程 W / 支持多国语言（用户要求）的源码面反例断言 ---
     # 判据两条:

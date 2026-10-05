@@ -72,7 +72,12 @@ End Sub
 
 Private Sub tmrStep_Timer()
     Dim lp As LongPtr
+    Dim allIn As Boolean
     lp = 20 + 20 * 65536          ' lParam = (x=20, y=20), 三枚子窗都覆盖得到
+    ' 门 #332 的读数: 这一形以前在**固定第三拍**读计数, 而五条通知是 PostMessage 发出去的,
+    ' 饿机器上到齐要用到第 8 拍 (本地 24 趟实测, 见台账 §B45) ⇒ 饿的时候读到全 0, 判据就红了。
+    ' 现在把"等多久"和"断言什么"拆开: 到齐就读, 到不了就等满 20 拍再读 —— 真丢通知仍然读成全 0 红。
+    allIn = (nDown >= 1 And nUp >= 1 And nClick >= 1 And nImg >= 1 And nLb >= 1)
     If mStep = 0 Then
         Pic1.Refresh                        ' 走一遍分层绘制 (表面 + 用户笔画)
         Call PostMessage(Pic1.hwnd, &H201, 1, lp)   ' WM_LBUTTONDOWN
@@ -80,13 +85,14 @@ Private Sub tmrStep_Timer()
         Call PostMessage(Img1.hwnd, &H201, 1, lp)
         Call PostMessage(Img1.hwnd, &H202, 0, lp)   ' => Image 的 Click
         Call PostMessage(Lb1.hwnd, &H201, 1, lp)    ' => Label 的 MouseDown (证人)
-    ElseIf mStep = 2 Then
+    ElseIf allIn Or mStep >= 20 Then
         ' 计数写成自洽式: 鼠标那五条是"每发一条消息恰好一条通知"(精确值才是翻倍探测器),
         ' paint 的**条数**不由我们定 (窗口显示/遮挡都会再要一次重绘) ⇒ 只问"有没有至少一条"。
         Dim paintOk As Integer
         If nPaint >= 1 Then paintOk = 1
         Debug.Print "PB-CNT mdown=" & nDown & " mup=" & nUp & _
                     " click=" & nClick & " img=" & nImg & " lb=" & nLb & " paint_ok=" & paintOk
+        Debug.Print "PB-WAIT done=" & CStr(allIn)
         tmrStep.Enabled = False
         Debug.Print "PB-DONE"
         Unload Me
