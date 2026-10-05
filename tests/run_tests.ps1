@@ -1702,8 +1702,8 @@ if ($Category -in @("all", "run", "bas")) {
         "BF-byte-or=95", "BF-byte-not=-86", "BF-int-not=-2", "BF-dblnot=-3", "BF-eqv=-7",
         "BF-imp=-5", "BF-assigned=51", "BF-bool-or=True", "BF-bool-and=False", "BF-boolbox=False",
         "BF-cond=hit", "BF-boolcond=miss", "BF-sum=85", "BF-DONE")
-    Add-BasTest "test_bitops" "$Tests	est_bitops.bas" $bitsNeedles
-    Add-BasTest "test_bitops_x86" "$Tests	est_bitops.bas" $bitsNeedles -Arch "x86"
+    Add-BasTest "test_bitops" "$Tests\test_bitops.bas" $bitsNeedles
+    Add-BasTest "test_bitops_x86" "$Tests\test_bitops.bas" $bitsNeedles -Arch "x86"
     # <vbeclipse>: Join/Filter 的数组槽 (Variant 数组曾按 BSTR* 读 → 段错误; Filter 的
     # VB6 可选参曾不补 → C2198/C2440 编不过)。含 1-based 源数组、零命中空数组、非字符串元素 → 13。
     Add-BasTest "test_joinfilter" "$Tests\test_joinfilter.bas" @("JF-var=[abc|xyz|abd]", "JF-var-def=[abc xyz abd]", "JF-str=[abc|xyz|abd]", "JF-f-lb=0 ub=1", "JF-f=[abc|abd]", "JF-none-ub=-1", "JF-excl-ub=0", "JF-excl=[xyz]", "JF-err=13", "JF-DONE")
