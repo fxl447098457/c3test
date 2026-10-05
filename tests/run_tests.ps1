@@ -4917,6 +4917,15 @@ if ($Category -in @("all", "syntax")) {
         "static void vb6_frmUnits_uArr_Hit();",
         "_sink_uArr.onHit",
         "vb6_frmUnits_evtThunk_uArr_Hit(void* handler)")
+    # 账 #222 的门 #350 回归 (charts_ucTreeMaps 两档 C2440) 的形状针: 事件形参的 C 类型
+    # 三处必须同源 —— 回调 typedef / 容器侧处理器原型 / prelude 那枚 thunk。修法是把 prelude
+    # 自带的第二张类型表撤掉、改问 mapTypeRef (见 check_uc_array_event_sites.ps1 的 E5)。
+    # Absent 那条是**改前产物里真实存在**的形状, 表一回来它就红。
+    Test-CodegenNote "ucevt_thunk_type_same_authority" @("$Tests\Charts 2020\ucTreeMaps\Proyecto1.vbp") @(
+        "typedef void (*vb6_evt_ucTreeMaps_ItemClick_cb)(void* handler, vb6_VARIANT Key);",
+        "static void vb6_Form2_evtThunk_ucTreeMaps1_ItemClick(void* handler, vb6_VARIANT a0) { vb6_Form2_ucTreeMaps1_ItemClick(a0); }") @(
+        "static void vb6_Form2_evtThunk_ucTreeMaps1_ItemClick(void* handler, int32_t a0)")
+
 
     # ai/028 V2 的发码形状: 插值必须** literally ** 发成手写的 & CStr() / Format$ 形状 ——
     # 注意第二枚读数挑的是 vb6_CStrLong (按实参类型改发专用 CStr), 这正是"降级成真 AST"

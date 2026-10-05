@@ -83,6 +83,20 @@ $e4arm  = Count-Of $wndp 'if (info.hasClick) {'
 if ($e4gate -ne 2) { $viol += ("E4: 两条 hasClick 判据都要问 sink 表，读到 " + $e4gate) }
 if ($e4arm -ne 1)  { $viol += ("E4: WM_LBUTTONUP 的发码 arm 应为 1 处，读到 " + $e4arm) }
 
+# ---- E5: 事件形参的 C 类型只有一处权威 (mapTypeRef) = 门 #350 那条回归的护栏 ----
+# prelude 以前自带一张 kTypeMapPre (七档 + default int32_t), 与 emitEventSink 的回调 typedef
+# 容器侧处理器原型两处**不同源**: 缺 Variant 一档 => thunk 声明 int32_t 而 typedef 与处理器
+# 都是 vb6_VARIANT => charts_ucTreeMaps 两架构 C2440; Integer 那一档表给 int32_t、mapTypeRef
+# 给 int16_t => VBFlexGrid 的 Button/Shift/Cancel 形参全按错宽度接 (发送侧按 typedef 发)。
+# 现在表已撤, 类型名现拼一枚 SimpleTypeRef 喂 mapTypeRef。钉死两头: 旧表不许回来、新出口只一处。
+if ((Count-Of $prelude 'kTypeMapPre') -ne 0) {
+    $viol += 'E5: prelude 里又出现了第二张事件形参类型表 kTypeMapPre (须与 typedef/处理器同源)'
+}
+$e5type = Count-Of $prelude 'mapTypeRef(&tyRefPre)'
+$e5node = Count-Of $prelude 'SimpleTypeRef tyRefPre('
+if ($e5type -ne 1) { $viol += ('E5: prelude 问 mapTypeRef 的路应为 1 条，读到 ' + $e5type) }
+if ($e5node -ne 1) { $viol += ('E5: prelude 现拼 SimpleTypeRef 应为 1 处，读到 ' + $e5node) }
+
 # ---- C: 账 #226 的 click 落点 —— 三份权威 + 顺序 (布局式初始化) ----
 # vb6_UserControlDesc 是**按位置**初始化式, 所以『新槽追加到末尾』不是风格问题,
 # 而是错位一个指针宽就运行期 AV 的那种问题 (rev22 那段教训)。这里钉两头:
@@ -119,8 +133,8 @@ if ($gRes -lt 0 -or $gCli -lt 0 -or -not ($gRes -lt $gCli)) {
 # ---- 普查（不判红，给下一轮留证据） ----
 $cenSink = Count-Of $prelude 'ucEventAttach_[attachKey]'
 $cenSfx  = Count-Of $prelude 'elemSfx'
-Write-Host ("census: key(def/dec/calls)={0}/{1}/{2} abi(def/dec/calls)={3}/{4}/{5} sink-table(dec/ins/gate/arm)={6}/{7}/{8}/{9} attach-store={10} elemSfx={11}" -f `
-    $e1def, $e1dec, $e1call, $e2def, $e2dec, $e2call, $e4dec, $e4ins, $e4gate, $e4arm, $cenSink, $cenSfx)
+Write-Host ("census: key(def/dec/calls)={0}/{1}/{2} abi(def/dec/calls)={3}/{4}/{5} sink-table(dec/ins/gate/arm)={6}/{7}/{8}/{9} attach-store={10} elemSfx={11} evt-type-exits(mapTypeRef/SimpleTypeRef)={12}/{13}" -f `
+    $e1def, $e1dec, $e1call, $e2def, $e2dec, $e2call, $e4dec, $e4ins, $e4gate, $e4arm, $cenSink, $cenSfx, $e5type, $e5node)
 Write-Host ("census-click: handoff={0} wrap={1} slot={2} struct-last-click={3} dblclick-dispatch(now)={4}" -f `
     $nHandoff, $nWrap, $nSlot, ($iClick -lt $iClose), (Count-Of $uhoTxt 'desc->dblClick'))
 
@@ -129,5 +143,5 @@ if ($viol.Count -gt 0) {
     foreach ($v in $viol) { Write-Host ('  ' + $v) }
     exit 1
 }
-Write-Host ("PASS: 元素键 1+1+4 / ABI 1+1+2+prep / 无第二份前向声明 / sink 表 1+1 且 gate {0} 条、arm {1} 条 / click 落点 1+2+1 且两份权威同序" -f $e4gate, $e4arm)
+Write-Host ("PASS: 元素键 1+1+4 / ABI 1+1+2+prep / 无第二份前向声明 / sink 表 1+1 且 gate {0} 条、arm {1} 条 / click 落点 1+2+1 且两份权威同序 / 事件形参类型一处权威" -f $e4gate, $e4arm)
 exit 0

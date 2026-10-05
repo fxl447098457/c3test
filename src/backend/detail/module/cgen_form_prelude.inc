@@ -114,15 +114,15 @@
             std::vector<UcEvtPre> ucEventsPre;
             {
                 std::string lowCode = Symbol::toLower(ucSpecEvt->codeSection);
-                static const char* kTypeMapPre[][2] = {
-                    // Fix <vbeclipse> rev17: 补 `object` —— 缺它时命中 default "int32_t",
-                    // 于是 `Public Event X(ByRef Editor As Object)` 的前向声明/thunk 写成
-                    // `int32_t arg0`, 而回调 typedef (emitEventSink 走 mapTypeRef) 与
-                    // RaiseEvent 发送侧都是 `void*`。x86 上同宽侥幸能跑, x64 直接截断指针。
-                    {"boolean", "int16_t"}, {"string", "BSTR"},
-                    {"integer", "int32_t"}, {"long", "int32_t"},
-                    {"single", "float"}, {"double", "double"},
-                    {"object", "void*"}, {nullptr, nullptr} };
+                // 形参 C 类型**不在这里另立一张表**: 回调 typedef (emitEventSink) 与容器侧处理器
+                // 原型都出自 mapTypeRef, 这里是第三处, 必须同源。账 #222 首版留着这张表,
+                // 它缺 Variant 一档 (掉 default "int32_t"), 于是门 #350 上 charts_ucTreeMaps
+                // 两档红: typedef 传 vb6_VARIANT、处理器收 vb6_VARIANT, thunk 却声明 int32_t a0
+                // = C2440 + C4024。Integer 那一档同样对不上 (表给 int32_t, mapTypeRef 给 int16_t,
+                // VBFlexGrid 三十多枚事件形参全在这一档上), 一并收掉。
+                // 类型名从 .ctl 的 `Public Event` 文本里切出来, 现拼一枚 SimpleTypeRef 喂给
+                // mapTypeRef。它顺带登记的类指针前向声明走 usedClassTypes_, 注入点在 .h 顶部
+                // (#include 之后), 所以这一趟登记也来得及。
                 size_t pos = 0;
                 while (true) {
                     size_t e = lowCode.find("public event ", pos);
@@ -148,10 +148,9 @@
                             std::string ty = args.substr(tStart, tEnd - tStart);
                             while (!ty.empty() && ty.front() == ' ') ty.erase(ty.begin());
                             while (!ty.empty() && (ty.back() == ' ' || ty.back() == '\r')) ty.pop_back();
-                            std::string cty = "int32_t";
-                            std::string tyLowPre = Symbol::toLower(ty);
-                            for (int k = 0; kTypeMapPre[k][0]; k++)
-                                if (tyLowPre == kTypeMapPre[k][0]) { cty = kTypeMapPre[k][1]; break; }
+                            // 账 #222: 与 typedef / 处理器原型同源 (见上面那段注释)。
+                            SimpleTypeRef tyRefPre(SourceLocation{}, ty);
+                            std::string cty = mapTypeRef(&tyRefPre);
                             ev.ptypes.push_back(cty);
                             pcur = tEnd;
                         }
