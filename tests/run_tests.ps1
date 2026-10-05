@@ -3338,6 +3338,19 @@ if ($Category -in @("all", "run", "vbp")) {
         "SB37-SETAUTOSZ=0", "SB38-SETTIP=hello", "SB39-SETSTYLE=6",
         "SB40-AFTERCLR=0", "CTRLSTATUSBAR-DONE")
 
+    # 账 #205: 状态条那两处问字体（sbrContents 的排版宽 + 画文字）以前都裸问窗口，而状态条是
+    # RTL 自注册的窗口类 ⇒ 恒回 NULL，实测同一串文字在 8pt 与 20pt 两枚上量出同一个宽(140)。
+    # 排版结果从 VB 没有现成的门（Panels(i).Width 读的是**请求值**，不是排版后的宽），
+    # 所以判据问窗口本人：SB_GETPARTS(WM_USER+6) 交回各格右边界。
+    # SF02/SF04 两头钉"字体参与排版"（改前都 False），SF05 钉"显式给过 Width 的那格不许挪"。
+    # RAW 三行只钉前缀 —— 110/260 是 DPI 的函数，不钉绝对数（#147 那条口径）。
+    $sbFontExpected = @(
+        "SF00-RAW pf8=", "SF01-RAW fix=", "SF02-CONTENTS-TRACKS-FONT=True",
+        "SF03-RAW after=", "SF04-RUNTIME-FONT=True",
+        "SF05-FIXED-EDGE-UNCHANGED=True", "SBFONT-DONE")
+    Test-Vbp "sbfont" "$Tests\sbfont\SbFont.vbp" $sbFontExpected
+    Test-Vbp "sbfont_x86" "$Tests\sbfont\SbFont.vbp" $sbFontExpected -Arch "x86"
+
     # --- P20-42: SSTab (SysTabControl32 复刻) ---
     # 期望串取自夹具真实输出 (别缩写标签)。TS25..TS28 是切页显隐: vb6_GetControlVisible
     # 走 IsWindowVisible 沿父链传播, 所以断言放在 Timer 里 (窗体已显示之后)。

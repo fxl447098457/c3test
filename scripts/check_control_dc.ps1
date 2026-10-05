@@ -268,22 +268,20 @@ if ($fntR.Count -lt 1) { $bad += "D10 nobody reads the VB6_CtrlFont slot (证人
 
 # ---- D11: 那一处出口的**覆盖面** (账 #202/#204/#205) ----
 # D10 守的是"读法只有一处"，这一条守"该用这一处的人都用了":
-#   一是全 src/rtl 里带 WM_GETFONT 的代码行 = 出口那 1 行 + 一条**具名豁免**（下面那段）——
+#   一是全 src/rtl 里带 WM_GETFONT 的代码行 = **只有出口那 1 行**（账 #205 之后，状态条那两处的
+#     具名豁免已删）——
 #     别处再裸问一次，对 STATIC/BUTTON 那一类窗口就是静默拿 NULL（探针实测两类都不答），
 #     症状是"按 DC 的默认字体画/量"，不是崩（shape 的图钮标题、widget 的 AutoSize 宽度就是这一形）；
 #   二是存那份自存的只有一个写口、三个调用站点（setter / 控件创建路 / 控件数组那条创建路），
 #     少一个就是一个站点又"只发不存"（#204 的根因形状）。
 #     数组那一路今天运行期不可达（`vb6_CtrlArr_Load` 全仓零调用者, 2026-10-05 grep 证），列进来是**口径**。
 $rawAll = @($rtl | Where-Object { $_.Text.Contains("WM_GETFONT") })
-$rawOut = @($rawAll | Where-Object { $_.File -ne "vb6forms_ctrl.c" })
-# 刻意留的一条**具名豁免**: vb6forms_statusbar.c 那两处也拿到同一个 NULL，但它属于另一位作者的族
-# （状态条的面板宽度判据要跟着重量），本刀不碰。**豁免是要自己消失的**: 那两处一旦改走出口，
-# 下面的计数从 3 掉到 1 就当场红 —— 别把它当成"已知绿"绕过去。欠的那条账 = 台账 §B40/#205。
-$sbRaw = @($rawOut | Where-Object { $_.File -eq "vb6forms_statusbar.c" })
-if ($rawAll.Count -ne 3 -or $sbRaw.Count -ne 2) {
+# 账 #202/#204 那轮这里留过一条**具名豁免**（状态条那两处，want 3 = 出口 1 + 豁免 2）。
+# 那两处已改走出口（账 #205），豁免随之删除 ⇒ 现在全 src/rtl 只许有出口那一行裸问。
+# 再出现第二行就是有人又开始"按 DC 的默认字体画/量"（STATIC/BUTTON/自注册类都不答那一问，探针实测）。
+if ($rawAll.Count -ne 1) {
     $bad += ("D11 全 src/rtl 里带 WM_GETFONT 的代码行 = " + $rawAll.Count +
-             " 处、其中状态条那两处 = " + $sbRaw.Count + " 处 (want 3 = 出口 1 + 状态条具名豁免 2; " +
-             "别处再裸问一次就是静默按 DC 默认字体画; 状态条那两处修好了就把这条豁免删掉) -> " +
+             " 处 (want exactly 1 = 出口那一行; 别处再裸问一次就是静默按 DC 默认字体画) -> " +
              (($rawAll | ForEach-Object { $_.File + ":" + $_.Line }) -join " | "))
 } elseif ($accDef.Count -eq 1) {
     $inside = @($rawAll | Where-Object { $_.File -eq "vb6forms_ctrl.c" })
