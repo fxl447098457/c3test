@@ -187,8 +187,17 @@
                 }
             }
 
-            // P24: ListBox.List + ItemData from .frx
-            if (ctrl.controlType == FrmControlType::ListBox) {
+            // P24 / 账 #207: 设计期 List + ItemData from .frx —— **一处出口, 两类控件**。
+            // 以前这一档只认 ListBox，而语料里用同一份 .frx blob 的 **ComboBox 有 17 处**
+            // （Charts 2020 四个 demo 工程的 "Number of Series" 那一类）⇒ 编出来的下拉框是空的，
+            // 而 ucTreeMaps 的 demo 正是拿 `Combo1.ListIndex` 决定画不画 ⇒ 图体空白。
+            // 消息对按控件型取，发出去的 ListBox 那一路文本与改前逐字节相同（护栏靠 A/B）。
+            // 两条创建路都走这里：调用点见 cgen_form_ctrl_style_apply.inc 与 cgen_form_frame_menu.inc。
+            const bool frxIsList = (ctrl.controlType == FrmControlType::ListBox);
+            const bool frxIsCombo = (ctrl.controlType == FrmControlType::ComboBox);
+            if (frxIsList || frxIsCombo) {
+                const char* addMsg = frxIsList ? "LB_ADDSTRING" : "CB_ADDSTRING";
+                const char* setMsg = frxIsList ? "LB_SETITEMDATA" : "CB_SETITEMDATA";
                 auto listIt = ctrl.properties.find("List");
                 bool hasListFromFrx = (listIt != ctrl.properties.end() && listIt->second.type == FrmValueType::FrxReference);
                 FrxListData listData;
@@ -196,14 +205,14 @@
                     listData = FrxReader::readStringList(listIt->second.frxOffset);
                     for (size_t i = 0; i < listData.items.size(); i++) {
                         c_.emitLine("{ wchar_t* vb6_witem = vb6_Utf8ToWide(\"" + escapeCString(listData.items[i]) + "\");");
-                        c_.emitLine("  if (vb6_witem) { SendMessageW((HWND)" + ctrlHwndVar + ", LB_ADDSTRING, 0, (LPARAM)vb6_witem); free(vb6_witem); } }");
+                        c_.emitLine("  if (vb6_witem) { SendMessageW((HWND)" + ctrlHwndVar + ", " + addMsg + ", 0, (LPARAM)vb6_witem); free(vb6_witem); } }");
                     }
                 }
                 auto idataIt = ctrl.properties.find("ItemData");
                 if (idataIt != ctrl.properties.end() && idataIt->second.type == FrmValueType::FrxReference) {
                     auto intData = FrxReader::readIntList(idataIt->second.frxOffset);
                     for (size_t i = 0; i < intData.items.size(); i++) {
-                        c_.emitLine("SendMessageW((HWND)" + ctrlHwndVar + ", LB_SETITEMDATA, " +
+                        c_.emitLine("SendMessageW((HWND)" + ctrlHwndVar + ", " + setMsg + ", " +
                                     std::to_string((int)i) + ", (LPARAM)" + std::to_string(intData.items[i]) + ");");
                     }
                 }

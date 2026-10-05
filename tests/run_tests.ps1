@@ -3312,9 +3312,16 @@ if ($Category -in @("all", "run", "vbp")) {
     # 整数表 (ItemData)。旧 readIntList 按"每项 2B 整数"读 ItemData, 读到的是
     # 结构的字节本身, 任何工程都解出 1/304/12288 这串恒定假值 → 设计期 ItemData
     # 编进 exe 一直是垃圾。本用例的 ItemData 取 5/300/-7, 旧实现必错。
+    # 账 #207: 同一份 blob 接第二类控件。设计期 List/ItemData 的 .frx 引用以前只认
+    # ListBox 一档，ComboBox 那 17 处（Charts 2020 四个 demo 工程的 "Number of Series"）
+    # 全落空 ⇒ 下拉框是空的，而 ucTreeMaps 的 demo 正是用 Combo1.ListIndex 决定画不画。
+    # FD8 是真判据（三项 List + 两项 ItemData 各自对上），FD9 留原始读数，
+    # FD10 只钉前缀：`Combo1.ListIndex = 2` 之后 clicks 今天还是 0（VB6 会发 Click），
+    # 那条另记新账 #208 —— 把已知缺陷钉成断言就是把红当基线。
     Test-Vbp "frxdata" "$Tests\frxdata\FrxData.vbp" @(
         "FD1=alpha|beta", "FD2=3", "FD3=1234", "FD4=5", "FD5=300", "FD6=-7",
-        "FD7=OK", "FRXDATA-DONE")
+        "FD7=OK", "FD8-COMBO=True", "FD9-COMBO-RAW count=3 item0=1234 id0=5 id2=-7",
+        "FD10-COMBO-LI-RAW", "FRXDATA-DONE")
 
     # P20-40: StatusBar 复刻 (msctls_status32, 不加载 mscomctl.ocx)。
     # comctl32 v5.82 / v6 都不注册 msctls_status32, 连 dwICC=0xFFFFFFFF 全开也补不上,
