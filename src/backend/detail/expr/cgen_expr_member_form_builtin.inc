@@ -409,7 +409,12 @@
                 if (itCtrl->second == FrmControlType::PictureBox) {
                     std::string memLower = node.memberName;
                     std::transform(memLower.begin(), memLower.end(), memLower.begin(), ::tolower);
-                    if (memLower == "print" || memLower == "cls") {
+                    // 账 #221: Line 也是**绘制**方法, 名字由 controlCanvasMethod 那张表回答
+                    // —— 不在这里给标记的话, 兜底会把它当 COM 属性取出来 (`ComGetObjectProp(hwnd,
+                    // L"Line")`) 再对结果取 `Item`, 两跳在 RTL 都登记成"认识但什么都不做"
+                    // ⇒ 编得过、跑得起、一笔不画。
+                    if (memLower == "print" || memLower == "cls" ||
+                        !controlCanvasMethod(itCtrl->second, memLower).empty()) {
                         comObjExpr_ = objLower;  // 小写控件名, 与 WebBrowser/ListBox 块同构
                         comMemberName_ = memLower;
                         isComMarker_ = true;

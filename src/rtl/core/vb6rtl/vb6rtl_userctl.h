@@ -199,11 +199,10 @@ static inline void* vb6_PropertyPage_SelectedControls(int32_t index) {
 #define vbHitResultTransparent 1
 #define vbHitResultHit         2
 
-// --- PropertyPage 内建 Changed 属性 ---
-// VB6 PropertyPage 代码惯用裸名 `Changed = True` (生成 C 亦为裸标识符),
-// 见 Charts 2020 PropPagLP.pag. 项目自定义的 Changed 只会以类字段
-// (me->m_Changed) 或模块限定名 (vb6_<Mod>_Changed) 出现, 不会占用裸键.
-extern int16_t Changed;
+// PropertyPage 的 Changed 只有 vb6_PropertyPage_Changed 这一个名字 (账 #219)。
+// 这里曾 extern 过一枚裸名 `int16_t Changed` 给"源码里裸写 Changed"落脚 —— 注释当时说
+// "项目自定义的 Changed 只会以类字段或模块限定名出现, 不会占用裸键"，**这句是错的**:
+// 标准模块里 `Public Changed As Long` 在生成的模块 C 里就是裸名 (探针实测 C2371 / no exe)。
 
 // --- AsyncProperty / Picture 类型常量 (VB6 内建, 此前缺失) ---
 #define vbAsyncTypePicture     0
@@ -218,9 +217,8 @@ extern int16_t Changed;
 #define vbPicTypeIcon          3
 #define vbPicTypeEMetafile     4
 
-// --- Picture.Line 模式常量 (Fix 102 把 `, B` / `, BF` 原样作为实参发射) ---
-extern const int32_t B;   // 画方框
-extern const int32_t BF;  // 实心方框
+// Picture.Line 的 B / BF 由 parser 在 style 位置折成字面量 1/2 (账 #220) —— 这里曾
+// extern 过两枚裸名 C 全局，与 VB 工程里叫 B 的模块级变量直接撞车，故删除。
 
 #ifdef __cplusplus
 }

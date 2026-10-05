@@ -687,6 +687,45 @@ function Test-BodyDeclShape {
         $out | Select-Object -First 6 | ForEach-Object { Write-Host "  $_" }
     }
 }
+function Test-DocHostAuthority {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] dochost_authority ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\check_dochost_authority.ps1" 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        $out | Select-Object -First 6 | ForEach-Object { Write-Host "  $_" }
+    }
+}
+function Test-CaseIsShape {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] caseis_shape ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\check_caseis_shape.ps1" 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        $out | Select-Object -First 6 | ForEach-Object { Write-Host "  $_" }
+    }
+}
+function Test-RtlNakedNames {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] rtl_naked_names ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\check_rtl_naked_names.ps1" 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        $out | Select-Object -First 6 | ForEach-Object { Write-Host "  $_" }
+    }
+}
 function Test-IntLiteralShape {
     $script:total++
     Write-Host -NoNewline "  [STATIC] int_literal_shape ... "
@@ -1725,6 +1764,30 @@ if ($Category -in @("all", "run", "bas")) {
         "BD-static=33", "BD-arr=13/2/3", "BD-variant=Long/String/1", "BD-DONE")
     Add-BasTest "test_bodydecl" "$Tests\test_bodydecl.bas" $bdNeedles
     Add-BasTest "test_bodydecl_x86" "$Tests\test_bodydecl.bas" $bdNeedles -Arch "x86"
+    # <vbeclipse> 账 #217 第一刀: `Case Is > 2` 里的 Is 不是标识符。改前 parser 造一枚
+    # IdentifierExpr("Is") 留在 AST 里借优先级解析，语义层就把它当未声明的名字 —— 模块写着
+    # Option Explicit 时每形一条 VB3001(两份真工程 36 条，发码语料全仓 138 条)，没写的那面
+    # 每枚用到的过程发一枚没人引用的 vb6_VARIANT 局部(探针实测)。发码从来只读比较符与右操作数，
+    # 值一直是对的，所以这里钉的是「形状换了、判定没换」: 六个关系符各自的分档(CI-rel/CI-ne)、
+    # Is 与普通值混写同一形(CI-mixed，优先级不能把 `, 1` 吃进右操作数)、字符串 Select(CI-word)、
+    # Single Select(CI-half，Fix 136 那一档的 Case 侧)、Variant 测试表达式(CI-var)。
+    $ciNeedles = @("CI-rel=lt/le/eq/gt/ge/ge", "CI-ne=is4/ne4", "CI-mixed=big/big/two/rest",
+        "CI-word=beq/gtm/rest", "CI-half=hi/lo/mid", "CI-var=hi/lo/hi", "CI-DONE")
+    Add-BasTest "test_caseis" "$Tests\test_caseis.bas" $ciNeedles
+    Add-BasTest "test_caseis_x86" "$Tests\test_caseis.bas" $ciNeedles -Arch "x86"
+    # <vbeclipse> 账 #220: B / BF 曾被 RTL 当成两枚**外部链接的 C 全局** (const int32_t B = 1;
+    # BF = 2;) 去接 Picture.Line 发码原样吐出的语法旗标。用户模块一发 `Public B As Long` 就撞成
+    # C2373 + C2166 给 const 赋值 —— 改前探针实测 BUILD-RC=1 / 5 条诊断 / no exe。旗标现在由
+    # parser 在 Line 的 style 位置折成字面量, 这两个名字整条归还给用户 (位置那一头见 pcline 的
+    # [CODEGEN-NOTE]，两处不许互相覆盖)。
+    $ncNeedles = @("NC-B=13 NC-BFLEN=2", "NC-ACC=15", "NC-BOX=3/8", "NC-DONE")
+    Add-BasTest "test_nameclash" "$Tests\test_nameclash.bas" $ncNeedles
+    Add-BasTest "test_nameclash_x86" "$Tests\test_nameclash.bas" $ncNeedles -Arch "x86"
+    # 账 #219: RTL 那枚裸名全局 Changed 撤掉后, 模块级 Public Changed As Long 整个归用户。
+    # 改前实测 BUILD-RC=1 / no exe (C2371 重定义), 改后两种架构都要出 exe 并读出这个数。
+    $nc219Needles = @("NC219-CHANGED=6", "NC219-VT=3", "NC219-DONE")
+    Add-BasTest "test_rtl_naked_changed" "$Tests\test_rtl_naked_changed.bas" $nc219Needles
+    Add-BasTest "test_rtl_naked_changed_x86" "$Tests\test_rtl_naked_changed.bas" $nc219Needles -Arch "x86"
     # <vbeclipse>: Join/Filter 的数组槽 (Variant 数组曾按 BSTR* 读 → 段错误; Filter 的
     # VB6 可选参曾不补 → C2198/C2440 编不过)。含 1-based 源数组、零命中空数组、非字符串元素 → 13。
     Add-BasTest "test_joinfilter" "$Tests\test_joinfilter.bas" @("JF-var=[abc|xyz|abd]", "JF-var-def=[abc xyz abd]", "JF-str=[abc|xyz|abd]", "JF-f-lb=0 ub=1", "JF-f=[abc|abd]", "JF-none-ub=-1", "JF-excl-ub=0", "JF-excl=[xyz]", "JF-err=13", "JF-DONE")
@@ -3426,6 +3489,16 @@ if ($Category -in @("all", "run", "vbp")) {
         "SF05-FIXED-EDGE-UNCHANGED=True", "SBFONT-DONE")
     Test-Vbp "sbfont" "$Tests\sbfont\SbFont.vbp" $sbFontExpected
     Test-Vbp "sbfont_x86" "$Tests\sbfont\SbFont.vbp" $sbFontExpected -Arch "x86"
+    # <vbeclipse> 账 #221 = C29-PL-a: Picture.Line 落原生 GDI。这条判据只能**画完再问像素** ——
+    # 改前 8 处 Line 全发成 ComGetObjectProp(hwnd,"Line") 再取 Item, 两跳在 RTL 都登记成
+    # "认识但什么都不做" ⇒ 编得过、跑得起、一笔不画、一条诊断也不打 (CLINE 那族静默空转的第三例)。
+    # 四形各钉两头: 画过的那枚像素 == 交进去的颜色, 没画过的那枚 != 它 —— 只钉前者会放过
+    # "整片刷成红", 只钉后者会放过"根本没落笔"。PL03 同时证明 BF(=1|4) 与 B(=1) 不是同一个数。
+    # 画与问都放在 Timer 第一拍 (dcsurf 那条口径: 窗口问题在窗口活着的时候问);
+    # 先试 Form_Load 时 GetPixel 一律 -1 (CLR_INVALID), 那不是本刀的靶子, 记在夹具注释里。
+    $pcDrawExpected = @("PL01-LINE=True", "PL02-BOX=True", "PL03-FILL=True", "PL04-CIRCLE=True", "PL-DONE")
+    Test-Vbp "pclinedraw" "$Tests\pcline\PcDraw.vbp" $pcDrawExpected
+    Test-Vbp "pclinedraw_x86" "$Tests\pcline\PcDraw.vbp" $pcDrawExpected -Arch "x86"
 
     # --- P20-42: SSTab (SysTabControl32 复刻) ---
     # 期望串取自夹具真实输出 (别缩写标签)。TS25..TS28 是切页显隐: vb6_GetControlVisible
@@ -4287,6 +4360,9 @@ if ($Category -in @("all", "compile")) {
     Test-SaAccess
     Test-BitwiseAuthority
     Test-BodyDeclShape
+    Test-CaseIsShape
+    Test-DocHostAuthority
+    Test-RtlNakedNames
     Test-SubclassSlotSites
     Test-CtrlArrayMemberSites
     Test-EventHandlerNames
@@ -4599,6 +4675,46 @@ if ($Category -in @("all", "syntax")) {
     Test-CodegenNote "bodydecl_one_per_declarator" @("$Tests\test_bodydecl.bas") @(
         "int32_t u1 = 0;", "int32_t u2 = 0;",
         "const int32_t c2 = 4;", "static int32_t st2 = 0;") @("VB3001")
+    # <vbeclipse> 账 #217 的诊断两面。neg 这份同时写着 `Case Is > 2` 和一枚真没声明过的名字:
+    # 'Is' 必须不再出现(改前每形一条)，nopeHereIsNotAName 必须继续出现 —— 拦「把整条诊断关掉」
+    # 那种修法。implicit 那份故意不写 Option Explicit，钉的是改前那枚没人引用的隐式局部。
+    Test-CodegenNote "caseis_is_not_an_identifier" @("$Tests\test_caseis_neg.bas") @(
+        "VB3001", "nopeHereIsNotAName") @("'Is'")
+    Test-CodegenNote "caseis_no_phantom_local" @("$Tests\test_caseis_implicit.bas") @(
+        "int32_t _vb6_select_0", "BSTR _vb6_select_1") @("vb6_VARIANT Is")
+    # <vbeclipse> 账 #220 的位置那一头 + 账 #221 的改道: Line 尾部的 B/C/F 只在 **style 格**
+    # (color 之后) 折成位数值 (B=1 / C=2 / F=4 ⇒ BF=5), 写在 color 格时必须还是用户自己的变量;
+    # 折好之后整条调用必须由 controlCanvasMethod 那张表改成原生 vb6_ControlLine(...)。
+    # 改前两格都发裸名、由 RTL 的 const int32_t B / BF 接住 (语料实测 vb6_ComPackValue(BF)),
+    # 而 Line 本身没人应答: Absent 那两条钉的就是"又退回兜底 / 名字又回来"这两件。
+    Test-CodegenNote "pcline_flag_folded" @("$Tests\pcline\PcForm.frm") @(
+        "vb6_ControlLine((void*)vb6_hwnd_picA, (double)10, (double)10, (double)50, (double)50, (int32_t)255, (int32_t)5)",
+        "vb6_ControlLine((void*)vb6_hwnd_picA, (double)0, (double)0, (double)20, (double)20, (int32_t)16711680, (int32_t)1)",
+        "vb6_ControlLine((void*)vb6_hwnd_picA, (double)5, (double)5, (double)15, (double)15, (int32_t)B, (int32_t)0)",
+        "vb6_ControlLine((void*)vb6_hwnd_picA, (double)6, (double)6, (double)16, (double)16, (int32_t)BF, (int32_t)0)") @(
+        "vb6_ComGetObjectProp(vb6_hwnd_picA, L" + [char]34 + "Line" + [char]34 + ")",
+        "vb6_ComPackValue(BF)", "vb6_ComPackValue(B)")
+    # <vbeclipse> 账 #217 第二刀: 文档隐式对象 (UserControl / PropertyPage / Extender / Ambient)
+    # 与全局库前缀 VBA 现在语义层也认识 (判据 = Module::docKind 一处写、两处读)。两份真工程的
+    # 发码语料实测: VB3001 全仓 2934→158 (grid 499→19、Charts 主工程 499→34)，而宿主符号一个没动
+    # (vb6_UserControl_ScaleWidth 436=436 / vb6_Ambient_UserMode 94=94 / vb6_PropertyPage_hWnd 16=16)。
+    # dhExp 钉"诊断清零 + 符号照旧"，dhImp 故意不写 Option Explicit 钉"不再发死局部"。
+    Test-CodegenNote "dochost_ctl_no_undeclared" @("$Tests\dochost\dhExp.ctl") @(
+        "vb6_UserControl_ScaleWidth", "vb6_UserControl_hWnd",
+        "vb6_Ambient_UserMode", "vb6_Extender_Tag", "vb6_UCase") @("VB3001")
+    Test-CodegenNote "dochost_no_phantom_locals" @("$Tests\dochost\dhImp.ctl") @(
+        "vb6_UserControl_ScaleWidth", "vb6_Ambient_UserMode", "vb6_UCase") @(
+        "vb6_VARIANT UserControl", "vb6_VARIANT Ambient", "vb6_VARIANT VBA")
+    # 账 #219 (裸写的文档成员): 语义层以前不问 kHostPseudoRows, 于是每条合法裸写配一句 VB3001
+    # (语料实测 Changed 24 条 / hDC 24 条), 而发码那侧从来是对的 (vb6_PropertyPage_Changed 186 处、
+    # 裸名 0 处)。判据收到那张表的 HPF_BARE 一列: 表里有的一个都不许报 (两份夹子), 表里没有的
+    # 必须照报 (dhTypo) —— 否则"放行"就成了"文档里写什么都行"。
+    Test-CodegenNote "dochost_bare_ctl_symbols" @("$Tests\dochost\dhBare.ctl") @(
+        "vb6_UserControl_ScaleWidth", "vb6_UserControl_hDC", "vb6_UserControl_hWnd") @("VB3001")
+    Test-CodegenNote "dochost_bare_pag_dirty_flag" @("$Tests\dochost\dhBare.pag") @(
+        "vb6_PropertyPage_Changed = (-1);") @("VB3001")
+    Test-CodegenNote "dochost_bare_typo_still_reported" @("$Tests\dochost\dhTypo.pag") @(
+        "'Changd'") @("'Changed'", "vb6_PropertyPage_Changed")
     # 账 #184 的形状面: 被 AddressOf 取址的过程 → Private 的发 static 桩、Public 的发外链桩,
     # 桩体逐字转调本体 (参数个数/宽度/顺序与本体一致, 只有约定不同); AddressOf 站点取桩地址;
     # 本体**保持 cdecl** (直接调用那条路与 RTL 的 cdecl 登记面都不受牵连)。

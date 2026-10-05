@@ -298,6 +298,8 @@ StmtPtr ASTCloner::cloneStmt(const Stmt* s) {
         for (auto& v : x.values) {
             CaseClause::CaseValue cv;
             cv.isIsClause = v.isIsClause;
+            cv.relOp = v.relOp;
+            cv.hasRelOp = v.hasRelOp;
             cv.value = cloneExprInner(v.value.get());
             if (v.value && !cv.value) { ok = false; break; }
             cv.toValue = cloneExprInner(v.toValue.get());

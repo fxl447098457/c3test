@@ -197,14 +197,48 @@ ExprPtr Parser::parsePostfix(ExprPtr expr) {
                                "expected ')' in Line (x1,y1)-(x2,y2)");
                         call->positional.push_back(std::move(x2));
                         call->positional.push_back(std::move(y2));
-                        // 可选后续参数: ", color" / ", color, BF|B|F"
+                        // 可选后续参数: ", color" / ", color, BF|B"
+                        int trailingIdx = 0;
                         while (match(TokenKind::Comma)) {
                             if (cur_.kind == TokenKind::NewLine ||
                                 cur_.kind == TokenKind::Colon ||
                                 cur_.kind == TokenKind::EndOfFile) {
                                 break;
                             }
+                            // VB6 的 `Line` 尾参只有 color 与 style 两格，而 style 那格的
+                            // B / C / F 是**语法旗标**不是名字 (账 #220)。折成数值就地定死：
+                            // 名字一旦进 AST，发码就把它原样发出去，靠 RTL 里两枚裸名全局
+                            // (const int32_t B / BF) 接住 —— 任何工程有个模块级变量叫 B 就撞车。
+                            // 只认 style 位置 (trailingIdx 为 1，即 color 已给出)：
+                            // `Line (a,b)-(c,d), B` 那一格按 VB6 是 color，用户的 B 必须照旧成立。
+                            // 位口径与 RTL `vb6_ControlLine` 是**同一张表**（账 #221）：
+                            // B=1 矩形、C=2 椭圆、F=4 填充，按字母逐个置位 ⇒ BF=5、CF=6。
+                            // 订正一处历史: 账 #220 那一刀为了不改语义沿用了旧全局的 1/2，
+                            // 于是 BF 与"C/F 两形"都没口径可依 —— 这一格把它收成字母位。
+                            if (trailingIdx == 1 && cur_.kind == TokenKind::Identifier) {
+                                const std::string optWord = toLower(cur_.text);
+                                int styleBits = 0;
+                                bool allFlagLetters = !optWord.empty();
+                                for (char ch : optWord) {
+                                    if (ch == 'b') { styleBits |= 1; }
+                                    else if (ch == 'c') { styleBits |= 2; }
+                                    else if (ch == 'f') { styleBits |= 4; }
+                                    else { allFlagLetters = false; break; }
+                                }
+                                if (allFlagLetters) {
+                                    auto locOpt = currentLoc();
+                                    advance();  // 消费 B / C / F 那一串
+                                    const std::string bitText = std::to_string(styleBits);
+                                    auto lit = std::make_unique<LiteralExpr>(
+                                        locOpt, LiteralKind::Integer, bitText);
+                                    lit->intValue = styleBits;
+                                    call->positional.push_back(std::move(lit));
+                                    trailingIdx++;
+                                    continue;
+                                }
+                            }
                             call->positional.push_back(parseExpression());
+                            trailingIdx++;
                         }
                     }
                 }
@@ -245,15 +279,21 @@ CaseClause::CaseValue Parser::parseCaseValue() {
         if (checkAny({TokenKind::LessThan, TokenKind::GreaterThan,
                       TokenKind::LessEqual, TokenKind::GreaterEqual,
                       TokenKind::Equals, TokenKind::NotEquals})) {
-            // 将比较运算符和右操作数合并为一个表达式
-            // 例如: Is > 0 → BinaryExpr(IdentifierExpr("Is"), Gt, LiteralExpr(0))
-            auto isExpr = std::make_unique<IdentifierExpr>(currentLoc(), "Is");
+            // VB6 的 `Is` 是 Select 的测试表达式本身, 不是标识符 (账 #217)。占位左操作数
+            // 只为借一次优先级解析 (右操作数按比较符的绑定力截断, 不能吃进后面的 `Or`/`,`)
+            // —— 它不进 AST: 留在树里就被语义层登记成隐式 Variant, 每形一条 VB3001 或一枚没人用的局部。
+            auto placeholder = std::make_unique<IdentifierExpr>(currentLoc(), "Is");
             auto bp = getBindingPower(cur_.kind);
-            cv.value = parseLeftDenotation(std::move(isExpr), bp.l_bp);
-        } else {
-            // Case Is (无比较符) → 标识符值
-            cv.value = std::make_unique<IdentifierExpr>(currentLoc(), "Is");
+            auto expr = parseLeftDenotation(std::move(placeholder), bp.l_bp);
+            if (expr && expr->kind == ASTNodeKind::BinaryExpr) {
+                auto& bin = static_cast<BinaryExpr&>(*expr);
+                cv.relOp = bin.op;
+                cv.hasRelOp = true;
+                cv.value = std::move(bin.right);
+            }
         }
+        // 无比较符的 `Case Is`: 发码侧只看 isIsClause, 值留空 (改动前放的那枚
+        // IdentifierExpr("Is") 从来没人读)。
     } else {
         // 普通值或范围
         cv.value = parseExpression();

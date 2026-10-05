@@ -1526,6 +1526,26 @@ std::string CCodeGen::controlScaleMethod(FrmControlType ctrlType,
             return "";
     }
 }
+// 账 #221 = C29-PL-a（语料物证 Charts 2020/ucProgressCircular 的 ppProgressCircular.pag
+// 那 8 条 `Picture1.Line` / `Picture2.Line`）: 画表面方法的名字表。
+// 这一族以前**没有表** —— parser 的 Fix 102 把坐标对折进实参表之后，注释写着"由后端按控件
+// 类型发射"，但后端从来没接这一刀，于是整条调用落到通用 COM 兜底
+// （`ComGetObjectProp(hwnd, L"Line")` 再对它取 `Item`，两跳都被 RTL 登记成"认识但什么都不做"），
+// 症状是**编得过、跑得起、一笔不画**。档位与 TextHeight/ScaleX 两族同样只给 Form 与 PictureBox。
+std::string CCodeGen::controlCanvasMethod(FrmControlType ctrlType,
+                                          const std::string& memberLower) const {
+    if (memberLower != "line") return "";
+    switch (ctrlType) {
+        case FrmControlType::PictureBox:
+            return "vb6_ControlLine";
+        default:
+            // Form 那一档刻意**不给**: 现在只有 PictureBox 那一处成员侧发了标记
+            // (cgen_expr_member_form_builtin.inc 的 Fix 185 那块), 给了就是"广告比应答复"。
+            // 接 Form 之前先把 `Me.Line` / 窗体自绘那条码头找出来。
+            return "";
+    }
+}
+
 
 // C29-SL-n（账 #141）: 「这枚控件要不要子类化」的唯一一份判据 —— 内容与
 // `cgen_form_wndproc_subclass.inc` 汇总 info.hasXxx 那一趟逐条对应（改一边就得改另一边，

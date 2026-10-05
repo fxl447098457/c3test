@@ -33,7 +33,7 @@ void   vb6_Form_Line(void* hwnd,
                      int32_t step1, int32_t has1, double x1, double y1,
                      int32_t step2, int32_t has2, double x2, double y2,
                      int32_t hasColor, int32_t color,
-                     int32_t box, int32_t fill);
+                     int32_t style);
 void   vb6_Form_Circle(void* hwnd,
                        int32_t step, int32_t hasXY, double x, double y,
                        double radius,
@@ -60,7 +60,7 @@ int32_t vb6_Printer_Point(double x, double y);
 void   vb6_Printer_Line(int32_t step1, int32_t has1, double x1, double y1,
                         int32_t step2, int32_t has2, double x2, double y2,
                         int32_t hasColor, int32_t color,
-                        int32_t box, int32_t fill);
+                        int32_t style);
 void   vb6_Printer_Circle(int32_t step, int32_t hasXY, double x, double y,
                           double radius, int32_t hasColor, int32_t color,
                           int32_t hasStart, double startAngle,

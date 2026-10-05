@@ -763,6 +763,64 @@ float vb6_ControlTextHeight(void* hwnd, void* bstrText) {
                                     vb6_WindowScaleModeSelf(hwnd), 1);
 }
 
+// 账 #221 = C29-PL-a: VB6 的 Picture.Line 落到原生 GDI。
+//
+// 为什么非补不可: 语料里那 8 条 Line 调用全发成
+// `vb6_ComCallObject(vb6_ComGetObjectProp(vb6_hwnd_PictureN, L"Line"), L"Item", {...}, 6)`
+// —— 先把方法名当**属性**取、再对取回的东西取 Item。而 RTL 两处都把 Line 登记成
+// 「认识但什么都不做」(vb6forms_axcontainer.c 的属性位交回 Empty + uc_hostmodel_call.inc
+// 的 return 1)，于是**两跳都返回成功、两跳都不落笔** —— 编得过、跑得起、画面空白。
+//
+// 三条口径:
+//   * DC 走 vb6_ControlPrint / vb6_ControlCls **同一处** vb6_ControlDrawDC（_Paint 派发
+//     挂在身上的 VB6_PaintDC 优先，取不到才 GetDC），不另开第二条取 DC 的路。
+//   * 坐标按**这枚窗口自己的** ScaleMode 换算（vb6_WindowScaleModeSelf + vb6_ScaleUserToPx，
+//     与 #196/#197 那一条单位表同一个来源），不自己再算一遍缇/像素。
+//   * style 的位口径与 parser 折旗标那一处是**同一张表**（parser_expr_postfix.cpp 的
+//     vb6_LineStyleBit 注释）: 1=B 矩形、2=C 椭圆、4=F 填充，故 BF = 1|4 = 5。
+//     color 传负数 = VB6 那一面的"没写颜色"，落到控件自己的 ForeColor。
+//
+// 刻意没做的两头（写在账里，别当已验）: ScaleLeft/ScaleTop 的**原点偏移**没进来
+// （语料的 PictureBox 都是 0），VB6 那条"Line 之后 CurrentX/CurrentY 移到终点"也没进来
+// （调用点从没读回它，接进来要先定 CurrentX 的单位口径，见 #192 那一格）。
+void vb6_ControlLine(void* hwnd, double x1, double y1, double x2, double y2,
+                     int32_t color, int32_t style) {
+    if (!hwnd) return;
+    HWND hw = (HWND)hwnd;
+    int32_t mode = vb6_WindowScaleModeSelf(hw);
+    int ax = vb6_ScaleUserToPx(x1, mode, 0);
+    int ay = vb6_ScaleUserToPx(y1, mode, 1);
+    int bx = vb6_ScaleUserToPx(x2, mode, 0);
+    int by = vb6_ScaleUserToPx(y2, mode, 1);
+
+    BOOL fromPaint = FALSE;
+    HDC hdc = vb6_ControlDrawDC(hw, &fromPaint);
+    if (!hdc) return;
+
+    COLORREF col = (color < 0) ? (COLORREF)vb6_GetControlForeColor(hw) : (COLORREF)color;
+    HPEN pen = CreatePen(PS_SOLID, 1, col);
+    HPEN hOldPen = pen ? (HPEN)SelectObject(hdc, pen) : NULL;
+    // 不填充那一档必须显式给 NULL_BRUSH: 留着上一次的画刷, Line 会顺带填出一块颜色
+    HBRUSH brush = (style & 4) ? CreateSolidBrush(col) : (HBRUSH)GetStockObject(NULL_BRUSH);
+    HBRUSH hOldBrush = brush ? (HBRUSH)SelectObject(hdc, brush) : NULL;
+
+    if (style & 2) {
+        Ellipse(hdc, ax, ay, bx, by);        // C: 两点是外接矩形
+    } else if (style & 1) {
+        Rectangle(hdc, ax, ay, bx, by);      // B: 矩形
+    } else {
+        POINT oldpt;
+        MoveToEx(hdc, ax, ay, &oldpt);       // 默认: 线段
+        LineTo(hdc, bx, by);
+    }
+
+    if (hOldPen) SelectObject(hdc, hOldPen);
+    if (hOldBrush) SelectObject(hdc, hOldBrush);
+    if (pen) DeleteObject(pen);
+    if (brush && (style & 4)) DeleteObject(brush);
+    if (!fromPaint) ReleaseDC(hw, hdc);
+}
+
 void vb6_ControlCls(void* hwnd) {
     if (!hwnd) return;
     HWND hw = (HWND)hwnd;

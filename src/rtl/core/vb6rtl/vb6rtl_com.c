@@ -669,12 +669,17 @@ int32_t vb6_PropertyPage_ScaleMode   = 1;
 int32_t vb6_PropertyPage_ScaleHeight = 0;
 int16_t vb6_PropertyPage_Changed     = 0;
 
-// --- PropertyPage built-in Changed property (Fix 108d) ---
-int16_t Changed = 0;
+// --- PropertyPage 的 Changed 不再有 C 侧裸名字 (账 #219) ---
+// 上面那枚 vb6_PropertyPage_Changed 就是它唯一的存储; 以前这里还有一份 `int16_t Changed`,
+// 专为"源码里裸写 Changed = True"留的落脚处。发码侧实测从来交的是带前缀那一个
+// (语料 vb6_PropertyPage_Changed 186 处、裸名 0 处)，而裸名全局与用户模块级变量共享 C 名字空间
+// ⇒ `Public Changed As Long` 直接 C2371 编不过 (探针 .build/b229out/pjChanged.bas 实测 no exe)。
 
-// --- Picture.Line mode constants ---
-const int32_t B  = 1;
-const int32_t BF = 2;
+// --- Picture.Line 的模式旗标不再有 C 侧名字 (账 #220) ---
+// 以前这里写着 `const int32_t B = 1; const int32_t BF = 2;`，让 parser 原样发出去的裸名
+// 有个落脚处。VB6 允许工程里有个叫 B 的模块级变量（`For B = 1 To 3` 这种写法到处都是），
+// 而那两枚是**外部链接的 C 全局** ⇒ 撞名直接 C2373 重定义 + C2166，连 exe 都出不来。
+// 旗标现在由 parser 在 Line 的 style 位置折成字面量 1/2，RTL 不再需要名字。
 
 // VB6 UserControl.TextWidth/TextHeight: measure with GDI using current Font
 // (unit = ScaleMode; simplified to pixels here; Twip handled once hosting lands)

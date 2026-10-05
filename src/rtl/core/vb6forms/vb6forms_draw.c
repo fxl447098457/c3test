@@ -171,14 +171,16 @@ int32_t vb6_Form_Point(void* hwnd, double x, double y) {
 //   Line -(x1,y1)-(x2,y2) [, color] [, B][F]
 //   Line -Step(x,y)- [, color] [, B][F]
 //   Line [Step] (x1,y1) [Step] -(x2,y2) [, color] [, B][F]
-// B = Box(画矩形边框), F = Fill(用 FillStyle 实心填充矩形)。
+// B/C/F 是**语法旗标**, parser (账 #220) 已折成位值: B=1 矩形、C=2 椭圆、F=4 填充,
+// 按字母逐个置位 ⇒ BF=5、CF=6。位口径与 vb6_ControlLine 是同一张表 (账 #221)。
+// ⚠ RTL 这边**不按名字认** —— 认名字会误伤用户自己的变量 `B`。
 // 不带终点时 = 画到 CurrentX/CurrentY, 并把笔位移到起点 (VB6 语义)。
 // ============================================================
 void vb6_Form_Line(void* hwnd,
                    int32_t step1, int32_t has1, double x1, double y1,
                    int32_t step2, int32_t has2, double x2, double y2,
                    int32_t hasColor, int32_t color,
-                   int32_t box, int32_t fill) {
+                   int32_t style) {
     HWND hw = (HWND)hwnd;
     int cx = vb6_DrawGetI(hw, L"VB6_CurrentX", 0);
     int cy = vb6_DrawGetI(hw, L"VB6_CurrentY", 0);
@@ -206,20 +208,27 @@ void vb6_Form_Line(void* hwnd,
     HPEN pen = CreatePen(PS_SOLID | (w > 1 ? PS_ENDCAP_ROUND : 0), w, c);
     HGDIOBJ oldPen = pen ? SelectObject(d.dc, pen) : NULL;
 
-    if (box || fill) {
-        // B/F 两参都是画矩形。FillStyle 0 = 实心(忽略 pen 颜色, 用 ForeColor 实心)
-        int fillStyle = vb6_DrawGetI(hw, L"VB6_FillStyle", 1 /* vbFSSolid=1? */);
+    // style 位值: B=1 矩形 / C=2 椭圆 / F=4 填充。任一位置位就不是"线段"。
+    if (style & 0x7) {
+        int wantEllipse = (style & 0x2) != 0;
+        int wantFill    = (style & 0x4) != 0;
         HBRUSH br = NULL;
-        if (fill) {
-            // vbFSSolid = 0? VB6: vbFSSolid=0(实心) vbFSTransparent=1(透明)
-            // 按 VB6 常量表: vbFSTransparent = 1, vbFSSolid = 0。
-            HBRUSH old = (HBRUSH)SelectObject(d.dc, GetStockObject(NULL_BRUSH));
-            (void)old;
+        HGDIOBJ oldBr = NULL;
+        if (wantFill) {
+            // F: 用当前前景色实心填充。B 与之同时给 = 填色 + 同色边框。
             br = CreateSolidBrush(c);
-            if (br) SelectObject(d.dc, br);
+            if (br) oldBr = SelectObject(d.dc, br);
+        } else {
+            oldBr = SelectObject(d.dc, GetStockObject(NULL_BRUSH));
         }
-        Rectangle(d.dc, (int)pax, (int)pay, (int)pbx, (int)pby);
-        if (br) { SelectObject(d.dc, GetStockObject(NULL_BRUSH)); DeleteObject(br); }
+        if (wantEllipse) {
+            // Rectangle 的右/下边是**不画**的 (exclusive), 椭圆要 +1 才闭合。
+            Ellipse(d.dc, (int)pax, (int)pay, (int)pbx + 1, (int)pby + 1);
+        } else {
+            Rectangle(d.dc, (int)pax, (int)pay, (int)pbx, (int)pby);
+        }
+        if (oldBr) SelectObject(d.dc, oldBr);
+        if (br) DeleteObject(br);
     } else {
         MoveToEx(d.dc, (int)pax, (int)pay, NULL);
         LineTo(d.dc, (int)pbx, (int)pby);
@@ -386,7 +395,7 @@ int32_t vb6_Printer_Point(double x, double y) {
 void vb6_Printer_Line(int32_t step1, int32_t has1, double x1, double y1,
                       int32_t step2, int32_t has2, double x2, double y2,
                       int32_t hasColor, int32_t color,
-                      int32_t box, int32_t fill) {
+                      int32_t style) {
     HDC dc = (HDC)vb6_Printer_hDC();
     if (!dc) return;
     int ax = has1 ? (int)x1 : g_prnDrawX;
@@ -402,10 +411,12 @@ void vb6_Printer_Line(int32_t step1, int32_t has1, double x1, double y1,
     int w = g_prnDrawWidth < 1 ? 1 : g_prnDrawWidth;
     HPEN pen = CreatePen(PS_SOLID, w, c);
     HGDIOBJ oldPen = pen ? SelectObject(dc, pen) : NULL;
-    if (box || fill) {
-        HBRUSH br = fill ? CreateSolidBrush(c) : NULL;
+    // style 位值与 Form 版同一张表: B=1 矩形 / C=2 椭圆 / F=4 填充。
+    if (style & 0x7) {
+        HBRUSH br = (style & 0x4) ? CreateSolidBrush(c) : NULL;
         HGDIOBJ ob = br ? SelectObject(dc, br) : SelectObject(dc, GetStockObject(NULL_BRUSH));
-        Rectangle(dc, ax, ay, bx, by);
+        if (style & 0x2) Ellipse(dc, ax, ay, bx + 1, by + 1);
+        else            Rectangle(dc, ax, ay, bx, by);
         if (br) { SelectObject(dc, ob); DeleteObject(br); }
     } else {
         MoveToEx(dc, ax, ay, NULL);

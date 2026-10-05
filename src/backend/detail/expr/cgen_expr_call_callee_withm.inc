@@ -566,6 +566,56 @@
         }
     }
 
+    // 账 #221 = C29-PL-a: PictureBox/Form 的 `Line (x1,y1)-(x2,y2)[, color][, B|C|F]` 从通用
+    // COM 兜底里接出来 —— 与上面 Fix 185 的 Print/Cls 同族，两条码头共用 controlCanvasMethod
+    // 这一张表（只接一头就是"编得过、跑了、什么都没画"，本线踩过三次的那一条）。
+    // 缺的两格按 VB6 的默认交: color 缺席交 -1（RTL 那一头落到控件自己的 ForeColor）、
+    // style 缺席交 0（线段）；坐标四格 parser 的 Fix 102 一定交满。
+    // 旗标 B/C/F 不在这里出现: parser 已在同一处把它们折成位数值，到这一步是 Integer 字面量。
+    if (isComMarker_) {
+        auto itCtrlLine = knownFormControls_.find(comObjExpr_);
+        if (itCtrlLine != knownFormControls_.end() &&
+            !controlCanvasMethod(itCtrlLine->second, comMemberName_).empty()) {
+            std::string fnLine = controlCanvasMethod(itCtrlLine->second, comMemberName_);
+            isComMarker_ = false;
+            isEarlyBoundCom_ = false;
+            earlyBoundSym_ = nullptr;
+            std::string ctrlLineName = cIdent(knownFormControlOriginalNames_.count(comObjExpr_)
+                ? knownFormControlOriginalNames_[comObjExpr_] : comObjExpr_);
+            comObjExpr_.clear();
+            comMemberName_.clear();
+            std::vector<std::string> la;
+            for (size_t i = 0; i < node.positional.size() && i < 6; i++) {
+                emitExpr(*node.positional[i]);
+                // 同 Fix 143/185: 实参自身是 COM 成员读时必须就地消费标记，否则交出去的是对象
+                // 指针，而残留标记还会被上层当独立语句再发一遍。
+                if (isComMarker_) {
+                    isComMarker_ = false;
+                    isEarlyBoundCom_ = false;
+                    earlyBoundSym_ = nullptr;
+                    std::string objM2 = std::move(comObjExpr_);
+                    std::string memM2 = std::move(comMemberName_);
+                    comObjExpr_.clear();
+                    comMemberName_.clear();
+                    la.push_back("vb6_ComGetIntProp(" + objM2 + ", L\"" + memM2 + "\")");
+                } else {
+                    la.push_back(std::move(lastExpr_));
+                }
+            }
+            while (la.size() < 4) la.push_back("0");
+            if (la.size() < 5) la.push_back("-1");
+            if (la.size() < 6) la.push_back("0");
+            c_.emitLine(fnLine + "((void*)vb6_hwnd_" + ctrlLineName + ", "
+                        + "(double)" + la[0] + ", (double)" + la[1] + ", "
+                        + "(double)" + la[2] + ", (double)" + la[3] + ", "
+                        + "(int32_t)" + la[4] + ", (int32_t)" + la[5] + ");  /* Line */");
+            // ⚠ 合并 rev38 时这段的收尾曾被丢掉 (与下面的 Form/Printer 段撞在同一
+            // 位置, git 把它判成冲突)。两个 if 各自闭合, 别再省。
+            lastExpr_ = "0";
+            return;
+        }
+    }
+
     // 2026-10-06: Form / Printer 的绘图方法 (PSet/Line/Circle/Point/Cls)。
     // 与上面 PictureBox.Print 同构 —— 成员侧 (form_builtin / Printer 那支) 把
     // comObjExpr_ 存成 Form 的 hwnd 表达式 (vb6_hwnd_<Form>) 或 Printer 哨兵,
@@ -656,31 +706,24 @@
                 std::string y1 = nCoord > 1 ? a[1] : "0";
                 std::string x2 = nCoord > 2 ? a[2] : "0";
                 std::string y2 = nCoord > 3 ? a[3] : "0";
-                std::string hasColor = "0", col = "0", box = "0", fill = "0";
+                std::string hasColor = "0", col = "0", style = "0";
                 for (size_t i = nCoord; i < a.size(); i++) {
-                    // ⚠ **B / BF / F 是 VB6 的关键字式布尔实参**, 不是变量:
-                    //   `Line (x1,y1)-(x2,y2), , B` 里的 B 被 parser 当 IdentifierExpr
-                    //   收进来, 照原样发射会得到 `vb6_Form_Line(..., B, 0)` ——
-                    //   B 在 C 侧是未声明标识符 ⇒ C2064 实参无法解析。
-                    //   归一化: 裸 B → box=1; 裸 BF → box=1 且 fill=1; 裸 F → fill=1。
-                    //   其它一律按位置当 color (VB6 文档: color 在 box/fill 之前)。
-                    std::string raw = a[i];
-                    std::string rw = Symbol::toLower(raw);
-                    if (rw == "b")   { box = "1"; continue; }
-                    if (rw == "bf")  { box = "1"; fill = "1"; continue; }
-                    if (rw == "f")   { fill = "1"; continue; }
-                    if (i == nCoord) { hasColor = "1"; col = raw; }
-                    else if (i == nCoord + 1) { box = raw; }
-                    else if (i == nCoord + 2) { fill = raw; }
+                    // ⚠ B / BF / F **已由 parser 折成位值** (账 #220, B=1 C=2 F=4,
+                    // 按字母逐个置位, BF=5) —— 见 parser_expr_postfix.cpp 的
+                    // isLineCall 那一段。所以这里**不要再按名字归一**:
+                    // 那会把用户自己的变量 `B` 误当成旗标 (parser 特意只在
+                    // style 位置折, 正是为了避开这个)。
+                    if (i == nCoord) { hasColor = "1"; col = a[i]; }
+                    else if (i == nCoord + 1) { style = a[i]; }
                 }
                 std::string pfx = looksLikePrinter ? "vb6_Printer_Line" : "vb6_Form_Line";
                 if (looksLikePrinter) {
                     call = pfx + "(0, 1, " + x1 + ", " + y1 + ", 0, 1, " + x2 + ", " + y2
-                         + ", " + hasColor + ", " + col + ", " + box + ", " + fill + ")";
+                         + ", " + hasColor + ", " + col + ", " + style + ")";
                 } else {
                     call = pfx + "((void*)" + obj + ", 0, 1, " + x1 + ", " + y1
                          + ", 0, 1, " + x2 + ", " + y2
-                         + ", " + hasColor + ", " + col + ", " + box + ", " + fill + ")";
+                         + ", " + hasColor + ", " + col + ", " + style + ")";
                 }
             } else { // circle
                 // Circle (x,y),r [,color] [,start] [,end] [,aspect]

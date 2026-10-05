@@ -636,7 +636,280 @@ C 那一枚顺带把 #209 的「未处理错误按 9 退出」口径在**实例�
 
 哨兵 `scripts/check_bodydecl_shape.ps1`：P1 定义/声明各 1 份，P2 四条路各调一次（调用点合计 4），P3 手写展开不许回来（`parser_stmt_assign.cpp` 里 `expectName("expected variable name")` 必须为 0，而共享那份 `parser_decl_var.cpp` 必须 ≥1），P4 除 `wrapBodyDecls` 内那一处外别处不许把声明列表直接包成 LocalDeclStmt（parser 全范围计数 = 1），P5 语义层**不许**再补 `case MultiDecl`（那等于把两种形状再造一遍，计数必须为 0）。当前绿：`defs 1, callsites 4, hand expansion 0, raw wraps 1, semantics MultiDecl 0`；负控 = 把这四个文件退回 HEAD 跑同一枚 ⇒ P1/P2/P3/P4 共十条红（P5 在 HEAD 上也绿，因为那儿本来就没写分支 —— 它是"保持为 0"的哨兵，不是"抓到本次改动"的哨兵）。已接进门禁 compile 那片：`[STATIC] bodydecl_shape`。
 
-边界与下一格：① 语义层 `visit(LocalDeclStmt)` 里 Dim 那支仍是自己内联造符号（`semantic_analyzer_stmt.cpp:255`），没并进 `registerVariable` —— 不在这一格的问题面上，没动；② `cgen_localdecl.cpp:31` 的 MultiDecl 分支从此 unreachable-by-construction，本轮没删（P4 已经把「只有一处能包」钉住，删它是另一格的清理）；③ `Static Sub` / `Static Function` 两形本来就不是变量列表，没走展开；④ VBFlexGridDemo 里**还剩 502 条 VB3001**，是另一族，**另立新账 #217**（本轮一条没动，只做了 census 与一条重要的读数警告）。502 条按名字分 12 组：UC/PB 宿主词汇 —— `UserControl` 278（全在 VBFlexGrid.ctl）、`PropertyPage` 127（三个 .pag：General 78 / Style 38 / Clip 11）、`Extender` 32、`Ambient` 7；库名成员访问 —— `VBA` 37（ctl 18 / Common.bas 15 / 两枚 .frm 各 2）；VB6 内在常量 —— `vbSrcCopy` 5、`vbPicTypeIcon` 5、`vbPicTypeBitmap` 3、`vbPicTypeEMetafile` 1；另有 `Is` 3（疑似 `TypeOf … Is` 的 Is 被当标识符）、`Interface` 3、工程内常量 `CTRLINFO_EATS_RETURN` 1。**一条必须先处理的读数**：这些告警自己报的 (行,列) 与源文件那行的文本对不上 —— 例如 `UserControl` 的首条指向 VBFlexGrid.ctl:2349 第 4 列，而那行是 `VBFlexGridComboButtonWidth = -1`；`PropertyPage` 指向 `.pag:18` 的 `End`。⇒ 按名字分家的数字可信，**按行定位不可信**（.ctl/.pag 走的是翻译后的虚拟源，行号映射没跟着回来），#217 开工前要么先把定位修对，要么别拿行号做判据。
+边界与下一格：① 语义层 `visit(LocalDeclStmt)` 里 Dim 那支仍是自己内联造符号（`semantic_analyzer_stmt.cpp:255`），没并进 `registerVariable` —— 不在这一格的问题面上，没动；② `cgen_localdecl.cpp:31` 的 MultiDecl 分支从此 unreachable-by-construction，本轮没删（P4 已经把「只有一处能包」钉住，删它是另一格的清理）；③ `Static Sub` / `Static Function` 两形本来就不是变量列表，没走展开；④ VBFlexGridDemo 里**还剩 502 条 VB3001**，是另一族，**另立新账 #217**（本轮一条没动，只做了 census 与一条重要的读数警告）。502 条按名字分 12 组：UC/PB 宿主词汇 —— `UserControl` 278（全在 VBFlexGrid.ctl）、`PropertyPage` 127（三个 .pag：General 78 / Style 38 / Clip 11）、`Extender` 32、`Ambient` 7；库名成员访问 —— `VBA` 37（ctl 18 / Common.bas 15 / 两枚 .frm 各 2）；VB6 内在常量 —— `vbSrcCopy` 5、`vbPicTypeIcon` 5、`vbPicTypeBitmap` 3、`vbPicTypeEMetafile` 1；另有 `Is` 3（疑似 `TypeOf … Is` 的 Is 被当标识符）、`Interface` 3、工程内常量 `CTRLINFO_EATS_RETURN` 1。**一条必须先处理的读数**：这些告警自己报的 (行,列) 与源文件那行的文本对不上 —— 例如 `UserControl` 的首条指向 VBFlexGrid.ctl:2349 第 4 列，而那行是 `VBFlexGridComboButtonWidth = -1`；`PropertyPage` 指向 `.pag:18` 的 `End`。⇒ 按名字分家的数字可信，**按行定位不可信**（.ctl/.pag 走的是翻译后的虚拟源，行号映射没跟着回来），#217 开工前要么先把定位修对，要么别拿行号做判据。（订正 2026-10-05：这一段里两处猜测是错的。`Is` 的三条来自 `Case Is`，不是 `TypeOf … Is`；`Interface` 那一组压根不存在，三条真名是 `OLEGuids.IObjectSafety` / `OLEGuids.IOleInPlaceActiveObjectVB` / `OLEGuids.IOleControlVB` —— 那是我自己按 UTF-8 硬读 GBK 告警造成的假条目，见 §C16。按 GBK 重读后 502 条落在 **14** 组名字上，一条不差；加上 Charts 2020 的 532 条一起分家，记在 §B50 头部。）
+
+### B50 `Case Is > 2` 里那枚 Is 是 parser 造的，36 条 VB3001 与一枚隐式局部都是它换来的（账 #217 第一刀，**已出：门 #341 唯一红是 frmevents 抖动、#342 全绿**）
+
+先把 #217 的分家钉完（两份真工程各 x64/x86 各一次 --emit-c，GBK 解码后按名字数；502 + 532 = 1034 条，
+按成因是**五种 + 4 条未归家**，五种里只有一种(第⑥族)是真缺陷）：① **文档类隐式对象** —— `UserControl` 278+366、`PropertyPage` 127+5、
+`Extender` 32+20、`Ambient` 7+74，外加 .pag 里裸写的 `Changed` 8、`hDC` 6、`Controls` 2；发码走的是
+`kHostPseudoRows` 那张唯一权威表（账 #159 收的），语义层不认识这些名字 ⇒ 纯诊断。实测发码：
+`UserControl.hDC` → `vb6_UserControl_hDC`、`Ambient.UserMode` → `vb6_Ambient_UserMode`、
+`Extender.Tag` → `vb6_Extender_Tag`、`PropertyPage.hWnd` → `vb6_PropertyPage_hWnd`。② **`VBA.` 限定** 37 条
+（`VBA.Choose` / `VBA.DateAdd` / `VBA.Year`）—— 发码剥前缀走内在函数（`VBA.Choose(j,a,b)` 实测发成
+`(j)==1 ? (a) : ((j)==2 ? (b) : NULL)`）⇒ 纯诊断。③ **内在常量缺档** 28 条（`vbSrcCopy` 7、`vbPicTypeIcon` 6、
+`vbPicTypeBitmap` 4、`vbPicTypeEMetafile` 1、`vbHitResultHit` 8、`vbAsyncTypeByteArray` 1、`vbAsyncReadForceUpdate` 1）
+—— `builtin_consts*.inc` 那张表没登记，但发码照旧出对值：`vbSrcCopy` 折成 `13369376`(SRCCOPY)，
+`vbPicTypeIcon` 原样发名、由 `vb6rtl_userctl.h` 的 `#define … 3` 接住 ⇒ 表缺档，且常量现在有**两份权威**。
+④ **外部类型库限定** 3 条 = 上面订正掉的那组 `OLEGuids.*`，来自 `Implements OLEGuids.IObjectSafety`，
+没有那份注册的类型库可查 ⇒ 源码侧/引用侧的账，不是编译器欠的。⑤ **跨模块 Public Const 看不见** 1 条：
+`CTRLINFO_EATS_RETURN` 写在 `Builds\VTableHandle.bas`（`Public Const … = 1`）而在 VBFlexGrid.ctl 里用 —— 发码那侧靠 `#define CTRLINFO_EATS_RETURN (1)` 活着，语义层那条跨模块常量解析待查。
+⑦ **未归家 4 条**（全在 Charts）：`ppProgressCircular.pag` 的 `BF` 2 与 `B` 1、`ucProgressCircular.ctl` 的
+`Count` 1。名字短得像被截了半截（`BF`/`B` 像在 `&H…` 那一类字面量上、`Count` 像伪对象/集合成员），
+但**没量过就不归家** —— 下一格先按 §C16 那两步（显式 gbk + 一枚最小 .bas 探针把行号拿到手）定形。
+
+**⑥ 这一刀出的那族：`Is` 36 条（grid 3 + Charts 33）**。#217 的告警行号本来不可信（.ctl/.pag 是翻译后的
+虚拟源），所以拿一枚最小 .bas 探针（`Case Is > 2, 1` / `Case Is > 5` / `Case Is < 0` 三形 + `a Is b` +
+`TypeOf o Is Collection`）走 --emit-c：告警落在**这三行本身**（6,17,19），后两形一条不出 ⇒ `Is` 一家当场定形
+为 `Case Is`，与 `TypeOf … Is` 无关。读 parser：`parseCaseValue` 为了借一次优先级解析，造了一枚
+`IdentifierExpr("Is")` 当左操作数**放进 AST**。语义层 visit(IdentifierExpr) 见到没声明的名字 ⇒ 写着
+`Option Explicit` 时每形一条 VB3001；没写时走 VB6 隐式声明那支，把 `Is` 登记成 Variant，发码就在每枚
+用到它的过程序言发一枚 `vb6_VARIANT Is = vb6_VariantEmpty();`（同一份夹具去掉 Option Explicit 实测 2 枚）。
+发码从头只读比较符与右操作数，所以**值一直是对的** —— 这一族是"AST 里撒了谎、换来两条副作用"，不是算错。
+
+修法（一处形状，不开第二条路）：VB6 的 `Is` 在 `Case Is` 里占的是**测试表达式**的位置，压根不是标识符 ⇒
+`CaseClause::CaseValue` 加 `relOp`(BinaryOp) + `hasRelOp`(bool)，parser 里那枚占位标识符只用于借优先级、
+出函数就丢，`cv.value` 从此只装右操作数；`cgen_select.cpp` 三档（字符串 / Single / 整数）改读 `cv.relOp`；
+`ast_clone.cpp` 两个字段都抄。无比较符的 `Case Is` 那支本来只看 `isIsClause`，值留空即可（改前塞进去的
+那枚标识符从来没人读）。
+
+判据（四件，本地全绿）：① 探针两面 —— VB3001 3→0（整个 err 空），隐式局部 2→0，而 `_vb6_select_` 的
+条件行逐字不变；② `tests/test_caseis.bas` 7 针真跑 x64+x86 全对（六个关系符各档 `CI-rel=lt/le/eq/gt/ge/ge`、
+`CI-ne=is4/ne4`、Is 与值混写 `CI-mixed=big/big/two/rest`、字符串 Select `CI-word=beq/gtm/rest`、
+Single Select 那一档 `CI-half=hi/lo/mid`、Variant 测试表达式 `CI-var=hi/lo/hi`）；③ 两条 [CODEGEN-NOTE] ——
+`caseis_is_not_an_identifier` 用同一份夹具**两头钉**（`nopeHereIsNotAName` 照旧报 VB3001，`'Is'` 必须不再出现，
+拦"把整条诊断关掉"那种修法），`caseis_no_phantom_local` 钉序言里没有 `vb6_VARIANT Is`；④ 哨兵
+`scripts/check_caseis_shape.ps1`（C1 两个字段各 1 份 / C2 parser 只设一次 hasRelOp 且不得再把造出来的名字
+存进 cv.value / C3 发码读 cv.relOp 三处且不得再把 cv.value 当 BinaryExpr 拆 / C4 clone 两字段各抄一次），
+[STATIC] caseis_shape 在 compile 片 PASS，该片 26→27；两条负控各自红过（删 clone 那行 ⇒ C4 红；把假标识符
+塞回 cv.value ⇒ C2 红），恢复后按 md5 验过逐字节相同。
+
+A/B 护栏（发码面）：inputs=100 same=90 **changed=10**，每份都是 `+0` 行的纯删除，条数 33/21/9/3/3 各两档
+（Charts 主工程 33 = ucChartArea 9 + ucChartBar 21 + ucTreeMaps 3，VBFlexGridDemo 3）—— 逐行看全部是删掉的
+VB3001 `Is` 诊断行，**unattributable=0**；CENSUS `'Is'` 138→0，CENSUS `_vb6_select_` 7346→7346（每个 Select Case
+站点照旧发码）。这一族的规模是全仓的：138 条里 .ctl/.pag 占大头，说明它在别的工程只会更多。
+
+边界与下一格：① 剩下 96% 的噪声是 ①②③ 三种"发码认识、语义层不认识"，收法与 §B50 这一刀不同 —— 要么把
+`kHostPseudoRows` 从 backend 提到 `src/common` 让语义层也问它（一处权威两个消费者，照账 #188 那个先例），
+要么在 `namesProjectLevel` 那条豁免位上补文档类隐式对象；动手前要先答一句「语义层把这些名字认识之后，
+`lastExprType_` 该不该跟着换档」—— 换档会动类型判定，必须重新做一遍 A/B。② `Controls`/`Count` 那 3 条是
+表**刻意不收**的成员（RTL 无对应全局），属账 #159 末尾说的"RTL 侧缺口，另立账"。③ `CTRLINFO_EATS_RETURN`
+一条要先量"跨模块 Public Const 在 .ctl 里到底解析不解析"，别顺手并进豁免位。④ §C16 那条读数教训是这一格
+最重要的副产品：census 的**名字**是唯一可信刻度，行号与自己解码出来的拼写都要复核。
+### B51 文档隐式对象只有"这份文档是哪一类"这一个前提，而那个前提在仓里猜过两处、语义层根本没有（账 #217 第二刀，**已出，门 #342**）
+
+症状是一整片噪声：全仓发码语料里 **VB3001 共 2934 条**（两份真工程 499 + 499，其余在 czUI / ve_units /
+Charts 各子工程）。按名字分家就是 §B50 说的 ① 那一族：`UserControl` 644、`PropertyPage` 132、`Ambient` 81、
+`Extender` 52、外加 `VBA.` 37 —— 合起来 946 条。发码那侧从来是对的（成员与类型由 `kHostPseudoRows`
+回答，账 #159），语义层的 `visit(IdentifierExpr)` 却只认「工程级名字」两个位（`namesProjectLevel`），
+于是每条 `<对象>.<成员>` 都当成未声明标识符。更实在的一面在**没写 Option Explicit 的模块**：那条
+隐式声明支路会把这些名字登记成 Variant 局部，发码真发出来 —— 探针 `b227out/vb_qual.bas` 读到的就是
+`vb6_VARIANT VBA = vb6_VariantEmpty();` 外加一对 `#pragma push_macro/pop_macro("VBA")` 护栏，每枚用到的
+过程一枚，从来没人读。
+
+结构上的根因是**同一个前提写了两遍、第三处压根没有**：driver 按扩展名算 `isControlModule` /
+`isPropertyPageModule`（`driver_frontend.cpp` 里那几个 bool），发码那边又拿 `controlTypeName` 找
+"PropertyPage" 字符串猜第二遍（`cgen_form.cpp` 的 Fix 110f），而语义层两手空空 —— `Module` 上连一个
+表示文档类别的字段都没有（`ast_decl.hpp` 只有 isClassModule / isFormModule / isInterfaceModule）。
+VB6 的 `UserControl` / `PropertyPage` 只在对应类别的文档里存在，`Extender` / `Ambient` 只有 UserControl 有，
+`VBA` 是全局库前缀哪都有 —— 这四条规矩必须落在**一格**里，不能散在字符串猜测上。
+
+收成一处：`common/types.hpp` 加 `DocumentKind { Standard, Form, UserControl, PropertyPage }`，
+`Module::docKind` 由 driver **一处**按扩展名写（就在原来写 isFormModule 那个位置），语义层与发码层两处读：
+语义层新增 `SemanticAnalyzer::isDocumentHostObject(name)`（(类别, 名字) 一格一格对，四枚文档对象各自认类别、
+`vba` 恒真），在 `visit(IdentifierExpr)` 的未找到支里插在 `namesProjectLevel` 之后当第三个豁免位，
+**且要求 `memberObjCtx_`**（限定符位）；发码层把 `isPropertyPageDesigner_` 改成读 `module.docKind`
+（`emitDesignerControlDecls` 多收一个参数），那句字符串猜测删掉。豁免只压诊断、**不改类型答案**：
+`lastExprType_` 仍旧答 Variant，成员的类型继续由发码那张表回答 —— 这一格刻意不碰类型判定，
+要碰是另一格（碰就得重做一遍发码 A/B，理由见 §B50 的"边界"）。
+
+判据两头 + 一张哨兵：① 两份真工程逐档清零 —— VBFlexGridDemo 499→**19**、Charts 主工程 499→**34**，
+x86 与 x64 读数逐字相同；② 编译面夹子 `tests/dochost/dhExp.ctl`（开着 Option Explicit，五枚符号照旧发出来
+而 Absent 钉 VB3001 = 0）与 `tests/dochost/dhImp.ctl`（故意不写 Option Explicit，Absent 钉三枚死局部
+`vb6_VARIANT UserControl/Ambient/VBA`）—— 顺带一条工具事实：**.ctl 可以单独喂 --emit-c**，
+不必为编译面判据造一整份工程；③ 哨兵 `scripts/check_dochost_authority.ps1`：D1 枚举 1 份四档齐、
+D2 **docKind 的写入点全仓恰好 1 处**（多一处就是第二个权威）、D3 谓词 定义/声明/调用 各 1 且调用点带
+memberObjCtx_、D4 旧的 `controlTypeName.find("PropertyPage")` 必须为 0、D5 名字表五枚齐全。
+[STATIC] dochost_authority 在 compile 片 PASS（该片 27→28）。
+
+发码面 A/B（BASE = 上一刀那台 HEAD `ab1db9c0`，NEW = 这一刀）：inputs=100 same=82 **changed=18**
+（9 份工程 × 两档），每份都是 `+0` 行的纯删除，`unattributable=0`；CENSUS VB3001 **2934→158**；
+宿主符号一条没动 —— `vb6_UserControl_ScaleWidth` 436=436、`vb6_Ambient_UserMode` 94=94、
+`vb6_PropertyPage_hWnd` 16=16、`vb6_UserControl_hWnd` 70=70、`vb6_Extender_Tag` 4=4，
+`_vb6_select_` 7346=7346，`VB7006` 0=0（豁免位没把包屏蔽那条诊断一起吃掉，这条是专门钉的）。
+隐式局部那一面在这批语料里读不出增量（这些工程全写 Option Explicit，走的是"只 warn 不登记"那一支），
+所以那一头靠 dhImp.ctl 钉，不假装 A/B 能证明。
+
+边界与下一格：① 余下 158 条里最大的一族是 ③ **内在常量** 28 条（`vbSrcCopy` 折成 13369376、
+`vbPicTypeIcon` 由 RTL 的 `#define` 接住 —— 两份权威，见 §B50 的 ③），已登记为下一格；
+② 裸写的伪成员（`Changed` 8 / `hDC` 6 / `Controls` 2 / `Count` 1 + grid 那 1 条裸 `UserControl`）
+这一格**故意没管** —— 裸名要按 `HPF_BARE` 放行，风险是遮住真打错的变量名，得单独定判据；
+③ `CTRLINFO_EATS_RETURN`（跨模块 `Public Const`）与 `BF` / `B` 那三条未归家的，都要先量再收；
+④ 类型答案那一面（语义层认识这些名字之后 `lastExprType_` 该不该跟着换档）没动，动它之前先想清楚
+为什么这一格的答案是"不换"：换档会改类型判定，而这一格的发码 A/B 判据只对"纯删诊断行"成立。
+
+**门 #342 落定（run 37345079456、head `910b37b8`、attempt 1）= 11 job 全 completed/success。**
+compile 片 27→28 里新那枚就是 `[STATIC] dochost_authority ... PASS`（`caseis_shape` 同片照旧绿）；
+syntax 片 154→156 = `dochost_ctl_no_undeclared` 与 `dochost_no_phantom_locals` 两枚进门禁且绿；
+bas 两片 47+47 与 #341 同（第一刀的两枚 test_caseis 已在里面）；vbp 四片 50/54/49(+1 SKIP)/51，
+唯一的 SKIP 仍是 test_vbman（COM 未注册 32-bit 视图，与 #335/#337/#339 同形）。
+**顺带把 #341 那条红结掉**：同一份 frmevents 夹具在 #342 `PASS`（vbp #2，54/59，红=0），而 #341 那次
+是 `.out/.err` 双 0 字节、距上一条 PASS 只 3 秒、发码逐字节相同 ⇒ **两刀都不是它的因**，账 #79 那条
+"拖放点按窗口位置现算"的抖动换了症状出现（从"少几条 EV"变成"整个进程没输出"），本账没动它，
+继续留在 #79。
+
+
+### B52 `Picture.Line` 尾部的 B / BF 是语法不是名字，而 RTL 用两枚**外部链接的裸名 C 全局**接了它三年（账 #220，**已出：门 #343 十一 job 全绿**）
+
+症状硬得没有歧义：一份工程只要有个叫 `B` 的模块级变量就**编不过**。探针 `b228out/clash_b.bas`
+（`Public B As Long` + `Public BF As String`，Main 里 `B = 7`）在改前实测 **BUILD-RC=1、5 条诊断
+（C2373 重定义 ×4 + C2166 赋值给 const 对象）、exe=False**；同一条语句 `Picture1.Line (x,y)-(x2,y2), c, BF`
+在 `ppProgressCircular.pag` 里其实只有 **3 条源语句**（297 / 299 / 474），但一份工程发码出 **8 条调用**（`DrawPalette` 4 + `PropertyPage_Initialize` 4），语料四份投影各 8 条 —— 这 8 条全靠那两枚全局才落得下地。
+
+成因是三段接力的最后一环：Fix 102 把 `(x1,y1)-(x2,y2)` 吸收成 Line 的实参表之后，尾部 `, color` / `, BF`
+是按普通实参 `parseExpression()` 发出去的 —— 名字进了 AST，发码就原样发裸名，RTL 那侧为了让它有个落脚处
+写了 `const int32_t B = 1; const int32_t BF = 2;` 并 extern 出去。问题在 VB6 的名字空间与 C 的名字空间
+**是共享的**：生成的模块 C 会 #include 那批 RTL 头，而用户模块级变量在 C 里同样是裸名 —— 于是头里 extern
+的在编译期撞，.c 里非 static 定义的还会在链接期撞（LNK2005），只有 static 的不撞。
+
+修法收成一处：parser 在 Line 的**尾部循环**里认 style 那一格（`trailingIdx == 1`，即 color 已经给出），
+把 `B` / `BF` 折成 `LiteralExpr(Integer)`，值沿用删除前两枚全局的 1 / 2（本刀刻意不改语义）；RTL 的两枚定义
+与两行 extern 一起删。**位置口径是关键**：`Line (a,b)-(c,d), B` 那一格按 VB6 是 **color**，用户的 `B` 必须
+照旧成立 —— 折错格就是"修一处撞车、制造一处静默错值"，所以夹具两头都写。
+
+判据三件：① 真跑 `tests/test_nameclash.bas`（x64 + x86 两片）—— 改前那份就是 no exe，改后
+`NC-B=13 NC-BFLEN=2` / `NC-ACC=15` / `NC-BOX=3/8` / `NC-DONE`，数值、串长、累加、装箱四形都归了用户；
+② 发码面 `tests/pcline/PcForm.frm` 的 [CODEGEN-NOTE] `pcline_flag_folded` —— 四条 needles 钉位置
+（两条 style 格折成 `vb6_ComPackInt(2)` / `(1)`，两条 color 格留 `vb6_ComPackInt(B)` / `(BF)`），
+两条 Absent 钉改前语料实测的那两形 `vb6_ComPackValue(BF)` / `(B)`；③ 哨兵
+`scripts/check_rtl_naked_names.ps1`：N1 B/BF 在 RTL 里 0 份、N2 **非 static 的裸名文件作用域数据全局 =
+一份钉死的名单**（现在 5 枚：`Changed`（账 #219 欠的）、`g_hoCount`、`g_uc_descCount`、`g_uc_recCount`、
+`g_uc_dumpSeq`；多一枚就红，缩小要在同一次提交里改名单）、N3 折旗标只许一个地方（style 位守卫 1、
+交出字面量 1、**旗标名字进 AST 必须为 0**）、N4 值口径 B=1 / BF=2 钉死。负控实测：往
+`vb6rtl_com.c` 插一行 `int32_t b220probe = 0;` ⇒ N2 立刻红并点名，撤掉复绿。
+
+发码面 A/B（BASE = HEAD `a7a929c9` 那台，NEW = 这一刀，inputs=100）：**changed=4**（ucProgressCircular
+那两份 × 两档），其余 96 份一行没动；每份 +8 行 / −8 行，且每一行差异都只在最末一格 ——
+`vb6_ComPackValue(B|BF)` → `vb6_ComPackInt(1|2)`，行内其余字符逐字相同；外加 3 行 VB3001 纯删
+（ppProgressCircular.pag 63/65/240 那三处），Charts 主工程 VB3001 34→**31**。
+
+边界与下一格：① **本刀只把名字归还用户，没让 Line 画出来** —— 那 8 处现在仍是
+`vb6_ComCallObject(vb6_ComGetObjectProp(vb6_hwnd_Picture1, L"Line"), L"Item", {...}, 6)`，宿主应答表里
+`Line` 从没登记，运行期是**静默空转**（登记为账 #221）；② `B=1 / BF=2` 这两个值沿用旧全局，没有对过类型库
+（VB6 文档那一面是 B/C/F 三个位，`BF` 到底是 2 还是 1|8 待查），归 §B51 边界 ③ / 账 #218 那一族，
+先读库再动；③ `Changed` 那枚裸名全局仍在名单上，由 #219 收（**同一轮已把它定罪成实测**：`Public Changed As Long` 现在编不过，C2371 重定义 —— 见 §C18 末段）。
+**门 #343 落定（run 37350249122、head `91a004fe`、attempt 1）= 11 job 全 completed/success、逐片 FAIL=0。**
+bas 两片 47→**48** 与 47→**48** = `test_nameclash` 与 `test_nameclash_x86` 进了门禁（那两片只落摘要行，
+所以逐针读数算本地那份：x64 真跑 `NC-B=13 NC-BFLEN=2` / `NC-ACC=15` / `NC-BOX=3/8` / `NC-DONE`）；
+compile 片 28→**29**，新那枚逐行读到 `[STATIC] rtl_naked_names ... PASS`；syntax 片 156→**157**，
+逐行读到 `[CODEGEN-NOTE] pcline_flag_folded ... PASS`；vbp 四片 50/54/49(+1 SKIP)/51 与 #342 同形
+（唯一的 SKIP 仍是 test_vbman，COM 未注册 32-bit 视图），asm 13/14、smoke 1/1。
+
+
+### B53 `Picture.Line` 的八处调用两跳都返回成功、一笔都不画：兜底把方法当属性取，而 RTL 两处都登记成「认识但什么都不做」（账 #221 = C29-PL-a，**已出：门 #344 红在自己的名单针 → 门 #345 十一 job 全绿**）
+
+这条缺陷的形状是**没有任何诊断的**：源侧 `ppProgressCircular.pag` 三句 `Picture1/2.Line (…)-(…), c, BF`
+（297 / 299 / 474，一份工程发码出 8 条调用），发码交出去的是
+`vb6_ComCallObject(vb6_ComGetObjectProp(vb6_hwnd_PictureN, L"Line"), L"Item", {…}, 6)` ——
+先把**方法名当属性**取回一个对象，再对那个对象取默认成员 `Item`。而 RTL 两处都把 Line 登记成
+"认识但不做事"：`vb6forms_axcontainer.c:304` 的属性位交回 `axSetEmpty` + `S_OK`（**Empty，不是 IDispatch**，
+所以第二跳根本没有可调的对象），`uc_hostmodel_call.inc:152` 干脆 `return 1`，注释写着
+「宿主对象: 未知方法一律空实现」。⇒ **两跳都成功、两跳都空**，编得过、跑得起、退出码照旧 0。
+这已经是本线第三条「控件方法落进 COM 兜底 = 运行期静默空转」（账 #143 的 SetFocus、账 #196 的
+hDC/TextHeight/ScaleX 各一条），差别只在 Line 是**六个实参**那一形。
+
+需求面先量了一遍：`Circle` / `PSet` / `Point` / `PaintPicture` 在 Charts 2020 / VBFlexGridDemo /
+czUI-main / VbQRCodegen-master 四份真源码里 **0 处**，`Cls` / `Print` 早已是原生出口
+（语料里 `vb6_ControlCls` 14、`vb6_ControlPrint` 2）⇒ Line 是这条绘图面上最后一个裸着的。
+
+顺带把账 #220 欠的那半收掉：那一刀为了不改语义，折出来的还是旧 RTL 全局的 `B=1 / BF=2`，
+只认两个词。现在按**字母位**折 —— `B=1 矩形 / C=2 椭圆 / F=4 填充`，按串里每个字母置位，
+所以 `BF=5`、`CF=6`，`C` / `F` / `CF` 三形从此有了落脚点。这张位口径是 parser 与 RTL **同一张表**
+的两头，哨兵 N5 就是钉这个：RTL 里 `style & 1` / `& 2` / `& 4` 各必须出现、`vb6_ControlLine` 必须 1 份。
+
+实现是三处 + 一处判定：RTL 新增 `vb6_ControlLine(hwnd, x1,y1,x2,y2, color, style)`
+（DC 走 `vb6_ControlPrint`/`vb6_ControlCls` **同一处** `vb6_ControlDrawDC`，坐标按
+`vb6_WindowScaleModeSelf` + `vb6_ScaleUserToPx` 折 —— 那是 #196/#197 的单位表，不另算一遍缇/像素；
+`color<0` 交回控件自己的 ForeColor；不填充那档必须显式 `NULL_BRUSH`，留着上一枚画刷就会顺带填一块）；
+后端加一张 `controlCanvasMethod` 表（照 `controlZeroArgMethod` / `controlOneArgMethod` /
+`controlScaleMethod` 那三张的规矩：**表只交名字、实参由码头拼**）；码头在
+`cgen_expr_call_callee_withm.inc` 的 Fix 185 那块之后接；**成员侧**
+`cgen_expr_member_form_builtin.inc` 的 PictureBox 那块要让 Line 也打标记。
+
+最后那一处是这一刀自己踩出来的：表与码头都写好后重编一台，产物**照旧**是
+`ComGetObjectProp(…, L"Line") + Item`，夹具四形全 False —— 因为成员侧没给标记时，兜底已经把
+`comObjExpr_` 换成 HWND 表达式（那段注释里 Fix 023e/089d 说的正是这件事），调用侧那张表根本收不到标记。
+于是哨兵加了 N6 第四条（成员侧必须问表），把"只接一头"这种半成品形状钉死。
+
+判据两面，都真跑：① 编译面 `tests/pcline/PcForm.frm` 的 [CODEGEN-NOTE] `pcline_flag_folded`
+换了针 —— 四条正针钉原生形状与其位置（`…, (int32_t)255, (int32_t)5)` 是 BF、`(int32_t)1)` 是 B，
+`(int32_t)B, (int32_t)0)` / `(int32_t)BF, (int32_t)0)` 是用户自己的名字**留在 color 格**、style 缺省 0），
+三条 Absent 钉 `ComGetObjectProp(vb6_hwnd_picA, L"Line")` 与改前那两形 `vb6_ComPackValue(B|BF)`；
+② 运行面新夹具 `tests/pcline/PcDraw.{frm,vbp}`（门禁 `pclinedraw` + `pclinedraw_x86`）—— 画完**问像素**：
+`PL01-LINE` 对角线那枚必须红而旁边那枚必须不红、`PL02-BOX` 边框蓝而中心不蓝、
+`PL03-FILL` 中心必须绿（这条同时证明 BF 与 B 折出来不是同一个数）、`PL04-CIRCLE` 沿 y 开小窗口找到切点
+且中心不红。四形 x64 与 x86 **逐行相同**：`PL05-RAW diag=255`、`PL06-RAW boxedge=16711680 boxmid=16777215`、
+`PL07-RAW fillmid=65280 circletop=255`。两条工具读数：画与问都要放在 **Timer 第一拍**（先写在
+Form_Load 里，`GetPixel` 一律回 -1 = CLR_INVALID，挪出去就全对，同 dcsurf 那条"窗口活着的时候问"）；
+DC 用 `GetDC(控件 hwnd)`（pbsub 那一族），`picC.hDC` 在这枚夹具上读出 0 —— 那是 #196 那一族的另一问，
+本刀不动。
+
+发码面 A/B（BASE = 账 #220 那台 `b228_new_emit`，NEW = 这一刀 `b230_new_emit`，inputs=100）：
+**changed=4**（Charts 主工程 + ucProgressCircular 各 × 两档）、same=96；每份 +8/−8 行，
+每一行都是同一条调用换了出口；CENSUS 兜底形状 `L"Line"` **32→0**、原生 `vb6_ControlLine(` **0→32**
+（正好 8 处 × 4 份投影，别处一份都没多），而 `VB3001` 146=146、`VB6_SA_AT(` 20972=20972、
+`_vb6_select_` 7346=7346 —— 一条噪声没新增。
+
+真工程那一头：`ucProgressCircular/Proyecto1.vbp` 两档真编译仍 rc=1、27 条 error C/档，但**逐文件归因**
+下来全在两处旧账 —— `Form1.c` 的 C2198 ×25 + C2084（控件数组事件臂两种形参表 + thunk 发两遍，
+**另立新账 #222**）与 `ucProgressCircular.c` 的 C2065 `"Count"`（账 #219 的 HPF_BARE 那半），
+而 Line 所在的 `ppProgressCircular.c` **零条诊断**、错误行里没有一条提到 `vb6_ControlLine`；
+BASE 语料里那几行 thunk 与声明**逐字相同**（changed=4 的差分行里没有一条是它们）⇒ 那些红不是本刀的因。
+
+边界与没验的一头：① `ScaleLeft/ScaleTop` 的**原点偏移**没进来（语料的 PictureBox 都是 0，
+真给非零原点的工程会画偏）；② VB6 那条「Line 之后 CurrentX/CurrentY 移到终点」没进来
+（调用点从没读回它，接进来要先定 CurrentX 的单位口径，与 #192 那一格同问）；
+③ `With picA : .Line (…)` 那一形**没测** —— 账 #192/#150 记着带实参的 With 形至今没接；
+④ 表里**刻意不给 Form 那一档**（只有 PictureBox 那处成员侧打了标记），给了就是"广告比应答复"，
+接 Form 之前先找出 `Me.Line` 那条码头；⑤ `Circle/PSet/Point` 的需求面是 0，所以这一格没为它们留出口。
+**两道门：#344 红在自己的名单针上，#345 全绿。** #344（run 37356616867、head `9513720f`、attempt 1）
+= compile 片 `PASS=28 FAIL=1`，红的不是产品也不是本刀的判据，而是**别人那枚哨兵**
+`[STATIC] control_dc ... FAIL: D2 call sites of the drawing-DC authority = 5 (want exactly 4)` ——
+`check_control_dc.ps1` 的 D2 钉的是「拿绘图 DC 的调用点恰好 4 处」这份名单，Line 接进同一处权威
+是正当扩容，名单没跟着改就是红。修法按本仓既有规矩（**名单扩大/缩小必须在同一次提交里改这里**）
+把 4 改成 5 并把 `ControlLine` 写进名单，顺带订正该文件头 D2 那行注释（还写着 3 枚 —— 上一格加
+文字量出口时也没同步，正是同一族"名单跟着代码走"会烂的地方）。
+⚠ 一般式（同批进记忆）：**往一族共用的出口上加站点时，同一轮把 `scripts/check_*.ps1` 全部跑一遍**
+（20 枚、几十秒），别只跑自己新写那枚 —— 这次红在别人那枚上，本地完全没读到，代价是一整轮门。
+其余十片 #344 当场就绿了，两枚新夹具在 CI 上各自 PASS（`[VBP] pclinedraw ... PASS` /
+`pclinedraw_x86 ... PASS`；vbp 四片 TOTAL 之和 226→228 正是这两枚）。
+
+**门 #345 落定（run 37359094337、head `b0e4da16`、attempt 1）= 11 job 全 completed/success、逐片 FAIL=0。**
+compile 片 29/29（`[STATIC] control_dc ... PASS` 与 `[STATIC] rtl_naked_names ... PASS` 同片都在）；
+syntax 片 157/157（本刀换过针的 `pcline_flag_folded` 在里）；bas 两片 48 + 48（账 #220 那两枚仍在）；
+vbp 四片 50(+1 SKIP)/55/50/51，唯一的 SKIP 仍是 test_vbman（COM 未注册 32-bit 视图，与 #342/#343/#344 同形）；
+asm 13/14、smoke 1/1；`Build C3.exe` 那片日志正文不含用例行（历轮同形的 empty-shell）。
+
+
+
+### B54 `.pag` 里裸写的 `Changed` 发码一直是对的、诊断却每条一响；RTL 那枚裸名全局是它的第二条权威，撞掉之后那张表才是唯一一处（账 #219 两刀，**已出：门 待回填**）
+
+两件症状，都是实测：
+
+① **撞名就编不过**：任何工程里一枚 `Public Changed As Long` 与 RTL 文件作用域那枚 `int16_t Changed`（外部链接的裸名 C 全局）撞成 C2371 重定义。探针 `tests/test_rtl_naked_changed.bas` 改前 BUILD-RC=1 / no exe，改后 RC=0 / exe / `NC219-CHANGED=6 NC219-VT=3`（x64 本地真跑过，x86 交门）。同族第三枚 `g_hoCount` 一类仍留在哨兵名单里。
+② **噪声**：`.pag` 里 `Changed = True` 每条配一句 VB3001，语料 24 条（PropPagLP.pag 4 条 × 两档 + ppProgressCircular.pag 4 条 × 两档）。
+
+关键读数：**这一格的发码从来是对的**。`vb6_PropertyPage_Changed` 语料 186 处、裸名 `Changed` 在产物 C 里 0 处，`Changed = True` 早就发成 `vb6_PropertyPage_Changed = (-1);` —— 成员叫什么、能不能裸写由 `kHostPseudoRows` 那张表回答（账 #159 就收了）。所以 RTL 那枚裸名全局既没人引用、又占着 C 的全局名字空间，是纯负担 ⇒ 删（定义与 extern 各换成一条记录这组读数的注释）。语义层补的是 `visit(IdentifierExpr)` 未找到分支里那一格"裸写的文档成员"，与限定符位那一格（`memberObjCtx_`，账 #217）互斥；类型答案仍走 Variant，由发码层按表回答。
+
+第二刀是架构那一刀，不这么写就还得再抄四遍：**语义层这一格不许自己认名字，只许问那张表**。表原先住在 `src/backend/cgen_util_com.cpp` 的匿名 namespace 里，语义层够不着 ⇒ 把它搬进 `src/common/host_pseudo.hpp`（`inline` 的表 + `hostPseudoFind` + 新增的 `hostPseudoBareEligible` 一句出口，与 `float_literal.hpp` / `int_literal.hpp` 同一家族），发码侧 `CCodeGen::hostPseudoBareName` 与语义层 `isDocumentBarePseudoMember` 都只问这一句。往后往表里加一行 `HPF_BARE`，诊断面顺带就放行了，不必两处同改。common 不得依赖 semantics，故表里的 `Symbol::toLower` 换成头文件自带的 `hostPseudoLower`（同一件事：ASCII 小写）。
+
+读数：发码语料 A/B（BASE = `b230_new_emit` = 账 #221 收线那台，NEW = `b233_new_emit` = 这台）inputs=100/100、changed=12、same=88，12 份里**每一条差异都是删掉一行 VB3001**（逐份 `+0/−N`），产物 C 一行没动 ⇒ 这一刀只动诊断面。VB3001 146→98，名字档 `Changed` 24→0、`hDC` 24→0，其余 18 种名字一个没动（`new-names={}`）；`vb6_PropertyPage_Changed` 186=186、`int16_t Changed`(VBFlexGrid 的 UC 形参面) 10=10。`.ctl` 那 24 条是表把 `ScaleWidth`/`hDC`/`hWnd` 一并发放行顺带收掉的 —— 这就是"问表"与"抄名字"的差别。
+
+判据两头（本地探针，`.build/b233out/`）：`pagBare.pag` 里 `Changed = True` / `If Changed Then` 零 VB3001 且发码命中 `vb6_PropertyPage_Changed` 三处，而同一份文件里打错的 `Changd` 照报；`basBare.bas`（标准模块）里裸写 `Changed` 仍报 VB3001 ⇒ 放行按文档类别，不是一片名字；`ctlBare.ctl` 裸 `hDC` 发成 `vb6_UserControl_hDC` 且零 VB3001。
+
+夹具与哨兵：`tests/test_rtl_naked_changed.bas`（x64/x86 各一形，三针）；`tests/dochost/dhBare.ctl`、`dhBare.pag`、`dhTypo.pag` 三条 [CODEGEN-NOTE]（`dhTypo` 是负控：表里没这名字 ⇒ 必须照报，且不许凭空发 `vb6_PropertyPage_Changed`）；`check_host_pseudo_table.ps1` 的 `$tblPath`、`must`、`deny` 三处跟着表搬家，`must` 从此含"语义层必须问表"那一条；`check_rtl_naked_names.ps1` 的 N7 换成谓词 定义/声明/调用/带门 = 1/1/1/1 + 问表 1 + 成员名字面量 **0**。哨兵红过一次是当场演示的负控：把 N7 里读那三个文件的一行删掉 ⇒ 六条计数全 0、五条 FAIL。
+
+剩下的同族（本账没做完，读数已钉住）：`Controls` 4 条全在 ppProgressCircular.**pag**（那张表 propertypage 档没有这一行；收不收要先问 VB6 里 .pag 裸写 `Controls` 是谁）；`Count` 2 条在 ucProgressCircular.**ctl**（表里也没这行，而 #159 的边界写明"RTL 没有对应全局的行刻意不收"⇒ 那是 RTL 侧缺口，另立账）；`ScaleWidth` 2 条在 frmDemo.**frm**（窗体成员走的是另一条路，不在这张表里）；另 26 条是内在常量一族 ⇒ 账 #218。
 
 ## C. 仍在生效的口径与工具事实（与本文档等长的一半价值在这里；完整版见记忆库）
 
@@ -730,6 +1003,43 @@ C 那一枚顺带把 #209 的「未处理错误按 9 退出」口径在**实例�
     `markAddressOfCallbacks` 内层那圈对**每个模块的符号表**各 +1（定义模块一份 + 每个引用它的外部副本一份），
     所以 VBFlexGridDemo 源码里去重后 37 个 `AddressOf` 目标名，这一行报 **49**。当「这条路走没走」的信号够用；
     **待办**：按过程名归并后再报（去重），下轮有别的源码刀时顺手改，不为它单开一轮门。
+16. **读 MSVC/C3 的中文告警必须显式按 gbk 解码，否则 census 会造出不存在的条目**（2026-10-05，账 #217 撞的）：
+    C3 的诊断正文是中文、按控制台码页写进日志。用 UTF-8 + errors='replace' 读时，名字前面的中文字节会连吃字符
+    —— 我因此把 `OLEGuids.IObjectSafety` / `OLEGuids.IOleInPlaceActiveObjectVB` / `OLEGuids.IOleControlVB` 三条
+    归成一簇叫 `nterface` 的假条目，还据此在 §B49 记了一条不存在的账。同一份日志 `decode('gbk','replace')` 重读，
+    502 条落在 14 组名字上、一条不差。同族第二条坑：正则的 `^` 不加 `re.M`，在整篇文本里只匹配文件开头，
+    会得到"这条日志里 0 条告警"这种假阴性 —— 而 `grep -c` 明明报 502。**数字与工具对不上时先怀疑读法**，
+    别拿第一个读数分家。
+
+17. **.ctl / .pag 可以单独喂 `--emit-c`**（2026-10-06，写账 #217 第二刀的判据夹子时确认）：
+    不必为"编译面判据"造一整份工程（.vbp + 宿主窗体 + .frx），一枚带 `Begin VB.UserControl X` 头行和
+    `Attribute VB_Name` 的 .ctl 就能直接跑 —— 走的是 driver 同一个按扩展名分派的入口。
+    配套的两条读数口径：① `Test-CodegenNote` 的 Absent 钉 VB3001 时**要钉 ID 而不是钉中文正文**
+    （正文按控制台码页写，跨码页不稳，见 §C16）；② 全仓 VB3001 总数是这类"跨工程同一族"改动最好的
+    横截面判据（本格 2934→158），比逐工程数数更难被局部巧合骗过。
+
+18. **RTL 导出的 C 名字与用户模块级变量共用同一个名字空间**（2026-10-06，账 #220）：生成的模块 C 会
+    #include 那批 RTL 头，而 `Public B As Long` 在 C 里也是**裸名** —— 所以 RTL 里头文件 extern 的裸名全局
+    在**编译期**撞（C2373 重定义 + C2166 给 const 赋值），.c 里**非 static** 定义的在**链接期**撞（LNK2005），
+    只有 `static` 的不撞。口径：RTL 只用 `vb6_` / `VB6_` 前缀导出名字；语法旗标（`Line` 的 `B`/`BF` 这种）
+    一律由 parser 折成字面量，**不许**为了让发码"有个名字落脚"而在 RTL 补一枚全局。
+    哨兵 `scripts/check_rtl_naked_names.ps1` 的 N2 把现存名单钉死（5 枚，`Changed` 那枚由账 #219 收），
+    负控 = 往 `vb6rtl_com.c` 插一行 `int32_t b220probe = 0;` 立刻红并点名。这条口径的两头各有实物（同一轮探针 `.build/b229out/`，两台都 no exe）：`Public Changed As Long` ⇒ **C2371 重定义；不同的基类型**（头里 `extern int16_t Changed;` 那一枚，编译期撞）；`Public g_hoCount As Long` ⇒ **LNK2005 + LNK1169**（只在 `uc_host.c` 里非 static 定义、它那个头没进生成的模块 C，链接期撞）。读法一条：cl 的诊断**不在 C3.exe 的控制台输出里**，只在 `<output-dir>/c3-error.log`（按 gbk 解），否则会出现「BUILD-RC=1 且控制台 grep error C 得 0 条」这种假象。
+
+19. **一条控件方法要"两头都接"才算接上：成员侧打标记 + 调用侧查表**（2026-10-06，账 #221 踩的）：
+    后端那张"表只交名字、实参由码头拼"的做法（`controlZeroArgMethod` / `controlOneArgMethod` /
+    `controlScaleMethod` / 现在的 `controlCanvasMethod`）只在**成员侧把 `comObjExpr_` 留成小写控件名**
+    时才拿得到控件类型；成员侧不打标记，兜底 Fix 023e/089d 已经把 `comObjExpr_` 换成 HWND 表达式，
+    调用侧那张表**根本不会被问**。症状与账 #143 一模一样：产物照旧 `ComGetObjectProp(hwnd, L"方法名")`
+    再取 `Item`、两跳都 `S_OK`、一笔不画、一条诊断都不打。所以新加一张这种表时，
+    `scripts/check_rtl_naked_names.ps1` 的 N6 四条（声明 1 / 定义 1 / 调用侧 ≥1 / **成员侧 ≥1**）
+    必须四条都绿才算这一格做完；只看到"表建好了、码写好了"就提交，等于交一半。
+    同批两条夹具读数纪律：画完问像素要放在 **Timer 第一拍**（Form_Load 里 `GetPixel` 全 -1 = CLR_INVALID），
+    DC 用 `GetDC(控件 hwnd)` 而不是 `控件.hDC`（后者在这枚夹具上读出 0，属 #196 那一族的另一问）。
+
+
+
+- **跨层的判据表住在 `src/common`（账 #219 起）**：一张"哪个成员叫什么 / 能不能裸写"的表（`kHostPseudoRows`）原先在 `src/backend/cgen_util_com.cpp` 的匿名 namespace 里，四个消费点都在发码侧。语义层要问同一件事时**不许把名字抄进 semantics**（抄一份就是第二个权威，本账那 48 条噪声就是这么来的），而是把表搬进 `src/common/host_pseudo.hpp`，两头只问 `hostPseudoBareEligible(obj, member)` 这一句。common 不得向上依赖 semantics，所以表里的 `Symbol::toLower` 换成头文件自带的 `hostPseudoLower`。哨兵 `check_host_pseudo_table.ps1` 的表路径 / `must` / `deny` 三处跟着表搬家，含义是"这张表只许有一个家、语义层只许问它"
 
 ## D. 已完成项一行索引（叙述已删；原文在 `git show 1465da1:ai/C3_FIX_HANDOFF.md` 的对应 §区间）
 
@@ -792,4 +1102,9 @@ C 那一枚顺带把 #209 的「未处理错误按 9 退出」口径在**实例�
 | 账 #214（提交 `323ab077` = §B46 的多维元素访问出口 + 4 秩发码补全 + 哨兵 A4 改口径与新 A6/A7；门 #334 = run 37287453662、head 323ab077、attempt 1 = 11 job 全 completed/success、逐片 FAIL=0，`[STATIC] sa_access ... PASS` 逐行读到，bas 两片之和 87→88 正是本轮新用例那枚进了门禁且绿） | **多维动态数组的元素访问同样不问「描述符在不在、每一维在不在范围」**：2 秩越界是**静默拿到隔壁那格**（`a2(3,1)` 回 12，VB6 是错误 9），从没 ReDim 取 `d(1,1)` 读 `(NULL)->data` 当场 0xC0000005，而 4 秩以上另有一条更糟 —— 发码把实参拼成 `(int[]){i0, i1}` 只塞两枚下标却按实际秩数交出去，于是 `Dim a4(1 To 2,1 To 2,1 To 2,1 To 2)` **在范围内也**崩（x86/x64 同形，1/2/3 秩各有专用分支所以一直是对的）。收成 `vb6_SaNdElemPtr` 一处 inline（先问形状 `dimCount`∈1..16 —— 一维描述符首字段 0x5A1D 天然落不进去，阈值抄的是 `vb6_LBoundND` 那条已有的 —— 再逐维问上下界）+ `vb6_SaNdElemFail` 抛 9；AT1/AT2/AT3 宏体改走它，新加 ATN 一次交全秩数与全部下标，复合字面量必须裹最外层括号（少了就是 cl C4002，实测）。新夹具 `test_arr_nd` 八针 x86+x64 各真编真跑逐行相同；A/B 98 份 `--emit-c` 逐字节相同（census ND_AT2 1468→1468、ATN 与 `_ndoff_` 各 0→0）；真编译 grid/charts × 两位数四片 rc=0；哨兵 A4 改成 0 条 + 新 A6/A7，七条负控逐条真红且逐字节还原；真工程带 `C3_SA_TRACE` 五趟 `saNd=0` ⇒ 那 1468 处全在范围内，加检查无可观察行为变化。另留一条读数纪律：`Form2.frm:504` 的 `Randomize Timer` 让「哪几枚 UC 宿主对 hover 有反应」在同一枚老 exe 上三趟就不同，这条不能当判据 | 已提交，门 #334 绿 |
 | 账 #212（夹子提交 `0364dfbb` = §B47 的 `tests/pberr` + `run_tests.ps1` 登记；门 #335 = run 37293132648、head 0364dfbb、attempt 1 = 11 job 全 completed/success，四片 vbp 的 TOTAL 之和 224→226 正是 pberr 与 pberr_x86 进了门禁且绿（vbp #1 由 PASS=48 SKIP=1 TOTAL=55 变 PASS=50 SKIP=0 TOTAL=56，vbp #4 TOTAL 55→56，vbman 那枚 SKIP 随分片挪到 vbp #3），`[STATIC] sa_access ... PASS` 逐行读到） | **#209/#214 交回运行期错误 9 之后，「抛在实例方法体内」这一路的另外两面一直没量过** —— 方法自己写了 `On Error GoTo` 时 9 会不会越过它 / 跳走之后那枚对象的成员还读不读得出（longjmp 没解链实例栈的话，现场就是「错误被吃掉 + 对象已坏」）。实测**没有产品改动**：x86 与 x64 真编真跑逐字节相同 `PE-1d=9 / PE-2d=9 / PE-null=9 / PE-caller=9 / PE-state=20-40 / PE-DONE` ⇒ 落回自己那枚方法的处理器、没处理器时交给调用方、三次抛出后成员照旧读出 20-40，这一路完整可用。三枚负控全走夹具（下标换成范围内 / 证人成员置 0 / 删掉驱动的 `On Error GoTo`），分别让 `PE-1d` `PE-state` 与「整片读数消失 + RUN=9」变红 —— 顺带记一条：**拿掉处理器前的 `Exit Function` 当不了负控**，抛出发生时根本走不到那一行（实测输出照旧）。登记按 §B46 那条新约束插在整条语句之后、PSParser=0 错、numstat +14/-0；夹具三文件从 LF 归一成 CRLF 之后重编重跑，六条读数不变。边界写明：钉的是工程类实例方法那一路，不是 UC 宿主带 `Extender`/`ScaleMode` 那一路；只断言 `Err.Number`；`On Error Resume Next` 那一形没问 | 已提交，待门 |
 | 账 #216（提交 `1df66f09` + 登记修复 `332bfd14` = §B48 的"位运算与 Not 的结果类型收成 TypeSystem 一处权威" + `tests/test_bitops.bas` 24 针（x86+x64 两形）+ 新哨兵 `scripts/check_bitwise_authority.ps1`；门 #337 = run 37313706942、head 332bfd14、attempt 1 = 11 job 全 completed/success，bas 两片之和 88→90 = test_bitops 两形进了门禁且绿，compile 片 24→25 里新那枚就是 `[STATIC] bitwise_authority ... PASS`，pberr/pberr_x86 在本 head 复绿；#336 那次红是登记行的 TAB（见 §B48 末段），同轮 tabwalk 一条红按其产物逐字节相同归到 #213） | **`And/Or/Xor/Eqv/Imp` 与 `Not` 的结果类型这条口径在仓里写了两份，发码那份对位运算恒答 Boolean** ⇒ 位运算数一进字符串上下文就打 True/False（`CStr(a Or b)`、`"x=" & (Not 5)`），装箱走 `vb6_VariantBool`，COM 实参更把 `hDC Or 0` 按 VT_BOOL 交出去（真工程 VBFlexGridDemo 的 `Render(...)` 就是这一条）；而同一表达式先赋给 Long 变量再打印一直是对的 ⇒ 差的是"问类型"不是算数。收成 `TypeSystem::bitwiseResult` / `logicalNotResult` 一处，语义层与发码层四个点全调它。24 针 x86+x64 各真编真跑逐行相同；负控=把权威毒成恒 Boolean ⇒ 16 条数值针全红、五条布尔面针不动；发码面 A/B 100 份 changed=8 且 VBFlexGridDemo 那 36 条有变行逐条归到三类；收成一处之后与手搓那版**逐字节相同 100/100**；真编译四片 0 error C / 0 LNK；哨兵在 HEAD 那两份消费点上 B1–B4 全红 | 已发货，门 #337 绿 |
+| 账 #217 第一刀（提交 `eef2c199`+`ab1db9c0` = §B50 那一族 `Case Is` 的假标识符不再进 AST + `tests/test_caseis.bas` 7 针 x86/x64 + 两条 [CODEGEN-NOTE] + `[STATIC] caseis_shape`） | 门 #341（唯一红 = frmevents 抖动，与本刀无关）→ 门 #342 全绿；发码语料 CENSUS `'Is'` 138→0，A/B 100 份 same=90 changed=10 全 +0 行 unattributable=0 | 已发货，门 #342 绿 |
+| 账 #217 第二刀（提交 `d2942bc8`+`910b37b8` = §B51 那一族文档隐式对象收成 `Module::docKind` 一处写两处读 + `tests/dochost/dhExp.ctl`/`dhImp.ctl` + `[STATIC] dochost_authority`） | 门 #342 = run 37345079456、attempt 1、11 job 全绿；compile 片 27→28、syntax 片 154→156；全仓语料 VB3001 2934→158，两份真工程各 499→19 / 499→34，宿主符号与 `_vb6_select_` 一动不动 | 已发货，门 #342 绿 |
+| 账 #220（本节 §B52 = `Picture.Line` 尾部的 `B`/`BF` 由 parser 在 style 格折成字面量 1/2、RTL 那两枚裸名 C 全局连 extern 一起删 + `tests/test_nameclash.bas`（x64/x86 真跑）+ `tests/pcline/PcForm.frm` 的 [CODEGEN-NOTE] 四针两 Absent + `[STATIC] rtl_naked_names`） | 发码语料 A/B inputs=100 changed=**4**（ucProgressCircular 两份 × 两档），每份 +8/−8 行且每行只差最末一格 `vb6_ComPackValue(B\|BF)` → `vb6_ComPackInt(1\|2)`，另 3 行 VB3001 纯删（Charts 主工程 34→31），其余 96 份一行没动；撞名探针改前 RC=1/5 诊断/no exe → 改后 RC=0/exe/`NC-B=13` | 已发货，门 #343 绿（11 job 全 completed/success；bas 两片 47→48、compile 28→29、syntax 156→157） |
+| 账 #221 = C29-PL-a（提交 `27767255` = `Picture.Line` 从 COM 兜底改道到原生 `vb6_ControlLine`：RTL 新出口 + `controlCanvasMethod` 表 + withm 码头 + 成员侧打标记；旗标改按字母位折 B=1/C=2/F=4 ⇒ BF=5、`C`/`F`/`CF` 从此有落脚点；`tests/pcline/PcDraw.{frm,vbp}` 画完问像素四形各钉两头 + `pcline_flag_folded` 换针 + 哨兵 N5/N6） | 发码 A/B inputs=100 changed=**4** same=96，每份 +8/−8 全是同一条调用换出口；CENSUS `L"Line"` **32→0** / `vb6_ControlLine(` **0→32**，VB3001 146=146、`VB6_SA_AT(` 20972=20972、`_vb6_select_` 7346=7346；x64 与 x86 真跑逐行相同 `PL01..PL04=True`（`diag=255 boxedge=16711680 boxmid=16777215 fillmid=65280 circletop=255`）；哨兵 PASS `fold bits 1+1+1, handoff 1+1, AST 0, RTL 1/bits, canvas 1+1+2+1`；只写表+码头不写成员侧时夹具四形**全 False**（N6 第四条由此起）；真工程 ucProgressCircular 两档仍 rc=1，27 条诊断逐文件归因到 #222（Form1.c 25×C2198+1×C2084）与 #219（`Count`），`ppProgressCircular.c` 零条 | 已发货，门 #344 红在 control_dc 名单（已改 4→5）→ **门 #345 全绿** |
 | 账 #215（提交 `48feae8e` = §B49 的"体级声明收成一条声明符一条 LocalDeclStmt" + `tests/test_bodydecl.bas` 8 针（x86+x64 两形）+ `[CODEGEN-NOTE] bodydecl_one_per_declarator` （Absent 钉 VB3001）+ | 门 #338 = run 37321722861、head bab5b0ef、attempt 1 = 11 job 全 completed/success；compile 片 25→26 里新那枚就是 `[STATIC] bodydecl_shape ... PASS`（逐行读到），syntax 片 151→152 是 `[CODEGEN-NOTE] bodydecl_one_per_declarator ... PASS`，bas 两片之和 90→92 = test_bodydecl 与 test_bodydecl_x86 进了门禁且绿；vbp #3 那条 SKIP 仍是 test_vbman（COM 未注册，与 #335/#337 同形）） | **体级声明有四条路、两种形状**：`Dim a, b` 由 parseDimStmt 在语句层手写一遍声明符解析并出两条语句，`Const/Static/体级 Public` 的多声明符行把 MultiDecl 原样塞进 LocalDeclStmt，而语义层 visit(LocalDeclStmt) 的 switch 不认这个 kind ⇒ **一枚名字都不登记、每条使用一条 VB3001**（VBFlexGridDemo 一片 778 → 502 条，全部是诊断行）；手写那份副本还落在共享实现后面，漏了 WithEvents 与「后缀即类型」两步 ⇒ `Dim a&, b&` 第二枚静默落回 Variant（TypeName 看不出，VarType 3/0 才看得出）。收成 `Parser::wrapBodyDecls` 一处，四条路全调它，手写展开删掉。A/B 100 份 same=98 changed=2 且两条差异逐条归到诊断行；真编译四片 0 error C / 0 LNK；哨兵在 HEAD 树上 P1..P4 十条红 | 已发货，门 #338 绿 |
+| 账 #219（§B54 = RTL 裸名 `Changed` 的定义与 extern 撤掉 + `visit(IdentifierExpr)` 补"裸写的文档成员"那一格 + `kHostPseudoRows` 搬进 `src/common/host_pseudo.hpp` 并新增 `hostPseudoBareEligible`，语义层与发码层同问一句 + `tests/test_rtl_naked_changed.bas`（x64/x86）+ `tests/dochost/dhBare.ctl`/`dhBare.pag`/`dhTypo.pag` 三条 [CODEGEN-NOTE] + 两份哨兵跟着改） | 发码语料 A/B inputs=100 changed=**12** same=88，每份差异**全是删一行 VB3001**、产物 C 一行没动；VB3001 146→98（`Changed` 24→0、`hDC` 24→0，`new-names={}`）、`vb6_PropertyPage_Changed` 186=186；撞名探针改前 RC=1/no exe ⇒ 改后 RC=0/exe/`NC219-CHANGED=6`；哨兵 `tbl 55 rows` 与 `bareDoc 1/1/1/1/tbl1/names0` 全 PASS，红过一次是删掉 N7 读文件的负控演示 | 已提交，门 待回填 |
