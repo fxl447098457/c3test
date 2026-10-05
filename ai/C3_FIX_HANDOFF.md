@@ -485,6 +485,7 @@ D11 放开普查范围到整个 `src/rtl` 的那天，只剩两处没接：`vb6f
 **护栏**：D11 那条**具名豁免按设计自己消失了**（`$rawAll` 从「want 3 = 出口 1 + 豁免 2」收成「want exactly 1」，PASS 行现在打印 `全仓裸问 1`）—— 这正是 #202/#204 那轮把豁免写成"删掉就红"的目的。A/B：这一刀只动 RTL ⇒ 86 份产物**逐字节相同**（`b207_new_emit` vs `b206_new_emit`，diff=0），另外把两份状态条工程也纳入普查面（4 份新快照，BASE 里没有对应份，只作留档不当判据）；相邻三枚哨兵（`check_di_stubs` 624=624、`check_uc_scale_units`、`check_host_pseudo_table` 55 行）各自复跑一遍全绿 —— 新夹具里那枚 `Declare … SendMessageW` 没要新桩。
 
 **顺带量出来一条新账（§B41/#206）**：`Panels(i).Width` 读的是**请求值**而不是排版后的宽（`vb6_StatusBar_GetPanelWidth` 直接 return `e->width`），所以 sbrContents/sbrSpring 那两档在 VB 侧读不到几何。今天**没有**据此改它 —— VB6 那一读数的单位口径（缇还是像素）还没量准，拿猜去改就是给这一族埋第二根雷。
+补一句为什么本地量不到基准：全仓没有一份**由 VB6 设计器写出来的**状态条设计块（`grep -rln --include=*.frm --include=*.pag "StatusBar"` 只命中我们自己那三份夹具），所以"设计值与实际宽的比"这条路在这儿取不到证据 ⇒ 这条账要动，得先拿到外部读数（原生 OCX 跑一遍，或 MSDN 原文）。
 
 ### B41 `Panels(i).Width` 交回的是请求值，不是排版后的宽（账 #206，开着）
 
