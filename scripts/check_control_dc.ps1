@@ -11,8 +11,8 @@
 #
 # 规则 (改坏了会红, 不是装饰):
 #   D1  vb6_ControlDrawDC 在 src/rtl 里恰好定义一次, 函数体两档都还在 (VB6_PaintDC 与 GetDC)
-#   D2  按 `= vb6_ControlDrawDC(` 形状数出来的调用点 = 恰好 3 (Cls / Print / GetControlHDC) ——
-#       这一刀之后所有拿绘图 DC 的路都从这一处走, 少一条就是有人又自己抢了一张
+#   D2  按 `= vb6_ControlDrawDC(` 形状数出来的调用点 = 恰好 5 (Cls / Print / GetControlHDC /
+#       ControlMeasureTextPx / ControlLine) —— 拿绘图 DC 的路都从这一处走, 少一条就是有人又自己抢了一张
 #   D3  vb6_GetControlHDC 恰好定义一次, 体内必须同时有: 调权威 / 缓存槽位写 / 白拿那张的 ReleaseDC;
 #       并且**不许**自己 GetDC( —— 那就是第二处口径
 #   D4  缓存槽位 VB6_ObjectDC: 写者(SetPropW) = 恰好 1, 归还(ReleaseDC) >= 1, 撤名(RemovePropW) >= 1
@@ -69,11 +69,12 @@ if (Test-Path -LiteralPath $ctrl) {
 }
 
 # ---- D2: 调用点形状与条数 ----
-# 4 处: Cls / Print / GetControlHDC / ControlMeasureTextPx（账 #196 第二条把文字量也接到同一处口径上了）
+# 5 处: Cls / Print / GetControlHDC / ControlMeasureTextPx / ControlLine
+# （账 #196 第二条把文字量也接到同一处口径上；账 #221 把 Line 接进来 —— 绘图面每一型都只从这一处拿 DC）
 $calls = @($rtl | Where-Object { $_.Text.Contains("= vb6_ControlDrawDC(") })
-if ($calls.Count -ne 4) {
+if ($calls.Count -ne 5) {
     $bad += ("D2 call sites of the drawing-DC authority = " + $calls.Count +
-             " (want exactly 4: Cls / Print / GetControlHDC / ControlMeasureTextPx) -> " +
+             " (want exactly 5: Cls / Print / GetControlHDC / ControlMeasureTextPx / ControlLine) -> " +
              (($calls | ForEach-Object { $_.File + ":" + $_.Line }) -join " | "))
 }
 
