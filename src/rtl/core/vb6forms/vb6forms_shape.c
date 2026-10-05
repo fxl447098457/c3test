@@ -369,7 +369,7 @@ static LRESULT CALLBACK vb6_GraphicalBtnSubclassProc(HWND hwnd, UINT msg, WPARAM
             int textH = 0;
             if (captionLen > 0) {
                 SIZE sz;
-                HFONT hFont = (HFONT)SendMessageW(hwnd, WM_GETFONT, 0, 0);
+                HFONT hFont = vb6_ControlFont(hwnd);   // 账 #204: 与 Print/文字量同一处问法
                 HFONT oldFont = NULL;
                 if (hFont) oldFont = (HFONT)SelectObject(hdc, hFont);
                 GetTextExtentPoint32W(hdc, caption, captionLen, &sz);
@@ -413,7 +413,7 @@ static LRESULT CALLBACK vb6_GraphicalBtnSubclassProc(HWND hwnd, UINT msg, WPARAM
                 textRc.top = textY;
                 textRc.right = btnW - border + pushOff;
                 textRc.bottom = textY + textH;
-                HFONT hFont = (HFONT)SendMessageW(hwnd, WM_GETFONT, 0, 0);
+                HFONT hFont = vb6_ControlFont(hwnd);   // 账 #204: 与 Print/文字量同一处问法
                 HFONT oldFont = NULL;
                 if (hFont) oldFont = (HFONT)SelectObject(hdc, hFont);
                 SetBkMode(hdc, TRANSPARENT);
@@ -426,7 +426,7 @@ static LRESULT CALLBACK vb6_GraphicalBtnSubclassProc(HWND hwnd, UINT msg, WPARAM
             WCHAR caption[256] = {0};
             int captionLen = GetWindowTextW(hwnd, caption, 256);
             if (captionLen > 0) {
-                HFONT hFont = (HFONT)SendMessageW(hwnd, WM_GETFONT, 0, 0);
+                HFONT hFont = vb6_ControlFont(hwnd);   // 账 #204: 与 Print/文字量同一处问法
                 HFONT oldFont = NULL;
                 if (hFont) oldFont = (HFONT)SelectObject(hdc, hFont);
                 SetBkMode(hdc, TRANSPARENT);

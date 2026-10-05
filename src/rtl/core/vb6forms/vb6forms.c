@@ -479,7 +479,11 @@ static LRESULT CALLBACK vb6_GroupBoxSubclassProc(HWND hwnd, UINT msg, WPARAM wp,
             if (hdc) {
                 RECT rc; GetClientRect(hwnd, &rc);
                 // 标题带高度: 用当前字体算 (经典 groupbox 标题约一行高)。
-                HFONT hf = (HFONT)SendMessageW(hwnd, WM_GETFONT, 0, 0);
+                // 账 #202: 这一问以前是裸 `SendMessageW(hwnd, WM_GETFONT, ...)`，而探针实测
+                // 裸 BUTTON(BS_GROUPBOX) 收到 WM_SETFONT 之后**也不答** WM_GETFONT（与 STATIC 同）
+                // ⇒ 拿到 NULL、SelectObject 整步跳过，带高与带宽都按 DC 的默认字体算，而组框画标题
+                // 用的是我们发过去的那张。字体今天没改过的工程里两边算出同一个数，所以它一直静默。
+                HFONT hf = vb6_ControlFont(hwnd);
                 HFONT old = hf ? (HFONT)SelectObject(hdc, hf) : NULL;
                 TEXTMETRICW tm; ZeroMemory(&tm, sizeof(tm));
                 GetTextMetricsW(hdc, &tm);
@@ -576,6 +580,11 @@ void* vb6_CreateControl(const char* win32Class, const char* controlName,
             );
         }
         SendMessage(hwnd, WM_SETFONT, (WPARAM)hFont, MAKELPARAM(FALSE, 0));
+        // 账 #204: 发出去还要**存下来**。STATIC / BUTTON 这一类窗口不答 `WM_GETFONT`（#200 探针钉的），
+        // 只发不存 ⇒ 从没被写过字体的控件在 `vb6_ControlFont` 那一处两问皆空：`.FontName` 读空串、
+        // `.FontSize` 读 0、`FontPixelHeight` 读 0、`TextHeight` 按 DC 默认字体给 16（VB6 该是 MS Sans
+        // Serif 8.25pt 的那个数）。存了之后 setter 换字体时也才找得到"上一张是我们造的"那张去删。
+        vb6_ControlFontStore(hwnd, hFont);
 
         // Fix 162c-extlist: Frame(BS_GROUPBOX) 关掉 comctl6 主题化 —— 主题版的
         // groupbox 会用白色填掉整个内部 (子控件的 240 灰底反而成了色块), VB6

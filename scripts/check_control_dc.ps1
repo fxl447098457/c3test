@@ -239,11 +239,14 @@ foreach ($fnName in @("vb6_ControlTextWidth", "vb6_ControlTextHeight")) {
 # ---- D10: 字体只从一处问窗口 (账 #200) ----
 # 裸 STATIC 不记 WM_SETFONT（探针实测 WM_GETFONT / STM_GETFONT 都回 NULL），所以我们自己存一张
 # VB6_CtrlFont，所有"这枚控件现在用什么字体"的读法都必须走 vb6_ControlFont 那一处出口。
-# 口径范围刻意只圈 vb6forms_ctrl.c（文字量那一路）：仓里另一枚裸问在 vb6forms.c 的 groupbox
-# 标题带里，探针实测 BUTTON 也不答 WM_GETFONT —— 那是另一条账，别把它的红算到这条上。
-$accDef = @($rtl | Where-Object { $_.File -eq "vb6forms_ctrl.c" -and $_.Text -match '^\s*static\s+HFONT\s+vb6_ControlFont\s*\(' })
+# 账 #202/#204 之后这一处的**覆盖面**也归这里守: 出口不再 static ⇒ 定义仍只许一处, 声明只许进内部头一处。
+$accDef = @($rtl | Where-Object { $_.File -eq "vb6forms_ctrl.c" -and $_.Text -match '^\s*HFONT\s+vb6_ControlFont\s*\(' })
 if ($accDef.Count -ne 1) {
     $bad += ("D10 vb6_ControlFont defined " + $accDef.Count + " times in vb6forms_ctrl.c (want exactly 1)")
+}
+$accDecl = @($rtl | Where-Object { $_.File -eq "vb6forms_internal.h" -and $_.Text -match '^HFONT\s+vb6_ControlFont\s*\([^)]*\);\s*$' })
+if ($accDecl.Count -ne 1) {
+    $bad += ("D10 内部头里那条声明 = " + $accDecl.Count + " (want exactly 1; 别的 .c 各自 extern 一遍 = 第二个口径)")
 }
 $getFontRaw = @($rtl | Where-Object { $_.File -eq "vb6forms_ctrl.c" -and $_.Text.Contains("WM_GETFONT") })
 if ($getFontRaw.Count -ne 1) {
@@ -263,14 +266,54 @@ $fntR = @($rtl | Where-Object { $_.Text.Contains("GetPropW") -and $_.Text.Contai
 if ($fntW.Count -ne 1) { $bad += ("D10 writers of the VB6_CtrlFont slot = " + $fntW.Count + " (want exactly 1)") }
 if ($fntR.Count -lt 1) { $bad += "D10 nobody reads the VB6_CtrlFont slot (证人又哑了)" }
 
+# ---- D11: 那一处出口的**覆盖面** (账 #202/#204/#205) ----
+# D10 守的是"读法只有一处"，这一条守"该用这一处的人都用了":
+#   一是全 src/rtl 里带 WM_GETFONT 的代码行 = 出口那 1 行 + 一条**具名豁免**（下面那段）——
+#     别处再裸问一次，对 STATIC/BUTTON 那一类窗口就是静默拿 NULL（探针实测两类都不答），
+#     症状是"按 DC 的默认字体画/量"，不是崩（shape 的图钮标题、widget 的 AutoSize 宽度就是这一形）；
+#   二是存那份自存的只有一个写口、三个调用站点（setter / 控件创建路 / 控件数组那条创建路），
+#     少一个就是一个站点又"只发不存"（#204 的根因形状）。
+#     数组那一路今天运行期不可达（`vb6_CtrlArr_Load` 全仓零调用者, 2026-10-05 grep 证），列进来是**口径**。
+$rawAll = @($rtl | Where-Object { $_.Text.Contains("WM_GETFONT") })
+$rawOut = @($rawAll | Where-Object { $_.File -ne "vb6forms_ctrl.c" })
+# 刻意留的一条**具名豁免**: vb6forms_statusbar.c 那两处也拿到同一个 NULL，但它属于另一位作者的族
+# （状态条的面板宽度判据要跟着重量），本刀不碰。**豁免是要自己消失的**: 那两处一旦改走出口，
+# 下面的计数从 3 掉到 1 就当场红 —— 别把它当成"已知绿"绕过去。欠的那条账 = 台账 §B40/#205。
+$sbRaw = @($rawOut | Where-Object { $_.File -eq "vb6forms_statusbar.c" })
+if ($rawAll.Count -ne 3 -or $sbRaw.Count -ne 2) {
+    $bad += ("D11 全 src/rtl 里带 WM_GETFONT 的代码行 = " + $rawAll.Count +
+             " 处、其中状态条那两处 = " + $sbRaw.Count + " 处 (want 3 = 出口 1 + 状态条具名豁免 2; " +
+             "别处再裸问一次就是静默按 DC 默认字体画; 状态条那两处修好了就把这条豁免删掉) -> " +
+             (($rawAll | ForEach-Object { $_.File + ":" + $_.Line }) -join " | "))
+} elseif ($accDef.Count -eq 1) {
+    $inside = @($rawAll | Where-Object { $_.File -eq "vb6forms_ctrl.c" })
+    if ($inside.Count -ne 1) { $bad += "D11 出口所在文件里没有那一行 WM_GETFONT" }
+}
+$storeDef = @($rtl | Where-Object { $_.File -eq "vb6forms_ctrl.c" -and $_.Text -match '^\s*void\s+vb6_ControlFontStore\s*\(' })
+if ($storeDef.Count -ne 1) { $bad += ("D11 vb6_ControlFontStore defined " + $storeDef.Count + " times in vb6forms_ctrl.c (want exactly 1)") }
+$storeWr = @($rtl | Where-Object { $_.Text.Contains("SetPropW") -and $_.Text.Contains('L"VB6_CtrlFont"') })
+if ($storeWr.Count -ne 1) {
+    $bad += ("D11 槽位的 SetPropW 写者 = " + $storeWr.Count + " (want exactly 1, 且只能在 Store 里面) -> " +
+             (($storeWr | ForEach-Object { $_.File + ":" + $_.Line }) -join " | "))
+}
+$storeCalls = @($rtl | Where-Object { $_.Text.StartsWith("vb6_ControlFontStore(") })
+$storeFiles = @($storeCalls | ForEach-Object { $_.File } | Sort-Object -Unique)
+if ($storeCalls.Count -ne 3 -or $storeFiles.Count -ne 3) {
+    $bad += ("D11 存字体的调用站点 = " + $storeCalls.Count + " 条 / " + $storeFiles.Count +
+             " 个文件 (want 3 且分属 vb6forms_ctrl.c / vb6forms.c / vb6forms_ctrlarr.c) -> " +
+             (($storeCalls | ForEach-Object { $_.File + ":" + $_.Line }) -join " | "))
+}
+
 if ($bad.Count -eq 0) {
     Write-Host ("PASS Control drawing DC: 定义 " + $defs.Count + " / 调用 " + $calls.Count +
                 " / 出口 " + $exitDef.Count + " / 槽位写 " + $wr.Count + " 归还 " + $rel.Count +
                 " 撤名 " + $rm.Count + " / 读表 " + $rows + " 手拼 " + $hand +
                 " / 文字量出口 " + ($oaDef.Count + $oaDefH.Count) + " 码头 " + $oaSites.Count +
                 " 签名表 " + $paramRows + " 手拼2 " + $hand2 +
-                " / 字体出口 " + $accDef.Count + " 裸问 " + $getFontRaw.Count +
-                " 槽位写 " + $fntW.Count + " 读 " + $fntR.Count) -ForegroundColor Green
+                " / 字体出口 " + $accDef.Count + " 声明 " + $accDecl.Count + " 裸问 " + $getFontRaw.Count +
+                " 槽位写 " + $fntW.Count + " 读 " + $fntR.Count +
+                " / 覆盖面 全仓裸问 " + $rawAll.Count + " 存口 " + $storeDef.Count +
+                " 站点 " + $storeCalls.Count + "/" + $storeFiles.Count + " 文件") -ForegroundColor Green
     exit 0
 }
 foreach ($b in $bad) { Write-Host ("FAIL " + $b) -ForegroundColor Red }

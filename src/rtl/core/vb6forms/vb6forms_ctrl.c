@@ -321,10 +321,20 @@ void* vb6_GetControlHwnd(void* hwnd) {
 // 而 .FontSize 读回来还是设计值（那是另一份自存的属性）—— 两头谁都不报错。
 // 所以 setter 现在把自己创建的那张 HFONT 存进 `VB6_CtrlFont`（新名字，与 #185 那条
 // "一层一个窗口属性名"同纪律），这里优先问窗口、问不到再读这份自存的。
-static HFONT vb6_ControlFont(HWND hw) {
+HFONT vb6_ControlFont(HWND hw) {
     HFONT h = (HFONT)SendMessageW(hw, WM_GETFONT, 0, 0);
     if (!h) h = (HFONT)GetPropW(hw, L"VB6_CtrlFont");
     return h;
+}
+
+// 账 #204: 那份自存只有这一个写口 —— 谁把字体发给窗口，谁就在这里存同一张。
+// 创建期那一站原来只发不存，而 STATIC/BUTTON 那一类窗口不答 `WM_GETFONT`（见上面那段），
+// 于是"从没被写过字体"的控件在出口这一头两问皆空：`.FontName` 读空串、`.FontSize` 读 0、
+// 文字量按 DC 的默认字体算（实测 bName= bfs=0 bpf=0 bth=16，16 是 Segoe UI 9pt、不是 VB6 的 8.25pt）。
+// 存了之后还顺带有个副作用：setter 换字体时找得到"上一张是我们造的"，那张才删得掉。
+void vb6_ControlFontStore(HWND hw, HFONT hFont) {
+    if (!hw || !hFont) return;
+    SetPropW(hw, L"VB6_CtrlFont", (HANDLE)hFont);
 }
 
 // Helper: get LOGFONT from control's current font
@@ -346,7 +356,7 @@ static void vb6_SetControlFontFromLogFont(void* hwnd, const LOGFONTW* plf) {
     HFONT hOldFont = (HFONT)GetPropW((HWND)hwnd, L"VB6_CtrlFont");
     if (!hOldFont) hOldFont = vb6_ControlFont((HWND)hwnd);
     SendMessageW((HWND)hwnd, WM_SETFONT, (WPARAM)hNewFont, (LPARAM)TRUE);
-    SetPropW((HWND)hwnd, L"VB6_CtrlFont", (HANDLE)hNewFont);
+    vb6_ControlFontStore((HWND)hwnd, hNewFont);
     // Force redraw
     InvalidateRect((HWND)hwnd, NULL, TRUE);
     // Delete old font only if it's not a stock font

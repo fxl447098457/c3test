@@ -243,7 +243,7 @@ void vb6_SetLabelAutoSize(void* hwnd, int32_t val) {
         // 再按单字节量宽, 中文标签的 AutoSize 宽度会算错 (截字/留白)。
         wchar_t text[1024] = {0};
         GetWindowTextW((HWND)hwnd, text, 1024);
-        HFONT hFont = (HFONT)SendMessageW((HWND)hwnd, WM_GETFONT, 0, 0);
+        HFONT hFont = vb6_ControlFont((HWND)hwnd);   // 账 #204: 同一处问法 —— STATIC 自己不应这一问，裸问恒 NULL 就等于按 DC 默认字体算宽度
         HFONT hOld = (HFONT)SelectObject(hdc, hFont);
         SIZE sz;
         GetTextExtentPoint32W(hdc, text, (int)wcslen(text), &sz);

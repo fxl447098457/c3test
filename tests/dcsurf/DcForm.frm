@@ -73,7 +73,8 @@ Private Sub tmr_Timer()
     Dim tA As Single, tA2 As Single, tW As Single, tB As Single, tT As Single, tB2 As Single
     Dim wLong As Single, wShort As Single
     Dim pfA As Long, pfB As Long
-    Dim ok5 As Boolean, ok6 As Boolean, ok7 As Boolean, ok8 As Boolean
+    Dim fnB As String, fsB As Single, pfB0 As Long
+    Dim ok5 As Boolean, ok6 As Boolean, ok7 As Boolean, ok8 As Boolean, ok9 As Boolean
 
     hA = picA.hDC
     hA2 = picA.hDC
@@ -99,6 +100,17 @@ Private Sub tmr_Timer()
     tT = picTwip.TextHeight("Xg")
     wLong = picB.TextWidth("WWWWWW")
     wShort = picB.TextWidth("W")
+    ' FR01 问的是「**从没被写过字体**的那枚控件，读不读得到自己正在用的那一张」。账 #204 之前读不到：
+    ' 创建期那一站只把字体发给窗口、没存进那一处出口，而 STATIC 这一类窗口又不答窗口的问（#200 探针钉的），
+    ' 于是两头皆空 —— 实测 name 是空串、size 是 0、证人 FontPixelHeight 是 0，而 TextHeight 按 DC 的
+    ' 默认字体给 16（Segoe UI 9pt），VB6 那里该是 MS Sans Serif 8.25pt 算出来的那个数。
+    ' tB 这一格量的正是这枚默认字体的 picB ⇒ 判据钉三头：自存的往返（name/size）+ 问窗口的证人（pf）+
+    ' **文字量真的跟着换了字体**（th 从 16 掉进那个区间）—— 最后一头才是本账的产品后果。
+    fnB = picB.FontName
+    fsB = picB.FontSize
+    pfB0 = picB.FontPixelHeight
+    ok9 = (fnB = "MS Sans Serif") And (fsB > 8) And (fsB < 9) And _
+          (pfB0 >= 10) And (pfB0 <= 14) And (tB >= 10) And (tB <= 14)
     ' TH03 钉的是「量的到底是不是这枚窗口现在在用的字体」那一头。账 #200 之前这一问两头都哑：
     ' 设计期 18pt 的 picA 与运行期改成 20pt 的 picB 都量 16（TH06 的 a / b / b2 三格就是那组读数），
     ' 那时它只留读数不当判据。#200 抓到的是 STATIC 这一类窗口压根不答 WM_GETFONT，修法是字体只从
@@ -126,6 +138,8 @@ Private Sub tmr_Timer()
     Debug.Print "TH04-WIDTH=" & TF(ok8)
     Debug.Print "TH05-RAW px=" & CStr(tB) & " twip=" & CStr(tT) & " wS=" & CStr(wShort) & " wL=" & CStr(wLong)
     Debug.Print "TH06-FONTRAW a=" & CStr(tA) & " b=" & CStr(tB) & " b2=" & CStr(tB2) & " fsA=" & CStr(picA.FontSize) & " pfA=" & CStr(pfA) & " pfB=" & CStr(pfB)
+    Debug.Print "FR01-DEFAULT=" & TF(ok9)
+    Debug.Print "FR02-RAW name=" & fnB & " fs=" & CStr(fsB) & " pf=" & CStr(pfB0) & " th=" & CStr(tB)
     Debug.Print "DS-DONE"
     Unload Me
 End Sub
