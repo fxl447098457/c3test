@@ -170,11 +170,12 @@ void CCodeGen::emitControlHandleDecls(const FrmFormDesc& frmDesc) {
 // 这里登记控件并发射句柄变量声明. 不发射窗体窗口框架: UserControl /
 // PropertyPage 对外是类, 其可见内容由代码绘制到 UserControl.hDC / hwnd,
 // 子控件句柄保持 NULL (RTL 的属性 setter 对 NULL 句柄是安全空操作).
-void CCodeGen::emitDesignerControlDecls(const FrmFormDesc& frmDesc) {
+void CCodeGen::emitDesignerControlDecls(const FrmFormDesc& frmDesc, DocumentKind kind) {
     // Fix 110f: 记录设计器种类 (.pag 为 PropertyPage, .ctl 为 UserControl),
     // 二者在宿主内建成员前缀上不同: vb6_PropertyPage_* / vb6_UserControl_*.
-    isPropertyPageDesigner_ =
-        frmDesc.formControl.controlTypeName.find("PropertyPage") != std::string::npos;
+    // 种类读 Module::docKind (driver 按扩展名一处写入, 账 #217 第二刀) —— 以前这里从
+    // controlTypeName 里找 "PropertyPage" 猜一遍, 与语义层的判据是两份.
+    isPropertyPageDesigner_ = (kind == DocumentKind::PropertyPage);
     // 1) 登记控件名映射 (与 emitFormFramework 的 P7.5/P7.6 块保持一致)
     std::string ownerLower = frmDesc.formName;
     std::transform(ownerLower.begin(), ownerLower.end(), ownerLower.begin(), ::tolower);

@@ -246,10 +246,15 @@ bool Driver::runParser(const CompileOptions& options) {
             genericUses_[fk] = std::move(rec);  // 同源内容一致, 覆盖幂等
         }
 
-        // P7: 设置窗体模块标志
-        if (module && isFormModule) {
-            module->isFormModule = true;
-
+        // P7: 设置窗体模块标志。文档类别 (.frm/.ctl/.pag) 的唯一写入点就在这里 ——
+        // 语义层要按它放行文档隐式对象 (账 #217 第二刀)，发码层也改读它，
+        // 所以别再往下的任何地方补第二处判定。
+        if (module) {
+            if (isFormModule) module->isFormModule = true;
+            module->docKind = isControlModule ? DocumentKind::UserControl
+                          : isPropertyPageModule ? DocumentKind::PropertyPage
+                          : isFormModule ? DocumentKind::Form
+                                         : DocumentKind::Standard;
         }
 
         if (options.dumpAST && module) {

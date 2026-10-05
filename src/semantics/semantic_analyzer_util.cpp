@@ -724,4 +724,17 @@ bool SemanticAnalyzer::namesProjectLevel(const std::string& name) const {
     return memberObjCtx_ && projModuleNames_.count(lk);
 }
 
+// 判据 = (文档类别, 对象名) 一格一格对，不靠字符串猜 (.ctl 与 .pag 的隐式对象前缀不同:
+// vb6_UserControl_* / vb6_PropertyPage_*)。`extender` / `ambient` 只有 UserControl 有。
+bool SemanticAnalyzer::isDocumentHostObject(const std::string& name) const {
+    if (name.empty() || !currentModule_) return false;
+    const std::string lk = ifaceLower(name);
+    if (lk == "vba") return true;   // VBA 全局库前缀, 任何模块都合法
+    const DocumentKind k = currentModule_->docKind;
+    if (lk == "usercontrol") return k == DocumentKind::UserControl;
+    if (lk == "propertypage") return k == DocumentKind::PropertyPage;
+    if (lk == "extender" || lk == "ambient") return k == DocumentKind::UserControl;
+    return false;
+}
+
 } // namespace vb6c3

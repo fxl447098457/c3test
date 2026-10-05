@@ -139,6 +139,10 @@ void SemanticAnalyzer::visit(IdentifierExpr& node) {
         // 放在最前面：Option Explicit 那条 3001 警告同样不该为这两个位出。
         if (pass_ == 2 && namesProjectLevel(node.name)) {
             // 什么都不做 —— 不是变量，也不是未声明标识符；名字的含义由发码层按工程解析。
+        } else if (pass_ == 2 && memberObjCtx_ && isDocumentHostObject(node.name)) {
+            // 文档隐式对象 (`UserControl.hDC` / `VBA.Len(x)` 那一族的限定符位) —— 判据与
+            // 两种后果都写在 SemanticAnalyzer::isDocumentHostObject 的声明处。类型答案仍然
+            // 走下面的 Variant：成员的类型由发码层按 kHostPseudoRows 回答 (账 #159)。
         } else if (pass_ == 2 && declaredByAncestor(node.name)) {
             diag_.error(DiagnosticID::SemInheritsNotSupported, node.loc,
                 "Inherited member '" + node.name + "' cannot be called unqualified in this build"

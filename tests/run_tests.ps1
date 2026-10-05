@@ -687,6 +687,19 @@ function Test-BodyDeclShape {
         $out | Select-Object -First 6 | ForEach-Object { Write-Host "  $_" }
     }
 }
+function Test-DocHostAuthority {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] dochost_authority ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\check_dochost_authority.ps1" 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        $out | Select-Object -First 6 | ForEach-Object { Write-Host "  $_" }
+    }
+}
 function Test-CaseIsShape {
     $script:total++
     Write-Host -NoNewline "  [STATIC] caseis_shape ... "
@@ -4312,6 +4325,7 @@ if ($Category -in @("all", "compile")) {
     Test-BitwiseAuthority
     Test-BodyDeclShape
     Test-CaseIsShape
+    Test-DocHostAuthority
     Test-SubclassSlotSites
     Test-CtrlArrayMemberSites
     Test-EventHandlerNames
@@ -4631,6 +4645,17 @@ if ($Category -in @("all", "syntax")) {
         "VB3001", "nopeHereIsNotAName") @("'Is'")
     Test-CodegenNote "caseis_no_phantom_local" @("$Tests\test_caseis_implicit.bas") @(
         "int32_t _vb6_select_0", "BSTR _vb6_select_1") @("vb6_VARIANT Is")
+    # <vbeclipse> 账 #217 第二刀: 文档隐式对象 (UserControl / PropertyPage / Extender / Ambient)
+    # 与全局库前缀 VBA 现在语义层也认识 (判据 = Module::docKind 一处写、两处读)。两份真工程的
+    # 发码语料实测: VB3001 全仓 2934→158 (grid 499→19、Charts 主工程 499→34)，而宿主符号一个没动
+    # (vb6_UserControl_ScaleWidth 436=436 / vb6_Ambient_UserMode 94=94 / vb6_PropertyPage_hWnd 16=16)。
+    # dhExp 钉"诊断清零 + 符号照旧"，dhImp 故意不写 Option Explicit 钉"不再发死局部"。
+    Test-CodegenNote "dochost_ctl_no_undeclared" @("$Tests\dochost\dhExp.ctl") @(
+        "vb6_UserControl_ScaleWidth", "vb6_UserControl_hWnd",
+        "vb6_Ambient_UserMode", "vb6_Extender_Tag", "vb6_UCase") @("VB3001")
+    Test-CodegenNote "dochost_no_phantom_locals" @("$Tests\dochost\dhImp.ctl") @(
+        "vb6_UserControl_ScaleWidth", "vb6_Ambient_UserMode", "vb6_UCase") @(
+        "vb6_VARIANT UserControl", "vb6_VARIANT Ambient", "vb6_VARIANT VBA")
     # 账 #184 的形状面: 被 AddressOf 取址的过程 → Private 的发 static 桩、Public 的发外链桩,
     # 桩体逐字转调本体 (参数个数/宽度/顺序与本体一致, 只有约定不同); AddressOf 站点取桩地址;
     # 本体**保持 cdecl** (直接调用那条路与 RTL 的 cdecl 登记面都不受牵连)。

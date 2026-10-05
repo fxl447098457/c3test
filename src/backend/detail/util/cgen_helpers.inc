@@ -824,7 +824,7 @@
     // P6.4+: class-module default instance singleton
     void emitClassDefaultInstance(Module& module);
     // Fix 110: emit symbol support for .ctl/.pag designer sub-controls
-    void emitDesignerControlDecls(const FrmFormDesc& frmDesc);
+    void emitDesignerControlDecls(const FrmFormDesc& frmDesc, DocumentKind kind);
     // Fix 110: recursively emit designer control handle/array/COM declarations
     void emitControlHandleDecls(const FrmFormDesc& frmDesc);
     // Fix 107: lookup type-category symbol (Class/UDT/Enum/COM), ignoring proc/var
