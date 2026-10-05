@@ -345,6 +345,15 @@ asm 片打 `PASS=13 SKIP=0 TOTAL=14`（差 1），其余七片自洽。本轮 11
 护栏：A/B 86 份（BASE = 这两刀之前那台）⇒ 被改 8 份、**OFFENDERS 0**；逐行归因 = 32 对读法替换（hDC 与 TextHeight/TextWidth 都算 K2，配对正确性用**整行**判 —— 公共前缀会把 `Co` 这种片段折掉，残段里搜全名搜不到，这是本轮第二课）+ 8 条 WD（VB4001 那三条诊断消失）。真工程配对：ucTreeMaps 两台（x64/x86）的 C2039/C2440 **全部消失**，`VB4001 Unknown control property` 只剩 1 条（`ScaleX/ScaleY` 那一族另计），红点从"编不过"推进到 **LNK2019 ×3**（`AddFontMemResourceEx` / `GdipNewPrivateFontCollection` / `GdipPrivateAddMemoryFont` 三枚 DI 桩没登记，见新账 §B36/#201）。
 **本刀没接的两处（记下不装绿）**：① 不带括号那条语句形（`picA.TextHeight "x"`，`cgen_call.cpp` 那一支）刻意没接 —— 语料 0 处，接它要先证明那条路上实参表怎么交；② 窗口字体那条判据今天**当不了判据**（见新账 §B35/#200）。
 
+**第三条（带 HWND 的 `ScaleX`/`ScaleY`）今天的形状量清了（2026-10-05）**：`--emit-c` 读 PropPagFMR 那一页，`ScaleX(.CurrentX, .ScaleMode, vbPixels)` 发出来是**裸的 `ScaleX(...)`**（一个既没声明也没定义的 C 函数名）：
+
+    vb6_di_TextOutW(vb6_GetControlHDC(_vb6_with_0), ScaleX(vb6_GetCurrentX(_vb6_with_0), vb6_WindowScaleModeSelf(_vb6_with_0), 3), ScaleY(...), vb6_StrPtr((*Text)), vb6_Len((*Text)));
+
+两边实参已经按那一枚窗口算了（`.ScaleMode` → `vb6_WindowScaleModeSelf(_vb6_with_0)`），缺的只是**换算那一站**。注意接收者是 UC 时不缺：`ScaleX(Extender.Left, vbContainerSize, UserControl.ScaleMode)` 早由 Fix 111 发成 `vb6_UserControl_ScaleX` —— 那一站是**纯单位换算**（`vb6_ScaleUnitsPerPx`，账 #177 收成一张表），不吃窗口句柄；窗体型接收者要的是同一条换算但**vbUser(0) 那一档得问这枚窗口自己的 ScaleWidth/ScaleHeight**，所以缺的出口是`vb6_WindowScaleX/ScaleY(void* hwnd, double x, int32_t from, int32_t to)`，接线照 #196 前两条那**三处码头**（With 形 / 带括号裸形 / 语句路），一头不接就是 #143 那一族。
+
+**一条今天的意外读数（别据此判"没接也没事"）**：这台工程今天 rc=0、0 error 出了 exe —— 但那份产物的 map 里**既没有 `ScaleX` 这个符号、也没有 `vb6_PropPagFMR_UnicodePrint`**（`PropPagFMR` 一共只剩 11 条别的符号）⇒ 那个调用点所在的函数被链接器的 **/OPT:REF 当未引用代码删掉了**，所以那条隐式声明根本没走到解析那一步。换句话说：**这一条今天不挡这台工程出 exe，是因为那页的入口本身还没接上（#199）**；一旦页被真正调用，它就是 LNK2019。⇒ 判据要自己钉（`--emit-c` 断"产物里不许出现裸 `ScaleX(`/`ScaleY(`" + 真跑一头换算读数），**不能拿"这台工程现在编得过"当这条通了**。
+
+
 ### B32 `VB6_ScaleMode` 在整个 RTL 里没有任何人写它（账 #197）
 
 `grep -rn "VB6_ScaleMode" src/rtl src/backend` 的全部命中只有 setter 自己（`vb6forms_widget_prop.c:265` 的 SetPropW）与两条读点，**0 个调用者**。⇒ 谁去读控件或窗体的 `ScaleMode` 都只会拿到缺省 1，跟 .frm/.pag 里写的设计值无关；所有按单位换算的路径（ScaleX/ScaleY、缇/像素互转）因此都建立在一个恒为 1 的数上。这与 #154/#160 同族（设计期属性从没下发到窗口），但影响面更大：它决定的是**量出来的数对不对**，不是某一枚控件的外观。
