@@ -892,7 +892,7 @@ asm 13/14、smoke 1/1；`Build C3.exe` 那片日志正文不含用例行（历�
 
 
 
-### B54 `.pag` 里裸写的 `Changed` 发码一直是对的、诊断却每条一响；RTL 那枚裸名全局是它的第二条权威，撞掉之后那张表才是唯一一处（账 #219 两刀，**已出：门 待回填**）
+### B54 `.pag` 里裸写的 `Changed` 发码一直是对的、诊断却每条一响；RTL 那枚裸名全局是它的第二条权威，撞掉之后那张表才是唯一一处（账 #219 两刀，**已出：门 #346（run 37366164862、head `0026d87f`、branch dev、attempt 1）= 11 job 全 completed/success、非绿 0**）
 
 两件症状，都是实测：
 
@@ -910,6 +910,23 @@ asm 13/14、smoke 1/1；`Build C3.exe` 那片日志正文不含用例行（历�
 夹具与哨兵：`tests/test_rtl_naked_changed.bas`（x64/x86 各一形，三针）；`tests/dochost/dhBare.ctl`、`dhBare.pag`、`dhTypo.pag` 三条 [CODEGEN-NOTE]（`dhTypo` 是负控：表里没这名字 ⇒ 必须照报，且不许凭空发 `vb6_PropertyPage_Changed`）；`check_host_pseudo_table.ps1` 的 `$tblPath`、`must`、`deny` 三处跟着表搬家，`must` 从此含"语义层必须问表"那一条；`check_rtl_naked_names.ps1` 的 N7 换成谓词 定义/声明/调用/带门 = 1/1/1/1 + 问表 1 + 成员名字面量 **0**。哨兵红过一次是当场演示的负控：把 N7 里读那三个文件的一行删掉 ⇒ 六条计数全 0、五条 FAIL。
 
 剩下的同族（本账没做完，读数已钉住）：`Controls` 4 条全在 ppProgressCircular.**pag**（那张表 propertypage 档没有这一行；收不收要先问 VB6 里 .pag 裸写 `Controls` 是谁；源码那三行已读: `ppProgressCircular.pag:460` 是 `Set oPC = Controls.Add(App.Title & ".ucProgressCircular", "ProgCirc")`、`:484 Controls.Remove` —— 运行期往这页上动态加/删 UC，而 `:490` 紧接着用的 `SelectedControls(0)` 是表里登记过的那枚）；`Count` 2 条在 ucProgressCircular.**ctl**（表里也没这行，而 #159 的边界写明"RTL 没有对应全局的行刻意不收"⇒ 那是 RTL 侧缺口，另立账）；`ScaleWidth` 2 条在 frmDemo.**frm**:168（`If ScaleWidth > 0 Then` —— 窗体自有的量走的是另一条路，不在这张表里，与 #68/#120 那族同面）；另 26 条是内在常量一族 ⇒ 账 #218。
+
+
+### B55 RTL 资源 id 有三处登记，`9a420157` 把其中两处写对调 —— 症状不是"少一个文件"而是"头里装着体"，于是**任何**要链接的程序都出不了 exe（账 #225，**已出：门 待回填**）
+
+**症状与归属**：门 #346（head `0026d87f`，#219 那一刀）11 job 全绿；下一台 #347（head `c5aab787` = 把 `9a420157`「新增 Form/Printer 绘图方法家族 (rev38)」合进 dev 之后）11 job 里 **9 job 红**，红的全是要链接的切片（bas #1/#2、vbp #1–#4、asm、smoke），bas #1 第一行就写着 `C3: 编译失败 (exit code 1169)`；只有不链接的两片（syntax / compile）还绿。`Build C3.exe` 本身成功 —— 编译器没坏，坏的是它带的 RTL。
+
+**根因（一条链，别只盯最后一环）**：一条 RTL 文件要进产物得在三处各登记一次，前两处对调了：
+· `src/driver/c3rtl.rc:379-380` = `223 RCDATA …/vb6forms_draw.h` / `224 RCDATA …/vb6forms_draw.c`（它自己的注释写明「头必须排在 .c 之前」）；
+· `src/driver/rtl_embedded.hpp:201-202` = `RTL_VB6FORMS_DRAW_C = 223` / `RTL_VB6FORMS_DRAW_H = 224`；
+· `src/driver/rtl_embedded.cpp:173-174` 的名字表把这两枚常量认领为 `.h` / `.c`。
+解包是 `FindResourceW(MAKEINTRESOURCEW(id))` 按**数字**取内容、再按名字表决定写出的文件名 ⇒ id 一对调，写出来的 `vb6forms_draw.h` 里装的是那 463 行的**体**，而 `vb6forms_draw.c` 里装的是头。同一次提交又往 `vb6forms.h` 末尾加了 `#include "vb6forms_draw.h"`，而 `vb6forms.h` 被 39 个 RTL 文件 + 每份生成的模块 .c include ⇒ 体里那 28 枚文件作用域符号（`vb6_Form_Circle/Line/Cls/Point/PSet`、`vb6_Form_DrawGet*/Set*`、`vb6_Printer_*`）在约 49 个编译单元里**各定义一份** ⇒ `LNK2005 ×1225 + LNK1169`。措辞完全误导：日志说「已经在 ucUnitTwip.obj 中定义」，真凶在资源 id 表上。
+
+**改法**：只把 `rtl_embedded.hpp` 那两行与 `.rc` 对上（`DRAW_H=223 / DRAW_C=224`）。动 hpp 而不是 `.rc`：`.rc` 一侧带着刻意的顺序说明，且 id 数字不变就不牵动表里其它 123 条。
+
+**判据三面**：① 新哨兵 `scripts/check_rtl_resource_ids.ps1` 把三处逐条对账（census `rc=125 hpp=125 cpp=125 orphanRcIds=0 unboundSymbols=0`，全仓只有这两条不齐）；负控 = 把两行改回上游那个形状 ⇒ 两条 R3 当场点名「id 223/224 两份权威对不上」、退出 1，还原后回绿且文件 MD5 相同。② 单变量真编译：`764469bf`（= HEAD，含 `c5aab787` 合流）冷编一台 C3 编 `tests/ve_units` ⇒ `RC=1 diag=1226 kinds={LNK2005:1225, LNK1169:1}`；**只**改这两行重编同一份源 ⇒ `RC=0 exe=VeUnits.exe diag=0`。③ 门禁：`[STATIC] rtl_resource_ids` 进 `tests/run_tests.ps1` 的 Static Checks 段。
+
+**留下的同族（本账没做完）**：① 三处登记本身仍是三份手抄，哨兵只做**对账**、没收成单一权威（要收就把 `.rc` 从那张表生成）；② `vb6_UserControlDesc` 里 `dblClick` 槽 0 个调用者、压根没有 `click` 槽 ⇒ `.ctl` 的 `UserControl_Click` 是死码（另立账 #226）；③ #224 记的 rev38 绘图家族另外几条（状态读回 +1、第二份 DC 获取、这一族没带门禁）仍开着。
 
 ## C. 仍在生效的口径与工具事实（与本文档等长的一半价值在这里；完整版见记忆库）
 
@@ -1107,4 +1124,5 @@ asm 13/14、smoke 1/1；`Build C3.exe` 那片日志正文不含用例行（历�
 | 账 #220（本节 §B52 = `Picture.Line` 尾部的 `B`/`BF` 由 parser 在 style 格折成字面量 1/2、RTL 那两枚裸名 C 全局连 extern 一起删 + `tests/test_nameclash.bas`（x64/x86 真跑）+ `tests/pcline/PcForm.frm` 的 [CODEGEN-NOTE] 四针两 Absent + `[STATIC] rtl_naked_names`） | 发码语料 A/B inputs=100 changed=**4**（ucProgressCircular 两份 × 两档），每份 +8/−8 行且每行只差最末一格 `vb6_ComPackValue(B\|BF)` → `vb6_ComPackInt(1\|2)`，另 3 行 VB3001 纯删（Charts 主工程 34→31），其余 96 份一行没动；撞名探针改前 RC=1/5 诊断/no exe → 改后 RC=0/exe/`NC-B=13` | 已发货，门 #343 绿（11 job 全 completed/success；bas 两片 47→48、compile 28→29、syntax 156→157） |
 | 账 #221 = C29-PL-a（提交 `27767255` = `Picture.Line` 从 COM 兜底改道到原生 `vb6_ControlLine`：RTL 新出口 + `controlCanvasMethod` 表 + withm 码头 + 成员侧打标记；旗标改按字母位折 B=1/C=2/F=4 ⇒ BF=5、`C`/`F`/`CF` 从此有落脚点；`tests/pcline/PcDraw.{frm,vbp}` 画完问像素四形各钉两头 + `pcline_flag_folded` 换针 + 哨兵 N5/N6） | 发码 A/B inputs=100 changed=**4** same=96，每份 +8/−8 全是同一条调用换出口；CENSUS `L"Line"` **32→0** / `vb6_ControlLine(` **0→32**，VB3001 146=146、`VB6_SA_AT(` 20972=20972、`_vb6_select_` 7346=7346；x64 与 x86 真跑逐行相同 `PL01..PL04=True`（`diag=255 boxedge=16711680 boxmid=16777215 fillmid=65280 circletop=255`）；哨兵 PASS `fold bits 1+1+1, handoff 1+1, AST 0, RTL 1/bits, canvas 1+1+2+1`；只写表+码头不写成员侧时夹具四形**全 False**（N6 第四条由此起）；真工程 ucProgressCircular 两档仍 rc=1，27 条诊断逐文件归因到 #222（Form1.c 25×C2198+1×C2084）与 #219（`Count`），`ppProgressCircular.c` 零条 | 已发货，门 #344 红在 control_dc 名单（已改 4→5）→ **门 #345 全绿** |
 | 账 #215（提交 `48feae8e` = §B49 的"体级声明收成一条声明符一条 LocalDeclStmt" + `tests/test_bodydecl.bas` 8 针（x86+x64 两形）+ `[CODEGEN-NOTE] bodydecl_one_per_declarator` （Absent 钉 VB3001）+ | 门 #338 = run 37321722861、head bab5b0ef、attempt 1 = 11 job 全 completed/success；compile 片 25→26 里新那枚就是 `[STATIC] bodydecl_shape ... PASS`（逐行读到），syntax 片 151→152 是 `[CODEGEN-NOTE] bodydecl_one_per_declarator ... PASS`，bas 两片之和 90→92 = test_bodydecl 与 test_bodydecl_x86 进了门禁且绿；vbp #3 那条 SKIP 仍是 test_vbman（COM 未注册，与 #335/#337 同形）） | **体级声明有四条路、两种形状**：`Dim a, b` 由 parseDimStmt 在语句层手写一遍声明符解析并出两条语句，`Const/Static/体级 Public` 的多声明符行把 MultiDecl 原样塞进 LocalDeclStmt，而语义层 visit(LocalDeclStmt) 的 switch 不认这个 kind ⇒ **一枚名字都不登记、每条使用一条 VB3001**（VBFlexGridDemo 一片 778 → 502 条，全部是诊断行）；手写那份副本还落在共享实现后面，漏了 WithEvents 与「后缀即类型」两步 ⇒ `Dim a&, b&` 第二枚静默落回 Variant（TypeName 看不出，VarType 3/0 才看得出）。收成 `Parser::wrapBodyDecls` 一处，四条路全调它，手写展开删掉。A/B 100 份 same=98 changed=2 且两条差异逐条归到诊断行；真编译四片 0 error C / 0 LNK；哨兵在 HEAD 树上 P1..P4 十条红 | 已发货，门 #338 绿 |
-| 账 #219（§B54 = RTL 裸名 `Changed` 的定义与 extern 撤掉 + `visit(IdentifierExpr)` 补"裸写的文档成员"那一格 + `kHostPseudoRows` 搬进 `src/common/host_pseudo.hpp` 并新增 `hostPseudoBareEligible`，语义层与发码层同问一句 + `tests/test_rtl_naked_changed.bas`（x64/x86）+ `tests/dochost/dhBare.ctl`/`dhBare.pag`/`dhTypo.pag` 三条 [CODEGEN-NOTE] + 两份哨兵跟着改） | 发码语料 A/B inputs=100 changed=**12** same=88，每份差异**全是删一行 VB3001**、产物 C 一行没动；VB3001 146→98（`Changed` 24→0、`hDC` 24→0，`new-names={}`）、`vb6_PropertyPage_Changed` 186=186；撞名探针改前 RC=1/no exe ⇒ 改后 RC=0/exe/`NC219-CHANGED=6`；哨兵 `tbl 55 rows` 与 `bareDoc 1/1/1/1/tbl1/names0` 全 PASS，红过一次是删掉 N7 读文件的负控演示 | 已提交，门 待回填 |
+| 账 #219（§B54 = RTL 裸名 `Changed` 的定义与 extern 撤掉 + `visit(IdentifierExpr)` 补"裸写的文档成员"那一格 + `kHostPseudoRows` 搬进 `src/common/host_pseudo.hpp` 并新增 `hostPseudoBareEligible`，语义层与发码层同问一句 + `tests/test_rtl_naked_changed.bas`（x64/x86）+ `tests/dochost/dhBare.ctl`/`dhBare.pag`/`dhTypo.pag` 三条 [CODEGEN-NOTE] + 两份哨兵跟着改） | 发码语料 A/B inputs=100 changed=**12** same=88，每份差异**全是删一行 VB3001**、产物 C 一行没动；VB3001 146→98（`Changed` 24→0、`hDC` 24→0，`new-names={}`）、`vb6_PropertyPage_Changed` 186=186；撞名探针改前 RC=1/no exe ⇒ 改后 RC=0/exe/`NC219-CHANGED=6`；哨兵 `tbl 55 rows` 与 `bareDoc 1/1/1/1/tbl1/names0` 全 PASS，红过一次是删掉 N7 读文件的负控演示 | 已发货，门 #346（run 37366164862、head `0026d87f`、branch dev、attempt 1）= 11 job 全 completed/success、非绿 0 |
+| 账 #225（§B55 = `src/driver/rtl_embedded.hpp` 两枚 id 与 `c3rtl.rc` 对上 + 新哨兵 `scripts/check_rtl_resource_ids.ps1` 三处逐条对账 + `tests/run_tests.ps1` 注册 `[STATIC] rtl_resource_ids`） | 上游 `9a420157`（rev38 绘图家族，经 `c5aab787` 合进 dev）把 `.rc` 的 `223=头/224=体` 与 hpp 的 `223=C/224=H` 写对调 ⇒ 解包把 463 行的体写成 `vb6forms_draw.h`，而 `vb6forms.h` include 它、被 39 个 RTL 文件 + 每份生成模块 .c 带到 ⇒ 28 枚符号 × 约 49 份定义 = LNK2005×1225 + LNK1169；门 #347 十一片九红（只有不链接的两片绿） | 单变量真编译：HEAD 冷编 `RC=1 diag=1226` → 只改这两行 `RC=0 exe=True diag=0`；哨兵 census 125/125/125、孤儿 0，两条 R3 负控真红、还原逐字节相同 | 已提交，门 待回填 |

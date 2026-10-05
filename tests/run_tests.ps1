@@ -726,6 +726,19 @@ function Test-RtlNakedNames {
         $out | Select-Object -First 6 | ForEach-Object { Write-Host "  $_" }
     }
 }
+function Test-RtlResourceIds {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] rtl_resource_ids ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\check_rtl_resource_ids.ps1" 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        $out | Select-Object -First 6 | ForEach-Object { Write-Host "  $_" }
+    }
+}
 function Test-IntLiteralShape {
     $script:total++
     Write-Host -NoNewline "  [STATIC] int_literal_shape ... "
@@ -4363,6 +4376,7 @@ if ($Category -in @("all", "compile")) {
     Test-CaseIsShape
     Test-DocHostAuthority
     Test-RtlNakedNames
+    Test-RtlResourceIds
     Test-SubclassSlotSites
     Test-CtrlArrayMemberSites
     Test-EventHandlerNames
