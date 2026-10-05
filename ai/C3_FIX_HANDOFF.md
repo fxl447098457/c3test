@@ -910,19 +910,15 @@ asm 13/14、smoke 1/1；`Build C3.exe` 那片日志正文不含用例行（历�
 夹具与哨兵：`tests/test_rtl_naked_changed.bas`（x64/x86 各一形，三针）；`tests/dochost/dhBare.ctl`、`dhBare.pag`、`dhTypo.pag` 三条 [CODEGEN-NOTE]（`dhTypo` 是负控：表里没这名字 ⇒ 必须照报，且不许凭空发 `vb6_PropertyPage_Changed`）；`check_host_pseudo_table.ps1` 的 `$tblPath`、`must`、`deny` 三处跟着表搬家，`must` 从此含"语义层必须问表"那一条；`check_rtl_naked_names.ps1` 的 N7 换成谓词 定义/声明/调用/带门 = 1/1/1/1 + 问表 1 + 成员名字面量 **0**。哨兵红过一次是当场演示的负控：把 N7 里读那三个文件的一行删掉 ⇒ 六条计数全 0、五条 FAIL。
 
 剩下的同族（本账没做完，读数已钉住）：`Controls` 4 条全在 ppProgressCircular.**pag**（那张表 propertypage 档没有这一行；收不收要先问 VB6 里 .pag 裸写 `Controls` 是谁；源码那三行已读: `ppProgressCircular.pag:460` 是 `Set oPC = Controls.Add(App.Title & ".ucProgressCircular", "ProgCirc")`、`:484 Controls.Remove` —— 运行期往这页上动态加/删 UC，而 `:490` 紧接着用的 `SelectedControls(0)` 是表里登记过的那枚）；`Count` 2 条在 ucProgressCircular.**ctl**（表里也没这行，而 #159 的边界写明"RTL 没有对应全局的行刻意不收"⇒ 那是 RTL 侧缺口，另立账）；`ScaleWidth` 2 条在 frmDemo.**frm**:168（`If ScaleWidth > 0 Then` —— 窗体自有的量走的是另一条路，不在这张表里，与 #68/#120 那族同面）；另 26 条是内在常量一族 ⇒ 账 #218。
-### B59 UC 事件处理器的形参表与 `.ctl` 里 `Public Event` 声明不一致时，编译器**一声不响** —— VB6 在编辑期就拒绝（账 #228，**未开工**）
+### B59 同一个 VB 类型写成两种拼法，`mapTypeRef` 给出两种 C 类型 —— `OLE_COLOR` 是 `int32_t`，`stdole.OLE_COLOR` 是 `void*`（账 #228，**已量完，未开工**）
 
-**为什么值得做（这条是 #222 那一族回归的正面闸）**：#222 的第二格（门 #350 红 → #351 绿）修的就是"thunk 的形参类型与
-回调 typedef / 处理器原型不同源"；同源之后还剩一类静默 —— **容器自己写的处理器与事件声明不匹配**。
-语料里现成一枚实物：`VBFlexGridDemo/UserEditingForm.frm` 的 `vbGridUserEdit_EditSetupWindow(hWndEdit As LongPtr,
-hInstance As LongPtr)`，而 `VBFlexGrid.ctl` 声明的是 `Public Event EditSetupWindow(hWndEdit As Long, hInstance As Long)`
-⇒ 产物里 typedef 交 `int32_t`、处理器收 `void*`，C 只给 C4024/C4047 警告；x64 上高 32 位是垃圾，
-读出来就是一个坏指针（VB6 本人：Argument not optional / 声明不匹配，**编译期就报错**）。
+**探针实测**（`.build/b255probe/probe.bas`，四枚 Sub 一次 `--emit-c`，3 秒）：`As OLE_COLOR` ⇒ `void vb6_BareColor(int32_t c)`；`As stdole.OLE_COLOR` ⇒ `void vb6_QualColor(void* c)`；`StdFont` / `stdole.StdFont` 同形。VB6 里这两种写法同义（类型库限定名），⇒ **限定名那一档在类型权威里掉到了兜底 `void*`**。
 
-**开工前先量的三件**：① 全语料扫一遍"事件处理器签名 vs `Public Event` 声明"的不一致数（按**类型名**比，
-不是按 C 类型比 —— `Long`/`LongPtr` 在 C 里都是指针宽时差别会被抹掉）；② VB6 的口径到底是"必须逐字相同"还是
-"可放宽到同宽"（语料里 `Index As Integer` vs 事件无参那一档是**合法的控件数组形状**，别一起报）；
-③ 这条要做成 error 还是 note（`note` 面在本项目只有阶段失败时才整体打印，见 [[c3-build-test-hazards]]）。
+**为什么值得做**：这条正是 #222 第二格（门 #350 红 → #351 绿）剩下的最后一条不同源。把 emit dump 里三处签名对齐的检具（`.build/b244_agree.py`）跑五件工程 49 枚 thunk：thunk↔typedef 不符 0、thunk↔处理器不符 **1** = `VBFlexGridDemo/UserEditingForm.frm:350` `VBFlexGrid1_EditSetupWindow(BackColor As stdole.OLE_COLOR, ForeColor As stdole.OLE_COLOR)` vs `.ctl:1117` `Public Event EditSetupWindow(ByRef BackColor As OLE_COLOR, ByRef ForeColor As OLE_COLOR)` —— 发送侧交 `int32_t`、处理器收 `void*`，x64 上高 32 位是垃圾。**语料里就这一枚**（全语料扫"处理器形参类型名 vs `Public Event` 声明"：14 枚工程内 UC / 132 条事件 / 4 枚命中的处理器，其中 3 枚是控件数组合法的前置 `Index`，1 枚就是这条）。
+
+**开工前要定的两件**：① 折的位置 = `mapTypeRef` 的 `dotPos` 那一支（现在只对**工程符号** `lookupModule(shortName)` 试裸名，内在/枚举名没试 ⇒ 掉兜底），改法 = 试裸名过 `typeSys_.resolveTypeName` 与 ivref/Class 符号，**只有查得到才折**（查不到照旧走原路，免得把 `Scripting.Dictionary` 这类真外部类型拉成原生）；② 全语料的限定名共 39 种 / 124 处，绝大多数是 `oleguids.*`、`msdatasrc.*` 这类真 COM 接口/结构（`void*` 就是对的），改完必须证明这一族**一条都不动** —— 拿 b244/b247 那两份 92 件 emit 捕获做 BASE 逐份对。
+
+**旧说法订正（别照着做）**：本节初版猜的是"容器自己把形参写成 `LongPtr` 而事件声明是 `Long`"—— 上面那两条 grep 把它否了：两边都是 `OLE_COLOR`，只是拼法不同 ⇒ 这一格是编译器侧的类型权威问题，不是用户代码形状。
 
 
 ## C. 仍在生效的口径与工具事实（与本文档等长的一半价值在这里；完整版见记忆库）
