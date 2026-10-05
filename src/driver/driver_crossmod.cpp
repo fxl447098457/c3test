@@ -33,6 +33,10 @@ public:
 } // namespace
 
 void Driver::markAddressOfCallbacks() {
+    // 注: marked 数的是**符号副本** (内层那圈对每个模块的符号表各 +1: 定义模块一份 +
+    // 每个引用模块的外部副本一份), 不是过程个数 —— 2026-10-05 实测 VBFlexGridDemo:
+    // 源码里去重后有 37 个 AddressOf 目标名, 这一行报 49。留着当"这条路走没走"的信号
+    // 足够; 精确去重 (按过程名归并再报数) 记进台账 §C, 下轮有别的源码刀时顺手改。
     size_t marked = 0;
     for (size_t i = 0; i < modules_.size(); i++) {
         if (!modules_[i] || i >= analyzers_.size() || !analyzers_[i]) continue;
