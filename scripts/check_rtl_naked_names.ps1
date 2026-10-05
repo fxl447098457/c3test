@@ -14,8 +14,16 @@
 #   N1  B / BF 这两枚裸名全局在 RTL 里必须彻底没有 (定义 0 + extern 0)
 #   N2  非 static 的裸名文件作用域数据全局 = 一份钉死的名单 (多一枚就红; 名单要缩小
 #       必须在同一次提交里改这里 —— 例如账 #219 把 Changed 归到 vb6_PropertyPage_Changed)
-#   N3  旗标折成字面量这件事只许有一个地方: style 位守卫 1 / 两个词各 1 / 交出的字面量 1
-#   N4  值口径不许飘: B -> 1, BF -> 2 (沿用删除前两枚全局的值, 本刀不改语义)
+#   N3  折旗标只许一个地方: style 位守卫 1 / B,C,F 三个字母位各 1 / 交出的字面量 1
+#   N4  折出来的必须是位掩码本身 (intValue = styleBits 一处), 且旗标名字不许进 AST (0)
+#   N5  RTL 解释的必须是同三位 (style & 1 / & 2 / & 4 各 >=1) 且 vb6_ControlLine 定义 1 份
+#       —— parser 与 RTL 是**一张表**的两头, 谁单独改编号就红
+#   N6  Line 的改道必须有表有码头: 声明 1 + 定义 1 + 码头至少查一次
+#       (只接一头就是账 #143 那条"编得过、跑了、什么都没发生")
+#   值口径 (账 #221): B=1 矩形 / C=2 椭圆 / F=4 填充 ⇒ BF=5、CF=6。
+#   订正: 账 #220 那一版沿用被删的两枚 RTL 全局写的是 B=1 / BF=2, 那一版既没有 C 也没有 F 的
+#   落脚点, 本档随 #221 一起收成字母位。
+# 规则扫的是标量/指针档 (intN_t / long / char / double / BSTR / VARIANT / VB6_* 等)。
 #
 # 扫的是标量/指针档 (intN_t / long / char / double / BSTR / VARIANT / VB6_* 等)。
 #
@@ -67,27 +75,54 @@ $missing = @($pin | Where-Object { -not $found.ContainsKey($_) })
 if ($extra.Count -gt 0) { $bad += ('N2 new naked RTL global: ' + ($extra -join ', ') + ' - VB lets a module name a variable that, so this collides') }
 if ($missing.Count -gt 0) { $bad += ('N2 pinned census no longer matches: ' + ($missing -join ', ') + ' disappeared - update the pin in the same commit that removes it') }
 
-# N3 + N4: 折旗标那一处
+# N3 + N4: 折旗标那一处 —— 账 #221 起按**字母位**折 (B=1 / C=2 / F=4, 所以 BF=5、CF=6),
+# 不再枚举两个词; 名字一律不进 AST 这一条没变 (那正是撞车的成因)。
 $ptxt = [System.IO.File]::ReadAllText($parserRel)
 $guard = @([regex]::Matches($ptxt, 'if\s*\(\s*trailingIdx\s*==\s*1')).Count
-$wordB = @([regex]::Matches($ptxt, 'optWord\s*==\s*"b"')).Count
-$wordBF = @([regex]::Matches($ptxt, 'optWord\s*==\s*"bf"')).Count
-$litInt = @([regex]::Matches($ptxt, 'LiteralKind::Integer,\s*optWord')).Count
-$idName = @([regex]::Matches($ptxt, 'IdentifierExpr[^;]*optWord')).Count
+$bitB = @([regex]::Matches($ptxt, "ch\s*==\s*'b'\s*\)\s*\{\s*styleBits\s*\|=\s*1")).Count
+$bitC = @([regex]::Matches($ptxt, "ch\s*==\s*'c'\s*\)\s*\{\s*styleBits\s*\|=\s*2")).Count
+$bitF = @([regex]::Matches($ptxt, "ch\s*==\s*'f'\s*\)\s*\{\s*styleBits\s*\|=\s*4")).Count
+$litInt = @([regex]::Matches($ptxt, 'LiteralKind::Integer,\s*bitText')).Count
+$hand = @([regex]::Matches($ptxt, 'intValue\s*=\s*styleBits')).Count
+$idName = @([regex]::Matches($ptxt, 'IdentifierExpr[^;]*styleBits')).Count
 if ($guard -ne 1) { $bad += ('N3 style-slot guard appears ' + $guard + ' times (want exactly 1 - one fold point)') }
-if ($wordB -lt 1) { $bad += 'N3 the B flag is no longer folded here' }
-if ($wordBF -lt 1) { $bad += 'N3 the BF flag is no longer folded here' }
+if ($bitB -ne 1) { $bad += ('N3 the B bit is folded ' + $bitB + ' times (want 1)') }
+if ($bitC -ne 1) { $bad += ('N3 the C bit is folded ' + $bitC + ' times (want 1) - 账 #220 那一版没这一形') }
+if ($bitF -ne 1) { $bad += ('N3 the F bit is folded ' + $bitF + ' times (want 1) - 同上') }
 if ($litInt -ne 1) { $bad += ('N3 literal handoff ' + $litInt + ' times (want 1)') }
+if ($hand -ne 1) { $bad += ('N4 intValue=styleBits appears ' + $hand + ' times (want 1 - the folded value must BE the bit mask)') }
 if ($idName -ne 0) { $bad += ('N3 the flag name is back in the AST ' + $idName + ' times (want 0) - that is what created the collision') }
-$pairText = @([regex]::Matches($ptxt, 'optWord\s*==\s*"b"\s*\?\s*"1"\s*:\s*"2"')).Count
-$pairInt = @([regex]::Matches($ptxt, 'intValue\s*=\s*optWord\s*==\s*"b"\s*\?\s*1\s*:\s*2')).Count
-if ($pairText -ne 1) { $bad += ('N4 flag text pair ' + $pairText + ' times (want 1)') }
-if ($pairInt -ne 1) { $bad += ('N4 flag intValue pair ' + $pairInt + ' times (want 1) - B=1 / BF=2 came from the deleted globals, do not renumber') }
+
+# N5: RTL 解释的必须是**同三位** —— parser 与 RTL 是一张表, 不是两边各自编号
+$rtlCtrl = [System.IO.File]::ReadAllText((Join-Path $root 'src\rtl\core\vb6forms\vb6forms_ctrl.c'))
+foreach ($bit in @('1', '2', '4')) {
+    $one = @([regex]::Matches($rtlCtrl, '\(\s*style\s*&\s*' + $bit + '\)')).Count
+    if ($one -lt 1) { $bad += ('N5 RTL never interprets style bit ' + $bit + ' - parser and RTL must be one table') }
+}
+$lineFn = @([regex]::Matches($rtlCtrl, 'void vb6_ControlLine\(')).Count
+if ($lineFn -ne 1) { $bad += ('N5 vb6_ControlLine defined ' + $lineFn + ' times (want 1)') }
+
+# N6: Line 的改道必须有表有码头 (缺一头就是"编得过、跑了、什么都没画", 本线踩过三次)
+$helpersTxt = [System.IO.File]::ReadAllText((Join-Path $root 'src\backend\detail\util\cgen_helpers.inc'))
+$utilTxt = [System.IO.File]::ReadAllText((Join-Path $root 'src\backend\cgen_util_ctrl.cpp'))
+$withmTxt = [System.IO.File]::ReadAllText((Join-Path $root 'src\backend\detail\expr\cgen_expr_call_callee_withm.inc'))
+$cvDecl = @([regex]::Matches($helpersTxt, 'std::string controlCanvasMethod')).Count
+$cvDef = @([regex]::Matches($utilTxt, 'CCodeGen::controlCanvasMethod')).Count
+$cvUse = @([regex]::Matches($withmTxt, 'controlCanvasMethod\(')).Count
+if ($cvDecl -ne 1) { $bad += ('N6 canvas table declared ' + $cvDecl + ' times (want 1)') }
+if ($cvDef -ne 1) { $bad += ('N6 canvas table defined ' + $cvDef + ' times (want 1)') }
+if ($cvUse -lt 1) { $bad += ('N6 the withm docket never consults the canvas table (' + $cvUse + ') - Line falls back to the silent COM path') }
+# 成员侧那一头也必须给标记: 只接调用侧 = 成员先被兜底当 COM 属性取走, 码头根本收不到标记
+# (这一刀第一次就红在这一条上 —— 表与码头都写好了, 产物里照旧是 ComGetObjectProp(L"Line")+Item)
+$memberTxt = [System.IO.File]::ReadAllText((Join-Path $root 'src\backend\detail\expr\cgen_expr_member_form_builtin.inc'))
+$cvMember = @([regex]::Matches($memberTxt, 'controlCanvasMethod\(')).Count
+if ($cvMember -lt 1) { $bad += 'N6 the member side never marks canvas methods - Line is read as a COM property and the docket never sees a marker' }
 
 if ($bad.Count -gt 0) {
     foreach ($b in $bad) { Write-Host ('FAIL ' + $b) -ForegroundColor Red }
     exit 1
 }
 Write-Host ('PASS RTL naked-name guard: B/BF ' + $n1 + ', census ' + ($found.Keys.Count) +
-    ' pinned names, fold point ' + $guard + '+' + $litInt + ', flag names in AST ' + $idName + ', value pair ' + $pairInt)
+    ' pinned names, fold bits ' + $bitB + '+' + $bitC + '+' + $bitF + ', handoff ' + $litInt + '+' + $hand +
+    ', flag names in AST ' + $idName + ', RTL ' + $lineFn + '/bits, canvas ' + $cvDecl + '+' + $cvDef + '+' + $cvUse + '+' + $cvMember)
 exit 0

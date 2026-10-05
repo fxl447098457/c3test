@@ -353,6 +353,13 @@
     std::string controlScaleMethod(FrmControlType ctrlType,
                                    const std::string& memberLower) const;
 
+    // 账 #221 = C29-PL-a: 控件的**画表面方法**名表（目前只有 Line，六个实参）。
+    // 与上面三张表同一套规矩: 表只交名字、实参由码头拼，且**刻意不给通用行** ——
+    // VB6 只有画得上去的那几枚（Form / PictureBox）有 Line，给成通用行就等于允许
+    // `List1.Line (0,0)-(1,1)` 也答一次成功（同 #192/#196 那条"别伪造成功"的口径）。
+    std::string controlCanvasMethod(FrmControlType ctrlType,
+                                    const std::string& memberLower) const;
+
     // C29-SL-n（账 #141）: 「这枚控件要不要子类化」的**唯一一份**判据。
     // 这一趟原本被抄成三份：发 arm 的 `cgen_form_wndproc_subclass.inc`（按 info.hasXxx 汇总）、
     // 装的 `cgen_form_frame_menu.inc`、拆的 `cgen_form_wndproc_dispatch.inc` —— 后两份各写一遍，

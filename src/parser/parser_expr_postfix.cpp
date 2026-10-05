@@ -175,22 +175,36 @@ ExprPtr Parser::parsePostfix(ExprPtr expr) {
                                 break;
                             }
                             // VB6 的 `Line` 尾参只有 color 与 style 两格，而 style 那格的
-                            // B / BF 是**语法旗标**不是名字 (账 #220)。折成数值就地定死：
+                            // B / C / F 是**语法旗标**不是名字 (账 #220)。折成数值就地定死：
                             // 名字一旦进 AST，发码就把它原样发出去，靠 RTL 里两枚裸名全局
                             // (const int32_t B / BF) 接住 —— 任何工程有个模块级变量叫 B 就撞车。
-                            // 只认 style 位置 (trailingIdx==1，即 color 已给出)：
+                            // 只认 style 位置 (trailingIdx 为 1，即 color 已给出)：
                             // `Line (a,b)-(c,d), B` 那一格按 VB6 是 color，用户的 B 必须照旧成立。
-                            const std::string optWord = toLower(cur_.text);
-                            if (trailingIdx == 1 && cur_.kind == TokenKind::Identifier &&
-                                (optWord == "b" || optWord == "bf")) {
-                                auto locOpt = currentLoc();
-                                advance();  // 消费 B / BF
-                                auto lit = std::make_unique<LiteralExpr>(
-                                    locOpt, LiteralKind::Integer, optWord == "b" ? "1" : "2");
-                                lit->intValue = optWord == "b" ? 1 : 2;
-                                call->positional.push_back(std::move(lit));
-                                trailingIdx++;
-                                continue;
+                            // 位口径与 RTL `vb6_ControlLine` 是**同一张表**（账 #221）：
+                            // B=1 矩形、C=2 椭圆、F=4 填充，按字母逐个置位 ⇒ BF=5、CF=6。
+                            // 订正一处历史: 账 #220 那一刀为了不改语义沿用了旧全局的 1/2，
+                            // 于是 BF 与"C/F 两形"都没口径可依 —— 这一格把它收成字母位。
+                            if (trailingIdx == 1 && cur_.kind == TokenKind::Identifier) {
+                                const std::string optWord = toLower(cur_.text);
+                                int styleBits = 0;
+                                bool allFlagLetters = !optWord.empty();
+                                for (char ch : optWord) {
+                                    if (ch == 'b') { styleBits |= 1; }
+                                    else if (ch == 'c') { styleBits |= 2; }
+                                    else if (ch == 'f') { styleBits |= 4; }
+                                    else { allFlagLetters = false; break; }
+                                }
+                                if (allFlagLetters) {
+                                    auto locOpt = currentLoc();
+                                    advance();  // 消费 B / C / F 那一串
+                                    const std::string bitText = std::to_string(styleBits);
+                                    auto lit = std::make_unique<LiteralExpr>(
+                                        locOpt, LiteralKind::Integer, bitText);
+                                    lit->intValue = styleBits;
+                                    call->positional.push_back(std::move(lit));
+                                    trailingIdx++;
+                                    continue;
+                                }
                             }
                             call->positional.push_back(parseExpression());
                             trailingIdx++;

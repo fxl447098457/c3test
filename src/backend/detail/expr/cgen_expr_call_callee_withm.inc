@@ -565,3 +565,51 @@
             return;
         }
     }
+
+    // 账 #221 = C29-PL-a: PictureBox/Form 的 `Line (x1,y1)-(x2,y2)[, color][, B|C|F]` 从通用
+    // COM 兜底里接出来 —— 与上面 Fix 185 的 Print/Cls 同族，两条码头共用 controlCanvasMethod
+    // 这一张表（只接一头就是"编得过、跑了、什么都没画"，本线踩过三次的那一条）。
+    // 缺的两格按 VB6 的默认交: color 缺席交 -1（RTL 那一头落到控件自己的 ForeColor）、
+    // style 缺席交 0（线段）；坐标四格 parser 的 Fix 102 一定交满。
+    // 旗标 B/C/F 不在这里出现: parser 已在同一处把它们折成位数值，到这一步是 Integer 字面量。
+    if (isComMarker_) {
+        auto itCtrlLine = knownFormControls_.find(comObjExpr_);
+        if (itCtrlLine != knownFormControls_.end() &&
+            !controlCanvasMethod(itCtrlLine->second, comMemberName_).empty()) {
+            std::string fnLine = controlCanvasMethod(itCtrlLine->second, comMemberName_);
+            isComMarker_ = false;
+            isEarlyBoundCom_ = false;
+            earlyBoundSym_ = nullptr;
+            std::string ctrlLineName = cIdent(knownFormControlOriginalNames_.count(comObjExpr_)
+                ? knownFormControlOriginalNames_[comObjExpr_] : comObjExpr_);
+            comObjExpr_.clear();
+            comMemberName_.clear();
+            std::vector<std::string> la;
+            for (size_t i = 0; i < node.positional.size() && i < 6; i++) {
+                emitExpr(*node.positional[i]);
+                // 同 Fix 143/185: 实参自身是 COM 成员读时必须就地消费标记，否则交出去的是对象
+                // 指针，而残留标记还会被上层当独立语句再发一遍。
+                if (isComMarker_) {
+                    isComMarker_ = false;
+                    isEarlyBoundCom_ = false;
+                    earlyBoundSym_ = nullptr;
+                    std::string objM2 = std::move(comObjExpr_);
+                    std::string memM2 = std::move(comMemberName_);
+                    comObjExpr_.clear();
+                    comMemberName_.clear();
+                    la.push_back("vb6_ComGetIntProp(" + objM2 + ", L\"" + memM2 + "\")");
+                } else {
+                    la.push_back(std::move(lastExpr_));
+                }
+            }
+            while (la.size() < 4) la.push_back("0");
+            if (la.size() < 5) la.push_back("-1");
+            if (la.size() < 6) la.push_back("0");
+            c_.emitLine(fnLine + "((void*)vb6_hwnd_" + ctrlLineName + ", "
+                        + "(double)" + la[0] + ", (double)" + la[1] + ", "
+                        + "(double)" + la[2] + ", (double)" + la[3] + ", "
+                        + "(int32_t)" + la[4] + ", (int32_t)" + la[5] + ");  /* Line */");
+            lastExpr_ = "0";
+            return;
+        }
+    }

@@ -3484,6 +3484,16 @@ if ($Category -in @("all", "run", "vbp")) {
         "SF05-FIXED-EDGE-UNCHANGED=True", "SBFONT-DONE")
     Test-Vbp "sbfont" "$Tests\sbfont\SbFont.vbp" $sbFontExpected
     Test-Vbp "sbfont_x86" "$Tests\sbfont\SbFont.vbp" $sbFontExpected -Arch "x86"
+    # <vbeclipse> 账 #221 = C29-PL-a: Picture.Line 落原生 GDI。这条判据只能**画完再问像素** ——
+    # 改前 8 处 Line 全发成 ComGetObjectProp(hwnd,"Line") 再取 Item, 两跳在 RTL 都登记成
+    # "认识但什么都不做" ⇒ 编得过、跑得起、一笔不画、一条诊断也不打 (CLINE 那族静默空转的第三例)。
+    # 四形各钉两头: 画过的那枚像素 == 交进去的颜色, 没画过的那枚 != 它 —— 只钉前者会放过
+    # "整片刷成红", 只钉后者会放过"根本没落笔"。PL03 同时证明 BF(=1|4) 与 B(=1) 不是同一个数。
+    # 画与问都放在 Timer 第一拍 (dcsurf 那条口径: 窗口问题在窗口活着的时候问);
+    # 先试 Form_Load 时 GetPixel 一律 -1 (CLR_INVALID), 那不是本刀的靶子, 记在夹具注释里。
+    $pcDrawExpected = @("PL01-LINE=True", "PL02-BOX=True", "PL03-FILL=True", "PL04-CIRCLE=True", "PL-DONE")
+    Test-Vbp "pclinedraw" "$Tests\pcline\PcDraw.vbp" $pcDrawExpected
+    Test-Vbp "pclinedraw_x86" "$Tests\pcline\PcDraw.vbp" $pcDrawExpected -Arch "x86"
 
     # --- P20-42: SSTab (SysTabControl32 复刻) ---
     # 期望串取自夹具真实输出 (别缩写标签)。TS25..TS28 是切页显隐: vb6_GetControlVisible
@@ -4667,13 +4677,17 @@ if ($Category -in @("all", "syntax")) {
         "VB3001", "nopeHereIsNotAName") @("'Is'")
     Test-CodegenNote "caseis_no_phantom_local" @("$Tests\test_caseis_implicit.bas") @(
         "int32_t _vb6_select_0", "BSTR _vb6_select_1") @("vb6_VARIANT Is")
-    # <vbeclipse> 账 #220 的位置那一头: Line 的 B / BF 只在 **style 格** (color 之后) 折成
-    # 字面量 1 / 2, 写在 color 格时必须还是用户自己的变量。改前两格都发裸名、由 RTL 的
-    # const int32_t B / BF 接住 (语料实测 vb6_ComPackValue(BF)) —— 所以 Absent 钉的就是那两条,
-    # 它们在场上即说明「名字又回来了」。四格全钉: 两条 style 折成数、两条 color 留名字。
+    # <vbeclipse> 账 #220 的位置那一头 + 账 #221 的改道: Line 尾部的 B/C/F 只在 **style 格**
+    # (color 之后) 折成位数值 (B=1 / C=2 / F=4 ⇒ BF=5), 写在 color 格时必须还是用户自己的变量;
+    # 折好之后整条调用必须由 controlCanvasMethod 那张表改成原生 vb6_ControlLine(...)。
+    # 改前两格都发裸名、由 RTL 的 const int32_t B / BF 接住 (语料实测 vb6_ComPackValue(BF)),
+    # 而 Line 本身没人应答: Absent 那两条钉的就是"又退回兜底 / 名字又回来"这两件。
     Test-CodegenNote "pcline_flag_folded" @("$Tests\pcline\PcForm.frm") @(
-        "vb6_ComPackInt(255), vb6_ComPackInt(2)", "vb6_ComPackInt(16711680), vb6_ComPackInt(1)",
-        "vb6_ComPackInt(15), vb6_ComPackInt(B)", "vb6_ComPackInt(16), vb6_ComPackInt(BF)") @(
+        "vb6_ControlLine((void*)vb6_hwnd_picA, (double)10, (double)10, (double)50, (double)50, (int32_t)255, (int32_t)5)",
+        "vb6_ControlLine((void*)vb6_hwnd_picA, (double)0, (double)0, (double)20, (double)20, (int32_t)16711680, (int32_t)1)",
+        "vb6_ControlLine((void*)vb6_hwnd_picA, (double)5, (double)5, (double)15, (double)15, (int32_t)B, (int32_t)0)",
+        "vb6_ControlLine((void*)vb6_hwnd_picA, (double)6, (double)6, (double)16, (double)16, (int32_t)BF, (int32_t)0)") @(
+        "vb6_ComGetObjectProp(vb6_hwnd_picA, L" + [char]34 + "Line" + [char]34 + ")",
         "vb6_ComPackValue(BF)", "vb6_ComPackValue(B)")
     # <vbeclipse> 账 #217 第二刀: 文档隐式对象 (UserControl / PropertyPage / Extender / Ambient)
     # 与全局库前缀 VBA 现在语义层也认识 (判据 = Module::docKind 一处写、两处读)。两份真工程的
