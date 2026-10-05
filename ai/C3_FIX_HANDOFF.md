@@ -403,7 +403,7 @@ asm 片打 `PASS=13 SKIP=0 TOTAL=14`（差 1），其余七片自洽。本轮 11
 **→ 已出（2026-10-05）**：修法就是本账预设的那一条 —— 出口从 `static` 提出来、进 `vb6forms_internal.h`，那一行改读 `vb6_ControlFont`。同一条根因今天**一并接上了六处**（这一处出口的覆盖面本来就不该按账号算）：`vb6forms.c` 的 groupbox 标题带读 + 控件创建路存、`vb6forms_ctrlarr.c` 问模板要字体 + 发给新窗口之后存、`vb6forms_shape.c` 三处图钮标题的文字量、`vb6forms_widget.c` 的 Label AutoSize 宽度。后两族今天没写判据 —— shape/widget 那两处改的是"画/量的时候用哪张字体"，观感类后果（截字/留白）没有一条现成的数值判据能钉，**别把"编得过、跑了"当成它们被验过**；钉住的是哨兵 D11 那条普查（见 §B39 收线段）。
 
 
-### B38 ucTreeMaps 的 exe 第一次真跑：x86 起窗、x64 启动期 AV（账 #203，开着）
+### B38 ucTreeMaps 的 exe 第一次真跑：x86 起窗、x64 启动期 AV（账 #203，**已归因，修在工程侧**）
 
 #201 让这台工程第一次真编真链出 exe，本条是那份产物的**第一趟真跑**读数（`.build/b200_tmrun.ps1` 收 stdout/stderr 与退出码，`.build/b182_winprobe.ps1` 数窗口）：
 
@@ -411,6 +411,14 @@ asm 片打 `PASS=13 SKIP=0 TOTAL=14`（差 1），其余七片自洽。本轮 11
 - **x64** = 8 秒内自己退出，`code=-1073740771`（0xC0000409 fail-fast），而 crash trace 打的是 `code=0xc0000005 at rva=0xce8a7463` + `av read target=0x48777bc3`（那是个野值），24 帧里只有 5 帧落在 exe 内（rva=0x2602c / 0x35317 / 0x2194e / 0x21a4c / 0x21f74），stdout 0 字节、Form1 那一枚窗口根本没出现。
 
 ⇒ 这一格从「编得过」推进到 VB6 那一侧的「能不能跑」；x64 起不来是**新缺陷**，不是 #201 那三枚桩的余波（那三枚在 x86 那条路上同样被调到，窗体照样起来）。**下一步（还没做）**：把 x64 那条 AV 归因 —— 顺序照 #182 那一味先拿带符号的产物把那几个 rva 落成函数名（**没符号化的 rva 名单不构成结论**），再分岔问「是产品发码把指针按 32 位存了」还是「工程自己的 Declare 把指针写成 `As Long`」，后者是改 VB 源码、不动编译器（#163/#175 那一族早已立过口径）。注意 x86 这一侧今天是**好的**，所以任何「回归坏了」的判据都不该把它算进去；反过来说，门禁今天只对这台工程断言「编得过」（Test-VbpBuild），跑得起来这件事还没进任何判据。
+
+**→ 已归因（2026-10-05，靠符号化、不靠猜）**：把这台工程用 `-g --keep-for-debug` 重编一遍（产物带 PDB+MAP，`.temp/b204_tm_g.ps1`），再跑一次拿**新的** RVA，喂给 `.temp/b204_sym.ps1`（照 `.temp/sym3.ps1` 的写法，只是把 exe 路径做成参数 —— sym3 那份把 VBFlexGridDemo 的路径写死了）⇒ 逐帧落成**生成的 .c 的 file:line**。
+
+读法上有一条会反复咬人：`#0` 落在 `rtl/vb6rtl.c:93` —— 那一行是崩溃轨迹**打印器自己**（`CaptureStackBackTrace`），而 `#1..#4` 全在 exe 之外（ntdll 的派发链）⇒ **真正的出错指令是 `#5`**：`rtl/vb6_di_win32_stubs.c:411`，调用链 `#6 FontMemRes.c:288` → `#7 :302` → `#8 :148` → `#9 :82`。而 `FontMemRes.c:288` 那一行是 `vb6_di_RtlMoveMemory((void*)&(lAddress), lpArray, 4);`（在 `IsArrayDim` 里）。
+
+往 VB 源码看就见底了（`tests/Charts 2020/ucTreeMaps/FontMemRes/FontMemRes.ctl`）：`34: Declare Function VarPtrArray Alias "VarPtr" (Ptr() As Any) As Long` 与 `186: Function IsArrayDim(ByVal lpArray As Long)` —— **指针在 x64 上被 `As Long` 截成 32 位**，所以那个"读目标地址" `0xffffffff927ee7d0` 根本不是指针，是被截过又符号扩展的残值。⇒ 定性 = **工程自己的声明没匹配 64 位**，与 #163/#175/B27 同一条口径：**改 VB 源码（`As LongPtr`），不动编译器**；x86 那台 LongPtr 就是 4 字节、今天实测起窗正常。
+
+**下一刀怎么做**（还没动手）：① 这两处 `As Long` → `As LongPtr`，并把同工程里其余"把指针当数交出去"的声明一起扫（census：`Declare ...` 里参数/返回是指针形状的那些逐条判定，不是猜）；② 判据要落在**运行面** —— 门禁今天对这台工程只断言「编得过」（`Test-VbpBuild`），"跑起来起不起窗"没人钉；现成的形态是 `Test-GuiVbp`（#175/#177 那批用过它），起窗判据 = 进程还活着 + 顶层出现 `VB6_Form_Form1`（本地读数已证 x86 这样认得出）。③ 两台都要真跑：x86 是回归护栏（今天好的不许坏），x64 才是这一刀的判据。
 
 ### B39 创建期下发的那张默认字体没人存：没被写过字体的控件整张 Font 面读空（账 #204，**已出**）
 
