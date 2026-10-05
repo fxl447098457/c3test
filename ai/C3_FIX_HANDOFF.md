@@ -909,7 +909,7 @@ asm 13/14、smoke 1/1；`Build C3.exe` 那片日志正文不含用例行（历�
 
 夹具与哨兵：`tests/test_rtl_naked_changed.bas`（x64/x86 各一形，三针）；`tests/dochost/dhBare.ctl`、`dhBare.pag`、`dhTypo.pag` 三条 [CODEGEN-NOTE]（`dhTypo` 是负控：表里没这名字 ⇒ 必须照报，且不许凭空发 `vb6_PropertyPage_Changed`）；`check_host_pseudo_table.ps1` 的 `$tblPath`、`must`、`deny` 三处跟着表搬家，`must` 从此含"语义层必须问表"那一条；`check_rtl_naked_names.ps1` 的 N7 换成谓词 定义/声明/调用/带门 = 1/1/1/1 + 问表 1 + 成员名字面量 **0**。哨兵红过一次是当场演示的负控：把 N7 里读那三个文件的一行删掉 ⇒ 六条计数全 0、五条 FAIL。
 
-剩下的同族（本账没做完，读数已钉住）：`Controls` 4 条全在 ppProgressCircular.**pag**（那张表 propertypage 档没有这一行；收不收要先问 VB6 里 .pag 裸写 `Controls` 是谁）；`Count` 2 条在 ucProgressCircular.**ctl**（表里也没这行，而 #159 的边界写明"RTL 没有对应全局的行刻意不收"⇒ 那是 RTL 侧缺口，另立账）；`ScaleWidth` 2 条在 frmDemo.**frm**（窗体成员走的是另一条路，不在这张表里）；另 26 条是内在常量一族 ⇒ 账 #218。
+剩下的同族（本账没做完，读数已钉住）：`Controls` 4 条全在 ppProgressCircular.**pag**（那张表 propertypage 档没有这一行；收不收要先问 VB6 里 .pag 裸写 `Controls` 是谁；源码那三行已读: `ppProgressCircular.pag:460` 是 `Set oPC = Controls.Add(App.Title & ".ucProgressCircular", "ProgCirc")`、`:484 Controls.Remove` —— 运行期往这页上动态加/删 UC，而 `:490` 紧接着用的 `SelectedControls(0)` 是表里登记过的那枚）；`Count` 2 条在 ucProgressCircular.**ctl**（表里也没这行，而 #159 的边界写明"RTL 没有对应全局的行刻意不收"⇒ 那是 RTL 侧缺口，另立账）；`ScaleWidth` 2 条在 frmDemo.**frm**:168（`If ScaleWidth > 0 Then` —— 窗体自有的量走的是另一条路，不在这张表里，与 #68/#120 那族同面）；另 26 条是内在常量一族 ⇒ 账 #218。
 
 ## C. 仍在生效的口径与工具事实（与本文档等长的一半价值在这里；完整版见记忆库）
 
