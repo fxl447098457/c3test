@@ -503,12 +503,14 @@ Fix 195 那轮把 .frx 三种 blob 的**布局**钉准了（字符串 / 字符�
 
 **护栏 A/B**（BASE = `b207_new_emit`）⇒ inputs=98、same=86、**changed=4**（ucChartBar 两台各 +48 行、ucTreeMaps 两台各 +15 行）、new-only=8（这轮把 LabelPlus / ucChartArea / ucPieChart / frxdata 也纳入普查面，BASE 里没对应份）；逐行归因 = **全部是新增的 combo 发码，0 行删除、0 行无法归因**（分类器要认整段两行形状：`{ wchar_t* vb6_witem = vb6_Utf8ToWide(...)` 那一行不含 CB_*，第一版因此报了 16 条假"无法归因" —— 又是"计数按整行判"那一课）。真工程配对：ucChartBar 两台 rc=0、ucTreeMaps 两台 rc=0。
 
-### B43 程序改 `ListIndex` 不发 `Click`（账 #208，开着）
+### B43 程序改 `ListIndex` 该不该发 `Click`（账 #208，**判掉：不许凭猜改产品**）
 
 #207 的夹具里顺手量到的：`Combo1.ListIndex = 2` 之后 `li=2`、`text=你好` 都对，但 `clicks=0` —— 挂在该组合框上的 `Combo1_Click` 一次也没进。VB6 的口径是**程序改 ListIndex 会触发 Click**（`ucTreeMaps/Form1.frm:357` 那句 `Combo1.ListIndex = 4: Exit Sub` 整个就是靠这个惯例来启动首次绘制的：设值 ⇒ 发 Click ⇒ `Combo1_Click` 里 `Clear / Form_Load / Refresh`）。后果：那一页现在必须**人手点一下 Random** 才画得出图。
 开工先量三件事，别直接改：① ListBox 那一档同不同形（VB6 两类都发）；② 发 Click 的时机 —— 是"赋值即发"还是"下一条消息才发"（决定重入：`Combo1_Click` 里又调 `Form_Load`，而 `Form_Load` 第一句就是那个赋值 ⇒ 会递归，VB6 靠"赋值时 ListIndex 已改好"让第二次进来不再走那一支，我们要不要同一顺序）；③ 用户点击与程序赋值**不能双发**（同 #171 那条"按来路筛"的纪律）。判据两头钉：程序赋值 ⇒ 恰好 1 次；用户点击 ⇒ 恰好 1 次；重复赋同一个值 ⇒ 0 次（VB6 是不是这样要先量，别照猜钉）。
 
 **#208 的机制已经量到（2026-10-05，读码）**：用户那一路是通的 —— `cgen_form_wndproc_create.inc:396` 把 `CBN_SELCHANGE`(code=1) 映到 `_Click()`（ListBox 那一路在 :316，容器里的在 :523/:544），而 Windows 对**程序**发的 `CB_SETCURSEL` 不回通知 ⇒ `vb6_SetListIndex`（`vb6forms_list.c:52`）设完就没人再发那条消息 ⇒ clicks=0。现成的先例两条：`vb6forms_richtextbox.c:478` 就是"程序化补发一条 `WM_COMMAND(MAKEWPARAM(id, code), hwnd)` 走完整派发链"，StatusBar 的 `SimClick` 同形。⇒ 缺的是"设完值补发那条通知"这一小步，而且**必须只在该控件挂了 Click 处理器时发**（否则又是 #190 那族"发码引用不存在的处理器"）。
+
+**→ 这一条照读码去做了，然后被自家夹具拦下（2026-10-05，同一天判掉）**：补发通知的改动写进 `vb6_SetListIndex` 之后，新夹具两头（combo/list 各恰好 1 次、同值 0 次）确实绿，ucTreeMaps 的 demo 也**不用点 Random 就自己画出图**了（`.build/b211out/tm_startup.png`）—— 但 `tests/ctrlfiles` 的 **CF14 / CF15 当场红**（两台都红）。看它们的写法就知道谁错了：CF14 断的是 `auxList.ListCount = 3` 且**第一条必须是 "dbl:"**，而那三条 item 是夹具自己 `fileList_DblClick` / `fileList_Click` **手工调用处理器**加进去的（`CfForm.frm:106/120`）—— 也就是说这套夹具一直按「程序改 ListIndex 不发 Click」写，而它钉的那份口径来自 VB6 本体。⇒ **本机没有 VB6，这条"VB6 会不会发"我量不了**；两难之间只有一种立场站得住：**不凭猜改产品**。已把 RTL 与夹具全部回退（`git checkout` 那三处），回退后复跑 ctrlfiles 17 条 needles 两台全在、frxdata 回到 #207 的读数。顺带把 ucTreeMaps 那一页"要点一下才画"重新定性：**那大概率就是 VB6 的原样行为**（作者写 `Combo1.ListIndex = 4: Exit Sub` 的意图是给组合框一个默认项，绘制留给用户点 Random），所以 #207 之后剩下的"启动不自动画"**不算缺陷**，本账到此结掉。如果哪天要重开，前置条件写死：先拿到能跑的 VB6（或原生 OCX 的对照实例）量出真口径，再动 `vb6_SetListIndex`。
 
 ## C. 仍在生效的口径与工具事实（与本文档等长的一半价值在这里；完整版见记忆库）
 

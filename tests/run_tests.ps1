@@ -3316,8 +3316,10 @@ if ($Category -in @("all", "run", "vbp")) {
     # ListBox 一档，ComboBox 那 17 处（Charts 2020 四个 demo 工程的 "Number of Series"）
     # 全落空 ⇒ 下拉框是空的，而 ucTreeMaps 的 demo 正是用 Combo1.ListIndex 决定画不画。
     # FD8 是真判据（三项 List + 两项 ItemData 各自对上），FD9 留原始读数，
-    # FD10 只钉前缀：`Combo1.ListIndex = 2` 之后 clicks 今天还是 0（VB6 会发 Click），
-    # 那条另记新账 #208 —— 把已知缺陷钉成断言就是把红当基线。
+    # FD10 只钉前缀（留原始读数，不钉值）：`Combo1.ListIndex = 2` 之后 clicks=0。
+    # 这一形对不对**本机量不了**（没有 VB6）。唯一能引的旁证是自家 ctrlfiles 的 CF14/CF15：
+    # 那两条是**手工调 fileList_Click 来模拟一次点击**的，也就是说这套夹具一直按
+    # "程序改 ListIndex 不发 Click" 写 —— 所以这里不把任何一种口径钉成断言（台账 §B43 / 账 #208）。
     Test-Vbp "frxdata" "$Tests\frxdata\FrxData.vbp" @(
         "FD1=alpha|beta", "FD2=3", "FD3=1234", "FD4=5", "FD5=300", "FD6=-7",
         "FD7=OK", "FD8-COMBO=True", "FD9-COMBO-RAW count=3 item0=1234 id0=5 id2=-7",
