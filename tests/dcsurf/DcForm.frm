@@ -74,7 +74,8 @@ Private Sub tmr_Timer()
     Dim wLong As Single, wShort As Single
     Dim pfA As Long, pfB As Long
     Dim fnB As String, fsB As Single, pfB0 As Long
-    Dim ok5 As Boolean, ok6 As Boolean, ok7 As Boolean, ok8 As Boolean, ok9 As Boolean
+    Dim sx1 As Single, sx2 As Single, sx3 As Single, sx4 As Single, sy1 As Single
+    Dim ok5 As Boolean, ok6 As Boolean, ok7 As Boolean, ok8 As Boolean, ok9 As Boolean, ok10 As Boolean
 
     hA = picA.hDC
     hA2 = picA.hDC
@@ -111,6 +112,20 @@ Private Sub tmr_Timer()
     pfB0 = picB.FontPixelHeight
     ok9 = (fnB = "MS Sans Serif") And (fsB > 8) And (fsB < 9) And _
           (pfB0 >= 10) And (pfB0 <= 14) And (tB >= 10) And (tB <= 14)
+    ' SX 钉的是「**窗体型接收者的单位换算，四形同归一处**」（账 #196 第三条）。四形 = 显式控件
+    ' `picB.ScaleX(...)`、窗体模块里裸写 `ScaleX(...)`、`Me.ScaleX(...)`、`With picB : .ScaleX(...)`。
+    ' VB6 里四形都是 Object.ScaleX(x, fromScale, toScale)，而换算只吃那两个显式单位参数 ⇒ 四个数
+    ' 必须彼此相等，且等于"1440 缇在这台机器 DPI 下的像素数"（= LOGPIXELSX，就是上面 caps 那一格）。
+    ' 刻意按 caps 现算、不写死 96：换 DPI 的机器上照样绿，也照样红得起来 —— 少接一形（发成裸
+    ' `ScaleX(`）、或某一形退回假 IDispatch 调用（回 0），都当场红，不是自洽假绿。
+    sx1 = picB.ScaleX(1440, 1, 3)
+    sx2 = ScaleX(1440, 1, 3)
+    sx3 = Me.ScaleX(1440, 1, 3)
+    With picB
+        sx4 = .ScaleX(1440, 1, 3)
+    End With
+    sy1 = picB.ScaleY(1440, 1, 3)
+    ok10 = (sx1 = sx2) And (sx1 = sx3) And (sx1 = sx4) And (sx1 = sy1) And (sx1 = caps) And (sx1 > 0)
     ' TH03 钉的是「量的到底是不是这枚窗口现在在用的字体」那一头。账 #200 之前这一问两头都哑：
     ' 设计期 18pt 的 picA 与运行期改成 20pt 的 picB 都量 16（TH06 的 a / b / b2 三格就是那组读数），
     ' 那时它只留读数不当判据。#200 抓到的是 STATIC 这一类窗口压根不答 WM_GETFONT，修法是字体只从
@@ -140,6 +155,8 @@ Private Sub tmr_Timer()
     Debug.Print "TH06-FONTRAW a=" & CStr(tA) & " b=" & CStr(tB) & " b2=" & CStr(tB2) & " fsA=" & CStr(picA.FontSize) & " pfA=" & CStr(pfA) & " pfB=" & CStr(pfB)
     Debug.Print "FR01-DEFAULT=" & TF(ok9)
     Debug.Print "FR02-RAW name=" & fnB & " fs=" & CStr(fsB) & " pf=" & CStr(pfB0) & " th=" & CStr(tB)
+    Debug.Print "SX10-FOURFORMS=" & TF(ok10)
+    Debug.Print "SX11-RAW pic=" & CStr(sx1) & " bare=" & CStr(sx2) & " me=" & CStr(sx3) & " with=" & CStr(sx4) & " y=" & CStr(sy1) & " dpi=" & CStr(caps)
     Debug.Print "DS-DONE"
     Unload Me
 End Sub

@@ -232,6 +232,19 @@
         }
     }
 
+    // 账 #196 第三条: 窗体模块 / 属性页模块里**裸写**的 `ScaleX(...)` / `ScaleY(...)`。
+    // VB6 那一形指的是"本模块那张窗口"的换算，而换算只吃两个显式的 from/to 参数 ⇒ 与
+    // 控件接收者 / `Me.` / With 块里那枚 共同一处实现 `vb6_ScaleUnitX/Y`（见 vb6rtl_com.c）。
+    // 以前它落到本文件末尾的"发射裸标识符"兜底 ⇒ 产物里是一个既没声明也没定义的 `ScaleX(`
+    // (隐式声明；真工程里今天只被 /OPT:REF 把整个调用者删掉才没响，见 §B31 那条读数)。
+    // 刻意不走 kHostPseudoRows 那条 `vb6_<Host>_<Member>` 的命名契约 —— 那是宿主伪成员的形状，
+    // 而这一对不是伪成员；.ctl 里裸写那一形仍由表里 UC 那两行负责，走到上面就 return 了。
+    if ((isFormModule_ || isPropertyPageDesigner_)
+        && (lower == "scalex" || lower == "scaley")) {
+        lastExpr_ = (lower == "scalex") ? "vb6_ScaleUnitX" : "vb6_ScaleUnitY";
+        return;
+    }
+
     // Fix 110u (续): 隐式 Variant 局部 (VB6 无 Option Explicit 时的未声明裸名).
     // 上方已把来自其它类模块的"泄漏"符号清空; 这里发射运行期 Empty 值
     // (Charts 2020 ucProgressCircular.ctl:949 的 Count — 语义等价于 VB6 的隐式

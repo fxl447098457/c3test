@@ -3807,7 +3807,8 @@ if ($Category -in @("all", "run", "vbp")) {
     $dcSurfExpected = @("DS01-SAME=True", "DS02-SEP=True", "DS03-LIVE=True",
         "DS04-PIXEL=True", "DS05-RAW",
         "TH01-TWOFORMS=True", "TH02-UNITS=True", "TH03-FONT=True", "TH04-WIDTH=True",
-        "TH05-RAW", "TH06-FONTRAW", "FR01-DEFAULT=True", "FR02-RAW", "DS-DONE")
+        "TH05-RAW", "TH06-FONTRAW", "FR01-DEFAULT=True", "FR02-RAW",
+        "SX10-FOURFORMS=True", "SX11-RAW", "DS-DONE")
     Test-Vbp "dcsurf" "$Tests\dcsurf\DcSurf.vbp" $dcSurfExpected
     Test-Vbp "dcsurf_x86" "$Tests\dcsurf\DcSurf.vbp" $dcSurfExpected -Arch "x86"
 
@@ -4597,6 +4598,26 @@ if ($Category -in @("all", "syntax")) {
     Test-CodegenNote "text_measure_real" @("$Tests\Charts 2020\ucTreeMaps\Proyecto1.vbp") @(
         "vb6_ControlTextHeight((void*)_vb6_with_0,") @(
         "_vb6_with_0.TextHeight")
+
+    # 形状针 (账 #196 第三条): 窗体型接收者的 ScaleX/ScaleY **四形**都落在同一处换算上。
+    # absent 那一头钉的是接上之前的三种真形状: 假 IDispatch 调用 (编得过、跑起来回 0)、
+    # `hwnd.ScaleX(...)` (编译不过)、裸写 `= ScaleX(` (隐式声明, 真工程里今天靠 /OPT:REF 才没响)。
+    Test-CodegenNote "dcsurf_scale_units" @("$Tests\dcsurf\DcSurf.vbp") @(
+        "sx1 = vb6_ScaleUnitX(1440, 1, 3)",
+        "sx2 = vb6_ScaleUnitX(1440, 1, 3)",
+        "sx3 = vb6_ScaleUnitX(1440, 1, 3)",
+        "sx4 = vb6_ScaleUnitX(1440, 1, 3)",
+        "sy1 = vb6_ScaleUnitY(1440, 1, 3)") @(
+        'vb6_ComCallDouble(vb6_hwnd_picB, L"ScaleX"',
+        'vb6_ComCallDouble(vb6_hwnd_DcForm, L"ScaleX"',
+        ".ScaleX(1440, 1, 3)",
+        "= ScaleX(1440, 1, 3)")
+
+    # 同一刀钉在真工程上: PropPagFMR.pag:259 那个 TextOutW 的坐标换算, 以前是裸 `ScaleX(`。
+    Test-CodegenNote "scale_units_real" @("$Tests\Charts 2020\ucTreeMaps\Proyecto1.vbp") @(
+        "vb6_ScaleUnitX(vb6_GetCurrentX(_vb6_with_0)") @(
+        '", ScaleX(vb6_GetCurrentX(_vb6_with_0)"',
+        'L"ScaleX"')
 
     # 账 #195: VB 的 Integer 类型后缀 `%` 以前在词法层就被拒 (case '%' 那一支只吃字符不置标志,
     # 于是 `3%` 落回「无后缀十进制按数值大小定档」那一段, 残留的 % 让 parseIntLit 报「超出 64 位」并级联出

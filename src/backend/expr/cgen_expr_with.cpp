@@ -95,6 +95,19 @@ void CCodeGen::visit(WithMemberExpr& node) {
             lastExpr_ = oaFnW;
             return;
         }
+        // 账 #196 第三条: With 块里那枚控件的 `ScaleX`/`ScaleY`（三个实参）。以前这一形落到下面
+        // 那条"未知属性"兜底 ⇒ 发成 `_vb6_with_N.ScaleX(...)` = **编译不过**（#150 同一族，
+        // 实测读数 `_vb6_with_2.ScaleX(1440, 1, 3)` + VB4001）。
+        // 与零/一实参那两形唯一的差别是: 这一对的换算**不吃接收者句柄**（两个单位都是显式参数），
+        // 所以这里刻意**不**交 pendingChainObj_ —— 调用点只在它非空时前置 this，留空正好得到
+        // `vb6_ScaleUnitX(1440, 1, 3)` 这个形状（见 cgen_expr_call_opt_pad.inc 的 classMethodObjArg）。
+        std::string scFnW = asCallCallee_ ? controlScaleMethod(info.ctrlType, memLower)
+                                          : std::string();
+        if (!scFnW.empty()) {
+            pendingChainObj_.clear();
+            lastExpr_ = scFnW;
+            return;
+        }
         diag_.warn(DiagnosticID::CodeGenUnsupportedFeature, SourceLocation{},
             std::string("P17.1: Unknown control property '.'") + node.memberName + "' in With block");
         lastExpr_ = tempVar + "." + cIdent(node.memberName);

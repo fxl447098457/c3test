@@ -348,6 +348,11 @@
     std::string controlOneArgMethod(FrmControlType ctrlType,
                                     const std::string& memberLower) const;
 
+    // 账 #196 第三条: 控件的单位换算方法（ScaleX/ScaleY，三个实参）名字表 —— 同一套
+    // 「表只交名字、实参由码头拼」的规矩，且刻意不给通用行（理由见定义处）。
+    std::string controlScaleMethod(FrmControlType ctrlType,
+                                   const std::string& memberLower) const;
+
     // C29-SL-n（账 #141）: 「这枚控件要不要子类化」的**唯一一份**判据。
     // 这一趟原本被抄成三份：发 arm 的 `cgen_form_wndproc_subclass.inc`（按 info.hasXxx 汇总）、
     // 装的 `cgen_form_frame_menu.inc`、拆的 `cgen_form_wndproc_dispatch.inc` —— 后两份各写一遍，

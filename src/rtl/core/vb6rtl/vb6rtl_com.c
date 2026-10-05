@@ -801,16 +801,35 @@ static double vb6_ucScaleToPixels(int32_t mode, int vert) {
     return (u == 0.0) ? 1.0 : (1.0 / u);
 }
 
-double vb6_UserControl_ScaleX(double x, int32_t fromScale, int32_t toScale) {
+// 账 #196 第三条: 这一对是**单位换算的唯一一份实现**，名字不带宿主前缀 —— 因为要接的接收者不止
+// UserControl：`picA.ScaleX(...)` / `Me.ScaleX(...)` / `With Picture1 : .ScaleX(...)` / 窗体模块里
+// 裸写 `ScaleX(...)` 都是 VB6 的同一件事 (`Object.ScaleX(x, fromScale, toScale)`)，而换算本身只吃
+// 那两个显式的 from/to 参数(接收者自己的 ScaleMode 是由发码侧算好后当参数交进来的，见
+// `vb6_WindowScaleModeSelf`)。
+// 接上之前这四形的形状：显式接收者与 `Me.` 那一形发成 `vb6_ComCallDouble(hwnd, L"ScaleX", …)` ——
+// 对一枚假 IDispatch 发 Invoke ⇒ **编得过、链接过、跑起来回个 0**(#143 那一族)；With 那一形发成
+// `hwnd.ScaleX(…)` ⇒ **编译不过**(#150 那一族)；窗体模块里裸写那一形发成裸 `ScaleX(…)` ⇒
+// 隐式声明，今天只在真工程里被 /OPT:REF 把整个调用者删掉才没响。
+// UserControl 那一档保留 `vb6_UserControl_ScaleX/Y` 这两个**名字**是宿主伪成员表的命名契约
+// (`vb6_<Host>_<Member>`，见 cgen_util_com.cpp 的 kHostPseudoRows)，它们只是转手到这里。
+double vb6_ScaleUnitX(double x, int32_t fromScale, int32_t toScale) {
     double px = x * vb6_ucScaleToPixels(fromScale, 0);
     double f = vb6_ucScaleToPixels(toScale, 0);
     return (f == 0.0) ? x : (px / f);
 }
 
-double vb6_UserControl_ScaleY(double y, int32_t fromScale, int32_t toScale) {
+double vb6_ScaleUnitY(double y, int32_t fromScale, int32_t toScale) {
     double px = y * vb6_ucScaleToPixels(fromScale, 1);
     double f = vb6_ucScaleToPixels(toScale, 1);
     return (f == 0.0) ? y : (px / f);
+}
+
+double vb6_UserControl_ScaleX(double x, int32_t fromScale, int32_t toScale) {
+    return vb6_ScaleUnitX(x, fromScale, toScale);
+}
+
+double vb6_UserControl_ScaleY(double y, int32_t fromScale, int32_t toScale) {
+    return vb6_ScaleUnitY(y, fromScale, toScale);
 }
 
 // UserControl.AsyncRead: no container/async message pump in compiled form, so

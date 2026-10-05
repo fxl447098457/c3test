@@ -260,6 +260,37 @@
             if (dtM == "movelast")     { lastExpr_ = "vb6_Data_MoveLast(" + objExpr + ")"; return; }
             if (dtM == "refresh")      { lastExpr_ = "vb6_Data_Refresh(" + objExpr + ")"; return; }
         }
+        // 账 #196 第三条: 窗体型接收者的 `ScaleX`/`ScaleY` (`picA.ScaleX(…)`、`Me.ScaleX(…)`)。
+        // 不拦就落到下面那条通用 COM 方法调用 —— `vb6_ComCallDouble(vb6_hwnd_X, L"ScaleX", …)`：
+        // 对一枚假 IDispatch 发 Invoke ⇒ 编得过、链接过、跑起来回 0（#143 那一族在方法面上的第三味；
+        // 上面 152 行那条 `axIsScaleMethod` 只是让它别走更错的"集合 + Item"那一形）。
+        // 换算只吃那两个显式的 from/to（接收者自己的 ScaleMode 由发码侧算成参数交进来），
+        // 所以四处接收者共用一处实现 `vb6_ScaleUnitX/Y`（见 vb6rtl_com.c 那段注释）。
+        {
+            std::string scMem = Symbol::toLower(memberName);
+            FrmControlType scType = FrmControlType::Unknown;
+            std::string scHwndUnused;
+            std::string scFn = formCtrlSlot(objExpr, scType, scHwndUnused)
+                             ? controlScaleMethod(scType, scMem) : std::string();
+            if (!scFn.empty()) {
+                std::vector<std::string> sc;
+                for (size_t i = 0; i < node.positional.size(); i++) {
+                    emitExpr(*node.positional[i]);
+                    sc.push_back(lastExpr_);
+                }
+                std::string sa0 = sc.size() > 0 ? sc[0] : std::string("0");
+                std::string sa1 = sc.size() > 1 ? sc[1] : std::string("1");
+                std::string sa2 = sc.size() > 2 ? sc[2] : std::string("3");
+                // 与这一族其他"自己拼完整调用"的出口同一动作：标记位要清掉，
+                // 否则语句路会以为还有一个 COM 成员调用没消费（#143 那一族的另一半）。
+                isComMarker_ = false;
+                comObjExpr_.clear();
+                comMemberName_.clear();
+                lastExpr_ = scFn + "(" + sa0 + ", " + sa1 + ", " + sa2 + ")";
+                return;
+            }
+        }
+
         // C29-4: StatusBar1.SimClick n, dbl —— **判据专用**方法 (无头环境点不了鼠标,
         // RTL 的 vb6_StatusBar_SimClick 程序化发一条真实 WM_NOTIFY, 走完整派发链)。
         // 不对应任何 VB6 语义, 写进 ai/029 边界。

@@ -1508,6 +1508,25 @@ std::string CCodeGen::controlOneArgMethod(FrmControlType ctrlType,
     }
 }
 
+// 账 #196 第三条: 控件的**单位换算方法**名表 —— VB6 的 ScaleX/ScaleY(x, fromScale, toScale)。
+// 与 controlOneArgMethod 同一套规矩：表只交名字、实参由码头拼；档位同样**刻意不给通用行** ——
+// VB6 只有"自己有 ScaleMode 的那些对象"才有这一对（Form / PictureBox / UserControl / PropertyPage /
+// Printer），给成通用行就等于允许 `List1.ScaleX(...)` 也答一个数（伪造成功，同 #192/#196 那条口径）。
+// 名字不带宿主前缀是故意的：这四形接收者（显式控件、`Me.`、With 块里那枚、UC/页里裸写）要的换算
+// 只吃那两个显式的 from/to，实现只有一份 `vb6_ScaleUnitX/Y`（UC 那一档另有一层同名转手，
+// 因为宿主伪成员表的命名契约是 `vb6_<Host>_<Member>`）。
+std::string CCodeGen::controlScaleMethod(FrmControlType ctrlType,
+                                         const std::string& memberLower) const {
+    if (memberLower != "scalex" && memberLower != "scaley") return "";
+    switch (ctrlType) {
+        case FrmControlType::Form:
+        case FrmControlType::PictureBox:
+            return memberLower == "scalex" ? "vb6_ScaleUnitX" : "vb6_ScaleUnitY";
+        default:
+            return "";
+    }
+}
+
 // C29-SL-n（账 #141）: 「这枚控件要不要子类化」的唯一一份判据 —— 内容与
 // `cgen_form_wndproc_subclass.inc` 汇总 info.hasXxx 那一趟逐条对应（改一边就得改另一边，
 // 否则又回到"arm 发了、没人 install"那一形）。装的那趟在 `cgen_form_frame_menu.inc`、

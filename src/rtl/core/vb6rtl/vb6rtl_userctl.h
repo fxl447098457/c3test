@@ -92,6 +92,12 @@ int32_t vb6_UserControl_TextHeight(BSTR text);
 //   PropertyChanged(propName) → 通知容器属性已变 (触发容器端的 Changed/属性刷新)
 double vb6_UserControl_ScaleX(double x, int32_t fromScale, int32_t toScale);
 double vb6_UserControl_ScaleY(double x, int32_t fromScale, int32_t toScale);
+
+// 账 #196 第三条: 上面那一对只是**转手**到这里 —— 单位换算的实现只有一份，名字不带宿主前缀，
+// 因为 PictureBox / 窗体 / `Me.` / With 块里那一枚控件 / 窗体模块里裸写 这四形接收者要的是同一件事。
+// 声明留在本头是因为换算的声明本来就住在这儿，而生成 C 只 include vb6rtl.h (本头由它带进来)。
+double vb6_ScaleUnitX(double x, int32_t fromScale, int32_t toScale);
+double vb6_ScaleUnitY(double y, int32_t fromScale, int32_t toScale);
 void   vb6_UserControl_AsyncRead(BSTR url, int32_t asyncType, BSTR propertyName,
                                  int32_t flags);
 void   vb6_UserControl_PropertyChanged(BSTR propName);

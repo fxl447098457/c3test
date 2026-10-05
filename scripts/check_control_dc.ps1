@@ -304,6 +304,60 @@ if ($storeCalls.Count -ne 3 -or $storeFiles.Count -ne 3) {
              (($storeCalls | ForEach-Object { $_.File + ":" + $_.Line }) -join " | "))
 }
 
+# ---- D12: 单位换算那一处 (账 #196 第三条) ----
+# 规矩与前两张表一样: **表只交名字**, 实参由码头拼。三个码头里只有两处从表来 (With 形 /
+# 显式接收者与 `Me.` 那一形)，第三处是窗体/页模块里**裸写**的名字, 走标识符那一路, 只能就地
+# 写出口名 —— 所以字面量在 src/backend 里恰好两处: 这张表 + 那一路。多一处就是有人又抄了一遍
+# 换算出口 (那是 #177 那条"单位表只剩一份"在本家族的翻版)。
+$scAuth = 0
+$scSites = @()
+$scHard = @()
+$scBody = ""
+foreach ($f in (Get-ChildItem -LiteralPath $beDir2 -Recurse -File | Where-Object { $_.Extension -in ".cpp", ".inc", ".hpp" })) {
+    $ln = 0
+    foreach ($line in ([System.IO.File]::ReadAllText($f.FullName) -split "`r?`n")) {
+        $ln++
+        $t = $line.Trim()
+        if ($t.StartsWith("//")) { continue }
+        if ($t -match 'std::string\s+CCodeGen::controlScaleMethod\s*\(') { $scAuth++; $scBody = [System.IO.File]::ReadAllText($f.FullName) }
+        if ($t.Contains("controlScaleMethod(") -and $t -notmatch 'std::string\s+CCodeGen::controlScaleMethod') {
+            $scSites += ($f.Name + ":" + $ln)
+        }
+        if ($line.Contains('"vb6_ScaleUnitX')) { $scHard += ($f.Name + ":" + $ln) }
+    }
+}
+if ($scAuth -ne 1) { $bad += ("D12 controlScaleMethod defined " + $scAuth + " times (want exactly 1)") }
+$scFiles = @($scSites | ForEach-Object { ($_ -split ":")[0] } | Sort-Object -Unique)
+foreach ($need in @("cgen_expr_with.cpp", "cgen_expr_call_com_bind.inc")) {
+    if ($scFiles -notcontains $need) {
+        $bad += ("D12 那一形不再问这张表: " + $need + " (少一形就是一形落回假 IDispatch 调用或裸 ScaleX( —— #143/#150 两族)")
+    }
+}
+# 出口名只许出现在两个地方: 表本身 (交名字的那一处) 与"裸写标识符"那一路的码头 (它没有表可问)。
+# 两处从表来的码头 (With 形 / 显式接收者形) 里再出现一次字面量, 就是有人绕开表自己抄了一遍。
+$scHardFiles = @($scHard | ForEach-Object { ($_ -split ":")[0] } | Sort-Object -Unique)
+if ($scHard.Count -ne 2 -or $scHardFiles.Count -ne 2 -or
+    ($scHardFiles -notcontains "cgen_util_ctrl.cpp") -or
+    ($scHardFiles -notcontains "cgen_expr_ident_builtin.inc")) {
+    $bad += ("D12 硬编码 vb6_ScaleUnitX 的处数 = " + $scHard.Count + " / 文件 " + ($scHardFiles -join ",") +
+             " (want 2 且只许 cgen_util_ctrl.cpp 这张表 + cgen_expr_ident_builtin.inc 那一路) -> " +
+             ($scHard -join " | "))
+}
+$scBlk = [regex]::Match($scBody, 'CCodeGen::controlScaleMethod\s*[\s\S]{0,700}?\r?\n\}')
+if (-not $scBlk.Success) {
+    $bad += "D12 表的身体读不到"
+} else {
+    if ($scBlk.Value -notmatch '"scalex"' -or $scBlk.Value -notmatch '"scaley"') {
+        $bad += "D12 表不再认这两个成员名"
+    }
+    if ($scBlk.Value -notmatch 'vb6_ScaleUnitX' -or $scBlk.Value -notmatch 'vb6_ScaleUnitY') {
+        $bad += "D12 表不再指向那两个出口"
+    }
+    if ($scBlk.Value -match 'default:\s*\r?\n\s*return\s+"vb6_Scale') {
+        $bad += "D12 表长了通用行 (List1.ScaleX 也答一个数 = 伪造成功)"
+    }
+}
+
 if ($bad.Count -eq 0) {
     Write-Host ("PASS Control drawing DC: 定义 " + $defs.Count + " / 调用 " + $calls.Count +
                 " / 出口 " + $exitDef.Count + " / 槽位写 " + $wr.Count + " 归还 " + $rel.Count +
@@ -313,7 +367,8 @@ if ($bad.Count -eq 0) {
                 " / 字体出口 " + $accDef.Count + " 声明 " + $accDecl.Count + " 裸问 " + $getFontRaw.Count +
                 " 槽位写 " + $fntW.Count + " 读 " + $fntR.Count +
                 " / 覆盖面 全仓裸问 " + $rawAll.Count + " 存口 " + $storeDef.Count +
-                " 站点 " + $storeCalls.Count + "/" + $storeFiles.Count + " 文件") -ForegroundColor Green
+                " 站点 " + $storeCalls.Count + "/" + $storeFiles.Count + " 文件" +
+                " / 换算表 " + $scAuth + " 码头 " + $scSites.Count + " 硬编码 " + $scHard.Count) -ForegroundColor Green
     exit 0
 }
 foreach ($b in $bad) { Write-Host ("FAIL " + $b) -ForegroundColor Red }
