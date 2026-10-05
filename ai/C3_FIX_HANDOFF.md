@@ -910,68 +910,20 @@ asm 13/14、smoke 1/1；`Build C3.exe` 那片日志正文不含用例行（历�
 夹具与哨兵：`tests/test_rtl_naked_changed.bas`（x64/x86 各一形，三针）；`tests/dochost/dhBare.ctl`、`dhBare.pag`、`dhTypo.pag` 三条 [CODEGEN-NOTE]（`dhTypo` 是负控：表里没这名字 ⇒ 必须照报，且不许凭空发 `vb6_PropertyPage_Changed`）；`check_host_pseudo_table.ps1` 的 `$tblPath`、`must`、`deny` 三处跟着表搬家，`must` 从此含"语义层必须问表"那一条；`check_rtl_naked_names.ps1` 的 N7 换成谓词 定义/声明/调用/带门 = 1/1/1/1 + 问表 1 + 成员名字面量 **0**。哨兵红过一次是当场演示的负控：把 N7 里读那三个文件的一行删掉 ⇒ 六条计数全 0、五条 FAIL。
 
 剩下的同族（本账没做完，读数已钉住）：`Controls` 4 条全在 ppProgressCircular.**pag**（那张表 propertypage 档没有这一行；收不收要先问 VB6 里 .pag 裸写 `Controls` 是谁；源码那三行已读: `ppProgressCircular.pag:460` 是 `Set oPC = Controls.Add(App.Title & ".ucProgressCircular", "ProgCirc")`、`:484 Controls.Remove` —— 运行期往这页上动态加/删 UC，而 `:490` 紧接着用的 `SelectedControls(0)` 是表里登记过的那枚）；`Count` 2 条在 ucProgressCircular.**ctl**（表里也没这行，而 #159 的边界写明"RTL 没有对应全局的行刻意不收"⇒ 那是 RTL 侧缺口，另立账）；`ScaleWidth` 2 条在 frmDemo.**frm**:168（`If ScaleWidth > 0 Then` —— 窗体自有的量走的是另一条路，不在这张表里，与 #68/#120 那族同面）；另 26 条是内在常量一族 ⇒ 账 #218。
+### B59 UC 事件处理器的形参表与 `.ctl` 里 `Public Event` 声明不一致时，编译器**一声不响** —— VB6 在编辑期就拒绝（账 #228，**未开工**）
 
+**为什么值得做（这条是 #222 那一族回归的正面闸）**：#222 的第二格（门 #350 红 → #351 绿）修的就是"thunk 的形参类型与
+回调 typedef / 处理器原型不同源"；同源之后还剩一类静默 —— **容器自己写的处理器与事件声明不匹配**。
+语料里现成一枚实物：`VBFlexGridDemo/UserEditingForm.frm` 的 `vbGridUserEdit_EditSetupWindow(hWndEdit As LongPtr,
+hInstance As LongPtr)`，而 `VBFlexGrid.ctl` 声明的是 `Public Event EditSetupWindow(hWndEdit As Long, hInstance As Long)`
+⇒ 产物里 typedef 交 `int32_t`、处理器收 `void*`，C 只给 C4024/C4047 警告；x64 上高 32 位是垃圾，
+读出来就是一个坏指针（VB6 本人：Argument not optional / 声明不匹配，**编译期就报错**）。
 
-### B55 RTL 资源 id 有三处登记，`9a420157` 把其中两处写对调 —— 症状不是"少一个文件"而是"头里装着体"，于是**任何**要链接的程序都出不了 exe（账 #225，**已出：已过门：#349（run 37380276520、head `ca9f3719`、attempt 1）= 11 job 全 completed/success、非绿 0**）
+**开工前先量的三件**：① 全语料扫一遍"事件处理器签名 vs `Public Event` 声明"的不一致数（按**类型名**比，
+不是按 C 类型比 —— `Long`/`LongPtr` 在 C 里都是指针宽时差别会被抹掉）；② VB6 的口径到底是"必须逐字相同"还是
+"可放宽到同宽"（语料里 `Index As Integer` vs 事件无参那一档是**合法的控件数组形状**，别一起报）；
+③ 这条要做成 error 还是 note（`note` 面在本项目只有阶段失败时才整体打印，见 [[c3-build-test-hazards]]）。
 
-**症状与归属**：门 #346（head `0026d87f`，#219 那一刀）11 job 全绿；下一台 #347（head `c5aab787` = 把 `9a420157`「新增 Form/Printer 绘图方法家族 (rev38)」合进 dev 之后）11 job 里 **9 job 红**，红的全是要链接的切片（bas #1/#2、vbp #1–#4、asm、smoke），bas #1 第一行就写着 `C3: 编译失败 (exit code 1169)`；只有不链接的两片（syntax / compile）还绿。`Build C3.exe` 本身成功 —— 编译器没坏，坏的是它带的 RTL。
-
-**根因（一条链，别只盯最后一环）**：一条 RTL 文件要进产物得在三处各登记一次，前两处对调了：
-· `src/driver/c3rtl.rc:379-380` = `223 RCDATA …/vb6forms_draw.h` / `224 RCDATA …/vb6forms_draw.c`（它自己的注释写明「头必须排在 .c 之前」）；
-· `src/driver/rtl_embedded.hpp:201-202` = `RTL_VB6FORMS_DRAW_C = 223` / `RTL_VB6FORMS_DRAW_H = 224`；
-· `src/driver/rtl_embedded.cpp:173-174` 的名字表把这两枚常量认领为 `.h` / `.c`。
-解包是 `FindResourceW(MAKEINTRESOURCEW(id))` 按**数字**取内容、再按名字表决定写出的文件名 ⇒ id 一对调，写出来的 `vb6forms_draw.h` 里装的是那 463 行的**体**，而 `vb6forms_draw.c` 里装的是头。同一次提交又往 `vb6forms.h` 末尾加了 `#include "vb6forms_draw.h"`，而 `vb6forms.h` 被 39 个 RTL 文件 + 每份生成的模块 .c include ⇒ 体里那 28 枚文件作用域符号（`vb6_Form_Circle/Line/Cls/Point/PSet`、`vb6_Form_DrawGet*/Set*`、`vb6_Printer_*`）在约 49 个编译单元里**各定义一份** ⇒ `LNK2005 ×1225 + LNK1169`。措辞完全误导：日志说「已经在 ucUnitTwip.obj 中定义」，真凶在资源 id 表上。
-
-**改法**：只把 `rtl_embedded.hpp` 那两行与 `.rc` 对上（`DRAW_H=223 / DRAW_C=224`）。动 hpp 而不是 `.rc`：`.rc` 一侧带着刻意的顺序说明，且 id 数字不变就不牵动表里其它 123 条。
-
-**判据三面**：① 新哨兵 `scripts/check_rtl_resource_ids.ps1` 把三处逐条对账（census `rc=125 hpp=125 cpp=125 orphanRcIds=0 unboundSymbols=0`，全仓只有这两条不齐）；负控 = 把两行改回上游那个形状 ⇒ 两条 R3 当场点名「id 223/224 两份权威对不上」、退出 1，还原后回绿且文件 MD5 相同。② 单变量真编译：`764469bf`（= HEAD，含 `c5aab787` 合流）冷编一台 C3 编 `tests/ve_units` ⇒ `RC=1 diag=1226 kinds={LNK2005:1225, LNK1169:1}`；**只**改这两行重编同一份源 ⇒ `RC=0 exe=VeUnits.exe diag=0`。③ 门禁：`[STATIC] rtl_resource_ids` 进 `tests/run_tests.ps1` 的 Static Checks 段。
-
-**留下的同族（本账没做完）**：① 三处登记本身仍是三份手抄，哨兵只做**对账**、没收成单一权威（要收就把 `.rc` 从那张表生成）；② `vb6_UserControlDesc` 里 `dblClick` 槽 0 个调用者、压根没有 `click` 槽 ⇒ `.ctl` 的 `UserControl_Click` 是死码（另立账 #226）；③ #224 记的 rev38 绘图家族另外几条（状态读回 +1、第二份 DC 获取、这一族没带门禁）仍开着。
-
-
-### B56 控件数组的 UC 事件臂：三种形参表活在同一个产物里、thunk 与 sink 按元素重复 24 遍 —— 同源化之后 Form1.c 的 26 条诊断清零（账 #222，**已出：**已过门：#351（run 37386871868、head `482c3273`、attempt 1）= 11 job 全 completed/success、非绿 0）
-
-**症状与量法**：`tests/Charts 2020/ucProgressCircular/Proyecto1.vbp` 两档真编译都 rc=1。用 HEAD 冷编的那台（`ca9f3719` 之前、含 `c5aab787` 合流）在同一份源上量到 `RC=1 exe=None diag=27 kinds={'C2198': 25, 'C2084': 1, 'C2065': 1}` —— 逐文件归因 = `Form1.c` 26 条（`C2198 ×25` + `C2084 ×1`）+ `ucProgressCircular.c` 1 条 `C2065 "Count"`（那条属 #219 的裸写未声明名，另账）。
-
-**根因是三份形参表同时存在，而不是一份**：模块级前置声明那一趟按 VB 默认（ByRef）发原型（`vb6_Form1_ucProgressCircular1_Click(int16_t* Index)`）；prelude 为了给每枚数组元素挂 sink，又**逐元素**发一份**零形参**的前向声明（`…_Click();`）和一份**同名** thunk；定义那一趟直到 `visit(SubDecl)` 才按事件 ABI 翻成 ByVal。于是声明与定义不同源 ⇒ 25 条 `C2198 参数太多`；24 枚元素共用同名 thunk/sink/声明 ⇒ `C2084` 重定义。而 VB6 里数组处理器本来就是一枚**共享过程 + 第一形参 Index**。
-
-**改法（口径收成三处，每处只一份）**：① 元素键唯一出口 `CCodeGen::ctrlElemKey(控件名, index)`（`src/backend/cgen_util_ctrl.cpp`；非数组退化成裸小写名）—— prelude 的登记、create-controls 的挂 sink、子类化那两条 `hasClick` 判据**四条路都问它**；② 事件 ABI 在**登记这枚处理器的那一刻**翻（`prepareEventHandlerProc` → `applyEventHandlerAbi`，`decl/cgen_decl_proc.cpp`），翻在 `visit` 里就赶不上模块级声明那一趟；prelude 里那份逐元素前向声明**删掉**，声明只留模块级那一份；③「sink 已经供了哪一枚事件」是一张表（`ucSinkEvents_`，键 = 元素键 + 事件名），`WM_LBUTTONUP` 那条兜底 arm 的**两条 hasClick 判据**都问它 —— 不问就是同一次点击双发。
-
-**判据（三头 + 针 + 哨兵）**：
-① 真编译：同一份 `ucProgressCircular` 修后 `RC=1 diag=1`，`Form1.c` **26 → 0**，只剩 `Count` 那条（#219 那一族）。
-② 真跑（`tests/ve_units` 夹具加长）：`uArr(0..2)` 是三枚 UC 实例，容器侧一枚共享处理器 `uArr_Hit(Index As Integer)`。两头各钉 —— 容器主动调 `uArr(1).Fire()` 读到 `U-ARREVT-RAW i1=1 h1=1 i2=2 h2=2 ret=7` ⇒ `U-ARREVT=True`；换成**真手势**那一头（对第 2 枚自己的宿主窗口 `SendMessageW(WM_LBUTTONUP)`）读到 `U-ARRCLICK-RAW hw=True idx=2 hits=1 ret=0` ⇒ `U-ARRCLICK=True`。i1=1 交回的是这一枚的 Index；h1=1 一次 raise 只发一遍（邻枚不跟着发）；h2=2 第 2 枚用的是**另一套 sink**（不是覆掉前一枚的槽）。两档读数逐行相同。
-③ 发码形状针 `ucarr_evt_thunk_per_element`：Needles 钉「一份 `static void vb6_frmUnits_uArr_Hit(int16_t Index);` + 逐元素 thunk + 逐元素 attach + desc 的 ucHostClick 末槽」；**Absent 三条全是改前产物里真实存在的形状**（零形参声明 / 同名 thunk / 共享 sink 的 attach），任何一条回来这枚针就红。
-④ 哨兵 `scripts/check_uc_array_event_sites.ps1` 钉死计数：元素键 定义1/声明1/调用4；ABI 定义1/声明1/调用2 + 登记那一刻调 prep 1；旧形状（第二份前向声明）0；sink 表 声明1/登记1 且两条 hasClick 判据都带 gate、发码 arm 1；click 落点 转调1/封装2/末槽1 且两份权威同序。三条假形状（多一处 ABI 翻法 / 撤一条 gate / 把前向声明发回去）逐条真红，还原后回绿且三份文件 MD5 相同。
-
-**护栏 A/B**：BASE = HEAD 冷编那台（没有 #222/#226/#225），NEW = 现在这台，两边喂**同一批源**（含本轮新加的夹具判据行）。`inputs=92 same=74 changed=18`（改到的全是含 UC 的工程，两档各一份），差异行 `direct=752 + blockfall=24`、**无法归因=0**。规则命中：#222 一族 K4 逐元素=270 / K5 旧共享形状=270 / K11 处理器原型=98 / K6 旧零形参声明=66 / K7 旧 arg0 前向声明=34 / K8 ByRef→ByVal=26 / K9 兜底 arm 撤掉=4；#226 一族 K1=64 / K3=64 / K2=24；夹具新判据 K10=34。x64 与 x86 每份的行数与规则分布**逐字对称**。
-
-**第二格 = 把 #222 首版留下的那张第二张类型表收掉（提交 `482c3273`，门 #350 红 → #351 绿）**：门 #350 抓到本批自己带进去的回归 —— `charts_ucTreeMaps` 两档红。根因不在 #222 那三刀里，而在 prelude 解析 `.ctl` 的 `Public Event` 时**自带的一张 `kTypeMapPre`**（七档 + default `int32_t`）：它缺 `Variant` 一档 ⇒ thunk 声明 `int32_t a0`，而同一枚事件的回调 typedef 与容器侧处理器原型都是 `vb6_VARIANT` ⇒ `Form2.c(7)` C2440 + C4024。顺带量出第二条：表把 `Integer` 记成 `int32_t` 而 `mapTypeRef` 给 `int16_t` ⇒ VBFlexGrid 三十多枚事件形参（`Button`/`Shift`/`Cancel`）一直按错宽度接，发送侧按 typedef 发、接收侧按 thunk 读。**三处同源 = typedef、处理器原型、thunk 都出自 `mapTypeRef`** ⇒ 修法不是给表补两档，是把表撤掉：类型名现拼一枚 `SimpleTypeRef` 喂 `mapTypeRef`（它登记的类指针前向声明走 `usedClassTypes_`，注入点在 .h 顶部，所以 prelude 这一趟也来得及）。
-
-**一条检具值得复用**（`b244_agree.py`，把 emit dump 里的三处签名对起来）：5 件工程 49 枚 thunk ⇒ thunk 与 typedef 不符 **5 → 0**、与处理器原型不符 **6 → 1**（剩那条是容器自己把形参写成 `LongPtr` 而事件声明是 `Long` —— 用户代码形状，改前也在，不是产品的账）。**判据**：哨兵加 E5（钉 `kTypeMapPre` 必须 0、`mapTypeRef(&tyRefPre)` 与现拼 `SimpleTypeRef` 各 1 处；拿一条假 `kTypeMapPre` 真验红）+ 发码形状针 `ucevt_thunk_type_same_authority`（Absent 那条 `int32_t a0` 就是改前产物里真实存在的形状）。**护栏 A/B（单变量）**：BASE = 把 prelude 回退到 HEAD 那版冷编的那台（= 门 #350 跑的形状），`inputs=92 same=86 changed=6`、28 条差异行**全部**落在 `evtThunk` 签名上（K1）、未归因=0、两架构逐份对称。**真编译矩阵两架构**：ucTreeMaps 出 exe 且诊断 0；Charts 2020 / ucChartBar / ucPieChart / ucChartArea / czUI / VBFlexGridDemo / ve_units 全 rc=0；ucProgressCircular 仍是那 1 条 C2065 裸名 `Count`（账 #219 那族，本刀没动）。**一条自己踩出来的工具雷**（重复踩过）：`io.open(p, "wb")` 是**先截断再算表达式** —— 补丁脚本里 `write(NL.join(lines))` 一旦 join 报错，原文件就成了 0 字节；这次靠"哨兵把整族读数报成 0"（而不是静默通过）暴露，随后 `git checkout --` + 重放同一份补丁、MD5 逐字节回位（`253d7fd3…`）才敢说没留伤。**规矩**：写文件前必须把新内容整个算完（`body = ...`）再 `open(..., "wb").write(body)`。
-
-**行为面普查（撤 arm 会不会把事件撤死）**：语料里"控件是工程内 UC 且容器写了 `_Click`"的格**一共只有两处** —— `ucProgressCircular/Form2.frm` 的 `ucProgressCircular1_Click`（该 .ctl 把 Click 写在 `UserControl_Click` 里，靠 #226 那条槽供）与 `czUI-main/frmDemo.frm` 的 `czButton1_Click`（该 .ctl 在 `UserControl_MouseDown/MouseUp` 里 `RaiseEvent Click`，mouseUp 转调本来就在供）。两头都没落点的那种 = **0 处** ⇒ gate 撤掉的只是 czUI 那一次点击的**双发**。
-
-### B57 UC 自己的 `UserControl_Click` 压根没有落点 —— `vb6_UserControlDesc` 只有 dblClick 槽、而且 0 个调用者（账 #226，**已出：**已过门：#351（run 37386871868、head `482c3273`、attempt 1）= 11 job 全 completed/success、非绿 0，与本行同一颗 head，`click` 那一槽的判据在 #351 上重跑过）
-
-**为什么这一格是 #222 的必修而不是下一批**：#222 把窗体子类化的 `WM_LBUTTONUP` 兜底 arm 按 sink 表 gate 掉之后，UC 的 Click 只能由 **sink** 供；而 sink 由 `.ctl` 里的 `RaiseEvent Click` 抬。语料里六枚 Charts UC 全把它写在 `Private Sub UserControl_Click()` 里 —— 那条子过程此前**没有任何人调**：`vb6_UserControlDesc` 有 `dblClick` 槽但 RTL 从不调它，压根没有 `click` 槽。普查读数（扫全部 `.ctl` 里每条 `RaiseEvent Click` 的最近过程头）：ucChartArea / ucChartBar / ucPieChart / ucProgressCircular / ucTreeMaps / LabelPlus 六枚都在 `UserControl_Click`；czUI 在 `UserControl_MouseDown/MouseUp`（这两条 `uc_host_window.c` 早就转调）；VBFlexGrid 走自己的 `WindowProcControl`。⇒ 不补落点，"编得过但一条 Click 都收不到"就是本批自己带进去的回归。
-
-**改法（三处一把，顺序是硬约束）**：① `vb6forms_controls.h` 的 `vb6_UserControlDesc` **末尾**追加 `void (*click)(void* me);` —— 这结构体是布局式初始化，rev22 那段教训写着"加槽一律追加到末尾"，插到中间就是错位一个指针宽的运行期 AV；② `uc_host_window.c` 在 `mouseUp` 转调（与 `vb6_uc_pop`）**之后**补 `if (msg == WM_LBUTTONUP && r->desc->click) r->desc->click(r->me);` —— VB6 的 Click 是抬起之后发的，顺序本身就是语义；旧 cgen 不发这一槽 ⇒ 初始化式补 0 ⇒ 不转调，行为与改动前逐字节一致；③ `cgen_form.cpp` 发 `vb6_<ctl>_ucHostClick` 封装（有 `UserControl_Click` 就转调、没有就空 stub，与 DblClick 同形）并把末槽写进 desc 初始化式，位置紧跟 designResize。
-
-**判据**：真跑那一头就是**真手势** —— ve_units 容器对 `uArr(2)` 自己的宿主窗口发一条 `WM_LBUTTONUP`，读到 `U-ARRCLICK-RAW hw=True idx=2 hits=1 ret=0` ⇒ `U-ARRCLICK=True`（两档相同）；负控 = 把 ② 那条转调注释掉、重编 C3、跑同一份夹具 ⇒ `U-ARRCLICK=False` 且现场 `idx=-1 hits=0`，而容器主动 `Fire()` 那一头照旧 True —— 两条针面各钉各的，不是同一条读数跑两遍。另并进 #222 那枚哨兵的 C1/C2/C3（结构体末槽、转调条数与位置、发码末槽同序），census 里点名 `dblclick-dispatch(now)=0`。
-
-**留下的同族一格已接上（账 #227 = §B58）**：`dblClick` 槽当时 0 个调用者 —— 先量（六枚 UC 的 `UserControl_DblClick` 里都真写着 `RaiseEvent DblClick`、`CS_DBLCLKS` 早在类样式里立着）再补，见 §B58。
-
-### B58 `desc->dblClick` 这一槽 cgen 一直在填、宿主从不转调 —— 六枚 UC 的 `RaiseEvent DblClick` 于是永不出声（账 #227，**已提交 `50fb6d5f`：门 待回填**）
-
-**形状与 #226 一模一样，是第二次**：`vb6_UserControlDesc` 是按位置初始化的表，`cgen_form.cpp` 每一格都发（有 `UserControl_DblClick` 就转调、没有就 `(void)me;` 空 stub），所以**发码面永远看不出问题**；缺的只是 RTL 那一跳 —— `uc_host_window.c` 里 `desc->` 的读数 {mouseDown, mouseUp, mouseMove, paint, resize, show, terminate, click} 有、`dblClick` 是 **0**。普查读数（`RaiseEvent DblClick` 的最近过程头）：ucChartArea / ucChartBar / ucPieChart / ucTreeMaps / ucProgressCircular / LabelPlus 六枚全在 `UserControl_DblClick` 里；类样式上 `CS_DBLCLKS` 早就立着（当年那句 "czUI fix: UserControl_DblClick 需要"），⇒ 消息收得到，缺的就是这一跳。**一般式：布局式填表 + 运行期按槽名转调 = 编译器永远绿的那一类缺陷**，判据只能问"每一槽都有人调吗"。
-
-**改法**：`uc_host_window.c` 新增独立一档 `case WM_LBUTTONDBLCLK:`，只在 `desc->dblClick` 非空时 push/转调/pop + 刷新，然后 `return 0`。`MouseDown`/`MouseUp` 的转调**刻意不挂**这条消息 —— 物理双击 Windows 发的是 `DOWN/UP/DBLCLK/UP`，Click 那一路已经由两条 UP 供过（VB6 同形：一次双击 = 两次 Click + 一次 DblClick），挂进来就变三发。
-
-**判据（第三头真手势 + 两头各钉）**：ve_units 容器对 `uArr(2)` 自己的宿主窗口发 `WM_LBUTTONDBLCLK`(&H203)，读 `U-ARRDBL-RAW hw=True idx=2 dbl=1 hits=0 ret=0` ⇒ `U-ARRDBL=True`，x64 与 x86 逐行相同。**问两个计数是这一格的关键**：`dbl=1` 钉"这一下真的走了 dblClick 槽"，`hits=0` 钉"它不是从点击那一路冒名来的" —— 只钉 `dbl` 的话，把落点错挂到 `WM_LBUTTONUP` 上也能绿。夹具里 UC 抬的是**另一枚事件** `Dbl`（不是 `Hit`），就是这个用途。负控 = 把那一条转调注释掉重编 ⇒ `U-ARRDBL=False` 现场 `idx=-1 dbl=0 hits=0`，而 Fire 头与点击头照旧 True；还原后 `uc_host_window.c` MD5 逐字节回位（`8df935b0…`）。
-
-**哨兵 C4（把"每一槽都要有人调"钉成结构性判据）**：`mouseDown`/`mouseUp`/`mouseMove`/`click`/`dblClick` 逐槽 `desc-><名>` 非零 + `r->desc->dblClick(r->me)` 恰 1 处 + 必须落在 `case WM_LBUTTONDBLCLK:` 之后。假形状（把槽名改成 `dblClickXX`）真红 2 条、还原回绿且 MD5 相同。一条读数教训：逐槽那半用的是子串计数，改名照样命中 —— **红的是"恰 1 处 + 位置"那两条**，所以钉计数与钉位置要一起写，别以为非零那条兜得住一切。
-
-**零发码变化证明**：46 件工程 × 两架构 = 92 份 `--emit-c` 捕获与上一轮（`482c3273`）**逐份相同**（`same=92 changed=0`）—— 这一刀只动 RTL，而 RTL 是嵌在 C3.exe 资源里、发码文本不含它，所以"发码全同"是**预期**而不是判据；判据在真跑那一头。
 
 ## C. 仍在生效的口径与工具事实（与本文档等长的一半价值在这里；完整版见记忆库）
 
@@ -1106,7 +1058,7 @@ asm 13/14、smoke 1/1；`Build C3.exe` 那片日志正文不含用例行（历�
 - **夹具（`.ctl/.frm/.pag/.bas`）里的注释一律写 ASCII**（账 #222 本轮实测）。C3 读源走 ANSI(GBK) 那一套解，UTF-8 中文注释**只有在字节两两配成合法 GBK 时才不出事**：`tests/ve_units/ucUnitPix.ctl:75` 那条带 `①②③` 的注释字节序配出了 `U+FFFD` ⇒ 当场 167 条 `VB1005 意外字符 / VB2002 / VB2003`、整工程 rc=1；同一行换成全 ASCII 注释就 rc=0。逐变量实测：只把 `①②③` 换成 `A)/B)/C)` 仍然红 ⇒ 踩雷的是这一行里某个字节对，不是某枚特定字符，别拿"哪枚字符不行"去记。老夹具里的中文注释能活下来纯属运气。所以新增判据行时注释写 ASCII，改完先 `--syntax-only` 或直接真编译一遍再下结论。
 
 
-## D. 已完成项一行索引（叙述已删；原文在 `git show 1465da1:ai/C3_FIX_HANDOFF.md` 的对应 §区间）
+## D. 已完成项一行索引（叙述已删；原文在 `git show 1465da1:ai/C3_FIX_HANDOFF.md` 的对应 §区间。§B55..§B58 那四节 = 账 #225/#222/#226/#227，四格都过门（#349/#351/#351/#352），叙述在 `git show dd73c049:ai/C3_FIX_HANDOFF.md`）
 
 | 原 § | 内容 | 状态 |
 |---|---|---|
@@ -1176,4 +1128,4 @@ asm 13/14、smoke 1/1；`Build C3.exe` 那片日志正文不含用例行（历�
 | 账 #225（§B55 = `src/driver/rtl_embedded.hpp` 两枚 id 与 `c3rtl.rc` 对上 + 新哨兵 `scripts/check_rtl_resource_ids.ps1` 三处逐条对账 + `tests/run_tests.ps1` 注册 `[STATIC] rtl_resource_ids`） | 上游 `9a420157`（rev38 绘图家族，经 `c5aab787` 合进 dev）把 `.rc` 的 `223=头/224=体` 与 hpp 的 `223=C/224=H` 写对调 ⇒ 解包把 463 行的体写成 `vb6forms_draw.h`，而 `vb6forms.h` include 它、被 39 个 RTL 文件 + 每份生成模块 .c 带到 ⇒ 28 枚符号 × 约 49 份定义 = LNK2005×1225 + LNK1169；门 #347 十一片九红（只有不链接的两片绿） | 单变量真编译：HEAD 冷编 `RC=1 diag=1226` → 只改这两行 `RC=0 exe=True diag=0`；哨兵 census 125/125/125、孤儿 0，两条 R3 负控真红、还原逐字节相同 | 已发货，门 #349（run 37380276520、head `ca9f3719`、attempt 1）= 11 job 全 completed/success、非绿 0 |
 | 账 #222（§B56 = 元素键唯一出口 `ctrlElemKey` + 事件 ABI 在登记那一刻翻（`prepareEventHandlerProc`/`applyEventHandlerAbi`）+ prelude 那份逐元素前向声明删掉 + `ucSinkEvents_` 让 `WM_LBUTTONUP` 两条 hasClick 判据都问表；夹具 ve_units 两头 + 发码针 `ucarr_evt_thunk_per_element`（Absent 三条 = 改前真实形状）+ 哨兵 `scripts/check_uc_array_event_sites.ps1`） | BASE 那台真编译 ucProgressCircular `RC=1 exe=None diag=27 kinds={'C2198': 25, 'C2084': 1, 'C2065': 1}` ⇒ 修后 `RC=1 diag=1`（只剩 `Count` C2065，属 #219）；真跑 ve_units 两档 `U-ARREVT=True`（`U-ARREVT-RAW i1=1 h1=1 i2=2 h2=2 ret=7`）；三条假形状逐条真红、还原 MD5 相同 | A/B inputs=92 same=74 changed=18，差异行 direct=752 blockfall=24 **无法归因=0**，x64/x86 逐份对称。**第二格**（撤 prelude 那张第二表、类型收成 `mapTypeRef` 一处）：单变量 A/B `inputs=92 same=86 changed=6`、28 条差异全在 `evtThunk` 签名、未归因=0；三处同源检具 cb 不符 5→0 / 原型不符 6→1；ucTreeMaps 两档出 exe | 已过门：#351（run 37386871868、head `482c3273`、attempt 1）= 11 job 全 completed/success、非绿 0（#350 红在两档 ucTreeMaps → #351 绿）|
 | 账 #226（§B57 = `vb6_UserControlDesc` **末尾**加 `click` 槽 + `uc_host_window.c` 在 mouseUp 转调之后补一次 + `cgen_form.cpp` 发 `ucHostClick` 封装与末槽） | 语料里六枚 Charts UC 的 `RaiseEvent Click` 全写在 `UserControl_Click`，而那条子过程此前没人调（desc 压根没有 click 槽；`dblClick` 槽也 0 调用者）；#222 把兜底 arm gate 掉之后不补落点就是"编得过但一条 Click 都收不到" | 真跑真手势 `U-ARRCLICK=True`（`U-ARRCLICK-RAW hw=True idx=2 hits=1 ret=0`，两档相同）；负控 = 注释掉那条转调重编 ⇒ `U-ARRCLICK=False` 现场 `idx=-1 hits=0` 而 Fire 那头照旧 True；哨兵 C1/C2/C3 钉末槽与转调顺序 | 已过门：#351（run 37386871868、head `482c3273`、attempt 1）= 11 job 全 completed/success、非绿 0 |
-| 账 #227（§B58 = `uc_host_window.c` 补 `case WM_LBUTTONDBLCLK` → `desc->dblClick` 一档 + 夹具第三头问 dbl/hits 两个计数 + 哨兵 C4 逐槽钉非零） | 与 #226 同形：desc 按位置填满 ⇒ 发码面永远看不出，`desc->` 读数里 dblClick 0 个调用者；六枚 UC 的 `RaiseEvent DblClick` 全静默（`CS_DBLCLKS` 早就立着） | 真跑两档 `U-ARRDBL=True`（`hw=True idx=2 dbl=1 hits=0 ret=0`）；负控 = 注释那条转调 ⇒ False 且现场 `idx=-1 dbl=0 hits=0`，另两头照旧 True；C4 假形状真红 2 条、还原 MD5 相同；92 份 emit 与上一轮逐份相同（纯 RTL 那一刀） | 已提交 `50fb6d5f`，门 待回填 |
+| 账 #227（§B58 = `uc_host_window.c` 补 `case WM_LBUTTONDBLCLK` → `desc->dblClick` 一档 + 夹具第三头问 dbl/hits 两个计数 + 哨兵 C4 逐槽钉非零） | 与 #226 同形：desc 按位置填满 ⇒ 发码面永远看不出，`desc->` 读数里 dblClick 0 个调用者；六枚 UC 的 `RaiseEvent DblClick` 全静默（`CS_DBLCLKS` 早就立着） | 真跑两档 `U-ARRDBL=True`（`hw=True idx=2 dbl=1 hits=0 ret=0`）；负控 = 注释那条转调 ⇒ False 且现场 `idx=-1 dbl=0 hits=0`，另两头照旧 True；C4 假形状真红 2 条、还原 MD5 相同；92 份 emit 与上一轮逐份相同（纯 RTL 那一刀） | 门 #352（run 37388004707、head `50fb6d5f`、attempt 1）= 11 job 全绿、非绿 0，wall 8m41s |
