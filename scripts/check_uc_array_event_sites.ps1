@@ -130,18 +130,38 @@ $gCli = $genTxt.IndexOf('_ucHostClick  /*')
 if ($gRes -lt 0 -or $gCli -lt 0 -or -not ($gRes -lt $gCli)) {
     $viol += 'C3: 发码里 click 必须排在 designResize 之后 (与结构体同序)'
 }
+# ---- C4: 账 #227 —— desc 的鼠标/点击那一族, 每一槽都必须有落点 ----
+# cgen 是按位置把这张表填满的, 所以 RTL 少转调哪一格都不会有编译症状, 只会让那一格
+# 事件永不出响: click 是账 #226, dblClick 是账 #227 (同一个形状栽了两次)。
+# 于是这里钉**逐槽非零**, 而不是只钉某一条转调的行数。
+foreach ($s4 in @('mouseDown', 'mouseUp', 'mouseMove', 'click', 'dblClick')) {
+    $n4 = Count-Of $uhoTxt ('desc->' + $s4)
+    if ($n4 -lt 1) {
+        $viol += ('C4: 宿主没有转调 desc->' + $s4 + ' 这一槽 (读到 ' + $n4 + ') - 那一格事件永远不出声')
+    }
+}
+# 而且 dblClick 的落点必须独立在 WM_LBUTTONDBLCLK 那一档里: 挂进鼠标那一档就会把
+# MouseDown/MouseUp 一起双发 (物理双击 Windows 发的是 DOWN/UP/DBLCLK/UP)。
+$i4case = $uhoTxt.IndexOf('case WM_LBUTTONDBLCLK:')
+$i4call = $uhoTxt.IndexOf('r->desc->dblClick(r->me)')
+if ($i4case -lt 0 -or $i4call -lt 0 -or -not ($i4case -lt $i4call)) {
+    $viol += 'C4: dblClick 转调必须在 case WM_LBUTTONDBLCLK 那一档里 (不挂鼠标那一段)'
+}
+$c4n = Count-Of $uhoTxt 'r->desc->dblClick(r->me)'
+if ($c4n -ne 1) { $viol += ('C4: dblClick 的转调应为 1 处，读到 ' + $c4n) }
+
 # ---- 普查（不判红，给下一轮留证据） ----
 $cenSink = Count-Of $prelude 'ucEventAttach_[attachKey]'
 $cenSfx  = Count-Of $prelude 'elemSfx'
 Write-Host ("census: key(def/dec/calls)={0}/{1}/{2} abi(def/dec/calls)={3}/{4}/{5} sink-table(dec/ins/gate/arm)={6}/{7}/{8}/{9} attach-store={10} elemSfx={11} evt-type-exits(mapTypeRef/SimpleTypeRef)={12}/{13}" -f `
     $e1def, $e1dec, $e1call, $e2def, $e2dec, $e2call, $e4dec, $e4ins, $e4gate, $e4arm, $cenSink, $cenSfx, $e5type, $e5node)
-Write-Host ("census-click: handoff={0} wrap={1} slot={2} struct-last-click={3} dblclick-dispatch(now)={4}" -f `
-    $nHandoff, $nWrap, $nSlot, ($iClick -lt $iClose), (Count-Of $uhoTxt 'desc->dblClick'))
+Write-Host ("census-click: handoff={0} wrap={1} slot={2} struct-last-click={3} dblclick-dispatch(now)={4} dbl-click-calls={5}" -f `
+    $nHandoff, $nWrap, $nSlot, ($iClick -lt $iClose), (Count-Of $uhoTxt 'desc->dblClick'), $c4n)
 
 if ($viol.Count -gt 0) {
     Write-Host ("FAIL: uc-array-event 哨兵, {0} 条" -f $viol.Count)
     foreach ($v in $viol) { Write-Host ('  ' + $v) }
     exit 1
 }
-Write-Host ("PASS: 元素键 1+1+4 / ABI 1+1+2+prep / 无第二份前向声明 / sink 表 1+1 且 gate {0} 条、arm {1} 条 / click 落点 1+2+1 且两份权威同序 / 事件形参类型一处权威" -f $e4gate, $e4arm)
+Write-Host ("PASS: 元素键 1+1+4 / ABI 1+1+2+prep / 无第二份前向声明 / sink 表 1+1 且 gate {0} 条、arm {1} 条 / click 落点 1+2+1 且两份权威同序 / 事件形参类型一处权威 / 鼠标族五槽都有落点" -f $e4gate, $e4arm)
 exit 0

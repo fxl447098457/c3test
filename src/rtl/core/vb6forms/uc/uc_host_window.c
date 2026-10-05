@@ -120,6 +120,24 @@ static LRESULT CALLBACK vb6_uc_wndproc(HWND hwnd, UINT msg, WPARAM wParam, LPARA
             UpdateWindow(hwnd);
             return 0;
         }
+        case WM_LBUTTONDBLCLK: {
+            // 账 #227: 这一槽 cgen 一直在填 (UC 里写 UserControl_DblClick 才有真身, 否则是空
+            // stub), 但宿主从没有转调过它 —— 语料里六枚 UC 的 `RaiseEvent DblClick` 于是永远
+            // 发不出去。类样式上 CS_DBLCLKS 早就立了 (下面那句 czUI fix), 消息收得到,
+            // 缺的就是这一跳。
+            // MouseDown/MouseUp 的转调**不**挂在这条消息上: 物理双击 Windows 发的是
+            // DOWN/UP/DBLCLK/UP, Click 那一路已经由两条 UP 供过, 再挂就变三发。
+            if (!r || !r->ready || !r->desc || !r->me || !r->desc->dblClick) break;
+            vb6_UCSaved saved227;
+            vb6_uc_push(r, &saved227);
+            vb6_UserControl_hDC = NULL;
+            r->desc->dblClick(r->me);
+            vb6_uc_pop(&saved227);
+            InvalidateRect(hwnd, NULL, FALSE);
+            UpdateWindow(hwnd);
+            return 0;
+        }
+
         case WM_CAPTURECHANGED:
             break;
         case WM_PAINT: {

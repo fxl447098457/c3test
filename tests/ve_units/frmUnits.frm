@@ -55,6 +55,7 @@ Option Explicit
 Private Declare Function SendMessageW Lib "user32" (ByVal hWnd As LongPtr, ByVal Msg As Long, ByVal wParam As LongPtr, ByVal lParam As LongPtr) As Long
 Private mIdx As Long
 Private mHits As Long
+Private mDbl As Long
 ' 两枚控件同尺寸 (2400 缇 = 160 像素 @96dpi), 只差 .ctl 声明的 ScaleMode。
 ' 判据写成**同一枚字体量出来的两个数之比**, 于是与 DPI 无关:
 '   缇型控件的 TextWidth / ScaleWidth 必须 = 像素型的 x Screen.TwipsPerPixelX
@@ -145,8 +146,27 @@ Private Sub Form_Load()
     hM = mHits
     Debug.Print "U-ARRCLICK-RAW hw=" & (hElem <> 0) & " idx=" & iM & " hits=" & hM & " ret=" & mRet
     Debug.Print "U-ARRCLICK=" & CStr(hElem <> 0 And iM = 2 And hM = 1 And mRet = 0)
+    ' account 227: third head = a REAL double-click gesture. WM_LBUTTONDBLCLK goes
+    ' to element 2's own host window and must land on the desc dblClick slot.
+    ' Ask BOTH counters: dbl has to move by exactly 1 and hits has to stay 0, so a
+    ' slot fed by the click path (or by the old no-landing shape) cannot pass.
+    Dim dM As Long, hM2 As Long
+    hElem = uArr(2).Hw()
+    mIdx = -1
+    mHits = 0
+    mDbl = 0
+    mRet = SendMessageW(hElem, &H203, 0, 0)
+    dM = mDbl
+    hM2 = mHits
+    Debug.Print "U-ARRDBL-RAW hw=" & (hElem <> 0) & " idx=" & mIdx & " dbl=" & dM & " hits=" & hM2 & " ret=" & mRet
+    Debug.Print "U-ARRDBL=" & CStr(hElem <> 0 And mIdx = 2 And dM = 1 And hM2 = 0 And mRet = 0)
     Debug.Print "U-DONE"
     Unload Me
+End Sub
+
+Private Sub uArr_Dbl(Index As Integer)
+    mDbl = mDbl + 1
+    mIdx = Index
 End Sub
 
 Private Sub uArr_Hit(Index As Integer)

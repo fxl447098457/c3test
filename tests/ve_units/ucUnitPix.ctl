@@ -83,6 +83,16 @@ End Function
 ' account 226: a UserControl's own Click needs a landing point. When the container
 ' sends WM_LBUTTONUP to this element's host window, the runtime must reach
 ' UserControl_Click here and route out through THIS instance's event sink.
+Public Event Dbl()
+
+' account 227: the host has to route WM_LBUTTONDBLCLK into UserControl_DblClick too.
+' This is a DIFFERENT event from Hit on purpose: the form's judgement asks both
+' counters, so a click that was really served by the WM_LBUTTONUP path cannot
+' masquerade as a double click (and a missing dblClick slot cannot pass).
+Private Sub UserControl_DblClick()
+    RaiseEvent Dbl
+End Sub
+
 Private Sub UserControl_Click()
     RaiseEvent Hit
 End Sub
