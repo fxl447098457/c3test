@@ -202,6 +202,13 @@ typedef struct vb6_UserControlDesc {
     //   栈 CreateFolder→ComSetProp→Host_SetProp→UC_OwnPropSet。
     //   **加槽一律追加到末尾**, 别按"语义分组"插到中间。
     void      (*designResize)(void* me, const char* ctrlName);
+
+    // ---- 账 #226: UC 自身的 Click (同样**只许追加到末尾**) ----
+    // VB6 的 Click 是"按下并抬起"之后发的, 落点就是宿主窗口的 WM_LBUTTONUP,
+    // 由 uc_host_window.c 在 mouseUp 转调**之后**再转这一槽 (顺序与 VB6 一致)。
+    // 没有这一槽时 .ctl 里的 UserControl_Click 是死码 —— Charts 六枚 UC 的
+    // `RaiseEvent Click` 全写在那里, 于是容器侧的 ucX_Click 一条都收不到。
+    void      (*click)(void* me);
 } vb6_UserControlDesc;
 
 // .ctl module self-registration (type name case-insensitive, duplicate ignored)

@@ -424,6 +424,16 @@ void CCodeGen::emitDesignerControlDecls(const FrmFormDesc& frmDesc, DocumentKind
             c_.emitLine("static void vb6_" + ctl + "_ucHostDblClick(void* me) { (void)me; }");
         }
 
+        // 账 #226: UserControl_Click 的封装 (与 DblClick 同形, 零参)。
+        const bool hasUcClick = hasProc("UserControl_Click");
+        if (hasUcClick) {
+            c_.emitLine("static void vb6_" + ctl + "_ucHostClick(void* me) {");
+            c_.emitLine("    vb6_" + ctl + "_UserControl_Click((" + clsShort + "*)me);");
+            c_.emitLine("}");
+        } else {
+            c_.emitLine("static void vb6_" + ctl + "_ucHostClick(void* me) { (void)me; }");
+        }
+
         // Fix <vbeclipse> rev18: 自有属性按名桥 (表 + thunk) —— 必须在本 desc 之前发。
         // (.ctl 不走 emitFormFramework, 所以只能落在这个函数里; 见该 .inc 头部说明.)
 #include "backend/detail/module/cgen_form_uc_props.inc"
@@ -457,7 +467,10 @@ void CCodeGen::emitDesignerControlDecls(const FrmFormDesc& frmDesc, DocumentKind
         c_.emitLine("    " + (designResizeCtrls.empty()
                            ? std::string("NULL")
                            : ("vb6_" + ctl + "_ucHostDesignResize"))
-                    + "  /* Fix <vbeclipse> rev22: 子控件 Resize 事件 */");
+                    + ",  /* Fix <vbeclipse> rev22: 子控件 Resize 事件 */");
+        // 账 #226: UC 自身 Click 的末槽 —— 顺序必须与 vb6_UserControlDesc 逐字一致
+        // (布局式初始化, 错位一个指针宽就是运行期 AV, 见结构体 rev22 那段教训)。
+        c_.emitLine("    vb6_" + ctl + "_ucHostClick  /* 账 #226: UserControl_Click */");
         c_.emitLine("};");
         c_.emitLine("void vb6_" + ctl + "_RegisterHost(void) { vb6_UC_Register(&vb6_" + ctl + "_ucHostDesc); }");
         // Fix <vbeclipse> rev14: 让每个 .ctl 在**本模块的 init 函数**里自注册宿主描述。

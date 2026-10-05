@@ -112,6 +112,10 @@ static LRESULT CALLBACK vb6_uc_wndproc(HWND hwnd, UINT msg, WPARAM wParam, LPARA
             vb6_UserControl_hDC = NULL;
             hook(r->me, button, 0, sx, sy);
             vb6_uc_pop(&saved);
+            // 账 #226: VB6 的 Click 是"按下并抬起"之后发的, 落点就在这条 WM_LBUTTONUP;
+            // 必须在 MouseUp 转调**之后**, 顺序才与 VB6 一致。旧 cgen 不发这一槽 ⇒
+            // 初始化式补 0 ⇒ 这里不转调, 行为与改动前逐字节一致。
+            if (msg == WM_LBUTTONUP && r->desc->click) r->desc->click(r->me);
             InvalidateRect(hwnd, NULL, FALSE);
             UpdateWindow(hwnd);
             return 0;

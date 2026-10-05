@@ -397,14 +397,15 @@
                 // czUI fix: UC 事件接线 — thunk/sink 已在文件作用域 (prelude) 生成,
                 // 这里按实例挂接 (attach 行由 prelude 存入 ucEventAttach_)。
                 {
-                    auto itAtt114 = ucEventAttach_.find(Symbol::toLower(ctrl.controlName));
+                    // 账 #222: 键与 sink 名都由 prelude 那一处算/拼, 这里只查表。
+                    auto itAtt114 = ucEventAttach_.find(ctrlElemKey(ctrl.controlName, ctrl.index));
                     if (itAtt114 != ucEventAttach_.end() && !getenv("C3_NO_EVENTS")) {
                         std::string shortCls114 = ctlClass;
                         size_t dotCls114 = shortCls114.rfind('.');
                         if (dotCls114 != std::string::npos) shortCls114 = shortCls114.substr(dotCls114 + 1);
                         c_.emitLine("{ /* UC events */");
-                        for (const auto& al : itAtt114->second) c_.emitLine("  " + al);
-                        c_.emitLine("  ((vb6_cls_" + cIdent(shortCls114) + "*)vb6_UC_InstanceOf(" + hwndExpr + "))->events = &_sink_" + cIdent(ctrl.controlName) + ";");
+                        for (const auto& al : itAtt114->second.lines) c_.emitLine("  " + al);
+                        c_.emitLine("  ((vb6_cls_" + cIdent(shortCls114) + "*)vb6_UC_InstanceOf(" + hwndExpr + "))->events = &" + itAtt114->second.sinkVar + ";");
                         c_.emitLine("}");
                     }
                 }

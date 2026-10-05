@@ -76,6 +76,9 @@
 
     // 生成函数签名 (不含函数体)
     std::string makeProcSignature(SubDecl& node);
+    // 账 #222: 事件处理器的 ABI 与"这枚处理器的首形参是不是元素号"两处判断的唯一实现。
+    void applyEventHandlerAbi(SubDecl& node);
+    bool prepareEventHandlerProc(Module& mod, const std::string& loweredName);
     std::string makeProcSignature(FunctionDecl& node);
 
     // ai/vb-asm-extension-spec: 过程体 = 单个 Asm 块时降级为独立 MASM 过程 (v1: x64/ml64)。
@@ -409,6 +412,8 @@
     // cgen_form_wndproc_subclass.inc（发不发这条 arm）与 cgen_form_frame_menu.inc
     // （要不要装子类化）。
     static bool controlClickFromNativeNotify(FrmControlType ctrlType);
+    // 账 #222: 控件数组元素的键 (见 cgen_util_ctrl.cpp 的定义处)。
+    static std::string ctrlElemKey(const std::string& ctrlName, int index);
     // C29-SL-g: 同理，但排除的是**焦点**通知（TextBox/ComboBox/ListBox/命令按钮那六类的
     // GotFocus/LostFocus 由父窗的 WM_COMMAND 码供，见 cgen_form_wndproc_dispatch.inc 开头）。
     // 三处使用点：发 arm（subclass）、装子类化（frame_menu）、拆子类化（dispatch）——

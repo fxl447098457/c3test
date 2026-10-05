@@ -1926,6 +1926,16 @@ std::string CCodeGen::ctrlHwndExprForInit(const FrmControl& ctrl) const {
 //   Menu -> 菜单命令那条路（cgen_form_menu.cpp），且 Menu 压根不子类化
 // 反过来，Label/Image/PictureBox/Frame/TextBox/ScrollBar/Slider 这些**没有**任何
 // 原生 Click 通知的，才由子类化那一档补上。
+// 账 #222: 控件数组元素的键 —— 一枚数组的 24 枚元素共用一枚事件处理器, 但每枚要自己的
+// thunk / sink / 挂接, 而"这枚元素"在发码里只有一个地方能拼出来: 就是这里。prelude 登记、
+// 挂接那头查表、两处子类化臂问"Click 是不是已经由 sink 供给", 三处都调它 (以前挂接那侧
+// 把 sink 变量名与控件名再拼一遍, 那是第二处拼名)。
+std::string CCodeGen::ctrlElemKey(const std::string& ctrlName, int index) {
+    std::string k = Symbol::toLower(ctrlName);
+    if (index >= 0) k += "#" + std::to_string(index);
+    return k;
+}
+
 bool CCodeGen::controlClickFromNativeNotify(FrmControlType ctrlType) {
     switch (ctrlType) {
     case FrmControlType::CommandButton:

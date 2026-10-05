@@ -739,6 +739,19 @@ function Test-RtlResourceIds {
         $out | Select-Object -First 6 | ForEach-Object { Write-Host "  $_" }
     }
 }
+function Test-UcArrayEventSites {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] uc_array_event_sites ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\check_uc_array_event_sites.ps1" 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        $out | Select-Object -First 8 | ForEach-Object { Write-Host "  $_" }
+    }
+}
 function Test-IntLiteralShape {
     $script:total++
     Write-Host -NoNewline "  [STATIC] int_literal_shape ... "
@@ -3920,7 +3933,9 @@ if ($Category -in @("all", "run", "vbp")) {
     # 是 undeclared identifier (C2065), 同窗体时恒答 0。负控实测 (a4e3b574 的编译器 x86):
     #   frmUnits.c(214)/(220): error C2065 "vb6_hwnd_uArr": 未声明的标识符, BUILD rc=1。
     $veUnitsExpected = @("U-SW=True", "U-TW=True", "U-TH=True", "U-CTX=True", "U-HW=True", "U-CNT=True",
-        "U-ARR-RAW count=3 lb=0 ub=2", "U-ARRM-methods=3", "U-ARR=True", "U-DONE")
+        "U-ARR-RAW count=3 lb=0 ub=2", "U-ARRM-methods=3", "U-ARR=True",
+        "U-ARREVT-RAW i1=1 h1=1 i2=2 h2=2 ret=7", "U-ARREVT=True",
+        "U-ARRCLICK-RAW hw=True idx=2 hits=1 ret=0", "U-ARRCLICK=True", "U-DONE")
     Test-Vbp "ve_units" "$Tests\ve_units\Units.vbp" $veUnitsExpected
     Test-Vbp "ve_units_x86" "$Tests\ve_units\Units.vbp" $veUnitsExpected -Arch "x86"
 
@@ -4377,6 +4392,7 @@ if ($Category -in @("all", "compile")) {
     Test-DocHostAuthority
     Test-RtlNakedNames
     Test-RtlResourceIds
+    Test-UcArrayEventSites
     Test-SubclassSlotSites
     Test-CtrlArrayMemberSites
     Test-EventHandlerNames
@@ -4888,6 +4904,19 @@ if ($Category -in @("all", "syntax")) {
         "vb6_CtrlArr_LBound(&vb6_arr_uArr)",
         "vb6_CtrlArr_UBound(&vb6_arr_uArr)") @(
         "vb6_ComGetIntProp(vb6_hwnd_uArr")
+
+    # 账 #222/#226 的发码形状针: UC 控件数组的事件臂必须**每元素一套** thunk 与 sink, 并把设计期
+    # Index 交给那枚共享处理器; 处理器原型全产物只许一份, 且按事件 ABI (ByVal) 发。
+    # 三条 Absent 都是改前产物里真实存在的形状 (零形参声明 / 同名 thunk / 共享 sink 槽),
+    # 任何一条回来这枚针就红 —— 实测 ucProgressCircular 那 25 条 C2198+C2084 就是这么来的。
+    Test-CodegenNote "ucarr_evt_thunk_per_element" @("$Tests\ve_units\Units.vbp") @(
+        "static void vb6_frmUnits_uArr_Hit(int16_t Index);",
+        "vb6_frmUnits_evtThunk_uArr_Hit_1(void* handler) { vb6_frmUnits_uArr_Hit(1); }",
+        "((vb6_cls_ucUnitPix*)vb6_UC_InstanceOf(vb6_CtrlArr_GetAt(&vb6_arr_uArr, 1)))->events = &_sink_uArr_1;",
+        "vb6_ucUnitPix_ucHostClick") @(
+        "static void vb6_frmUnits_uArr_Hit();",
+        "_sink_uArr.onHit",
+        "vb6_frmUnits_evtThunk_uArr_Hit(void* handler)")
 
     # ai/028 V2 的发码形状: 插值必须** literally ** 发成手写的 & CStr() / Format$ 形状 ——
     # 注意第二枚读数挑的是 vb6_CStrLong (按实参类型改发专用 CStr), 这正是"降级成真 AST"

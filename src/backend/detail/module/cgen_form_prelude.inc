@@ -168,7 +168,13 @@
             size_t dotUc = ucShort.rfind('.');
             if (dotUc != std::string::npos) ucShort = ucShort.substr(dotUc + 1);
             std::string evtPrefixType = "vb6_events_" + cIdent(ucShort);
-            std::string sinkVar = "_sink_" + cIdent(child.controlName);
+            // 账 #222: 控件数组元素的设计期 Index 带进名字 (非数组恒空后缀) —— 以前 24 枚元素
+            // 各发一套**同名**的 thunk / sink / 前向声明, 实测就是 ucProgressCircular 编不过的
+            // 那 1 条 C2084 + 24 条 C2198 (Form1.c)。
+            const bool isArrayElem = child.index >= 0;
+            const std::string elemSfx = isArrayElem ? ("_" + std::to_string(child.index)) : std::string();
+            std::string sinkVar = "_sink_" + cIdent(child.controlName) + elemSfx;
+            const std::string attachKey = ctrlElemKey(child.controlName, child.index);
             bool anyHandler = false;
             std::vector<std::string> attachLines;
             for (const auto& ev : ucEventsPre) {
@@ -184,26 +190,34 @@
                 // 据此把形参按事件 ABI (ByVal) 发, 与下面 thunk 的 arg 类型、
                 // emitEventSink 的 typedef、RaiseEvent 发送侧三处对齐 (见状态区注释)。
                 ucEventHandlers_.insert(handlerLower);
+                // 账 #222: 登记之后**立刻**把这枚处理器的形参翻成事件 ABI (ByVal) —— 翻在
+                // visit(SubDecl) 里太晚: 模块级前置声明那一趟已经按 VB 默认(ByRef)把原型发出去了,
+                // 于是同一枚函数在产物里有三种形参表 (ByRef 声明 / 零形参声明 / ByVal 定义)。
+                // emitFormFramework 在 decl-pass 里跑在那一趟之前 (cgen_base_generate_decl_pass.inc
+                // :40 与 :46), 所以这里翻一次, 声明与定义就同源了。
+                bool handlerHasIndex = prepareEventHandlerProc(module, handlerLower);
                 std::string fnOrig = cIdent(child.controlName) + "_" + cIdent(ev.name);
                 std::string frmPrefix = "vb6_" + cIdent(formName) + "_";
-                std::string thunkName = frmPrefix + "evtThunk_" + fnOrig;
-                std::string sig = "";
-                for (size_t i = 0; i < ev.ptypes.size(); i++)
-                    sig += (i ? ", " : "") + ev.ptypes[i] + " arg" + std::to_string(i);
-                c_.emitLine("static void " + frmPrefix + fnOrig + "(" + sig + ");");
+                std::string thunkName = frmPrefix + "evtThunk_" + fnOrig + elemSfx;
+                // 前向声明**不在这里发** (原来这里逐元素发一份零形参的, 既与定义不同源又自己
+                // 重复 24 遍): 模块级那一趟发的才是唯一的一份。
                 std::string thunkSig = "void* handler";
                 for (size_t i = 0; i < ev.ptypes.size(); i++)
                     thunkSig += ", " + ev.ptypes[i] + " a" + std::to_string(i);
                 std::string callArgs = "";
+                if (handlerHasIndex && isArrayElem)
+                    callArgs += std::to_string(child.index);   // VB6: 数组元素的处理器第一形参是元素号
                 for (size_t i = 0; i < ev.ptypes.size(); i++)
-                    callArgs += (i ? ", " : "") + std::string("a") + std::to_string(i);
+                    callArgs += (callArgs.empty() ? "" : ", ") + std::string("a") + std::to_string(i);
                 c_.emitLine("static void " + thunkName + "(" + thunkSig + ") { " + frmPrefix + fnOrig + "(" + callArgs + "); }");
                 std::string evtCbType = "vb6_evt_" + cIdent(ucShort) + "_" + cIdent(ev.name) + "_cb";
                 attachLines.push_back(sinkVar + ".on" + cIdent(ev.name) + " = (" + evtCbType + ")" + thunkName + ";");
+                ucSinkEvents_.insert(attachKey + "." + Symbol::toLower(ev.name));
             }
             if (anyHandler) {
                 c_.emitLine("static " + evtPrefixType + " " + sinkVar + ";");
-                ucEventAttach_[Symbol::toLower(child.controlName)] = attachLines;
+                ucEventAttach_[attachKey].lines = attachLines;
+                ucEventAttach_[attachKey].sinkVar = sinkVar;
             }
         }
     }

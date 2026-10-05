@@ -52,6 +52,9 @@ Attribute VB_Creatable = False
 Attribute VB_PredeclaredId = True
 Attribute VB_Exposed = False
 Option Explicit
+Private Declare Function SendMessageW Lib "user32" (ByVal hWnd As LongPtr, ByVal Msg As Long, ByVal wParam As LongPtr, ByVal lParam As LongPtr) As Long
+Private mIdx As Long
+Private mHits As Long
 ' 两枚控件同尺寸 (2400 缇 = 160 像素 @96dpi), 只差 .ctl 声明的 ScaleMode。
 ' 判据写成**同一枚字体量出来的两个数之比**, 于是与 DPI 无关:
 '   缇型控件的 TextWidth / ScaleWidth 必须 = 像素型的 x Screen.TwipsPerPixelX
@@ -114,6 +117,39 @@ Private Sub Form_Load()
     Next
     Debug.Print "U-ARRM-methods=" & aok
     Debug.Print "U-ARR=" & CStr(ac = 3 And al = 0 And au = 2 And aok = 3)
+    ' account 222: a UC control array needs one thunk/sink pair PER ELEMENT, and
+    ' the design-time Index has to reach the single shared handler. Three heads,
+    ' all of them required: i1=1 is this element's Index; h1=1 means one raise
+    ' fires exactly once (neighbours stay silent); h2=2 means element 2 used its
+    ' OWN sink instead of overwriting element 1's slot.
+    Dim eIdx1 As Long, eHits1 As Long, eRet As Long
+    mIdx = -1
+    mHits = 0
+    eRet = uArr(1).Fire()
+    eIdx1 = mIdx
+    eHits1 = mHits
+    eRet = uArr(2).Fire()
+    Debug.Print "U-ARREVT-RAW i1=" & eIdx1 & " h1=" & eHits1 & " i2=" & mIdx & " h2=" & mHits & " ret=" & eRet
+    Debug.Print "U-ARREVT=" & CStr(eIdx1 = 1 And eHits1 = 1 And mIdx = 2 And mHits = 2 And eRet = 7)
+    ' account 226: the head above lets the container call Fire() itself; this head
+    ' is a REAL gesture - WM_LBUTTONUP goes to element 2's own host window and
+    ' must travel the desc click slot (after the MouseUp handoff) -> UC_Click ->
+    ' this element's sink -> shared handler with Index=2. Without this head a
+    ' missing click slot (the old shape) would still read green.
+    Dim hElem As LongPtr, mRet As Long, iM As Long, hM As Long
+    hElem = uArr(2).Hw()
+    mIdx = -1
+    mHits = 0
+    mRet = SendMessageW(hElem, &H202, 0, 0)
+    iM = mIdx
+    hM = mHits
+    Debug.Print "U-ARRCLICK-RAW hw=" & (hElem <> 0) & " idx=" & iM & " hits=" & hM & " ret=" & mRet
+    Debug.Print "U-ARRCLICK=" & CStr(hElem <> 0 And iM = 2 And hM = 1 And mRet = 0)
     Debug.Print "U-DONE"
     Unload Me
+End Sub
+
+Private Sub uArr_Hit(Index As Integer)
+    mHits = mHits + 1
+    mIdx = Index
 End Sub

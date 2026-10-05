@@ -927,7 +927,18 @@
 
     // Fix 112: in-project UserControl (.ctl) designer spec table (lowercase module -> FrmFile)
     // czUI fix: UC 事件 attach 行 (文件作用域 thunk/sink 在 prelude 生成)
-    std::map<std::string, std::vector<std::string>> ucEventAttach_;
+    // 账 #222: 键从"控件名"改成"控件名 + 元素号" —— 控件数组的 24 枚元素共用一枚处理器,
+    // 但每枚要自己的 thunk 与自己的 sink (元素号得交得回去), 按名字存就只剩最后一枚。
+    // sink 变量名一起存: 挂接那侧以前把 "_sink_" + 名字**再拼一遍**, 那是第二处拼名。
+    struct UcEventAttach {
+        std::vector<std::string> lines;
+        std::string sinkVar;
+    };
+    std::map<std::string, UcEventAttach> ucEventAttach_;
+    // 账 #222: 同一趟登记顺手记下"sink 供了哪一枚事件" (键 = ctrlElemKey + "." + 事件小写名)。
+    // UC 的 Click 走 RaiseEvent 到 sink 到 thunk, 子类化那条 WM_LBUTTONUP 臂再发一遍就是
+    // 一次点击两声 (实测 ucProgressCircular 的 Form1.c 两路都有)。
+    std::set<std::string> ucSinkEvents_;
 
     // Fix <vbeclipse> rev17: 本窗体里**充当 WithEvents 事件处理器**的过程名 (小写)。
     // 由 cgen_form_prelude 在扫 <ctrl>_<Event> 命中时登记。用途: 事件处理器是"跨对象
