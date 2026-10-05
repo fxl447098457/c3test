@@ -3814,14 +3814,21 @@ if ($Category -in @("all", "run", "vbp")) {
     # 账 #187: Charts 2020 的三枚 UC 子工程真编真链 (x64 + x86)，只要求"编得过、出得了 exe"，不跑。
     # 本轮实测字节数 (当前这台)：x64 696,320 / 576,000 / 576,000；x86 496,128 / 498,176，
     # ucChartBar x86 = .build/b191new/ucChartBar/Proyecto1.exe。
-    # ucProgressCircular / ucTreeMaps **刻意不列** —— 它们今天还红着 (B29③④ 与 #192/#196)，
-    # 列进来就是把已知红当门禁基线；编过之后再加，那一加就是"这个工程从此不许退回编不过"。
+    # ucProgressCircular **刻意不列** —— 它今天还红着 (B29③④)，列进来就是把已知的红当门禁基线；
+    # 等编过之后再加，那一加就是"这个工程从此不许退回编不过"。ucTreeMaps 原本也在这条黑名单里，
+    # 账 #201 手写三枚 DI 桩之后它编得过、链得出 exe ⇒ 移到下面那组去了。
     Test-VbpBuild "charts_ucChartBar"  "$Tests\Charts 2020\ucChartBar\Proyecto1.vbp"
     Test-VbpBuild "charts_ucChartBar_x86" "$Tests\Charts 2020\ucChartBar\Proyecto1.vbp" -Arch "x86"
     Test-VbpBuild "charts_ucChartArea"  "$Tests\Charts 2020\ucChartArea\Proyecto1.vbp"
     Test-VbpBuild "charts_ucChartArea_x86" "$Tests\Charts 2020\ucChartArea\Proyecto1.vbp" -Arch "x86"
     Test-VbpBuild "charts_ucPieChart"  "$Tests\Charts 2020\ucPieChart\Proyecto1.vbp"
     Test-VbpBuild "charts_ucPieChart_x86" "$Tests\Charts 2020\ucPieChart\Proyecto1.vbp" -Arch "x86"
+    # 账 #201: ucTreeMaps 是 #187 立这条门禁时**刻意不列**的那两枚之一（当时卡在 B29③④ 与
+    # #192/#196 的编译错上）。现在两刀的编译面全清、只剩三枚 DI 桩没登记 ⇒ 手写单桩之后
+    # 第一次真编真链出 exe（本轮实测 x64 659,968 / x86 562,688 字节，.build/b201out/）。
+    # 这一加就是那句口径："这个工程从此不许退回编不过"。
+    Test-VbpBuild "charts_ucTreeMaps"  "$Tests\Charts 2020\ucTreeMaps\Proyecto1.vbp"
+    Test-VbpBuild "charts_ucTreeMaps_x86" "$Tests\Charts 2020\ucTreeMaps\Proyecto1.vbp" -Arch "x86"
 
     # <vbeclipse> 回归夹子 (optdef) 账 #194: VB 的整数类型后缀是**词法**，不许抄进生成 C。
     # 语义层那份 Optional 默认值求值以前直接 return rawText，于是 `Optional ... As Long = 0&` 发成
