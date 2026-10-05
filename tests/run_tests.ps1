@@ -713,6 +713,19 @@ function Test-CaseIsShape {
         $out | Select-Object -First 6 | ForEach-Object { Write-Host "  $_" }
     }
 }
+function Test-RtlNakedNames {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] rtl_naked_names ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\check_rtl_naked_names.ps1" 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        $out | Select-Object -First 6 | ForEach-Object { Write-Host "  $_" }
+    }
+}
 function Test-IntLiteralShape {
     $script:total++
     Write-Host -NoNewline "  [STATIC] int_literal_shape ... "
@@ -1762,6 +1775,14 @@ if ($Category -in @("all", "run", "bas")) {
         "CI-word=beq/gtm/rest", "CI-half=hi/lo/mid", "CI-var=hi/lo/hi", "CI-DONE")
     Add-BasTest "test_caseis" "$Tests\test_caseis.bas" $ciNeedles
     Add-BasTest "test_caseis_x86" "$Tests\test_caseis.bas" $ciNeedles -Arch "x86"
+    # <vbeclipse> 账 #220: B / BF 曾被 RTL 当成两枚**外部链接的 C 全局** (const int32_t B = 1;
+    # BF = 2;) 去接 Picture.Line 发码原样吐出的语法旗标。用户模块一发 `Public B As Long` 就撞成
+    # C2373 + C2166 给 const 赋值 —— 改前探针实测 BUILD-RC=1 / 5 条诊断 / no exe。旗标现在由
+    # parser 在 Line 的 style 位置折成字面量, 这两个名字整条归还给用户 (位置那一头见 pcline 的
+    # [CODEGEN-NOTE]，两处不许互相覆盖)。
+    $ncNeedles = @("NC-B=13 NC-BFLEN=2", "NC-ACC=15", "NC-BOX=3/8", "NC-DONE")
+    Add-BasTest "test_nameclash" "$Tests\test_nameclash.bas" $ncNeedles
+    Add-BasTest "test_nameclash_x86" "$Tests\test_nameclash.bas" $ncNeedles -Arch "x86"
     # <vbeclipse>: Join/Filter 的数组槽 (Variant 数组曾按 BSTR* 读 → 段错误; Filter 的
     # VB6 可选参曾不补 → C2198/C2440 编不过)。含 1-based 源数组、零命中空数组、非字符串元素 → 13。
     Add-BasTest "test_joinfilter" "$Tests\test_joinfilter.bas" @("JF-var=[abc|xyz|abd]", "JF-var-def=[abc xyz abd]", "JF-str=[abc|xyz|abd]", "JF-f-lb=0 ub=1", "JF-f=[abc|abd]", "JF-none-ub=-1", "JF-excl-ub=0", "JF-excl=[xyz]", "JF-err=13", "JF-DONE")
@@ -4326,6 +4347,7 @@ if ($Category -in @("all", "compile")) {
     Test-BodyDeclShape
     Test-CaseIsShape
     Test-DocHostAuthority
+    Test-RtlNakedNames
     Test-SubclassSlotSites
     Test-CtrlArrayMemberSites
     Test-EventHandlerNames
@@ -4645,6 +4667,14 @@ if ($Category -in @("all", "syntax")) {
         "VB3001", "nopeHereIsNotAName") @("'Is'")
     Test-CodegenNote "caseis_no_phantom_local" @("$Tests\test_caseis_implicit.bas") @(
         "int32_t _vb6_select_0", "BSTR _vb6_select_1") @("vb6_VARIANT Is")
+    # <vbeclipse> 账 #220 的位置那一头: Line 的 B / BF 只在 **style 格** (color 之后) 折成
+    # 字面量 1 / 2, 写在 color 格时必须还是用户自己的变量。改前两格都发裸名、由 RTL 的
+    # const int32_t B / BF 接住 (语料实测 vb6_ComPackValue(BF)) —— 所以 Absent 钉的就是那两条,
+    # 它们在场上即说明「名字又回来了」。四格全钉: 两条 style 折成数、两条 color 留名字。
+    Test-CodegenNote "pcline_flag_folded" @("$Tests\pcline\PcForm.frm") @(
+        "vb6_ComPackInt(255), vb6_ComPackInt(2)", "vb6_ComPackInt(16711680), vb6_ComPackInt(1)",
+        "vb6_ComPackInt(15), vb6_ComPackInt(B)", "vb6_ComPackInt(16), vb6_ComPackInt(BF)") @(
+        "vb6_ComPackValue(BF)", "vb6_ComPackValue(B)")
     # <vbeclipse> 账 #217 第二刀: 文档隐式对象 (UserControl / PropertyPage / Extender / Ambient)
     # 与全局库前缀 VBA 现在语义层也认识 (判据 = Module::docKind 一处写、两处读)。两份真工程的
     # 发码语料实测: VB3001 全仓 2934→158 (grid 499→19、Charts 主工程 499→34)，而宿主符号一个没动

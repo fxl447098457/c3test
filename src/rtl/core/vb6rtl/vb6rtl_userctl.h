@@ -218,9 +218,8 @@ extern int16_t Changed;
 #define vbPicTypeIcon          3
 #define vbPicTypeEMetafile     4
 
-// --- Picture.Line 模式常量 (Fix 102 把 `, B` / `, BF` 原样作为实参发射) ---
-extern const int32_t B;   // 画方框
-extern const int32_t BF;  // 实心方框
+// Picture.Line 的 B / BF 由 parser 在 style 位置折成字面量 1/2 (账 #220) —— 这里曾
+// extern 过两枚裸名 C 全局，与 VB 工程里叫 B 的模块级变量直接撞车，故删除。
 
 #ifdef __cplusplus
 }

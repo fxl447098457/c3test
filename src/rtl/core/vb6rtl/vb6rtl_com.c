@@ -672,9 +672,11 @@ int16_t vb6_PropertyPage_Changed     = 0;
 // --- PropertyPage built-in Changed property (Fix 108d) ---
 int16_t Changed = 0;
 
-// --- Picture.Line mode constants ---
-const int32_t B  = 1;
-const int32_t BF = 2;
+// --- Picture.Line 的模式旗标不再有 C 侧名字 (账 #220) ---
+// 以前这里写着 `const int32_t B = 1; const int32_t BF = 2;`，让 parser 原样发出去的裸名
+// 有个落脚处。VB6 允许工程里有个叫 B 的模块级变量（`For B = 1 To 3` 这种写法到处都是），
+// 而那两枚是**外部链接的 C 全局** ⇒ 撞名直接 C2373 重定义 + C2166，连 exe 都出不来。
+// 旗标现在由 parser 在 Line 的 style 位置折成字面量 1/2，RTL 不再需要名字。
 
 // VB6 UserControl.TextWidth/TextHeight: measure with GDI using current Font
 // (unit = ScaleMode; simplified to pixels here; Twip handled once hosting lands)

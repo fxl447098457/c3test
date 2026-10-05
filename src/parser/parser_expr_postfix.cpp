@@ -166,14 +166,34 @@ ExprPtr Parser::parsePostfix(ExprPtr expr) {
                                "expected ')' in Line (x1,y1)-(x2,y2)");
                         call->positional.push_back(std::move(x2));
                         call->positional.push_back(std::move(y2));
-                        // 可选后续参数: ", color" / ", color, BF|B|F"
+                        // 可选后续参数: ", color" / ", color, BF|B"
+                        int trailingIdx = 0;
                         while (match(TokenKind::Comma)) {
                             if (cur_.kind == TokenKind::NewLine ||
                                 cur_.kind == TokenKind::Colon ||
                                 cur_.kind == TokenKind::EndOfFile) {
                                 break;
                             }
+                            // VB6 的 `Line` 尾参只有 color 与 style 两格，而 style 那格的
+                            // B / BF 是**语法旗标**不是名字 (账 #220)。折成数值就地定死：
+                            // 名字一旦进 AST，发码就把它原样发出去，靠 RTL 里两枚裸名全局
+                            // (const int32_t B / BF) 接住 —— 任何工程有个模块级变量叫 B 就撞车。
+                            // 只认 style 位置 (trailingIdx==1，即 color 已给出)：
+                            // `Line (a,b)-(c,d), B` 那一格按 VB6 是 color，用户的 B 必须照旧成立。
+                            const std::string optWord = toLower(cur_.text);
+                            if (trailingIdx == 1 && cur_.kind == TokenKind::Identifier &&
+                                (optWord == "b" || optWord == "bf")) {
+                                auto locOpt = currentLoc();
+                                advance();  // 消费 B / BF
+                                auto lit = std::make_unique<LiteralExpr>(
+                                    locOpt, LiteralKind::Integer, optWord == "b" ? "1" : "2");
+                                lit->intValue = optWord == "b" ? 1 : 2;
+                                call->positional.push_back(std::move(lit));
+                                trailingIdx++;
+                                continue;
+                            }
                             call->positional.push_back(parseExpression());
+                            trailingIdx++;
                         }
                     }
                 }
