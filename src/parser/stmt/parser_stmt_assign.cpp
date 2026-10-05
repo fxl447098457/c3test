@@ -48,46 +48,22 @@ std::unique_ptr<CallStmt> Parser::parseCallStmt() {
 StmtPtr Parser::parseDimStmt() {
     auto loc = currentLoc();
     advance(); // consume 'Dim'
-    auto varDecl = parseVariableDecl(AccessLevel::Private, false);
-    // P20: Dim a As Long, b As String — comma-separated multi-variable
-    if (cur_.kind != TokenKind::Comma) {
-        return std::make_unique<LocalDeclStmt>(loc, std::move(varDecl));
+    return wrapBodyDecls(loc, parseVariableDeclList(AccessLevel::Private, false));
+}
+
+// 体级声明只有一种形状: 一条声明符一条 LocalDeclStmt。parse*DeclList 在多声明符时返回
+// MultiDecl, 这里就地展开 —— 以前 Dim 自己手写一遍展开 (那份副本漏了 parseVariableDecl
+// 里的 WithEvents 与「后缀即类型」两步, 于是 `Dim a&, b&` 的第二枚落回 Variant),
+// 而 Const/Static/Public 三条把 MultiDecl 原样交给语义层, 那儿的 switch 不认这个 kind,
+// 于是一枚名字都不登记、每条使用报一条 VB3001 (账 #215)。
+StmtPtr Parser::wrapBodyDecls(SourceLocation loc, DeclPtr decl) {
+    if (decl->kind != ASTNodeKind::MultiDecl) {
+        return std::make_unique<LocalDeclStmt>(loc, std::move(decl));
     }
-    // Multiple variables: wrap in Block
+    auto& multi = static_cast<MultiDecl&>(*decl);
     StmtList stmts;
-    stmts.push_back(std::make_unique<LocalDeclStmt>(loc, std::move(varDecl)));
-    while (match(TokenKind::Comma)) {
-        // Parse additional variable name As Type
-        auto nameTok = expectName("expected variable name");
-        // Fix 028: 剥离 VB6 类型后缀 ($%&!#@), 与 parseVariableDecl 保持一致
-        auto suffixInfo = stripTypeSuffix(nameTok.text);
-        const std::string& varName = suffixInfo.name;
-        std::vector<VariableDecl::Dimension> dimensions;
-        bool isDynamicArray = false;
-        if (match(TokenKind::LeftParen)) {
-            if (cur_.kind != TokenKind::RightParen) {
-                do {
-                    VariableDecl::Dimension dim;
-                    auto first = parseExpression();
-                    if (match(TokenKind::To)) { dim.lower = std::move(first); dim.upper = parseExpression(); }
-                    else { dim.upper = std::move(first); }
-                    dimensions.push_back(std::move(dim));
-                } while (match(TokenKind::Comma));
-            } else { isDynamicArray = true; }
-            expect(TokenKind::RightParen, DiagnosticID::ParseExpectedToken, "expected ')'");
-        }
-        bool isNew = false;
-        TypeRefPtr asType;
-        if (match(TokenKind::As)) {
-            if (match(TokenKind::New)) isNew = true;
-            asType = parseTypeRef();
-        }
-        ExprPtr initializer;
-        if (match(TokenKind::Equals)) initializer = parseExpression();
-        stmts.push_back(std::make_unique<LocalDeclStmt>(loc,
-            std::make_unique<VariableDecl>(loc, AccessLevel::Private, varName,
-                false, false, isNew, std::move(asType), std::move(initializer),
-                std::move(dimensions), isDynamicArray)));
+    for (auto& d : multi.declarations) {
+        stmts.push_back(std::make_unique<LocalDeclStmt>(loc, std::move(d)));
     }
     return std::make_unique<Block>(loc, std::move(stmts));
 }
@@ -224,8 +200,7 @@ std::unique_ptr<ReDimStmt> Parser::parseReDimStmt() {
 StmtPtr Parser::parseConstStmtInBody() {
     auto loc = currentLoc();
     // 不需要 advance() — parseConstDeclList -> parseConstDecl 会消费 'Const'
-    auto decl = parseConstDeclList(AccessLevel::Private);
-    return std::make_unique<LocalDeclStmt>(loc, std::move(decl));
+    return wrapBodyDecls(loc, parseConstDeclList(AccessLevel::Private));
 }
 
 StmtPtr Parser::parseStaticStmtInBody() {
@@ -240,8 +215,7 @@ StmtPtr Parser::parseStaticStmtInBody() {
         auto funcDecl = parseFunctionDecl(AccessLevel::Private, true);
         return std::make_unique<LocalDeclStmt>(loc, std::move(funcDecl));
     }
-    auto varDecl = parseVariableDeclList(AccessLevel::Private, true);
-    return std::make_unique<LocalDeclStmt>(loc, std::move(varDecl));
+    return wrapBodyDecls(loc, parseVariableDeclList(AccessLevel::Private, true));
 }
 
 StmtPtr Parser::parseAccessDeclInBody() {
@@ -250,8 +224,7 @@ StmtPtr Parser::parseAccessDeclInBody() {
     AccessLevel access = (cur_.kind == TokenKind::Public)
         ? AccessLevel::Public : AccessLevel::Private;
     advance();
-    auto varDecl = parseVariableDeclList(access, false);
-    return std::make_unique<LocalDeclStmt>(loc, std::move(varDecl));
+    return wrapBodyDecls(loc, parseVariableDeclList(access, false));
 }
 
 // ============================================================

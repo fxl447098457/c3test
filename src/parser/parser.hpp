@@ -222,6 +222,8 @@ private:
     StmtPtr parseConstStmtInBody();
     StmtPtr parseStaticStmtInBody();
     StmtPtr parseAccessDeclInBody();
+    // 体级声明的单一约定: 一条声明符一条 LocalDeclStmt (账 #215)
+    StmtPtr wrapBodyDecls(SourceLocation loc, DeclPtr decl);
 
     // 行标签/赋值/调用 (两可: label: 或 x = 1 或 proc args)
     StmtPtr parseLabelOrAssignmentOrCall();

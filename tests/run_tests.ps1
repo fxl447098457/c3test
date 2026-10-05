@@ -674,6 +674,19 @@ function Test-BitwiseAuthority {
         $out | Select-Object -First 6 | ForEach-Object { Write-Host "  $_" }
     }
 }
+function Test-BodyDeclShape {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] bodydecl_shape ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\check_bodydecl_shape.ps1" 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        $out | Select-Object -First 6 | ForEach-Object { Write-Host "  $_" }
+    }
+}
 function Test-IntLiteralShape {
     $script:total++
     Write-Host -NoNewline "  [STATIC] int_literal_shape ... "
@@ -1704,6 +1717,14 @@ if ($Category -in @("all", "run", "bas")) {
         "BF-cond=hit", "BF-boolcond=miss", "BF-sum=85", "BF-DONE")
     Add-BasTest "test_bitops" "$Tests\test_bitops.bas" $bitsNeedles
     Add-BasTest "test_bitops_x86" "$Tests\test_bitops.bas" $bitsNeedles -Arch "x86"
+    # <vbeclipse> 账 #215: 体级声明收成「一条声明符一条 LocalDeclStmt」。改前四条体级路两种形状 ——
+    # Dim 自己手写一遍展开(那份副本漏了 WithEvents 与「后缀即类型」)，Const/Static/体级 Public 把
+    # MultiDecl 原样交给语义层(switch 不认) ⇒ 一枚名字都不登记、每条使用一条 VB3001(真工程一片 276 条)，
+    # 而 `Dim a&, b&` 第二枚落回 Variant 是**真值差**(BD-empty 改前 3/0)。BD-* 其余六条是护栏(改前改后同)。
+    $bdNeedles = @("BD-dim=9", "BD-suffix=Long/Long/15", "BD-empty=3/3", "BD-const=345",
+        "BD-static=33", "BD-arr=13/2/3", "BD-variant=Long/String/1", "BD-DONE")
+    Add-BasTest "test_bodydecl" "$Tests\test_bodydecl.bas" $bdNeedles
+    Add-BasTest "test_bodydecl_x86" "$Tests\test_bodydecl.bas" $bdNeedles -Arch "x86"
     # <vbeclipse>: Join/Filter 的数组槽 (Variant 数组曾按 BSTR* 读 → 段错误; Filter 的
     # VB6 可选参曾不补 → C2198/C2440 编不过)。含 1-based 源数组、零命中空数组、非字符串元素 → 13。
     Add-BasTest "test_joinfilter" "$Tests\test_joinfilter.bas" @("JF-var=[abc|xyz|abd]", "JF-var-def=[abc xyz abd]", "JF-str=[abc|xyz|abd]", "JF-f-lb=0 ub=1", "JF-f=[abc|abd]", "JF-none-ub=-1", "JF-excl-ub=0", "JF-excl=[xyz]", "JF-err=13", "JF-DONE")
@@ -4265,6 +4286,7 @@ if ($Category -in @("all", "compile")) {
     Test-ControlDC
     Test-SaAccess
     Test-BitwiseAuthority
+    Test-BodyDeclShape
     Test-SubclassSlotSites
     Test-CtrlArrayMemberSites
     Test-EventHandlerNames
@@ -4572,6 +4594,11 @@ if ($Category -in @("all", "syntax")) {
     }
     Test-CodegenNote "in_n3_undeclared_in_hole" @("$Tests\interp_neg\in_n3_undeclared_in_hole.bas") @("VB3001", "nopeHere")
     Test-CodegenNote "in_n4_second_hole_line" @("$Tests\interp_neg\in_n4_second_hole_line.bas") @("VB3001", "alsoNope", "(8,7)")
+    # <vbeclipse> 账 #215 的另一面: 数值针看不出 Variant 与 Long 的差别(TypeName 装箱后都打 Long)，
+    # 所以这里钉发码里的声明行，并用 Absent 钉诊断 —— 改前同一份夹具是 7 条 VB3001。
+    Test-CodegenNote "bodydecl_one_per_declarator" @("$Tests\test_bodydecl.bas") @(
+        "int32_t u1 = 0;", "int32_t u2 = 0;",
+        "const int32_t c2 = 4;", "static int32_t st2 = 0;") @("VB3001")
     # 账 #184 的形状面: 被 AddressOf 取址的过程 → Private 的发 static 桩、Public 的发外链桩,
     # 桩体逐字转调本体 (参数个数/宽度/顺序与本体一致, 只有约定不同); AddressOf 站点取桩地址;
     # 本体**保持 cdecl** (直接调用那条路与 RTL 的 cdecl 登记面都不受牵连)。
