@@ -330,7 +330,7 @@ asm 片打 `PASS=13 SKIP=0 TOTAL=14`（差 1），其余七片自洽。本轮 11
 - 按 HWND 的 `TextHeight`/`TextWidth`：只有 UserControl 版（`vb6rtl_com.c:731/744` + 静态 `vb6_uc_measureText:693`，按实例走 `uc_host.c:882/886`）。签名可以直接照 `vb6_UC_TextHeightOf(void* inst, BSTR text)` 换 HWND。
 - 带 HWND 参数的 `ScaleX`/`ScaleY`：只有 `vb6_UserControl_ScaleX/Y`（`vb6rtl_com.c:804/810`，无 HWND），而裸名那条改写还挂在 `isDesignerModule_` 上（`cgen_expr_ident_builtin.inc:215-232`）⇒ `.pag` 里的裸 `ScaleX(...)` 认不出来。换算的零件是现成的：`vb6_ScalePxToUser` / `vb6_ScaleUnitsPerPx` / `vb6_WindowScaleModeSelf`（`vb6forms_window.h:58-67`，见 §B32 那条 ScaleMode 的坑）。
 
-开工顺序建议（2026-10-05 订正）：hDC 与 TextHeight/TextWidth **两条都已出**（门 #323 / #324），ucTreeMaps 的 UnicodePrint 编译面因此全清 —— 但"整条通了"这句要说得更准：它现在停在链接期缺三枚桩（§B36/#201），而页里的控件压根没被创建（§B34/#199）也还没解。剩下的：带 HWND 的 `ScaleX`/`ScaleY`（与 §B32 那条 ScaleMode 同源，那条已通，所以这一条现在做得对了）、#199 的甲/乙口径（页从来没被创建 ⇒ 页里的绘图面至今白画）、新记的 §B37/#202（Frame 标题带按默认字体量）。
+开工顺序建议（2026-10-05 订正）：hDC 与 TextHeight/TextWidth **两条都已出**（门 #323 / #324），ucTreeMaps 的 UnicodePrint 编译面因此全清 —— 但"整条通了"这句要说得更准：它现在停在链接期缺三枚桩（§B36/#201），而页里的控件压根没被创建（§B34/#199）也还没解。剩下的：带 HWND 的 `ScaleX`/`ScaleY`（与 §B32 那条 ScaleMode 同源，那条已通，所以这一条现在做得对了）、#199 的甲/乙口径（页从来没被创建 ⇒ 页里的绘图面至今白画）、新记的 §B37/#202（Frame 标题带按默认字体量）。另：ucTreeMaps 的第一趟真跑已量到 x64 启动期 AV（新账 §B38/#203，x86 是好的）。
 
 **→ 本轮（2026-10-05）过后订正两句**：① §B31 里那条 `.ScaleMode` 不属于本账，它是 §B32（账 #197）的读表那一半，已随 #197 出掉 —— **ucTreeMaps 的 C2039 实测 4→2**，剩下的两条就是 `hDC` 与 `TextHeight`（+ C2198/C2440 各 1，同根）。② 做 §B32 的时候顺带量出一条**更大的一格**（见 §B34，账 **#199**）：`.pag` 的设计块控件**从来没被创建** —— 同一份 emit 里 PropPagFMR 那一段 `vb6_CreateControl` **0 处**、同工程 Form1 那一段 **14 处**，页里的 `vb6_hwnd_Picture1` 是 `#define ... (*vb6_UC_DesignSlotOf(me, "Picture1"))` 而那个槽位按需新建、初值 NULL（`uc_host.c:641-652`）⇒ 属性页里 `With Picture1` 打的是一枚空句柄。**这条不修，本账剩下的两条做完 UnicodePrint 也还是白画** —— 接下去的开工顺序改成：#199 → #196。
 
@@ -382,7 +382,7 @@ asm 片打 `PASS=13 SKIP=0 TOTAL=14`（差 1），其余七片自洽。本轮 11
 
 **改**：一处出口 + 一份自存。新增 `static HFONT vb6_ControlFont(HWND)`（先问窗口，回 NULL 再读窗口属性 `VB6_CtrlFont`），setter `vb6_SetControlFontFromLogFont` 把自己 `CreateFontIndirectW` 出来的那张存进这个**新名字**（#185「一层一个属性名」那条纪律），三条读法全改走这一处。旧字体的找法刻意改成「先读自存、找不到才问窗口」—— 顺序反了会对真记字体的那几类（EDIT/BUTTON）**双删**（`WM_GETFONT` 回来的正是我们上一轮存进去的那张，两边都当成旧字体）。**顺带修掉一处 GDI 泄漏**：改前 STATIC 每写一次字体就漏一张，因为那句 `DeleteObject` 依赖的 `WM_GETFONT` 恒回 NULL ⇒ 旧字体永远找不到；现在找得到、也删得掉。已知边界（记在这里不装绿）：窗口销毁时最后一张字体不被 `DeleteObject`（Windows 回收属性表、但不认识 GDI 对象），一枚控件至多一张 —— 普通控件没有统一的 WM_DESTROY 挂钩（只有 picture/image 那层有，就是 #185/#196 归还 DC 的那一站），要补这一头得先造机制。
 
-**运行期读数**（真跑，x64 与 x86 **逐行相同**）：`TH06-FONTRAW a=29 b=16 b2=27 fsA=18 pfA=24 pfB=27` —— 设计期 18pt 的 picA 从 16 → **29**；运行期改 20pt 的 picB 从「改前改后都是 16」→ **16 / 27**；证人 `FontPixelHeight` 两台都答 **24 / 27**（改前那一句整行都不打）。TH03 因此从「只留读数」升回**真判据**：`ok7 = (tA > tB) And (tB2 > tB) And (pfA >= 18)`，`TH03-FONT=True` 进 `$dcSurfExpected`（两台各一条）。真工程配对：ucTreeMaps 两台仍 rc=0、诊断面 0 error、exe 659,968 / 562,688 字节（与 #201 那轮同尺寸）。
+**运行期读数**（真跑，x64 与 x86 **逐行相同**）：`TH06-FONTRAW a=29 b=16 b2=27 fsA=18 pfA=24 pfB=27` —— 设计期 18pt 的 picA 从 16 → **29**；运行期改 20pt 的 picB 从「改前改后都是 16」→ **16 / 27**；证人 `FontPixelHeight` 两台都答 **24 / 27**（改前那一句整行都不打）。TH03 因此从「只留读数」升回**真判据**：`ok7 = (tA > tB) And (tB2 > tB) And (pfA >= 18)`，`TH03-FONT=True` 进 `$dcSurfExpected`（两台各一条）。真工程配对：ucTreeMaps 两台仍 rc=0、诊断面 0 error、warning 面 109 VB3001 + 6 VB3003 + 1 VB4001（与 #201 那轮同一条），exe 659,968 / 562,688 **与 #201 那轮两个数字一模一样** —— 同尺寸一开始被我读成「这台没真的重新链接、拿的是旧产物」的形状，所以把两台产物目录**删空重跑**（09:31 / 09:32 新写的文件）：照样同尺寸 ⇒ 那是 PE 段对齐把这点增长吸收了，不是旧产物。**这一枪打在自己身上是有价值的**：判据「产物逐字节相同」本来就当不了判据（记忆里那条冷编两次 md5 就不同），但**反过来**"尺寸没变"也不能当成"没重编"的判据 —— 要问就删空目录再问一次。
 
 **护栏**：哨兵 D10 四条 —— 出口在 `vb6forms_ctrl.c` 恰好定义一次 / 文件里带 `WM_GETFONT` 的那一行恰好 1 且必须落在出口体内（第 dl+1..dl+8 行）/ `VB6_CtrlFont` 写者恰好 1 / 读者 >= 1。**假 needle 真红过**：把 measure 那一处换回裸 `SendMessageW(hw, WM_GETFONT, 0, 0)` ⇒ `FAIL D10 问窗口字体的那一行 = 2 处 -> vb6forms_ctrl.c:325 | :733`，换回来即绿。**这一刀自己的第一枪红得不该怪产品**：D10 落地那一次报的是 3 处，多出来那两条是我给两行**行尾注释**写了 `WM_GETFONT` —— 哨兵跳行首 `//`、不跳行尾注释，于是「注释把形状写出来」就自己造了红；措辞改成不嵌那个 token 才对上（同「计数要打印实测值」那一类自欺，只是这回是自欺的方式换了个方向）。**A/B** 86 份（BASE = #201 那份 emit 快照、NEW = 现在这台）⇒ changed=2、**OFFENDERS=0**；那 2 份就是 dcsurf 两台，逐行归因全是夹具自己新增的那几行（pfA/pfB 两条声明与两次 `vb6_ControlFontPixelHeight` 读、ok7、TH03 那条 Debug.Print、TH06 那串 concat 变长）—— 后端一字节未动，这正是「只动 RTL 的一刀在发码面应当一字不变」这条立论的钉法。
 
@@ -400,6 +400,15 @@ asm 片打 `PASS=13 SKIP=0 TOTAL=14`（差 1），其余七片自洽。本轮 11
 
 **修法在 #200 里已经造好了**，缺的是把它跨文件递过去：那一行改读 `vb6_ControlFont` ⇒ 要先把出口从 `static` 提出来、进内部头；同时 `VB6_CtrlFont` 的写侧要覆盖到 Frame 这一档（现在唯一那条写者是 `vb6_SetControlFontFromLogFont`）。哨兵 D10 今天刻意只圈 `vb6forms_ctrl.c`（规则注释里写着原因），跨出来那一天应当把普查范围一起放开成整个 `src/rtl` —— 别留一份「两处口径、只守一处」的表。
 
+
+### B38 ucTreeMaps 的 exe 第一次真跑：x86 起窗、x64 启动期 AV（账 #203，开着）
+
+#201 让这台工程第一次真编真链出 exe，本条是那份产物的**第一趟真跑**读数（`.build/b200_tmrun.ps1` 收 stdout/stderr 与退出码，`.build/b182_winprobe.ps1` 数窗口）：
+
+- **x86** = `alive=True mainhwnd=0x1606BC`，顶层窗口 6 条，其中 `cls=VB6_Form_Form1 txt=Form1` 是可见的 ⇒ **窗体真起来了**（另五条是 GDI+ Hook Window、ComboLBox、MSCTFIME 与两枚 Default IME，都是系统的）。
+- **x64** = 8 秒内自己退出，`code=-1073740771`（0xC0000409 fail-fast），而 crash trace 打的是 `code=0xc0000005 at rva=0xce8a7463` + `av read target=0x48777bc3`（那是个野值），24 帧里只有 5 帧落在 exe 内（rva=0x2602c / 0x35317 / 0x2194e / 0x21a4c / 0x21f74），stdout 0 字节、Form1 那一枚窗口根本没出现。
+
+⇒ 这一格从「编得过」推进到 VB6 那一侧的「能不能跑」；x64 起不来是**新缺陷**，不是 #201 那三枚桩的余波（那三枚在 x86 那条路上同样被调到，窗体照样起来）。**下一步（还没做）**：把 x64 那条 AV 归因 —— 顺序照 #182 那一味先拿带符号的产物把那几个 rva 落成函数名（**没符号化的 rva 名单不构成结论**），再分岔问「是产品发码把指针按 32 位存了」还是「工程自己的 Declare 把指针写成 `As Long`」，后者是改 VB 源码、不动编译器（#163/#175 那一族早已立过口径）。注意 x86 这一侧今天是**好的**，所以任何「回归坏了」的判据都不该把它算进去；反过来说，门禁今天只对这台工程断言「编得过」（Test-VbpBuild），跑得起来这件事还没进任何判据。
 
 ## C. 仍在生效的口径与工具事实（与本文档等长的一半价值在这里；完整版见记忆库）
 
