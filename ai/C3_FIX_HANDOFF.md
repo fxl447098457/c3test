@@ -806,6 +806,74 @@ compile 片 28→**29**，新那枚逐行读到 `[STATIC] rtl_naked_names ... PA
 （唯一的 SKIP 仍是 test_vbman，COM 未注册 32-bit 视图），asm 13/14、smoke 1/1。
 
 
+### B53 `Picture.Line` 的八处调用两跳都返回成功、一笔都不画：兜底把方法当属性取，而 RTL 两处都登记成「认识但什么都不做」（账 #221 = C29-PL-a，已出，门 待回填）
+
+这条缺陷的形状是**没有任何诊断的**：源侧 `ppProgressCircular.pag` 三句 `Picture1/2.Line (…)-(…), c, BF`
+（297 / 299 / 474，一份工程发码出 8 条调用），发码交出去的是
+`vb6_ComCallObject(vb6_ComGetObjectProp(vb6_hwnd_PictureN, L"Line"), L"Item", {…}, 6)` ——
+先把**方法名当属性**取回一个对象，再对那个对象取默认成员 `Item`。而 RTL 两处都把 Line 登记成
+"认识但不做事"：`vb6forms_axcontainer.c:304` 的属性位交回 `axSetEmpty` + `S_OK`（**Empty，不是 IDispatch**，
+所以第二跳根本没有可调的对象），`uc_hostmodel_call.inc:152` 干脆 `return 1`，注释写着
+「宿主对象: 未知方法一律空实现」。⇒ **两跳都成功、两跳都空**，编得过、跑得起、退出码照旧 0。
+这已经是本线第三条「控件方法落进 COM 兜底 = 运行期静默空转」（账 #143 的 SetFocus、账 #196 的
+hDC/TextHeight/ScaleX 各一条），差别只在 Line 是**六个实参**那一形。
+
+需求面先量了一遍：`Circle` / `PSet` / `Point` / `PaintPicture` 在 Charts 2020 / VBFlexGridDemo /
+czUI-main / VbQRCodegen-master 四份真源码里 **0 处**，`Cls` / `Print` 早已是原生出口
+（语料里 `vb6_ControlCls` 14、`vb6_ControlPrint` 2）⇒ Line 是这条绘图面上最后一个裸着的。
+
+顺带把账 #220 欠的那半收掉：那一刀为了不改语义，折出来的还是旧 RTL 全局的 `B=1 / BF=2`，
+只认两个词。现在按**字母位**折 —— `B=1 矩形 / C=2 椭圆 / F=4 填充`，按串里每个字母置位，
+所以 `BF=5`、`CF=6`，`C` / `F` / `CF` 三形从此有了落脚点。这张位口径是 parser 与 RTL **同一张表**
+的两头，哨兵 N5 就是钉这个：RTL 里 `style & 1` / `& 2` / `& 4` 各必须出现、`vb6_ControlLine` 必须 1 份。
+
+实现是三处 + 一处判定：RTL 新增 `vb6_ControlLine(hwnd, x1,y1,x2,y2, color, style)`
+（DC 走 `vb6_ControlPrint`/`vb6_ControlCls` **同一处** `vb6_ControlDrawDC`，坐标按
+`vb6_WindowScaleModeSelf` + `vb6_ScaleUserToPx` 折 —— 那是 #196/#197 的单位表，不另算一遍缇/像素；
+`color<0` 交回控件自己的 ForeColor；不填充那档必须显式 `NULL_BRUSH`，留着上一枚画刷就会顺带填一块）；
+后端加一张 `controlCanvasMethod` 表（照 `controlZeroArgMethod` / `controlOneArgMethod` /
+`controlScaleMethod` 那三张的规矩：**表只交名字、实参由码头拼**）；码头在
+`cgen_expr_call_callee_withm.inc` 的 Fix 185 那块之后接；**成员侧**
+`cgen_expr_member_form_builtin.inc` 的 PictureBox 那块要让 Line 也打标记。
+
+最后那一处是这一刀自己踩出来的：表与码头都写好后重编一台，产物**照旧**是
+`ComGetObjectProp(…, L"Line") + Item`，夹具四形全 False —— 因为成员侧没给标记时，兜底已经把
+`comObjExpr_` 换成 HWND 表达式（那段注释里 Fix 023e/089d 说的正是这件事），调用侧那张表根本收不到标记。
+于是哨兵加了 N6 第四条（成员侧必须问表），把"只接一头"这种半成品形状钉死。
+
+判据两面，都真跑：① 编译面 `tests/pcline/PcForm.frm` 的 [CODEGEN-NOTE] `pcline_flag_folded`
+换了针 —— 四条正针钉原生形状与其位置（`…, (int32_t)255, (int32_t)5)` 是 BF、`(int32_t)1)` 是 B，
+`(int32_t)B, (int32_t)0)` / `(int32_t)BF, (int32_t)0)` 是用户自己的名字**留在 color 格**、style 缺省 0），
+三条 Absent 钉 `ComGetObjectProp(vb6_hwnd_picA, L"Line")` 与改前那两形 `vb6_ComPackValue(B|BF)`；
+② 运行面新夹具 `tests/pcline/PcDraw.{frm,vbp}`（门禁 `pclinedraw` + `pclinedraw_x86`）—— 画完**问像素**：
+`PL01-LINE` 对角线那枚必须红而旁边那枚必须不红、`PL02-BOX` 边框蓝而中心不蓝、
+`PL03-FILL` 中心必须绿（这条同时证明 BF 与 B 折出来不是同一个数）、`PL04-CIRCLE` 沿 y 开小窗口找到切点
+且中心不红。四形 x64 与 x86 **逐行相同**：`PL05-RAW diag=255`、`PL06-RAW boxedge=16711680 boxmid=16777215`、
+`PL07-RAW fillmid=65280 circletop=255`。两条工具读数：画与问都要放在 **Timer 第一拍**（先写在
+Form_Load 里，`GetPixel` 一律回 -1 = CLR_INVALID，挪出去就全对，同 dcsurf 那条"窗口活着的时候问"）；
+DC 用 `GetDC(控件 hwnd)`（pbsub 那一族），`picC.hDC` 在这枚夹具上读出 0 —— 那是 #196 那一族的另一问，
+本刀不动。
+
+发码面 A/B（BASE = 账 #220 那台 `b228_new_emit`，NEW = 这一刀 `b230_new_emit`，inputs=100）：
+**changed=4**（Charts 主工程 + ucProgressCircular 各 × 两档）、same=96；每份 +8/−8 行，
+每一行都是同一条调用换了出口；CENSUS 兜底形状 `L"Line"` **32→0**、原生 `vb6_ControlLine(` **0→32**
+（正好 8 处 × 4 份投影，别处一份都没多），而 `VB3001` 146=146、`VB6_SA_AT(` 20972=20972、
+`_vb6_select_` 7346=7346 —— 一条噪声没新增。
+
+真工程那一头：`ucProgressCircular/Proyecto1.vbp` 两档真编译仍 rc=1、27 条 error C/档，但**逐文件归因**
+下来全在两处旧账 —— `Form1.c` 的 C2198 ×25 + C2084（控件数组事件臂两种形参表 + thunk 发两遍，
+**另立新账 #222**）与 `ucProgressCircular.c` 的 C2065 `"Count"`（账 #219 的 HPF_BARE 那半），
+而 Line 所在的 `ppProgressCircular.c` **零条诊断**、错误行里没有一条提到 `vb6_ControlLine`；
+BASE 语料里那几行 thunk 与声明**逐字相同**（changed=4 的差分行里没有一条是它们）⇒ 那些红不是本刀的因。
+
+边界与没验的一头：① `ScaleLeft/ScaleTop` 的**原点偏移**没进来（语料的 PictureBox 都是 0，
+真给非零原点的工程会画偏）；② VB6 那条「Line 之后 CurrentX/CurrentY 移到终点」没进来
+（调用点从没读回它，接进来要先定 CurrentX 的单位口径，与 #192 那一格同问）；
+③ `With picA : .Line (…)` 那一形**没测** —— 账 #192/#150 记着带实参的 With 形至今没接；
+④ 表里**刻意不给 Form 那一档**（只有 PictureBox 那处成员侧打了标记），给了就是"广告比应答复"，
+接 Form 之前先找出 `Me.Line` 那条码头；⑤ `Circle/PSet/Point` 的需求面是 0，所以这一格没为它们留出口。
+
+
 
 ## C. 仍在生效的口径与工具事实（与本文档等长的一半价值在这里；完整版见记忆库）
 
@@ -922,6 +990,18 @@ compile 片 28→**29**，新那枚逐行读到 `[STATIC] rtl_naked_names ... PA
     哨兵 `scripts/check_rtl_naked_names.ps1` 的 N2 把现存名单钉死（5 枚，`Changed` 那枚由账 #219 收），
     负控 = 往 `vb6rtl_com.c` 插一行 `int32_t b220probe = 0;` 立刻红并点名。这条口径的两头各有实物（同一轮探针 `.build/b229out/`，两台都 no exe）：`Public Changed As Long` ⇒ **C2371 重定义；不同的基类型**（头里 `extern int16_t Changed;` 那一枚，编译期撞）；`Public g_hoCount As Long` ⇒ **LNK2005 + LNK1169**（只在 `uc_host.c` 里非 static 定义、它那个头没进生成的模块 C，链接期撞）。读法一条：cl 的诊断**不在 C3.exe 的控制台输出里**，只在 `<output-dir>/c3-error.log`（按 gbk 解），否则会出现「BUILD-RC=1 且控制台 grep error C 得 0 条」这种假象。
 
+19. **一条控件方法要"两头都接"才算接上：成员侧打标记 + 调用侧查表**（2026-10-06，账 #221 踩的）：
+    后端那张"表只交名字、实参由码头拼"的做法（`controlZeroArgMethod` / `controlOneArgMethod` /
+    `controlScaleMethod` / 现在的 `controlCanvasMethod`）只在**成员侧把 `comObjExpr_` 留成小写控件名**
+    时才拿得到控件类型；成员侧不打标记，兜底 Fix 023e/089d 已经把 `comObjExpr_` 换成 HWND 表达式，
+    调用侧那张表**根本不会被问**。症状与账 #143 一模一样：产物照旧 `ComGetObjectProp(hwnd, L"方法名")`
+    再取 `Item`、两跳都 `S_OK`、一笔不画、一条诊断都不打。所以新加一张这种表时，
+    `scripts/check_rtl_naked_names.ps1` 的 N6 四条（声明 1 / 定义 1 / 调用侧 ≥1 / **成员侧 ≥1**）
+    必须四条都绿才算这一格做完；只看到"表建好了、码写好了"就提交，等于交一半。
+    同批两条夹具读数纪律：画完问像素要放在 **Timer 第一拍**（Form_Load 里 `GetPixel` 全 -1 = CLR_INVALID），
+    DC 用 `GetDC(控件 hwnd)` 而不是 `控件.hDC`（后者在这枚夹具上读出 0，属 #196 那一族的另一问）。
+
+
 
 ## D. 已完成项一行索引（叙述已删；原文在 `git show 1465da1:ai/C3_FIX_HANDOFF.md` 的对应 §区间）
 
@@ -987,4 +1067,5 @@ compile 片 28→**29**，新那枚逐行读到 `[STATIC] rtl_naked_names ... PA
 | 账 #217 第一刀（提交 `eef2c199`+`ab1db9c0` = §B50 那一族 `Case Is` 的假标识符不再进 AST + `tests/test_caseis.bas` 7 针 x86/x64 + 两条 [CODEGEN-NOTE] + `[STATIC] caseis_shape`） | 门 #341（唯一红 = frmevents 抖动，与本刀无关）→ 门 #342 全绿；发码语料 CENSUS `'Is'` 138→0，A/B 100 份 same=90 changed=10 全 +0 行 unattributable=0 | 已发货，门 #342 绿 |
 | 账 #217 第二刀（提交 `d2942bc8`+`910b37b8` = §B51 那一族文档隐式对象收成 `Module::docKind` 一处写两处读 + `tests/dochost/dhExp.ctl`/`dhImp.ctl` + `[STATIC] dochost_authority`） | 门 #342 = run 37345079456、attempt 1、11 job 全绿；compile 片 27→28、syntax 片 154→156；全仓语料 VB3001 2934→158，两份真工程各 499→19 / 499→34，宿主符号与 `_vb6_select_` 一动不动 | 已发货，门 #342 绿 |
 | 账 #220（本节 §B52 = `Picture.Line` 尾部的 `B`/`BF` 由 parser 在 style 格折成字面量 1/2、RTL 那两枚裸名 C 全局连 extern 一起删 + `tests/test_nameclash.bas`（x64/x86 真跑）+ `tests/pcline/PcForm.frm` 的 [CODEGEN-NOTE] 四针两 Absent + `[STATIC] rtl_naked_names`） | 发码语料 A/B inputs=100 changed=**4**（ucProgressCircular 两份 × 两档），每份 +8/−8 行且每行只差最末一格 `vb6_ComPackValue(B\|BF)` → `vb6_ComPackInt(1\|2)`，另 3 行 VB3001 纯删（Charts 主工程 34→31），其余 96 份一行没动；撞名探针改前 RC=1/5 诊断/no exe → 改后 RC=0/exe/`NC-B=13` | 已发货，门 #343 绿（11 job 全 completed/success；bas 两片 47→48、compile 28→29、syntax 156→157） |
+| 账 #221 = C29-PL-a（提交 `27767255` = `Picture.Line` 从 COM 兜底改道到原生 `vb6_ControlLine`：RTL 新出口 + `controlCanvasMethod` 表 + withm 码头 + 成员侧打标记；旗标改按字母位折 B=1/C=2/F=4 ⇒ BF=5、`C`/`F`/`CF` 从此有落脚点；`tests/pcline/PcDraw.{frm,vbp}` 画完问像素四形各钉两头 + `pcline_flag_folded` 换针 + 哨兵 N5/N6） | 发码 A/B inputs=100 changed=**4** same=96，每份 +8/−8 全是同一条调用换出口；CENSUS `L"Line"` **32→0** / `vb6_ControlLine(` **0→32**，VB3001 146=146、`VB6_SA_AT(` 20972=20972、`_vb6_select_` 7346=7346；x64 与 x86 真跑逐行相同 `PL01..PL04=True`（`diag=255 boxedge=16711680 boxmid=16777215 fillmid=65280 circletop=255`）；哨兵 PASS `fold bits 1+1+1, handoff 1+1, AST 0, RTL 1/bits, canvas 1+1+2+1`；只写表+码头不写成员侧时夹具四形**全 False**（N6 第四条由此起）；真工程 ucProgressCircular 两档仍 rc=1，27 条诊断逐文件归因到 #222（Form1.c 25×C2198+1×C2084）与 #219（`Count`），`ppProgressCircular.c` 零条 | 已发货，门 待回填 |
 | 账 #215（提交 `48feae8e` = §B49 的"体级声明收成一条声明符一条 LocalDeclStmt" + `tests/test_bodydecl.bas` 8 针（x86+x64 两形）+ `[CODEGEN-NOTE] bodydecl_one_per_declarator` （Absent 钉 VB3001）+ | 门 #338 = run 37321722861、head bab5b0ef、attempt 1 = 11 job 全 completed/success；compile 片 25→26 里新那枚就是 `[STATIC] bodydecl_shape ... PASS`（逐行读到），syntax 片 151→152 是 `[CODEGEN-NOTE] bodydecl_one_per_declarator ... PASS`，bas 两片之和 90→92 = test_bodydecl 与 test_bodydecl_x86 进了门禁且绿；vbp #3 那条 SKIP 仍是 test_vbman（COM 未注册，与 #335/#337 同形）） | **体级声明有四条路、两种形状**：`Dim a, b` 由 parseDimStmt 在语句层手写一遍声明符解析并出两条语句，`Const/Static/体级 Public` 的多声明符行把 MultiDecl 原样塞进 LocalDeclStmt，而语义层 visit(LocalDeclStmt) 的 switch 不认这个 kind ⇒ **一枚名字都不登记、每条使用一条 VB3001**（VBFlexGridDemo 一片 778 → 502 条，全部是诊断行）；手写那份副本还落在共享实现后面，漏了 WithEvents 与「后缀即类型」两步 ⇒ `Dim a&, b&` 第二枚静默落回 Variant（TypeName 看不出，VarType 3/0 才看得出）。收成 `Parser::wrapBodyDecls` 一处，四条路全调它，手写展开删掉。A/B 100 份 same=98 changed=2 且两条差异逐条归到诊断行；真编译四片 0 error C / 0 LNK；哨兵在 HEAD 树上 P1..P4 十条红 | 已发货，门 #338 绿 |
