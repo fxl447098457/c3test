@@ -214,15 +214,21 @@ CaseClause::CaseValue Parser::parseCaseValue() {
         if (checkAny({TokenKind::LessThan, TokenKind::GreaterThan,
                       TokenKind::LessEqual, TokenKind::GreaterEqual,
                       TokenKind::Equals, TokenKind::NotEquals})) {
-            // 将比较运算符和右操作数合并为一个表达式
-            // 例如: Is > 0 → BinaryExpr(IdentifierExpr("Is"), Gt, LiteralExpr(0))
-            auto isExpr = std::make_unique<IdentifierExpr>(currentLoc(), "Is");
+            // VB6 的 `Is` 是 Select 的测试表达式本身, 不是标识符 (账 #217)。占位左操作数
+            // 只为借一次优先级解析 (右操作数按比较符的绑定力截断, 不能吃进后面的 `Or`/`,`)
+            // —— 它不进 AST: 留在树里就被语义层登记成隐式 Variant, 每形一条 VB3001 或一枚没人用的局部。
+            auto placeholder = std::make_unique<IdentifierExpr>(currentLoc(), "Is");
             auto bp = getBindingPower(cur_.kind);
-            cv.value = parseLeftDenotation(std::move(isExpr), bp.l_bp);
-        } else {
-            // Case Is (无比较符) → 标识符值
-            cv.value = std::make_unique<IdentifierExpr>(currentLoc(), "Is");
+            auto expr = parseLeftDenotation(std::move(placeholder), bp.l_bp);
+            if (expr && expr->kind == ASTNodeKind::BinaryExpr) {
+                auto& bin = static_cast<BinaryExpr&>(*expr);
+                cv.relOp = bin.op;
+                cv.hasRelOp = true;
+                cv.value = std::move(bin.right);
+            }
         }
+        // 无比较符的 `Case Is`: 发码侧只看 isIsClause, 值留空 (改动前放的那枚
+        // IdentifierExpr("Is") 从来没人读)。
     } else {
         // 普通值或范围
         cv.value = parseExpression();

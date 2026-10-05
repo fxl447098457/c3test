@@ -144,9 +144,13 @@ class CaseClause : public Stmt {
 public:
     // Case 值: 可以是单个值、Is比较、范围或多个值
     struct CaseValue {
-        ExprPtr value;       // 单个值或范围的起始值
+        ExprPtr value;       // 单个值、范围的起始值, 或 Is 比较的右操作数
         ExprPtr toValue;     // To 范围的终止值 (可为nullptr)
-        bool isIsClause = false;  // 是否是 Case Is > 0 形式
+        // `Case Is > 0`: 比较符存成 relOp, value 只装右操作数 —— VB6 的 Is 站在
+        // 测试表达式的位置, 不是标识符 (账 #217; 改动前 parser 造一枚 IdentifierExpr("Is"))
+        bool isIsClause = false;
+        BinaryOp relOp = BinaryOp::Eq;   // 仅 hasRelOp 为真时有意义
+        bool hasRelOp = false;
     };
     std::vector<CaseValue> values;  // Case val1, val2, val3
     StmtList body;

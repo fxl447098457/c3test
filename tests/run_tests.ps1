@@ -687,6 +687,19 @@ function Test-BodyDeclShape {
         $out | Select-Object -First 6 | ForEach-Object { Write-Host "  $_" }
     }
 }
+function Test-CaseIsShape {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] caseis_shape ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\check_caseis_shape.ps1" 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        $out | Select-Object -First 6 | ForEach-Object { Write-Host "  $_" }
+    }
+}
 function Test-IntLiteralShape {
     $script:total++
     Write-Host -NoNewline "  [STATIC] int_literal_shape ... "
@@ -1725,6 +1738,17 @@ if ($Category -in @("all", "run", "bas")) {
         "BD-static=33", "BD-arr=13/2/3", "BD-variant=Long/String/1", "BD-DONE")
     Add-BasTest "test_bodydecl" "$Tests\test_bodydecl.bas" $bdNeedles
     Add-BasTest "test_bodydecl_x86" "$Tests\test_bodydecl.bas" $bdNeedles -Arch "x86"
+    # <vbeclipse> 账 #217 第一刀: `Case Is > 2` 里的 Is 不是标识符。改前 parser 造一枚
+    # IdentifierExpr("Is") 留在 AST 里借优先级解析，语义层就把它当未声明的名字 —— 模块写着
+    # Option Explicit 时每形一条 VB3001(两份真工程 36 条，发码语料全仓 138 条)，没写的那面
+    # 每枚用到的过程发一枚没人引用的 vb6_VARIANT 局部(探针实测)。发码从来只读比较符与右操作数，
+    # 值一直是对的，所以这里钉的是「形状换了、判定没换」: 六个关系符各自的分档(CI-rel/CI-ne)、
+    # Is 与普通值混写同一形(CI-mixed，优先级不能把 `, 1` 吃进右操作数)、字符串 Select(CI-word)、
+    # Single Select(CI-half，Fix 136 那一档的 Case 侧)、Variant 测试表达式(CI-var)。
+    $ciNeedles = @("CI-rel=lt/le/eq/gt/ge/ge", "CI-ne=is4/ne4", "CI-mixed=big/big/two/rest",
+        "CI-word=beq/gtm/rest", "CI-half=hi/lo/mid", "CI-var=hi/lo/hi", "CI-DONE")
+    Add-BasTest "test_caseis" "$Tests\test_caseis.bas" $ciNeedles
+    Add-BasTest "test_caseis_x86" "$Tests\test_caseis.bas" $ciNeedles -Arch "x86"
     # <vbeclipse>: Join/Filter 的数组槽 (Variant 数组曾按 BSTR* 读 → 段错误; Filter 的
     # VB6 可选参曾不补 → C2198/C2440 编不过)。含 1-based 源数组、零命中空数组、非字符串元素 → 13。
     Add-BasTest "test_joinfilter" "$Tests\test_joinfilter.bas" @("JF-var=[abc|xyz|abd]", "JF-var-def=[abc xyz abd]", "JF-str=[abc|xyz|abd]", "JF-f-lb=0 ub=1", "JF-f=[abc|abd]", "JF-none-ub=-1", "JF-excl-ub=0", "JF-excl=[xyz]", "JF-err=13", "JF-DONE")
@@ -4287,6 +4311,7 @@ if ($Category -in @("all", "compile")) {
     Test-SaAccess
     Test-BitwiseAuthority
     Test-BodyDeclShape
+    Test-CaseIsShape
     Test-SubclassSlotSites
     Test-CtrlArrayMemberSites
     Test-EventHandlerNames
@@ -4599,6 +4624,13 @@ if ($Category -in @("all", "syntax")) {
     Test-CodegenNote "bodydecl_one_per_declarator" @("$Tests\test_bodydecl.bas") @(
         "int32_t u1 = 0;", "int32_t u2 = 0;",
         "const int32_t c2 = 4;", "static int32_t st2 = 0;") @("VB3001")
+    # <vbeclipse> 账 #217 的诊断两面。neg 这份同时写着 `Case Is > 2` 和一枚真没声明过的名字:
+    # 'Is' 必须不再出现(改前每形一条)，nopeHereIsNotAName 必须继续出现 —— 拦「把整条诊断关掉」
+    # 那种修法。implicit 那份故意不写 Option Explicit，钉的是改前那枚没人引用的隐式局部。
+    Test-CodegenNote "caseis_is_not_an_identifier" @("$Tests\test_caseis_neg.bas") @(
+        "VB3001", "nopeHereIsNotAName") @("'Is'")
+    Test-CodegenNote "caseis_no_phantom_local" @("$Tests\test_caseis_implicit.bas") @(
+        "int32_t _vb6_select_0", "BSTR _vb6_select_1") @("vb6_VARIANT Is")
     # 账 #184 的形状面: 被 AddressOf 取址的过程 → Private 的发 static 桩、Public 的发外链桩,
     # 桩体逐字转调本体 (参数个数/宽度/顺序与本体一致, 只有约定不同); AddressOf 站点取桩地址;
     # 本体**保持 cdecl** (直接调用那条路与 RTL 的 cdecl 登记面都不受牵连)。
