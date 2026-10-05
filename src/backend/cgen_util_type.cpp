@@ -170,9 +170,16 @@ Vb6Type CCodeGen::inferExprType(Expr& expr) const {
                 bin.op == BinaryOp::Le || bin.op == BinaryOp::Ge ||
                 bin.op == BinaryOp::Like || bin.op == BinaryOp::Is)
                 return Vb6Type::Boolean;
-            // 逻辑运算符 → Boolean (VB6中)
-            if (bin.op == BinaryOp::And || bin.op == BinaryOp::Or || bin.op == BinaryOp::Xor)
-                return Vb6Type::Boolean;
+            // VB6 的 And/Or/Xor/Eqv/Imp 是**位运算**，结果类型只在
+            // TypeSystem::bitwiseResult 一处写 (账 #216：以前这份 oracle 无条件答
+            // Boolean，于是 `CStr(a Or b)` 打成 True、`vb6_ComPack*(hDC Or 0)` 装箱成
+            // VT_BOOL —— 值一直是位的数，只是类型被问错)。
+            if (bin.op == BinaryOp::And || bin.op == BinaryOp::Or ||
+                bin.op == BinaryOp::Xor || bin.op == BinaryOp::Eqv ||
+                bin.op == BinaryOp::Imp) {
+                return TypeSystem::bitwiseResult(inferExprType(*bin.left),
+                                                  inferExprType(*bin.right));
+            }
             // 浮点除法 → Double
             if (bin.op == BinaryOp::Div) return Vb6Type::Double;
 
@@ -195,7 +202,10 @@ Vb6Type CCodeGen::inferExprType(Expr& expr) const {
         }
         case ASTNodeKind::UnaryExpr: {
             auto& un = static_cast<UnaryExpr&>(expr);
-            if (un.op == UnaryOp::Not) return Vb6Type::Boolean;
+            // 同上：`Not` 对数值是按位取反，口径只在 TypeSystem::logicalNotResult 一处。
+            if (un.op == UnaryOp::Not) {
+                return TypeSystem::logicalNotResult(inferExprType(*un.operand));
+            }
             return inferExprType(*un.operand);
         }
         case ASTNodeKind::IndexOrCallExpr: {

@@ -52,14 +52,8 @@ void SemanticAnalyzer::visit(BinaryExpr& node) {
             break;
         case BinaryOp::And: case BinaryOp::Or: case BinaryOp::Xor:
         case BinaryOp::Eqv: case BinaryOp::Imp:
-            // 逻辑运算符: 如果两边都是Boolean → Boolean, 否则 → 数值提升
-            if (leftType == Vb6Type::Boolean && rightType == Vb6Type::Boolean) {
-                lastExprType_ = Vb6Type::Boolean;
-            } else if (TypeSystem::isNumeric(leftType) && TypeSystem::isNumeric(rightType)) {
-                lastExprType_ = TypeSystem::promote(leftType, rightType);
-            } else {
-                lastExprType_ = Vb6Type::Variant;
-            }
+            // 逻辑/位运算符: 口径在 TypeSystem::bitwiseResult 一处 (账 #216)
+            lastExprType_ = TypeSystem::bitwiseResult(leftType, rightType);
             break;
         case BinaryOp::Add: case BinaryOp::Sub:
         case BinaryOp::Mul: case BinaryOp::Div:
@@ -96,14 +90,8 @@ void SemanticAnalyzer::visit(UnaryExpr& node) {
             }
             break;
         case UnaryOp::Not:
-            // Not x: Boolean → Boolean, 数值 → 数值(按位取反)
-            if (operandType == Vb6Type::Boolean) {
-                lastExprType_ = Vb6Type::Boolean;
-            } else if (TypeSystem::isIntegral(operandType)) {
-                lastExprType_ = operandType;
-            } else {
-                lastExprType_ = Vb6Type::Variant;
-            }
+            // Not x: 口径在 TypeSystem::logicalNotResult 一处 (账 #216)
+            lastExprType_ = TypeSystem::logicalNotResult(operandType);
             break;
     }
 }

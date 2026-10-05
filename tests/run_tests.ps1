@@ -661,6 +661,19 @@ function Test-SaAccess {
         $out | Select-Object -First 6 | ForEach-Object { Write-Host "  $_" }
     }
 }
+function Test-BitwiseAuthority {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] bitwise_authority ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\check_bitwise_authority.ps1" 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        $out | Select-Object -First 6 | ForEach-Object { Write-Host "  $_" }
+    }
+}
 function Test-IntLiteralShape {
     $script:total++
     Write-Host -NoNewline "  [STATIC] int_literal_shape ... "
@@ -1678,6 +1691,19 @@ if ($Category -in @("all", "run", "bas")) {
     #  发码那一条把实参拼成 (int[]){i0, i1} 只塞了两个下标却按实际秩数交出去)。NA-in / NA-dyn-in 是范围内的负控。
     Add-BasTest "test_arr_nd" "$Tests\test_arr_nd.bas" @("NA-udt=5/6", "NA-in=0/23/211/2112",
         "NA-above=9", "NA-below=9", "NA-null=9", "NA-dyn-in=102/23", "NA-rank=9", "NA-DONE")
+    # <vbeclipse> 账 #216: 位运算 (And/Or/Xor/Eqv/Imp) 与一元 Not 的**结果类型**收成一处权威
+    # (TypeSystem::bitwiseResult / logicalNotResult，语义层与发码层都调它)。改前发码那份
+    # oracle 恒答 Boolean，于是位运算数一进字符串上下文就打 True/False，COM 实参还被装箱成
+    # VT_BOOL (真工程里 MainForm 的 Render(hdc Or 0, ...) 就是这一条)。两头钉：数值档按数答
+    # (BF-or/xor/and/not/eqv/imp/byte*/int-not/dblnot)，两侧都是 Boolean 时**仍**是 Boolean
+    # (BF-bool-or / BF-bool-and / BF-boolbox)，条件位照旧当真假用 (BF-cond) —— 拦反向错。
+    $bitsNeedles = @("BF-or-lit=51", "BF-or-var=51", "BF-xor=17", "BF-and=34", "BF-not=-6",
+        "BF-int-or=3", "BF-mixed=-1", "BF-cstr=51", "BF-left=51", "BF-byte-and=80",
+        "BF-byte-or=95", "BF-byte-not=-86", "BF-int-not=-2", "BF-dblnot=-3", "BF-eqv=-7",
+        "BF-imp=-5", "BF-assigned=51", "BF-bool-or=True", "BF-bool-and=False", "BF-boolbox=False",
+        "BF-cond=hit", "BF-boolcond=miss", "BF-sum=85", "BF-DONE")
+    Add-BasTest "test_bitops" "$Tests	est_bitops.bas" $bitsNeedles
+    Add-BasTest "test_bitops_x86" "$Tests	est_bitops.bas" $bitsNeedles -Arch "x86"
     # <vbeclipse>: Join/Filter 的数组槽 (Variant 数组曾按 BSTR* 读 → 段错误; Filter 的
     # VB6 可选参曾不补 → C2198/C2440 编不过)。含 1-based 源数组、零命中空数组、非字符串元素 → 13。
     Add-BasTest "test_joinfilter" "$Tests\test_joinfilter.bas" @("JF-var=[abc|xyz|abd]", "JF-var-def=[abc xyz abd]", "JF-str=[abc|xyz|abd]", "JF-f-lb=0 ub=1", "JF-f=[abc|abd]", "JF-none-ub=-1", "JF-excl-ub=0", "JF-excl=[xyz]", "JF-err=13", "JF-DONE")
@@ -4238,6 +4264,7 @@ if ($Category -in @("all", "compile")) {
     Test-ScaleModeWriters
     Test-ControlDC
     Test-SaAccess
+    Test-BitwiseAuthority
     Test-SubclassSlotSites
     Test-CtrlArrayMemberSites
     Test-EventHandlerNames
