@@ -1783,6 +1783,11 @@ if ($Category -in @("all", "run", "bas")) {
     $ncNeedles = @("NC-B=13 NC-BFLEN=2", "NC-ACC=15", "NC-BOX=3/8", "NC-DONE")
     Add-BasTest "test_nameclash" "$Tests\test_nameclash.bas" $ncNeedles
     Add-BasTest "test_nameclash_x86" "$Tests\test_nameclash.bas" $ncNeedles -Arch "x86"
+    # 账 #219: RTL 那枚裸名全局 Changed 撤掉后, 模块级 Public Changed As Long 整个归用户。
+    # 改前实测 BUILD-RC=1 / no exe (C2371 重定义), 改后两种架构都要出 exe 并读出这个数。
+    $nc219Needles = @("NC219-CHANGED=6", "NC219-VT=3", "NC219-DONE")
+    Add-BasTest "test_rtl_naked_changed" "$Tests\test_rtl_naked_changed.bas" $nc219Needles
+    Add-BasTest "test_rtl_naked_changed_x86" "$Tests\test_rtl_naked_changed.bas" $nc219Needles -Arch "x86"
     # <vbeclipse>: Join/Filter 的数组槽 (Variant 数组曾按 BSTR* 读 → 段错误; Filter 的
     # VB6 可选参曾不补 → C2198/C2440 编不过)。含 1-based 源数组、零命中空数组、非字符串元素 → 13。
     Add-BasTest "test_joinfilter" "$Tests\test_joinfilter.bas" @("JF-var=[abc|xyz|abd]", "JF-var-def=[abc xyz abd]", "JF-str=[abc|xyz|abd]", "JF-f-lb=0 ub=1", "JF-f=[abc|abd]", "JF-none-ub=-1", "JF-excl-ub=0", "JF-excl=[xyz]", "JF-err=13", "JF-DONE")
@@ -4700,6 +4705,16 @@ if ($Category -in @("all", "syntax")) {
     Test-CodegenNote "dochost_no_phantom_locals" @("$Tests\dochost\dhImp.ctl") @(
         "vb6_UserControl_ScaleWidth", "vb6_Ambient_UserMode", "vb6_UCase") @(
         "vb6_VARIANT UserControl", "vb6_VARIANT Ambient", "vb6_VARIANT VBA")
+    # 账 #219 (裸写的文档成员): 语义层以前不问 kHostPseudoRows, 于是每条合法裸写配一句 VB3001
+    # (语料实测 Changed 24 条 / hDC 24 条), 而发码那侧从来是对的 (vb6_PropertyPage_Changed 186 处、
+    # 裸名 0 处)。判据收到那张表的 HPF_BARE 一列: 表里有的一个都不许报 (两份夹子), 表里没有的
+    # 必须照报 (dhTypo) —— 否则"放行"就成了"文档里写什么都行"。
+    Test-CodegenNote "dochost_bare_ctl_symbols" @("$Tests\dochost\dhBare.ctl") @(
+        "vb6_UserControl_ScaleWidth", "vb6_UserControl_hDC", "vb6_UserControl_hWnd") @("VB3001")
+    Test-CodegenNote "dochost_bare_pag_dirty_flag" @("$Tests\dochost\dhBare.pag") @(
+        "vb6_PropertyPage_Changed = (-1);") @("VB3001")
+    Test-CodegenNote "dochost_bare_typo_still_reported" @("$Tests\dochost\dhTypo.pag") @(
+        "'Changd'") @("'Changed'", "vb6_PropertyPage_Changed")
     # 账 #184 的形状面: 被 AddressOf 取址的过程 → Private 的发 static 桩、Public 的发外链桩,
     # 桩体逐字转调本体 (参数个数/宽度/顺序与本体一致, 只有约定不同); AddressOf 站点取桩地址;
     # 本体**保持 cdecl** (直接调用那条路与 RTL 的 cdecl 登记面都不受牵连)。

@@ -12,8 +12,10 @@
 # 还彼此不一致 (写 ScaleWidth 答 Long, 写 UserControl.ScaleWidth 才答 Long, 写
 # UserControl.hWnd 两边都不答)。
 #
-# 现在只有一张表: src/backend/cgen_util_com.cpp 的 kHostPseudoRows, 四个消费点
-# (裸名发射 / 两条类型 oracle / 赋值拆数值) 都只问它。
+# 现在只有一张表: src/common/host_pseudo.hpp 的 kHostPseudoRows, 五个消费点
+# (裸名发射 / 两条类型 oracle / 赋值拆数值 / 语义层的裸写放行) 都只问它。
+# 表从 src/backend/cgen_util_com.cpp 搬到 common 是账 #219 那一刀：语义层不许再自己抄一串
+# 成员名 (那样每增一行 HPF_BARE 都要两处同改)，它只能问这张表。
 #
 # 本哨兵钉三件事:
 #   1) 表里每一行的 vb6_<对象>_<拼写> 必须在 vb6rtl_userctl.h 真有其人;
@@ -31,7 +33,7 @@ param(
 )
 $ErrorActionPreference = "Continue"
 
-$tblPath = if ($TableFile) { $TableFile } else { Join-Path $Root "src\backend\cgen_util_com.cpp" }
+$tblPath = if ($TableFile) { $TableFile } else { Join-Path $Root "src\common\host_pseudo.hpp" }
 $hdrPath = Join-Path $Root "src\rtl\core\vb6rtl\vb6rtl_userctl.h"
 $viol = @()
 $hdrRaw = ""
@@ -99,7 +101,9 @@ $deny = @(
     @{ File = "src\backend\cgen_util_type.cpp"; Pat = 'lower == "scalewidth"|memLowerCz' },
     # 成员名字面量只许出现在那张表里: 消费点再按名字判成员 = 抄了第二份
     @{ File = "src\backend\detail\expr\cgen_expr_ident_builtin.inc"; Pat = '"(scalewidth|scaleheight|scalemode|containerhwnd|enabled|autoredraw|hdc|hwnd)"' },
-    @{ File = "src\backend\detail\stmt\cgen_assign_host_pseudo.inc"; Pat = '"(scalewidth|scaleheight|scalemode|containerhwnd|enabled|autoredraw|hdc|hwnd)"' }
+    @{ File = "src\backend\detail\stmt\cgen_assign_host_pseudo.inc"; Pat = '"(scalewidth|scaleheight|scalemode|containerhwnd|enabled|autoredraw|hdc|hwnd)"' },
+    # 语义层那一头同样禁用成员名字面量（账 #219 删掉的就是这一份）
+    @{ File = "src\semantics\semantic_analyzer_util.cpp"; Pat = '"(changed|scalewidth|scaleheight|scalemode|containerhwnd|enabled|autoredraw|hdc|hwnd)"' }
 )
 foreach ($d in $deny) {
     $p = Join-Path $Root $d.File
@@ -111,14 +115,17 @@ foreach ($d in $deny) {
 
 # ---------- 4) 权威必须在场 (否则"禁旧形状"退化成没人管) ----------
 $must = @(
-    @{ File = "src\backend\cgen_util_com.cpp"; Pat = 'const HostPseudoRow kHostPseudoRows\[\]' },
+    @{ File = "src\common\host_pseudo.hpp"; Pat = 'inline const HostPseudoRow kHostPseudoRows\[\]' },
+    @{ File = "src\common\host_pseudo.hpp"; Pat = 'inline bool hostPseudoBareEligible' },
     @{ File = "src\backend\cgen_util_com.cpp"; Pat = 'bool CCodeGen::hostPseudoValueType' },
     @{ File = "src\backend\cgen_util_com.cpp"; Pat = 'bool CCodeGen::hostPseudoBareName' },
     @{ File = "src\backend\cgen_util_com.cpp"; Pat = 'bool CCodeGen::hostPseudoIsNumeric' },
     @{ File = "src\backend\detail\util\cgen_helpers.inc"; Pat = 'hostPseudoValueType' },
     @{ File = "src\backend\cgen_util_type.cpp"; Pat = 'hostPseudoValueType\(' },
     @{ File = "src\backend\detail\expr\cgen_expr_ident_builtin.inc"; Pat = 'hostPseudoBareName\(' },
-    @{ File = "src\backend\detail\stmt\cgen_assign_host_pseudo.inc"; Pat = 'hostPseudoIsNumeric\(' }
+    @{ File = "src\backend\detail\stmt\cgen_assign_host_pseudo.inc"; Pat = 'hostPseudoIsNumeric\(' },
+    # 第五个消费点 (账 #219): 语义层的裸写放行必须问表，不许把成员名抄回 semantics。
+    @{ File = "src\semantics\semantic_analyzer_util.cpp"; Pat = 'hostPseudoBareEligible\(' }
 )
 foreach ($m in $must) {
     $p = Join-Path $Root $m.File
@@ -129,9 +136,9 @@ foreach ($m in $must) {
 }
 
 # ---------- 5) 普查读数 (不判红, 给下一轮留证据) ----------
-$files = Get-ChildItem -Path (Join-Path $Root "src\backend") -Recurse -Include *.cpp,*.inc
+$files = Get-ChildItem -Path @((Join-Path $Root "src\backend"), (Join-Path $Root "src\common"), (Join-Path $Root "src\semantics")) -Recurse -Include *.cpp,*.inc,*.hpp
 $cen = @($files | Select-String -Pattern 'vb6_(UserControl|PropertyPage|Extender|Ambient)_[A-Za-z]+' |
-         Where-Object { $_.Path -notmatch 'cgen_util_com\.cpp$' -and $_.Line -notmatch '^\s*//' })
+         Where-Object { $_.Path -notmatch 'host_pseudo\.hpp$' -and $_.Line -notmatch '^\s*//' })
 Write-Host ("census: rows={0} scalar={1} hand-written-host-symbols-outside-table={2}" -f $rows.Count, $scalarRows, $cen.Count)
 foreach ($c in $cen) {
     Write-Host ("   site: {0}:{1}" -f (Split-Path $c.Path -Leaf), $c.LineNumber)

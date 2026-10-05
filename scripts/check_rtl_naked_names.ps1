@@ -48,12 +48,12 @@ Get-ChildItem -Path $rtlDir -Recurse -Include *.c, *.h | ForEach-Object {
     $rtlText[$_.FullName] = [System.IO.File]::ReadAllText($_.FullName)
 }
 
-# N1: B / BF 不许以任何形式回到 RTL
+# N1: B / BF / Changed 这些裸名不许回到 RTL
 $n1 = 0
 foreach ($t in $rtlText.Values) {
-    $n1 += @([regex]::Matches($t, '^(?:extern\s+)?(?:static\s+)?(?:const\s+)?(?:int32_t|uint32_t|int16_t|int)\s+\*?\s*(?:B|BF)\s*(?:\[[^\]]*\])?\s*(?:=[^;]*)?;', 'Multiline')).Count
+    $n1 += @([regex]::Matches($t, '^(?:extern\s+)?(?:static\s+)?(?:const\s+)?(?:int32_t|uint32_t|int16_t|int)\s+\*?\s*(?:B|BF|Changed)\s*(?:\[[^\]]*\])?\s*(?:=[^;]*)?;', 'Multiline')).Count
 }
-if ($n1 -ne 0) { $bad += ('N1 naked B/BF globals back in RTL ' + $n1 + ' times (want 0 - the flag is folded by the parser now)') }
+if ($n1 -ne 0) { $bad += ('N1 naked B/BF/Changed globals back in RTL ' + $n1 + ' times (want 0 - the flag is folded by the parser, and PropertyPage.Changed has vb6_PropertyPage_Changed)') }
 
 # N2: 非 static 的裸名文件作用域数据全局, 名单钉死
 $found = @{}
@@ -67,9 +67,9 @@ foreach ($kv in $rtlText.GetEnumerator()) {
         $found[$name] += 1
     }
 }
-# 名单: Changed 归账 #219 (它和 vb6_PropertyPage_Changed 是同一件事的两枚全局);
-#       g_uc_* / g_hoCount 是 UC 宿主的内部计数, 撞名概率低但同样该带前缀。
-$pin = @('Changed', 'g_hoCount', 'g_uc_descCount', 'g_uc_recCount', 'g_uc_dumpSeq')
+# 名单: g_uc_* / g_hoCount 是 UC 宿主的内部计数, 撞名概率低但同样该带前缀。
+#       (`Changed` 原本是名单里的一枚, 账 #219 那一刀把它撤掉了 —— 名单缩小按规矩同批改这里)
+$pin = @('g_hoCount', 'g_uc_descCount', 'g_uc_recCount', 'g_uc_dumpSeq')
 $extra = @($found.Keys | Where-Object { $pin -notcontains $_ })
 $missing = @($pin | Where-Object { -not $found.ContainsKey($_) })
 if ($extra.Count -gt 0) { $bad += ('N2 new naked RTL global: ' + ($extra -join ', ') + ' - VB lets a module name a variable that, so this collides') }
@@ -118,11 +118,36 @@ $memberTxt = [System.IO.File]::ReadAllText((Join-Path $root 'src\backend\detail\
 $cvMember = @([regex]::Matches($memberTxt, 'controlCanvasMethod\(')).Count
 if ($cvMember -lt 1) { $bad += 'N6 the member side never marks canvas methods - Line is read as a COM property and the docket never sees a marker' }
 
+# N7: 语义层放行"裸写的文档成员"这一格只许一处 (账 #219) —— 谓词 定义 1 / 声明 1 / 调用 1,
+#     调用点必须带 !memberObjCtx_ (限定符位由 isDocumentHostObject 管, 两支不许重叠);
+#     而名字本身不归语义层管 —— 它只许问那张宿主伪成员表 (hostPseudoBareEligible),
+#     自己抄一份成员名清单就是本账删掉的那第二个权威。
+
+$semUtil = [System.IO.File]::ReadAllText((Join-Path $root 'src\semantics\semantic_analyzer_util.cpp'))
+$semHdr = [System.IO.File]::ReadAllText((Join-Path $root 'src\semantics\semantic_analyzer.hpp'))
+$semExpr = [System.IO.File]::ReadAllText((Join-Path $root 'src\semantics\semantic_analyzer_expr.cpp'))
+$bareDef = @([regex]::Matches($semUtil, 'bool SemanticAnalyzer::isDocumentBarePseudoMember')).Count
+$bareDec = @([regex]::Matches($semHdr, 'bool isDocumentBarePseudoMember')).Count
+$bareUse = @([regex]::Matches($semExpr, 'isDocumentBarePseudoMember\(node\.name\)')).Count
+$bareGate = @([regex]::Matches($semExpr, '!memberObjCtx_\s*&&\s*isDocumentBarePseudoMember')).Count
+$bareTbl = @([regex]::Matches($semUtil, 'hostPseudoBareEligible\(')).Count
+$bareName = 0
+foreach ($t in @($semUtil, $semHdr, $semExpr)) { $bareName += @([regex]::Matches($t, 
+    '"(changed|hdc|hwnd|scalewidth|scaleheight|scalemode|containerhwnd|enabled|autoredraw)"')).Count }
+if ($bareDef -ne 1) { $bad += ('N7 isDocumentBarePseudoMember defined ' + $bareDef + ' times (want 1)') }
+if ($bareDec -ne 1) { $bad += ('N7 isDocumentBarePseudoMember declared ' + $bareDec + ' times (want 1)') }
+if ($bareUse -ne 1) { $bad += ('N7 bare-document-member exemption used ' + $bareUse + ' times (want exactly 1)') }
+if ($bareGate -ne 1) { $bad += ('N7 the exemption is not gated by !memberObjCtx_ (found ' + $bareGate + ', want 1) - the two exemptions must stay disjoint') }
+if ($bareTbl -ne 1) { $bad += ('N7 semantics asks the host-pseudo table ' + $bareTbl + ' times (want 1) - 0 means the name list is back in semantics, which is the second authority this account deleted') }
+if ($bareName -ne 0) { $bad += ('N7 semantics copies member-name literals again (' + $bareName + ') - the only authority for those names is kHostPseudoRows') }
+
 if ($bad.Count -gt 0) {
     foreach ($b in $bad) { Write-Host ('FAIL ' + $b) -ForegroundColor Red }
     exit 1
 }
 Write-Host ('PASS RTL naked-name guard: B/BF ' + $n1 + ', census ' + ($found.Keys.Count) +
     ' pinned names, fold bits ' + $bitB + '+' + $bitC + '+' + $bitF + ', handoff ' + $litInt + '+' + $hand +
-    ', flag names in AST ' + $idName + ', RTL ' + $lineFn + '/bits, canvas ' + $cvDecl + '+' + $cvDef + '+' + $cvUse + '+' + $cvMember)
+    ', flag names in AST ' + $idName + ', RTL ' + $lineFn + '/bits, ' +
+    'canvas ' + $cvDecl + '+' + $cvDef + '+' + $cvUse + '+' + $cvMember + ' ' +
+    'bareDoc ' + $bareDef + '/' + $bareDec + '/' + $bareUse + '/' + $bareGate + '/tbl' + $bareTbl + '/names' + $bareName)
 exit 0

@@ -1,6 +1,7 @@
 #include "semantics/semantic_analyzer.hpp"
 #include "common/float_literal.hpp"  // 账 #188: 浮点字面量的单一出口
 #include "common/int_literal.hpp"   // 账 #194: 整数字面量的单一出口
+#include "common/host_pseudo.hpp"  // 账 #219: 裸写伪成员问那张表
 #include "semantics/interface_sig.hpp"  // tB Interface/继承线共用的小写键函数 (B07b)
 #include <algorithm>
 #include <cctype>
@@ -736,5 +737,25 @@ bool SemanticAnalyzer::isDocumentHostObject(const std::string& name) const {
     if (lk == "extender" || lk == "ambient") return k == DocumentKind::UserControl;
     return false;
 }
+// 裸写的文档成员（账 #219）：判据 = 那张宿主伪成员表（common/host_pseudo.hpp）里带 HPF_BARE
+// 的那几行。发码侧从来只问这张表，语义层以前不问 —— 于是同一句 `Changed = True`
+// 一边发成正确的 vb6_PropertyPage_Changed、一边每条配一句 VB3001「未声明的标识符」
+// （语料实测 24 条，全在这一枚名字上）。收到同一张表上之后，以后往表里加一行 HPF_BARE
+// 不用再来改这里。
+// 同一格还搬走了一枚硬障碍：它以前靠 RTL 导出 `int16_t Changed` 这枚**外部链接的裸名
+// C 全局**落地 —— 与账 #220 那两枚旗标同型：工程里有一枚模块级变量叫 Changed 就撞成 C2371
+// （探针 `.build/b229out/pjChanged.bas`：`Public Changed As Long` ⇒ 连 exe 都不出）。发码侧从来
+// 交的是带前缀那一个名字（语料 186 处、裸名 0 处），所以那枚全局是纯负担，已撤。
+bool SemanticAnalyzer::isDocumentBarePseudoMember(const std::string& name) const {
+    if (!currentModule_ || name.empty()) return false;
+    const char* obj = nullptr;
+    switch (currentModule_->docKind) {
+        case DocumentKind::UserControl:  obj = "UserControl";  break;
+        case DocumentKind::PropertyPage: obj = "PropertyPage"; break;
+        default: return false;   // 标准模块 / 窗体没有这一族隐式文档成员
+    }
+    return hostPseudoBareEligible(obj, name);
+}
+
 
 } // namespace vb6c3

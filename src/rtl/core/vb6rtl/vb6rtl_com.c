@@ -669,8 +669,11 @@ int32_t vb6_PropertyPage_ScaleMode   = 1;
 int32_t vb6_PropertyPage_ScaleHeight = 0;
 int16_t vb6_PropertyPage_Changed     = 0;
 
-// --- PropertyPage built-in Changed property (Fix 108d) ---
-int16_t Changed = 0;
+// --- PropertyPage 的 Changed 不再有 C 侧裸名字 (账 #219) ---
+// 上面那枚 vb6_PropertyPage_Changed 就是它唯一的存储; 以前这里还有一份 `int16_t Changed`,
+// 专为"源码里裸写 Changed = True"留的落脚处。发码侧实测从来交的是带前缀那一个
+// (语料 vb6_PropertyPage_Changed 186 处、裸名 0 处)，而裸名全局与用户模块级变量共享 C 名字空间
+// ⇒ `Public Changed As Long` 直接 C2371 编不过 (探针 .build/b229out/pjChanged.bas 实测 no exe)。
 
 // --- Picture.Line 的模式旗标不再有 C 侧名字 (账 #220) ---
 // 以前这里写着 `const int32_t B = 1; const int32_t BF = 2;`，让 parser 原样发出去的裸名
