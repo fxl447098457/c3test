@@ -3898,6 +3898,20 @@ if ($Category -in @("all", "run", "vbp")) {
     Test-Vbp "erase_sub" "$Tests\erase_sub\EraseSub.vbp" $eraseSubExpected
     Test-Vbp "erase_sub_x86" "$Tests\erase_sub\EraseSub.vbp" $eraseSubExpected -Arch "x86"
 
+    # <vbeclipse> 账 #212 的两面判据 (夹子 tests/pberr, 一枚 .cls + 一个 Sub Main): 运行时错误 9 从
+    # **实例方法体内**抛出时 —— ① 方法自己写的 On Error GoTo 有没有接住它 (而不是越过它落到调用方,
+    # 或干脆落不回); ② 抛过之后那枚对象的成员还读不读得出数 (跳走时实例栈必须已经解链, 否则现场就是
+    # 「错误被吃掉了」那一族: 错误还在、对象已坏)。来源是 #209/#214: 越界元素访问改成抛 9 之后,
+    # VbEclipse 那批调用点全在 UC 的实例方法里 (`With m_Serie(Index)` 取的就是 &(me->m_arr(k)) 当对象),
+    # 而此前只量过「没处理器 ⇒ Unhandled error 9 + 进程按 9 退出」这一面。
+    # PE-1d/PE-2d/PE-null = 处理器在同一枚方法里 (一维越界 / 二维越界 / 从没 ReDim 的成员动态数组);
+    # PE-caller = 方法内**没有**处理器, 9 必须继续往上交回调用方的处理器; PE-state = 三次抛出之后
+    # 那枚对象的成员照旧读得出 20-40。真 VB6 五个数全同 (9/9/9/9/20-40) —— 实测两台逐行相同,
+    # 所以这一格没有产品改动, 是把「不回归」钉住的一枚夹子 (见 §B46 末段与 §B47)。
+    $pbErrExpected = @("PE-1d=9", "PE-2d=9", "PE-null=9", "PE-caller=9", "PE-state=20-40", "PE-DONE")
+    Test-Vbp "pberr" "$Tests\pberr\PbErr.vbp" $pbErrExpected
+    Test-Vbp "pberr_x86" "$Tests\pberr\PbErr.vbp" $pbErrExpected -Arch "x86"
+
     # 账 #186 的**边界**负例: `Erase m_list(1)` 这形 VB6 只在元素是 Variant(装着数组) 时合法,
     # 本仓没那条通路 —— 静默降级成"销毁整个数组"会改变语义, 所以必须继续报诊断。
     # 针面取消息里的英文片段 (GBK 控制台下中文会被折行/转码, 与既有 Test-CompileFail 同一口径)。
