@@ -512,6 +512,8 @@ Fix 195 那轮把 .frx 三种 blob 的**布局**钉准了（字符串 / 字符�
 
 **→ 这一条照读码去做了，然后被自家夹具拦下（2026-10-05，同一天判掉）**：补发通知的改动写进 `vb6_SetListIndex` 之后，新夹具两头（combo/list 各恰好 1 次、同值 0 次）确实绿，ucTreeMaps 的 demo 也**不用点 Random 就自己画出图**了（`.build/b211out/tm_startup.png`）—— 但 `tests/ctrlfiles` 的 **CF14 / CF15 当场红**（两台都红）。看它们的写法就知道谁错了：CF14 断的是 `auxList.ListCount = 3` 且**第一条必须是 "dbl:"**，而那三条 item 是夹具自己 `fileList_DblClick` / `fileList_Click` **手工调用处理器**加进去的（`CfForm.frm:106/120`）—— 也就是说这套夹具一直按「程序改 ListIndex 不发 Click」写，而它钉的那份口径来自 VB6 本体。⇒ **本机没有 VB6，这条"VB6 会不会发"我量不了**；两难之间只有一种立场站得住：**不凭猜改产品**。已把 RTL 与夹具全部回退（`git checkout` 那三处），回退后复跑 ctrlfiles 17 条 needles 两台全在、frxdata 回到 #207 的读数。顺带把 ucTreeMaps 那一页"要点一下才画"重新定性：**那大概率就是 VB6 的原样行为**（作者写 `Combo1.ListIndex = 4: Exit Sub` 的意图是给组合框一个默认项，绘制留给用户点 Random），所以 #207 之后剩下的"启动不自动画"**不算缺陷**，本账到此结掉。如果哪天要重开，前置条件写死：先拿到能跑的 VB6（或原生 OCX 的对照实例）量出真口径，再动 `vb6_SetListIndex`。
 
+**重开时要带着的三条旁证（本轮顺手量的，别重新找）**：① **两个 vendored 工程都把这个惯用法当启动路径** —— `ucTreeMaps/Form1.frm:357` 与 `ucChartBar/Form1.frm:524-530`（后者一次设四枚组合框的 ListIndex 然后 `Exit Sub`），作者的意图明显是"设默认项 ⇒ 触发 Click ⇒ 重跑 Form_Load 才画"；若 VB6 不发，这两页在 VB6 里也永远空白，那不太像 released demo 的样子。② 反方向：`tests/ctrlfiles` 的 CF14/CF15 按"不发"写（手工调处理器模拟点击）。③ `VBFlexGridDemo/MainForm.frm:439/448` 也设了 `ListIndex = 0`，而那台 demo 启动画面是完整的（`.build/b208out/f1.png`）—— 但它不依赖 Click 的副作用，所以这条**中性**。本机可查的仲裁者只剩一个：`D:	ools	winBASIC_IDE_BETA_983`（tB 是 VB6 语义的再实现，它怎么处理"程序改 ListIndex 发不发 Click"至少是一份可比对的证据）。
+
 ## C. 仍在生效的口径与工具事实（与本文档等长的一半价值在这里；完整版见记忆库）
 
 - **子类化分层的槽位口径（账 #185 起）**：RTL 里**每一层**窗口子类用**自己**的窗口属性名存它下面那层的 wndproc ——
