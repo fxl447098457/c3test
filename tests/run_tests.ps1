@@ -3806,7 +3806,7 @@ if ($Category -in @("all", "run", "vbp")) {
     #   BUILD rc=1、一条读数都不出（物证 .build/b196neg/）。
     $dcSurfExpected = @("DS01-SAME=True", "DS02-SEP=True", "DS03-LIVE=True",
         "DS04-PIXEL=True", "DS05-RAW",
-        "TH01-TWOFORMS=True", "TH02-UNITS=True", "TH04-WIDTH=True",
+        "TH01-TWOFORMS=True", "TH02-UNITS=True", "TH03-FONT=True", "TH04-WIDTH=True",
         "TH05-RAW", "TH06-FONTRAW", "DS-DONE")
     Test-Vbp "dcsurf" "$Tests\dcsurf\DcSurf.vbp" $dcSurfExpected
     Test-Vbp "dcsurf_x86" "$Tests\dcsurf\DcSurf.vbp" $dcSurfExpected -Arch "x86"

@@ -312,10 +312,25 @@ void* vb6_GetControlHwnd(void* hwnd) {
 // P13.1: Font properties
 // ============================================================
 
+// 账 #200：**这枚控件现在在用的字体**只从这里问一次。
+// 为什么要有这一处：PictureBox / Label 那几枚是 STATIC 类，而这个类**不记字体** ——
+// 一次性探针（`.build/b200probe/fontprobe.c`，裸 STATIC、谁也没子类化）实测
+// `WM_SETFONT` 之后 `WM_GETFONT` 回 NULL，`STM_SETFONT`/`STM_GETFONT` 同样回 NULL。
+// 于是原来那三条读法（`vb6_GetControlLogFont` 给 .FontName/.FontSize 用、Print 落笔前选字体、
+// #196 的文字量）在这类窗口上**永远拿不到用户设的字体**，只能拿 DC 的默认字体画，
+// 而 .FontSize 读回来还是设计值（那是另一份自存的属性）—— 两头谁都不报错。
+// 所以 setter 现在把自己创建的那张 HFONT 存进 `VB6_CtrlFont`（新名字，与 #185 那条
+// "一层一个窗口属性名"同纪律），这里优先问窗口、问不到再读这份自存的。
+static HFONT vb6_ControlFont(HWND hw) {
+    HFONT h = (HFONT)SendMessageW(hw, WM_GETFONT, 0, 0);
+    if (!h) h = (HFONT)GetPropW(hw, L"VB6_CtrlFont");
+    return h;
+}
+
 // Helper: get LOGFONT from control's current font
 static int vb6_GetControlLogFont(void* hwnd, LOGFONTW* plf) {
     if (!hwnd || !plf) return 0;
-    HFONT hFont = (HFONT)SendMessageW((HWND)hwnd, WM_GETFONT, 0, 0);
+    HFONT hFont = vb6_ControlFont((HWND)hwnd);
     if (!hFont) return 0;
     return GetObjectW(hFont, sizeof(LOGFONTW), plf) > 0;
 }
@@ -326,8 +341,12 @@ static void vb6_SetControlFontFromLogFont(void* hwnd, const LOGFONTW* plf) {
     if (!hwnd || !plf) return;
     HFONT hNewFont = CreateFontIndirectW(plf);
     if (!hNewFont) return;
-    HFONT hOldFont = (HFONT)SendMessageW((HWND)hwnd, WM_GETFONT, 0, 0);
+    // 旧字体先按"我们存过的那张"找，找不到才退回问窗口 —— 顺序反了会双删：
+    // 真记字体的那几类控件（EDIT/BUTTON…）WM_GETFONT 回来的就是我们上一轮存进去的那张。
+    HFONT hOldFont = (HFONT)GetPropW((HWND)hwnd, L"VB6_CtrlFont");
+    if (!hOldFont) hOldFont = vb6_ControlFont((HWND)hwnd);
     SendMessageW((HWND)hwnd, WM_SETFONT, (WPARAM)hNewFont, (LPARAM)TRUE);
+    SetPropW((HWND)hwnd, L"VB6_CtrlFont", (HANDLE)hNewFont);
     // Force redraw
     InvalidateRect((HWND)hwnd, NULL, TRUE);
     // Delete old font only if it's not a stock font
@@ -711,7 +730,7 @@ static int vb6_ControlMeasureTextPx(void* hwnd, BSTR text, int wantWidth) {
     BOOL fromPaint = FALSE;
     HDC hdc = vb6_ControlDrawDC(hw, &fromPaint);
     if (!hdc) return 0;
-    HFONT hFont = (HFONT)SendMessageW(hw, WM_GETFONT, 0, 0);
+    HFONT hFont = vb6_ControlFont(hw);   // 账 #200: 字体只从 vb6_ControlFont 那一处问
     HFONT hOld = hFont ? (HFONT)SelectObject(hdc, hFont) : NULL;
     SIZE sz = { 0, 0 };
     GetTextExtentPoint32W(hdc, text, len, &sz);
@@ -761,7 +780,7 @@ void vb6_ControlPrint(void* hwnd, void* bstrText) {
     BOOL fromPaint = FALSE;
     HDC hdc = vb6_ControlDrawDC(hw, &fromPaint);
     if (!hdc) return;
-    HFONT hFont = (HFONT)SendMessageW(hw, WM_GETFONT, 0, 0);
+    HFONT hFont = vb6_ControlFont(hw);   // 账 #200: 字体只从 vb6_ControlFont 那一处问
     HFONT hOld = hFont ? (HFONT)SelectObject(hdc, hFont) : NULL;
     SetBkMode(hdc, TRANSPARENT);
     SetTextColor(hdc, (COLORREF)vb6_GetControlForeColor(hwnd));

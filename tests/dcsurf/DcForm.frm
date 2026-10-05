@@ -72,6 +72,7 @@ Private Sub tmr_Timer()
     Dim px1 As Long, px2 As Long, caps As Long
     Dim tA As Single, tA2 As Single, tW As Single, tB As Single, tT As Single, tB2 As Single
     Dim wLong As Single, wShort As Single
+    Dim pfA As Long, pfB As Long
     Dim ok5 As Boolean, ok6 As Boolean, ok7 As Boolean, ok8 As Boolean
 
     hA = picA.hDC
@@ -98,15 +99,20 @@ Private Sub tmr_Timer()
     tT = picTwip.TextHeight("Xg")
     wLong = picB.TextWidth("WWWWWW")
     wShort = picB.TextWidth("W")
-    ' TH03 那一问（量的到底是不是这枚窗口现在在用的字体）今天**不当判据**：运行期把 picB 的
-    ' 字号从默认改成 20，量回来的高度照旧 16（TH06 的 b 与 b2 两格就是这条读数），而设计期
-    ' 18pt 的 picA 也量 16 —— 这先归给"窗口字体到底换没换"那一格（另立新账 #200），
-    ' 不在本刀的判据里装绿。本刀能钉的是：两形同归一处、单位折算真发生、宽度随文字变。
+    ' TH03 钉的是「量的到底是不是这枚窗口现在在用的字体」那一头。账 #200 之前这一问两头都哑：
+    ' 设计期 18pt 的 picA 与运行期改成 20pt 的 picB 都量 16（TH06 的 a / b / b2 三格就是那组读数），
+    ' 那时它只留读数不当判据。#200 抓到的是 STATIC 这一类窗口压根不答 WM_GETFONT，修法是字体只从
+    ' 一处出口问 + 自己存一份；于是这条升回判据：tA > tB（设计期大字号的那个量得更大）、tB2 > tB
+    ' （运行期改字号真的跟着走）、pfA >= 18（问窗口的那位证人 FontPixelHeight 也答得出数 —— 改前
+    ' 它拿到 NULL 就 return 0，整条 Debug.Print 一行都不打）。
     picB.FontSize = 20
     tB2 = picB.TextHeight("Xg")
+    pfA = picA.FontPixelHeight
+    pfB = picB.FontPixelHeight
 
     ok5 = (tA > 0) And (tA = tA2) And (tA = tW)              ' 两形同归一处
     ok6 = (tT > 4 * tB)                                      ' 同字体: 缇框那个数明显大于像素框那个
+    ok7 = (tA > tB) And (tB2 > tB) And (pfA >= 18)
     ok8 = (wLong > wShort) And (wShort > 0) And (tB > 0)
 
     Debug.Print "DS01-SAME=" & TF(ok1)
@@ -116,9 +122,10 @@ Private Sub tmr_Timer()
     Debug.Print "DS05-RAW dpi=" & CStr(caps) & " a=" & CStr(px1) & " b=" & CStr(px2)
     Debug.Print "TH01-TWOFORMS=" & TF(ok5)
     Debug.Print "TH02-UNITS=" & TF(ok6)
+    Debug.Print "TH03-FONT=" & TF(ok7)
     Debug.Print "TH04-WIDTH=" & TF(ok8)
     Debug.Print "TH05-RAW px=" & CStr(tB) & " twip=" & CStr(tT) & " wS=" & CStr(wShort) & " wL=" & CStr(wLong)
-    Debug.Print "TH06-FONTRAW a=" & CStr(tA) & " b=" & CStr(tB) & " b2=" & CStr(tB2) & " fsA=" & CStr(picA.FontSize)
+    Debug.Print "TH06-FONTRAW a=" & CStr(tA) & " b=" & CStr(tB) & " b2=" & CStr(tB2) & " fsA=" & CStr(picA.FontSize) & " pfA=" & CStr(pfA) & " pfB=" & CStr(pfB)
     Debug.Print "DS-DONE"
     Unload Me
 End Sub

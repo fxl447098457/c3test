@@ -236,12 +236,41 @@ foreach ($fnName in @("vb6_ControlTextWidth", "vb6_ControlTextHeight")) {
     }
 }
 
+# ---- D10: 字体只从一处问窗口 (账 #200) ----
+# 裸 STATIC 不记 WM_SETFONT（探针实测 WM_GETFONT / STM_GETFONT 都回 NULL），所以我们自己存一张
+# VB6_CtrlFont，所有"这枚控件现在用什么字体"的读法都必须走 vb6_ControlFont 那一处出口。
+# 口径范围刻意只圈 vb6forms_ctrl.c（文字量那一路）：仓里另一枚裸问在 vb6forms.c 的 groupbox
+# 标题带里，探针实测 BUTTON 也不答 WM_GETFONT —— 那是另一条账，别把它的红算到这条上。
+$accDef = @($rtl | Where-Object { $_.File -eq "vb6forms_ctrl.c" -and $_.Text -match '^\s*static\s+HFONT\s+vb6_ControlFont\s*\(' })
+if ($accDef.Count -ne 1) {
+    $bad += ("D10 vb6_ControlFont defined " + $accDef.Count + " times in vb6forms_ctrl.c (want exactly 1)")
+}
+$getFontRaw = @($rtl | Where-Object { $_.File -eq "vb6forms_ctrl.c" -and $_.Text.Contains("WM_GETFONT") })
+if ($getFontRaw.Count -ne 1) {
+    $bad += ("D10 问窗口字体的那一行 = " + $getFontRaw.Count + " 处 (want exactly 1，且只能在出口函数体内) -> " +
+             (($getFontRaw | ForEach-Object { $_.File + ":" + $_.Line }) -join " | "))
+} elseif ($accDef.Count -eq 1) {
+    # 那一行还必须**在出口函数体里** —— 只在别处留一行也算破窗
+    $dl = $accDef[0].Line
+    $fl = $getFontRaw[0].Line
+    if ($fl -le $dl -or $fl -gt $dl + 8) {
+        $bad += ("D10 那一行 WM_GETFONT 不在 vb6_ControlFont 的函数体里 (定义在第 " + $dl +
+                 " 行，读在第 " + $fl + " 行)")
+    }
+}
+$fntW = @($rtl | Where-Object { $_.Text.Contains("SetPropW") -and $_.Text.Contains('L"VB6_CtrlFont"') })
+$fntR = @($rtl | Where-Object { $_.Text.Contains("GetPropW") -and $_.Text.Contains('L"VB6_CtrlFont"') })
+if ($fntW.Count -ne 1) { $bad += ("D10 writers of the VB6_CtrlFont slot = " + $fntW.Count + " (want exactly 1)") }
+if ($fntR.Count -lt 1) { $bad += "D10 nobody reads the VB6_CtrlFont slot (证人又哑了)" }
+
 if ($bad.Count -eq 0) {
     Write-Host ("PASS Control drawing DC: 定义 " + $defs.Count + " / 调用 " + $calls.Count +
                 " / 出口 " + $exitDef.Count + " / 槽位写 " + $wr.Count + " 归还 " + $rel.Count +
                 " 撤名 " + $rm.Count + " / 读表 " + $rows + " 手拼 " + $hand +
                 " / 文字量出口 " + ($oaDef.Count + $oaDefH.Count) + " 码头 " + $oaSites.Count +
-                " 签名表 " + $paramRows + " 手拼2 " + $hand2) -ForegroundColor Green
+                " 签名表 " + $paramRows + " 手拼2 " + $hand2 +
+                " / 字体出口 " + $accDef.Count + " 裸问 " + $getFontRaw.Count +
+                " 槽位写 " + $fntW.Count + " 读 " + $fntR.Count) -ForegroundColor Green
     exit 0
 }
 foreach ($b in $bad) { Write-Host ("FAIL " + $b) -ForegroundColor Red }
