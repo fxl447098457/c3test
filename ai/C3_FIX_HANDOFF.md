@@ -892,6 +892,25 @@ asm 13/14、smoke 1/1；`Build C3.exe` 那片日志正文不含用例行（历�
 
 
 
+### B54 `.pag` 里裸写的 `Changed` 发码一直是对的、诊断却每条一响；RTL 那枚裸名全局是它的第二条权威，撞掉之后那张表才是唯一一处（账 #219 两刀，**已出：门 待回填**）
+
+两件症状，都是实测：
+
+① **撞名就编不过**：任何工程里一枚 `Public Changed As Long` 与 RTL 文件作用域那枚 `int16_t Changed`（外部链接的裸名 C 全局）撞成 C2371 重定义。探针 `tests/test_rtl_naked_changed.bas` 改前 BUILD-RC=1 / no exe，改后 RC=0 / exe / `NC219-CHANGED=6 NC219-VT=3`（x64 本地真跑过，x86 交门）。同族第三枚 `g_hoCount` 一类仍留在哨兵名单里。
+② **噪声**：`.pag` 里 `Changed = True` 每条配一句 VB3001，语料 24 条（PropPagLP.pag 4 条 × 两档 + ppProgressCircular.pag 4 条 × 两档）。
+
+关键读数：**这一格的发码从来是对的**。`vb6_PropertyPage_Changed` 语料 186 处、裸名 `Changed` 在产物 C 里 0 处，`Changed = True` 早就发成 `vb6_PropertyPage_Changed = (-1);` —— 成员叫什么、能不能裸写由 `kHostPseudoRows` 那张表回答（账 #159 就收了）。所以 RTL 那枚裸名全局既没人引用、又占着 C 的全局名字空间，是纯负担 ⇒ 删（定义与 extern 各换成一条记录这组读数的注释）。语义层补的是 `visit(IdentifierExpr)` 未找到分支里那一格"裸写的文档成员"，与限定符位那一格（`memberObjCtx_`，账 #217）互斥；类型答案仍走 Variant，由发码层按表回答。
+
+第二刀是架构那一刀，不这么写就还得再抄四遍：**语义层这一格不许自己认名字，只许问那张表**。表原先住在 `src/backend/cgen_util_com.cpp` 的匿名 namespace 里，语义层够不着 ⇒ 把它搬进 `src/common/host_pseudo.hpp`（`inline` 的表 + `hostPseudoFind` + 新增的 `hostPseudoBareEligible` 一句出口，与 `float_literal.hpp` / `int_literal.hpp` 同一家族），发码侧 `CCodeGen::hostPseudoBareName` 与语义层 `isDocumentBarePseudoMember` 都只问这一句。往后往表里加一行 `HPF_BARE`，诊断面顺带就放行了，不必两处同改。common 不得依赖 semantics，故表里的 `Symbol::toLower` 换成头文件自带的 `hostPseudoLower`（同一件事：ASCII 小写）。
+
+读数：发码语料 A/B（BASE = `b230_new_emit` = 账 #221 收线那台，NEW = `b233_new_emit` = 这台）inputs=100/100、changed=12、same=88，12 份里**每一条差异都是删掉一行 VB3001**（逐份 `+0/−N`），产物 C 一行没动 ⇒ 这一刀只动诊断面。VB3001 146→98，名字档 `Changed` 24→0、`hDC` 24→0，其余 18 种名字一个没动（`new-names={}`）；`vb6_PropertyPage_Changed` 186=186、`int16_t Changed`(VBFlexGrid 的 UC 形参面) 10=10。`.ctl` 那 24 条是表把 `ScaleWidth`/`hDC`/`hWnd` 一并发放行顺带收掉的 —— 这就是"问表"与"抄名字"的差别。
+
+判据两头（本地探针，`.build/b233out/`）：`pagBare.pag` 里 `Changed = True` / `If Changed Then` 零 VB3001 且发码命中 `vb6_PropertyPage_Changed` 三处，而同一份文件里打错的 `Changd` 照报；`basBare.bas`（标准模块）里裸写 `Changed` 仍报 VB3001 ⇒ 放行按文档类别，不是一片名字；`ctlBare.ctl` 裸 `hDC` 发成 `vb6_UserControl_hDC` 且零 VB3001。
+
+夹具与哨兵：`tests/test_rtl_naked_changed.bas`（x64/x86 各一形，三针）；`tests/dochost/dhBare.ctl`、`dhBare.pag`、`dhTypo.pag` 三条 [CODEGEN-NOTE]（`dhTypo` 是负控：表里没这名字 ⇒ 必须照报，且不许凭空发 `vb6_PropertyPage_Changed`）；`check_host_pseudo_table.ps1` 的 `$tblPath`、`must`、`deny` 三处跟着表搬家，`must` 从此含"语义层必须问表"那一条；`check_rtl_naked_names.ps1` 的 N7 换成谓词 定义/声明/调用/带门 = 1/1/1/1 + 问表 1 + 成员名字面量 **0**。哨兵红过一次是当场演示的负控：把 N7 里读那三个文件的一行删掉 ⇒ 六条计数全 0、五条 FAIL。
+
+剩下的同族（本账没做完，读数已钉住）：`Controls` 4 条全在 ppProgressCircular.**pag**（那张表 propertypage 档没有这一行；收不收要先问 VB6 里 .pag 裸写 `Controls` 是谁）；`Count` 2 条在 ucProgressCircular.**ctl**（表里也没这行，而 #159 的边界写明"RTL 没有对应全局的行刻意不收"⇒ 那是 RTL 侧缺口，另立账）；`ScaleWidth` 2 条在 frmDemo.**frm**（窗体成员走的是另一条路，不在这张表里）；另 26 条是内在常量一族 ⇒ 账 #218。
+
 ## C. 仍在生效的口径与工具事实（与本文档等长的一半价值在这里；完整版见记忆库）
 
 - **子类化分层的槽位口径（账 #185 起）**：RTL 里**每一层**窗口子类用**自己**的窗口属性名存它下面那层的 wndproc ——
@@ -1020,6 +1039,8 @@ asm 13/14、smoke 1/1；`Build C3.exe` 那片日志正文不含用例行（历�
 
 
 
+- **跨层的判据表住在 `src/common`（账 #219 起）**：一张"哪个成员叫什么 / 能不能裸写"的表（`kHostPseudoRows`）原先在 `src/backend/cgen_util_com.cpp` 的匿名 namespace 里，四个消费点都在发码侧。语义层要问同一件事时**不许把名字抄进 semantics**（抄一份就是第二个权威，本账那 48 条噪声就是这么来的），而是把表搬进 `src/common/host_pseudo.hpp`，两头只问 `hostPseudoBareEligible(obj, member)` 这一句。common 不得向上依赖 semantics，所以表里的 `Symbol::toLower` 换成头文件自带的 `hostPseudoLower`。哨兵 `check_host_pseudo_table.ps1` 的表路径 / `must` / `deny` 三处跟着表搬家，含义是"这张表只许有一个家、语义层只许问它"
+
 ## D. 已完成项一行索引（叙述已删；原文在 `git show 1465da1:ai/C3_FIX_HANDOFF.md` 的对应 §区间）
 
 | 原 § | 内容 | 状态 |
@@ -1086,3 +1107,4 @@ asm 13/14、smoke 1/1；`Build C3.exe` 那片日志正文不含用例行（历�
 | 账 #220（本节 §B52 = `Picture.Line` 尾部的 `B`/`BF` 由 parser 在 style 格折成字面量 1/2、RTL 那两枚裸名 C 全局连 extern 一起删 + `tests/test_nameclash.bas`（x64/x86 真跑）+ `tests/pcline/PcForm.frm` 的 [CODEGEN-NOTE] 四针两 Absent + `[STATIC] rtl_naked_names`） | 发码语料 A/B inputs=100 changed=**4**（ucProgressCircular 两份 × 两档），每份 +8/−8 行且每行只差最末一格 `vb6_ComPackValue(B\|BF)` → `vb6_ComPackInt(1\|2)`，另 3 行 VB3001 纯删（Charts 主工程 34→31），其余 96 份一行没动；撞名探针改前 RC=1/5 诊断/no exe → 改后 RC=0/exe/`NC-B=13` | 已发货，门 #343 绿（11 job 全 completed/success；bas 两片 47→48、compile 28→29、syntax 156→157） |
 | 账 #221 = C29-PL-a（提交 `27767255` = `Picture.Line` 从 COM 兜底改道到原生 `vb6_ControlLine`：RTL 新出口 + `controlCanvasMethod` 表 + withm 码头 + 成员侧打标记；旗标改按字母位折 B=1/C=2/F=4 ⇒ BF=5、`C`/`F`/`CF` 从此有落脚点；`tests/pcline/PcDraw.{frm,vbp}` 画完问像素四形各钉两头 + `pcline_flag_folded` 换针 + 哨兵 N5/N6） | 发码 A/B inputs=100 changed=**4** same=96，每份 +8/−8 全是同一条调用换出口；CENSUS `L"Line"` **32→0** / `vb6_ControlLine(` **0→32**，VB3001 146=146、`VB6_SA_AT(` 20972=20972、`_vb6_select_` 7346=7346；x64 与 x86 真跑逐行相同 `PL01..PL04=True`（`diag=255 boxedge=16711680 boxmid=16777215 fillmid=65280 circletop=255`）；哨兵 PASS `fold bits 1+1+1, handoff 1+1, AST 0, RTL 1/bits, canvas 1+1+2+1`；只写表+码头不写成员侧时夹具四形**全 False**（N6 第四条由此起）；真工程 ucProgressCircular 两档仍 rc=1，27 条诊断逐文件归因到 #222（Form1.c 25×C2198+1×C2084）与 #219（`Count`），`ppProgressCircular.c` 零条 | 已发货，门 #344 红在 control_dc 名单（已改 4→5）→ **门 #345 全绿** |
 | 账 #215（提交 `48feae8e` = §B49 的"体级声明收成一条声明符一条 LocalDeclStmt" + `tests/test_bodydecl.bas` 8 针（x86+x64 两形）+ `[CODEGEN-NOTE] bodydecl_one_per_declarator` （Absent 钉 VB3001）+ | 门 #338 = run 37321722861、head bab5b0ef、attempt 1 = 11 job 全 completed/success；compile 片 25→26 里新那枚就是 `[STATIC] bodydecl_shape ... PASS`（逐行读到），syntax 片 151→152 是 `[CODEGEN-NOTE] bodydecl_one_per_declarator ... PASS`，bas 两片之和 90→92 = test_bodydecl 与 test_bodydecl_x86 进了门禁且绿；vbp #3 那条 SKIP 仍是 test_vbman（COM 未注册，与 #335/#337 同形）） | **体级声明有四条路、两种形状**：`Dim a, b` 由 parseDimStmt 在语句层手写一遍声明符解析并出两条语句，`Const/Static/体级 Public` 的多声明符行把 MultiDecl 原样塞进 LocalDeclStmt，而语义层 visit(LocalDeclStmt) 的 switch 不认这个 kind ⇒ **一枚名字都不登记、每条使用一条 VB3001**（VBFlexGridDemo 一片 778 → 502 条，全部是诊断行）；手写那份副本还落在共享实现后面，漏了 WithEvents 与「后缀即类型」两步 ⇒ `Dim a&, b&` 第二枚静默落回 Variant（TypeName 看不出，VarType 3/0 才看得出）。收成 `Parser::wrapBodyDecls` 一处，四条路全调它，手写展开删掉。A/B 100 份 same=98 changed=2 且两条差异逐条归到诊断行；真编译四片 0 error C / 0 LNK；哨兵在 HEAD 树上 P1..P4 十条红 | 已发货，门 #338 绿 |
+| 账 #219（§B54 = RTL 裸名 `Changed` 的定义与 extern 撤掉 + `visit(IdentifierExpr)` 补"裸写的文档成员"那一格 + `kHostPseudoRows` 搬进 `src/common/host_pseudo.hpp` 并新增 `hostPseudoBareEligible`，语义层与发码层同问一句 + `tests/test_rtl_naked_changed.bas`（x64/x86）+ `tests/dochost/dhBare.ctl`/`dhBare.pag`/`dhTypo.pag` 三条 [CODEGEN-NOTE] + 两份哨兵跟着改） | 发码语料 A/B inputs=100 changed=**12** same=88，每份差异**全是删一行 VB3001**、产物 C 一行没动；VB3001 146→98（`Changed` 24→0、`hDC` 24→0，`new-names={}`）、`vb6_PropertyPage_Changed` 186=186；撞名探针改前 RC=1/no exe ⇒ 改后 RC=0/exe/`NC219-CHANGED=6`；哨兵 `tbl 55 rows` 与 `bareDoc 1/1/1/1/tbl1/names0` 全 PASS，红过一次是删掉 N7 读文件的负控演示 | 已提交，门 待回填 |
