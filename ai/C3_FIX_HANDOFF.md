@@ -806,7 +806,7 @@ compile 片 28→**29**，新那枚逐行读到 `[STATIC] rtl_naked_names ... PA
 （唯一的 SKIP 仍是 test_vbman，COM 未注册 32-bit 视图），asm 13/14、smoke 1/1。
 
 
-### B53 `Picture.Line` 的八处调用两跳都返回成功、一笔都不画：兜底把方法当属性取，而 RTL 两处都登记成「认识但什么都不做」（账 #221 = C29-PL-a，已出，门 待回填）
+### B53 `Picture.Line` 的八处调用两跳都返回成功、一笔都不画：兜底把方法当属性取，而 RTL 两处都登记成「认识但什么都不做」（账 #221 = C29-PL-a，**已出：门 #344 红在自己的名单针 → 门 #345 十一 job 全绿**）
 
 这条缺陷的形状是**没有任何诊断的**：源侧 `ppProgressCircular.pag` 三句 `Picture1/2.Line (…)-(…), c, BF`
 （297 / 299 / 474，一份工程发码出 8 条调用），发码交出去的是
@@ -872,6 +872,23 @@ BASE 语料里那几行 thunk 与声明**逐字相同**（changed=4 的差分行
 ③ `With picA : .Line (…)` 那一形**没测** —— 账 #192/#150 记着带实参的 With 形至今没接；
 ④ 表里**刻意不给 Form 那一档**（只有 PictureBox 那处成员侧打了标记），给了就是"广告比应答复"，
 接 Form 之前先找出 `Me.Line` 那条码头；⑤ `Circle/PSet/Point` 的需求面是 0，所以这一格没为它们留出口。
+**两道门：#344 红在自己的名单针上，#345 全绿。** #344（run 37356616867、head `9513720f`、attempt 1）
+= compile 片 `PASS=28 FAIL=1`，红的不是产品也不是本刀的判据，而是**别人那枚哨兵**
+`[STATIC] control_dc ... FAIL: D2 call sites of the drawing-DC authority = 5 (want exactly 4)` ——
+`check_control_dc.ps1` 的 D2 钉的是「拿绘图 DC 的调用点恰好 4 处」这份名单，Line 接进同一处权威
+是正当扩容，名单没跟着改就是红。修法按本仓既有规矩（**名单扩大/缩小必须在同一次提交里改这里**）
+把 4 改成 5 并把 `ControlLine` 写进名单，顺带订正该文件头 D2 那行注释（还写着 3 枚 —— 上一格加
+文字量出口时也没同步，正是同一族"名单跟着代码走"会烂的地方）。
+⚠ 一般式（同批进记忆）：**往一族共用的出口上加站点时，同一轮把 `scripts/check_*.ps1` 全部跑一遍**
+（20 枚、几十秒），别只跑自己新写那枚 —— 这次红在别人那枚上，本地完全没读到，代价是一整轮门。
+其余十片 #344 当场就绿了，两枚新夹具在 CI 上各自 PASS（`[VBP] pclinedraw ... PASS` /
+`pclinedraw_x86 ... PASS`；vbp 四片 TOTAL 之和 226→228 正是这两枚）。
+
+**门 #345 落定（run 37359094337、head `b0e4da16`、attempt 1）= 11 job 全 completed/success、逐片 FAIL=0。**
+compile 片 29/29（`[STATIC] control_dc ... PASS` 与 `[STATIC] rtl_naked_names ... PASS` 同片都在）；
+syntax 片 157/157（本刀换过针的 `pcline_flag_folded` 在里）；bas 两片 48 + 48（账 #220 那两枚仍在）；
+vbp 四片 50(+1 SKIP)/55/50/51，唯一的 SKIP 仍是 test_vbman（COM 未注册 32-bit 视图，与 #342/#343/#344 同形）；
+asm 13/14、smoke 1/1；`Build C3.exe` 那片日志正文不含用例行（历轮同形的 empty-shell）。
 
 
 
@@ -1067,5 +1084,5 @@ BASE 语料里那几行 thunk 与声明**逐字相同**（changed=4 的差分行
 | 账 #217 第一刀（提交 `eef2c199`+`ab1db9c0` = §B50 那一族 `Case Is` 的假标识符不再进 AST + `tests/test_caseis.bas` 7 针 x86/x64 + 两条 [CODEGEN-NOTE] + `[STATIC] caseis_shape`） | 门 #341（唯一红 = frmevents 抖动，与本刀无关）→ 门 #342 全绿；发码语料 CENSUS `'Is'` 138→0，A/B 100 份 same=90 changed=10 全 +0 行 unattributable=0 | 已发货，门 #342 绿 |
 | 账 #217 第二刀（提交 `d2942bc8`+`910b37b8` = §B51 那一族文档隐式对象收成 `Module::docKind` 一处写两处读 + `tests/dochost/dhExp.ctl`/`dhImp.ctl` + `[STATIC] dochost_authority`） | 门 #342 = run 37345079456、attempt 1、11 job 全绿；compile 片 27→28、syntax 片 154→156；全仓语料 VB3001 2934→158，两份真工程各 499→19 / 499→34，宿主符号与 `_vb6_select_` 一动不动 | 已发货，门 #342 绿 |
 | 账 #220（本节 §B52 = `Picture.Line` 尾部的 `B`/`BF` 由 parser 在 style 格折成字面量 1/2、RTL 那两枚裸名 C 全局连 extern 一起删 + `tests/test_nameclash.bas`（x64/x86 真跑）+ `tests/pcline/PcForm.frm` 的 [CODEGEN-NOTE] 四针两 Absent + `[STATIC] rtl_naked_names`） | 发码语料 A/B inputs=100 changed=**4**（ucProgressCircular 两份 × 两档），每份 +8/−8 行且每行只差最末一格 `vb6_ComPackValue(B\|BF)` → `vb6_ComPackInt(1\|2)`，另 3 行 VB3001 纯删（Charts 主工程 34→31），其余 96 份一行没动；撞名探针改前 RC=1/5 诊断/no exe → 改后 RC=0/exe/`NC-B=13` | 已发货，门 #343 绿（11 job 全 completed/success；bas 两片 47→48、compile 28→29、syntax 156→157） |
-| 账 #221 = C29-PL-a（提交 `27767255` = `Picture.Line` 从 COM 兜底改道到原生 `vb6_ControlLine`：RTL 新出口 + `controlCanvasMethod` 表 + withm 码头 + 成员侧打标记；旗标改按字母位折 B=1/C=2/F=4 ⇒ BF=5、`C`/`F`/`CF` 从此有落脚点；`tests/pcline/PcDraw.{frm,vbp}` 画完问像素四形各钉两头 + `pcline_flag_folded` 换针 + 哨兵 N5/N6） | 发码 A/B inputs=100 changed=**4** same=96，每份 +8/−8 全是同一条调用换出口；CENSUS `L"Line"` **32→0** / `vb6_ControlLine(` **0→32**，VB3001 146=146、`VB6_SA_AT(` 20972=20972、`_vb6_select_` 7346=7346；x64 与 x86 真跑逐行相同 `PL01..PL04=True`（`diag=255 boxedge=16711680 boxmid=16777215 fillmid=65280 circletop=255`）；哨兵 PASS `fold bits 1+1+1, handoff 1+1, AST 0, RTL 1/bits, canvas 1+1+2+1`；只写表+码头不写成员侧时夹具四形**全 False**（N6 第四条由此起）；真工程 ucProgressCircular 两档仍 rc=1，27 条诊断逐文件归因到 #222（Form1.c 25×C2198+1×C2084）与 #219（`Count`），`ppProgressCircular.c` 零条 | 已发货，门 待回填 |
+| 账 #221 = C29-PL-a（提交 `27767255` = `Picture.Line` 从 COM 兜底改道到原生 `vb6_ControlLine`：RTL 新出口 + `controlCanvasMethod` 表 + withm 码头 + 成员侧打标记；旗标改按字母位折 B=1/C=2/F=4 ⇒ BF=5、`C`/`F`/`CF` 从此有落脚点；`tests/pcline/PcDraw.{frm,vbp}` 画完问像素四形各钉两头 + `pcline_flag_folded` 换针 + 哨兵 N5/N6） | 发码 A/B inputs=100 changed=**4** same=96，每份 +8/−8 全是同一条调用换出口；CENSUS `L"Line"` **32→0** / `vb6_ControlLine(` **0→32**，VB3001 146=146、`VB6_SA_AT(` 20972=20972、`_vb6_select_` 7346=7346；x64 与 x86 真跑逐行相同 `PL01..PL04=True`（`diag=255 boxedge=16711680 boxmid=16777215 fillmid=65280 circletop=255`）；哨兵 PASS `fold bits 1+1+1, handoff 1+1, AST 0, RTL 1/bits, canvas 1+1+2+1`；只写表+码头不写成员侧时夹具四形**全 False**（N6 第四条由此起）；真工程 ucProgressCircular 两档仍 rc=1，27 条诊断逐文件归因到 #222（Form1.c 25×C2198+1×C2084）与 #219（`Count`），`ppProgressCircular.c` 零条 | 已发货，门 #344 红在 control_dc 名单（已改 4→5）→ **门 #345 全绿** |
 | 账 #215（提交 `48feae8e` = §B49 的"体级声明收成一条声明符一条 LocalDeclStmt" + `tests/test_bodydecl.bas` 8 针（x86+x64 两形）+ `[CODEGEN-NOTE] bodydecl_one_per_declarator` （Absent 钉 VB3001）+ | 门 #338 = run 37321722861、head bab5b0ef、attempt 1 = 11 job 全 completed/success；compile 片 25→26 里新那枚就是 `[STATIC] bodydecl_shape ... PASS`（逐行读到），syntax 片 151→152 是 `[CODEGEN-NOTE] bodydecl_one_per_declarator ... PASS`，bas 两片之和 90→92 = test_bodydecl 与 test_bodydecl_x86 进了门禁且绿；vbp #3 那条 SKIP 仍是 test_vbman（COM 未注册，与 #335/#337 同形）） | **体级声明有四条路、两种形状**：`Dim a, b` 由 parseDimStmt 在语句层手写一遍声明符解析并出两条语句，`Const/Static/体级 Public` 的多声明符行把 MultiDecl 原样塞进 LocalDeclStmt，而语义层 visit(LocalDeclStmt) 的 switch 不认这个 kind ⇒ **一枚名字都不登记、每条使用一条 VB3001**（VBFlexGridDemo 一片 778 → 502 条，全部是诊断行）；手写那份副本还落在共享实现后面，漏了 WithEvents 与「后缀即类型」两步 ⇒ `Dim a&, b&` 第二枚静默落回 Variant（TypeName 看不出，VarType 3/0 才看得出）。收成 `Parser::wrapBodyDecls` 一处，四条路全调它，手写展开删掉。A/B 100 份 same=98 changed=2 且两条差异逐条归到诊断行；真编译四片 0 error C / 0 LNK；哨兵在 HEAD 树上 P1..P4 十条红 | 已发货，门 #338 绿 |
