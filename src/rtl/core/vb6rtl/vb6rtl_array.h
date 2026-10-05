@@ -97,8 +97,21 @@ void  vb6_SafeArrayPutElem(vb6_SafeArray1D* arr, int32_t index, void* value);
 // 由 VB6 隐式转换为 Long。这里把下标差值显式转 int32_t, 否则 C 端
 // float/double 下标直接报 C2108 (Charts 2020 ucChartArea: 202 处),
 // 且级联出 C2198 等二次错误。Variant 下标仍由生成端 toLongIfVariant 处理。
+//
+// 账 #209: 这里是**唯一**对一维数组描述符的裸解引用点, 此前它一个检查都没有, 于是
+//   `With m_Serie(Index)`（动态数组从未 ReDim / 已被 Erase）读 (NULL)->lBound
+//   ⇒ 0xC0000005 原生崩（实测 ucChartBar demo 点 Random, 三次同偏移 0x1abf2）。
+// VB6 在这一条是**运行时错误 9**, 与 vb6_UBound/vb6_LBound 的 rev2 同族 —— 那两处
+// 已经抛 9, 本刀补上"元素"这一半。步长仍按调用方写明的 sizeof(type), 不改读描述符的
+// elemSize —— 那是 Fix 170/rev3 记下的独立历史坑, 本刀只加检查、不动步长语义。
+void vb6_SaElemFail(void* arr, int32_t idx);  // 必抛 9, 不返回
+static inline void* vb6_SaElemPtr(void* arrV, int32_t idx, int32_t elemSize) {
+    vb6_SafeArray1D* arr = (vb6_SafeArray1D*)arrV;
+    if (!arr || idx < arr->lBound || idx > arr->uBound) vb6_SaElemFail(arrV, idx);
+    return (char*)arr->data + (ptrdiff_t)(idx - arr->lBound) * (ptrdiff_t)elemSize;
+}
 #define VB6_SA_AT(type, arr, idx) \
-    (((type*)((arr)->data))[(int32_t)((idx) - (arr)->lBound)])
+    (*(type*)vb6_SaElemPtr((arr), (int32_t)(idx), (int32_t)sizeof(type)))
 
 // UBound/LBound (替换旧stub)
 int32_t vb6_UBound(vb6_SafeArray1D* safeArray, int32_t dimension);
