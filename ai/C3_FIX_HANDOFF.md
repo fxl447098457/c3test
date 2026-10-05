@@ -636,7 +636,66 @@ C 那一枚顺带把 #209 的「未处理错误按 9 退出」口径在**实例�
 
 哨兵 `scripts/check_bodydecl_shape.ps1`：P1 定义/声明各 1 份，P2 四条路各调一次（调用点合计 4），P3 手写展开不许回来（`parser_stmt_assign.cpp` 里 `expectName("expected variable name")` 必须为 0，而共享那份 `parser_decl_var.cpp` 必须 ≥1），P4 除 `wrapBodyDecls` 内那一处外别处不许把声明列表直接包成 LocalDeclStmt（parser 全范围计数 = 1），P5 语义层**不许**再补 `case MultiDecl`（那等于把两种形状再造一遍，计数必须为 0）。当前绿：`defs 1, callsites 4, hand expansion 0, raw wraps 1, semantics MultiDecl 0`；负控 = 把这四个文件退回 HEAD 跑同一枚 ⇒ P1/P2/P3/P4 共十条红（P5 在 HEAD 上也绿，因为那儿本来就没写分支 —— 它是"保持为 0"的哨兵，不是"抓到本次改动"的哨兵）。已接进门禁 compile 那片：`[STATIC] bodydecl_shape`。
 
-边界与下一格：① 语义层 `visit(LocalDeclStmt)` 里 Dim 那支仍是自己内联造符号（`semantic_analyzer_stmt.cpp:255`），没并进 `registerVariable` —— 不在这一格的问题面上，没动；② `cgen_localdecl.cpp:31` 的 MultiDecl 分支从此 unreachable-by-construction，本轮没删（P4 已经把「只有一处能包」钉住，删它是另一格的清理）；③ `Static Sub` / `Static Function` 两形本来就不是变量列表，没走展开；④ VBFlexGridDemo 里**还剩 502 条 VB3001**，是另一族，**另立新账 #217**（本轮一条没动，只做了 census 与一条重要的读数警告）。502 条按名字分 12 组：UC/PB 宿主词汇 —— `UserControl` 278（全在 VBFlexGrid.ctl）、`PropertyPage` 127（三个 .pag：General 78 / Style 38 / Clip 11）、`Extender` 32、`Ambient` 7；库名成员访问 —— `VBA` 37（ctl 18 / Common.bas 15 / 两枚 .frm 各 2）；VB6 内在常量 —— `vbSrcCopy` 5、`vbPicTypeIcon` 5、`vbPicTypeBitmap` 3、`vbPicTypeEMetafile` 1；另有 `Is` 3（疑似 `TypeOf … Is` 的 Is 被当标识符）、`Interface` 3、工程内常量 `CTRLINFO_EATS_RETURN` 1。**一条必须先处理的读数**：这些告警自己报的 (行,列) 与源文件那行的文本对不上 —— 例如 `UserControl` 的首条指向 VBFlexGrid.ctl:2349 第 4 列，而那行是 `VBFlexGridComboButtonWidth = -1`；`PropertyPage` 指向 `.pag:18` 的 `End`。⇒ 按名字分家的数字可信，**按行定位不可信**（.ctl/.pag 走的是翻译后的虚拟源，行号映射没跟着回来），#217 开工前要么先把定位修对，要么别拿行号做判据。
+边界与下一格：① 语义层 `visit(LocalDeclStmt)` 里 Dim 那支仍是自己内联造符号（`semantic_analyzer_stmt.cpp:255`），没并进 `registerVariable` —— 不在这一格的问题面上，没动；② `cgen_localdecl.cpp:31` 的 MultiDecl 分支从此 unreachable-by-construction，本轮没删（P4 已经把「只有一处能包」钉住，删它是另一格的清理）；③ `Static Sub` / `Static Function` 两形本来就不是变量列表，没走展开；④ VBFlexGridDemo 里**还剩 502 条 VB3001**，是另一族，**另立新账 #217**（本轮一条没动，只做了 census 与一条重要的读数警告）。502 条按名字分 12 组：UC/PB 宿主词汇 —— `UserControl` 278（全在 VBFlexGrid.ctl）、`PropertyPage` 127（三个 .pag：General 78 / Style 38 / Clip 11）、`Extender` 32、`Ambient` 7；库名成员访问 —— `VBA` 37（ctl 18 / Common.bas 15 / 两枚 .frm 各 2）；VB6 内在常量 —— `vbSrcCopy` 5、`vbPicTypeIcon` 5、`vbPicTypeBitmap` 3、`vbPicTypeEMetafile` 1；另有 `Is` 3（疑似 `TypeOf … Is` 的 Is 被当标识符）、`Interface` 3、工程内常量 `CTRLINFO_EATS_RETURN` 1。**一条必须先处理的读数**：这些告警自己报的 (行,列) 与源文件那行的文本对不上 —— 例如 `UserControl` 的首条指向 VBFlexGrid.ctl:2349 第 4 列，而那行是 `VBFlexGridComboButtonWidth = -1`；`PropertyPage` 指向 `.pag:18` 的 `End`。⇒ 按名字分家的数字可信，**按行定位不可信**（.ctl/.pag 走的是翻译后的虚拟源，行号映射没跟着回来），#217 开工前要么先把定位修对，要么别拿行号做判据。（订正 2026-10-05：这一段里两处猜测是错的。`Is` 的三条来自 `Case Is`，不是 `TypeOf … Is`；`Interface` 那一组压根不存在，三条真名是 `OLEGuids.IObjectSafety` / `OLEGuids.IOleInPlaceActiveObjectVB` / `OLEGuids.IOleControlVB` —— 那是我自己按 UTF-8 硬读 GBK 告警造成的假条目，见 §C16。按 GBK 重读后 502 条落在 **14** 组名字上，一条不差；加上 Charts 2020 的 532 条一起分家，记在 §B50 头部。）
+
+### B50 `Case Is > 2` 里那枚 Is 是 parser 造的，36 条 VB3001 与一枚隐式局部都是它换来的（账 #217 第一刀，**已发货，待门**）
+
+先把 #217 的分家钉完（两份真工程各 x64/x86 各一次 --emit-c，GBK 解码后按名字数；502 + 532 = 1034 条，
+按成因是**五种 + 4 条未归家**，五种里只有一种(第⑥族)是真缺陷）：① **文档类隐式对象** —— `UserControl` 278+366、`PropertyPage` 127+5、
+`Extender` 32+20、`Ambient` 7+74，外加 .pag 里裸写的 `Changed` 8、`hDC` 6、`Controls` 2；发码走的是
+`kHostPseudoRows` 那张唯一权威表（账 #159 收的），语义层不认识这些名字 ⇒ 纯诊断。实测发码：
+`UserControl.hDC` → `vb6_UserControl_hDC`、`Ambient.UserMode` → `vb6_Ambient_UserMode`、
+`Extender.Tag` → `vb6_Extender_Tag`、`PropertyPage.hWnd` → `vb6_PropertyPage_hWnd`。② **`VBA.` 限定** 37 条
+（`VBA.Choose` / `VBA.DateAdd` / `VBA.Year`）—— 发码剥前缀走内在函数（`VBA.Choose(j,a,b)` 实测发成
+`(j)==1 ? (a) : ((j)==2 ? (b) : NULL)`）⇒ 纯诊断。③ **内在常量缺档** 28 条（`vbSrcCopy` 7、`vbPicTypeIcon` 6、
+`vbPicTypeBitmap` 4、`vbPicTypeEMetafile` 1、`vbHitResultHit` 8、`vbAsyncTypeByteArray` 1、`vbAsyncReadForceUpdate` 1）
+—— `builtin_consts*.inc` 那张表没登记，但发码照旧出对值：`vbSrcCopy` 折成 `13369376`(SRCCOPY)，
+`vbPicTypeIcon` 原样发名、由 `vb6rtl_userctl.h` 的 `#define … 3` 接住 ⇒ 表缺档，且常量现在有**两份权威**。
+④ **外部类型库限定** 3 条 = 上面订正掉的那组 `OLEGuids.*`，来自 `Implements OLEGuids.IObjectSafety`，
+没有那份注册的类型库可查 ⇒ 源码侧/引用侧的账，不是编译器欠的。⑤ **跨模块 Public Const 看不见** 1 条：
+`CTRLINFO_EATS_RETURN` 写在 `Builds\VTableHandle.bas`（`Public Const … = 1`）而在 VBFlexGrid.ctl 里用 —— 发码那侧靠 `#define CTRLINFO_EATS_RETURN (1)` 活着，语义层那条跨模块常量解析待查。
+⑦ **未归家 4 条**（全在 Charts）：`ppProgressCircular.pag` 的 `BF` 2 与 `B` 1、`ucProgressCircular.ctl` 的
+`Count` 1。名字短得像被截了半截（`BF`/`B` 像在 `&H…` 那一类字面量上、`Count` 像伪对象/集合成员），
+但**没量过就不归家** —— 下一格先按 §C16 那两步（显式 gbk + 一枚最小 .bas 探针把行号拿到手）定形。
+
+**⑥ 这一刀出的那族：`Is` 36 条（grid 3 + Charts 33）**。#217 的告警行号本来不可信（.ctl/.pag 是翻译后的
+虚拟源），所以拿一枚最小 .bas 探针（`Case Is > 2, 1` / `Case Is > 5` / `Case Is < 0` 三形 + `a Is b` +
+`TypeOf o Is Collection`）走 --emit-c：告警落在**这三行本身**（6,17,19），后两形一条不出 ⇒ `Is` 一家当场定形
+为 `Case Is`，与 `TypeOf … Is` 无关。读 parser：`parseCaseValue` 为了借一次优先级解析，造了一枚
+`IdentifierExpr("Is")` 当左操作数**放进 AST**。语义层 visit(IdentifierExpr) 见到没声明的名字 ⇒ 写着
+`Option Explicit` 时每形一条 VB3001；没写时走 VB6 隐式声明那支，把 `Is` 登记成 Variant，发码就在每枚
+用到它的过程序言发一枚 `vb6_VARIANT Is = vb6_VariantEmpty();`（同一份夹具去掉 Option Explicit 实测 2 枚）。
+发码从头只读比较符与右操作数，所以**值一直是对的** —— 这一族是"AST 里撒了谎、换来两条副作用"，不是算错。
+
+修法（一处形状，不开第二条路）：VB6 的 `Is` 在 `Case Is` 里占的是**测试表达式**的位置，压根不是标识符 ⇒
+`CaseClause::CaseValue` 加 `relOp`(BinaryOp) + `hasRelOp`(bool)，parser 里那枚占位标识符只用于借优先级、
+出函数就丢，`cv.value` 从此只装右操作数；`cgen_select.cpp` 三档（字符串 / Single / 整数）改读 `cv.relOp`；
+`ast_clone.cpp` 两个字段都抄。无比较符的 `Case Is` 那支本来只看 `isIsClause`，值留空即可（改前塞进去的
+那枚标识符从来没人读）。
+
+判据（四件，本地全绿）：① 探针两面 —— VB3001 3→0（整个 err 空），隐式局部 2→0，而 `_vb6_select_` 的
+条件行逐字不变；② `tests/test_caseis.bas` 7 针真跑 x64+x86 全对（六个关系符各档 `CI-rel=lt/le/eq/gt/ge/ge`、
+`CI-ne=is4/ne4`、Is 与值混写 `CI-mixed=big/big/two/rest`、字符串 Select `CI-word=beq/gtm/rest`、
+Single Select 那一档 `CI-half=hi/lo/mid`、Variant 测试表达式 `CI-var=hi/lo/hi`）；③ 两条 [CODEGEN-NOTE] ——
+`caseis_is_not_an_identifier` 用同一份夹具**两头钉**（`nopeHereIsNotAName` 照旧报 VB3001，`'Is'` 必须不再出现，
+拦"把整条诊断关掉"那种修法），`caseis_no_phantom_local` 钉序言里没有 `vb6_VARIANT Is`；④ 哨兵
+`scripts/check_caseis_shape.ps1`（C1 两个字段各 1 份 / C2 parser 只设一次 hasRelOp 且不得再把造出来的名字
+存进 cv.value / C3 发码读 cv.relOp 三处且不得再把 cv.value 当 BinaryExpr 拆 / C4 clone 两字段各抄一次），
+[STATIC] caseis_shape 在 compile 片 PASS，该片 26→27；两条负控各自红过（删 clone 那行 ⇒ C4 红；把假标识符
+塞回 cv.value ⇒ C2 红），恢复后按 md5 验过逐字节相同。
+
+A/B 护栏（发码面）：inputs=100 same=90 **changed=10**，每份都是 `+0` 行的纯删除，条数 33/21/9/3/3 各两档
+（Charts 主工程 33 = ucChartArea 9 + ucChartBar 21 + ucTreeMaps 3，VBFlexGridDemo 3）—— 逐行看全部是删掉的
+VB3001 `Is` 诊断行，**unattributable=0**；CENSUS `'Is'` 138→0，CENSUS `_vb6_select_` 7346→7346（每个 Select Case
+站点照旧发码）。这一族的规模是全仓的：138 条里 .ctl/.pag 占大头，说明它在别的工程只会更多。
+
+边界与下一格：① 剩下 96% 的噪声是 ①②③ 三种"发码认识、语义层不认识"，收法与 §B50 这一刀不同 —— 要么把
+`kHostPseudoRows` 从 backend 提到 `src/common` 让语义层也问它（一处权威两个消费者，照账 #188 那个先例），
+要么在 `namesProjectLevel` 那条豁免位上补文档类隐式对象；动手前要先答一句「语义层把这些名字认识之后，
+`lastExprType_` 该不该跟着换档」—— 换档会动类型判定，必须重新做一遍 A/B。② `Controls`/`Count` 那 3 条是
+表**刻意不收**的成员（RTL 无对应全局），属账 #159 末尾说的"RTL 侧缺口，另立账"。③ `CTRLINFO_EATS_RETURN`
+一条要先量"跨模块 Public Const 在 .ctl 里到底解析不解析"，别顺手并进豁免位。④ §C16 那条读数教训是这一格
+最重要的副产品：census 的**名字**是唯一可信刻度，行号与自己解码出来的拼写都要复核。
 
 ## C. 仍在生效的口径与工具事实（与本文档等长的一半价值在这里；完整版见记忆库）
 
@@ -730,6 +789,14 @@ C 那一枚顺带把 #209 的「未处理错误按 9 退出」口径在**实例�
     `markAddressOfCallbacks` 内层那圈对**每个模块的符号表**各 +1（定义模块一份 + 每个引用它的外部副本一份），
     所以 VBFlexGridDemo 源码里去重后 37 个 `AddressOf` 目标名，这一行报 **49**。当「这条路走没走」的信号够用；
     **待办**：按过程名归并后再报（去重），下轮有别的源码刀时顺手改，不为它单开一轮门。
+16. **读 MSVC/C3 的中文告警必须显式按 gbk 解码，否则 census 会造出不存在的条目**（2026-10-05，账 #217 撞的）：
+    C3 的诊断正文是中文、按控制台码页写进日志。用 UTF-8 + errors='replace' 读时，名字前面的中文字节会连吃字符
+    —— 我因此把 `OLEGuids.IObjectSafety` / `OLEGuids.IOleInPlaceActiveObjectVB` / `OLEGuids.IOleControlVB` 三条
+    归成一簇叫 `nterface` 的假条目，还据此在 §B49 记了一条不存在的账。同一份日志 `decode('gbk','replace')` 重读，
+    502 条落在 14 组名字上、一条不差。同族第二条坑：正则的 `^` 不加 `re.M`，在整篇文本里只匹配文件开头，
+    会得到"这条日志里 0 条告警"这种假阴性 —— 而 `grep -c` 明明报 502。**数字与工具对不上时先怀疑读法**，
+    别拿第一个读数分家。
+
 
 ## D. 已完成项一行索引（叙述已删；原文在 `git show 1465da1:ai/C3_FIX_HANDOFF.md` 的对应 §区间）
 
