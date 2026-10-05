@@ -61,7 +61,9 @@ extern void vb6_ComExit(void);
 // ============================================================
 
 int32_t vb6_IntDiv(int32_t a, int32_t b) {
-    if (b == 0) return 0;  // TODO: raise error
+    // VB6 语义: \ 除 0 → 运行期错误 11 ("Division by zero"), 与 '/' 同源
+    // (此前 TODO "raise error" 一直没接, 变量除数静默返回 0)。
+    if (b == 0) { vb6_ErrRaiseNumber(11); return 0; }
     // VB6 \ 运算符: 截断到整数 (C的整数除法对正负数的行为与VB6一致)
     return a / b;
 }
@@ -525,7 +527,9 @@ void vb6_ErrRaiseNumber(int32_t errNum) {
 //      "Debug.Print 1 / 0" 实证); 换成函数调用即不可折叠。
 //  (b) 走 vb6_ErrRaise: On Error Resume Next 下静默置 Err.Number=11 —— InIde 的
 //      "除零探测错误处理"技巧依赖此行为; 无错误处理时按 VB6 弹框/退出。
-// 变量除数仍走裸 C 除法 (IEEE inf) —— 运行期语义缺口与 vb6_IntDiv 的 TODO 同源。
+// 账 (除零补全): cgen 现在对 **变量除数** 也统一走 vb6_Num_Div / vb6_Num_Mod /
+// vb6_IntDiv (三者都在 b==0 时 vb6_ErrRaiseNumber(11)), 此前变量除数落裸 C
+// 除法得 IEEE inf / 静默 0 的缺口已闭合。
 double vb6_Num_Div(double a, double b) {
     if (b == 0.0) { vb6_ErrRaiseNumber(11); return 0.0; }
     return a / b;
