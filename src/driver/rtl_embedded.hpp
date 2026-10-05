@@ -194,6 +194,12 @@ enum RtlResourceID {
     RTL_VB6FORMS_SLIDER_C                  = 221,
     // 账 #181: 崩溃轨迹每进程只记一次的闸 (零依赖头, 见文件头注释)
     RTL_VB6RTL_CRASH_H                     = 222,
+
+    // 2026-10-06: Form/Printer 绘图方法家族 (PSet/Line/Circle/Point/Cls)。
+    // 此前 Form 级绘图面**完全缺失** —— 只有 Shape/Line 控件的自绘路径,
+    // `Form_Paint` 里的 Me.PSet 等落进 COM dispatch 桩 (运行时 no-op)。
+    RTL_VB6FORMS_DRAW_C                    = 223,
+    RTL_VB6FORMS_DRAW_H                    = 224,
 };
 
 // Session directory manager

@@ -1,4 +1,9 @@
 // c3rtl.rc - RTL runtime library embedded as resources
+// 2026-10-06: 新增 Form/Printer 绘图方法家族 vb6forms_draw.c/.h (PSet/Line/
+//   Circle/Point/Cls, 资源 223/224)。此前 Form 级绘图面**完全缺失** —— 只有
+//   Shape/Line 控件的自绘路径, `Form_Paint` 里的 Me.PSet 等落进 COM dispatch
+//   桩 (运行时 no-op)。HDC 不新建: 优先取窗口属性 VB6_PaintDC (WM_PAINT 派发期
+//   宿主 BeginPaint 过的那张), 否则 GetDC —— 与 vb6_ControlDrawDC 同口径。
 // 账 #185: PictureBox/Image 的事件面以前**一次也不响**。RTL 建窗时给 STATIC+SS_BITMAP
 //   装的自绘子类, 和发码为控件事件装的子类, 把原始窗口过程存在**同一个属性名**
 //   (VB6_OrigProc) 上, 而两边都写"属性已存在就不装" ⇒ 后装的那层被静默丢掉。
@@ -366,6 +371,13 @@
 137 RCDATA "../rtl/core/vb6rtl/vb6rtl_class_com.h"
 138 RCDATA "../rtl/core/vb6rtl/vb6rtl_runtime.h"
 222 RCDATA "../rtl/core/vb6rtl/vb6rtl_crash.h"
+
+// 2026-10-06: Form/Printer 绘图方法家族 (PSet/Line/Circle/Point/Cls)。
+// 此前 Form 级绘图面完全缺失 —— 只有 Shape/Line 控件的自绘路径,
+// `Form_Paint` 里的 Me.PSet 等落进 COM dispatch 桩 (运行时 no-op)。
+// ⚠ 头必须排在 .c 之前 (解包后是平铺目录, 同名 .h 缺失 ⇒ cl 报 C1083)。
+223 RCDATA "../rtl/core/vb6forms/vb6forms_draw.h"
+224 RCDATA "../rtl/core/vb6forms/vb6forms_draw.c"
 
 // vb6forms 家族再细分 (2026-09-17): Picture 属性 / Widget 属性
 139 RCDATA "../rtl/core/vb6forms/vb6forms_picture_prop.c"

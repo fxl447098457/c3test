@@ -149,6 +149,37 @@ ExprPtr Parser::parsePostfix(ExprPtr expr) {
                 // If/End If 配对 (Charts 2020 ppProgressCircular.pag 297/299/474).
                 // 吸收后统一为 IndexOrCallExpr(callee=obj.Line,
                 // 实参 = x1, y1, x2, y2[, color][, fillMode]), 由后端按控件类型发射。
+                //
+                // 2026-10-06: **Circle / PSet / Point 同样要吸收**, 否则它们的
+                // 坐标/半径尾巴会漏到外层变成独立表达式, 而残留的 `0(...)` 桩
+                // 语句既 C2064 又把半径丢掉 (实测 `Me.Circle (300,100),40` 发出
+                // `vb6_Form_Circle(..., 300, 100, 0, ...)` 且下一行是残桩)。
+                // 三者的尾巴形态:
+                //   Circle (x, y), radius [, color] [, start] [, end] [, aspect]
+                //   PSet   [Step] (x, y) [, color]
+                //   Point  (x, y)                          ← 无尾巴, 无需吸收
+                // ⇒ 需要吸收的是 Circle 的 `, radius[, ...]` 与 PSet 的 `, color`。
+                if (cur_.kind == TokenKind::Comma) {
+                    bool isCircleCall = false, isPSetCall = false;
+                    if (call->callee && call->callee->kind == ASTNodeKind::MemberAccessExpr) {
+                        auto& maC = static_cast<MemberAccessExpr&>(*call->callee);
+                        std::string mn = toLower(maC.memberName);
+                        isCircleCall = (mn == "circle");
+                        isPSetCall = (mn == "pset");
+                    }
+                    if (isCircleCall || isPSetCall) {
+                        // 收不动就停 (下一个 token 是语句终止符), 剩下的交给外层。
+                        while (match(TokenKind::Comma)) {
+                            if (cur_.kind == TokenKind::NewLine ||
+                                cur_.kind == TokenKind::Colon ||
+                                cur_.kind == TokenKind::EndOfFile ||
+                                cur_.kind == TokenKind::RightParen) {
+                                break;
+                            }
+                            call->positional.push_back(parseExpression());
+                        }
+                    }
+                }
                 if (cur_.kind == TokenKind::Minus && next_.kind == TokenKind::LeftParen) {
                     bool isLineCall = false;
                     if (call->callee && call->callee->kind == ASTNodeKind::MemberAccessExpr) {

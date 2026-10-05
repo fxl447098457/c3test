@@ -565,3 +565,146 @@
             return;
         }
     }
+
+    // 2026-10-06: Form / Printer 的绘图方法 (PSet/Line/Circle/Point/Cls)。
+    // 与上面 PictureBox.Print 同构 —— 成员侧 (form_builtin / Printer 那支) 把
+    // comObjExpr_ 存成 Form 的 hwnd 表达式 (vb6_hwnd_<Form>) 或 Printer 哨兵,
+    // 这里按方法名翻译成 RTL 调用。
+    //
+    // 为什么必须有这一段: Form 的未知成员此前**一律**落进下方通用 COM 绑定,
+    // 编出 `vb6_ComCall(hwnd, L"PSet", ...)` —— 窗体句柄不是 IDispatch, 运行期
+    // 静默 no-op。于是 `Me.PSet / Me.Line / Me.Circle / Me.Point` 在 Form_Paint
+    // 里既不画也不报错, 正是"Form 绘图方法缺失"的症状。
+    //
+    // ⚠ 形参要按 VB6 语义打平: Step 关键字、坐标省略、颜色省略、Box/Fill/BF
+    // 都要各自成为**独立实参** (RTL 侧签名见 vb6forms_draw.h), 不能像
+    // Print 那样只取第 0 个 —— `Line -(x1,y1)-(x2,y2), c, B` 的信息全在后几个。
+    if (isComMarker_) {
+        std::string mDraw = Symbol::toLower(comMemberName_);
+        bool isPrinterDraw = (mDraw == "pset" || mDraw == "line" || mDraw == "circle"
+                              || mDraw == "point" || mDraw == "cls");
+        // Printer 那支的 obj 是 (void*)vb6_Printer_Object(); Form 那支是 vb6_hwnd_X
+        bool looksLikePrinter = (comObjExpr_.find("Printer") != std::string::npos);
+        if (isPrinterDraw && (isFormModule_ || looksLikePrinter)) {
+            isComMarker_ = false;
+            isEarlyBoundCom_ = false;
+            earlyBoundSym_ = nullptr;
+            std::string method = std::move(comMemberName_);
+            std::string obj = std::move(comObjExpr_);
+            comObjExpr_.clear();
+            comMemberName_.clear();
+            // ⚠ 必须小写化后比较: memberName_ 是**原样大小写** (用户写 `Me.PSet`
+            // 就是 "PSet"), 拿它跟小写字面量比会全部落空 ⇒ 一律走 else 分支
+            // (实测 PSet/Point/Line 全被发成 vb6_Form_Circle)。
+            std::string m = Symbol::toLower(method);
+
+            // 逐个求值位置实参, 顺带把 named 形参 (VB6 允许 Line x1,y1, To x2,y2)
+            // 归位。命名实参不在本轮支持范围 (VB6 里 PSet/Line/Circle 的 named
+            // 形参只有 color/box/fill/aspect, 已按位置覆盖)。
+            std::vector<std::string> a;
+            a.reserve(node.positional.size());
+            for (size_t ai = 0; ai < node.positional.size(); ai++) {
+                emitExpr(*node.positional[ai]);
+                if (isComMarker_) {   // 实参自身是 COM 读, 就地消费
+                    isComMarker_ = false;
+                    isEarlyBoundCom_ = false;
+                    earlyBoundSym_ = nullptr;
+                    std::string o2 = std::move(comObjExpr_);
+                    std::string m2 = std::move(comMemberName_);
+                    comObjExpr_.clear();
+                    comMemberName_.clear();
+                    a.push_back("vb6_ComGetProp((void*)" + o2 + ", L\"" + m2 + "\")");
+                } else {
+                    a.push_back(std::move(lastExpr_));
+                }
+            }
+            // 形状判定: Step 关键字只能在**语法位置**上出现, 编译期不可得
+            // (VB6 的 Step 落到 AST 上已被 parser 吞掉)。所以按"实参个数 + 首参
+            // 是不是坐标对"来分派, 这是能拿到的最强信号。
+            //   PSet(x,y) / PSet(x,y,c) / PSet Step(x,y) / PSet(x,y),c
+            //   Line -(x1,y1)-(x2,y2) [,c] [,B] [,F]
+            //   Circle (x,y),r [,c] [,start] [,end] [,aspect]
+            //   Point(x,y)
+            std::string call;
+            if (m == "pset") {
+                // PSet(x,y) / PSet(x,y),color —— 3 参时末参是颜色。
+                bool hasColor = (a.size() >= 3);
+                std::string x = a.size() > 0 ? a[0] : "0";
+                std::string y = a.size() > 1 ? a[1] : "0";
+                std::string col = hasColor ? a[a.size() - 1] : "0";
+                call = looksLikePrinter
+                    ? ("vb6_Printer_PSet(0, 1, " + x + ", " + y + ", "
+                       + (hasColor ? "1" : "0") + ", " + col + ")")
+                    : ("vb6_Form_PSet((void*)" + obj + ", 0, 1, " + x + ", " + y
+                       + ", " + (hasColor ? "1" : "0") + ", " + col + ")");
+            } else if (m == "point") {
+                std::string x = a.size() > 0 ? a[0] : "0";
+                std::string y = a.size() > 1 ? a[1] : "0";
+                lastExpr_ = looksLikePrinter
+                    ? ("vb6_Printer_Point(" + x + ", " + y + ")")
+                    : ("vb6_Form_Point((void*)" + obj + ", " + x + ", " + y + ")");
+                return;
+            } else if (m == "cls") {
+                call = looksLikePrinter ? std::string("vb6_Printer_EndDoc()")
+                                        : ("vb6_Form_Cls((void*)" + obj + ")");
+            } else if (m == "line") {
+                // Line 的两种形状: -(x1,y1)-(x2,y2) 4 参, 或 (x1,y1)-(x2,y2) 4 参
+                // (VB6 里 Step 由 parser 吞, 这里统一按 4 坐标 = 2 点)。
+                // 后面的可选实参: color / box / fill, 按 VB6 文档的实参顺序。
+                size_t nCoord = (a.size() >= 4) ? 4 : 2;
+                std::string x1 = nCoord > 0 ? a[0] : "0";
+                std::string y1 = nCoord > 1 ? a[1] : "0";
+                std::string x2 = nCoord > 2 ? a[2] : "0";
+                std::string y2 = nCoord > 3 ? a[3] : "0";
+                std::string hasColor = "0", col = "0", box = "0", fill = "0";
+                for (size_t i = nCoord; i < a.size(); i++) {
+                    // ⚠ **B / BF / F 是 VB6 的关键字式布尔实参**, 不是变量:
+                    //   `Line (x1,y1)-(x2,y2), , B` 里的 B 被 parser 当 IdentifierExpr
+                    //   收进来, 照原样发射会得到 `vb6_Form_Line(..., B, 0)` ——
+                    //   B 在 C 侧是未声明标识符 ⇒ C2064 实参无法解析。
+                    //   归一化: 裸 B → box=1; 裸 BF → box=1 且 fill=1; 裸 F → fill=1。
+                    //   其它一律按位置当 color (VB6 文档: color 在 box/fill 之前)。
+                    std::string raw = a[i];
+                    std::string rw = Symbol::toLower(raw);
+                    if (rw == "b")   { box = "1"; continue; }
+                    if (rw == "bf")  { box = "1"; fill = "1"; continue; }
+                    if (rw == "f")   { fill = "1"; continue; }
+                    if (i == nCoord) { hasColor = "1"; col = raw; }
+                    else if (i == nCoord + 1) { box = raw; }
+                    else if (i == nCoord + 2) { fill = raw; }
+                }
+                std::string pfx = looksLikePrinter ? "vb6_Printer_Line" : "vb6_Form_Line";
+                if (looksLikePrinter) {
+                    call = pfx + "(0, 1, " + x1 + ", " + y1 + ", 0, 1, " + x2 + ", " + y2
+                         + ", " + hasColor + ", " + col + ", " + box + ", " + fill + ")";
+                } else {
+                    call = pfx + "((void*)" + obj + ", 0, 1, " + x1 + ", " + y1
+                         + ", 0, 1, " + x2 + ", " + y2
+                         + ", " + hasColor + ", " + col + ", " + box + ", " + fill + ")";
+                }
+            } else { // circle
+                // Circle (x,y),r [,color] [,start] [,end] [,aspect]
+                std::string x = a.size() > 0 ? a[0] : "0";
+                std::string y = a.size() > 1 ? a[1] : "0";
+                std::string r = a.size() > 2 ? a[2] : "0";
+                std::string hasColor = "0", col = "0";
+                std::string hasStart = "0", sA = "0", hasEnd = "0", eA = "0", hasAsp = "0", asp = "0";
+                if (a.size() > 3) { hasColor = "1"; col = a[3]; }
+                if (a.size() > 4) { hasStart = "1"; sA = a[4]; }
+                if (a.size() > 5) { hasEnd = "1"; eA = a[5]; }
+                if (a.size() > 6) { hasAsp = "1"; asp = a[6]; }
+                if (looksLikePrinter) {
+                    call = "vb6_Printer_Circle(0, 1, " + x + ", " + y + ", " + r
+                         + ", " + hasColor + ", " + col + ", " + hasStart + ", " + sA
+                         + ", " + hasEnd + ", " + eA + ", " + hasAsp + ", " + asp + ")";
+                } else {
+                    call = "vb6_Form_Circle((void*)" + obj + ", 0, 1, " + x + ", " + y + ", " + r
+                         + ", " + hasColor + ", " + col + ", " + hasStart + ", " + sA
+                         + ", " + hasEnd + ", " + eA + ", " + hasAsp + ", " + asp + ")";
+                }
+            }
+            c_.emitLine(call + ";  /* Form." + method + " */");
+            lastExpr_ = "0";
+            return;
+        }
+    }

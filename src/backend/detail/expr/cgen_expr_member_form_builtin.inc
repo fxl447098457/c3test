@@ -59,6 +59,19 @@
             lastExpr_ = readFn + "(" + formHwnd + ")  /* Form." + node.memberName + " via Me */";
             return;
         }
+        // 2026-10-06: Form 的**绘图状态**属性读。此前这些与 ScaleHeight 一起落进
+        // 下方 COM dispatch 桩 —— 编译过了但运行期 no-op, `Print Me.ForeColor`
+        // 在 Form_Paint 里拿到的是 0 (不是真的画笔色)。交 RTL 按 HWND 存取
+        // (vb6forms_draw.c), 与控件 CurrentX 同一套窗口属性手法。
+        // ⚠ 只做**读侧**。写侧 (`Me.ForeColor = x`) 走赋值语句的发射路径, 不经过
+        // 本分支 —— 在这里加写侧是不可达的死代码 (读侧已 return)。
+        {
+            std::string mDr = Symbol::toLower(node.memberName);
+            if (mDr == "currentx")  { lastExpr_ = "vb6_Form_DrawGetCurrentX(" + formHwnd + ")"; return; }
+            if (mDr == "currenty")  { lastExpr_ = "vb6_Form_DrawGetCurrentY(" + formHwnd + ")"; return; }
+            if (mDr == "forecolor") { lastExpr_ = "vb6_Form_DrawGetForeColor(" + formHwnd + ")"; return; }
+            if (mDr == "drawwidth") { lastExpr_ = "vb6_Form_DrawGetWidth(" + formHwnd + ")"; return; }
+        }
         // 未知 Form 成员 → COM dispatch (作为编译 stub; 运行时不可靠)
         comObjExpr_ = formHwnd;
         comMemberName_ = node.memberName;
@@ -195,6 +208,25 @@
             // Task #39: Printer.hDC — ChooseFont/PrintDlg 的 hDC 字段来源
             // (cDlg.cls ShowFont: tChooseFont.hDC = Printer.hDC)
             if (memLower == "hdc") { lastExpr_ = "(void*)vb6_Printer_hDC()"; return; }
+            // 2026-10-06: Printer 绘图方法 (PSet/Line/Circle/Point/Cls) + 绘图状态。
+            //   此前这些落进下方通用 COM 绑定 ⇒ Printer 不是真 IDispatch, 运行期
+            //   静默 no-op, `Printer.Line ...` 在报表里画不出线。
+            //   方法**不在这里**翻译 —— 走 comObjExpr_ 标记, 由
+            //   cgen_expr_call_callee_withm.inc 的绘图段统一发射 (与 Form 同款,
+            //   实参个数/可选形参的判定逻辑只写一份)。
+            if (memLower == "pset" || memLower == "line" || memLower == "circle"
+                || memLower == "point" || memLower == "cls") {
+                comObjExpr_ = "Printer";
+                comMemberName_ = node.memberName;
+                isComMarker_ = true;
+                isEarlyBoundCom_ = false;
+                earlyBoundSym_ = nullptr;
+                lastExpr_ = "Printer";
+                return;
+            }
+            // 绘图状态读 (CurrentX/CurrentY 上面已给, 这里补 ForeColor/DrawWidth)
+            if (memLower == "forecolor") { lastExpr_ = "vb6_Printer_DrawGetForeColor()"; return; }
+            if (memLower == "drawwidth") { lastExpr_ = "vb6_Printer_DrawGetWidth()"; return; }
         }
 
         // P18-C: Forms 集合
