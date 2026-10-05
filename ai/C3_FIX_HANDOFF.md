@@ -508,6 +508,8 @@ Fix 195 那轮把 .frx 三种 blob 的**布局**钉准了（字符串 / 字符�
 #207 的夹具里顺手量到的：`Combo1.ListIndex = 2` 之后 `li=2`、`text=你好` 都对，但 `clicks=0` —— 挂在该组合框上的 `Combo1_Click` 一次也没进。VB6 的口径是**程序改 ListIndex 会触发 Click**（`ucTreeMaps/Form1.frm:357` 那句 `Combo1.ListIndex = 4: Exit Sub` 整个就是靠这个惯例来启动首次绘制的：设值 ⇒ 发 Click ⇒ `Combo1_Click` 里 `Clear / Form_Load / Refresh`）。后果：那一页现在必须**人手点一下 Random** 才画得出图。
 开工先量三件事，别直接改：① ListBox 那一档同不同形（VB6 两类都发）；② 发 Click 的时机 —— 是"赋值即发"还是"下一条消息才发"（决定重入：`Combo1_Click` 里又调 `Form_Load`，而 `Form_Load` 第一句就是那个赋值 ⇒ 会递归，VB6 靠"赋值时 ListIndex 已改好"让第二次进来不再走那一支，我们要不要同一顺序）；③ 用户点击与程序赋值**不能双发**（同 #171 那条"按来路筛"的纪律）。判据两头钉：程序赋值 ⇒ 恰好 1 次；用户点击 ⇒ 恰好 1 次；重复赋同一个值 ⇒ 0 次（VB6 是不是这样要先量，别照猜钉）。
 
+**#208 的机制已经量到（2026-10-05，读码）**：用户那一路是通的 —— `cgen_form_wndproc_create.inc:396` 把 `CBN_SELCHANGE`(code=1) 映到 `_Click()`（ListBox 那一路在 :316，容器里的在 :523/:544），而 Windows 对**程序**发的 `CB_SETCURSEL` 不回通知 ⇒ `vb6_SetListIndex`（`vb6forms_list.c:52`）设完就没人再发那条消息 ⇒ clicks=0。现成的先例两条：`vb6forms_richtextbox.c:478` 就是"程序化补发一条 `WM_COMMAND(MAKEWPARAM(id, code), hwnd)` 走完整派发链"，StatusBar 的 `SimClick` 同形。⇒ 缺的是"设完值补发那条通知"这一小步，而且**必须只在该控件挂了 Click 处理器时发**（否则又是 #190 那族"发码引用不存在的处理器"）。
+
 ## C. 仍在生效的口径与工具事实（与本文档等长的一半价值在这里；完整版见记忆库）
 
 - **子类化分层的槽位口径（账 #185 起）**：RTL 里**每一层**窗口子类用**自己**的窗口属性名存它下面那层的 wndproc ——
