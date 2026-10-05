@@ -402,6 +402,25 @@ void vb6_SaElemFail(void* arr, int32_t idx) {
     exit(9);  /* 不可达: vb6_ErrRaise 必 longjmp 或 ExitProcess */
 }
 
+// 账 #209 同族: 多维那一支的冷路径。口径与上面那条一模一样 (VB6 的越界就是错误 9),
+// 只是把秩数与逐维下标带出来 —— 多维最容易犯的错是"某一维抄错上下界", 光一个 idx 说不清。
+void vb6_SaNdElemFail(void* arr, const int32_t* idx, int32_t rank) {
+    vb6_SafeArrayND* a = (vb6_SafeArrayND*)arr;
+    if (getenv("C3_SA_TRACE")) {  // 与 vb6_UBound rev4 / vb6_SaElemFail 同一个开关
+        fprintf(stderr, "[SA] ND elem access out of range: arr=%p rank=%d dimCount=%d",
+                (void*)a, (int)rank, a ? (int)a->dimCount : -999);
+        for (int32_t d = 0; a && d < rank && d < 16; d++) {
+            fprintf(stderr, " d%d=%d[lb=%d n=%d]", (int)d, (int)idx[d],
+                    (int)a->bounds[d].lBound, (int)a->bounds[d].cElements);
+        }
+        fprintf(stderr, "\n");
+        fflush(stderr);
+    }
+    vb6_ErrRaise(9, vb6_BSTR_FromStr(L"VBA.Information"),
+                 vb6_BSTR_FromStr(L"Subscript out of range"));
+    exit(9);  /* 不可达 */
+}
+
 // ============================================================
 // SAFEARRAY ND - VB6 多维数组实现
 // ============================================================

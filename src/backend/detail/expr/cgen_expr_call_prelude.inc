@@ -337,16 +337,28 @@
             std::string ndArr = "(vb6_SafeArrayND*)" + arrName;
             lastExpr_ = "VB6_SA_ND_AT3(" + elemCType + ", " + ndArr + ", " + idx0 + ", " + idx1 + ", " + idx2 + ")";
         } else {
-            // 4+维: 通用通过vb6_SafeArrayND_Offset + 直接指针访问
+            // 4 秩及以上 (VB6 到 60): 一律交 VB6_SA_ND_ATN —— 秩数与**全部**下标一次交全。
+            // 以前这一条拼的是 `(int[]){indices[0], indices[1]}`(只塞两个) 却按 actualDimCount
+            // 交给 vb6_SafeArrayND_Offset ⇒ 秩 >=4 时读的是 indices[2]/[3] 那两块栈上垃圾,
+            // 偏移成了垃圾再拿去寻址: 实测 `Dim a4(1 To 2, 1 To 2, 1 To 2, 1 To 2)` **在范围内**
+            // 也当场 0xC0000005 (x86/x64 同形)，而 1/2/3 秩各 0 错位。
+            // 秩数取「源码写了几枚下标」而不是 actualDimCount: 两者不等时以前是静默少传，
+            // 现在交给运行期按 dimCount 问一句 (交回错误 9，不再拿越界的下标去寻址)。
             std::vector<std::string> indices;
             for (auto& arg : node.positional) {
                 emitExpr(*arg);
                 indices.push_back(std::move(lastExpr_));
             }
-            // 构建indices数组 + offset计算
-            std::string offVar = "_ndoff_" + std::to_string(tempCounter_++);
-            c_.emitLine("int " + offVar + " = vb6_SafeArrayND_Offset(" + arrName + ", " + std::to_string(actualDimCount) + ", (int[]){" + indices[0] + ", " + indices[1] + "});");
-            lastExpr_ = "((" + elemCType + "*)(((char*)" + arrName + "->data) + " + offVar + "))[0]";
+            std::string idxList;
+            for (size_t d = 0; d < indices.size(); d++) {
+                if (d) idxList += ", ";
+                idxList += "(int32_t)(" + indices[d] + ")";
+            }
+            lastExpr_ = "VB6_SA_ND_ATN(" + elemCType + ", (vb6_SafeArrayND*)" + arrName +
+                        ", " + std::to_string(indices.size()) +
+                        ", ((const int32_t[]){" + idxList + "}))";
+            // 最外层那对括号不是装饰: 预处理器按顶层逗号切宏实参, `{a, b, c}` 里的花括号
+            // 挡不住它 —— 少了这对括号就是 cl C4002 "VB6_SA_ND_ATN 参数过多"(实测 P4.bas)。
         }
         return;
     }

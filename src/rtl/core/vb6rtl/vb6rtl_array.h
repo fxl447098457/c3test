@@ -185,21 +185,51 @@ static inline vb6_VARIANT vb6_VariantFromUdtBytes(const void* src, int32_t nByte
     return v;
 }
 
-// Fix 106: 同 VB6_SA_AT, 多维下标也显式转 int32_t (VB6 隐式 CLng).
+// Fix 106: 同 VB6_SA_AT, 多维下标也显式转 int32_t (VB6 隐式 CLng)。
+// 账 #209 同族的下一半: 这一支以前和当初的 VB6_SA_AT 一模一样 —— 描述符在不在、
+// 每一维在不在范围内, 一个都不问。三条实测读数:
+//   · `Dim a2(1 To 2, 1 To 3)` 读 a2(3,1) ⇒ 静默拿到隔壁那格 (12)，VB6 是错误 9；
+//   · `Dim d() As Long` 从没 ReDim 就取 d(1,1) ⇒ 读 (NULL)->data ⇒ 0xC0000005；
+//   · 4 秩数组 `Dim a4(1 To 2,1 To 2,1 To 2,1 To 2)` **在范围内也崩** —— 那是发码侧
+//     把实参写成 `(int[]){i0, i1}` 只塞了两个下标却按实际秩数交出去 (cgen_expr_call_prelude.inc)。
+// 现在全部秩数(1..16)都走这一个出口: 热路径逐维比上下界, 冷路径抛 9。步长仍按调用方
+// 写明的 sizeof(type) —— 与一维那一刀同一口径, 不去读描述符的 elemSize。
+void vb6_SaNdElemFail(void* arr, const int32_t* idx, int32_t rank);   // 必抛 9, 不返回
+static inline void* vb6_SaNdElemPtr(void* arrV, int32_t rank, const int32_t* idx,
+                                    int32_t elemSize) {
+    vb6_SafeArrayND* a = (vb6_SafeArrayND*)arrV;
+    // 一维描述符被按多维形状用 (Fix 056 那条"声明 1D、ReDim 成 ND"的双面形) —— 一维的
+    // 首字段是魔数 0x5A1D=23069, 落不进 1..16, 所以这一问既认出"不是 ND"又不必多读字段。
+    if (!a || a->dimCount < 1 || a->dimCount > 16 || rank < 1 || rank > a->dimCount) {
+        vb6_SaNdElemFail(arrV, idx, rank);
+    }
+    ptrdiff_t off = 0;
+    ptrdiff_t stride = 1;
+    for (int32_t d = 0; d < rank; d++) {
+        int32_t lb = a->bounds[d].lBound;
+        int32_t cnt = a->bounds[d].cElements;
+        if (idx[d] < lb || idx[d] >= lb + cnt) vb6_SaNdElemFail(arrV, idx, rank);
+        off += (ptrdiff_t)(idx[d] - lb) * stride;
+        stride *= cnt;
+    }
+    return (char*)a->data + off * (ptrdiff_t)elemSize;
+}
+
 #define VB6_SA_ND_AT1(elemType, arr, i) \
-    (*((elemType*)((arr)->data) + \
-       ((int32_t)((i) - (arr)->bounds[0].lBound))))
+    (*(elemType*)vb6_SaNdElemPtr((arr), 1, \
+        (const int32_t[]){ (int32_t)(i) }, (int32_t)sizeof(elemType)))
 
 #define VB6_SA_ND_AT2(elemType, arr, i, j) \
-    (*((elemType*)((arr)->data) + \
-       (((int32_t)((i) - (arr)->bounds[0].lBound)) + \
-        ((int32_t)((j) - (arr)->bounds[1].lBound)) * (arr)->bounds[0].cElements)))
+    (*(elemType*)vb6_SaNdElemPtr((arr), 2, \
+        (const int32_t[]){ (int32_t)(i), (int32_t)(j) }, (int32_t)sizeof(elemType)))
 
 #define VB6_SA_ND_AT3(elemType, arr, i, j, k) \
-    (*((elemType*)((arr)->data) + \
-       (((int32_t)((i) - (arr)->bounds[0].lBound)) + \
-        ((int32_t)((j) - (arr)->bounds[1].lBound)) * (arr)->bounds[0].cElements + \
-        ((int32_t)((k) - (arr)->bounds[2].lBound)) * (arr)->bounds[0].cElements * (arr)->bounds[1].cElements)))
+    (*(elemType*)vb6_SaNdElemPtr((arr), 3, \
+        (const int32_t[]){ (int32_t)(i), (int32_t)(j), (int32_t)(k) }, (int32_t)sizeof(elemType)))
+
+// 4 秩及以上(VB6 到 60 秩)走这一条: 秩数与下标数组都由发码侧一次交全。
+#define VB6_SA_ND_ATN(elemType, arr, rank, idx) \
+    (*(elemType*)vb6_SaNdElemPtr((arr), (rank), (idx), (int32_t)sizeof(elemType)))
 
 // 文件 I/O
 int32_t vb6_FreeFile(void);

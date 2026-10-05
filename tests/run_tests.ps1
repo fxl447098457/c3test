@@ -1673,6 +1673,11 @@ if ($Category -in @("all", "run", "bas")) {
     Add-BasTest "test_arr_empty" "$Tests\test_arr_empty.bas" @("EA-ub=-1", "EA-lb=0", "EA-n=0", "EA-isarr=True", "EA-join=[", "EA-fe=0", "EA-vub=-1", "EA-3ub=2", "EA-e2=9", "EA-rb-lb=1", "EA-rb-ub=3", "EA-err=9", "EA-ea-nullread=9", "EA-ea-nullwrite=9",
         "EA-ea-in=20/30/50", "EA-ea-above=9", "EA-ea-below=9", "EA-ea-udt-in=11/22/0/0",
         "EA-ea-udt=9", "EA-ea-before=8", "EA-ea-erase=9", "EA-ea-loop=100", "EA-DONE")
+    # <vbeclipse> 账 #214: 多维数组的**元素**访问收成一处带检查的出口 —— 越界 / 未分配一律错误 9
+    # (以前: 二维越界静默拿到隔壁那格、二维未分配读 NULL->data 当场 AV、4 秩连"在范围内"都崩 ——
+    #  发码那一条把实参拼成 (int[]){i0, i1} 只塞了两个下标却按实际秩数交出去)。NA-in / NA-dyn-in 是范围内的负控。
+    Add-BasTest "test_arr_nd" "$Tests\test_arr_nd.bas" @("NA-udt=5/6", "NA-in=0/23/211/2112",
+        "NA-above=9", "NA-below=9", "NA-null=9", "NA-dyn-in=102/23", "NA-rank=9", "NA-DONE")
     # <vbeclipse>: Join/Filter 的数组槽 (Variant 数组曾按 BSTR* 读 → 段错误; Filter 的
     # VB6 可选参曾不补 → C2198/C2440 编不过)。含 1-based 源数组、零命中空数组、非字符串元素 → 13。
     Add-BasTest "test_joinfilter" "$Tests\test_joinfilter.bas" @("JF-var=[abc|xyz|abd]", "JF-var-def=[abc xyz abd]", "JF-str=[abc|xyz|abd]", "JF-f-lb=0 ub=1", "JF-f=[abc|abd]", "JF-none-ub=-1", "JF-excl-ub=0", "JF-excl=[xyz]", "JF-err=13", "JF-DONE")
