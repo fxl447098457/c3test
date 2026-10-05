@@ -696,6 +696,58 @@ VB3001 `Is` 诊断行，**unattributable=0**；CENSUS `'Is'` 138→0，CENSUS `_
 表**刻意不收**的成员（RTL 无对应全局），属账 #159 末尾说的"RTL 侧缺口，另立账"。③ `CTRLINFO_EATS_RETURN`
 一条要先量"跨模块 Public Const 在 .ctl 里到底解析不解析"，别顺手并进豁免位。④ §C16 那条读数教训是这一格
 最重要的副产品：census 的**名字**是唯一可信刻度，行号与自己解码出来的拼写都要复核。
+### B51 文档隐式对象只有"这份文档是哪一类"这一个前提，而那个前提在仓里猜过两处、语义层根本没有（账 #217 第二刀，**已发货，待门**）
+
+症状是一整片噪声：全仓发码语料里 **VB3001 共 2934 条**（两份真工程 499 + 499，其余在 czUI / ve_units /
+Charts 各子工程）。按名字分家就是 §B50 说的 ① 那一族：`UserControl` 644、`PropertyPage` 132、`Ambient` 81、
+`Extender` 52、外加 `VBA.` 37 —— 合起来 946 条。发码那侧从来是对的（成员与类型由 `kHostPseudoRows`
+回答，账 #159），语义层的 `visit(IdentifierExpr)` 却只认「工程级名字」两个位（`namesProjectLevel`），
+于是每条 `<对象>.<成员>` 都当成未声明标识符。更实在的一面在**没写 Option Explicit 的模块**：那条
+隐式声明支路会把这些名字登记成 Variant 局部，发码真发出来 —— 探针 `b227out/vb_qual.bas` 读到的就是
+`vb6_VARIANT VBA = vb6_VariantEmpty();` 外加一对 `#pragma push_macro/pop_macro("VBA")` 护栏，每枚用到的
+过程一枚，从来没人读。
+
+结构上的根因是**同一个前提写了两遍、第三处压根没有**：driver 按扩展名算 `isControlModule` /
+`isPropertyPageModule`（`driver_frontend.cpp` 里那几个 bool），发码那边又拿 `controlTypeName` 找
+"PropertyPage" 字符串猜第二遍（`cgen_form.cpp` 的 Fix 110f），而语义层两手空空 —— `Module` 上连一个
+表示文档类别的字段都没有（`ast_decl.hpp` 只有 isClassModule / isFormModule / isInterfaceModule）。
+VB6 的 `UserControl` / `PropertyPage` 只在对应类别的文档里存在，`Extender` / `Ambient` 只有 UserControl 有，
+`VBA` 是全局库前缀哪都有 —— 这四条规矩必须落在**一格**里，不能散在字符串猜测上。
+
+收成一处：`common/types.hpp` 加 `DocumentKind { Standard, Form, UserControl, PropertyPage }`，
+`Module::docKind` 由 driver **一处**按扩展名写（就在原来写 isFormModule 那个位置），语义层与发码层两处读：
+语义层新增 `SemanticAnalyzer::isDocumentHostObject(name)`（(类别, 名字) 一格一格对，四枚文档对象各自认类别、
+`vba` 恒真），在 `visit(IdentifierExpr)` 的未找到支里插在 `namesProjectLevel` 之后当第三个豁免位，
+**且要求 `memberObjCtx_`**（限定符位）；发码层把 `isPropertyPageDesigner_` 改成读 `module.docKind`
+（`emitDesignerControlDecls` 多收一个参数），那句字符串猜测删掉。豁免只压诊断、**不改类型答案**：
+`lastExprType_` 仍旧答 Variant，成员的类型继续由发码那张表回答 —— 这一格刻意不碰类型判定，
+要碰是另一格（碰就得重做一遍发码 A/B，理由见 §B50 的"边界"）。
+
+判据两头 + 一张哨兵：① 两份真工程逐档清零 —— VBFlexGridDemo 499→**19**、Charts 主工程 499→**34**，
+x86 与 x64 读数逐字相同；② 编译面夹子 `tests/dochost/dhExp.ctl`（开着 Option Explicit，五枚符号照旧发出来
+而 Absent 钉 VB3001 = 0）与 `tests/dochost/dhImp.ctl`（故意不写 Option Explicit，Absent 钉三枚死局部
+`vb6_VARIANT UserControl/Ambient/VBA`）—— 顺带一条工具事实：**.ctl 可以单独喂 --emit-c**，
+不必为编译面判据造一整份工程；③ 哨兵 `scripts/check_dochost_authority.ps1`：D1 枚举 1 份四档齐、
+D2 **docKind 的写入点全仓恰好 1 处**（多一处就是第二个权威）、D3 谓词 定义/声明/调用 各 1 且调用点带
+memberObjCtx_、D4 旧的 `controlTypeName.find("PropertyPage")` 必须为 0、D5 名字表五枚齐全。
+[STATIC] dochost_authority 在 compile 片 PASS（该片 27→28）。
+
+发码面 A/B（BASE = 上一刀那台 HEAD `ab1db9c0`，NEW = 这一刀）：inputs=100 same=82 **changed=18**
+（9 份工程 × 两档），每份都是 `+0` 行的纯删除，`unattributable=0`；CENSUS VB3001 **2934→158**；
+宿主符号一条没动 —— `vb6_UserControl_ScaleWidth` 436=436、`vb6_Ambient_UserMode` 94=94、
+`vb6_PropertyPage_hWnd` 16=16、`vb6_UserControl_hWnd` 70=70、`vb6_Extender_Tag` 4=4，
+`_vb6_select_` 7346=7346，`VB7006` 0=0（豁免位没把包屏蔽那条诊断一起吃掉，这条是专门钉的）。
+隐式局部那一面在这批语料里读不出增量（这些工程全写 Option Explicit，走的是"只 warn 不登记"那一支），
+所以那一头靠 dhImp.ctl 钉，不假装 A/B 能证明。
+
+边界与下一格：① 余下 158 条里最大的一族是 ③ **内在常量** 28 条（`vbSrcCopy` 折成 13369376、
+`vbPicTypeIcon` 由 RTL 的 `#define` 接住 —— 两份权威，见 §B50 的 ③），已登记为下一格；
+② 裸写的伪成员（`Changed` 8 / `hDC` 6 / `Controls` 2 / `Count` 1 + grid 那 1 条裸 `UserControl`）
+这一格**故意没管** —— 裸名要按 `HPF_BARE` 放行，风险是遮住真打错的变量名，得单独定判据；
+③ `CTRLINFO_EATS_RETURN`（跨模块 `Public Const`）与 `BF` / `B` 那三条未归家的，都要先量再收；
+④ 类型答案那一面（语义层认识这些名字之后 `lastExprType_` 该不该跟着换档）没动，动它之前先想清楚
+为什么这一格的答案是"不换"：换档会改类型判定，而这一格的发码 A/B 判据只对"纯删诊断行"成立。
+
 
 ## C. 仍在生效的口径与工具事实（与本文档等长的一半价值在这里；完整版见记忆库）
 
@@ -796,6 +848,13 @@ VB3001 `Is` 诊断行，**unattributable=0**；CENSUS `'Is'` 138→0，CENSUS `_
     502 条落在 14 组名字上、一条不差。同族第二条坑：正则的 `^` 不加 `re.M`，在整篇文本里只匹配文件开头，
     会得到"这条日志里 0 条告警"这种假阴性 —— 而 `grep -c` 明明报 502。**数字与工具对不上时先怀疑读法**，
     别拿第一个读数分家。
+
+17. **.ctl / .pag 可以单独喂 `--emit-c`**（2026-10-06，写账 #217 第二刀的判据夹子时确认）：
+    不必为"编译面判据"造一整份工程（.vbp + 宿主窗体 + .frx），一枚带 `Begin VB.UserControl X` 头行和
+    `Attribute VB_Name` 的 .ctl 就能直接跑 —— 走的是 driver 同一个按扩展名分派的入口。
+    配套的两条读数口径：① `Test-CodegenNote` 的 Absent 钉 VB3001 时**要钉 ID 而不是钉中文正文**
+    （正文按控制台码页写，跨码页不稳，见 §C16）；② 全仓 VB3001 总数是这类"跨工程同一族"改动最好的
+    横截面判据（本格 2934→158），比逐工程数数更难被局部巧合骗过。
 
 
 ## D. 已完成项一行索引（叙述已删；原文在 `git show 1465da1:ai/C3_FIX_HANDOFF.md` 的对应 §区间）
