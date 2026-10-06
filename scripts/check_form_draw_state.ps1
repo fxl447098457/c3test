@@ -13,6 +13,9 @@
 #   S3  读写成对: currentx / currenty / drawwidth 三个名在 getControlPropReadFn 的 Form 档与
 #       getControlPropWriteFn 的 Form 档**都要**有 (少一边就是这一刀回归)
 #   S4  编码对称: vb6_DrawSetI 那条 SetPropW 必须写裸值 (只看写行 —— 注释里提到 "v+1" 是在讲历史)
+#   S5  画笔色也只有一份存储 (账 #235): 属性名 VB6_DrawForeColor 在 src/rtl 里不许出现在任何
+#       GetPropW/SetPropW 行 —— Form 绘图家族的画笔色就是控件那个 ForeColor (唯一出口
+#       vb6_GetControlForeColor)。另存一枚的现场就是 `Me.ForeColor = vbRed` 之后 PSet 画出来是黑。
 #
 # 用法:  pwsh -File scripts\check_form_draw_state.ps1
 # 退出码: 0 = 全绿; 1 = 红
@@ -105,10 +108,23 @@ if (-not $mSet.Success) {
         $bad += ("S4 vb6_DrawSetI stores v+1 again while vb6_DrawGetI does not subtract 1 -> " + $w.Trim())
     }
 }
+# ---- S5: 画笔色只有一份存储 (账 #235) ----
+$patFg = '(GetPropW|SetPropW)\s*\([^;]*L"VB6_DrawForeColor"'
+$fghost = @()
+foreach ($f in Get-SrcFiles $rtlDir) {
+    foreach ($m in [regex]::Matches([System.IO.File]::ReadAllText($f.FullName), $patFg)) {
+        $fghost += ($f.Name + ":" + $m.Value.Substring(0, [Math]::Min(44, $m.Value.Length)))
+    }
+}
+if ($fghost.Count -ne 0) {
+    $bad += ("S5 pen color opened a second store = " + $fghost.Count + " -> " + (($fghost | Select-Object -First 4) -join " | "))
+}
+
+
 
 if ($bad.Count -eq 0) {
     Write-Host ("PASS form draw state: pen store unique, side-list gone, " +
-                "read/write paired for 3 props, encoding symmetric") -ForegroundColor Green
+                "read/write paired for 3 props, encoding symmetric, pen color store unique")
     exit 0
 }
 foreach ($b in $bad) { Write-Host ("FAIL " + $b) -ForegroundColor Red }

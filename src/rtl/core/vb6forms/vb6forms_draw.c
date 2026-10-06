@@ -15,8 +15,8 @@
 //     2. 否则 GetDC(hwnd)（Print/Cls 等在 WM_PAINT 之外调用的场景）。
 // 非 WM_PAINT 期拿的 DC 由本文件负责 ReleaseDC，fromPaint 那张不释放。
 //
-// 状态存哪：绘图状态（ForeColor / DrawWidth / DrawStyle / FillStyle / CurrentX/Y）
-// 一律按 HWND 存窗口属性（"VB6_FgColor" / "VB6_DrawWidth" ...），与
+// 状态存哪：绘图状态（DrawWidth / DrawStyle / FillStyle）按 HWND 存窗口属性；
+// 画笔色与笔位不在这一族 —— 它们各自只有一份存储 (账 #235 / #233)，与
 // vb6_ControlPrint 用 "VB6_PrintX/Y" 同一套手法。这样:
 //   * Form 与控件天然隔离（各自 HWND）；
 //   * 不需要给宿主模型加字段、不需要动 vb6_UserControlDesc 那三张按名桥表
@@ -100,20 +100,13 @@ static int32_t vb6_DrawCurY(HWND hw) { return (int32_t)vb6_GetCurrentY((void*)hw
 static void vb6_DrawSetCurX(HWND hw, int32_t v) { vb6_SetCurrentX((void*)hw, (float)v); }
 static void vb6_DrawSetCurY(HWND hw, int32_t v) { vb6_SetCurrentY((void*)hw, (float)v); }
 
-// 前景色: 0 (黑) 是合法值, 但不能表示"没设过" => 用 VB6 语义兜底
-// (BackColor/BackStyle 决定首色; 这里取 vbBlack = 0, 与 Print 同一档)。
+// 画笔色**只有一份存储** (账 #235): 控件那三处 (vb6forms_ctrl.c 的 Line / Print / 子控件回显)
+// 一直问 vb6_GetControlForeColor, 而 Form 绘图家族以前自己在 VB6_DrawForeColor 上又存了一枚
+// (还带一套 +1/-1) ⇒ `Me.ForeColor = vbRed` 之后**不带颜色的** PSet 画出来是黑 (实测 0 对 255)。
+// 两边默认档本来就是同一个数 (未设 → 0 → vbBlack), 所以合并不引入 Fix 187 那类"0 与没设过
+// 同构"的误判 —— 那条坑属于 BackColor (它默认是 BTNFACE 而不是黑, 才要 VB6_BackColorSet 哨兵)。
 static COLORREF vb6_DrawForeColor(void* hwnd) {
-    HWND hw = (HWND)hwnd;
-    if (!hw) return RGB(0, 0, 0);
-    intptr_t v = (intptr_t)GetPropW(hw, L"VB6_DrawForeColor");
-    if (v == 0) return RGB(0, 0, 0);
-    return (COLORREF)(int32_t)(v - 1);
-}
-
-static void vb6_DrawSetForeColor(void* hwnd, int32_t c) {
-    HWND hw = (HWND)hwnd;
-    if (!hw) return;
-    SetPropW(hw, L"VB6_DrawForeColor", (HANDLE)(INT_PTR)(c + 1));
+    return (COLORREF)vb6_GetControlForeColor(hwnd);
 }
 
 // ============================================================
@@ -354,17 +347,16 @@ void vb6_Form_Cls(void* hwnd) {
 }
 
 // ============================================================
-// 绘图状态读侧 (cgen 的 `Me.ForeColor` / `Me.DrawWidth` 打这里；笔位不在这一族 ——
-// 账 #233: 读写两侧都登记在 cgen_util_ctrl.cpp 的那两张表里, 且**成对**)。
+// 绘图状态读侧 (cgen 的 `Me.DrawWidth` 打这里；笔位与画笔色都不在这一族 ——
+// 账 #233: 读写两侧都登记在 cgen_util_ctrl.cpp 的那两张表里, 且**成对**；
+// 账 #235: 画笔色改问唯一那份存储, 所以这里**不再有** ForeColor 的读写出入口。
 // 与上面各方法同源: 状态按 HWND 存窗口属性, 缺省兜底成 VB6 初始值。
 // ============================================================
-int32_t vb6_Form_DrawGetForeColor(void* hwnd) { return (int32_t)vb6_DrawForeColor(hwnd); }
 int32_t vb6_Form_DrawGetWidth(void* hwnd)     { return vb6_DrawGetI(hwnd, L"VB6_DrawWidth", 1); }
 
 // 写侧。**登记进 cgen 的写侧表才是这条通路生效的唯一办法** —— 赋值语句发 C 时先问
 // getControlPropWriteFn(Form, 名), 没登记就退化成"把读函数当左值" (C2106, 实测)。
 // 编码口径与读侧同一套: 存裸值, "没设过"由各自的缺省档 / 钳位负责 (见 vb6_DrawSetI)。
-void vb6_Form_DrawSetForeColor(void* hwnd, int32_t c) { vb6_DrawSetForeColor(hwnd, c); }
 void vb6_Form_DrawSetWidth(void* hwnd, int32_t w) {
     if (w < 1) w = 1;
     vb6_DrawSetI(hwnd, L"VB6_DrawWidth", w);

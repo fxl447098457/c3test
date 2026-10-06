@@ -45,8 +45,10 @@ Private Sub tmrF_Timer()
     Dim d As LongPtr
     Dim r As Long
     Dim px2 As Long
+    Dim px3 As Long
     Dim ok1 As Boolean, ok2 As Boolean, ok3 As Boolean
     Dim ok5 As Boolean, ok10 As Boolean
+    Dim ok6 As Boolean
 
     tmrF.Enabled = False
 
@@ -72,6 +74,15 @@ Private Sub tmrF_Timer()
     Debug.Print "FD07-PIXEL=" & TF(GetPixel(d, 40, 60) = vbRed)
     px2 = GetPixel(d, 41, 61)
     ok5 = (px2 <> vbRed)
+    ' 235: pen color = one store only. Me.ForeColor must reach a PSet that carries no
+    ' color argument; the point painted earlier with an explicit vbRed must stay red,
+    ' so this cannot be won by 'repaint the whole surface blue'.
+    Me.ForeColor = vbBlue
+    Me.PSet (100, 120)
+    px3 = GetPixel(d, 100, 120)
+    ok6 = (px3 = vbBlue) And (GetPixel(d, 40, 60) = vbRed)
+    Debug.Print "FD11-forecolor=" & TF(ok6)
+    Debug.Print "FD12-RAW pen=" & CStr(px3) & " blue=" & CStr(vbBlue) & " first=" & CStr(GetPixel(d, 40, 60))
     r = ReleaseDC(Me.hwnd, d)
     Debug.Print "FD08-neg=" & TF(ok5) & " raw=" & CStr(px2)
 

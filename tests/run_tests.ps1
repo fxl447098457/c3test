@@ -3569,7 +3569,9 @@ if ($Category -in @("all", "run", "vbp")) {
     # ⇒ 只打印不当判据（本线口径：读数留档，判据换成"落在 30..3000 之间"那一枚布尔）。
     $fdrawExpected = @("FD01-drawwidth=True", "FD02-curxy=True", "FD03-pset2=True",
         "FD04-RAW xy=300,130 dw=3", "FD05-sm0=1", "FD06-sm1=3",
-        "FD07-PIXEL=True", "FD08-neg=True", "FD10-printstore=True", "FD-DONE")
+        "FD07-PIXEL=True", "FD08-neg=True",
+        "FD11-forecolor=True", "FD12-RAW pen=16711680 blue=16711680 first=255",
+        "FD10-printstore=True", "FD-DONE")
     Test-Vbp "fdrawstate" "$Tests\fdraw\FDemo.vbp" $fdrawExpected
     Test-Vbp "fdrawstate_x86" "$Tests\fdraw\FDemo.vbp" $fdrawExpected -Arch "x86"
 

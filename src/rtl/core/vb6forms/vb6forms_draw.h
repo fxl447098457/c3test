@@ -44,11 +44,9 @@ void   vb6_Form_Circle(void* hwnd,
 void   vb6_Form_Cls(void* hwnd);
 
 // ---- Form 绘图状态读写 (cgen 的 Me.CurrentX / .ForeColor / .DrawWidth) ----
-int32_t vb6_Form_DrawGetForeColor(void* hwnd);
 // 笔位不在这张表里 —— 账 #233: CurrentX/Y 只有一份存储, cgen 直接登记
 // vb6_GetCurrentX / vb6_SetCurrentX (vb6forms_prop_form.h)。
 int32_t vb6_Form_DrawGetWidth(void* hwnd);
-void   vb6_Form_DrawSetForeColor(void* hwnd, int32_t c);
 void   vb6_Form_DrawSetWidth(void* hwnd, int32_t w);
 
 // ---- Printer 版 (走全局 g_printerDC, 无 HWND 可挂属性 ⇒ 状态用静态变量) ----
