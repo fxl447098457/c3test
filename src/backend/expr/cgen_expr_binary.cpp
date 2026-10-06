@@ -313,7 +313,8 @@ void CCodeGen::visit(BinaryExpr& node) {
         };
         // Variant 表达式的取址: 左值标识符/成员/VB6_SA_AT(...) 直接 &,
         // 其余 rvalue (vb6_VariantFromComResult 等) 用临时变量存上再取址.
-        auto variantAddr158n = [&](const std::string& s) -> std::string {
+        // 账 #238: 裸名字那一形还要问"它是不是 vb6_VARIANT 那份存储" (判据在一处)。
+        auto variantAddr158n = [&](const std::string& s, Expr* ast) -> std::string {
             std::string t = s;
             while (t.size() >= 2 && t.front() == '(' && t.back() == ')')
                 t = t.substr(1, t.size() - 2);
@@ -329,7 +330,7 @@ void CCodeGen::visit(BinaryExpr& node) {
                 c_.emitLine("vb6_VARIANT " + tmp + " = vb6_VariantLong(" + s + ");");
                 return "&" + tmp;
             }
-            if (simpIdent158n(t) && !isConstIdent(t)) return "&" + s;
+            if (simpIdent158n(t) && !isConstIdent(t) && cmpOperandMayTakeAddr(t, ast)) return "&" + s;
             if (t.rfind("VB6_SA_AT(", 0) == 0) return "&" + s;
             // Fix 158u: Variant 比较左值语义落在 COM 对象指针成员 (me->VBFlexGrid
             // FlexDataSource 等 union 成员, 声类型 ComIface*/void*) 时, 裸 `vb6_VARIANT
@@ -349,17 +350,17 @@ void CCodeGen::visit(BinaryExpr& node) {
         bool rv158n = varLike158n(right, node.right.get());
         if (lv158n || rv158n) {
             if (lv158n && rv158n) {
-                lastExpr_ = "(vb6_VarCmpEq(" + variantAddr158n(left) + ", "
-                          + variantAddr158n(right) + "))";
+                lastExpr_ = "(vb6_VarCmpEq(" + variantAddr158n(left, node.left.get()) + ", "
+                          + variantAddr158n(right, node.right.get()) + "))";
             } else if (lv158n && isNothingSentinel158n(right)) {
-                lastExpr_ = "(vb6_IsNothing(vb6_VariantToObject(" + variantAddr158n(left) + ")))";
+                lastExpr_ = "(vb6_IsNothing(vb6_VariantToObject(" + variantAddr158n(left, node.left.get()) + ")))";
             } else if (rv158n && isNothingSentinel158n(left)) {
-                lastExpr_ = "(vb6_IsNothing(vb6_VariantToObject(" + variantAddr158n(right) + ")))";
+                lastExpr_ = "(vb6_IsNothing(vb6_VariantToObject(" + variantAddr158n(right, node.right.get()) + ")))";
             } else if (lv158n) {
-                lastExpr_ = "(vb6_VarCmpLongEq(" + variantAddr158n(left) + ", (int32_t)("
+                lastExpr_ = "(vb6_VarCmpLongEq(" + variantAddr158n(left, node.left.get()) + ", (int32_t)("
                           + right + ")))";
             } else {
-                lastExpr_ = "(vb6_VarCmpLongEq(" + variantAddr158n(right) + ", (int32_t)("
+                lastExpr_ = "(vb6_VarCmpLongEq(" + variantAddr158n(right, node.right.get()) + ", (int32_t)("
                           + left + ")))";
             }
             return;
@@ -481,7 +482,7 @@ void CCodeGen::visit(BinaryExpr& node) {
                     // `&vb6_enum_...` C2101 (MagneticWnd.ctl `eMsgWhen.MSG_BEFORE = When`)
                     bool leftIsLvalue = !left.empty() && (std::isalpha(static_cast<unsigned char>(left[0])) || left[0] == '_') && !isConstIdent(left) && left.rfind("vb6_enum_", 0) != 0;
                     if (leftIsLvalue) { for (char c : left) { if (!std::isalnum(static_cast<unsigned char>(c)) && c != '_') { leftIsLvalue = false; break; } } }
-                    if (leftIsLvalue) {
+                    if (leftIsLvalue && cmpOperandMayTakeAddr(left, node.left.get())) {
                         lastExpr_ = "(vb6_VarCmpLong" + cmpFn + "(&" + left + ", " + scalarArg158m(right) + "))";
                     } else {
                         std::string tmp = "_vcmp_" + std::to_string(vcmpCounter_++);
@@ -513,7 +514,7 @@ void CCodeGen::visit(BinaryExpr& node) {
                     // Fix <vbeclipse>: 枚举常量 (vb6_enum_*) 同样不可取址 (对称于 493 行)
                     bool rightIsLvalue = !right.empty() && (std::isalpha(static_cast<unsigned char>(right[0])) || right[0] == '_') && !isConstIdent(right) && right.rfind("vb6_enum_", 0) != 0;
                     if (rightIsLvalue) { for (char c : right) { if (!std::isalnum(static_cast<unsigned char>(c)) && c != '_') { rightIsLvalue = false; break; } } }
-                    if (rightIsLvalue) {
+                    if (rightIsLvalue && cmpOperandMayTakeAddr(right, node.right.get())) {
                         lastExpr_ = "(vb6_VarCmpLong" + revCmpFn + "(&" + right + ", " + scalarArg158m(left) + "))";
                     } else {
                         std::string tmp = "_vcmp_" + std::to_string(vcmpCounter_++);
@@ -551,8 +552,15 @@ void CCodeGen::visit(BinaryExpr& node) {
                     return e;
                 return "vb6_VariantFromValue(" + e + ")";
             };
-            std::string leftAddr = isLvalue(left) ? ("&" + left) : ([&]{ std::string tmp = "_vcmp_" + std::to_string(vcmpCounter_++); c_.emitLine("vb6_VARIANT " + tmp + " = " + wrapOperand132(left) + ";"); return "&" + tmp; }());
-            std::string rightAddr = isLvalue(right) ? ("&" + right) : ([&]{ std::string tmp = "_vcmp_" + std::to_string(vcmpCounter_++); c_.emitLine("vb6_VARIANT " + tmp + " = " + wrapOperand132(right) + ";"); return "&" + tmp; }());
+            // 账 #238: 取址之前还要问"这个名字是不是 vb6_VARIANT 那份存储" —— 判据在一处
+            // (CCodeGen::cmpOperandMayTakeAddr), 裸标识符的形状测试本身不够: `Dim d As Double`
+            // 的地址当 vb6_VARIANT* 递进 RTL 会按 VARIANT 布局读一个 8 字节标量。
+            std::string leftAddr = (isLvalue(left) && cmpOperandMayTakeAddr(left, node.left.get()))
+                ? ("&" + left)
+                : ([&]{ std::string tmp = "_vcmp_" + std::to_string(vcmpCounter_++); c_.emitLine("vb6_VARIANT " + tmp + " = " + wrapOperand132(left) + ";"); return "&" + tmp; }());
+            std::string rightAddr = (isLvalue(right) && cmpOperandMayTakeAddr(right, node.right.get()))
+                ? ("&" + right)
+                : ([&]{ std::string tmp = "_vcmp_" + std::to_string(vcmpCounter_++); c_.emitLine("vb6_VARIANT " + tmp + " = " + wrapOperand132(right) + ";"); return "&" + tmp; }());
             lastExpr_ = "(vb6_VarCmp" + cmpFn + "(" + leftAddr + ", " + rightAddr + "))";
             return;
         }

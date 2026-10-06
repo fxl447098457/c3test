@@ -133,12 +133,11 @@ Private Sub tmrF_Timer()
     curTw = Me.CurrentY
     sm0 = Me.ScaleMode
     thTw = Me.TextHeight("AB")
-    ' NOTE: both unit judges are written as a difference, not as `Me.CurrentY = thTw`.
-    ' That direct form is the shape that miscompiles today -- the emit is
-    '   vb6_VarCmpEq(&_vcmp_8, &thTw)   a boxed Variant next to the address of a double,
-    ' so two equal numbers answer False (raw readings agree: FD15 tw/pt vs curTw/curPt).
-    ' Recorded as account #238; put the plain equality back here once that path is fixed.
-    ok13 = (Abs(Me.CurrentY - thTw) < 0.001) And (Me.CurrentX = 0)
+    ' 238: this judge is written as a plain equality ON PURPOSE. Until that account
+    ' it had to be `Abs(Me.CurrentY - thTw) < 0.001`, because (Me.CurrentY = thTw)
+    ' compiled to vb6_VarCmpEq(&boxed, &thTw) -- the Double local's address handed to
+    ' a vb6_VARIANT* parameter -- and two equal numbers answered False.
+    ok13 = (Me.CurrentY = thTw) And (Me.CurrentX = 0)
     Debug.Print "FD13-printadvance-twips=" & TF(ok13)
     Me.ScaleMode = vbPoints
     Me.CurrentX = 0
@@ -147,7 +146,7 @@ Private Sub tmrF_Timer()
     curPt = Me.CurrentY
     sm1 = Me.ScaleMode
     thPt = Me.TextHeight("AB")
-    ok14 = (Abs(Me.CurrentY - thPt) < 0.001)
+    ok14 = (Me.CurrentY = thPt)
     Debug.Print "FD14-printadvance-points=" & TF(ok14)
     Debug.Print "FD15-RAW tw=" & CStr(thTw) & " pt=" & CStr(thPt) & _
               " curTw=" & CStr(curTw) & " curPt=" & CStr(curPt) & _

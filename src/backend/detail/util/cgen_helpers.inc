@@ -463,6 +463,12 @@
     // isArrOut: 若不为 nullptr, 用于返回是否为 Variant() 数组类型.
     bool isDefinitelyVariantExpr(Expr& expr, bool* isArrOut = nullptr) const;
 
+    // 账 #238: 「这个操作数能不能当 vb6_VARIANT* 取址」只有一处判据。vb6_VarCmp*(&A,&B)
+    // 那四个取址点以前只看名字形状 (裸标识符就 & 取址), 于是 `Dim d As Double` 的地址被当
+    // vb6_VARIANT* 递进 RTL —— 按 VARIANT 的布局读一个 8 字节标量: 答案错, 且越界读。
+    // 裸名字那一形交回 isDefinitelyVariantExpr (声明那几张表 + 符号表); 其余形状不在这里回答。
+    bool cmpOperandMayTakeAddr(const std::string& c, Expr* ast) const;
+
     // Fix 038b: 基于 C 表达式字符串的 Variant 检测 — 补充 isDefinitelyVariantExpr
     // 的 AST 级检测. 当 codegen 生成的 C 表达式包含已知返回 vb6_VARIANT 的函数调用
     // (如 vb6_VariantArrayGet, vb6_VariantFromComResult 等) 时, 判定为 Variant.

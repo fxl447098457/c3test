@@ -1054,7 +1054,7 @@ CurrentY 的增量 == Me.TextHeight(同一串)"是两条路真汇合而不是各
 本文件不许再出现 `dpi` / `LOGPIXELSX` / `1440`（四条假针逐条证红）。
 护栏：24 道哨兵 red=0、90 份 emit 捕获 changed=0（纯 RTL + 夹具）、邻域五枚真跑全绿、矩阵 4 行干净。
 
-### B68 与 Variant 比较的那个标量操作数没装箱 —— `vb6_VarCmpEq(&variant, &double)`（账 #238，**已量到，未开工**）
+### B68 与 Variant 比较的那个标量操作数没装箱 —— `vb6_VarCmpEq(&variant, &double)`（账 #238，**已修，等门**）
 
 写 FD13 时撞见的：`(Me.CurrentY = thTw)` 在两个数**实测相等**（`FD15-RAW` 打出来 `th=240 curTw=240`）
 的情况下答 False，反过来写 `(thTw = Me.CurrentY)` 也 False，而算术那条路 `(Abs(Me.CurrentY - thTw) < 0.001)` True。
@@ -1068,7 +1068,29 @@ CurrentY 的增量 == Me.TextHeight(同一串)"是两条路真汇合而不是各
 
 **暴露面（按函数作用域逐处回溯声明扫 90 份捕获，工具 `.build/b367_varcmp_scope.py`）**：全语料 158 处 `vb6_VarCmp*(&A, &B)` 里 126 处两侧都是 `_vcmp_N` 临时、32 处两侧都是声明为 `vb6_VARIANT` 的局部，**0 处把标量局部的地址当 VARIANT* 递进去** —— 即本刀那两处是目前唯一知道的形状，且它们在新写的夹具里。也就是说这是一格**潜伏缺陷**：要求 一侧是 Variant 类型的表达式、另一侧是 「`Dim … As Double/Single/Long`」这种标量局部，而它一旦出现就是静默错答案（不报 C 类型错、不崩）。修之前先把判据 钉进发码针（含"裸标量地址不许进 VarCmp"那条哨兵）。
 
-### B69 `PictureBox` 的 Print 还留着第二份笔位，而且那份是像素（账 #239，**已修，等门**）
+**已收（这一族的形状 = "取址那一问按名字形状答，没按类型答"）**：四个取址点（`variantAddr158n`
+的裸名字那一支、VarCmpLong 的左右两条腿、兜底那一对 `vb6_VarCmp*(&A,&B)`）现在全部问同一处
+判据 `CCodeGen::cmpOperandMayTakeAddr(名字, AST)` —— 定义在 `cgen_util_type.cpp`、声明在
+`cgen_helpers.inc`，回答只来自 `isDefinitelyVariantExpr`（它读声明那几张表 + 符号表，正是这几张表
+把 `Dim d As Double` 钉成 `double` 的）。不许取址就走装箱，装箱沿用那条 `_Generic
+vb6_VariantFromValue` —— 对**已经是** `vb6_VARIANT` 的表达式它命中 `vb6_VariantIdentity` 恒等直传，
+所以"权威认不出的真 Variant"最坏只多一枚临时，不会改语义（这条是敢翻转默认档的依据）。
+读数：新夹具 `tests/test_varcmp_scalar.bas` 16 条判据两架构全 True，BASE 那台同一份夹具 7 条 False
+（VC01..VC05 / VC10 / VC15 —— 相等答 False、`Not(...)` 那一面也答错，正是本账的形状）；
+`tests/fdraw` 的 FD13/FD14 由算术形式**换回直接相等**（本刀的用后归还，改前那台上它 False）。
+发码面 `Test-CodegenNote "varcmp_scalar_boxed"` 两头钉：必须出现 `vb6_VariantFromValue(d)` /
+`(&gV` 那类装箱，必须不出现 `vb6_VarCmpEq(&v, &d)` 等五条旧形状。
+哨兵 `scripts/check_variant_cmp_boxing.ps1`（第 25 道 [STATIC]）三条规则各用一处假改动证红：
+判据 bodies 不再问权威 → V1 红（同一次假改动同时让夹具回红 = 行为负控）；撤掉 VarCmpLong
+那一腿的问话 → V2 + V3 双红；复制一枚声明 → V1 decl 红。
+语料 A/B `inputs=90 changed=2`，逐行归因 = 装箱语句 + 被改写的比较 + `_vcmp_N` 编号平移，**未归因 0**；
+唯一一处真形状变化是 `ucProgressCircular` 的裸名 `Count`（那枚名字本来就 C2065 ⇒ 该工程今天编不出 exe，
+BASE/NEW 两台的 build 结果逐条相同），所以这一格在**能编过的语料里是零暴露**。
+
+**订正上一轮那句"0 处"**：它只统计了"在同一个函数体里找得到声明"的名字，因此漏掉了**未声明的裸名**
+那一形（`&Count`）。量暴露面时要把"没有声明的名字"单独列一类，否则会把 1 读成 0。
+
+### B69 `PictureBox` 的 Print 还留着第二份笔位，而且那份是像素（账 #239，**已出：已过：门 #364（run 37429327451、head `e5c66e4d`、branch dev、attempt 1）= 11 job 全 completed/success、非绿 0，wall 12m40s**）
 
 `vb6_ControlPrint`（`vb6forms_ctrl.c`）把光标存在窗口属性 `VB6_PrintX` / `VB6_PrintY` 里、按**像素**推进，
 而控件的 `CurrentX` / `CurrentY` 读写的是 #233 那份 float 笔位（`cgen_util_ctrl.cpp` 两档都登记到
@@ -1304,4 +1326,5 @@ Print 之后笔位推进 `0 → 13`（= 同一枚控件自己答的 `TextHeight`
 | 账 #235（§B65 = 画笔色两份存储合一：`vb6_DrawForeColor` 改问唯一出口 `vb6_GetControlForeColor`，撤掉私有 setter 与两个零引用导出；Printer 那族不动） | `Me.ForeColor = vbRed` 之后不带颜色的 `Me.PSet` 画出来是 **0（黑）**（改前两架构实测），带颜色的那条才是 255 —— 控件那侧本来就只有一份，Form 绘图自己另存了一枚 | 新夹具一头 FD11/FD12（**两面**：新点要蓝、旧点仍红）+ 逐字回退重编那台跑同一夹具真红（False / pen=0）+ 哨兵新 S5（属性名回潮=0，假针证红）；23 份 check 全绿、邻域四枚零缺失、矩阵 4 件出 exe | 已过：门 #360（run 37415128806、head `ea8dc7c9`、attempt 1）= 11 job 全 completed/success、非绿 0，wall 8m31s |
 | 账 #236（§B66 = 门 #359 的 vbp#4 红归因到夹具：阈值收线的 `*_Timer` 里自增排在提前返回之后 => exe 永不关窗，被 60s 超时杀；修法=计数器先走，哨兵 `check_fixture_timer_close.ps1` 第 24 道钉住这条口径） | 已过：门 #360（run 37415128806、head `ea8dc7c9`、attempt 1）= 11 job 全 completed/success、非绿 0，wall 8m31s |
 | 账 #237（§B67 = Print 从 vb6forms.c 搬进绘图家族：DC / 字体 / 色彩 / 单位四件都改问已有权威，推进量取刚写那串字的 extent（与 TextHeight 同一个量）；顺带撤掉本文件自带那份只认缇的 v * dpi / 1440，换算全部交回 vb6_ScaleUserToPx / vb6_ScalePxToUser 并显式写纵/横） | FD13/FD14 推进 == TextHeight（缇、点）、FD16 = 72 点与 1 英寸同一行（蓝/红分居两个 x 窗口）；行为负控改回旧形三条全 False + 哨兵 S6/S7 四条假针逐条能红 | 已过：门 #361（run 37421550422、head `d86b478c`、attempt 1）= 11 job 全 completed/success、非绿 0，wall 8m49s |
-| 账 #239（§B69 = 控件那户 `Print` / `Cls` 撤掉自存的像素笔位 `VB6_PrintX` / `VB6_PrintY`，两条函数改成只转调家族的 `vb6_Form_Print` / `vb6_Form_Cls`；家族那份 `Cls` 的背景色改问带 Fix 187 哨兵那份唯一出口 `vb6_GetControlBackColor`） | `pic.Print` 既不读也不动 `pic.CurrentX/Y`（实测推进 0 而同一枚控件答 `TextHeight` = 13、笔位放 60 而墨落在第 2 行、`Cls` 之后 `CurrentY` 仍是 400）= #237 在 Form 侧刚拆掉的「一份存储两种单位」在控件侧重演；而合并之后若不换色彩出口，控件那户 `Cls` 会从实测 0 变成按钮面 | `tests/pcline` 加一枚 picP + 五条 needle（PL08-PEN / PL09-CLSPEN / PL10-TWIPADV / PL11-BLACKCLS / PL12-STACK + 两条 RAW）两架构真跑；BASE 那台跑同一份夹具真红（Q01 推进 0 / Q03 Cls 后仍 400 / Q05 笔位不动）；三处**行为**负控各让自己那一条红（推进归零 → 08/10/12、像素当用户单位存回 → 只 10、色彩自己答 → 只 11）；哨兵 `check_form_draw_state.ps1` 新 S8 四条假针各证红（属性名回潮 0 / 两条码头必须转调 / 定义恰好一次且住在家族里 / `Cls` 只许问那条色彩出口，且**只看代码行** —— 先前只查体内文本时注释把判据顶成假绿）；`check_control_dc.ps1` 的 D2 因这一刀 6→4（哨兵先响，归因写进规则注释）；24 份 check 全绿 + 邻域 fdraw / pbsub / dcsurf 两架构零缺失；零后端改动 ⇒ 发码逐字节不可能变（RTL 是 exe 的资源），判据只能落在真跑那一头 | 等门 |
+| 账 #239（§B69 = 控件那户 `Print` / `Cls` 撤掉自存的像素笔位 `VB6_PrintX` / `VB6_PrintY`，两条函数改成只转调家族的 `vb6_Form_Print` / `vb6_Form_Cls`；家族那份 `Cls` 的背景色改问带 Fix 187 哨兵那份唯一出口 `vb6_GetControlBackColor`） | `pic.Print` 既不读也不动 `pic.CurrentX/Y`（实测推进 0 而同一枚控件答 `TextHeight` = 13、笔位放 60 而墨落在第 2 行、`Cls` 之后 `CurrentY` 仍是 400）= #237 在 Form 侧刚拆掉的「一份存储两种单位」在控件侧重演；而合并之后若不换色彩出口，控件那户 `Cls` 会从实测 0 变成按钮面 | `tests/pcline` 加一枚 picP + 五条 needle（PL08-PEN / PL09-CLSPEN / PL10-TWIPADV / PL11-BLACKCLS / PL12-STACK + 两条 RAW）两架构真跑；BASE 那台跑同一份夹具真红（Q01 推进 0 / Q03 Cls 后仍 400 / Q05 笔位不动）；三处**行为**负控各让自己那一条红（推进归零 → 08/10/12、像素当用户单位存回 → 只 10、色彩自己答 → 只 11）；哨兵 `check_form_draw_state.ps1` 新 S8 四条假针各证红（属性名回潮 0 / 两条码头必须转调 / 定义恰好一次且住在家族里 / `Cls` 只许问那条色彩出口，且**只看代码行** —— 先前只查体内文本时注释把判据顶成假绿）；`check_control_dc.ps1` 的 D2 因这一刀 6→4（哨兵先响，归因写进规则注释）；24 份 check 全绿 + 邻域 fdraw / pbsub / dcsurf 两架构零缺失；零后端改动 ⇒ 发码逐字节不可能变（RTL 是 exe 的资源），判据只能落在真跑那一头 | 已过：门 #364（run 37429327451、head `e5c66e4d`、branch dev、attempt 1）= 11 job 全 completed/success、非绿 0，wall 12m40s |
+| 账 #238（§B68 = `vb6_VarCmp*(&A,&B)` 那四个取址点以前按"名字形状像左值"决定能不能 &，现在全问一处判据 `CCodeGen::cmpOperandMayTakeAddr`（回答只来自 `isDefinitelyVariantExpr`：声明那几张表 + 符号表），不许取址就走 `_Generic vb6_VariantFromValue` 装箱） | `Dim d As Double` 的地址被当 `vb6_VARIANT*` 递进 RTL ⇒ 按 VARIANT 布局读一个 8 字节标量：**相等的两个数答 False**（VC01..05 / VC10 / VC15 七条实测，两架构一致），且读过头；编译、运行、诊断都不响 = 静默给错答案那一族（#123 的 Byte 是同一形状的另一档）。FD13/FD14 当初因此只能写成 `Abs(a-b)<0.001` | 新夹具 `tests/test_varcmp_scalar.bas` 16 条两架构真跑（每条相等配一条近似不等，Long/String 两条本来通的腿也钉住）+ BASE 同一份夹具 7 条 False + 发码针 `varcmp_scalar_boxed`（必须装箱 / 五条旧形状必须不出现）+ FD13/FD14 换回直接相等 + 新哨兵 `check_variant_cmp_boxing.ps1`（第 25 道 [STATIC]，V1 一处判据且真问权威 / V2 五处问话 / V3 每条 & 拼接都被问过 + 旧形状禁回潮）三条假改动各证红；语料 A/B inputs=90 changed=2 逐行归因完（未归因 0），唯一真形状变化在编不过的 ucProgressCircular 裸名 `Count` ⇒ 能编过的语料零暴露；邻域 fdraw / pcline / bool_display / datelit 两架构零回归（后两条输出与 BASE 逐行相同）。附带订正：上一轮那句"暴露面 0 处"只统计了找得到声明的名字，漏了未声明裸名那一形 | 等门 |

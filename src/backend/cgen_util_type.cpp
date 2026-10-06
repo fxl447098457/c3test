@@ -506,6 +506,23 @@ bool CCodeGen::isDefinitelyVariantExpr(Expr& expr, bool* isArrOut) const {
     }
 }
 
+// 账 #238: 比较发码那一族"能不能把这个操作数按 vb6_VARIANT* 交出去"的唯一判据。
+// 只回答**裸名字**那一形 (其余形状今天的取址判据不动, 交给调用方自己的形状测试):
+// 名字是否 vb6_VARIANT 那份存储, 问 isDefinitelyVariantExpr —— 它读声明那几张表
+// (knownVariantVars_ / knownBstrVars_ / knownLongVars_ / knownDoubleVars_ /
+// knownSingleVars_ / knownByteVars_ / knownArrays_ / moduleIntConstValues_) 再加符号表,
+// 正是这几张表把 `Dim d As Double` 钉成 double 的。以前 vb6_VarCmp*(&A, &B) 的四个取址点
+// 各自按"看着像左值"就 &，于是标量局部的地址被当 VARIANT* 递进 RTL: 按 VARIANT 的布局读一个
+// 8 字节标量 ⇒ 相等的两个数答 False (实测), 且读过头 (越界读)。
+bool CCodeGen::cmpOperandMayTakeAddr(const std::string& c, Expr* ast) const {
+    if (c.empty()) return true;
+    if (!(std::isalpha(static_cast<unsigned char>(c[0])) || c[0] == '_')) return true;
+    for (char ch : c) {
+        if (!std::isalnum(static_cast<unsigned char>(ch)) && ch != '_') return true;
+    }
+    return ast && isDefinitelyVariantExpr(*ast);
+}
+
 
 // ============================================================
 // Fix 038b-1: 基于 C 表达式字符串的 Variant 检测

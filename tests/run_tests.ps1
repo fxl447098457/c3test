@@ -835,6 +835,19 @@ function Test-FormDrawState {
         $out | Select-Object -First 6 | ForEach-Object { Write-Host "  $_" }
     }
 }
+function Test-VariantCmpBoxing {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] variant_cmp_boxing ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\check_variant_cmp_boxing.ps1" 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        $out | Select-Object -First 6 | ForEach-Object { Write-Host "  $_" }
+    }
+}
 function Test-FixtureTimerClose {
     $script:total++
     Write-Host -NoNewline "  [STATIC] fixture_timer_close ... "
@@ -1925,6 +1938,20 @@ if ($Category -in @("all", "run", "bas")) {
     # 裸值 Debug.Print (B31-B32)。
     $boolNeedles = @("BOOL-DONE") + (1..30 | ForEach-Object { "B$_=Y" }) + @("B31-rawTrue", "B32-rawFalse")
     Add-BasTest "test_bool_display" "$Tests\test_bool_display.bas" $boolNeedles
+    # 账 #238: 与 Variant 比较的那个标量操作数以前**按地址交出去** (`&d`, d 是 double) ——
+    # vb6_VarCmp* 于是把一个 8 字节标量当 vb6_VARIANT 的布局读: 相等的两个数答 False (改前
+    # 两架构实测 VC01..VC05 / VC10 / VC15 七条全 False), 而且读过头。现在取址只问一处判据
+    # (CCodeGen::cmpOperandMayTakeAddr → 声明那几张表 + 符号表)。两头都钉: 每条相等都有
+    # 一条近似不等必须 False (否则"恒真"也算修好了); Long / String 那两条本来就走快捷通道与
+    # vb6_StrCmp, 一起钉住 —— 把它们改道到 VarCmp 也会红。
+    $varcmpNeedles = @("VC01-var-eq-double=True", "VC02-double-eq-var=True", "VC03-var-eq-single=True",
+        "VC04-var-eq-currency=True", "VC05-module-var-eq-double=True",
+        "VC06-var-ne-double-true=True", "VC07-var-eq-double-false=True",
+        "VC08-var-gt-double=True", "VC09-double-lt-var=True", "VC10-rel-reverse-false=True",
+        "VC11-var-eq-long=True", "VC12-var-eq-long-false=True",
+        "VC13-var-eq-string=True", "VC14-var-eq-string-false=True",
+        "VC15-var-eq-date=True", "VC16-var-eq-date-false=True", "VC-DONE")
+    Add-BasTest "test_varcmp_scalar" "$Tests\test_varcmp_scalar.bas" $varcmpNeedles
     Write-Host ""
 
         # --- P5.5 数据类型兼容性测试 ---
@@ -2080,6 +2107,7 @@ if ($Category -in @("all", "run", "bas")) {
     # parse, the new keywords stay soft, and the codegen path is still untouched.
     Add-BasTest "test_interface" "$Tests\test_interface.bas" @("ITF-SOFT:12", "ITF-1:OK", "ITF-2:OK", "INTERFACE-DONE")
     Add-BasTest "test_interface_x86" "$Tests\test_interface.bas" @("ITF-SOFT:12", "ITF-1:OK", "ITF-2:OK", "INTERFACE-DONE") -Arch "x86"
+    Add-BasTest "test_varcmp_scalar_x86" "$Tests\test_varcmp_scalar.bas" $varcmpNeedles -Arch "x86"
     Add-BasTest "test_bool_display_x86" "$Tests\test_bool_display.bas" $boolNeedles -Arch "x86"
 
     # ai/009 5.10 (P3, 溢出检查): 窄整型收窄赋值越界必须报 Error 6, 边界值 (255 /
@@ -4496,6 +4524,7 @@ if ($Category -in @("all", "compile")) {
     Test-CtrlPropTypeAuthority
     Test-FormDrawState
     Test-FixtureTimerClose
+    Test-VariantCmpBoxing
     Test-EventHandlerNames
     Test-UcInstanceExit
 
@@ -5033,6 +5062,16 @@ if ($Category -in @("all", "syntax")) {
     # 处理器收 8 字节指针。修完反过来还要钉住**不该折的不折**: StdFont 是真外部类型
     # (工程里没有同名符号), 两种拼法都得留 void* —— 只钉前一半的话, "把所有点号都剥掉"
     # 这种过折照样绿。
+    Test-CodegenNote "varcmp_scalar_boxed" @("$Tests\test_varcmp_scalar.bas") @(
+        "vb6_VariantFromValue(d)",
+        "vb6_VariantFromValue(gD)",
+        "vb6_VarCmpEq(&v, ") @(
+        "vb6_VarCmpEq(&v, &d)",
+        "vb6_VarCmpEq(&d, &v)",
+        "vb6_VarCmpEq(&gV, &gD)",
+        "vb6_VarCmpGt(&v, &d)",
+        "vb6_VarCmpLt(&d, &v)")
+
     Test-CodegenNote "alias_type_spelling_same_ctype" @("$Tests\test_alias_spellings.bas") @(
         "void vb6_BareColor(int32_t c);",
         "void vb6_QualColor(int32_t c);",
