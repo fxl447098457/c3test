@@ -35,6 +35,24 @@ void vb6_Form_SetDispatch(void* hwnd, void* pDispatch);
 void* vb6_Form_ControlsAdd(void* hwnd, const wchar_t* progId, const wchar_t* ctrlName);
 
 // ============================================================
+// Fix <vbeclipse> 2026-10-06: 运行期 Controls.Add 免注册 OCX 表 (vbp Object= 同款机制)
+// ============================================================
+// cgen 在入口点烘焙: 每个 vbp Object= 引用的 OCX, 其 typelib 导入后收集的全部
+// coclass {ProgID, CLSID, coclass名, 相对exe路径} 进此表。vb6_Form_ControlsAdd 按
+// ProgID 命中后改走 ocxCreateAny (LoadLibrary+DllGetClassObject), 完全绕开注册表 ——
+// 与设计期 vb6_OcxHost_Create 用 ocxFiles_ 免注册同款机制。未命中 → 原有注册表路径.
+#define VB6_MAX_OCXREFS 256
+typedef struct Vb6OcxRef {
+    const wchar_t* progId;       /* "NewTabCtl.NewTab" */
+    const wchar_t* clsidStr;     /* "{XXXXXXXX-...}" coclass CLSID (typelib 真实类) */
+    const wchar_t* coclassName;  /* "NewTab" — progid 缺失时的末段名兜底匹配 */
+    const wchar_t* fileName;     /* "NewTab01.ocx" / "bin\NewTab01.ocx" — 相对 exe, 不依赖 CWD */
+} Vb6OcxRef;
+
+// 注册运行期 OCX 免注册表 (cgen 生成, 入口点调用一次). count 超过 256 截断并打 stderr 警告.
+void vb6_OcxRefRegister(const Vb6OcxRef* libs, int count);
+
+// ============================================================
 // Fix 143: 第三方 OCX 控件真宿主 (设计期 Begin NewTabCtl.NewTab 等)
 // ============================================================
 

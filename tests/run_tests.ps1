@@ -1215,6 +1215,17 @@ function Test-Vbp {
         return
     }
 
+    # 免注册便携部署: 把工程目录下的原生依赖 (OCX/DLL/TLB) 复制到 exe 同目录 ($OutDir),
+    # 与 Test-GuiVbp 行为一致 (否则依赖免注册 OCX 的用例在 CI 上拿不到控件文件 → LoadLibrary 失败)。
+    # Fix <vbeclipse> 2026-10-06: axcontrolsadd 的运行时 Me.Controls.Add 走 Object= 免注册表,
+    # 需要 NewTab01.ocx 在 exe 旁才能 regfree 加载。
+    $srcDir = Split-Path $VbpFile -Parent
+    if (Test-Path $srcDir) {
+        Get-ChildItem $srcDir -File | Where-Object { $_.Extension -match '\.(ocx|dll|tlb)$' } | ForEach-Object {
+            Copy-Item -Force $_.FullName $OutDir | Out-Null
+        }
+    }
+
     # 可选环境变量 "K1=V1;K2=V2" → 显式注入子进程环境块 (RTL 用 GetEnvironmentVariableW 读它)。
     # ⚠ Test-Vbp 曾经声明了 $Env 却忘了往下传 ⇒ 调用点写的 -Env 被静默吞掉: frmevents 的
     # OLE 无头联测 (C3_OLEDDB_TEST=1) 在 CI 上从不启用, 症状是 EV24/EV25 缺失 → FAIL
@@ -3902,6 +3913,10 @@ if ($Category -in @("all", "run", "vbp")) {
     # NewTab: 第三方 OCX 控件 (NewTab01.ocx, 32 位) 真宿主验证. 免注册便携部署 (OCX 在工程目录, 由 harness 复制到 exe 旁, 不依赖本机注册);
     # 无边框窗体无关闭按钮/无自动退出逻辑, 用 -AutoExitSec 3 收尾避免阻塞后续测试
     Test-GuiVbp "NewTab" "$Tests\NewTab-test\Test.vbp" -Arch "x86" -AutoExitSec 3
+    # axcontrolsadd: 运行期 Me.Controls.Add 免注册创建第三方 OCX 控件 (NewTabCtl.NewTab), 验证
+    # Object= 免注册表在运行时路径被查询 (regfree hit); OCX 在工程目录, 由 harness 复制到 exe 旁,
+    # 不依赖本机注册。断言 ADD=OK (实例化+激活不崩)。x86: NewTab01.ocx 是 32 位, 必须与 32 位 exe 同架构。
+    Test-Vbp "axcontrolsadd" "$Tests\axcontrolsadd\AxAdd.vbp" @("ADD=OK") -Arch "x86"
     # ExtShow: 跨模块窗体默认实例"无参" Show (Fix 146 回归靶, 2026-09-20 vbman C2198):
     # .bas caller 调 Form2.Show, 定义侧签名 (hMDIClient, modal) 后调用侧须补 modal=0
     Test-GuiVbp "ExtShow" "$Tests\ext_show_test\test_ext_show.vbp" -AutoExitSec 3

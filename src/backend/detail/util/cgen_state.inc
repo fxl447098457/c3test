@@ -972,6 +972,9 @@
     // Fix 160: vbp ComLib= 免注册 COM 组件表 {ProgID, CLSID, coclass名, 相对exe路径}
     const std::vector<std::array<std::string, 4>>* comLibRefs_ = nullptr;
 
+    // Fix <vbeclipse> 2026-10-06: vbp Object= OCX 免注册表 {ProgID, CLSID, coclass名, 相对exe路径}
+    const std::vector<std::array<std::string, 4>>* ocxLibRefs_ = nullptr;
+
     // Fix 112: sub-controls on a form whose type is an in-project UserControl
     std::unordered_map<std::string, std::string> knownUserControlCtrlVars_;
                   // DLL的ProgID前缀
