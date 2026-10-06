@@ -1023,6 +1023,59 @@ core.autocrlf 是 CRLF —— 按 `
 ` 切那份字节的脚本会把整个文件看成一行，于是"改好了"其实没改。
 切行之前先看分隔符，别假定。
 
+### B67 `Print` 住在窗体那套代码里，DC / 字体 / 色彩 / 单位四件全是自己答的 —— 缇档 Print 一行推进 16 而 TextHeight 答 240（账 #237，**已提交 `32b5eedf`，等门**）
+
+症状两半，都是实测（探针 `.build/b347probe`，x64 与 x86 一模一样）：
+`Me.ScaleMode = vbTwips` 下 `Me.CurrentY = 0 : Print "AB"` 之后 `CurrentY = 16`，而同一枚窗体自己答
+`Me.TextHeight("AB") = 240` —— 笔位那份存储从 #233 起就是**用户单位**，Print 却把一个**像素行高**存回去；
+另一半更糟：把笔位放到 `ScaleHeight / 2`（缇档 = 客户区正中）再 Print，墨落在**第 3 行**（那是上一行
+Print 的残留），因为落点坐标是用户单位被直接递给 `TextOutW` 当像素用了 —— 真实落点在客户区外，看不见。
+
+`vb6_Form_Print` 以前住在 `vb6forms.c`，四件都自带一份答案：自己 `GetDC` + 无条件 `ReleaseDC`
+（派发期 `BeginPaint` 挂在窗口上的那张 `VB6_PaintDC` 它从不问 ⇒ `_Paint` 里 Print 落不进那一轮）、
+不选字体（拿 DC 默认字体而不是这枚窗体的 `Font`，与 #200 同一味）、不 `SetTextColor`、单位自己算。
+本文件里的 `vb6_DrawUserToPx` 也是第二套口径：写死 `v * dpi / 1440`，**只认缇**，
+`Point/Inch/Centimeter/Millimeter` 全按缇算（差 20 倍），纵向还用横向的 dpi —— 正是 Fix 184
+那句"所有换算共用那一对真实 DPI 出口"没覆盖到的角落。
+
+修法 = 把 Print 搬进 `vb6forms_draw.c` 并让它问四件已有的权威：DC `vb6_DrawAcquire`（#234）、
+字体 `vb6_ControlFont`（#200）、色 `vb6_DrawForeColor`（#235）、单位改问 `vb6_ScaleUserToPx` /
+`vb6_ScalePxToUser`（`vb6forms.c` 那一族唯一权威）。推进量刻意取**刚写那串字的
+`GetTextExtentPoint32W().cy`** —— 那正是 `vb6_ControlTextHeight` 量的同一个量，于是"Print 之后
+CurrentY 的增量 == Me.TextHeight(同一串)"是两条路真汇合而不是各写一遍。家族里其余 11 个换算调用点
+一律显式写出纵/横那一档。
+
+判据（`tests/fdraw`，两架构真跑，针面从 12 条扩到 18 条）：FD13/FD14 把推进与 `TextHeight` 比相等
+（缇、点两档），FD16 是"72 点与 1 英寸落在同一行"的跨单位巧合 —— 蓝长行留在右边、红短行盖在左边，
+两个 x 窗口各读一个颜色，所以"第二行根本没画"赢不了。全都不钉绝对数 ⇒ DPI 变了不假红。
+行为负控：把落点与推进改回改前的形状 ⇒ FD13/FD14/FD16 全 False（`curTw=16` 对 `th=240`、
+`rowB=75` 对 `rowR=-1`），还原后全 True。哨兵 `check_form_draw_state.ps1` 加 S6/S7：Print 恰定义一次
+且必须住在家族文件、体内七件权威一个都不许少；换算码头必须交回权威、每个调用点必须带 0/1 那一档、
+本文件不许再出现 `dpi` / `LOGPIXELSX` / `1440`（四条假针逐条证红）。
+护栏：24 道哨兵 red=0、90 份 emit 捕获 changed=0（纯 RTL + 夹具）、邻域五枚真跑全绿、矩阵 4 行干净。
+
+### B68 与 Variant 比较的那个标量操作数没装箱 —— `vb6_VarCmpEq(&variant, &double)`（账 #238，**已量到，未开工**）
+
+写 FD13 时撞见的：`(Me.CurrentY = thTw)` 在两个数**实测相等**（`FD15-RAW` 打出来 `th=240 curTw=240`）
+的情况下答 False，反过来写 `(thTw = Me.CurrentY)` 也 False，而算术那条路 `(Abs(Me.CurrentY - thTw) < 0.001)` True。
+发码直接给出现场：`eqA = (vb6_VarCmpEq(&_vcmp_8, &thTw));` —— 第一个实参是装箱好的 `vb6_VARIANT`，
+第二个是把**裸 `double` 变量的地址**当 `vb6_VARIANT*` 递了进去（RTL 原型 `int32_t vb6_VarCmpEq(vb6_VARIANT*, vb6_VARIANT*)`），
+于是读到的 vt/值是那块内存的巧合内容。症状不是崩而是**两个相等的数答 False**（静默给错答案那一族）。
+左边是 Variant（`Me.CurrentY` 的类型 oracle 交 Variant 档）、右边是本地 Double/Single 时都会走到这条路；
+`VarType()` 读数 `4,5`（Single / Double）也对得上。开工前先量清到底有多少调用点把非 VARIANT 的地址递进
+`vb6_VarCmp*` 这一族（cgen 的比较发码处），修法应是**两侧都装箱**而不是换 RTL 原型。
+本刀的夹具暂时用算术形式表达判据（`tests/fdraw` 里那段注释点名了这一格，修好就换回直接相等）。
+
+### B69 `PictureBox` 的 Print 还留着第二份笔位，而且那份是像素（账 #239，**已量到，未开工**）
+
+`vb6_ControlPrint`（`vb6forms_ctrl.c`）把光标存在窗口属性 `VB6_PrintX` / `VB6_PrintY` 里、按**像素**推进，
+而控件的 `CurrentX` / `CurrentY` 读写的是 #233 那份 float 笔位（`cgen_util_ctrl.cpp` 两档都登记到
+`vb6_GetCurrentX/Y` / `vb6_SetCurrentX/Y`）—— 两份存储从不汇合：`pic.Print "AB"` 之后 `pic.CurrentY` 一动不动，
+而 `pic.TextHeight` 答的是**用户单位**（#177 那条换算）。这正是 #224 那一族在控件侧的镜像，
+也是 #237 在 Form 侧刚拆掉的那个形状。语料里只有一处控件侧 Print（`VBFlexGridDemo/MainForm.frm`），
+所以存量用例照旧全哑 —— 判据得新写，别指望 GA 红。修的时候顺带把 `vb6_ControlCls` 那两条 `RemovePropW`
+改回"把笔位归零"（它现在撤的是那份自存的像素笔位）。
+
 ## C. 仍在生效的口径与工具事实（与本文档等长的一半价值在这里；完整版见记忆库）
 
 - **子类化分层的槽位口径（账 #185 起）**：RTL 里**每一层**窗口子类用**自己**的窗口属性名存它下面那层的 wndproc ——
@@ -1234,3 +1287,4 @@ core.autocrlf 是 CRLF —— 按 `
 | 账 #234（§B64 = 绘图方法家族改问唯一权威 `vb6_ControlDrawDC`；`vb6forms_internal.h` 声明、`vb6_DrawAcquire` 只挡 NULL；census 跟着长：D1 排除声明行 / D2 5→6 / 新 D13 禁 draw.c 自己开 DC） | 无 bug 症状的重复实现：两份同口径 ⇒ 一改就静默分家，而 `check_control_dc.ps1` 的名单原本扫不到第二份所在文件 | 零行为改动（两分支逐条等价）+ 三条负控各证哨兵会红 + 邻域四枚真跑夹具 28 条 needle 零缺失 + emit A/B 90 份 changed=0 + 矩阵 4 件出 exe | 已过：门 #358（run 37409833257、head `2b3baf82`、attempt 1）= 11 job 全 completed/success、非绿 0，wall 9m44s |
 | 账 #235（§B65 = 画笔色两份存储合一：`vb6_DrawForeColor` 改问唯一出口 `vb6_GetControlForeColor`，撤掉私有 setter 与两个零引用导出；Printer 那族不动） | `Me.ForeColor = vbRed` 之后不带颜色的 `Me.PSet` 画出来是 **0（黑）**（改前两架构实测），带颜色的那条才是 255 —— 控件那侧本来就只有一份，Form 绘图自己另存了一枚 | 新夹具一头 FD11/FD12（**两面**：新点要蓝、旧点仍红）+ 逐字回退重编那台跑同一夹具真红（False / pen=0）+ 哨兵新 S5（属性名回潮=0，假针证红）；23 份 check 全绿、邻域四枚零缺失、矩阵 4 件出 exe | 已过：门 #360（run 37415128806、head `ea8dc7c9`、attempt 1）= 11 job 全 completed/success、非绿 0，wall 8m31s |
 | 账 #236（§B66 = 门 #359 的 vbp#4 红归因到夹具：阈值收线的 `*_Timer` 里自增排在提前返回之后 => exe 永不关窗，被 60s 超时杀；修法=计数器先走，哨兵 `check_fixture_timer_close.ps1` 第 24 道钉住这条口径） | 已过：门 #360（run 37415128806、head `ea8dc7c9`、attempt 1）= 11 job 全 completed/success、非绿 0，wall 8m31s |
+| 账 #237（§B67 = Print 从 vb6forms.c 搬进绘图家族：DC / 字体 / 色彩 / 单位四件都改问已有权威，推进量取刚写那串字的 extent（与 TextHeight 同一个量）；顺带撤掉本文件自带那份只认缇的 v * dpi / 1440，换算全部交回 vb6_ScaleUserToPx / vb6_ScalePxToUser 并显式写纵/横） | FD13/FD14 推进 == TextHeight（缇、点）、FD16 = 72 点与 1 英寸同一行（蓝/红分居两个 x 窗口）；行为负控改回旧形三条全 False + 哨兵 S6/S7 四条假针逐条能红 | 已提交 `32b5eedf`，等门 |
