@@ -1114,7 +1114,7 @@ Print 之后笔位推进 `0 → 13`（= 同一枚控件自己答的 `TextHeight`
 `vb6_ComCall(vb6_hwnd_<Form>, L"Cls", NULL, 0)`（emit 物证 `.build/b373_emit_base.c:327`），运行期 no-op。
 所以家族那份 `vb6_Form_Cls` 今天只被控件那户到达；窗体自己的 Cls 何时能跑，等 #232 那条前端出口。
 
-### B70 窗体绘图语句的"裸形"与 "Me." 形各缺一条路（账 #232，**② 已出：门 #368（run 37454147931、head `9e5c9f91`、branch dev、attempt 1）= 11 job 全 completed/success、非绿 0，wall 9m46s；**① 已出：门待回填**；③ 未开工**）
+### B70 窗体绘图语句的"裸形"与 "Me." 形各缺一条路（账 #232，**② 已出：门 #368（run 37454147931、head `9e5c9f91`、branch dev、attempt 1）= 11 job 全 completed/success、非绿 0，wall 9m46s；**① 已出：门 #374（run 37533797244、head `2ef2ee71`、branch dev、attempt 1）= 11 job 全 completed/success、非绿 0，含新的 [CODEGEN-NOTE] form_canvas_bare 所在的 Tests (syntax) 片与跑 FD21/FD22/FD23 的 vbp 四片**；③ 未开工**）
 
 探针 `.build/b433_shapes.txt`（同一枚 `.frm` 每次只放一条语句，`--emit-c` 看发码；工具 `.build/b431_232probe.py` 那套形状表）。**七形七样**（窗体上）：
 
@@ -1222,11 +1222,23 @@ S9.4 打标记那一路的 PictureBox 判据必须问表、且不许把成员名
 **开工顺序**：(1) 立 `canvas_drawing.hpp`，先把 `cls` / `print` 两档搬过去 —— 预期 A/B `changed=0`；(2) 把 `pset` / `circle` / `point` / `line` 的 Form 档搬进同一张表，withm 的 Form/Printer 段改成按表里的形状 packing —— 仍应 `changed=0`；(3) 语义层的折叠器上线（这一步才是 ① 真正修好的时刻：`Cls` / `PSet` / `Circle` 三形从 C2065 变成通），判据两头钉 = `tests/fdraw` 加一形真跑像素证人 + 一条发码针（"三形都不许再出现未声明裸调用，也不许出现 `vb6_ComCall`"）+ 负控用改前那台数 C2065 的条数。**③ 那一格必须另开**（裸 `Line (0,0)-(10,10)` 在 token 层就报错：`TokenKind::Line` 在 `parser_stmt.cpp:136` 只认 `Line Input`，而坐标对续画的吸收住在 `parser_expr_postfix.cpp:183-189` 且**只认 callee 是 MemberAccessExpr 且成员名是 line** ⇒ 语义层折叠救不了它，得动 parser；动 parser 时按 ①-c 那同一张表放行，不要再列第四份动词名单）。
 
 **两件别顺手做**：(a) 别把裸形折进 `cgen_file_io.cpp` 的 `isFormPrint` 那条 —— 那是 parser 认 `Print` 是**关键字**才有的路，`Cls` / `PSet` 不是关键字，照抄就要动词法 ⇒ 白多一份形状；(b) 折叠判据里"名字查不到符号"这一问必须留着 —— 用户自己写 `Sub PSet(x, y)` 时那枚过程**该**赢（VB6 的模块内作用域），无条件折就是"修一处静默、造一处调错函数"。
-**① 已出（门待回填）—— 三条改动、三面判据、外加一道补刀（旧哨兵那条断言是假绿）**
+**① 已出（门 #374（run 37533797244、head `2ef2ee71`、branch dev、attempt 1）= 11 job 全 completed/success、非绿 0，含新的 [CODEGEN-NOTE] form_canvas_bare 所在的 Tests (syntax) 片与跑 FD21/FD22/FD23 的 vbp 四片）—— 三条改动、三面判据、外加一道补刀（旧哨兵那条断言是假绿）**
 
 **读数（同一份夹具、两台编译器的 `--emit-c`，前后只差两行）**：改前 `Cls` 发 `Cls();`、`PSet (170, 130)` 发 `PSet(170, 130);`，而 stderr 还多一条 VB3001「未声明的标识符 'Cls'」；改后这两行是 `vb6_ControlCls((void*)vb6_hwnd_FDForm); /* Form.Cls */` 与 `vb6_Form_PSet((void*)vb6_hwnd_FDForm, 0, 1, 170, 130, 0, 0); /* Form.PSet */`。真编译那一面更硬：基线台两架构都死在 `LNK2019 无法解析的外部函数 Cls（在 vb6_tmrF_Timer 中被引用）` + 同族那条 `PSet` + `LNK1120` ⇒ **压根没有 exe**。所以这一格不是"跑起来一笔不画"那一族，是"编不过"那一族。
 
-**六形实测（探针 `.build/b494_probe2/ShForm.frm`：一份 .frm 把裸形全摆上，`--emit-c` 逐行读）**：`Cls` / `PSet (5, 6)` / `PSet 12, 13`（无括号那形）/ `Circle 30, 31, 32` / `Point (40, 41)` 五形都折成真出口；**只剩 `Circle (20, 21), 22` 没折**，仍发 `Circle(20, 21, vb6_VariantEmpty(), 22);`。⇒ 欠的那一格是**同一族的续写形**（坐标对 + 逗号尾巴被 parser 吸收之后，callee 树比折叠器认的两形多套一层：`foldBareCanvasVerb` 只下一层去取最内层 IdentifierExpr，`src/semantics/semantic_analyzer_util.cpp:779`）—— 这一句是**假说、不是读数**，读数只到"发出来还是裸名"那一层。挨着 ③ 一起做，别为它单开一轮。
+**六形实测（探针 `.build/b494_probe2/ShForm.frm`：一份 .frm 把裸形全摆上，`--emit-c` 逐行读）**：`Cls` / `PSet (5, 6)` / `PSet 12, 13`（无括号那形）/ `Circle 30, 31, 32` / `Circle 70, 71, 20, 255`（带颜色那形，hasColor 折成 1）/ `Point (40, 41)` 六形都折成真出口；**只剩「括号坐标对 + 逗号尾巴」那一形没折** —— `Circle (20, 21), 22` 仍发 `Circle(20, 21, vb6_VariantEmpty(), 22);`，`PSet (60, 61), 255` 同样漏（发 `PSet(60, 61, vb6_VariantEmpty(), 255);`）。
+
+**下一格的根因（本轮量清；上面先前那句「callee 树多套一层」是假说，已被读数推翻 —— 扁平逗号形六形全通，
+就证明折叠器认得这一形；漏的不是折叠，是 parser 没把尾巴收进来）**：
+`src/parser/parser_expr_postfix.cpp:162-181` 那趟 Circle/PSet 的逗号尾巴吸收，判据是 `call->callee->kind == MemberAccessExpr` 再去取 `memberName`；裸写的 callee 是 `IdentifierExpr` ⇒ `isCircleCall`/`isPSetCall` 恒假 ⇒ `, r` 漏到外层表达式，剩下的 `(...)` 桩由发码的可选形参补成 `vb6_VariantEmpty()`。
+同一文件 183 行往下的 `-(x, y)` 那趟（`Line` 的两点形）**同样是 MemberAccessExpr-only** ⇒ ③ 的裸 `Line (0,0)-(10,10)` 是同一刀的第二头；再加 `src/parser/stmt/parser_stmt.cpp:136` 那一格 `TokenKind::Line`（今天只认 `Line Input`，裸 `Line (0,0)` 走 `parseLabelOrAssignmentOrCall` 就报 `expected ')'`）。
+
+**这一格要的形状（照 ①-c 的口径，别单开第五份名单）**：两处吸收都改成「callee 是 MemberAccessExpr **或** IdentifierExpr，
+名字问 `canvas_drawing.hpp`」—— 这两处现在硬编码的 `circle` / `pset` / `line` 是画布动词名单的**第四份副本**，
+改完由哨兵跟着 census；裸 `Line` 的语句形要把 `TokenKind::Line` 折成「一枚叫 Line 的裸调用」再交给语义层那把折叠，
+而不是再拼一条专用发码头。判据两头：六形 + `Line` 两形各一条发码针（present 真出口 / absent 裸名），
+负控仍用「同一对编译器 + 带裸形的夹具」那枚能红的对照。覆盖面本轮再扫一遍全树：`tests/` 里 `Line (` / `Circle (` / `PSet (` 的裸形只有本刀自己的夹具，其余全是 `Line Input` ⇒ 这一格是**潜伏缺陷 + 收口完整性**，
+优先级排在任何「真语料编不过 / 跑坏」的账之后。
 
 **收成一处（新增 common + 三处码头改问它）**：`src/common/canvas_drawing.hpp` = 15 行（动词, 接收者）矩阵 + owner 两档（METHOD / DRAW）+ 四个 accessor，与 `host_pseudo.hpp` / `float_literal.hpp` / `int_literal.hpp` 同一层（common 不向上依赖 semantics）。`controlCanvasMethod` 退成"把 ctrlType 换成接收者位再问表"；withm 绘图码头那段 `isPrinterDraw` 的五条名字硬名单改成 `canvasDrawEntry(名, 接收者)`；打标记那一路的 enddoc 也改问表。**折叠本身住在语义层一条语句的位置**：`visit(CallStmt&)` 里 `analyzeExpr` 之前调 `foldBareCanvasVerb`，五道门 = pass 2 / docKind==Form / callee 是裸 IdentifierExpr 或 IndexOrCallExpr 的内层那枚 / 名字在那张表里有 Form 档 / 三问查不到符号（`symTab_`、工程级、祖先）。折完下游一行没动 —— `Me.Cls` 走 ② 那张表，`Me.PSet` 走 Form/Printer 段。
 
