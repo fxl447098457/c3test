@@ -623,13 +623,17 @@ bool CCodeGen::cExprIsVariant(const std::string& cExpr) const {
                                  //   Dim D() As Byte: D = LoadResData(...) 赋值
                                  //   需 VariantToSafeArray1D 提取 (cLang LoadData/LoadInfo C2440).
         // vbeclipse: LoadResPicture 与 LoadResData 同族, RTL 签名都是
-        //   vb6_VARIANT vb6_LoadResPicture(int32_t, int32_t) (vb6rtl_runtime.h:66 /
-        //   vb6rtl_com.c:526). 不登记会让
-        //   `Function getResourceIcon(...) As IPictureDisp` 的
+        //   vb6_VARIANT vb6_LoadResPicture(vb6_VARIANT, vb6_VARIANT) (vb6rtl_runtime.h).
+        //   不登记会让 `Function getResourceIcon(...) As IPictureDisp` 的
         //   `Set getResourceIcon = LoadResPicture(...)` 直接 `vb6_ret_X =
         //   vb6_LoadResPicture(...)` → C2440 (modResources.c 22/24/33). 登记后走
         //   Set 的 Fix 038b-6 分支包 vb6_VariantToObjectVal 提取对象指针.
+        // Fix <vbeclipse> (2026-10-06): LoadRes 实参/返回全面 Variant 化 (2026-10-05
+        //   实测 LoadResData("BIN1","CUSTOM") 的 BSTR 实参被截进 int32 形参), 三函数
+        //   返回都是 vb6_VARIANT — LoadResString 也一样, 不登记则 `s = LoadResString(1)`
+        //   发 vb6_BSTR_Assign 直收 Variant → C2440.
         "vb6_LoadResPicture(",
+        "vb6_LoadResString(",
         "vb6_DispCallByVtbl(",  // Fix 068: DispCallByVtbl returns Variant
         // Fix 110w: VB6 CallByName 返回 vb6_VARIANT (见 vb6rtl_class_com.h) —
         // 参与算术/关系运算或需 BSTR 时必须按 Variant 处理, 否则 C2088

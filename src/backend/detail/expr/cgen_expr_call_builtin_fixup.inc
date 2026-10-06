@@ -2,6 +2,25 @@
 // 由 src/backend/expr/cgen_expr_call.cpp 拆出（2026-09-17），在函数体内被 #include，非独立编译单元。
 // 内容 = 原文件第 2861~3250 行，逐行未改。
 
+    // Fix <vbeclipse> (2026-10-06): LoadRes* 实参统一按 VB6 Variant 形包装。
+    // RTL 签名是 (vb6_VARIANT, ...) (VB6 里三函数的实参本就是 Variant: 数字 id 与
+    // 字符串资源名都合法 —— 实测语料两边都有, cAesCBC 的 LoadResData("AES.CBC",
+    // "JSCRIPT") 与 modResources 的 LoadResPicture(102, 0))。不包装的话字符串形
+    // 会把 BSTR 截断进 int32 形参 (Fix 090bz 时代起就是坏的)。包一层
+    // vb6_VariantFromValue: 整数字面量 → VT_I4, BSTR 表达式 → VT_BSTR, Long 变量
+    // → VT_I4, RTL 按 vt 分派按名/按 id 查资源。
+    if (callee == "vb6_LoadResString" || callee == "vb6_LoadResData"
+        || callee == "vb6_LoadResPicture") {
+        std::string joinedRes;
+        for (size_t iRes = 0; iRes < args.size(); iRes++) {
+            if (iRes) joinedRes += ", ";
+            joinedRes += "vb6_VariantFromValue(" + args[iRes] + ")";
+        }
+        argList = joinedRes;
+        args.clear();
+    }
+
+
     // Fix <vbeclipse>: `Load <控件数组>(i)` / `Unload <控件数组>(i)` 发码接入。
     // 控件数组元素的表达式路发的是 `vb6_CtrlArr_GetAt(&vb6_arr_<名>, <idx>)`
     // (cgen_util_ctrl.cpp / cgen_expr_member_precheck.inc 的同一出口)，于是
