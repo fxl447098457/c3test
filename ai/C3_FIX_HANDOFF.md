@@ -1316,7 +1316,7 @@ S9.4 打标记那一路的 PictureBox 判据必须问表、且不许把成员名
 判据：新夹具 `tests/geomcache`（两架构真跑，GC01..GC08 全 True）—— GC01/02 设计值（顶层路 + 容器子控件路）、GC04 赋值、GC05 Move，各带一枚**像素证人**（user32 的 rect + kernel32 的 MulDiv 现算，故意不走产品自己的换算）钉住"存下那个数"没把窗口挪走；GC06 像素档容器边界；GC07 切 ScaleMode ⇒ 回投影、切回来 ⇒ 还是那一个数；GC08 ComboBox 被 RTL 自己加高 ⇒ 缓存被像素闸判废、跟着窗口答。
 负控 = 改前那台编译器跑**同一份夹具**：GC01/02/04/05/07 五条 False（raw 就是那批量化后的数），GC03/06/08 两边同数 ⇒ 夹具抓得住这一刀，也没把没动的东西算进账里。
 新哨兵 `scripts/check_ctrl_geom_cache.ps1`（第 26 道 [STATIC]）：S1 存储唯一 / S2 四档读写成对 / S3 来路计数 8+4 / S4 建窗记缇（并禁建窗路问容器 ScaleMode）/ S5 四个 getter 各过缓存一次且 `return (int)vb6_ScalePxToUser` 那一形 0 次 / S6 像素闸还在。**六条各用一处假改动证过能红**（植完立刻还原，还原后 PASS 且文件逐字节相同）。
-护栏：语料 A/B（BASE = 改前那台**本机冷编** `.build/wt_base230`，见 §B73 那条口径）⇒ inputs=90 **changed=0 / same=90**；10 枚会读几何的存量夹具两架构真跑逐行相同（ctrlslider/btnfocus/ctrltabindex/ctrlprop/combofocus/c29listview/ctrlmanifest/ctrlshape/ctrlsstab/ctrlstatusbar）；唯一一条差异是 `modal` 的 `M2 …/busy=0→8`，那是**在途 tick 条数**（夹具自己的注释就写着"那个界是看负载的"，账 #162 同族），而套件钉的是前缀 `M2-returned=Y` ⇒ 不在断言面里。
+护栏：语料 A/B（BASE = 改前那台**本机冷编** `.build/wt_base230`，见 §B73 那条口径）⇒ inputs=90 **changed=0 / same=90**；会读几何的存量夹具**同一份产物两台编译器对输出**（x64，`.build/b511_geocheck.py`）共 15 枚跑出读数 —— ctrlslider / btnfocus / ctrltabindex / ctrlprop / combofocus / c29listview / ctrlmanifest / ctrlshape / ctrlsstab / ctrlstatusbar / scalemode / sbfont / dcsurf **13 枚逐行相同**，只有两条差异且都是天生抖的数：`modal` 的 `M2 …/busy=0→8` = **在途 tick 条数**（夹具自己的注释就写着"那个界是看负载的"，账 #162 同族；套件钉的是前缀 `M2-returned=Y` ⇒ 不在断言面里），`ve_units` 的 `U-CNT-RAW cnt=3015690→3146762` = 那一行打印的是**容器 HWND 本身**（两边的 `ok=True/True` 都在）。`NewTab-test` / `tabwalk` 本地没跑出读数（exe 名没猜中），`VBFlexGridDemo` 两台都超时不自退 ⇒ 这三枚由门覆盖，而本轮门 #376 绿。
 
 ### B75 控件几何还有**第二份实现**没接上这张缓存 —— UC 宿主模型那一对 getprop/setprop（账 #230 顺手量到，**未开工**）
 
