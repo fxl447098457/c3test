@@ -968,6 +968,19 @@ asm 13/14、smoke 1/1；`Build C3.exe` 那片日志正文不含用例行（历�
 **留给下一格（账 #224 剩下的）**：`vb6_DrawAcquire` 与 `vb6_ControlDrawDC` 是"拿 DC"这个决定的两份实现，而 `check_control_dc.ps1` 扫不到前者；`Print` 按像素推进、绘图按用户单位收 —— 单位口径那一问本刀刻意没碰；以及 `Me.ForeColor`（存 `VB6_ForeColor`）与画点用的 `VB6_DrawForeColor` 是两份色彩存储。
 
 
+### B64 「这枚窗口的绘图 DC 从哪儿来」被实现了两遍 —— 绘图方法家族改问唯一权威（账 #234，**已出：`67352011`，等门**）
+
+**这一格没有 bug 症状**，正因此才值得单开：rev38 在 `vb6forms_draw.c` 里把"派发期先问窗口属性 `VB6_PaintDC`、否则 `GetDC`、fromPaint 那张不许 Release"这整条口径**又写了一份**，与账 #185/#196 收口在 `vb6forms_ctrl.c` 的那份**逐条同口径**（它自己的提交说明就写着"完全同一口径"）。两份都活着的时候行为一模一样，谁都看不出问题；**一改其中一份，另一份就静默分家** —— 而 #185 那一族（同名窗口属性/同一张 DC 被两处各拿一遍）的教训正是这种分家的现场。census 面上 `check_control_dc.ps1` 的名单只盯 `vb6forms_ctrl.c` ⇒ 那个洞在这刀一起补，不留"以后再收"。
+
+**改法（三处，零行为改动）**：① `vb6_ControlDrawDC` 去掉 `static`；② 在 `vb6forms_internal.h` 里声明它 —— 那个文件的既有职责就是"文件级 static 不跨编译单元可见 ⇒ 跨族共享符号集中声明"，声明旁边写清 `*pFromPaint=TRUE` 那张不许 `ReleaseDC`；③ `vb6_DrawAcquire` 只留"NULL 先挡（Printer 那一路另有出口）+ 把 `&out.fromPaint` 直接交给权威"，两分支与旧代码逐条等价（NULL→`{NULL,FALSE}`；非 NULL→派发期那张或 `GetDC`）。文件头那段"HDC 来源（关键）"的口径说明改成指向权威，不再复述实现。
+
+**哨兵跟着长（这一步才是本格的主体）**：`check_control_dc.ps1` D1 的"定义"匹配**排除以 `;` 结尾的声明行** —— 不排除，本刀新增的那条头文件声明当场被数成"第二处定义"= 冤案红（这条是改 census 时最容易踩的：名单一扩，先把"声明/定义"的区分补上）；D2 钉死的调用点数 **5→6**，多的那条就是 draw.c；新增 **D13** = `vb6forms_draw.c` 里不许再出现 `GetDC(` 或 `GetPropW(...L"VB6_PaintDC")`（注释行跳过）。三条各用一处假改动证明会红、跑完按 md5 还原。
+
+**读数**：23 份 `check_*.ps1` 全绿；邻域真跑四枚夹具（`fdrawstate` 含 FD07 像素证人 / `pclinedraw` / `dcsurf` / `ve_units`）28 条 needle **零缺失**；语料 emit A/B 90 份 `changed=0`（RTL 改动天然不进 `--emit-c`，这条只证前端没被碰到，不当行为护栏）；真编译矩阵 4 件全出 exe、诊断 0 条。踩到的一次真红：第一次行切片把 `vb6_DrawAcquire` 的收尾 `}` 一起替换掉了 ⇒ C2143/C2065 一片、四枚夹具 build-rc=1 —— 又是"哨兵只扫源码抓不到、必须真编译"那一族，插入/替换的边界必须是**整条语句**。
+
+
+
+
 
 
 
@@ -1179,3 +1192,4 @@ asm 13/14、smoke 1/1；`Build C3.exe` 那片日志正文不含用例行（历�
 | 账 #229（§B60 = 两条对象形态收成一处出口 `ctrlTypeOfMemberObject`，P20-42 的兜底改问它；类型仍出自 `controlPropType` 那张表） | `& uArr(0).Left` 判成 String（撞内置函数 Left）⇒ 拼接不套数值转换 ⇒ 裸 int 进 BSTR 槽 = 两架构 0xC0000005；同元素 `.Top` 只绕远装箱、非数组 `.Left` 正常 ⇒ 症状按名字分家很误导 | 夹具两头（RAW = 崩溃现场本身 + 四枚变量对上设计期几何）；BASE 那台跑同一份夹具两架构真崩、修后两架构 rc=0 读数相同；语料 A/B 90 份里只有 ve_units 变（纯夹具新增行，产品发码零改动） | 已过：门 #355（run 37398206822、head `187dc3e7`、attempt 1）= 11 job 全 completed/success、非绿 0，wall 10m16s |
 | 账 #231（§B62 = C29-1a/1b/C29-9 手抄在 `inferExprType` 里的三份名单（`kNumericFc`/`kStringFc3`/`kStrFcCd`+`kNumFcCd`）逐条搬进 `controlPropType` 那张表，问话只留一次且仍在 case 最前；`!= Unknown` 那道闸跟进表里） | 控件属性的**类型**两处各答，重合的四条靠"恰好一样"才没出事（#229 就是这道缝）；表外那 28 条名字散在推断函数里，改一处就把另一处的旧答案留在原地 | 这一刀**刻意零发码改动**：BASE 先冷存复捕证明与上一轮 90 份逐字节相同，改后 `inputs=90 changed=0 same=90`；新哨兵 `check_ctrl_prop_type_authority.ps1`（A1 旧名单回潮 0 / A2+A3 一处定义+恰好一个调用者 / A4 28 条名字逐条在表里 / A5 Unknown 闸 1 处）+ 三条负控各让一条红；22 份 check 全绿、真编译 4 件全出 exe | 已过：门 #356（run 37401361458、head `442da251`、attempt 1）= 11 job 全 completed/success、非绿 0，wall 10m23s |
 | 账 #233（§B63 = Form 的绘图状态属性收成"两张表成对登记 + 一份笔位存储 + 一套编码"：cgen 侧表删掉、`vb6_DrawSetI` 存裸值、笔位归 float 那一户、ScaleMode 改问 #197 那道权威） | `Me.DrawWidth = 3` 发成"把读函数当左值" ⇒ **C2106，两架构零产物**（写侧从没登记）；读回恒 +1（Step 累积漂）；`VB6_CurrentX` 一个属性名两套编码（绘图 int32 vs Print float 位图案）互读必错 | 新夹具 tests/fdraw 两头钉（写后读回 + 像素证人 + Print 之后读得到同一个数），BASE 那台跑同一份夹具真红；语料 A/B 340 份 changed=0（= 这一族零覆盖）；新哨兵 check_form_draw_state.ps1（S1 存储唯一 / S2 侧表不回潮 / S3 读写成对 / S4 编码对称）四条各证能红 | 已过：门 #357（run 37405355138、head `05f04f31`、attempt 1）= 11 job 全 completed/success、非绿 0，wall 10m05s。订正一句读数方法：那台 watcher 回读 jobs 时被本机代理顶了一次，只写出 `jobs=0 non-success=0` 就收线 —— `conclusion=success` 配 0 条 job 不是"全绿"，是**没拿到读数**；补一次按 run id 回 API 复核才数到 11 条 （`.build/b309_verify357.py`） |
+| 账 #234（§B64 = 绘图方法家族改问唯一权威 `vb6_ControlDrawDC`；`vb6forms_internal.h` 声明、`vb6_DrawAcquire` 只挡 NULL；census 跟着长：D1 排除声明行 / D2 5→6 / 新 D13 禁 draw.c 自己开 DC） | 无 bug 症状的重复实现：两份同口径 ⇒ 一改就静默分家，而 `check_control_dc.ps1` 的名单原本扫不到第二份所在文件 | 零行为改动（两分支逐条等价）+ 三条负控各证哨兵会红 + 邻域四枚真跑夹具 28 条 needle 零缺失 + emit A/B 90 份 changed=0 + 矩阵 4 件出 exe | 等门（提交 `67352011`） |
