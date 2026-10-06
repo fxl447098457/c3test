@@ -550,6 +550,7 @@ vb6_di_SetScrollInfo
 vb6_di_setsockopt
 vb6_di_SetStretchBltMode
 vb6_di_SetTextAlign
+vb6_di_SetProcessDPIAware
 vb6_di_SetTextColor
 vb6_di_SetTimer
 vb6_di_SetupComm
