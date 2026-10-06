@@ -999,6 +999,30 @@ asm 13/14、smoke 1/1；`Build C3.exe` 那片日志正文不含用例行（历�
 
 
 
+### B66 门 #359 那条红不是产品坏了 —— 夹具的收线坐在自己那道闸后面（账 #236，**已提交 `ffcb52f7`，等门**）
+
+症状只有半条：`Tests (vbp #4)` 退 1，别的十片全绿。拿不到 job 日志（PAT 没有 actions:read），
+但**工件（artifact）拿得到** —— `actions/artifacts/<id>/zip` 会先 302 到签名 URL，跟过去时**必须把
+Authorization 头丢掉**，否则对象存储回 403（`.build/b335_dl.py` 那份是活模板）。工件里 
+`ResAlpha.out` 27 字节、两条 needle 都在，**却没有配对的 `ResAlpha.err`** —— 这就是定位本身：
+`Invoke-TestExe` 正常退出那条路 `WriteAllText` 两份都写（哪怕 stderr 是空的），只有超时那条路
+「非空才写」，所以**整片唯一缺 .err 的那枚就是被 60s 杀掉的那枚**。本地照做：45s 不退出（rc=124）。
+
+成因在夹具，不在发码：`tChk_Timer` 第一行 `If done Then Exit Sub`，而 `tick = tick + 1` 在它自己
+那趟的末尾 —— 第一拍把 done 置上之后每一拍都提前返回，`tick` 永远停在 1，
+`If tick >= 30 Then Unload Me` 再也够不着。两条 needle 早就打完了，所以红得很像"CI 抖动"。
+
+修法：计数器先走，每条路径都有界（Picture 没挂上时也在 30 拍后关窗 —— 那时缺 needle 会正常报红，
+而不是把整片拖到超时）。第 24 道哨兵 `scripts/check_fixture_timer_close.ps1` 把这条口径钉住：
+凡「靠计数阈值收线」的 `*_Timer` 处理器，自增必须出现在**第一条提前返回之前**；
+F1 覆盖面下限（实数 29，下限 20）、F3 适用面非空，两条都是防"哨兵自己没电"。
+负控：把 HEAD 那份旧夹具放回原路跑 => F2 红并点名行号；换回修好的 => 绿。
+
+一条工具事实（本轮踩过）：`git show HEAD:<path>` 交回的是**索引里的 blob（LF）**，而工作树因 
+core.autocrlf 是 CRLF —— 按 `
+` 切那份字节的脚本会把整个文件看成一行，于是"改好了"其实没改。
+切行之前先看分隔符，别假定。
+
 ## C. 仍在生效的口径与工具事实（与本文档等长的一半价值在这里；完整版见记忆库）
 
 - **子类化分层的槽位口径（账 #185 起）**：RTL 里**每一层**窗口子类用**自己**的窗口属性名存它下面那层的 wndproc ——
@@ -1209,3 +1233,4 @@ asm 13/14、smoke 1/1；`Build C3.exe` 那片日志正文不含用例行（历�
 | 账 #233（§B63 = Form 的绘图状态属性收成"两张表成对登记 + 一份笔位存储 + 一套编码"：cgen 侧表删掉、`vb6_DrawSetI` 存裸值、笔位归 float 那一户、ScaleMode 改问 #197 那道权威） | `Me.DrawWidth = 3` 发成"把读函数当左值" ⇒ **C2106，两架构零产物**（写侧从没登记）；读回恒 +1（Step 累积漂）；`VB6_CurrentX` 一个属性名两套编码（绘图 int32 vs Print float 位图案）互读必错 | 新夹具 tests/fdraw 两头钉（写后读回 + 像素证人 + Print 之后读得到同一个数），BASE 那台跑同一份夹具真红；语料 A/B 340 份 changed=0（= 这一族零覆盖）；新哨兵 check_form_draw_state.ps1（S1 存储唯一 / S2 侧表不回潮 / S3 读写成对 / S4 编码对称）四条各证能红 | 已过：门 #357（run 37405355138、head `05f04f31`、attempt 1）= 11 job 全 completed/success、非绿 0，wall 10m05s。订正一句读数方法：那台 watcher 回读 jobs 时被本机代理顶了一次，只写出 `jobs=0 non-success=0` 就收线 —— `conclusion=success` 配 0 条 job 不是"全绿"，是**没拿到读数**；补一次按 run id 回 API 复核才数到 11 条 （`.build/b309_verify357.py`） |
 | 账 #234（§B64 = 绘图方法家族改问唯一权威 `vb6_ControlDrawDC`；`vb6forms_internal.h` 声明、`vb6_DrawAcquire` 只挡 NULL；census 跟着长：D1 排除声明行 / D2 5→6 / 新 D13 禁 draw.c 自己开 DC） | 无 bug 症状的重复实现：两份同口径 ⇒ 一改就静默分家，而 `check_control_dc.ps1` 的名单原本扫不到第二份所在文件 | 零行为改动（两分支逐条等价）+ 三条负控各证哨兵会红 + 邻域四枚真跑夹具 28 条 needle 零缺失 + emit A/B 90 份 changed=0 + 矩阵 4 件出 exe | 已过：门 #358（run 37409833257、head `2b3baf82`、attempt 1）= 11 job 全 completed/success、非绿 0，wall 9m44s |
 | 账 #235（§B65 = 画笔色两份存储合一：`vb6_DrawForeColor` 改问唯一出口 `vb6_GetControlForeColor`，撤掉私有 setter 与两个零引用导出；Printer 那族不动） | `Me.ForeColor = vbRed` 之后不带颜色的 `Me.PSet` 画出来是 **0（黑）**（改前两架构实测），带颜色的那条才是 255 —— 控件那侧本来就只有一份，Form 绘图自己另存了一枚 | 新夹具一头 FD11/FD12（**两面**：新点要蓝、旧点仍红）+ 逐字回退重编那台跑同一夹具真红（False / pen=0）+ 哨兵新 S5（属性名回潮=0，假针证红）；23 份 check 全绿、邻域四枚零缺失、矩阵 4 件出 exe | 等门（提交 `2ab90321`） |
+| 账 #236（§B66 = 门 #359 的 vbp#4 红归因到夹具：阈值收线的 `*_Timer` 里自增排在提前返回之后 => exe 永不关窗，被 60s 超时杀；修法=计数器先走，哨兵 `check_fixture_timer_close.ps1` 第 24 道钉住这条口径） | 已提交 `ffcb52f7`，等门 |
