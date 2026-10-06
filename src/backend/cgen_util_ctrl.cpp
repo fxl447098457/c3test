@@ -47,6 +47,21 @@ Vb6Type CCodeGen::controlPropType(FrmControlType ctrlType, const std::string& pr
     if (p == "left" || p == "top" || p == "width" || p == "height") {
         return Vb6Type::Long;
     }
+    // 账 #231: 这一档原来住在 inferExprType 里 (C29-1a 那份自带名单), 搬进来之后
+    // 控件属性的类型**只有这张表**。名单逐条照搬、答案一字未改。
+    // 为什么仍要问 "不是 Unknown": Unknown = 工程外的自定义 OCX / UC 实例 (VBFlexGrid
+    // 那一族), 它们的属性面由类型库说话, `Shape` / `BorderWidth` 这类名字在 OCX 上
+    // 未必是同一件事 —— C29-1a 当年就是靠这道闸只放行内建控件的。
+    if (ctrlType != FrmControlType::Unknown) {
+        // Shape/PictureBox 的 Shape/FillStyle/… 与 Line 的四条端点坐标: RTL getter
+        // 全是 int32_t。BorderStyle 在 Shape/Line 上是"画笔线型"(0..6)、在其他控件上
+        // 是窗口边框样式 —— 两条读法在 getControlPropReadFn 里分家, 类型这侧同档。
+        if (p == "shape" || p == "fillstyle" || p == "borderwidth" || p == "borderstyle"
+            || p == "fillcolor" || p == "bordercolor"
+            || p == "x1" || p == "y1" || p == "x2" || p == "y2") {
+            return Vb6Type::Long;
+        }
+    }
     if (p == "visible" || p == "enabled") {
         return Vb6Type::Boolean;
     }
@@ -241,6 +256,32 @@ Vb6Type CCodeGen::controlPropType(FrmControlType ctrlType, const std::string& pr
         // 于是成员名 "count" 单独进来 —— 不登记成 Long 就被装箱, `Count = 3` 恒假
         // (实测: 值是对的 3, 打出来却是空串, 比较也全 N)。
         if (ctrlType == FrmControlType::Toolbar && p == "count") return Vb6Type::Long;
+    }
+    if (ctrlType == FrmControlType::DriveListBox || ctrlType == FrmControlType::DirListBox
+        || ctrlType == FrmControlType::FileListBox) {
+        // 账 #231 (原 C29-1b 那份名单): 不登记 ⇒ 判成 Variant ⇒
+        // `File1.FileName = File1.List(0)` 这类比较走 vb6_VarCmpEq 而不是 vb6_StrCmp ——
+        // 右边 (RTL 声明 void*) 装箱成 VT_UNKNOWN, 于是同一条读数 x64 为真、x86 为假。
+        // VB6 里这几条就是 String, 类型该在这里落地, 不在用例里绕。
+        if (p == "drive" || p == "path" || p == "pattern" || p == "filename"
+            || p == "list") {
+            return Vb6Type::String;
+        }
+    }
+    if (ctrlType == FrmControlType::CommonDialog) {
+        // 账 #231 (原 D6 / C29-9 那两份名单): 这枚控件没有外观, 读的全是对话框字段。
+        // 字符串那七条里 `FontName` 已由通用档答 String (与控件字体同档, 见 #154 那段)，
+        // 这里补剩下六条。
+        if (p == "filter" || p == "filename" || p == "filetitle" || p == "dialogtitle"
+            || p == "initdir" || p == "defaultext") {
+            return Vb6Type::String;
+        }
+        // CancelError 在 VB6 是 Boolean、Color 是 OLE_COLOR —— 这里**照旧答 Long**：
+        // 这一刀只做"两份名单合一", 一条答案都不改; 改口径要另开账（否则发码会动）。
+        if (p == "flags" || p == "cancelerror" || p == "color" || p == "min"
+            || p == "max" || p == "copies" || p == "fontsize") {
+            return Vb6Type::Long;
+        }
     }
     return Vb6Type::Unknown;
 }

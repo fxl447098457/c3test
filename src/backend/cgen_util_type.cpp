@@ -231,72 +231,20 @@ Vb6Type CCodeGen::inferExprType(Expr& expr) const {
         }
         case ASTNodeKind::MemberAccessExpr: {
             auto& ma = static_cast<MemberAccessExpr&>(expr);
-            // C29-1a: 内建窗体控件的整数型属性必须在这里就判成 Long。`Left` 同时是 VB
-            // 内置函数名, 落到下面的符号表查找会被折成 String (Fix 081i 记过同一类),
-            // 于是 `If Line1.Left = 600` 生成 vb6_StrCmp(整数值, BSTR) —— 把 600 当
-            // 指针解引用, 运行期直接段错误 (实测就是这条)。口径同上面的
-            // UserControl.ScaleWidth 分支: 按"对象是内建控件 + 属性名"给类型。
-            // 只认内建控件类型: 工程内 .ctl 宿主同名属性 (如 Value) 由它自己的符号表说话。
-            static const char* const kNumericFc[] = {
-                "left", "top", "width", "height",
-                "shape", "fillstyle", "borderwidth", "borderstyle",
-                "fillcolor", "bordercolor", "x1", "y1", "x2", "y2",
-            };
-            std::string fcName;   // 命中的内建控件名 (空 = 这不是内建控件的属性访问)
-            if (ma.object && ma.object->kind == ASTNodeKind::IdentifierExpr) {
-                fcName = Symbol::toLower(static_cast<IdentifierExpr&>(*ma.object).name);
-            } else if (ma.object && ma.object->kind == ASTNodeKind::IndexOrCallExpr) {
-                // 控件数组的元素 (`lamp(1).Left`): 对象位是 `名字(下标)`, 同一条规则。
-                // 只认确实在 knownFormControls_ 里的名字, 所以函数调用返回对象
-                // (`GetWidget(1).Left`) 不会被误判。
-                auto& callFc = static_cast<IndexOrCallExpr&>(*ma.object);
-                if (callFc.callee && callFc.callee->kind == ASTNodeKind::IdentifierExpr
-                    && callFc.positional.size() == 1) {
-                    fcName = Symbol::toLower(
-                        static_cast<IdentifierExpr&>(*callFc.callee).name);
-                }
-            }
-            if (!fcName.empty()) {
-                auto fcIt = knownFormControls_.find(fcName);
-                if (fcIt != knownFormControls_.end() && fcIt->second != FrmControlType::Unknown) {
-                    std::string memFc = Symbol::toLower(ma.memberName);
-                    for (const char* n : kNumericFc) {
-                        if (memFc == n) return Vb6Type::Long;
-                    }
-                    // C29-1b: 文件系统三控件的四个字符串属性。不登记则推断成 Variant,
-                    // `File1.FileName = File1.List(0)` 这类比较就走 vb6_VarCmpEq 而不是
-                    // vb6_StrCmp —— 右边 (RTL 声明 void*) 装箱成 VT_UNKNOWN, 于是
-                    // 同一条读数 x64 为真、x86 为假。VB6 里这四个属性是 String, 类型
-                    // 就该在这里落地, 不在用例里绕。
-                    if (fcIt->second == FrmControlType::DriveListBox
-                        || fcIt->second == FrmControlType::DirListBox
-                        || fcIt->second == FrmControlType::FileListBox) {
-                        static const char* const kStringFc3[] = {
-                            "drive", "path", "pattern", "filename", "list",
-                        };
-                        for (const char* n : kStringFc3) {
-                            if (memFc == n) return Vb6Type::String;
-                        }
-                    }
-                    // D6 / C29-9: CommonDialog 的成员面。不登记 ⇒ 字符串属性被判成
-                    // Variant ⇒ 比较/拼接走错箱（C29-1b 那条"x64 真、x86 假"的同族坑），
-                    // 而 `CancelError` 这类布尔判成 Variant 还会让 `If CD1.CancelError`
-                    // 走 VarCmp 而不是直接真值判断。
-                    if (fcIt->second == FrmControlType::CommonDialog) {
-                        static const char* const kStrFcCd[] = {
-                            "filter", "filename", "filetitle", "dialogtitle",
-                            "initdir", "defaultext", "fontname",
-                        };
-                        static const char* const kNumFcCd[] = {
-                            "flags", "cancelerror", "color", "min", "max", "copies", "fontsize",
-                        };
-                        for (const char* n : kStrFcCd) {
-                            if (memFc == n) return Vb6Type::String;
-                        }
-                        for (const char* n : kNumFcCd) {
-                            if (memFc == n) return Vb6Type::Long;
-                        }
-                    }
+            // C29-1a + P20-42 + 账 #229 + 账 #231: 对象是窗体上的已知控件 (单枚**或**数组
+            // 元素) 时, 属性类型**只问 controlPropType 这一张表**。
+            // 为什么必须问在这条 case 的**最前面**: 兜底那条 lookupModule(memberName) 按成员
+            // **裸名**查模块级符号, 凡是与模块级/内置符号同名的控件属性都会被顶掉 ——
+            // 实测 `SSTab1.Tab` 撞上返回 BSTR 的内置函数 `Tab` → 判成 String → Debug.Print
+            // 拼接不套 vb6_CStr(vb6_VariantFromValue(...)) → 而 RTL 的 vb6_SSTab_GetTab 返回
+            // int32_t → 整数当 BSTR 指针解引用 → 0xC0000005。控件数组那一形 (`uArr(0).Left`)
+            // 以前根本不进这条规则, 掉进同一个坑 (账 #229)。
+            // 只认内建控件类型: 工程内 .ctl 宿主同名属性由它自己的符号表说话 (表内那道闸)。
+            {
+                FrmControlType ctlType = FrmControlType::Unknown;
+                if (ctrlTypeOfMemberObject(ma.object.get(), ctlType)) {
+                    Vb6Type pt = controlPropType(ctlType, ma.memberName);
+                    if (pt != Vb6Type::Unknown) return pt;
                 }
             }
             // P24-12: Err对象特殊处理
@@ -399,22 +347,6 @@ Vb6Type CCodeGen::inferExprType(Expr& expr) const {
                         }
                         break;
                     }
-                }
-            }
-            // P20-42: 对象是窗体上的已知控件时, 属性类型先问控件属性表。
-            // **不能**直接掉到下面的 lookupModule(memberName): 那是按成员**裸名**
-            // 查模块级符号, 凡是与模块级/内置符号同名的控件属性都会被顶掉。
-            // 实测 `SSTab1.Tab` 撞上返回 BSTR 的内置函数 `Tab` → 判成 String →
-            // Debug.Print 拼接不套 vb6_CStr(vb6_VariantFromValue(...)), 而 RTL 的
-            // vb6_SSTab_GetTab 返回 int32_t → 整数当 BSTR 指针解引用 → 0xC0000005。
-            // 账 #229: 这一处以前只认 `控件名.属性`，控件数组元素那一形 (`uArr(0).Left`)
-            // 从这儿掉下去撞内置函数 Left ⇒ 拼接不套数值转换 ⇒ 裸 int 进 BSTR 槽 = AV。
-            // 两条对象形态改问同一个出口 (单枚 / 数组元素同一条规则)。
-            {
-                FrmControlType ctlType229 = FrmControlType::Unknown;
-                if (ctrlTypeOfMemberObject(ma.object.get(), ctlType229)) {
-                    Vb6Type pt229 = controlPropType(ctlType229, ma.memberName);
-                    if (pt229 != Vb6Type::Unknown) return pt229;
                 }
             }
             // 查找成员函数/属性的返回类型

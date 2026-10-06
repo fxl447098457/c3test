@@ -808,6 +808,20 @@ function Test-CtrlArrayMemberSites {
     }
 }
 
+function Test-CtrlPropTypeAuthority {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] ctrl_prop_type_authority ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\check_ctrl_prop_type_authority.ps1" 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        $out | Select-Object -First 6 | ForEach-Object { Write-Host "  $_" }
+    }
+}
+
 function Test-EventHandlerNames {
     $script:total++
     Write-Host -NoNewline "  [STATIC] event_handler_names ... "
@@ -4401,6 +4415,7 @@ if ($Category -in @("all", "compile")) {
     Test-UcArrayEventSites
     Test-SubclassSlotSites
     Test-CtrlArrayMemberSites
+    Test-CtrlPropTypeAuthority
     Test-EventHandlerNames
     Test-UcInstanceExit
 
