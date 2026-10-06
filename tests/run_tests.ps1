@@ -3728,6 +3728,17 @@ if ($Category -in @("all", "run", "vbp")) {
         # and the pen never moved. Each judge is ink + pen, so a fake "did something"
         # cannot win it.
         "FD18-mecls=True", "FD19-mepaint=True", "FD20-mepen=True",
+        # 232-1: the same two canvas verbs written BARE (Cls / PSet (x, y)), no receiver.
+        # These two judges cannot be won by a fake: before the fold the bare call reached
+        # no RTL exit at all, so the whole project died at LNK2019 (unresolved Cls / PSet)
+        # and there was no exe to run. FD21 = ink really disappears; FD22 = the pen colour
+        # actually landed on the form, in this window's own unit.
+        "FD21-barecls=True", "FD22-barepset=True",
+        # 232-1 boundary: a user-written Sub named like a canvas verb must WIN -- the
+        # fold only takes names that resolve to nothing here. Reading = how many times
+        # the module's own Sub Circle ran, so a silent fold onto the form canvas shows
+        # up as 0 (and the emitted C would call vb6_Form_Circle instead).
+        "FD23-usercircle=1",
         "FD-DONE")
     Test-Vbp "fdrawstate" "$Tests\fdraw\FDemo.vbp" $fdrawExpected
     Test-Vbp "fdrawstate_x86" "$Tests\fdraw\FDemo.vbp" $fdrawExpected -Arch "x86"
@@ -5208,6 +5219,25 @@ if ($Category -in @("all", "syntax")) {
         "vb6_ComCall(vb6_hwnd_FDForm",
         "vb6_ComGetObjectProp(vb6_hwnd_FDForm",
         "vb6_ComCallObject(")
+
+    # 账 #232①: 同一批绘图动词**不带接收者**裸写（Cls / PSet (x, y)）。发码以前把裸名当"未定义的
+    # 标识符"（VB3001）照原样发成一个 C 调用 —— 到 cl 那边是 C2065/隐式声明，到链接是 LNK2019
+    # （实测基线编译器在同一份夹具上：`无法解析的外部函数 Cls（在 vb6_tmrF_Timer 中被引用）`）。
+    # 修法在语义层：来这条通知时这个名字压根不是工程级符号 ⇒ 折成 `Me.<名>`，于是走上面那条
+    # 已经收好的唯一出口。Absent 那两条是**基线产物里逐字存在**的形状（--emit-c 对同一份夹具，
+    # 前后只差这两行），所以这一枚针真会红；VB3001 一条是语义层留下的疤，折完之后整份产物里
+    # 一条都不该有。
+    # 第四、五条钉的是折叠的**边界**：模块里自己写了 `Sub Circle(x, y)` 时那枚过程该赢（VB6 的
+    # 模块内作用域），无条件折就是"修一处静默、造一处调错函数"—— 产物里必须看见 `vb6_Circle(...)`
+    # 而压根看不见窗体那枚 `vb6_Form_Circle`。
+    Test-CodegenNote "form_canvas_bare" @("$Tests\fdraw\FDemo.vbp") @(
+        "vb6_ControlCls((void*)vb6_hwnd_FDForm); /* Form.Cls */",
+        "vb6_Form_PSet((void*)vb6_hwnd_FDForm, 0, 1, 170, 130, 0, 0); /* Form.PSet */",
+        "vb6_Circle((&(int32_t){7}), (&(int32_t){9}));") @(
+        "Cls();",
+        "PSet(170, 130);",
+        "VB3001",
+        "vb6_Form_Circle((void*)vb6_hwnd_FDForm")
 
     Test-CodegenNote "alias_type_spelling_same_ctype" @("$Tests\test_alias_spellings.bas") @(
         "void vb6_BareColor(int32_t c);",

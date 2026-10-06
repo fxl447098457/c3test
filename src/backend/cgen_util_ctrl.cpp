@@ -1,6 +1,7 @@
 #include "backend/cgen.hpp"
 #include "common/float_literal.hpp"  // 账 #188: 浮点字面量的单一出口
 #include "common/int_literal.hpp"   // 账 #194: 整数字面量的单一出口
+#include "common/canvas_drawing.hpp"  // 账 #232①: 画布动词的单一出口 (名字 / 接收者 / 实参形状)
 #include <algorithm>
 #include <cctype>
 #include <iostream>
@@ -1595,29 +1596,26 @@ std::string CCodeGen::controlScaleMethod(FrmControlType ctrlType,
 // 窗体句柄不是 IDispatch ⇒ 编得过、跑得起、一笔不画（本线第四次栽在同一味上）。
 // 窗体自己那枚接收者是认得的（`cgen_form_ctrl_registry.inc` 把窗体名也登记进
 // knownFormControls_，类型 Form），缺的只有这两行。
-// line 那一档**仍然只给 PictureBox**：Form 的 Line 有自己的 12 参签名
-// （`vb6_Form_Line`，带 Step 相对位），签名不同不能并进这张表 —— 那是账 #224 剩下的口径。
+// line 那一档今天三族接收者都在表里（账 #232① 把 Form/Printer 两行搬进来的），但 Form 那一行是
+// owner=DRAW（12 参 `vb6_Form_Line`，带 Step 相对位）⇒ 归绘图码头答，从这条 METHOD 出口问它是空串。
+//
+// 账 #232①-c: 表的**本体**（动词名 / 哪些接收者有这一档 / 这一档归谁发码）搬到
+// `src/common/canvas_drawing.hpp`，因为语义层（裸写的 `Cls` / `PSet` 折成 `Me.<动词>`）也要问同一张表，
+// 而 common 是两层唯一都能问的家（与 host_pseudo.hpp / float_literal.hpp 同族）。
+// 这里只留**两份** AST 侧才有的知识：`FrmControlType` 到接收者旗标的映射，以及"这条码头问的是
+// METHOD 那一族"。表里 owner=DRAW 的行（`Me.PSet` / `Me.Line` 在窗体上的 12 参那一档）由绘图码头答，
+// 从这条出口问必须是空串 —— 两条码头各答一半，正是本账 ② 之前的形状。
+// 比对口径原样保留（表按拿进来的字符串逐字比，不在这个出口里擅自 toLower —— 两条码头给的拼写
+// 本来就不一样，改它是另一刀，得单独有用量）。
 std::string CCodeGen::controlCanvasMethod(FrmControlType ctrlType,
                                           const std::string& memberLower) const {
-    if (memberLower == "cls" || memberLower == "print") {
-        switch (ctrlType) {
-            case FrmControlType::Form:
-            case FrmControlType::PictureBox:
-                return memberLower == "cls" ? "vb6_ControlCls" : "vb6_ControlPrint";
-            default:
-                return "";
-        }
-    }
-    if (memberLower != "line") return "";
+    uint32_t receiver = 0;
     switch (ctrlType) {
-        case FrmControlType::PictureBox:
-            return "vb6_ControlLine";
-        default:
-            // Form 那一档刻意**不给**: 现在只有 PictureBox 那一处成员侧发了标记
-            // (cgen_expr_member_form_builtin.inc 的 Fix 185 那块), 给了就是"广告比应答复"。
-            // 接 Form 之前先把 `Me.Line` / 窗体自绘那条码头找出来。
-            return "";
+        case FrmControlType::Form:       receiver = CR_CANVAS_FORM; break;
+        case FrmControlType::PictureBox: receiver = CR_CANVAS_PBOX; break;
+        default: return "";   // 没有画布的控件: 本表一律不答
     }
+    return canvasMethodEntry(memberLower, receiver);
 }
 
 

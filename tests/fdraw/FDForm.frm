@@ -56,6 +56,17 @@ Private Function FirstRowOfColor(d As LongPtr, want As Long, xLo As Long, xHi As
     Next
 End Function
 
+' 232-1 boundary judge: the fold may only take a name that resolves to NOTHING in
+' this module. A user-written Sub named like a canvas verb has to win, otherwise the
+' fix would trade "does not compile" for "silently calls the wrong function" -- the
+' shape this line has been burned by before. Circle is used nowhere else on this
+' form, and the call below is exactly the bare (no Me.) spelling the fold sees.
+Private userCircle As Long
+
+Private Sub Circle(x As Long, y As Long)
+    userCircle = userCircle + 1
+End Sub
+
 Private Sub tmrF_Timer()
     Dim d As LongPtr
     Dim r As Long
@@ -209,6 +220,33 @@ Private Sub tmrF_Timer()
     ok20 = (curA = thA)
     Debug.Print "FD19-mepaint=" & TF(ok19) & " raw=" & CStr(inkAfter)
     Debug.Print "FD20-mepen=" & TF(ok20) & " raw=" & CStr(curA) & "," & CStr(thA)
+
+    ' 232-1 = the BARE spellings of the same two verbs (no Me.). Before, the form
+    ' never became the implicit receiver: Cls and PSet (x, y) reached codegen as bare
+    ' C calls. Measured on the pre-fix compiler with this very fixture: the emit held
+    ' `Cls();` and `PSet(170, 130);`, Cls also drew a VB3001 "undeclared identifier",
+    ' and the real build died at LNK2019 on both names (no exe at all). The semantic
+    ' layer now folds them onto the form canvas, which is the route Me.Cls / Me.PSet
+    ' already took: same entry, same ink.
+    Dim ok21 As Boolean
+    Dim ok22 As Boolean
+    Me.ForeColor = vbRed
+    Me.CurrentX = 0
+    Me.CurrentY = 0
+    Print "MMMMMMMMMMMMMMMM"
+    inkBefore = FirstRowOfColor(d, vbRed, 0, 40, 1, 120)
+    Cls
+    inkAfter = FirstRowOfColor(d, vbRed, 0, 40, 1, 120)
+    ok21 = (inkBefore > 0) And (inkAfter < 0)
+    Debug.Print "FD21-barecls=" & TF(ok21) & " raw=" & CStr(inkBefore) & "," & CStr(inkAfter)
+    Me.ForeColor = vbBlue
+    Me.DrawWidth = 7
+    PSet (170, 130)
+    rowB = FirstRowOfColor(d, vbBlue, 150, 200, 120, 160)
+    ok22 = (rowB > 0)
+    Debug.Print "FD22-barepset=" & TF(ok22) & " raw=" & CStr(rowB)
+    Circle 7, 9
+    Debug.Print "FD23-usercircle=" & CStr(userCircle)
     r = ReleaseDC(Me.hwnd, d)
     Debug.Print "FD-DONE"
     Unload Me

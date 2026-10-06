@@ -278,32 +278,86 @@ function Get-CodeText($text) {
 $tableFile = Join-Path $root "src\backend\cgen_util_ctrl.cpp"
 $declFile = Join-Path $root "src\backend\detail\util\cgen_helpers.inc"
 
-# S9.1 三个 C 出口名只许住在表文件里 (任何一条码头自己拼名字 = 又一份答案)
-foreach ($name in @("vb6_ControlCls", "vb6_ControlPrint", "vb6_ControlLine")) {
+# S9.1 C 出口名只许住在表里 —— 表的家已搬到 src/common/canvas_drawing.hpp（账 #232①-c：
+# 语义层也要问同一张表，而 common 是两层唯一都能问的家）。backend 下任何一处再拼一次名字 = 又一份答案。
+# 名单**从表里读**（以前这里硬编码三枚名字 —— 表加一档这条判据就看不见那一档，正是本账那一族）。
+$canvasTable = Join-Path $root "src\common\canvas_drawing.hpp"
+if (-not (Test-Path -LiteralPath $canvasTable)) {
+    $bad += ("S9 canvas table missing -> " + $canvasTable)
+}
+$tableText = ""
+if (Test-Path -LiteralPath $canvasTable) {
+    $tableText = [System.IO.File]::ReadAllText($canvasTable)
+    $mRows = [regex]::Match($tableText, 'kCanvasVerbRows\[\] = \{[\s\S]*?\};')
+    if (-not $mRows.Success) {
+        $bad += "S9 the canvas verb table body not found in canvas_drawing.hpp"
+        $canvasNames = @()
+    } else {
+        $canvasNames = @([regex]::Matches($mRows.Value, '"(vb6_[A-Za-z0-9_]+)"') |
+                         ForEach-Object { $_.Groups[1].Value } | Sort-Object -Unique)
+        # census 地板: 表被清空 / 正则退化到只认一行时, 这条判据不许"绿着的空转"
+        if ($canvasNames.Count -lt 3) {
+            $bad += ("S9 canvas table yields only " + $canvasNames.Count +
+                     " entry names (want >= 3) -> the guard went vacuous")
+        }
+    }
+}
+foreach ($name in $canvasNames) {
     foreach ($f in Get-SrcFiles $beDir) {
         $code = Get-CodeText ([System.IO.File]::ReadAllText($f.FullName))
         if ($code.IndexOf($name) -lt 0) { continue }
-        if ($f.FullName -ne $tableFile) {
-            $bad += ("S9 " + $name + " is spelled outside the canvas table -> " +
-                     (Split-Path -Leaf $f.FullName) +
-                     " (only controlCanvasMethod may answer a canvas member's C entry)")
+        $bad += ("S9 " + $name + " is spelled outside the canvas table -> " +
+                 (Split-Path -Leaf $f.FullName) +
+                 " (only src/common/canvas_drawing.hpp may name a canvas entry)")
+    }
+}
+
+# S9.2 覆盖面矩阵钉死：每一对（动词, 接收者）都得在表里占一行，而且总行数不许悄悄变。
+# 上一版这里只查"每个名字在不在"，于是删掉 {"point", CR_CANVAS_FORM} 那一行它一声不响
+# （负控实测 rc=0）—— 而"只接了一半接收者"恰恰是本账 ② 那一轮的定义，判据必须换成对。
+$wantPairs = @(
+    @('cls',    'FORM'),    @('cls',    'PBOX'),    @('cls',    'PRINTER'),
+    @('enddoc', 'PRINTER'),
+    @('print',  'FORM'),    @('print',  'PBOX'),
+    @('line',   'PBOX'),    @('line',   'FORM'),    @('line',   'PRINTER'),
+    @('pset',   'FORM'),    @('pset',   'PRINTER'),
+    @('circle', 'FORM'),    @('circle', 'PRINTER'),
+    @('point',  'FORM'),    @('point',  'PRINTER'))
+if (Test-Path -LiteralPath $canvasTable) {
+    $mTbl = [regex]::Match($tableText, 'kCanvasVerbRows\[\] = \{[\s\S]*?\};')
+    if (-not $mTbl.Success) {
+        $bad += "S9 the canvas verb table body not found in canvas_drawing.hpp"
+    } else {
+        $tbl = Get-CodeText $mTbl.Value
+        $rowTotal = [regex]::Matches($tbl, '\{"[a-z]+",\s*CR_CANVAS_[A-Z]+').Count
+        if ($rowTotal -ne $wantPairs.Count) {
+            $bad += ("S9 the canvas table has " + $rowTotal + " (verb, receiver) rows, want exactly " +
+                    $wantPairs.Count + " -> add the pair to this matrix when a verb gains a receiver")
+        }
+        foreach ($pr in $wantPairs) {
+            $rx = '\{"' + $pr[0] + '",\s*CR_CANVAS_' + $pr[1] + '\b'
+            if (-not [regex]::IsMatch($tbl, $rx)) {
+                $bad += ("S9 the canvas table no longer pairs " + $pr[0] + " with CR_CANVAS_" + $pr[1] +
+                         " -> a receiver silently loses its drawing entry")
+            }
+        }
+        foreach ($owner in @('CANVAS_OWNER_METHOD', 'CANVAS_OWNER_DRAW')) {
+            if ($tbl.IndexOf($owner) -lt 0) {
+                $bad += ("S9 the canvas table no longer carries " + $owner +
+                         " -> the two owner kinds (member call / drawing dock) collapsed into one")
+            }
         }
     }
 }
 
-# S9.2 表本身三档齐、两档接收者齐 —— 少一档就是"只接了一半"回到本账那一形
-$mTbl = [regex]::Match([System.IO.File]::ReadAllText($tableFile),
-                       'std::string CCodeGen::controlCanvasMethod[\s\S]*?\r?\n\}')
-if (-not $mTbl.Success) {
-    $bad += "S9 controlCanvasMethod body not found in cgen_util_ctrl.cpp"
-} else {
-    $tbl = Get-CodeText $mTbl.Value
-    foreach ($want in @('"cls"', '"print"', '"line"', "FrmControlType::Form",
-                        "FrmControlType::PictureBox", "vb6_ControlCls", "vb6_ControlPrint")) {
-        if ($tbl.IndexOf($want) -lt 0) {
-            $bad += ("S9 the canvas table no longer carries " + $want +
-                     " -> a receiver or a member silently loses its drawing entry")
-        }
+# S9.2b 表不许是死代码：backend 那一条出口必须 include 它并问它要答案，
+# 而且 AST 侧的接收者映射两处都得在（Form / PictureBox 少一条就是"表在、没人接"回到本账那一形）。
+$askCode = Get-CodeText ([System.IO.File]::ReadAllText($tableFile))
+foreach ($want in @('canvas_drawing.hpp', 'canvasMethodEntry(', 'FrmControlType::Form',
+                    'FrmControlType::PictureBox')) {
+    if ($askCode.IndexOf($want) -lt 0) {
+        $bad += ("S9 cgen_util_ctrl.cpp no longer asks the canvas table for " + $want +
+                 " -> the table exists but a dock answers from somewhere else again")
     }
 }
 
@@ -333,11 +387,22 @@ if ($mbHits.Count -ne 1) {
 if ($mbCode -match '==\s*"print"\s*\|\|\s*\w+\s*==\s*"cls"') {
     $bad += 'S9 the member side hardcodes the canvas member names again (print / cls list)'
 }
+# S9.5 绘图码头也必须问表 (名字与"这一档有没有出口"都来自表, 不再自带一份动词名单)
+$dwFile = Join-Path $root "src\backend\detail\expr\cgen_expr_call_callee_withm.inc"
+$dwCode = Get-CodeText ([System.IO.File]::ReadAllText($dwFile))
+if ($dwCode.IndexOf('canvasDrawEntry(') -lt 0) {
+    $bad += "S9 the drawing dock no longer asks the canvas table (canvasDrawEntry gone)"
+}
+$mFormP = Get-CodeText ([System.IO.File]::ReadAllText($mbFile))
+if ($mFormP.IndexOf('canvasDrawEntry("enddoc"') -lt 0) {
+    $bad += "S9 the Printer member route spells its own entry again (enddoc)"
+}
+
 if ($bad.Count -eq 0) {
     Write-Host ("PASS form draw state: pen store unique, side-list gone, " +
                 "read/write paired for 3 props, encoding symmetric, pen color store unique, " +
                 "Print inside the family asking 7 authorities, conversions dock-only with an axis, " +
-                "Print/Cls one implementation that the control side only forwards to, canvas names from one table with both receivers")
+                "Print/Cls one implementation that the control side only forwards to, canvas verbs one common table that the backend asks with both receivers")
     exit 0
 }
 foreach ($b in $bad) { Write-Host ("FAIL " + $b) -ForegroundColor Red }
