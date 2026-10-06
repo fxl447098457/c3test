@@ -59,19 +59,11 @@
             lastExpr_ = readFn + "(" + formHwnd + ")  /* Form." + node.memberName + " via Me */";
             return;
         }
-        // 2026-10-06: Form 的**绘图状态**属性读。此前这些与 ScaleHeight 一起落进
-        // 下方 COM dispatch 桩 —— 编译过了但运行期 no-op, `Print Me.ForeColor`
-        // 在 Form_Paint 里拿到的是 0 (不是真的画笔色)。交 RTL 按 HWND 存取
-        // (vb6forms_draw.c), 与控件 CurrentX 同一套窗口属性手法。
-        // ⚠ 只做**读侧**。写侧 (`Me.ForeColor = x`) 走赋值语句的发射路径, 不经过
-        // 本分支 —— 在这里加写侧是不可达的死代码 (读侧已 return)。
-        {
-            std::string mDr = Symbol::toLower(node.memberName);
-            if (mDr == "currentx")  { lastExpr_ = "vb6_Form_DrawGetCurrentX(" + formHwnd + ")"; return; }
-            if (mDr == "currenty")  { lastExpr_ = "vb6_Form_DrawGetCurrentY(" + formHwnd + ")"; return; }
-            if (mDr == "forecolor") { lastExpr_ = "vb6_Form_DrawGetForeColor(" + formHwnd + ")"; return; }
-            if (mDr == "drawwidth") { lastExpr_ = "vb6_Form_DrawGetWidth(" + formHwnd + ")"; return; }
-        }
+        // Form 的绘图状态属性 (CurrentX / CurrentY / DrawWidth) **不在这里答** ——
+        // 上面那句 getControlPropReadFn(Form, 名) 就是唯一入口, 读写两侧成对登记在
+        // cgen_util_ctrl.cpp 的那两张表里 (账 #233)。这里曾经另摆过四条硬编码:
+        // 它只覆盖读侧, 于是赋值语句找不到写侧出口, 发成
+        // `vb6_Form_DrawGetWidth(vb6_hwnd_X) = 3;` —— C2106, 两架构都编不过。
         // 未知 Form 成员 → COM dispatch (作为编译 stub; 运行时不可靠)
         comObjExpr_ = formHwnd;
         comMemberName_ = node.memberName;

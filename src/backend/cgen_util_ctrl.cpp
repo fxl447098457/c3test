@@ -405,6 +405,15 @@ std::string CCodeGen::getControlPropReadFn(FrmControlType ctrlType, const std::s
         if (propLower == "scalewidth") return "vb6_GetScaleWidth";
         if (propLower == "scaleheight") return "vb6_GetScaleHeight";
         if (propLower == "scalemode") return "vb6_WindowScaleModeSelf";  // 账 #197: 与写侧成对
+        // 账 #233: Form 的**笔位与画笔粗细**。此前这四条住在 cgen_expr_member_form_builtin.inc
+        // 的一份侧表里 —— 那份表只有读侧, 于是 `Me.DrawWidth = 3` 退化成
+        // `vb6_Form_DrawGetWidth(vb6_hwnd_X) = 3;` (C2106, 实测两架构都编不过)。
+        // 收进这两张表之后读写成对, 侧表删掉。forecolor **不在这里** —— 它早已由上面
+        // 那条通用行答给 vb6_GetControlForeColor (侧表那一条从没命中过), 与绘图家族
+        // 自带的 VB6_DrawForeColor 是两份存储, 那一问另开账。
+        if (propLower == "currentx") return "vb6_GetCurrentX";   // 笔位只有一份存储 (float)
+        if (propLower == "currenty") return "vb6_GetCurrentY";
+        if (propLower == "drawwidth") return "vb6_Form_DrawGetWidth";
         if (propLower == "hdc") return "vb6_GetControlHDC";  // 账 #196: Form.hDC 同一处出口
         break;
     case FrmControlType::WebBrowser:
@@ -869,6 +878,10 @@ std::string CCodeGen::getControlPropWriteFn(FrmControlType ctrlType, const std::
         if (propLower == "visible") return "vb6_SetControlVisible";
         if (propLower == "enabled") return "vb6_SetControlEnabled";
         if (propLower == "scalemode") return "vb6_SetScaleMode";  // 账 #197: Me.ScaleMode 写得动
+        // 账 #233: 与上面读侧成对 —— 赋值语句发 C 时**只问这张表**, 没登记就把读函数当左值。
+        if (propLower == "currentx") return "vb6_SetCurrentX";
+        if (propLower == "currenty") return "vb6_SetCurrentY";
+        if (propLower == "drawwidth") return "vb6_Form_DrawSetWidth";
         break;
     case FrmControlType::WebBrowser:
         if (propLower == "visible") return "vb6_SetControlVisible";

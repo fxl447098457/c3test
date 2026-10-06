@@ -822,6 +822,20 @@ function Test-CtrlPropTypeAuthority {
     }
 }
 
+function Test-FormDrawState {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] form_draw_state ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\check_form_draw_state.ps1" 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        $out | Select-Object -First 6 | ForEach-Object { Write-Host "  $_" }
+    }
+}
+
 function Test-EventHandlerNames {
     $script:total++
     Write-Host -NoNewline "  [STATIC] event_handler_names ... "
@@ -3544,6 +3558,21 @@ if ($Category -in @("all", "run", "vbp")) {
     Test-Vbp "pclinedraw" "$Tests\pcline\PcDraw.vbp" $pcDrawExpected
     Test-Vbp "pclinedraw_x86" "$Tests\pcline\PcDraw.vbp" $pcDrawExpected -Arch "x86"
 
+    # 账 #233 = Form 的绘图状态属性。这一组改前**压根编不出来**：`Me.DrawWidth = 3` 发成
+    # `vb6_Form_DrawGetWidth(vb6_hwnd_X) = 3;` (C2106) —— 写侧从没登记进 cgen 的写表，而
+    # 那四条读侧硬编码住在 cgen_expr_member_form_builtin.inc 的一份侧表里（注释还写着"写侧
+    # 不需要"）。两头各钉：FD01/02/03 = 写进去的数读回来一样（钉 +1 编码与写侧接线）；
+    # FD07/08 = 一枚像素证人（画到的那一点问得到、旁边那一点不是那个颜色）；
+    # FD10 = 两份编码合一的证人 —— `Print` 推进笔位之后，绘图那一路读得到同一个数
+    # （改前那里读回的是 float 位图案当整数的天文数，或 0）。
+    # FD04/05/06 钉的是自己算出来的定值，可以直接当判据；FD09 那行 **AFTERPRINT 的 y 与字号/DPI 有关**
+    # ⇒ 只打印不当判据（本线口径：读数留档，判据换成"落在 30..3000 之间"那一枚布尔）。
+    $fdrawExpected = @("FD01-drawwidth=True", "FD02-curxy=True", "FD03-pset2=True",
+        "FD04-RAW xy=300,130 dw=3", "FD05-sm0=1", "FD06-sm1=3",
+        "FD07-PIXEL=True", "FD08-neg=True", "FD10-printstore=True", "FD-DONE")
+    Test-Vbp "fdrawstate" "$Tests\fdraw\FDemo.vbp" $fdrawExpected
+    Test-Vbp "fdrawstate_x86" "$Tests\fdraw\FDemo.vbp" $fdrawExpected -Arch "x86"
+
     # --- P20-42: SSTab (SysTabControl32 复刻) ---
     # 期望串取自夹具真实输出 (别缩写标签)。TS25..TS28 是切页显隐: vb6_GetControlVisible
     # 走 IsWindowVisible 沿父链传播, 所以断言放在 Timer 里 (窗体已显示之后)。
@@ -4416,6 +4445,7 @@ if ($Category -in @("all", "compile")) {
     Test-SubclassSlotSites
     Test-CtrlArrayMemberSites
     Test-CtrlPropTypeAuthority
+    Test-FormDrawState
     Test-EventHandlerNames
     Test-UcInstanceExit
 
