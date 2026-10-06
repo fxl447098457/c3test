@@ -928,7 +928,7 @@ asm 13/14、smoke 1/1；`Build C3.exe` 那片日志正文不含用例行（历�
 
 **症状按"属性名撞不撞内置函数名"分家，很误导**：同一枚数组元素，`& uArr(0).Left` 崩、`& uArr(0).Top` 只是绕远装箱、非数组的 `uPix.Left` 一切正常。三条读数放一起才看出来是**同一处**：类型推断里"`对象.成员` 的对象位是不是控件"这一问被抄成两份，一份只认 `控件名.属性`（P20-42 那条兜底前面），一份只认 `控件名(i).属性`（C29-1a 那份名单）。数组元素那一形从前一条前面掉下去，撞上"按成员**裸名**查模块符号" ⇒ `Left` 命中返回 String 的 VB 内置函数 ⇒ 判定为String ⇒ 拼接面不再套数值转换 ⇒ `vb6_BSTR_Concat(L"...", vb6_GetControlLeft(CtrlArr_GetAt(...)))`把 int32_t 当 BSTR 指针解引用。实测 ve_units 探针：x64 与 x86 都是 0xC0000005，且崩点就在那一行（`U-ARREXT-RAW` 整行不打印）。
 
-**改法**：两条对象形态收成**一个出口** `CCodeGen::ctrlTypeOfMemberObject(obj, outType)`（单枚 / 元素同一条规则，登记表 `knownFormControls_` 只这一处读），P20-42 那一处改问它，属性类型仍出自那张表 `controlPropType`。**残留没收干净，记在明处**：C29-1a 那一档（`kNumericFc` 13 条名字）仍是那张表通用段之外的一份自带名单，两处的名字集合重合 4 条 （left/top/width/height）—— 本轮不动它，因为要把 13 条逐条对上 `controlPropType` 的分型段，风险面比这一刀大。
+**改法**：两条对象形态收成**一个出口** `CCodeGen::ctrlTypeOfMemberObject(obj, outType)`（单枚 / 元素同一条规则，登记表 `knownFormControls_` 只这一处读），P20-42 那一处改问它，属性类型仍出自那张表 `controlPropType`。（当时留在明处的那格"这张表之外还有一份自带名单"已在**下一格 B62（账 #231）**收掉。）
 
 **判据（两头 + 负控）**：夹具 ve_units 加一头，`U-ARREXT-RAW l=3600 t=1320 w=1200 h=1140` 那一行**就是崩溃现场本身**（四枚读法全在 `&` 拼接里），另一行 `U-ARREXT=` 问四个变量等于设计期几何（3600/1320/1200/1140）—— 只钉 RAW 那一行会放过"值对不上"的修法，只钉判据行会放过崩溃。负控 = 用改前那台编译器跑**同一份**夹具 ⇒ 两架构 rc=0xC0000005 且 U-ARREXT 整行不出现；修后两架构 rc=0、两条读数逐字相同。
 
@@ -937,6 +937,21 @@ asm 13/14、smoke 1/1；`Build C3.exe` 那片日志正文不含用例行（历�
 ### B61 数组元素的 extender 属性**写后读回不是请求值**（缇→像素→缇 取整损失），VB6 存的是缇（账 #230，**已量到，未开工**）
 
 同一轮探针量出来的：`uArr(0).Left = 5000` 之后读回 **4995**（5000 缇 = 333.33 像素，控件位置只能落整数像素，读回时再乘回去就丢 5 缇）。VB6 的 `Left` 是**属性值**而不是窗口位置的投影，写什么读什么。同族的既有账是 #206（`Panels(i).Width` 交回请求值还是排版后的宽，单位口径待量）—— 两格合起来是一个问题：**控件几何属性到底以哪一侧为准**（存 VB 侧的值 vs 问窗口）。动它之前要先定口径（VB6 语义 = 存 VB 侧），并且别忘了 `Move` 与容器排版会改窗口而不改 VB 侧的值。
+
+
+### B62 控件属性的**类型**有两处权威 —— `controlPropType` 那张表 + `inferExprType` 里的三份自带名单（账 #231，**已提交 `bd11b997`，等门**）
+
+**为什么这一格值得单开**：同一个问句（"Shape1.FillStyle 是什么类型"）以前有**两处**各自作答 —— 那张表（`cgen_util_ctrl.cpp`）与 C29-1a / C29-1b / C29-9 在 `cgen_util_type.cpp` 里手抄的三份名单（`kNumericFc` 14 条 / `kStringFc3` 5 条 / `kStrFcCd` 7 条 + `kNumFcCd` 7 条）。两份名单与表重合的只有 left/top/width/height 四条，**重合是靠"恰好一样"才没出事**；账 #229 崩的那条就死在这道缝上（同一问被抄成两份，一份只认 `控件名.属性`、一份只认 `控件名(i).属性`）。所以这一刀不改任何答案，只把两处并成一处。
+
+**改法**：那 28 条名字逐条搬进 `controlPropType`（通用段补 10 条数值名 + 文件系统三控件一节 + CommonDialog 一节），`inferExprType` 里三份名单连它的循环一起删，只留**一次问话** —— 位置仍在 `MemberAccessExpr` 那条 case 的**最前面**（原 C29-1a 的位置），所以答案的**先后顺序**也没动；C29-1a 那道 `!= FrmControlType::Unknown` 的闸一并搬进表里（自定义 OCX/UC 的属性面归类型库，不让这张表按名字形状抢答）。
+
+**这一刀的护栏比往常硬**：refactor 的失败模式不是崩，是"某条名字在整个语料里根本没人这样写" —— 那种漏在 emit A/B 上是**哑的**（上一格 #229 的读数就是"changed 全是夹具自身新增行"）。所以两头一起钉：
+- 语料 A/B：BASE = 改前那台（`C3_base231.exe` 冷存；先用它复捕一份，证明与上一轮那 90 份**逐字节相同**才承认它是 BASE）⇒ 改后 `inputs=90 changed=0 same=90`，**产品发码零改动**（这一刀的正确答案就是 0，不是"逐行归因后 0"）。
+- 新哨兵 `scripts/check_ctrl_prop_type_authority.ps1`：A1 旧名单标识符与它的循环变量回潮 = 0；A2/A3 `controlPropType` 与 `ctrlTypeOfMemberObject` 各"定义 + 声明 + **恰好一个**调用者" = 3 次提及；A4 **28 条名字逐条**必须在表里答到（`p == "<名>"`）；A5 那道 Unknown 闸必须还在且只有 1 处。三条负控（假插一份 `kNumericFc` / 把 `fillstyle` 改名 / 多开一个调用点）各让对应规则红，跑完按 md5 还原源文件。已进回归 `[STATIC] ctrl_prop_type_authority`（第 22 道）。
+- 全 22 份 `check_*.ps1` 逐份绿；真编译定点 4 件（ve_units 两架构 / ucTreeMaps x64 / VBFlexGridDemo x64 —— 最后一件正是 A5 那道闸的对象）全部 rc=0 出 exe、诊断 0 条。
+
+**工具事实（踩过才记）**：python 的 **bytes** 字面量里写 "src" + 反斜杠 + "rtl" 时，那枚反斜杠-r 会被折成一枚真 CR 塞进文件 —— 于是那一行被劈成两半，PowerShell 报 ParserError 而**字节数看着完全正常**。此后校验 CRLF 文件必须同时数 `lone_lf` 与 `lone_cr`（只数 LF 会放过这一类）。
+
 
 
 
@@ -1146,3 +1161,4 @@ asm 13/14、smoke 1/1；`Build C3.exe` 那片日志正文不含用例行（历�
 | 账 #227（§B58 = `uc_host_window.c` 补 `case WM_LBUTTONDBLCLK` → `desc->dblClick` 一档 + 夹具第三头问 dbl/hits 两个计数 + 哨兵 C4 逐槽钉非零） | 与 #226 同形：desc 按位置填满 ⇒ 发码面永远看不出，`desc->` 读数里 dblClick 0 个调用者；六枚 UC 的 `RaiseEvent DblClick` 全静默（`CS_DBLCLKS` 早就立着） | 真跑两档 `U-ARRDBL=True`（`hw=True idx=2 dbl=1 hits=0 ret=0`）；负控 = 注释那条转调 ⇒ False 且现场 `idx=-1 dbl=0 hits=0`，另两头照旧 True；C4 假形状真红 2 条、还原 MD5 相同；92 份 emit 与上一轮逐份相同（纯 RTL 那一刀） | 门 #352（run 37388004707、head `50fb6d5f`、attempt 1）= 11 job 全绿、非绿 0，wall 8m41s |
 | 账 #228（§B59 = `mapTypeRef` 的别名档改问类型本名 `aliasName`（点号最后一段），符号那几档不动 + 夹具 `tests/test_alias_spellings.bas` 两面钉） | 同一 VB 类型两种拼法给出两种 C 类型：`OLE_COLOR`→`int32_t` 而同义的 `stdole.OLE_COLOR` 掉兜底 `void*`；实物 = `.ctl` 声明 `EditSetupWindow(... As OLE_COLOR)` 而容器写 `As stdole.OLE_COLOR` ⇒ 发送侧交 4 字节、处理器收 8 字节指针（x64 高 32 位是垃圾） | 单变量 A/B `inputs=90 same=88 changed=2`、4 条差异全是那一枚处理器的 `void*`→`int32_t`，真 COM 限定名一族（39 种 / 124 处）零改动；三处同源检具 52 枚 thunk 的两类不符 → 0/0；BASE 那台跑同一夹具真红（少一枚 needle + 命中一条 Absent）；9 件工程两架构 rc=0 | 门 #353 |
 | 账 #229（§B60 = 两条对象形态收成一处出口 `ctrlTypeOfMemberObject`，P20-42 的兜底改问它；类型仍出自 `controlPropType` 那张表） | `& uArr(0).Left` 判成 String（撞内置函数 Left）⇒ 拼接不套数值转换 ⇒ 裸 int 进 BSTR 槽 = 两架构 0xC0000005；同元素 `.Top` 只绕远装箱、非数组 `.Left` 正常 ⇒ 症状按名字分家很误导 | 夹具两头（RAW = 崩溃现场本身 + 四枚变量对上设计期几何）；BASE 那台跑同一份夹具两架构真崩、修后两架构 rc=0 读数相同；语料 A/B 90 份里只有 ve_units 变（纯夹具新增行，产品发码零改动） | 已过：门 #355（run 37398206822、head `187dc3e7`、attempt 1）= 11 job 全 completed/success、非绿 0，wall 10m16s |
+| 账 #231（§B62 = C29-1a/1b/C29-9 手抄在 `inferExprType` 里的三份名单（`kNumericFc`/`kStringFc3`/`kStrFcCd`+`kNumFcCd`）逐条搬进 `controlPropType` 那张表，问话只留一次且仍在 case 最前；`!= Unknown` 那道闸跟进表里） | 控件属性的**类型**两处各答，重合的四条靠"恰好一样"才没出事（#229 就是这道缝）；表外那 28 条名字散在推断函数里，改一处就把另一处的旧答案留在原地 | 这一刀**刻意零发码改动**：BASE 先冷存复捕证明与上一轮 90 份逐字节相同，改后 `inputs=90 changed=0 same=90`；新哨兵 `check_ctrl_prop_type_authority.ps1`（A1 旧名单回潮 0 / A2+A3 一处定义+恰好一个调用者 / A4 28 条名字逐条在表里 / A5 Unknown 闸 1 处）+ 三条负控各让一条红；22 份 check 全绿、真编译 4 件全出 exe | 等门（提交 `bd11b997`） |
