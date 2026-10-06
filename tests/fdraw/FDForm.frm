@@ -40,6 +40,21 @@ Private Declare PtrSafe Function ReleaseDC Lib "user32" (ByVal hwnd As LongPtr, 
 Private Function TF(ByVal b As Boolean) As String
     If b Then TF = "True" Else TF = "False"
 End Function
+' First device row in [lo,hi] that carries `want` somewhere in x in [xLo,xHi].
+' Used by the two unit witnesses below; scanning a colour (not "any pixel that
+' differs from the background") keeps a leftover line from answering for a new one.
+Private Function FirstRowOfColor(d As LongPtr, want As Long, xLo As Long, xHi As Long, _
+                                 lo As Long, hi As Long) As Long
+    Dim row As Long, i As Long
+    FirstRowOfColor = -1
+    For row = lo To hi
+        If FirstRowOfColor < 0 Then
+            For i = xLo To xHi
+                If GetPixel(d, i, row) = want Then FirstRowOfColor = row
+            Next
+        End If
+    Next
+End Function
 
 Private Sub tmrF_Timer()
     Dim d As LongPtr
@@ -92,6 +107,71 @@ Private Sub tmrF_Timer()
     Debug.Print "FD09-AFTERPRINT=" & CStr(Me.CurrentX) & "," & CStr(Me.CurrentY)
     ok10 = (Me.CurrentX = 0) And (Me.CurrentY > 30) And (Me.CurrentY < 3000)
     Debug.Print "FD10-printstore=" & TF(ok10)
+    ' ---- 237: Print moves the pen in this window's OWN unit, and paints where the
+    ' pen says. Before, vb6_Form_Print lived outside the drawing family and answered
+    ' all four questions itself: its own GetDC (never the dispatch-time one), no font
+    ' selected, no colour, the user number handed straight to TextOutW as pixels, and
+    ' a raw device-pixel line height stored back into the pen -- one Print in twips
+    ' moved CurrentY by 16 while the same form answered TextHeight = 240.
+    ' Every judge below is an equality between two paths, so no DPI constant is pinned.
+    Dim curTw As Double
+    Dim curPt As Double
+    Dim sm0 As Long
+    Dim sm1 As Long
+    Dim thTw As Double
+    Dim thPt As Double
+    Dim rowB As Long
+    Dim rowR As Long
+    Dim ok13 As Boolean
+    Dim ok14 As Boolean
+    Dim ok16 As Boolean
+
+    Me.ScaleMode = vbTwips
+    Me.CurrentX = 0
+    Me.CurrentY = 0
+    Print "AB"
+    curTw = Me.CurrentY
+    sm0 = Me.ScaleMode
+    thTw = Me.TextHeight("AB")
+    ' NOTE: both unit judges are written as a difference, not as `Me.CurrentY = thTw`.
+    ' That direct form is the shape that miscompiles today -- the emit is
+    '   vb6_VarCmpEq(&_vcmp_8, &thTw)   a boxed Variant next to the address of a double,
+    ' so two equal numbers answer False (raw readings agree: FD15 tw/pt vs curTw/curPt).
+    ' Recorded as account #238; put the plain equality back here once that path is fixed.
+    ok13 = (Abs(Me.CurrentY - thTw) < 0.001) And (Me.CurrentX = 0)
+    Debug.Print "FD13-printadvance-twips=" & TF(ok13)
+    Me.ScaleMode = vbPoints
+    Me.CurrentX = 0
+    Me.CurrentY = 0
+    Print "AB"
+    curPt = Me.CurrentY
+    sm1 = Me.ScaleMode
+    thPt = Me.TextHeight("AB")
+    ok14 = (Abs(Me.CurrentY - thPt) < 0.001)
+    Debug.Print "FD14-printadvance-points=" & TF(ok14)
+    Debug.Print "FD15-RAW tw=" & CStr(thTw) & " pt=" & CStr(thPt) & _
+              " curTw=" & CStr(curTw) & " curPt=" & CStr(curPt) & _
+              " sm0=" & CStr(sm0) & " sm1=" & CStr(sm1)
+
+    ' 72 points and 1 inch are the same physical distance, so the two lines must land
+    ' on the same device row, an inch below the top. The long blue line stays visible
+    ' to the right of the short red one, which is what the two x windows read.
+    d = GetDC(Me.hwnd)
+    Me.ForeColor = vbBlue
+    Me.CurrentX = 0
+    Me.CurrentY = 72
+    Print "MMMMMMMMMMMMMMMM"
+    Me.ScaleMode = vbInches
+    Me.ForeColor = vbRed
+    Me.CurrentX = 0
+    Me.CurrentY = 1
+    Print "M"
+    rowB = FirstRowOfColor(d, vbBlue, 150, 200, 20, 240)
+    rowR = FirstRowOfColor(d, vbRed, 0, 10, 20, 240)
+    ok16 = (rowR > 50) And (rowR = rowB)
+    Debug.Print "FD16-paint-units=" & TF(ok16)
+    Debug.Print "FD17-RAW rowB=" & CStr(rowB) & " rowR=" & CStr(rowR)
+    r = ReleaseDC(Me.hwnd, d)
     Debug.Print "FD-DONE"
     Unload Me
 End Sub

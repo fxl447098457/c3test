@@ -3587,7 +3587,14 @@ if ($Category -in @("all", "run", "vbp")) {
         "FD04-RAW xy=300,130 dw=3", "FD05-sm0=1", "FD06-sm1=3",
         "FD07-PIXEL=True", "FD08-neg=True",
         "FD11-forecolor=True", "FD12-RAW pen=16711680 blue=16711680 first=255",
-        "FD10-printstore=True", "FD-DONE")
+        "FD10-printstore=True",
+        # 237: the pen advance and the paint position must use this window's own unit.
+        # The RAW lines carry DPI-dependent numbers, so only their prefixes and the
+        # two scale-mode readings are pinned; the True/False judges are ratios.
+        "FD13-printadvance-twips=True", "FD14-printadvance-points=True",
+        "FD15-RAW", "sm0=1 sm1=2",
+        "FD16-paint-units=True", "FD17-RAW",
+        "FD-DONE")
     Test-Vbp "fdrawstate" "$Tests\fdraw\FDemo.vbp" $fdrawExpected
     Test-Vbp "fdrawstate_x86" "$Tests\fdraw\FDemo.vbp" $fdrawExpected -Arch "x86"
 

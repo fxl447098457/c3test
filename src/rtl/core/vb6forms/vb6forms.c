@@ -1529,49 +1529,6 @@ void vb6_UnloadForm(void* hwnd) {
     SendMessageW((HWND)hwnd, WM_CLOSE, 0, 0);
 }
 
-// M22-Issue6: 窗体表面Print
-// VB6的"Print expr"语句在窗体表面绘制文本
-// 维护CurrentX/CurrentY用于定位下一次输出
-void vb6_Form_Print(void* hwnd, void* bstrText) {
-    if (!hwnd) return;
-    HWND hw = (HWND)hwnd;
-    BSTR text = (BSTR)bstrText;
-    
-    // Get CurrentX/CurrentY from window properties (stored as pixels)
-    float currentX = vb6_GetCurrentX(hwnd);
-    float currentY = vb6_GetCurrentY(hwnd);
-    
-    HDC hdc = GetDC(hw);
-    if (!hdc) return;
-    
-    // Set text color and background mode (transparent for form printing)
-    SetBkMode(hdc, TRANSPARENT);
-    
-    int len = text ? (int)SysStringLen(text) : 0;
-    if (len > 0) {
-        // Calculate text size for advancing CurrentX
-        SIZE size;
-        TEXTMETRICW tm;
-        GetTextExtentPoint32W(hdc, text, len, &size);
-        GetTextMetricsW(hdc, &tm);
-        
-        // Draw text at CurrentX, CurrentY
-        TextOutW(hdc, (int)currentX, (int)currentY, text, len);
-        
-        // VB6 behavior: Print automatically advances to next line (newline)
-        // CurrentY += line height, CurrentX reset to 0
-        vb6_SetCurrentY(hwnd, currentY + (float)tm.tmHeight);
-        vb6_SetCurrentX(hwnd, 0.0f);
-    } else {
-        // Empty Print = newline: advance CurrentY by font height, reset CurrentX
-        TEXTMETRICW tm;
-        GetTextMetricsW(hdc, &tm);
-        vb6_SetCurrentY(hwnd, currentY + (float)tm.tmHeight);
-        vb6_SetCurrentX(hwnd, 0.0f);
-    }
-    
-    ReleaseDC(hw, hdc);
-}
 
 // ============================================================
 // Form_Unload回调

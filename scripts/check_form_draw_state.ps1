@@ -14,6 +14,14 @@
 #       getControlPropWriteFn 的 Form 档**都要**有 (少一边就是这一刀回归)
 #   S4  编码对称: vb6_DrawSetI 那条 SetPropW 必须写裸值 (只看写行 —— 注释里提到 "v+1" 是在讲历史)
 #   S5  画笔色也只有一份存储 (账 #235): 属性名 VB6_DrawForeColor 在 src/rtl 里不许出现在任何
+#   S6  Print 是绘图家族的一员 (账 #237): `vb6_Form_Print` 在 src/rtl 里恰好定义一次, 而那一条
+#       必须住在 vb6forms_draw.c; 它体内四件权威一个都不许自己答 —— DC(vb6_DrawAcquire)、
+#       字体(vb6_ControlFont()、色(vb6_DrawForeColor、笔位(vb6_GetCurrentY/vb6_SetCurrentY +
+#       两条换算码头(vb6_DrawUserToPx / vb6_DrawPxToUser)。以前它住在 vb6forms.c 里自带一份
+#       GetDC/ReleaseDC、不选字体、把用户单位当像素落笔、把像素行高存回用户单位那份笔位里。
+#   S7  换算只许是码头 (账 #237): 两条码头分别交回 vb6_ScaleUserToPx / vb6_ScalePxToUser,
+#       每个调用点都必须**显式写出纵/横那一档**(0 或 1), 且本文件不许再出现自己的 dpi
+#       (LOGPIXELSX / v * dpi) —— 那份 `v * dpi / 1440` 只认缇, Point/Inch/cm 差 20 倍。
 #       GetPropW/SetPropW 行 —— Form 绘图家族的画笔色就是控件那个 ForeColor (唯一出口
 #       vb6_GetControlForeColor)。另存一枚的现场就是 `Me.ForeColor = vbRed` 之后 PSet 画出来是黑。
 #
@@ -122,9 +130,73 @@ if ($fghost.Count -ne 0) {
 
 
 
+
+# ---- S6: Print 住在家族里, 且四件都问权威 (账 #237) ----
+$printDefs = @()
+foreach ($f in Get-SrcFiles $rtlDir) {
+    $txt = [System.IO.File]::ReadAllText($f.FullName)
+    foreach ($m in [regex]::Matches($txt, 'void\s+vb6_Form_Print\s*\([^)]*\)\s*\{')) {
+        $printDefs += $f.Name
+    }
+}
+if ($printDefs.Count -ne 1) {
+    $bad += ("S6 vb6_Form_Print defined " + $printDefs.Count + " times in src\rtl (want exactly 1) -> " +
+             ($printDefs -join ", "))
+} elseif ($printDefs[0] -ne "vb6forms_draw.c") {
+    $bad += ("S6 vb6_Form_Print lives in " + $printDefs[0] + " again -> it left the drawing family" +
+             " and grew its own DC/units answer back")
+} else {
+    $mPrint = [regex]::Match($d, 'void\s+vb6_Form_Print\s*\([\s\S]*?\r?\n\}')
+    if (-not $mPrint.Success) {
+        $bad += "S6 vb6_Form_Print body not found in vb6forms_draw.c"
+    } else {
+        foreach ($need in @("vb6_DrawAcquire", "vb6_ControlFont(", "vb6_DrawForeColor",
+                            "vb6_GetCurrentY", "vb6_SetCurrentY", "vb6_DrawUserToPx",
+                            "vb6_DrawPxToUser")) {
+            if ($mPrint.Value.IndexOf($need) -lt 0) {
+                $bad += ("S6 vb6_Form_Print no longer asks the authority " + $need)
+            }
+        }
+    }
+}
+
+# ---- S7: 单位换算只许是码头, 而且必须点名纵/横 (账 #237) ----
+$mU = [regex]::Match($d, 'static double vb6_DrawUserToPx\([\s\S]*?\r?\n\}')
+$mP = [regex]::Match($d, 'static double vb6_DrawPxToUser\([\s\S]*?\r?\n\}')
+if (-not $mU.Success -or ($mU.Value.IndexOf("vb6_ScaleUserToPx(") -lt 0)) {
+    $bad += "S7 vb6_DrawUserToPx no longer delegates to vb6_ScaleUserToPx"
+}
+if (-not $mP.Success -or ($mP.Value.IndexOf("vb6_ScalePxToUser(") -lt 0)) {
+    $bad += "S7 vb6_DrawPxToUser no longer delegates to vb6_ScalePxToUser"
+}
+# Every call of the two docks must name its axis (0 = x, 1 = y): the pre-237 helper had
+# no axis at all, so the vertical leg was converted with the horizontal DPI.
+$callTot = @([regex]::Matches($d, 'vb6_Draw(UserToPx|PxToUser)\s*\(')).Count
+$axisTot = @([regex]::Matches($d, 'vb6_Draw(?:UserToPx|PxToUser)\s*\([^;{]*?,\s*[01]\s*\)')).Count
+if ($callTot - 2 -ne $axisTot) {
+    $bad += ("S7 " + ($callTot - 2 - $axisTot) + " conversion call site(s) without an explicit" +
+             " 0/1 axis flag (calls " + ($callTot - 2) + ", flagged " + $axisTot + ")")
+}
+$own = @()
+foreach ($ln in ($d -split "`r?`n")) {
+    $t = $ln.Trim()
+    if ($t.StartsWith("//")) { continue }
+    foreach ($tok in @("LOGPIXELSX", "1440", "dpi")) {
+        if ($t.Contains($tok)) {
+            $own += ($tok + " :: " + $t.Substring(0, [Math]::Min(58, $t.Length)))
+        }
+    }
+}
+if ($own.Count -ne 0) {
+    $bad += ("S7 vb6forms_draw.c carries its own DPI math again -> " +
+             (($own | Select-Object -First 3) -join " | ") +
+             " (Fix 184: every scale conversion shares the one real-DPI pair in vb6forms.c)")
+}
+
 if ($bad.Count -eq 0) {
     Write-Host ("PASS form draw state: pen store unique, side-list gone, " +
-                "read/write paired for 3 props, encoding symmetric, pen color store unique")
+                "read/write paired for 3 props, encoding symmetric, pen color store unique, " +
+                "Print inside the family asking 7 authorities, conversions dock-only with an axis")
     exit 0
 }
 foreach ($b in $bad) { Write-Host ("FAIL " + $b) -ForegroundColor Red }

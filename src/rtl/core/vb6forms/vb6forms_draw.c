@@ -122,11 +122,17 @@ static int vb6_DrawScaleMode(void* hwnd) {
     return (int)vb6_WindowScaleModeSelf(hwnd);
 }
 
-static double vb6_DrawUserToPx(HDC dc, void* hwnd, double v) {
-    if (vb6_DrawScaleMode(hwnd) == 3 /* vbPixels */) return v;   // 已是像素
-    int dpi = GetDeviceCaps(dc, LOGPIXELSX);
-    if (dpi <= 0) dpi = 96;
-    return v * dpi / 1440.0;
+// 账 #237: 这两条**只是码头**，换算本身在 vb6forms.c 的 vb6_ScaleUserToPx / vb6_ScalePxToUser
+// (Fix 184 已把缇<->像素收成那一对带真实 DPI 的出口，几何 Move/SetPos、控件 Line、TextHeight
+// 全走它)。以前本文件自带一份 `v * dpi / 1440` —— 那是第二套口径，而且**只认缇**:
+// ScaleMode = Point/Inch/Centimeter/Millimeter 时它照缇算，差 20 倍；纵向还拿横向的 dpi。
+// 现在竖/横分开交给权威，与本文件其余三件 (DC / 字体 / 色彩) 同一形状: 只问，不再自己答。
+static double vb6_DrawUserToPx(void* hwnd, double v, int vert) {
+    return (double)vb6_ScaleUserToPx(v, vb6_DrawScaleMode(hwnd), vert);
+}
+
+static double vb6_DrawPxToUser(void* hwnd, double px, int vert) {
+    return vb6_ScalePxToUser(px, vb6_DrawScaleMode(hwnd), vert);
 }
 
 // ============================================================
@@ -150,8 +156,8 @@ void vb6_Form_PSet(void* hwnd, int32_t step, int32_t hasXY,
 
     vb6_draw_dc_t d = vb6_DrawAcquire(hwnd);
     if (!d.dc) return;
-    double dx = vb6_DrawUserToPx(d.dc, hwnd, px);
-    double dy = vb6_DrawUserToPx(d.dc, hwnd, py);
+    double dx = vb6_DrawUserToPx(hwnd, px, 0);
+    double dy = vb6_DrawUserToPx(hwnd, py, 1);
     COLORREF c = hasColor ? (COLORREF)color : vb6_DrawForeColor(hwnd);
     SetPixelV(d.dc, (int)dx, (int)dy, c);
     vb6_DrawRelease(&d, hwnd);
@@ -163,8 +169,8 @@ void vb6_Form_PSet(void* hwnd, int32_t step, int32_t hasXY,
 int32_t vb6_Form_Point(void* hwnd, double x, double y) {
     vb6_draw_dc_t d = vb6_DrawAcquire(hwnd);
     if (!d.dc) return -1;
-    double dx = vb6_DrawUserToPx(d.dc, hwnd, x);
-    double dy = vb6_DrawUserToPx(d.dc, hwnd, y);
+    double dx = vb6_DrawUserToPx(hwnd, x, 0);
+    double dy = vb6_DrawUserToPx(hwnd, y, 1);
     COLORREF c = GetPixel(d.dc, (int)dx, (int)dy);
     vb6_DrawRelease(&d, hwnd);
     return (int32_t)c;   // 已经是 0x00BBGGRR, 与 VB6 的 Point 返回同序
@@ -201,10 +207,10 @@ void vb6_Form_Line(void* hwnd,
 
     vb6_draw_dc_t d = vb6_DrawAcquire(hwnd);
     if (!d.dc) return;
-    double pax = vb6_DrawUserToPx(d.dc, hwnd, ax);
-    double pay = vb6_DrawUserToPx(d.dc, hwnd, ay);
-    double pbx = vb6_DrawUserToPx(d.dc, hwnd, bx);
-    double pby = vb6_DrawUserToPx(d.dc, hwnd, by);
+    double pax = vb6_DrawUserToPx(hwnd, ax, 0);
+    double pay = vb6_DrawUserToPx(hwnd, ay, 1);
+    double pbx = vb6_DrawUserToPx(hwnd, bx, 0);
+    double pby = vb6_DrawUserToPx(hwnd, by, 1);
 
     COLORREF c = hasColor ? (COLORREF)color : vb6_DrawForeColor(hwnd);
     int w = vb6_DrawGetI(hw, L"VB6_DrawWidth", 1);
@@ -275,9 +281,9 @@ void vb6_Form_Circle(void* hwnd,
 
     vb6_draw_dc_t d = vb6_DrawAcquire(hwnd);
     if (!d.dc) return;
-    double dcx = vb6_DrawUserToPx(d.dc, hwnd, ccx);
-    double dcy = vb6_DrawUserToPx(d.dc, hwnd, ccy);
-    double r = vb6_DrawUserToPx(d.dc, hwnd, radius);
+    double dcx = vb6_DrawUserToPx(hwnd, ccx, 0);
+    double dcy = vb6_DrawUserToPx(hwnd, ccy, 1);
+    double r = vb6_DrawUserToPx(hwnd, radius, 0);
     // 半径要按**纵横**两个方向各算一次: VB6 的 Circle 传的是缇单位下的半径,
     // 落在 DC 上是椭圆 (除非 aspect=1 且 hwnd 方正)。
     double ry = r;
@@ -344,6 +350,50 @@ void vb6_Form_Cls(void* hwnd) {
     vb6_DrawRelease(&d, hwnd);
     vb6_DrawSetCurX(hw, 0);
     vb6_DrawSetCurY(hw, 0);
+}
+
+// ============================================================
+// PRINT —— 在笔位上落一行文字，再把笔位推到下一行。
+//   VB6 的 Print 没有坐标实参: 落点恒取 CurrentX/CurrentY，行末 CurrentX 归零。
+// 账 #237: 这条以前住在 vb6forms.c，四件都是**自己答**的 —— 自己 GetDC、无条件 ReleaseDC
+// (派发期那张 BeginPaint 的 DC 它从不问，所以在 _Paint 里 Print 落不进那一轮)、
+// 字体不选 (拿 DC 默认字体，不是这枚窗体的 Font)、颜色不 SetTextColor、
+// 落点把「用户单位」当「像素」直接递出去，推进笔位又把一个像素数存回用户单位那份存储里
+// (实测缇档 Print 一行 = CurrentY + 16，而同一枚窗体自己答 TextHeight = 240)。
+// 现在四件都问家族已有的权威: DC = vb6_DrawAcquire (账 #234)、字体 = vb6_ControlFont
+// (账 #200)、色 = vb6_DrawForeColor (账 #235)、单位 = vb6_DrawUserToPx / vb6_DrawPxToUser
+// (本文件账 #237 那两条码头)。
+// 推进量刻意取**刚写那串字的 GetTextExtentPoint32W().cy** —— 那正是 vb6_ControlTextHeight
+// 量的同一个量，所以「Print 之后 CurrentY 的增量 == Me.TextHeight(同一串)」这条判据是两条路
+// 真汇合，不是各写一遍凑出来的相等。空 Print = 一个空行，取字体行高。
+// ============================================================
+void vb6_Form_Print(void* hwnd, void* bstrText) {
+    HWND hw = (HWND)hwnd;
+    BSTR text = (BSTR)bstrText;
+    if (!hw) return;
+    int len = text ? (int)SysStringLen(text) : 0;
+    vb6_draw_dc_t d = vb6_DrawAcquire(hwnd);
+    if (!d.dc) return;
+    HFONT hFont = vb6_ControlFont(hw);
+    HFONT hOld = hFont ? (HFONT)SelectObject(d.dc, hFont) : NULL;
+    SetBkMode(d.dc, TRANSPARENT);
+    SetTextColor(d.dc, vb6_DrawForeColor(hwnd));
+    double xUser = (double)vb6_GetCurrentX(hwnd);
+    double yUser = (double)vb6_GetCurrentY(hwnd);
+    int linePx = 0;
+    if (len > 0) {
+        SIZE sz;
+        TextOutW(d.dc, (int)vb6_DrawUserToPx(hwnd, xUser, 0),
+                         (int)vb6_DrawUserToPx(hwnd, yUser, 1), text, len);
+        if (GetTextExtentPoint32W(d.dc, text, len, &sz)) linePx = sz.cy;
+    } else {
+        TEXTMETRICW tm;
+        if (GetTextMetricsW(d.dc, &tm)) linePx = tm.tmHeight;
+    }
+    if (hOld) SelectObject(d.dc, hOld);
+    vb6_DrawRelease(&d, hwnd);
+    vb6_SetCurrentX(hwnd, 0.0f);
+    vb6_SetCurrentY(hwnd, (float)(yUser + vb6_DrawPxToUser(hwnd, (double)linePx, 1)));
 }
 
 // ============================================================
