@@ -946,7 +946,7 @@ asm 13/14、smoke 1/1；`Build C3.exe` 那片日志正文不含用例行（历�
 **改法**：那 28 条名字逐条搬进 `controlPropType`（通用段补 10 条数值名 + 文件系统三控件一节 + CommonDialog 一节），`inferExprType` 里三份名单连它的循环一起删，只留**一次问话** —— 位置仍在 `MemberAccessExpr` 那条 case 的**最前面**（原 C29-1a 的位置），所以答案的**先后顺序**也没动；C29-1a 那道 `!= FrmControlType::Unknown` 的闸一并搬进表里（自定义 OCX/UC 的属性面归类型库，不让这张表按名字形状抢答）。
 
 **这一刀的护栏比往常硬**：refactor 的失败模式不是崩，是"某条名字在整个语料里根本没人这样写" —— 那种漏在 emit A/B 上是**哑的**（上一格 #229 的读数就是"changed 全是夹具自身新增行"）。所以两头一起钉：
-- 语料 A/B：BASE = 改前那台（`C3_base231.exe` 冷存；先用它复捕一份，证明与上一轮那 90 份**逐字节相同**才承认它是 BASE）⇒ 改后 `inputs=90 changed=0 same=90`，**产品发码零改动**（这一刀的正确答案就是 0，不是"逐行归因后 0"）。
+- 语料 A/B：BASE = 改前那台（`C3_base231.exe` 冷存；先用它复捕一份，证明与上一轮那 90 份**逐字节相同**才承认它是 BASE）⇒ 改后 `inputs=90 changed=0 same=90`（覆盖面不止这 45 份 .vbp：`tests/` 下 **250 份单文件 .bas 用例**也各用两台 emit 一遍、诊断文本一并入读 ⇒ 同样 `changed=0`，脚本 `.build/b286_basab.py`；合计 **340 份捕获一字不差**），**产品发码零改动**（这一刀的正确答案就是 0，不是"逐行归因后 0"）。
 - 新哨兵 `scripts/check_ctrl_prop_type_authority.ps1`：A1 旧名单标识符与它的循环变量回潮 = 0；A2/A3 `controlPropType` 与 `ctrlTypeOfMemberObject` 各"定义 + 声明 + **恰好一个**调用者" = 3 次提及；A4 **28 条名字逐条**必须在表里答到（`p == "<名>"`）；A5 那道 Unknown 闸必须还在且只有 1 处。三条负控（假插一份 `kNumericFc` / 把 `fillstyle` 改名 / 多开一个调用点）各让对应规则红，跑完按 md5 还原源文件。已进回归 `[STATIC] ctrl_prop_type_authority`（第 22 道）。
 - 全 22 份 `check_*.ps1` 逐份绿；真编译定点 4 件（ve_units 两架构 / ucTreeMaps x64 / VBFlexGridDemo x64 —— 最后一件正是 A5 那道闸的对象）全部 rc=0 出 exe、诊断 0 条。
 
