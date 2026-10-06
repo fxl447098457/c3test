@@ -253,18 +253,18 @@ function Test-ComRegistered {
 
 # === 静态对表: DI 桩 census ===
 # 判据与基线都在 scripts/check_di_stubs.ps1 + scripts/di_stubs_manifest.txt (只许增不许静默减)。
-# 子进程跑 (脚本以 exit 收尾, 直接 & 调用会把本 runner 一起 exit 掉)。没有 pwsh 时 SKIP ——
-# 本 runner 本来就可跑在 Windows PowerShell 5.1 下。
+# 子进程跑 (脚本以 exit 收尾, 直接 & 调用会把本 runner 一起 exit 掉)。
+# 解释器: 优先 pwsh (CI 的 shell), 没有就**退回 Windows PowerShell**, 不 SKIP ——
+#   2026-10-06 发现: 本机没有 pwsh, 老写法 (缺 pwsh 即 SKIP) 让这条哨兵在这台机器上长期形同虚设,
+#   而 dbgdlg 的 LNK2019 恰恰就是在"以为有哨兵"的窗口里漏过去的。哨兵不许自废。
+#   check_di_stubs.ps1 只用 5.1 也有的东西 (Get-Content -Raw / HashSet / regex), 可安全下调。
 function Test-DiStubCensus {
     $script:total++
     Write-Host -NoNewline "  [STATIC] di_stubs_census ... "
+    $psExe = "powershell"
     $ps7 = Get-Command pwsh -ErrorAction SilentlyContinue
-    if (-not $ps7) {
-        $script:skip++
-        Write-Host "SKIP (无 pwsh)" -ForegroundColor Yellow
-        return
-    }
-    $out = & $ps7.Source -NoProfile -File "$Root\scripts\check_di_stubs.ps1" 2>&1
+    if ($ps7) { $psExe = $ps7.Source }
+    $out = & $psExe -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\check_di_stubs.ps1" 2>&1
     if ($LASTEXITCODE -eq 0) {
         $script:pass++
         Write-Host "PASS" -ForegroundColor Green
@@ -272,6 +272,30 @@ function Test-DiStubCensus {
         $script:fail++
         Write-Host "FAIL" -ForegroundColor Red
         $out | Select-Object -Last 14 | ForEach-Object { Write-Host "  $_" }
+    }
+}
+
+# === 静态对表: .vbp 夹具 census (每个夹具都必须入册) ===
+# 判据与基线都在 scripts/check_vbp_fixture_census.ps1 + scripts/vbp_fixtures_unregistered.txt。
+# 由来 (2026-10-06, 与上面那条 di_stubs_census 是同一件事的两面):
+#   dbgdlg 的 `vb6_di_PageSetupDlgA` 缺桩是**真红**, 可它在门禁里连"红"都算不上 —— 因为
+#   dbgdlg 这个夹具压根不在任何清单里, 门禁从不编它。"编不过的东西在门禁里等于不存在"。
+#   补 dbgdlg 只修了这一枚; 这道哨兵把"入册"本身变成判据, 才堵得住这一类。
+# 解释器口径同 Test-DiStubCensus: 优先 pwsh, 没有就退回 Windows PowerShell, 不许自废。
+function Test-VbpFixtureCensus {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] vbp_fixture_census ... "
+    $psExe = "powershell"
+    $ps7 = Get-Command pwsh -ErrorAction SilentlyContinue
+    if ($ps7) { $psExe = $ps7.Source }
+    $out = & $psExe -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\check_vbp_fixture_census.ps1" 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        $out | Select-Object -Last 20 | ForEach-Object { Write-Host "  $_" }
     }
 }
 
@@ -4167,6 +4191,41 @@ if ($Category -in @("all", "run", "vbp")) {
     Test-VbpBuild "charts_ucTreeMaps"  "$Tests\Charts 2020\ucTreeMaps\Proyecto1.vbp"
     Test-VbpBuild "charts_ucTreeMaps_x86" "$Tests\Charts 2020\ucTreeMaps\Proyecto1.vbp" -Arch "x86"
 
+    # <vbeclipse> 回归夹子 (dbgdlg) 2026-10-06: 「Alias 名与 VB 名相同」这条路上**真调用**过
+    # DI 包装的那一份夹具 —— 只要求"编得过、链得出 exe"，不跑 (它是 GUI 工程，跑起来要人点)。
+    # 缺口是什么：cDlg.cls:196 `Declare Function PageSetupDlg Lib "COMDLG32" Alias "PageSetupDlgA"...`,
+    #   VB 名 = Alias，于是生成侧根本不发 `#define`、也不进 declareAliasMap_，包装体名照旧
+    #   `vb6_lw_PageSetupDlgA`，体内引用的却是 `vb6_di_PageSetupDlgA` —— 而桩表里没这枚 ⇒ LNK2019。
+    # 为什么以前抓不住：**判据不是"声明"，是"调用"**。包装是 `static __inline`，未被引用时 MSVC
+    #   根本不发符号，桩缺也不报；全树只有 cDlg.cls:2233 `mApiReturn = PageSetupDlg(iPsd)` 真调了它。
+    #   而 dbgdlg 此前**不在门禁任何清单里** ⇒ 编不过的东西在门禁里连"红"都算不上 (与 #188 那句同源)。
+    # 两头钉住：x64 与 x86 各一 (x86 的 WINAPI 折叠与 .lib 选择是另一条路，缺一边就是假绿)。
+    Test-VbpBuild "dbgdlg"     "$Tests\dbgdlg\dbgdlg.vbp"
+    Test-VbpBuild "dbgdlg_x86" "$Tests\dbgdlg\dbgdlg.vbp" -Arch "x86"
+
+    # 2026-10-06 (同一笔: 由新的 [STATIC] vbp_fixture_census 逼出来的): 这四份夹具**早就存在、
+    # 天天在树里**, 却一直不在任何清单里 —— 于是它们编不编得过, 门禁既不知道也不关心。
+    # 处置口径: 四条都能**确定地编得过**(本轮逐一实测 x64+x86: rc=0 且出了 exe), 那就登记进来,
+    # 从此"不许退回编不过"; 只看编译面, **不跑** (它们要跑得先在本机注册 COM/OLE 服务, 门禁
+    # 环境不保证, 拿运行当基线就是把环境问题算成产品红)。
+    #   · c29data          数据控件 (DataApp + data\)   · olecon          OLE 容器
+    #   · test_validate    Validate 事件                · test_com_events_winhttp  COM 事件 (winhttp 类型库)
+    # 未登记的其余 .vbp 不在这里, 而是挂账在 scripts/vbp_fixtures_unregistered.txt 并写明理由
+    # (ucProgressCircular=刻意不列; vbman_host / vbp_project=别处已覆盖)。
+    Test-VbpBuild "c29data"        "$Tests\c29data\DataApp.vbp"
+    Test-VbpBuild "c29data_x86"    "$Tests\c29data\DataApp.vbp" -Arch "x86"
+    Test-VbpBuild "olecon"         "$Tests\olecon\OleCon.vbp"
+    Test-VbpBuild "olecon_x86"     "$Tests\olecon\OleCon.vbp" -Arch "x86"
+    Test-VbpBuild "test_validate"  "$Tests\test_validate\ValidateTest.vbp"
+    Test-VbpBuild "test_validate_x86" "$Tests\test_validate\ValidateTest.vbp" -Arch "x86"
+    Test-VbpBuild "com_events_winhttp"     "$Tests\test_com_events_winhttp\test_com_events_winhttp.vbp"
+    Test-VbpBuild "com_events_winhttp_x86" "$Tests\test_com_events_winhttp\test_com_events_winhttp.vbp" -Arch "x86"
+    # diff_smoke: 差分对照首例 (docs/tests/plan.md P0)。它当年的验收是"VB6Mini /make 与 C3 --arch x86
+    # 各出一份 result.txt 逐行一致", 那套差分 runner (P0 的 P2 后续) 还没落地; 但它本身编得过
+    # (本轮实测 x64+x86 均 rc=0 且出 exe), 按同一口径登记为"编译面"用例, 保住"不许退回编不过"。
+    Test-VbpBuild "diff_smoke"     "$Tests\diff_smoke.vbp"
+    Test-VbpBuild "diff_smoke_x86" "$Tests\diff_smoke.vbp" -Arch "x86"
+
     # <vbeclipse> 回归夹子 (optdef) 账 #194: VB 的整数类型后缀是**词法**，不许抄进生成 C。
     # 语义层那份 Optional 默认值求值以前直接 return rawText，于是 `Optional ... As Long = 0&` 发成
     # `(*FontIndex) = 0&;` = C2059 (真工程证据: Charts 2020/ucTreeMaps 的 PropPagFMR.pag:740/886)。
@@ -4523,6 +4582,7 @@ if ($Category -in @("all", "compile")) {
     # 这里改成每次 compile 段都静态对一遍基线 (不编译、不跑程序)。
     Write-Host "--- Static Checks ---" -ForegroundColor Yellow
     Test-DiStubCensus
+    Test-VbpFixtureCensus
     Test-UcScaleUnitsCensus
     Test-HostPseudoTableCensus
     Test-AddressOfThunkSites
