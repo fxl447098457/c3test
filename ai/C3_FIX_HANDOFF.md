@@ -1181,6 +1181,7 @@ BASE 那台同一份夹具 = 两架构三条**全 False**（`FD18 raw=3,-1` / `F
 ② 发码针 `Test-CodegenNote "form_canvas_family"`（顺带把账 #224 欠的 ⑤ 一次还掉）：五枚必须出现 + 三枚必须不出现
 （`vb6_ComCall(vb6_hwnd_FDForm` / `vb6_ComGetObjectProp(vb6_hwnd_FDForm` / `vb6_ComCallObject(`）；
 BASE 产物实测"缺 2 枚 + 命中 3 枚各 1"⇒ 两头都真能红。
+发码针的一条格式规矩（本刀踩过，代价是一整轮门 #367 红在自己身上）：`Invoke-CodegenProj` 比对之前先把 emit 输出做 `-replace '\s+',' '` —— 所以 needle 里不许写连续两个空格。我第一版照抄产物的对齐写成 `);  /* Form.Cls */`（两个空格）⇒ 永远匹配不上：本地 `-Category syntax` 164/1、CI 同一枚红，改成单空格即对。要钉**逐字节形状**（含对齐与续行）得用 `Test-EmitcShape`，只有那一条不折叠空白。
 ③ 哨兵 `scripts/check_form_draw_state.ps1` 加 S9 四条：S9.1 三个 C 出口名只许住在表文件里（任何码头自己拼名字 = 又一份答案）；
 S9.2 表里 `cls` / `print` / `line` 三档与 `Form` / `PictureBox` 两档接收者齐；S9.3 调用点恰好 7（定义 1 + 声明 1 + 码头 5）；
 S9.4 打标记那一路的 PictureBox 判据必须问表、且不许把成员名抄成名单。**只看代码行**（S8 那条"注释里出现名字把判据读哑"

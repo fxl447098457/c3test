@@ -5097,7 +5097,7 @@ if ($Category -in @("all", "syntax")) {
     # 链接过、跑起来一笔不画，正是本线踩过四次的同一味）。Absent 面把整条兜底钉死：
     # 这一份产物里压根不该出现针对窗体槽的 ComCall / ComGetObjectProp，也不该出现 ComCallObject。
     Test-CodegenNote "form_canvas_family" @("$Tests\fdraw\FDemo.vbp") @(
-        "vb6_ControlCls((void*)vb6_hwnd_FDForm);  /* Form.Cls */",
+        "vb6_ControlCls((void*)vb6_hwnd_FDForm); /* Form.Cls */",
         "vb6_ControlPrint((void*)vb6_hwnd_FDForm,",
         "vb6_Form_Print(vb6_hwnd_FDForm",
         "vb6_Form_PSet((void*)vb6_hwnd_FDForm",
