@@ -31,22 +31,107 @@ void vb6_Form_SetDispatch(void* hwnd, void* pDispatch) {
     SetPropW((HWND)hwnd, g_FormDispatchProp, (HANDLE)pDispatch);
 }
 
+/* Fix <vbeclipse> 2026-10-06: 运行期 Controls.Add 免注册 OCX 表 (vbp Object= 同款机制).
+ * cgen 在入口点烘焙 c3_ocx_libs[], 由 vb6_OcxRefRegister 登记。vb6_Form_ControlsAdd
+ * 按 ProgID 命中后改走 ocxCreateAny (LoadLibrary+DllGetClassObject, 绕开注册表);
+ * 未命中 → 原有 CLSIDFromProgID+CoCreateInstance 注册表路径 (零回归: 表空时恒回退). */
+static Vb6OcxRef g_ocxRefs[VB6_MAX_OCXREFS];
+static int       g_ocxRefCount = 0;
+
+void vb6_OcxRefRegister(const Vb6OcxRef* libs, int count) {
+    if (count > VB6_MAX_OCXREFS) {
+        fwprintf(stderr, L"[C3_OCX] ocx ref table full (%d > %d); truncating\n",
+                 count, VB6_MAX_OCXREFS);
+        count = VB6_MAX_OCXREFS;
+    }
+    for (int i = 0; i < count; i++) g_ocxRefs[i] = libs[i];
+    g_ocxRefCount = count;
+}
+
+/* 按 ProgID 或 CLSID 字符串查免注册表; 返回 NULL = 未命中. */
+static const Vb6OcxRef* vb6_OcxRefLookup(const wchar_t* progId, const wchar_t* clsidStr) {
+    if (g_ocxRefCount == 0) return NULL;
+    /* 1) ProgID 精确 (大小写不敏感) */
+    if (progId) {
+        for (int i = 0; i < g_ocxRefCount; i++) {
+            if (g_ocxRefs[i].progId && _wcsicmp(g_ocxRefs[i].progId, progId) == 0)
+                return &g_ocxRefs[i];
+        }
+        /* 2) ProgID 去版本后缀 (.1/.2) 再试 (typelib 导出版本无关 ProgID 时兜底) */
+        size_t n = wcslen(progId);
+        if (n > 2 && progId[n - 2] == L'.' && progId[n - 1] >= L'0' && progId[n - 1] <= L'9') {
+            wchar_t base[128];
+            if (n < 128) {
+                wcscpy(base, progId);
+                base[n - 2] = 0;
+                for (int i = 0; i < g_ocxRefCount; i++)
+                    if (g_ocxRefs[i].progId && _wcsicmp(g_ocxRefs[i].progId, base) == 0)
+                        return &g_ocxRefs[i];
+            }
+        }
+    }
+    /* 3) CLSID 字符串精确 (注册表可解析 CLSID 时兜底) */
+    if (clsidStr) {
+        for (int i = 0; i < g_ocxRefCount; i++) {
+            if (g_ocxRefs[i].clsidStr && _wcsicmp(g_ocxRefs[i].clsidStr, clsidStr) == 0)
+                return &g_ocxRefs[i];
+        }
+    }
+    return NULL;
+}
+
 void* vb6_Form_ControlsAdd(void* hwnd, const wchar_t* progId, const wchar_t* ctrlName) {
     if (!hwnd || !progId) return NULL;
 
-    /* 1. CLSIDFromProgID */
-    CLSID clsid;
-    HRESULT hr = CLSIDFromProgID(progId, &clsid);
-    if (FAILED(hr)) {
-        return NULL;
+    /* C3_OCX_TRACE=1: 打印实例化/激活各步 HRESULT (诊断宿主问题) */
+    int ocxTrace = (GetEnvironmentVariableW(L"C3_OCX_TRACE", NULL, 0) > 0);
+
+    /* 0. 免注册表优先 (按 ProgID 查, 不依赖注册表).
+     *    命中 → 用表里记录的 coclass CLSID + 相对 exe 路径走 ocxCreateAny,
+     *    完全绕开 HKLM 注册表 —— CI runner 未注册 OCX 也能实例化. */
+    const Vb6OcxRef* hit = vb6_OcxRefLookup(progId, NULL);
+    if (!hit) {
+        /* 注册表可解析 CLSID 时, 再按 CLSID 试一次 (typelib progId 与用户写的
+         * ProgID 不一致时兜底; 此分支仅在机器已注册该 ProgID 时才会用到). */
+        CLSID c0;
+        if (SUCCEEDED(CLSIDFromProgID(progId, &c0))) {
+            wchar_t cs[40];
+            if (StringFromGUID2(&c0, cs, 40) > 0)
+                hit = vb6_OcxRefLookup(NULL, cs);
+        }
     }
 
-    /* 2. CoCreateInstance */
     IUnknown* pUnk = NULL;
-    hr = CoCreateInstance(&clsid, NULL, CLSCTX_INPROC_SERVER | CLSCTX_LOCAL_SERVER,
-                          &IID_IUnknown, (void**)&pUnk);
-    if (FAILED(hr) || !pUnk) {
-        return NULL;
+    HRESULT hr = ((HRESULT)0x800401F1L);
+    if (hit && hit->clsidStr && hit->fileName) {
+        CLSID c;
+        if (SUCCEEDED(CLSIDFromString((LPOLESTR)hit->clsidStr, &c))) {
+            hr = ocxCreateAny(hit->fileName, &c, (void**)&pUnk);
+            if (ocxTrace)
+                fwprintf(stderr,
+                         L"[C3_OCX] Controls.Add regfree hit progId=%ls ocx=%ls hr=0x%08lX pUnk=%p\n",
+                         progId, hit->fileName, (unsigned long)hr, (void*)pUnk);
+        }
+    }
+
+    /* 1. 注册表兜底 (原有路径): 表未命中 / ocxCreateAny 失败 (OCX 不在 exe 旁). */
+    if (!pUnk) {
+        CLSID clsid;
+        hr = CLSIDFromProgID(progId, &clsid);
+        if (FAILED(hr)) {
+            if (ocxTrace)
+                fwprintf(stderr, L"[C3_OCX] Controls.Add: 免注册表未命中且 CLSIDFromProgID 失败 progId=%ls (需注册表或 Object= 引用)\n", progId);
+            return NULL;
+        }
+        hr = CoCreateInstance(&clsid, NULL, CLSCTX_INPROC_SERVER | CLSCTX_LOCAL_SERVER,
+                              &IID_IUnknown, (void**)&pUnk);
+        if (FAILED(hr) || !pUnk) {
+            if (ocxTrace)
+                fwprintf(stderr, L"[C3_OCX] Controls.Add registry fallback progId=%ls hr=0x%08lX\n", progId, (unsigned long)hr);
+            return NULL;
+        }
+        if (ocxTrace)
+            fwprintf(stderr, L"[C3_OCX] Controls.Add registry fallback progId=%ls pUnk=%p\n", progId, (void*)pUnk);
     }
 
     /* 3. Get IDispatch */
