@@ -1114,7 +1114,7 @@ Print 之后笔位推进 `0 → 13`（= 同一枚控件自己答的 `TextHeight`
 `vb6_ComCall(vb6_hwnd_<Form>, L"Cls", NULL, 0)`（emit 物证 `.build/b373_emit_base.c:327`），运行期 no-op。
 所以家族那份 `vb6_Form_Cls` 今天只被控件那户到达；窗体自己的 Cls 何时能跑，等 #232 那条前端出口。
 
-### B70 窗体绘图语句的"裸形"与 "Me." 形各缺一条路（账 #232，**② 已出：门 #368（run 37454147931、head `9e5c9f91`、branch dev、attempt 1）= 11 job 全 completed/success、非绿 0，wall 9m46s；**① 已出：门 #374（run 37533797244、head `2ef2ee71`、branch dev、attempt 1）= 11 job 全 completed/success、非绿 0，含新的 [CODEGEN-NOTE] form_canvas_bare 所在的 Tests (syntax) 片与跑 FD21/FD22/FD23 的 vbp 四片**；**③ 已出：门待回填**）
+### B70 窗体绘图语句的"裸形"与 "Me." 形各缺一条路（账 #232，**② 已出：门 #368（run 37454147931、head `9e5c9f91`、branch dev、attempt 1）= 11 job 全 completed/success、非绿 0，wall 9m46s；**① 已出：门 #374（run 37533797244、head `2ef2ee71`、branch dev、attempt 1）= 11 job 全 completed/success、非绿 0，含新的 [CODEGEN-NOTE] form_canvas_bare 所在的 Tests (syntax) 片与跑 FD21/FD22/FD23 的 vbp 四片**；**③ 已出：门 #375（run 37540458054、head `129358c4`、branch dev、attempt 1）= 11 job 全 completed/success、非绿 0，含新针 form_canvas_tail 所在的 Tests (syntax) 片与跑 FD21..FD25 的 vbp 四片**）
 
 探针 `.build/b433_shapes.txt`（同一枚 `.frm` 每次只放一条语句，`--emit-c` 看发码；工具 `.build/b431_232probe.py` 那套形状表）。**七形七样**（窗体上）：
 
@@ -1250,7 +1250,7 @@ S9.4 打标记那一路的 PictureBox 判据必须问表、且不许把成员名
 
 **边界**：Printer 那一族的名字这轮一起搬进表（`pset` / `circle` / `point` / `line` / `enddoc` 各有一行 PRINTER），但 `Printer.Cls` = 结束文档那层语义只在表里挂一行 DRAW，没有新造第二种"清画布"。`With pic : .Cls` 照上一轮的记录押后；③ 裸 `Line` 两形照旧（parser 就不认）。
 
-**③ 已出（门待回填）—— 裸写动词的尾巴改由 parser 收进来；名单只剩表那一处**
+**③ 已出（门 #375（run 37540458054、head `129358c4`、branch dev、attempt 1）= 11 job 全 completed/success、非绿 0，含新针 form_canvas_tail 所在的 Tests (syntax) 片与跑 FD21..FD25 的 vbp 四片）—— 裸写动词的尾巴改由 parser 收进来；名单只剩表那一处**
 
 **读数（两台都在本机编的编译器、同一份工作树文件）**：改前那台（HEAD `2ef2ee71` 在本机冷编，`.build/wt_base374`）对 `tests/fdraw/FDemo.vbp` 做 `--emit-c` 直接 **exit 1**，三条错误全落在那一枚裸写的 `Line (300, 40)-(300, 120)` 上（`FDForm.frm(253,24): expected ')' (got ,)` + VB2003 + VB2002 —— 一行崩掉整段过程）；同一台在探针 `.build/b494_probe2/ShApp.vbp` 上进得去，发出来的是 `Circle(20, 21, vb6_VariantEmpty(), 22);` 与 `PSet(60, 61, vb6_VariantEmpty(), 255);` —— 逗号之后的实参**看着在**，其实是尾巴漏到外层之后由可选形参补齐拼出来的，整条调用仍是未声明的裸名（C2065/C2064 那一族）。改后这一族六形 + Line 两点形全落真出口，夹具两架构 26 行输出逐字相同、stderr 0 字节：`FD24-barecircle=True raw=-1,59`、`FD25-bareline=True raw=-1,38`。
 
