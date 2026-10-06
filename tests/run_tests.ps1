@@ -3736,9 +3736,17 @@ if ($Category -in @("all", "run", "vbp")) {
         "FD21-barecls=True", "FD22-barepset=True",
         # 232-1 boundary: a user-written Sub named like a canvas verb must WIN -- the
         # fold only takes names that resolve to nothing here. Reading = how many times
-        # the module's own Sub Circle ran, so a silent fold onto the form canvas shows
-        # up as 0 (and the emitted C would call vb6_Form_Circle instead).
-        "FD23-usercircle=1",
+        # the module's own Sub Point ran, so a silent fold onto the form canvas shows
+        # up as 0 (and the emitted C would call vb6_Form_Point instead).
+        "FD23-userpoint=1",
+        # 232-3: the bare verb WITH a tail. Before this cut the parser dropped
+        # everything after the coordinate pair for the BARE spelling (only `Me.Circle`
+        # / `Pic.Line` reached the absorption), so `Circle (240, 90), 30` lost its
+        # radius and a bare `Line (300, 40)-(300, 120)` did not parse at all (three
+        # VB2001/VB2003/VB2002 off one line -- the pre-cut compiler exits 1 on this
+        # very fixture). Two-sided on a colour nothing else here uses: scan empty,
+        # draw, scan again and find the rows.
+        "FD24-barecircle=True", "FD25-bareline=True",
         "FD-DONE")
     Test-Vbp "fdrawstate" "$Tests\fdraw\FDemo.vbp" $fdrawExpected
     Test-Vbp "fdrawstate_x86" "$Tests\fdraw\FDemo.vbp" $fdrawExpected -Arch "x86"
@@ -5227,17 +5235,32 @@ if ($Category -in @("all", "syntax")) {
     # 已经收好的唯一出口。Absent 那两条是**基线产物里逐字存在**的形状（--emit-c 对同一份夹具，
     # 前后只差这两行），所以这一枚针真会红；VB3001 一条是语义层留下的疤，折完之后整份产物里
     # 一条都不该有。
-    # 第四、五条钉的是折叠的**边界**：模块里自己写了 `Sub Circle(x, y)` 时那枚过程该赢（VB6 的
-    # 模块内作用域），无条件折就是"修一处静默、造一处调错函数"—— 产物里必须看见 `vb6_Circle(...)`
-    # 而压根看不见窗体那枚 `vb6_Form_Circle`。
+    # 第四、五条钉的是折叠的**边界**：模块里自己写了 `Sub Point(x, y)` 时那枚过程该赢（VB6 的
+    # 模块内作用域），无条件折就是"修一处静默、造一处调错函数"—— 产物里必须看见 `vb6_Point(...)`
+    # 而压根看不见窗体那枚 `vb6_Form_Point`。（这一枚用 Point 而不是 Circle，因为下面
+    # form_canvas_tail 那条针要拿裸写的 `Circle (x, y), r` 真画一个圆 —— 同名过程会把它吃掉。）
     Test-CodegenNote "form_canvas_bare" @("$Tests\fdraw\FDemo.vbp") @(
         "vb6_ControlCls((void*)vb6_hwnd_FDForm); /* Form.Cls */",
         "vb6_Form_PSet((void*)vb6_hwnd_FDForm, 0, 1, 170, 130, 0, 0); /* Form.PSet */",
-        "vb6_Circle((&(int32_t){7}), (&(int32_t){9}));") @(
+        "vb6_Point((&(int32_t){7}), (&(int32_t){9}));") @(
         "Cls();",
         "PSet(170, 130);",
         "VB3001",
-        "vb6_Form_Circle((void*)vb6_hwnd_FDForm")
+        "vb6_Form_Point((void*)vb6_hwnd_FDForm")
+
+    # 账 #232③: 裸写动词**带尾巴**那一形。尾巴是 VB6 语法的一部分，不是第二个参数：
+    #   `Circle (x, y), radius[, color...]`   `PSet (x, y), color`   `Line (x1,y1)-(x2,y2)[, color][, B|BF|F]`
+    # 改前 parser 的那两趟吸收只认带接收者那一形（callee 必须是 MemberAccessExpr），于是裸写的
+    # 尾巴漏到外层表达式：`Circle (20, 21), 22` 发成 `Circle(20, 21, vb6_VariantEmpty(), 22);`
+    # （探针 `.build/b494_probe2/emit_new.txt` 里逐字存在的那条 BASE 产物 —— 半径看着在、
+    # 其实位置错了，而且整条调用是个未声明的裸名），而 `Line (300, 40)-(300, 120)` 连解析都过不去
+    # （基线台对这一份夹具直接 exit 1，三条 VB2001/VB2003/VB2002）。
+    Test-CodegenNote "form_canvas_tail" @("$Tests\fdraw\FDemo.vbp") @(
+        "vb6_Form_Circle((void*)vb6_hwnd_FDForm, 0, 1, 240, 90, 30, 0, 0, 0, 0, 0, 0, 0, 0); /* Form.Circle */",
+        "vb6_Form_Line((void*)vb6_hwnd_FDForm, 0, 1, 300, 40, 0, 1, 300, 120, 0, 0, 0); /* Form.Line */",
+        "vb6_Point((&(int32_t){7}), (&(int32_t){9}));") @(
+        "vb6_VariantEmpty()",
+        "Circle(240, 90")
 
     Test-CodegenNote "alias_type_spelling_same_ctype" @("$Tests\test_alias_spellings.bas") @(
         "void vb6_BareColor(int32_t c);",

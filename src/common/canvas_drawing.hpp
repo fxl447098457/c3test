@@ -108,4 +108,25 @@ inline bool canvasVerbHasFormEntry(const std::string& verb) {
     return false;
 }
 
+// parser 问的这一问：**这条动词的尾巴该由 parser 收进实参表**（账 #232 的 ③）。
+// VB6 的画布语法里有两形不是"一个括号实参表"就能装下的：
+//   PSet/Circle: `PSet (x, y)[, color]`、`Circle (x, y), radius[, ...]` —— 括号之后再跟逗号实参
+//   Line:        `Line (x1, y1)-(x2, y2)[, color][, B|BF|F]` —— 紧跟第二点，再跟逗号实参
+// 不收就会漏到外层表达式：`, 22` 变成一条独立的语句残桩，`-(20, 20)` 里的逗号当场
+// `expected ')'`（`b499_probe3` 实测三条错误 VB2001/VB2003/VB2002）。
+// 为什么这份知识住在这里而不是 parser 里：parser 那段吸收以前**自己写死** `circle` / `pset` / `line`
+// 三个名字（是画布动词名单的第四份副本），而且只认带接收者那一形 ⇒ 裸写 `Circle (20,21), 22` 的尾巴
+// 收不到。名单与"带不带接收者"是两件事，名字仍然只在这一个头里回答。
+enum CanvasTailKind {
+    CANVAS_TAIL_NONE = 0,        // 没有尾巴可收
+    CANVAS_TAIL_COORD = 1,       // PSet / Circle: 括号之后再收逗号实参
+    CANVAS_TAIL_TWO_POINT = 2,   // Line: 先收 `-(x2, y2)` 那枚第二点，再收逗号实参
+};
+
+inline CanvasTailKind canvasVerbTailKind(const std::string& verb) {
+    if (verb == "pset" || verb == "circle") return CANVAS_TAIL_COORD;
+    if (verb == "line") return CANVAS_TAIL_TWO_POINT;
+    return CANVAS_TAIL_NONE;
+}
+
 } // namespace vb6c3

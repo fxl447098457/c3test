@@ -398,11 +398,50 @@ if ($mFormP.IndexOf('canvasDrawEntry("enddoc"') -lt 0) {
     $bad += "S9 the Printer member route spells its own entry again (enddoc)"
 }
 
+# S10 尾巴吸收的名字也只许问那张表（账 #232③）。这一族以前在 parser 里是**第四份**动词名单
+# (`toLower(memberName) == "circle"` / `== "pset"` / `== "line"` 三条硬写)，而且只认带接收者那一形
+# ⇒ 裸写 `Circle (20,21), 22` 的半径与 `Line (0,0)-(10,10)` 的第二点都收不进来。
+# 现在 parser 两趟都问 canvasVerbTailKind(名字)，名单只剩表那一处。
+$parserFile = Join-Path $root "src\parser\parser_expr_postfix.cpp"
+$parserCode = Get-CodeText ([System.IO.File]::ReadAllText($parserFile))
+foreach ($want in @('common/canvas_drawing.hpp', 'canvasVerbTailKind(', 'CANVAS_TAIL_COORD', 'CANVAS_TAIL_TWO_POINT')) {
+    if ($parserCode.IndexOf($want) -lt 0) {
+        $bad += ("S10 parser_expr_postfix.cpp no longer asks the canvas table for " + $want +
+                 " -> a canvas verb's tail is being decided by a hand-written list again")
+    }
+}
+# 一问只许问一次（两处吸收共用同一个 tailKind），但两档都得真的被用到
+if ([regex]::Matches($parserCode, 'canvasVerbTailKind\s*\(').Count -ne 1) {
+    $bad += "S10 the parser asks canvasVerbTailKind a number of times other than 1 (one question, both absorptions read the answer)"
+}
+if ([regex]::Matches($parserCode, 'tailKind\s*==\s*CANVAS_TAIL_').Count -ne 2) {
+    $bad += ("S10 the parser gates on tailKind " +
+            [regex]::Matches($parserCode, 'tailKind\s*==\s*CANVAS_TAIL_').Count +
+            " times, want exactly 2 (coordinate tail + second point)")
+}
+foreach ($lit in @('== "circle"', '== "pset"', '== "line"')) {
+    if ($parserCode.IndexOf($lit) -ge 0) {
+        $bad += ("S10 the parser spells the verb list itself again (" + $lit +
+                 ") -> that is the fourth copy; canvas_drawing.hpp answers this question")
+    }
+}
+# 表那一头也得真的答得出三档尾巴（撤掉一处 = 裸写的尾巴又没人收了）
+$tailBody = [regex]::Match($tableText, 'canvasVerbTailKind[\s\S]*?\r\n\}')
+if (-not $tailBody.Success) {
+    $bad += "S10 canvasVerbTailKind is gone from canvas_drawing.hpp -> the tail question has no answer left"
+} else {
+    foreach ($want in @('"pset"', '"circle"', '"line"', 'CANVAS_TAIL_COORD', 'CANVAS_TAIL_TWO_POINT')) {
+        if ($tailBody.Value.IndexOf($want) -lt 0) {
+            $bad += ("S10 canvasVerbTailKind no longer maps " + $want + " -> a tail stops being absorbed")
+        }
+    }
+}
+
 if ($bad.Count -eq 0) {
     Write-Host ("PASS form draw state: pen store unique, side-list gone, " +
                 "read/write paired for 3 props, encoding symmetric, pen color store unique, " +
                 "Print inside the family asking 7 authorities, conversions dock-only with an axis, " +
-                "Print/Cls one implementation that the control side only forwards to, canvas verbs one common table that the backend asks with both receivers")
+                "Print/Cls one implementation that the control side only forwards to, canvas verbs one common table that the backend asks with both receivers, and the parser's coordinate tails asked of that same table")
     exit 0
 }
 foreach ($b in $bad) { Write-Host ("FAIL " + $b) -ForegroundColor Red }

@@ -59,12 +59,12 @@ End Function
 ' 232-1 boundary judge: the fold may only take a name that resolves to NOTHING in
 ' this module. A user-written Sub named like a canvas verb has to win, otherwise the
 ' fix would trade "does not compile" for "silently calls the wrong function" -- the
-' shape this line has been burned by before. Circle is used nowhere else on this
-' form, and the call below is exactly the bare (no Me.) spelling the fold sees.
-Private userCircle As Long
+' shape this line has been burned by before. Point is not drawn anywhere else on
+' this form (the canvas Circle is FD24's job below), and the call is bare (no Me.).
+Private userPoint As Long
 
-Private Sub Circle(x As Long, y As Long)
-    userCircle = userCircle + 1
+Private Sub Point(x As Long, y As Long)
+    userPoint = userPoint + 1
 End Sub
 
 Private Sub tmrF_Timer()
@@ -245,8 +245,33 @@ Private Sub tmrF_Timer()
     rowB = FirstRowOfColor(d, vbBlue, 150, 200, 120, 160)
     ok22 = (rowB > 0)
     Debug.Print "FD22-barepset=" & TF(ok22) & " raw=" & CStr(rowB)
-    Circle 7, 9
-    Debug.Print "FD23-usercircle=" & CStr(userCircle)
+
+    ' 232-3 = the bare verb WITH a tail the parser used to drop. `Circle (x, y), r`
+    ' and `PSet (x, y), color` lost everything after the coordinate pair (the emit
+    ' measured before this cut: `Circle(20, 21, vb6_VariantEmpty(), 22);` -- a bare
+    ' undeclared call whose radius only looks absorbed), and a bare
+    ' `Line (a,b)-(c,d)` did not parse at all (VB2001 expected ')' / VB2003 / VB2002,
+    ' three errors off one line). Both judges are two-sided on a colour nothing else
+    ' on this form uses: the scan must come back empty first, then find drawn rows.
+    Dim ok24 As Boolean, ok25 As Boolean
+    Dim rowG0 As Long, rowG As Long
+    Dim rowM0 As Long, rowM As Long
+    Me.ForeColor = vbGreen
+    Me.DrawWidth = 4
+    rowG0 = FirstRowOfColor(d, vbGreen, 205, 275, 55, 125)
+    Circle (240, 90), 30
+    rowG = FirstRowOfColor(d, vbGreen, 205, 275, 55, 125)
+    ok24 = (rowG0 < 0) And (rowG > 0)
+    Debug.Print "FD24-barecircle=" & TF(ok24) & " raw=" & CStr(rowG0) & "," & CStr(rowG)
+    Me.ForeColor = vbMagenta
+    Me.DrawWidth = 5
+    rowM0 = FirstRowOfColor(d, vbMagenta, 294, 306, 35, 125)
+    Line (300, 40)-(300, 120)
+    rowM = FirstRowOfColor(d, vbMagenta, 294, 306, 35, 125)
+    ok25 = (rowM0 < 0) And (rowM > 0)
+    Debug.Print "FD25-bareline=" & TF(ok25) & " raw=" & CStr(rowM0) & "," & CStr(rowM)
+    Point 7, 9
+    Debug.Print "FD23-userpoint=" & CStr(userPoint)
     r = ReleaseDC(Me.hwnd, d)
     Debug.Print "FD-DONE"
     Unload Me
