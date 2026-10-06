@@ -14,6 +14,8 @@
 #       getControlPropWriteFn 的 Form 档**都要**有 (少一边就是这一刀回归)
 #   S4  编码对称: vb6_DrawSetI 那条 SetPropW 必须写裸值 (只看写行 —— 注释里提到 "v+1" 是在讲历史)
 #   S5  画笔色也只有一份存储 (账 #235): 属性名 VB6_DrawForeColor 在 src/rtl 里不许出现在任何
+#       GetPropW/SetPropW 行 —— Form 绘图家族的画笔色就是控件那个 ForeColor (唯一出口
+#       vb6_GetControlForeColor)。另存一枚的现场就是 `Me.ForeColor = vbRed` 之后 PSet 画出来是黑。
 #   S6  Print 是绘图家族的一员 (账 #237): `vb6_Form_Print` 在 src/rtl 里恰好定义一次, 而那一条
 #       必须住在 vb6forms_draw.c; 它体内四件权威一个都不许自己答 —— DC(vb6_DrawAcquire)、
 #       字体(vb6_ControlFont()、色(vb6_DrawForeColor、笔位(vb6_GetCurrentY/vb6_SetCurrentY +
@@ -22,8 +24,10 @@
 #   S7  换算只许是码头 (账 #237): 两条码头分别交回 vb6_ScaleUserToPx / vb6_ScalePxToUser,
 #       每个调用点都必须**显式写出纵/横那一档**(0 或 1), 且本文件不许再出现自己的 dpi
 #       (LOGPIXELSX / v * dpi) —— 那份 `v * dpi / 1440` 只认缇, Point/Inch/cm 差 20 倍。
-#       GetPropW/SetPropW 行 —— Form 绘图家族的画笔色就是控件那个 ForeColor (唯一出口
-#       vb6_GetControlForeColor)。另存一枚的现场就是 `Me.ForeColor = vbRed` 之后 PSet 画出来是黑。
+#   S8  Print/Cls 全仓只有一份实现 (账 #239): 控件那户 vb6_ControlPrint / vb6_ControlCls 只许
+#       转调 vb6_Form_Print / vb6_Form_Cls; 窗口属性 VB6_PrintX/Y 在 src/rtl 里 0 次 (那份私有
+#       像素光标一回来, pic.Print 就又不读也不动 pic.CurrentX/Y); Cls 的背景色必须问
+#       vb6_GetControlBackColor —— 黑色按值存就是 NULL, 自己判空等于把 vbBlack 读成"没设过"。
 #
 # 用法:  pwsh -File scripts\check_form_draw_state.ps1
 # 退出码: 0 = 全绿; 1 = 红
@@ -193,10 +197,70 @@ if ($own.Count -ne 0) {
              " (Fix 184: every scale conversion shares the one real-DPI pair in vb6forms.c)")
 }
 
+# ---- S8: Print/Cls 全仓只许一份实现, 控件那户只许转调 (账 #239) ----
+# 改前 vb6forms_ctrl.c 的 Print/Cls 是本族另写的一份: 笔位存在窗口属性 VB6_PrintX/Y 上、
+# 按像素推进, 既不读 pic.CurrentX/CurrentY 也不动它们; Cls 也只复位那份私有存储。
+$patPrintProp = '(GetPropW|SetPropW|RemovePropW)\s*\([^;]*L"VB6_Print[XY]"'
+$leakPen = @()
+foreach ($f in Get-SrcFiles $rtlDir) {
+    foreach ($m in [regex]::Matches([System.IO.File]::ReadAllText($f.FullName), $patPrintProp)) {
+        $leakPen += ($f.Name + ":" + $m.Value.Substring(0, [Math]::Min(44, $m.Value.Length)))
+    }
+}
+if ($leakPen.Count -ne 0) {
+    $bad += ("S8 the control-side pixel cursor is back = " + $leakPen.Count + " -> " +
+             (($leakPen | Select-Object -First 4) -join " | "))
+}
+$ctrlFile = Join-Path $root "src\rtl\core\vb6forms\vb6forms_ctrl.c"
+$ct = [System.IO.File]::ReadAllText($ctrlFile)
+foreach ($pair in @(@("vb6_ControlPrint", "vb6_Form_Print"), @("vb6_ControlCls", "vb6_Form_Cls"))) {
+    $mDock = [regex]::Match($ct, 'void\s+' + $pair[0] + '\s*\([\s\S]*?\r?\n\}')
+    if (-not $mDock.Success) {
+        $bad += ("S8 " + $pair[0] + " definition not found in vb6forms_ctrl.c")
+    } elseif ($mDock.Value.IndexOf($pair[1] + "(") -lt 0) {
+        $bad += ("S8 " + $pair[0] + " no longer forwards to " + $pair[1] + " -> the control side" +
+                " grew its own Print/Cls implementation back (pen store, units, background)")
+    }
+}
+foreach ($fn in @("vb6_Form_Print", "vb6_Form_Cls")) {
+    $defs = @()
+    foreach ($f in Get-SrcFiles $rtlDir) {
+        $t2 = [System.IO.File]::ReadAllText($f.FullName)
+        foreach ($m in [regex]::Matches($t2, 'void\s+' + $fn + '\s*\([^)]*\)\s*\{')) { $defs += $f.Name }
+    }
+    if ($defs.Count -ne 1 -or $defs[0] -ne "vb6forms_draw.c") {
+        $bad += ("S8 " + $fn + " must be defined exactly once and inside vb6forms_draw.c -> found " +
+                 $defs.Count + " in " + ($defs -join ", "))
+    }
+}
+# Cls 不许自己答背景色: 黑色存进窗口属性就是 NULL, "0 与没设过同构"那颗哨兵住在
+# vb6_GetControlBackColor (Fix 187) —— 自己按值判空就把 BackColor = vbBlack 读成未设置。
+$mCls = [regex]::Match($d, 'void\s+vb6_Form_Cls\s*\([\s\S]*?\r?\n\}')
+if (-not $mCls.Success) {
+    $bad += "S8 vb6_Form_Cls body not found in vb6forms_draw.c"
+} else {
+    # 只看代码行: 讲历史的注释里出现这两个名字不算数 —— 负控就是这么发现的 (注释写着
+    # vb6_GetControlBackColor 而代码答的是 VB6_BackColor, 只查体内文本的判据是哑的)。
+    $clsLines = @()
+    foreach ($ln in ($mCls.Value -split "`r?`n")) {
+        $t = $ln.Trim()
+        if ($t.StartsWith("//")) { continue }
+        $clsLines += $t
+    }
+    $clsCode = $clsLines -join " "
+    if ($clsCode.IndexOf("vb6_GetControlBackColor(") -lt 0) {
+        $bad += "S8 vb6_Form_Cls no longer asks vb6_GetControlBackColor (the Fix 187 set-sentinel lives there)"
+    }
+    if ($clsCode -match 'L"VB6_BackColor"') {
+        $bad += 'S8 vb6_Form_Cls answers the background from the raw property name again (black = 0 is indistinguishable from unset)'
+    }
+}
+
 if ($bad.Count -eq 0) {
     Write-Host ("PASS form draw state: pen store unique, side-list gone, " +
                 "read/write paired for 3 props, encoding symmetric, pen color store unique, " +
-                "Print inside the family asking 7 authorities, conversions dock-only with an axis")
+                "Print inside the family asking 7 authorities, conversions dock-only with an axis, " +
+                "Print/Cls one implementation that the control side only forwards to")
     exit 0
 }
 foreach ($b in $bad) { Write-Host ("FAIL " + $b) -ForegroundColor Red }

@@ -16,17 +16,18 @@
 // 非 WM_PAINT 期拿的 DC 由本文件负责 ReleaseDC，fromPaint 那张不释放。
 //
 // 状态存哪：绘图状态（DrawWidth / DrawStyle / FillStyle）按 HWND 存窗口属性；
-// 画笔色与笔位不在这一族 —— 它们各自只有一份存储 (账 #235 / #233)，与
-// vb6_ControlPrint 用 "VB6_PrintX/Y" 同一套手法。这样:
-//   * Form 与控件天然隔离（各自 HWND）；
+// 画笔色与笔位不在这一族 —— 它们各自只有一份存储 (账 #235 / #233)。这样:
+//   * 按 HWND 存 ⇒ Form 与控件天然隔离（各自 HWND），所以本文件这份 Print/Cls
+//     同时是 PictureBox/Image 那两族的全部实现（账 #239: 控件那边以前另存了一套
+//     "VB6_PrintX/Y" 像素光标，现已撤掉，只留转调）；
 //   * 不需要给宿主模型加字段、不需要动 vb6_UserControlDesc 那三张按名桥表
 //     （MEMORY 记着"加槽一律追加末尾"，能不碰就不碰）；
 //   * 缺省值 = 属性不存在 = 0，各方法自己兜底成 VB6 的初始值。
 //
-// 单位：与 Print / TextWidth 同一口径 —— 绘图坐标按**缇(twips)** 收，落到 DC 前用
-// MM_TEXT + 缇→像素换算（1 px = 15 缇 @96dpi）。ScaleMode 系列属另一条线
-// （ScaleX/ScaleY/ScaleWidth/ScaleHeight），本文件只在 ScaleMode==vbPixels(3) 时
-// 直通像素、其余按缇换算，与 vb6_ScaleUserToPx 同款判据。
+// 单位：与 Print / TextWidth / TextHeight 同一口径 —— 坐标按**这枚窗口自己的 ScaleMode**
+// 收，落到 DC 前一律过 vb6_ScaleUserToPx / vb6_ScalePxToUser（账 #237 之后本文件不再
+// 自带任何 DPI 或缇的数，八档都在那一条 vb6_ScaleUnitsPerPx 里答）。
+// ScaleX/ScaleY/ScaleWidth/ScaleHeight 那条线与这里共用同一批出口。
 #include "vb6forms.h"
 #include "vb6forms_internal.h"   // 账 #234: 取 DC 的唯一口径在那儿声明
 #include <stdio.h>
@@ -93,14 +94,15 @@ static void vb6_DrawSetI(void* hwnd, const wchar_t* name, int32_t v) {
 
 // 笔位 (CurrentX / CurrentY) **只有一份存储** —— vb6forms_widget_prop.c 那对 float
 // 出口。此前本文件在同一个窗口属性名上另开了一套 int32 编码: `vb6_Form_Print` 读 float、
-// PSet/Line/Circle 读 int32, 两边互读必错 (账 #233)。单位口径还不齐 (Print 按像素推进、
-// 绘图按用户单位), 那一问记在账 #224, 本刀不动。
+// PSet/Line/Circle 读 int32, 两边互读必错 (账 #233)。Print 的推进量按像素存回用户单位
+// 那一格由账 #237 收掉；PictureBox/Image 那两族以前在 "VB6_PrintX/Y" 上另存一份像素光标,
+// 由账 #239 撤掉 —— 从此全仓的 Print/Cls 只有本文件这一份实现，笔位也就只有这一份。
 static int32_t vb6_DrawCurX(HWND hw) { return (int32_t)vb6_GetCurrentX((void*)hw); }
 static int32_t vb6_DrawCurY(HWND hw) { return (int32_t)vb6_GetCurrentY((void*)hw); }
 static void vb6_DrawSetCurX(HWND hw, int32_t v) { vb6_SetCurrentX((void*)hw, (float)v); }
 static void vb6_DrawSetCurY(HWND hw, int32_t v) { vb6_SetCurrentY((void*)hw, (float)v); }
 
-// 画笔色**只有一份存储** (账 #235): 控件那三处 (vb6forms_ctrl.c 的 Line / Print / 子控件回显)
+// 画笔色**只有一份存储** (账 #235): 控件那两处 (vb6forms_ctrl.c 的 Line / 子控件回显)
 // 一直问 vb6_GetControlForeColor, 而 Form 绘图家族以前自己在 VB6_DrawForeColor 上又存了一枚
 // (还带一套 +1/-1) ⇒ `Me.ForeColor = vbRed` 之后**不带颜色的** PSet 画出来是黑 (实测 0 对 255)。
 // 两边默认档本来就是同一个数 (未设 → 0 → vbBlack), 所以合并不引入 Fix 187 那类"0 与没设过
@@ -343,9 +345,12 @@ void vb6_Form_Cls(void* hwnd) {
     if (!d.dc) return;
     RECT rc;
     GetClientRect(hw, &rc);
-    int32_t bg = vb6_DrawGetI(hw, L"VB6_BackColor", -1);
-    COLORREF c = (bg == -1) ? RGB(240, 240, 240)/*vbFormBackColor*/ : (COLORREF)bg;
-    HBRUSH br = CreateSolidBrush(c);
+    // 背景色问唯一那份存储 (vb6_GetControlBackColor)，不在这里再答一遍:
+    // 上面那句"0 与没设过同构"的坑正是 Fix 187 —— 黑色存进窗口属性就是 NULL，
+    // 按值判空会把 BackColor = vbBlack 读成"未设置"而回落成按钮面 (实测控件那户
+    // Cls 之后取像素 0 对 15790320)。账 #239: 控件的 Cls 现在转调这里，所以这一问
+    // 两边共用；Form 自己那一路还到不了 (Me.Cls 落 COM 兜底，见账 #232)。
+    HBRUSH br = CreateSolidBrush((COLORREF)vb6_GetControlBackColor(hwnd));
     if (br) { FillRect(d.dc, &rc, br); DeleteObject(br); }
     vb6_DrawRelease(&d, hwnd);
     vb6_DrawSetCurX(hw, 0);

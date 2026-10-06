@@ -1068,15 +1068,29 @@ CurrentY 的增量 == Me.TextHeight(同一串)"是两条路真汇合而不是各
 
 **暴露面（按函数作用域逐处回溯声明扫 90 份捕获，工具 `.build/b367_varcmp_scope.py`）**：全语料 158 处 `vb6_VarCmp*(&A, &B)` 里 126 处两侧都是 `_vcmp_N` 临时、32 处两侧都是声明为 `vb6_VARIANT` 的局部，**0 处把标量局部的地址当 VARIANT* 递进去** —— 即本刀那两处是目前唯一知道的形状，且它们在新写的夹具里。也就是说这是一格**潜伏缺陷**：要求 一侧是 Variant 类型的表达式、另一侧是 「`Dim … As Double/Single/Long`」这种标量局部，而它一旦出现就是静默错答案（不报 C 类型错、不崩）。修之前先把判据 钉进发码针（含"裸标量地址不许进 VarCmp"那条哨兵）。
 
-### B69 `PictureBox` 的 Print 还留着第二份笔位，而且那份是像素（账 #239，**已量到，未开工**）
+### B69 `PictureBox` 的 Print 还留着第二份笔位，而且那份是像素（账 #239，**已修，等门**）
 
 `vb6_ControlPrint`（`vb6forms_ctrl.c`）把光标存在窗口属性 `VB6_PrintX` / `VB6_PrintY` 里、按**像素**推进，
 而控件的 `CurrentX` / `CurrentY` 读写的是 #233 那份 float 笔位（`cgen_util_ctrl.cpp` 两档都登记到
 `vb6_GetCurrentX/Y` / `vb6_SetCurrentX/Y`）—— 两份存储从不汇合：`pic.Print "AB"` 之后 `pic.CurrentY` 一动不动，
 而 `pic.TextHeight` 答的是**用户单位**（#177 那条换算）。这正是 #224 那一族在控件侧的镜像，
 也是 #237 在 Form 侧刚拆掉的那个形状。语料里只有一处控件侧 Print（`VBFlexGridDemo/MainForm.frm`），
-所以存量用例照旧全哑 —— 判据得新写，别指望 GA 红。修的时候顺带把 `vb6_ControlCls` 那两条 `RemovePropW`
-改回"把笔位归零"（它现在撤的是那份自存的像素笔位）。
+所以存量用例照旧全哑 —— 判据得新写，别指望 GA 红。
+
+**已收（同一形状别再抄一份）**：`vb6_ControlPrint` / `vb6_ControlCls` 现在是两条**码头**，转调
+`vb6_Form_Print` / `vb6_Form_Cls` —— 那一份经过 #233(笔位) / #234(DC) / #235(色) / #237(单位) 之后
+五件都问的已是唯一权威，所以控件侧不必再写第二遍。实测三对读数（同一枚 `PictureBox`，两架构一致）：
+Print 之后笔位推进 `0 → 13`（= 同一枚控件自己答的 `TextHeight`）、笔位放到 60 时墨的落点 `第 2 行 → 笔位那一行`、
+`Cls` 之后 `CurrentY` `400 → 0`；缇档推进 `0 → 195`。**顺带第二格（它同时是本刀的防回归）**：
+家族的 `vb6_Form_Cls` 以前自己按 `VB6_BackColor` 判空取背景色 —— 黑色存进窗口属性就是 NULL，
+按值判空 = 读成"没设过" ⇒ 回落按钮面；改成问带 Fix 187 哨兵那份唯一出口 `vb6_GetControlBackColor`。
+不这么改，控件那户 Cls 会因转调而从实测 `0` 变成 `15790320`（改前控件答 0、家族答按钮面，两份答案一旦合一就必须选对的那份）。
+量到的另一格只读不响：`vb6forms_picture_prop.c` 里还有一处 `GetPropW(VB6_BackColor)`，但它在
+`C3_FORMS_TRACE` 那枚 env 闸里的 fprintf 内（同时打印 set 旗标），是诊断文本不是第二份行为答案。
+
+**顺带量到的新事实（属 #232 那一族）**：`Me.Cls` 在 VB→C 那一路压根没出口 —— 发成
+`vb6_ComCall(vb6_hwnd_<Form>, L"Cls", NULL, 0)`（emit 物证 `.build/b373_emit_base.c:327`），运行期 no-op。
+所以家族那份 `vb6_Form_Cls` 今天只被控件那户到达；窗体自己的 Cls 何时能跑，等 #232 那条前端出口。
 
 ## C. 仍在生效的口径与工具事实（与本文档等长的一半价值在这里；完整版见记忆库）
 
@@ -1290,3 +1304,4 @@ CurrentY 的增量 == Me.TextHeight(同一串)"是两条路真汇合而不是各
 | 账 #235（§B65 = 画笔色两份存储合一：`vb6_DrawForeColor` 改问唯一出口 `vb6_GetControlForeColor`，撤掉私有 setter 与两个零引用导出；Printer 那族不动） | `Me.ForeColor = vbRed` 之后不带颜色的 `Me.PSet` 画出来是 **0（黑）**（改前两架构实测），带颜色的那条才是 255 —— 控件那侧本来就只有一份，Form 绘图自己另存了一枚 | 新夹具一头 FD11/FD12（**两面**：新点要蓝、旧点仍红）+ 逐字回退重编那台跑同一夹具真红（False / pen=0）+ 哨兵新 S5（属性名回潮=0，假针证红）；23 份 check 全绿、邻域四枚零缺失、矩阵 4 件出 exe | 已过：门 #360（run 37415128806、head `ea8dc7c9`、attempt 1）= 11 job 全 completed/success、非绿 0，wall 8m31s |
 | 账 #236（§B66 = 门 #359 的 vbp#4 红归因到夹具：阈值收线的 `*_Timer` 里自增排在提前返回之后 => exe 永不关窗，被 60s 超时杀；修法=计数器先走，哨兵 `check_fixture_timer_close.ps1` 第 24 道钉住这条口径） | 已过：门 #360（run 37415128806、head `ea8dc7c9`、attempt 1）= 11 job 全 completed/success、非绿 0，wall 8m31s |
 | 账 #237（§B67 = Print 从 vb6forms.c 搬进绘图家族：DC / 字体 / 色彩 / 单位四件都改问已有权威，推进量取刚写那串字的 extent（与 TextHeight 同一个量）；顺带撤掉本文件自带那份只认缇的 v * dpi / 1440，换算全部交回 vb6_ScaleUserToPx / vb6_ScalePxToUser 并显式写纵/横） | FD13/FD14 推进 == TextHeight（缇、点）、FD16 = 72 点与 1 英寸同一行（蓝/红分居两个 x 窗口）；行为负控改回旧形三条全 False + 哨兵 S6/S7 四条假针逐条能红 | 已过：门 #361（run 37421550422、head `d86b478c`、attempt 1）= 11 job 全 completed/success、非绿 0，wall 8m49s |
+| 账 #239（§B69 = 控件那户 `Print` / `Cls` 撤掉自存的像素笔位 `VB6_PrintX` / `VB6_PrintY`，两条函数改成只转调家族的 `vb6_Form_Print` / `vb6_Form_Cls`；家族那份 `Cls` 的背景色改问带 Fix 187 哨兵那份唯一出口 `vb6_GetControlBackColor`） | `pic.Print` 既不读也不动 `pic.CurrentX/Y`（实测推进 0 而同一枚控件答 `TextHeight` = 13、笔位放 60 而墨落在第 2 行、`Cls` 之后 `CurrentY` 仍是 400）= #237 在 Form 侧刚拆掉的「一份存储两种单位」在控件侧重演；而合并之后若不换色彩出口，控件那户 `Cls` 会从实测 0 变成按钮面 | `tests/pcline` 加一枚 picP + 五条 needle（PL08-PEN / PL09-CLSPEN / PL10-TWIPADV / PL11-BLACKCLS / PL12-STACK + 两条 RAW）两架构真跑；BASE 那台跑同一份夹具真红（Q01 推进 0 / Q03 Cls 后仍 400 / Q05 笔位不动）；三处**行为**负控各让自己那一条红（推进归零 → 08/10/12、像素当用户单位存回 → 只 10、色彩自己答 → 只 11）；哨兵 `check_form_draw_state.ps1` 新 S8 四条假针各证红（属性名回潮 0 / 两条码头必须转调 / 定义恰好一次且住在家族里 / `Cls` 只许问那条色彩出口，且**只看代码行** —— 先前只查体内文本时注释把判据顶成假绿）；`check_control_dc.ps1` 的 D2 因这一刀 6→4（哨兵先响，归因写进规则注释）；24 份 check 全绿 + 邻域 fdraw / pbsub / dcsurf 两架构零缺失；零后端改动 ⇒ 发码逐字节不可能变（RTL 是 exe 的资源），判据只能落在真跑那一头 | 等门 |

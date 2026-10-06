@@ -694,10 +694,11 @@ LRESULT vb6_CtlColorBtnBrush(HWND child, HWND parent) {
 // Fix 185: 控件级绘制入口 PictureBox.Print / PictureBox.Cls
 // ============================================================
 //
-// DC 来源有两档：_Paint 派发时挂上的 VB6_PaintDC（BeginPaint/EndPaint 之间才有
-// 效，绝不能 ReleaseDC），否则回落 GetDC。VB6 允许在非 _Paint 时机 Print，效果就
-// 是画在屏幕上、下次重绘即消失，这里保持同样的宽松度。
-// 绘制光标 (PrintX/PrintY) 存窗口属性，Cls 归零 —— 等价于 VB6 的当前绘制位置。
+// DC 来源只有下面这一处口径（账 #196）：_Paint 派发时挂上的 VB6_PaintDC（BeginPaint/
+// EndPaint 之间才有效，绝不能 ReleaseDC），否则回落 GetDC。VB6 允许在非 _Paint 时机
+// Print，效果就是画在屏幕上、下次重绘即消失，这里保持同样的宽松度。
+// 笔位不在这里（账 #239）：Print/Cls 都转调 vb6forms_draw.c 的同一份实现，
+// 笔位那份全仓唯一存储（VB6_CurrentX/Y，float）由它去问。
 //
 // 账 #196：**「这枚控件的绘图 DC 从哪儿来」只有下面这一处口径**（与 `.hDC` 共用）。
 // 区别只在句柄归谁：Print/Cls 这类内部调用用完就 ReleaseDC；而交回给 VB 代码的
@@ -821,52 +822,18 @@ void vb6_ControlLine(void* hwnd, double x1, double y1, double x2, double y2,
     if (!fromPaint) ReleaseDC(hw, hdc);
 }
 
+// 账 #239: 这两条以前是本族**另写的一份**实现 —— 笔位存在窗口属性 VB6_PrintX/Y 上、
+// 按像素推进，既不读 pic.CurrentX/CurrentY 也不动它们（实测把笔位放到 20 像素后 Print，
+// 墨仍落在第 2 行；Print 之后 CurrentY 的推进是 0，而同一枚控件自己答 TextHeight = 13）。
+// Form 那一族的 vb6_Form_Print / vb6_Form_Cls 经过 #233(笔位) #234(DC) #235(色)
+// #237(单位) 之后，五件都问的已经是全仓唯一的权威 ⇒ 这里直接转调：控件与窗体的
+// Print/Cls 从此同一份代码，缺的那件补上，抄的那份撤掉。
 void vb6_ControlCls(void* hwnd) {
-    if (!hwnd) return;
-    HWND hw = (HWND)hwnd;
-    BOOL fromPaint = FALSE;
-    HDC hdc = vb6_ControlDrawDC(hw, &fromPaint);
-    if (!hdc) return;
-    RECT rc;
-    GetClientRect(hw, &rc);
-    HBRUSH br = CreateSolidBrush((COLORREF)vb6_GetControlBackColor(hwnd));
-    if (br) {
-        FillRect(hdc, &rc, br);
-        DeleteObject(br);
-    }
-    if (!fromPaint) ReleaseDC(hw, hdc);
-    RemovePropW(hw, L"VB6_PrintX");
-    RemovePropW(hw, L"VB6_PrintY");
+    vb6_Form_Cls(hwnd);
 }
 
 void vb6_ControlPrint(void* hwnd, void* bstrText) {
-    if (!hwnd) return;
-    HWND hw = (HWND)hwnd;
-    BSTR text = (BSTR)bstrText;
-    // 未赋值的 As String 是 NULL BSTR，对 VB6 而言等价于 ""（空行 = 只推进光标）
-    int len = text ? (int)SysStringLen(text) : 0;
-    BOOL fromPaint = FALSE;
-    HDC hdc = vb6_ControlDrawDC(hw, &fromPaint);
-    if (!hdc) return;
-    HFONT hFont = vb6_ControlFont(hw);   // 账 #200: 字体只从 vb6_ControlFont 那一处问
-    HFONT hOld = hFont ? (HFONT)SelectObject(hdc, hFont) : NULL;
-    SetBkMode(hdc, TRANSPARENT);
-    SetTextColor(hdc, (COLORREF)vb6_GetControlForeColor(hwnd));
-    RECT rc;
-    GetClientRect(hw, &rc);
-    int x = (int)(INT_PTR)GetPropW(hw, L"VB6_PrintX");
-    int y = (int)(INT_PTR)GetPropW(hw, L"VB6_PrintY");
-    if (len > 0) {
-        ExtTextOutW(hdc, x, y, ETO_CLIPPED, &rc, text, len, NULL);
-    }
-    TEXTMETRICW tm;
-    int advance = 0;
-    if (GetTextMetricsW(hdc, &tm)) advance = tm.tmHeight + tm.tmExternalLeading;
-    // VB6 的 Print 行末换行：光标回到最左并下移一行
-    SetPropW(hw, L"VB6_PrintX", (HANDLE)(INT_PTR)0);
-    SetPropW(hw, L"VB6_PrintY", (HANDLE)(INT_PTR)(y + advance));
-    if (hOld) SelectObject(hdc, hOld);
-    if (!fromPaint) ReleaseDC(hw, hdc);
+    vb6_Form_Print(hwnd, bstrText);
 }
 
 

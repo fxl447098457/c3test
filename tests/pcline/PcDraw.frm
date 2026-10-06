@@ -19,6 +19,17 @@ Begin VB.Form PcDrawForm
       Top             =   120
       Width           =   4500
    End
+   Begin VB.PictureBox picP 
+      BackColor       =   &H00FFFFFF&
+      Height          =   1560
+      Left            =   120
+      ScaleHeight     =   1500
+      ScaleMode       =   3  'Pixel
+      ScaleWidth      =   4440
+      TabIndex        =   3
+      Top             =   1440
+      Width           =   4500
+   End
    Begin VB.Timer tmrP 
       Interval        =   150
       Left            =   120
@@ -47,12 +58,43 @@ Private Declare PtrSafe Function GetPixel Lib "gdi32" (ByVal hdc As LongPtr, ByV
 Private Declare PtrSafe Function GetDC Lib "user32" (ByVal hwnd As LongPtr) As LongPtr
 Private Declare PtrSafe Function ReleaseDC Lib "user32" (ByVal hwnd As LongPtr, ByVal hdc As LongPtr) As Long
 
+' First device row in [lo,hi] whose ink differs from the box's own background
+' (a colour match would silently fail if the ink never reached this DC).
+Private Function FirstInk(d As LongPtr, bg As Long, lo As Long, hi As Long) As Long
+    Dim row As Long
+    Dim i As Long
+    Dim cnt As Long
+    FirstInk = -1
+    For row = lo To hi
+        If FirstInk < 0 Then
+            cnt = 0
+            For i = 0 To 60
+                If GetPixel(d, i, row) <> bg Then cnt = cnt + 1
+            Next
+            If cnt > 3 Then FirstInk = row
+        End If
+    Next
+End Function
+
 Private Sub tmrP_Timer()
     Dim d As LongPtr
     Dim r As Long
     Dim i As Long
     Dim hitEdge As Boolean
     Dim okLine As Boolean, okBox As Boolean, okFill As Boolean, okCircle As Boolean
+    Dim d2 As LongPtr
+    Dim wb As Long
+    Dim dp As Double
+    Dim dtw As Double
+    Dim stk As Double
+    Dim th As Double
+    Dim inkTop As Long
+    Dim inkNear As Long
+    Dim okPen As Boolean
+    Dim okCls As Boolean
+    Dim okTwip As Boolean
+    Dim okBlack As Boolean
+    Dim okStack As Boolean
 
     tmrP.Enabled = False
 
@@ -84,7 +126,61 @@ Private Sub tmrP_Timer()
     Debug.Print "PL05-RAW diag=" & CStr(GetPixel(d, 20, 20))
     Debug.Print "PL06-RAW boxedge=" & CStr(GetPixel(d, 60, 20)) & " boxmid=" & CStr(GetPixel(d, 80, 20))
     Debug.Print "PL07-RAW fillmid=" & CStr(GetPixel(d, 140, 20)) & " circletop=" & CStr(GetPixel(d, 200, 0))
+
+    ' ---- account 239: the Print pen of a PictureBox -----------------------------
+    ' Before this blade picP.Print drew with its OWN pixel cursor (window props
+    '  VB6_PrintX / VB6_PrintY): it neither read picP.CurrentX/CurrentY nor moved
+    '  them. Measured on the pre-fix build: advance = 0 while the same box answered
+    '  TextHeight = 13, and with the pen sitting at row 60 the ink still landed on
+    '  row 2. Print/Cls now call the one implementation the Form family uses, so the
+    '  pen is the single float store and the unit is this window's own ScaleMode.
+    d2 = GetDC(picP.hwnd)
+    wb = GetPixel(d2, 200, 5)
+    picP.CurrentX = 0
+    picP.CurrentY = 60
+    picP.Print "AB"
+    th = picP.TextHeight("AB")
+    dp = picP.CurrentY - 60
+    inkTop = FirstInk(d2, wb, 0, 40)
+    inkNear = FirstInk(d2, wb, 45, 95)
+    okPen = (Abs(dp - th) < 0.001) And (inkTop = -1) And (inkNear >= 45)
+
+    picP.Cls
+    okCls = (Abs(picP.CurrentY) < 0.001)
+
+    picP.ScaleMode = vbTwips
+    picP.CurrentX = 0
+    picP.CurrentY = 600
+    picP.Print "CD"
+    dtw = picP.CurrentY - 600
+    okTwip = (Abs(dtw - picP.TextHeight("CD")) < 0.001)
+
+    ' Cls fills with the stored background. Black is the hard case: stored as a
+    ' window property, 0 is indistinguishable from "never set", so the answer must
+    ' come from the one getter that carries the Fix 187 set-sentinel.
+    picP.BackColor = vbBlack
+    picP.Cls
+    okBlack = (GetPixel(d2, 200, 40) = vbBlack)
+
+    picP.BackColor = vbWhite
+    picP.ScaleMode = vbPixels
+    picP.Cls
+    picP.CurrentX = 0
+    picP.CurrentY = 0
+    picP.Print "AB"
+    picP.Print "CD"
+    stk = picP.CurrentY
+    okStack = (Abs(stk - 2 * picP.TextHeight("AB")) < 0.001)
+
+    Debug.Print "PL08-PEN=" & CStr(okPen)
+    Debug.Print "PL09-CLSPEN=" & CStr(okCls)
+    Debug.Print "PL10-TWIPADV=" & CStr(okTwip)
+    Debug.Print "PL11-BLACKCLS=" & CStr(okBlack)
+    Debug.Print "PL12-STACK=" & CStr(okStack)
+    Debug.Print "PL13-RAW dp=" & CStr(dp) & " th=" & CStr(th) & " inkTop=" & CStr(inkTop)
+    Debug.Print "PL14-RAW twip=" & CStr(dtw) & " stack=" & CStr(stk)
     Debug.Print "PL-DONE"
+    r = ReleaseDC(picP.hwnd, d2)
     r = ReleaseDC(picC.hwnd, d)
     Unload Me
 End Sub

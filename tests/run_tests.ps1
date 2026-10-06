@@ -3570,7 +3570,16 @@ if ($Category -in @("all", "run", "vbp")) {
     # "整片刷成红", 只钉后者会放过"根本没落笔"。PL03 同时证明 BF(=1|4) 与 B(=1) 不是同一个数。
     # 画与问都放在 Timer 第一拍 (dcsurf 那条口径: 窗口问题在窗口活着的时候问);
     # 先试 Form_Load 时 GetPixel 一律 -1 (CLR_INVALID), 那不是本刀的靶子, 记在夹具注释里。
-    $pcDrawExpected = @("PL01-LINE=True", "PL02-BOX=True", "PL03-FILL=True", "PL04-CIRCLE=True", "PL-DONE")
+    # 账 #239: 控件那户 Print 的笔位。改前 picP.Print 用本族自存的像素光标 (VB6_PrintX/Y)，
+    # 既不读 picP.CurrentX/CurrentY 也不推进它们 —— 同一份判据在改前的编译器上实测
+    # 推进 = 0 (而同一枚控件答 TextHeight = 13)、笔位放到 60 而墨落在第 2 行、Cls 之后
+    # CurrentY 仍是 400。PL08 钉"增量 == 自己量的 TextHeight"、PL09 钉 Cls 复位笔位、
+    # PL10 钉缇档同一问 (一份存储不许两种单位)、PL11 钉 Cls 用的是带 Fix 187 哨兵那份背景色、
+    # PL12 钉两行叠两行高。PL13/PL14 只钉前缀 (13/195/26 都是 DPI 的函数，不钉绝对数)。
+    $pcDrawExpected = @("PL01-LINE=True", "PL02-BOX=True", "PL03-FILL=True", "PL04-CIRCLE=True",
+        "PL08-PEN=True", "PL09-CLSPEN=True", "PL10-TWIPADV=True",
+        "PL11-BLACKCLS=True", "PL12-STACK=True",
+        "PL13-RAW dp=", "PL14-RAW twip=", "PL-DONE")
     Test-Vbp "pclinedraw" "$Tests\pcline\PcDraw.vbp" $pcDrawExpected
     Test-Vbp "pclinedraw_x86" "$Tests\pcline\PcDraw.vbp" $pcDrawExpected -Arch "x86"
 
