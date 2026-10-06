@@ -4927,6 +4927,20 @@ if ($Category -in @("all", "syntax")) {
         "static void vb6_Form2_evtThunk_ucTreeMaps1_ItemClick(void* handler, vb6_VARIANT a0) { vb6_Form2_ucTreeMaps1_ItemClick(a0); }") @(
         "static void vb6_Form2_evtThunk_ucTreeMaps1_ItemClick(void* handler, int32_t a0)")
 
+    # 账 #228: 同一个 VB 类型写成两种拼法必须给出**同一种 C 类型**。库里限定的
+    # `stdole.OLE_COLOR` 以前一路掉到 mapTypeRef 末尾的兜底 void*, 而裸名 OLE_COLOR 答
+    # int32_t —— 同一枚 VBFlexGrid 事件 (.ctl 写裸名 / 容器写限定名) 于是发送侧交 4 字节、
+    # 处理器收 8 字节指针。修完反过来还要钉住**不该折的不折**: StdFont 是真外部类型
+    # (工程里没有同名符号), 两种拼法都得留 void* —— 只钉前一半的话, "把所有点号都剥掉"
+    # 这种过折照样绿。
+    Test-CodegenNote "alias_type_spelling_same_ctype" @("$Tests\test_alias_spellings.bas") @(
+        "void vb6_BareColor(int32_t c);",
+        "void vb6_QualColor(int32_t c);",
+        "void vb6_BareFont(void* f);",
+        "void vb6_QualFont(void* f);") @(
+        "void vb6_QualColor(void* c)",
+        "void vb6_BareFont(int32_t f)")
+
 
     # ai/028 V2 的发码形状: 插值必须** literally ** 发成手写的 & CStr() / Format$ 形状 ——
     # 注意第二枚读数挑的是 vb6_CStrLong (按实参类型改发专用 CStr), 这正是"降级成真 AST"
