@@ -283,6 +283,9 @@ BSTR vb6_ErrDescription(void);
 void vb6_ErrClear(void);
 void vb6_RaiseError(int32_t errNum, BSTR description);
 BSTR vb6_ErrSource(void);
+// Fix <vbeclipse> 2026-10-06: Err.LastDllError 快照 (调用点捕获, 访问时返回存储值)
+int32_t vb6_ErrLastDllError(void);
+void vb6_ErrSetLastDllError(int32_t code);
 void vb6_ErrRaise(int32_t errNum, BSTR source, BSTR description);
 void vb6_ErrRaiseNumber(int32_t errNum);
 

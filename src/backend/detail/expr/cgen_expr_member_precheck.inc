@@ -103,7 +103,7 @@
             if (_memLower == "number")      { lastExpr_ = "vb6_ErrNumber()";      return; }
             if (_memLower == "description") { lastExpr_ = "vb6_ErrDescription()"; return; }
             if (_memLower == "source")      { lastExpr_ = "vb6_ErrSource()";      return; }
-            if (_memLower == "lastdllerror") { lastExpr_ = "GetLastError()";       return; }
+            if (_memLower == "lastdllerror") { lastExpr_ = "vb6_ErrLastDllError()"; return; }
             if (_memLower == "helpfile")    { lastExpr_ = "(BSTR)0";              return; }
             if (_memLower == "helpcontext") { lastExpr_ = "0";                    return; }
             if (_memLower == "clear")       { lastExpr_ = "vb6_ErrClear()";       return; }

@@ -1867,6 +1867,21 @@ if ($Category -in @("all", "run", "bas")) {
         "CI-word=beq/gtm/rest", "CI-half=hi/lo/mid", "CI-var=hi/lo/hi", "CI-DONE")
     Add-BasTest "test_caseis" "$Tests\test_caseis.bas" $ciNeedles
     Add-BasTest "test_caseis_x86" "$Tests\test_caseis.bas" $ciNeedles -Arch "x86"
+    # <vbeclipse> Fix 2026-10-06: Err.LastDllError 必须是"Declare 调用那一刻的快照"。
+    # VB6 每次由 Declare 发起的 DLL 调用: 1) 先 SetLastError(0), 2) 调 API,
+    # 3) 返回后立刻 GetLastError() 存进 Err.LastDllError (MSDN ErrObject.LastDllError +
+    # 社区对 VB6 运行时的逆向, tek-tips 222-475113 "VB 里 GetLastError 恒为 0")。
+    # 改前 cgen_expr_member_precheck.inc / cgen_expr_with.cpp 把 Err.LastDllError 直接映成
+    # **访问那一刻**的 GetLastError(), 三条可观测后果全反; 现在由 cgen_decl_api.cpp 为每个
+    # Declare 生成的 static __inline 捕获包装承担 (不能改成"调用点插两条语句" —— Declare
+    # 调用可以落在 Do While 条件这种表达式位置, 语句注入会把 C 撕成非法代码, 夹具的
+    # LDL-loop 就钉这一点)。LDL-survive 是主判据: 200 次字符串拼接 + 打印之后快照仍是 126。
+    # LDL-preclear/LDL-cleared 钉 Err.Clear: VB6 文档 "Clear Method (Err Object)" 的 Clear 后
+    # 属性表逐项写着 LastDLLError 0 —— 快照不许跨过一次 Clear 存活。
+    $ldlNeedles = @("LDL-ret=0", "LDL-fail=126", "LDL-len=492", "LDL-survive=126",
+        "LDL-ok=0", "LDL-raw=0", "LDL-loop=4", "LDL-preclear=126", "LDL-cleared=0", "LDL-DONE")
+    Add-BasTest "test_lastdllerror" "$Tests\test_lastdllerror.bas" $ldlNeedles
+    Add-BasTest "test_lastdllerror_x86" "$Tests\test_lastdllerror.bas" $ldlNeedles -Arch "x86"
     # <vbeclipse> 账 #220: B / BF 曾被 RTL 当成两枚**外部链接的 C 全局** (const int32_t B = 1;
     # BF = 2;) 去接 Picture.Line 发码原样吐出的语法旗标。用户模块一发 `Public B As Long` 就撞成
     # C2373 + C2166 给 const 赋值 —— 改前探针实测 BUILD-RC=1 / 5 条诊断 / no exe。旗标现在由
