@@ -47,7 +47,8 @@
         };
         if (numericBuiltins108c.count(callee)) {
             for (auto& a : args) {
-                if (a.compare(0, 12, "vb6_ComCall(") == 0) {
+                if (a.compare(0, 12, "vb6_ComCall(") == 0
+                            || a.compare(0, 20, "vb6_ComCallByDispid(") == 0) {
                     std::string wrapped =
                         "vb6_VariantToDouble(vb6_VariantFromComResult(" + a + "))";
                     replaceInArgList108c(a, wrapped);
@@ -63,6 +64,7 @@
         if (callee == "vb6_Val") {
             for (auto& a : args) {
                 bool isComResult = (a.compare(0, 12, "vb6_ComCall(") == 0
+                                    || a.compare(0, 20, "vb6_ComCallByDispid(") == 0
                                     || a.compare(0, 12, "vb6_ComGetProp(") == 0);
                 if (isComResult) {
                     std::string wrapped =

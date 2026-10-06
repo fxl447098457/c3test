@@ -651,6 +651,7 @@ std::string CCodeGen::resolveComMarkerForPack(const std::string& packFnHint) {
     // 等价于 vb6_ComPackVariant(vb6_VariantFromComResult(ComCall)).
     if (packFnHint == "vb6_ComPackVariant" || packFnHint == "vb6_ComPackValue") {
         if (lastExpr_.find("vb6_ComCall(") == 0 ||
+            lastExpr_.find("vb6_ComCallByDispid(") == 0 ||
             lastExpr_.find("vb6_ComGetProp(") == 0 ||
             lastExpr_.find("vb6_ComGetObjectProp(") == 0 ||
             lastExpr_.find("vb6_ComCallObject(") == 0) {
@@ -765,6 +766,7 @@ std::string CCodeGen::resolveComMarkerForPack(const std::string& packFnHint) {
     // vb6_ComPackVariant / Fix 030 vb6_ComPackValue: 需要把 COM 返回的 VARIANT* 转成 vb6_VARIANT
     if (packFnHint == "vb6_ComPackVariant" || packFnHint == "vb6_ComPackValue") {
         if (lastExpr_.find("vb6_ComCall(") == 0 ||
+            lastExpr_.find("vb6_ComCallByDispid(") == 0 ||
             lastExpr_.find("vb6_ComGetProp(") == 0 ||
             lastExpr_.find("vb6_ComGetObjectProp(") == 0 ||
             lastExpr_.find("vb6_ComCallObject(") == 0) {

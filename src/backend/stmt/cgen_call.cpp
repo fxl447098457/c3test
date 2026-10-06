@@ -671,7 +671,8 @@ void CCodeGen::visit(CallStmt& node) {
             }
         }
 
-        if (callExpr.find("vb6_ComCall(") == 0) {
+        if (callExpr.find("vb6_ComCall(") == 0
+            || callExpr.find("vb6_ComCallByDispid(") == 0) {
             // ComCall返回可能含对象的VARIANT*, 用VarFree避免Release对象
             c_.emitLine("vb6_ComVarFree((void*)" + callExpr + ");  /* COM call, discard result */");
         } else if (callExpr.find("vb6_ComGetProp(") == 0) {

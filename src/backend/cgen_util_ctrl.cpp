@@ -2239,8 +2239,8 @@ std::string CCodeGen::wrapVariantValue(ASTNode* valueNode, const std::string& cE
         return cExpr;
     }
     
-    // COM后期绑定调用: vb6_ComCall返回VARIANT*, 需转为vb6_VARIANT
-    if (cExpr.find("vb6_ComCall(") == 0) {
+    // COM后期绑定调用: vb6_ComCall/vb6_ComCallByDispid返回VARIANT*, 需转为vb6_VARIANT
+    if (cExpr.find("vb6_ComCall(") == 0 || cExpr.find("vb6_ComCallByDispid(") == 0) {
         return "vb6_VariantFromComResult(" + cExpr + ")";
     }
     
@@ -2298,13 +2298,15 @@ std::string CCodeGen::boxToVariant(Expr* expr, const std::string& cExpr) const {
     //  VarToStr(PropBag.ReadProperty("ClipSeparators", "")) 启动即崩).
     // 与 conv_cstr (Fix 121) / arg_variant (Fix 113) 既有口径一致.
     {
-        // 精确匹配裸 vb6_ComCall( / vb6_ComGetProp( / vb6_ComGetObjectProp(
-        // (12/15/21 字符含左括号); 不误伤 vb6_ComCallInt/BSTR/Double/Object/ByDispid.
+        // 精确匹配裸 vb6_ComCall( / vb6_ComCallByDispid( / vb6_ComGetProp(
+        // / vb6_ComGetObjectProp( (12/20/15/21 字符含左括号);
+        // 不误伤 vb6_ComCallInt/BSTR/Double/Object。
         size_t cs = 0;
         while (cs < cExpr.size()
                && (cExpr[cs] == '(' || cExpr[cs] == ' ' || cExpr[cs] == '\t'
                    || cExpr[cs] == '\n' || cExpr[cs] == '\r')) cs++;
         bool comRes = (cExpr.compare(cs, 12, "vb6_ComCall(") == 0)
+                   || (cExpr.compare(cs, 20, "vb6_ComCallByDispid(") == 0)
                    || (cExpr.compare(cs, 15, "vb6_ComGetProp(") == 0)
                    || (cExpr.compare(cs, 21, "vb6_ComGetObjectProp(") == 0);
         if (comRes) return "vb6_VariantFromComResult(" + cExpr + ")";

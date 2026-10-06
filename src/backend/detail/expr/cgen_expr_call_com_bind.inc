@@ -738,6 +738,7 @@
                        lastExpr_.compare(0, 15, "vb6_ComGetProp(") == 0
                     || lastExpr_.compare(0, 17, "vb6_ComGetPropArg(") == 0
                     || lastExpr_.compare(0, 12, "vb6_ComCall(") == 0
+                    || lastExpr_.compare(0, 20, "vb6_ComCallByDispid(") == 0
                     || lastExpr_.compare(0, 18, "vb6_ComCallObject(") == 0
                     || lastExpr_.compare(0, 18, "vb6_ComGetObjectProp(") == 0
                     || lastExpr_.compare(0, 23, "vb6_ComGetPropertyObject(") == 0

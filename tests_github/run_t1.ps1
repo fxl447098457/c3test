@@ -127,6 +127,7 @@ Add-BasTest "test_not_com" "test_not_com.bas" @("NOT-COM:OK", "NOT-COM2:OK", "NO
 Add-BasTest "test_err_obj" "test_err_obj.bas" @("ERR-1:OK", "ERR-6:OK", "ERR:6/6")
 Add-BasTest "test_variant_cmp" "test_variant_cmp.bas" @("VC-1:OK", "VC-4:OK", "VC:4/4")
 Add-BasTest "test_com_default_prop" "test_com_default_prop.bas" @("DP-1:OK", "DP-4:OK", "P24-10: 4/4")
+Add-BasTest "test_com_latebound" "test_com_latebound.bas" @("LB-1:OK", "LB-2:OK", "LB-3:OK", "LB-4:OK", "LB-5:OK", "P24-10b: 5/5")
 Add-BasTest "test_com_optional" "test_com_optional.bas" @("OP-1:OK", "OP-4:OK", "P24-11: 4/4")
 Add-BasTest "test_bstr_concat_scalar" "test_bstr_concat_scalar.bas" @("BCS:16/16")
 

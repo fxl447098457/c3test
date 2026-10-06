@@ -303,7 +303,8 @@ void CCodeGen::visit(BinaryExpr& node) {
         // 包装; 裸 vb6_ComCall( 结果是 VARIANT*, 须走 VariantFromComResult
         // 解引用 (与 Fix 132 同规则).
         auto wrapVariantRvalue196 = [&](const std::string& e) -> std::string {
-            if (e.find("vb6_ComCall(") != std::string::npos
+            if ((e.find("vb6_ComCall(") != std::string::npos
+                 || e.find("vb6_ComCallByDispid(") != std::string::npos)
                 && e.find("vb6_VariantFromComResult(") == std::string::npos)
                 return "vb6_VariantFromComResult(" + e + ")";
             if (e.find("vb6_VariantFromComResult(") != std::string::npos
@@ -489,7 +490,8 @@ void CCodeGen::visit(BinaryExpr& node) {
                         // Fix 024: left 被 inferExprType 误判为 Variant, 但实际标量 (LenB/Asc/int 等).
                         // 用 vb6_VariantFromValue 在编译期按实类型选择 variant 构造函数, 消除 C2440.
                         // Fix 132: 裸 COM 结果必须走 VariantFromComResult (见下方说明)。
-                        std::string wrapL = (left.find("vb6_ComCall(") != std::string::npos
+                        std::string wrapL = ((left.find("vb6_ComCall(") != std::string::npos
+                                              || left.find("vb6_ComCallByDispid(") != std::string::npos)
                                              && left.find("vb6_VariantFromComResult(") == std::string::npos)
                                             ? ("vb6_VariantFromComResult(" + left + ")") : ("vb6_VariantFromValue(" + left + ")");
                         c_.emitLine("vb6_VARIANT " + tmp + " = " + wrapL + ";");
@@ -520,7 +522,8 @@ void CCodeGen::visit(BinaryExpr& node) {
                         std::string tmp = "_vcmp_" + std::to_string(vcmpCounter_++);
                         // Fix 024: right 被 inferExprType 误判为 Variant, 但实际标量. 用 FromValue 包装.
                         // Fix 132: 裸 COM 结果必须走 VariantFromComResult。
-                        std::string wrapR = (right.find("vb6_ComCall(") != std::string::npos
+                        std::string wrapR = ((right.find("vb6_ComCall(") != std::string::npos
+                                              || right.find("vb6_ComCallByDispid(") != std::string::npos)
                                              && right.find("vb6_VariantFromComResult(") == std::string::npos)
                                             ? ("vb6_VariantFromComResult(" + right + ")") : ("vb6_VariantFromValue(" + right + ")");
                         c_.emitLine("vb6_VARIANT " + tmp + " = " + wrapR + ";");
@@ -544,7 +547,8 @@ void CCodeGen::visit(BinaryExpr& node) {
             // 使 `If coll.Item(i) <= 0` 恒真 (TreeMaps 所有值被判 <=0 而写成 0.0001,
             // 蓝色梯度消失)。COM 结果必须走 vb6_VariantFromComResult 解引用。
             auto wrapOperand132 = [&](const std::string& e) -> std::string {
-                if (e.find("vb6_ComCall(") != std::string::npos
+                if ((e.find("vb6_ComCall(") != std::string::npos
+                     || e.find("vb6_ComCallByDispid(") != std::string::npos)
                     && e.find("vb6_VariantFromComResult(") == std::string::npos)
                     return "vb6_VariantFromComResult(" + e + ")";
                 if (e.find("vb6_VariantFromComResult(") != std::string::npos
@@ -671,7 +675,8 @@ void CCodeGen::visit(BinaryExpr& node) {
     // Object 前缀不同, 不受影响; `Is` (对象引用比较) 排除在外.
     if (node.op != BinaryOp::Is) {
         auto unwrapBareComCall108 = [](const std::string& cExpr) -> std::string {
-            if (cExpr.compare(0, 12, "vb6_ComCall(") == 0) {
+            if (cExpr.compare(0, 12, "vb6_ComCall(") == 0
+                || cExpr.compare(0, 20, "vb6_ComCallByDispid(") == 0) {
                 return "vb6_VariantToDouble(vb6_VariantFromComResult(" + cExpr + "))";
             }
             return cExpr;

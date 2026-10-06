@@ -129,6 +129,22 @@
         if (valueIsVariant) {
             value = "vb6_VariantToString(" + value + ")";
         }
+        // Fix P24-10b: RHS 是裸晚绑定调用结果 (vb6_ComCallByDispid → void* 指向
+        // VARIANT) 且目标是 BSTR — Fix 113 已把 ComCall 无类型结果从前缀表回退,
+        // valueIsVariant 不命中, 原样交给 vb6_BSTR_Assign 会把它当 BSTR 指针
+        // → 运行期 0xC0000005 (test_com_latebound `s1 = o("name")` 实测)。
+        // 先 VariantFromComResult 包回 vb6_VARIANT 再提取 BSTR, 与下方 else
+        // 分支的 Fix 124 valueIsBareComResult 同口径 (只认返回 void* VARIANT*
+        // 的四兄弟; ComCallBSTR/Int/Double/Object 返回类型化值, 不在此列)。
+        if (!valueIsVariant) {
+            bool comResBstr = value.compare(0, 12, "vb6_ComCall(") == 0
+                || value.compare(0, 20, "vb6_ComCallByDispid(") == 0
+                || value.compare(0, 15, "vb6_ComGetProp(") == 0
+                || value.compare(0, 21, "vb6_ComGetObjectProp(") == 0;
+            if (comResBstr) {
+                value = "vb6_VariantToString(vb6_VariantFromComResult(" + value + "))";
+            }
+        }
         // Fix 140: RHS 是 Byte() 数组 (类成员 m_Caption 或已知字节数组变量) 且目标是
         // BSTR → 按 UTF-16LE 字节还原为字符串. 不能把数组指针当 BSTR 交给
         // vb6_BSTR_Assign (SysStringLen 会读数组前的堆元数据当长度 → 堆损坏).
@@ -355,6 +371,7 @@
         // vb6_ret_pvVfsSeek = vb6_ComCall(...) 2630). 按目标 C 类型解封:
         // VariantFromComResult 把 void* 包回 vb6_VARIANT, 再 VariantToXxx 提取.
         bool valueIsBareComResult = (value.compare(0, 12, "vb6_ComCall(") == 0
+            || value.compare(0, 20, "vb6_ComCallByDispid(") == 0
             || value.compare(0, 17, "vb6_ComCallObject(") == 0
             || value.compare(0, 15, "vb6_ComCallBSTR(") == 0
             || value.compare(0, 14, "vb6_ComCallInt(") == 0

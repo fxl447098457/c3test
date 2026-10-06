@@ -1130,6 +1130,7 @@
                     // 先解出 Variant 的值再放进复合字面量 (Fix 029 只覆盖 ByVal 路径).
                     {
                         bool comRes120 = (argVal.compare(0, 12, "vb6_ComCall(") == 0)
+                            || (argVal.compare(0, 20, "vb6_ComCallByDispid(") == 0)
                             || (argVal.compare(0, 15, "vb6_ComGetProp(") == 0)
                             || (argVal.compare(0, 21, "vb6_ComGetObjectProp(") == 0);
                         if (comRes120) {
@@ -1191,6 +1192,7 @@
                                 } else if (cExprIsVariant(argVal)) {
                                     argVal = "(&(vb6_VARIANT){.vt=VT_BSTR, .bstrVal=vb6_VariantToString(" + argVal + ")})";
                                 } else if (argVal.compare(0, 12, "vb6_ComCall(") == 0
+                                           || argVal.compare(0, 20, "vb6_ComCallByDispid(") == 0
                                            || argVal.compare(0, 15, "vb6_ComGetProp(") == 0
                                            || argVal.compare(0, 21, "vb6_ComGetObjectProp(") == 0) {
                                     // Fix 113l: **裸 COM 结果** (void*, 承载 COM

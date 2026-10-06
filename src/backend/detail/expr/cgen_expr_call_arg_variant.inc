@@ -107,6 +107,7 @@
             if (!argIsVariant && !argIsVariantArr) {
                 bool argIsComRes113i =
                     (argVal.compare(0, 12, "vb6_ComCall(") == 0)
+                    || (argVal.compare(0, 20, "vb6_ComCallByDispid(") == 0)
                     || (argVal.compare(0, 15, "vb6_ComGetProp(") == 0)
                     || (argVal.compare(0, 21, "vb6_ComGetObjectProp(") == 0);
                 if (argIsComRes113i) argIsVariant = true;
@@ -118,6 +119,7 @@
                 // = vb6_ComCall(...) → 原生成 VariantToSafeArray1D(ComCall) C2440.
                 bool isComResultVal2 =
                     (argVal.find("vb6_ComCall(") == 0)
+                    || (argVal.find("vb6_ComCallByDispid(") == 0)
                     || (argVal.find("vb6_ComGetProp(") == 0)
                     || (argVal.find("vb6_ComGetObjectProp(") == 0);
                 if (isComResultVal2) {
@@ -275,6 +277,7 @@
                 if (!argIsVariant) {
                     bool argIsComRes113 =
                         (argVal.compare(0, 12, "vb6_ComCall(") == 0)
+                        || (argVal.compare(0, 20, "vb6_ComCallByDispid(") == 0)
                         || (argVal.compare(0, 15, "vb6_ComGetProp(") == 0)
                         || (argVal.compare(0, 21, "vb6_ComGetObjectProp(") == 0);
                     if (argIsComRes113) argIsVariant = true;
@@ -356,6 +359,7 @@
                     // vb6_ComGetStringProp( (返回 BSTR) / vb6_ComCallObject( (对象).
                     bool isComResultVal =
                         (argVal.find("vb6_ComCall(") == 0)
+                        || (argVal.find("vb6_ComCallByDispid(") == 0)
                         || (argVal.find("vb6_ComGetProp(") == 0)
                         || (argVal.find("vb6_ComGetObjectProp(") == 0);
                     if (isComResultVal) {

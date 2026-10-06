@@ -99,7 +99,7 @@
             //  此处合并为并集: 含 ComCallByDispid/ComGetObjectProp)。
             const std::string& a0 = args[0];
             bool comRes121 = (a0.compare(0, 12, "vb6_ComCall(") == 0)
-                || (a0.compare(0, 21, "vb6_ComCallByDispid(") == 0)
+                || (a0.compare(0, 20, "vb6_ComCallByDispid(") == 0)
                 || (a0.compare(0, 15, "vb6_ComGetProp(") == 0)
                 || (a0.compare(0, 21, "vb6_ComGetObjectProp(") == 0);
             if (comRes121) {

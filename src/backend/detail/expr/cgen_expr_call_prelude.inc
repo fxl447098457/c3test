@@ -246,9 +246,36 @@
             return;
         }
 
-        // P24-10 TODO: 后期绑定COM变量 (Dim obj As Object → knownObjectVars_)
-        // 后期绑定的 obj(args) 需要VARIANT返回类型推导, 暂不支持
-        // 前期绑定 (Dim d As Dictionary) 已完全支持
+        // ---- P24-10 后期绑定COM变量 (Dim obj As Object → knownObjectVars_) ----
+        // 后期绑定无类型库签名, 默认成员名不可知 (不一定是 Item, Collection 是 _Item,
+        // 控件/宿主各有各的 default member), 不能按名 GetIDsOfNames。VB6 语义:
+        //   Set o = CreateObject(...): o(k) → o.<DISPID_VALUE>(k)
+        // 直接按 DISPID_VALUE=0 调 vb6_ComCallByDispid (vb6com_invoke.c P24-10)。
+        // 返回 VARIANT* (void*), 与 vb6_ComCall 同族 —— 下游各处对 "vb6_ComCall("
+        // 前缀的 COM 结果识别已同步纳入 "vb6_ComCallByDispid(" (Fix 121 等)。
+        // 前期绑定 (Dim d As Dictionary) 走上方签名路径, 已完全支持。
+        auto itLate = knownObjectVars_.find(comLower);
+        if (itLate != knownObjectVars_.end()) {
+            emitExpr(*node.callee);  // emits "name" / "(*param)" / "me->field"(+自动实例化守卫)
+            std::string objExpr = std::move(lastExpr_);
+            std::vector<std::string> packedArgs;
+            for (size_t i = 0; i < node.positional.size(); i++) {
+                std::string packFn = comPackExpr(*node.positional[i]);
+                emitExpr(*node.positional[i]);
+                { std::string resolved = resolveComMarkerForPack(packFn); if (!resolved.empty()) lastExpr_ = resolved; }
+                packedArgs.push_back(packFn + "(" + lastExpr_ + ")");
+            }
+            int32_t argc = (int32_t)packedArgs.size();
+            std::string argsArray = "(void*[]){";
+            for (int i = 0; i < argc; i++) {
+                if (i > 0) argsArray += ", ";
+                argsArray += packedArgs[i];
+            }
+            argsArray += "}";
+            lastExpr_ = "vb6_ComCallByDispid(" + objExpr + ", 0, "
+                      + argsArray + ", " + std::to_string(argc) + ")";
+            return;
+        }
     }
 
     }

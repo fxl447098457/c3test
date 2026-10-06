@@ -84,7 +84,7 @@ std::string CCodeGen::wrapToBSTR(const std::string& expr, Expr& node) {
     if (expr.find("vb6_VariantArrayGet") == 0) {
         return "vb6_VariantToString(" + expr + ")";
     }
-    if (expr.find("vb6_ComCall(") == 0) {
+    if (expr.find("vb6_ComCall(") == 0 || expr.find("vb6_ComCallByDispid(") == 0) {
         return "vb6_VariantToString(vb6_VariantFromComResult(" + expr + "))";
     }
     // Fix 092w: 链式默认属性访问结果 (vb6_VariantFromComResult(vb6_ComCall(...))) 是
