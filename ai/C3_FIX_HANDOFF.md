@@ -1114,7 +1114,7 @@ Print 之后笔位推进 `0 → 13`（= 同一枚控件自己答的 `TextHeight`
 `vb6_ComCall(vb6_hwnd_<Form>, L"Cls", NULL, 0)`（emit 物证 `.build/b373_emit_base.c:327`），运行期 no-op。
 所以家族那份 `vb6_Form_Cls` 今天只被控件那户到达；窗体自己的 Cls 何时能跑，等 #232 那条前端出口。
 
-### B70 窗体绘图语句的"裸形"与 "Me." 形各缺一条路（账 #232，**② 已出：门 #368（run 37454147931、head `9e5c9f91`、branch dev、attempt 1）= 11 job 全 completed/success、非绿 0，wall 9m46s；**① 已出：门 #374（run 37533797244、head `2ef2ee71`、branch dev、attempt 1）= 11 job 全 completed/success、非绿 0，含新的 [CODEGEN-NOTE] form_canvas_bare 所在的 Tests (syntax) 片与跑 FD21/FD22/FD23 的 vbp 四片**；③ 未开工**）
+### B70 窗体绘图语句的"裸形"与 "Me." 形各缺一条路（账 #232，**② 已出：门 #368（run 37454147931、head `9e5c9f91`、branch dev、attempt 1）= 11 job 全 completed/success、非绿 0，wall 9m46s；**① 已出：门 #374（run 37533797244、head `2ef2ee71`、branch dev、attempt 1）= 11 job 全 completed/success、非绿 0，含新的 [CODEGEN-NOTE] form_canvas_bare 所在的 Tests (syntax) 片与跑 FD21/FD22/FD23 的 vbp 四片**；**③ 已出：门待回填**）
 
 探针 `.build/b433_shapes.txt`（同一枚 `.frm` 每次只放一条语句，`--emit-c` 看发码；工具 `.build/b431_232probe.py` 那套形状表）。**七形七样**（窗体上）：
 
@@ -1250,6 +1250,20 @@ S9.4 打标记那一路的 PictureBox 判据必须问表、且不许把成员名
 
 **边界**：Printer 那一族的名字这轮一起搬进表（`pset` / `circle` / `point` / `line` / `enddoc` 各有一行 PRINTER），但 `Printer.Cls` = 结束文档那层语义只在表里挂一行 DRAW，没有新造第二种"清画布"。`With pic : .Cls` 照上一轮的记录押后；③ 裸 `Line` 两形照旧（parser 就不认）。
 
+**③ 已出（门待回填）—— 裸写动词的尾巴改由 parser 收进来；名单只剩表那一处**
+
+**读数（两台都在本机编的编译器、同一份工作树文件）**：改前那台（HEAD `2ef2ee71` 在本机冷编，`.build/wt_base374`）对 `tests/fdraw/FDemo.vbp` 做 `--emit-c` 直接 **exit 1**，三条错误全落在那一枚裸写的 `Line (300, 40)-(300, 120)` 上（`FDForm.frm(253,24): expected ')' (got ,)` + VB2003 + VB2002 —— 一行崩掉整段过程）；同一台在探针 `.build/b494_probe2/ShApp.vbp` 上进得去，发出来的是 `Circle(20, 21, vb6_VariantEmpty(), 22);` 与 `PSet(60, 61, vb6_VariantEmpty(), 255);` —— 逗号之后的实参**看着在**，其实是尾巴漏到外层之后由可选形参补齐拼出来的，整条调用仍是未声明的裸名（C2065/C2064 那一族）。改后这一族六形 + Line 两点形全落真出口，夹具两架构 26 行输出逐字相同、stderr 0 字节：`FD24-barecircle=True raw=-1,59`、`FD25-bareline=True raw=-1,38`。
+
+**因由与修法（一句话）**：`src/parser/parser_expr_postfix.cpp:162-181`（Circle/PSet 的逗号尾巴）与 183 行往下的 `-(x, y)`（Line 的第二点）两趟吸收都把判据写死成 `call->callee->kind == MemberAccessExpr` ⇒ 只认带接收者那一形（`Me.Circle` / `Pic1.Line`），裸写的 callee 是 `IdentifierExpr` 就收不到尾巴；而且这两处还各自把 `circle` / `pset` / `line` 三个名字**自己拼成名单** —— 那是画布动词名单的**第四份副本**。修法 = 尾巴形状那一档收进 `src/common/canvas_drawing.hpp`（`canvasVerbTailKind`：NONE / COORD / TWO_POINT，一问一处答），parser 两处改成「callee 是 MemberAccessExpr **或** IdentifierExpr，名字问表」。语义层那把折叠（账 #232①）一行没动 —— 折成 `Me.<动词>` 之后就走 ①② 已经收好的两条码头。
+
+**判据三面 + 一次被迫的改名**：① FD24 / FD25 各两头钉（同一支颜色先扫到空、画完扫得到；颜色用这枚窗体别处不出现的 vbGreen / vbMagenta，免得拿别人的墨当证人）。② 发码针新增 `form_canvas_tail`（present 三枚真出口；absent 两枚 = `vb6_VariantEmpty()` 与 `Circle(240, 90`，钉住"尾巴没漏成补齐桩"）。③ 边界证人 **从 Sub Circle 改成 Sub Point** —— Circle 现在要留给 FD24 真画一个圆，模块级同名过程会把它吃掉；这条改名不是将就，它正是那条边界自己在说话（折叠只在名字查不到符号时才动）。`form_canvas_bare` 的那对边界针跟着换成 `vb6_Point(...)` / `vb6_Form_Point(...)`。红侧两头都有实物：HEAD 那台对这份夹具 exit 1（`Test-CodegenNote` 要求 rc=0 ⇒ 必红），而探针里那两条裸名是它逐字存在的产物。
+
+**哨兵 S10 三条**（`scripts/check_form_draw_state.ps1`）：parser 必须 include 那张表、必须问 `canvasVerbTailKind(`（**恰好一次** —— 一问两用，两处 gate 读同一个答案）、两处都必须 gate 在 `tailKind == CANVAS_TAIL_*`、并且不许再出现 `== "circle"` / `== "pset"` / `== "line"` 这种自己拼的名单；表那一头三档尾巴齐。两条假改动各证红：parser 里补一句 `|| tailName == "circle"` ⇒ rc=1 点名"fourth copy"；表里删掉 `line` 那一行 ⇒ rc=1 两条（`no longer maps "line"` + `no longer maps CANVAS_TAIL_TWO_POINT`）；恢复 ⇒ rc=0。
+
+**护栏**：语料 A/B `inputs=90 changed=0` —— BASE 是 **HEAD 那笔在本机冷编的那台**（同一套 VS2019 工具链，`.build/wt_base374`），不是我第一版误用的 CI 工件（那一版读出 `changed=14`、1068 行差异，全是晚绑定 COM 读面的 `vb6_ComGetIntProp` ↔ `vb6_VariantFromComResult(vb6_ComGetProp)` 一族、画布动词一行都没有 ⇒ 记进 §B73）；pcline（唯一用带接收者 `Line` 两点形的夹具）emit 前后逐行相同、四枚 line 出口不动；27 道 [STATIC] 全 rc=0；`-Category syntax` 167 例 0 红。
+
+**边界与下一格**：`Line -(x, y)` 与 `Line Step (x, y)-(x2, y2)` 两形仍不通 —— 读数是 `LnForm.frm` 上 `Line Step (5, 5)-(15, 15)` 报 `expected 'Input' after 'Line'`。它们的堵点在**语句层**：`src/parser/stmt/parser_stmt.cpp:136` 那一格 `TokenKind::Line` 今天只把「后面跟 `=` / `(` / `.`」交回调用路，跟 `-` / `Step` 就去做 `Line Input`。要接得先定两件事：(a) 把裸 `Line` 交下来成一枚 `IdentifierExpr` 调用（折叠与尾巴吸收都已就位）；(b) VB6 那句"从 CurrentX/CurrentY 起笔"的起点口径怎么在 `vb6_Form_Line` 的 12 参里表达（现在那两格是 step 旗标 + 坐标，没有"取当前点"这一档）⇒ 口径要用户拍，别自己定。
+
 ### B71 门 #369/370 那两条红只有 runner 上现形 —— 本机那台 cl 压根不诊断「实参过多」（账 #240，**已出：门 #371（run 37471108271、head `bb252705`、branch dev、attempt 1）= 11 job 全 completed/success、非绿 0；红过的 olecon / olecon_x86 两片转绿，新的 [STATIC] rtl_proto_arity 跟着 Tests (compile) 一起跑绿；dev 已镜像到 gitcode（origin/dev 由 `39d9b119` 快进到 `bb252705`）**）
 
 **读数**：门 #369（run 37456420314、head `39d9b119`、branch dev）11 job 里两片红，各红一条且是同一枚夹具的两个架构 —— `Tests (vbp #2)` = `[VBP-BUILD] olecon ... FAIL rc=1 exe=False`（该片 PASS=54 FAIL=1 SKIP=1）、`Tests (vbp #3)` = `olecon_x86`（PASS=53 FAIL=1 SKIP=0）；其余九片全绿。**引入方式不是改了产品**：`39d9b119` 那轮新增 [STATIC] vbp_fixture_census 把五份"跟踪着却没登记"的 .vbp 逼出册登记成编译面用例，olecon 是其中一份（提交说明里写着本地 x64+x86 rc=0 且出 exe）。同批登记的 dbgdlg（就是那枚缺 `vb6_di_PageSetupDlgA` 桩、为它才补的夹具）在两片上都 PASS ⇒ 桩表与 RTL 内嵌在 CI 上是对上的，红只跟着 olecon 走。
@@ -1279,6 +1293,14 @@ S9.4 打标记那一路的 PictureBox 判据必须问表、且不许把成员名
 账 #240 那一刀把"头追不上体"钉死了（`check_rtl_proto_arity.ps1`：RTL 里两头都有的名字，声明侧参数个数集合必须等于定义侧）。**没钉住的是第三头**：cgen 递出去的实参个数。本轮三者恰好同源（体 10 = 发码 10 = 补完的头 10），所以新 cl 的诊断只落在头那一份上。反过来的形状照样要命：若有人给某枚 `vb6_Ctrl_*` 加形参、只改头与体，而**发码仍递旧的个数**，那么多递这一侧在本机只是 `warning C4020`（见 §B71 那条不对称测量），到新 cl 才升成 `error C2197` —— 也就是说它会以**"门红、本地全绿"的形状再来一次，而这次红在别人刚登记的用例上**。
 
 要收的形状（照 §B70 的 ①-c 那张表的做法，别再单开第四份名单）：控件方法的"名字 → RTL 出口 + 实参形状"本来就该只有一处答案。现在 `controlZeroArgMethod` / `controlOneArgMethod` / `controlCanvasMethod` 三张表里**没有"这一档递几枚实参"这一格** —— 那个信息住在调用点（各码头自己拼参数串）。所以第一步是把实参个数写成表里的一个取值，第二步才是同一条针两面都问：拿表里的出口名去 RTL 头里查参数个数，与表里的形状对。第一步与 §B70 工单的第 (1) 步是同一件活（画布动词那张 `src/common/canvas_drawing.hpp`），所以这一格**排在 ① 之后做**，不要为它先立一张只有旗标没有形状的表。
+
+### B73 同一笔提交，CI 编出来的 C3.exe 与本机编的那枚，发码不一样（账 #232③ 撞见，**未开工**）
+
+**读数（三方对跑 `--emit-c`，同一份工作树文件、同一个 cwd）**：① 本机冷编的 HEAD（`2ef2ee71`）与本机当前树（多 ③ 那一刀）⇒ `inputs=90 changed=0`。② 拿门 #374 的工件当 BASE（`gh run download 37533797244 -n c3-exe`，CI 的 Build job 用 vswhere -latest = VS2022）对同一台本机 HEAD 树 ⇒ **`changed=14`，1068 行差异里 1060 行是同一族**：`vb6_ComGetIntProp(oFont, L"Name")` ↔ `vb6_VariantToString(vb6_VariantFromComResult(vb6_ComGetProp(...)))`、`vb6_ComCallInt(...)` ↔ `vb6_ComVarFree((void*)vb6_ComCall(...))`，另有 `ComGetDouble` / `ComGetObject` / `ComGetBool` 同形；落在 Charts 2020 六份子工程（`IAFPService` / `ITilterAccess` / `IMyCompany` 那几枚晚绑定对象）与 VBFlexGridDemo 的 `PropFont` 读面上。**画布动词一行都没有** ⇒ 与 ③ 那刀无关（逐条 grep 过）。③ 再钉一颗反向钉子：本机 `847ee9f4` 那台（更早两笔提交）与本机 `2ef2ee71` 那台在这一族上**逐字相同**（`vb6_VariantFromComResult` 各 70 处），CI 那台是 66 处 —— 所以这不是"少一笔提交"，是**同一份源码在两台构建机上做出不同决定**。
+
+**为什么最可疑的是"顺序"而不是 `#if`**：`vb6_ComGetIntProp` 这套带类型 getter 在本树里到处都在（`cgen_util_com.cpp` 六处、十个文件提到），两台都编得出来，只是**在哪些调用点上选它**不同 —— 这正是"一排识别器轮询、第一条命中就答"的形状。若那条队列走的是无序容器（`unordered_map` / 指针序 / 静态初始化序），MSVC 两版换哈希实现就会换首命中 ⇒ 决定随构建机变，而**门不会报**：Build 与 Tests 用的是同一枚工件，自洽。两条便宜的分辨办法：(a) 本机同一笔提交冷编两次跑同一份语料，两边逐字相同就排除"真随机"，只剩工具链；(b) 把发码里所有「遍历容器取第一个命中」的识别器列出来（`grep -n "unordered_" src/backend src/semantics`），凡答案会随遍历序变的，换成有序容器或换成显式优先级 —— 与本仓既有的定死做法一致（单一权威 + census + 结构性哨兵）。两条同族的旧账可以拿来对照：门 #162（CI 上关掉的 Timer 仍报 21 拍，本地 1 拍，归因未定）与 MV-d（本地红、CI 绿，最后是挂钟）——**"CI 与本地不同"这一族已经有三种因由，这是第四种，而且它差在发码面上**，比运行时那几种更硬。
+
+**这一格今天就能用的口径**：**语料 A/B 的 BASE 必须与 NEW 同一工具链、同一构建方式**（本机冷编 worktree：`git worktree add .build/wt_baseX <sha>` + `.build/wt_pre_build.ps1 -Src ...`，实测约 6 分钟）；**CI 工件只能用来跑测试，不能当发码基线**。反过来也成立：凡是「CI 红、本地绿」且差异落在发码形状针上的门，先怀疑这一格，再怀疑自己的刀。
 
 ## C. 仍在生效的口径与工具事实（与本文档等长的一半价值在这里；完整版见记忆库）
 
