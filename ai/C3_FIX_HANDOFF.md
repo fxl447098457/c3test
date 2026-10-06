@@ -1023,7 +1023,7 @@ core.autocrlf 是 CRLF —— 按 `
 ` 切那份字节的脚本会把整个文件看成一行，于是"改好了"其实没改。
 切行之前先看分隔符，别假定。
 
-### B67 `Print` 住在窗体那套代码里，DC / 字体 / 色彩 / 单位四件全是自己答的 —— 缇档 Print 一行推进 16 而 TextHeight 答 240（账 #237，**已提交 `32b5eedf`，等门**）
+### B67 `Print` 住在窗体那套代码里，DC / 字体 / 色彩 / 单位四件全是自己答的 —— 缇档 Print 一行推进 16 而 TextHeight 答 240（账 #237，**已出：已过：门 #361（run 37421550422、head `d86b478c`、branch dev、attempt 1）= 11 job 全 completed/success、非绿 0，wall 8m49s**）
 
 症状两半，都是实测（探针 `.build/b347probe`，x64 与 x86 一模一样）：
 `Me.ScaleMode = vbTwips` 下 `Me.CurrentY = 0 : Print "AB"` 之后 `CurrentY = 16`，而同一枚窗体自己答
@@ -1287,4 +1287,4 @@ CurrentY 的增量 == Me.TextHeight(同一串)"是两条路真汇合而不是各
 | 账 #234（§B64 = 绘图方法家族改问唯一权威 `vb6_ControlDrawDC`；`vb6forms_internal.h` 声明、`vb6_DrawAcquire` 只挡 NULL；census 跟着长：D1 排除声明行 / D2 5→6 / 新 D13 禁 draw.c 自己开 DC） | 无 bug 症状的重复实现：两份同口径 ⇒ 一改就静默分家，而 `check_control_dc.ps1` 的名单原本扫不到第二份所在文件 | 零行为改动（两分支逐条等价）+ 三条负控各证哨兵会红 + 邻域四枚真跑夹具 28 条 needle 零缺失 + emit A/B 90 份 changed=0 + 矩阵 4 件出 exe | 已过：门 #358（run 37409833257、head `2b3baf82`、attempt 1）= 11 job 全 completed/success、非绿 0，wall 9m44s |
 | 账 #235（§B65 = 画笔色两份存储合一：`vb6_DrawForeColor` 改问唯一出口 `vb6_GetControlForeColor`，撤掉私有 setter 与两个零引用导出；Printer 那族不动） | `Me.ForeColor = vbRed` 之后不带颜色的 `Me.PSet` 画出来是 **0（黑）**（改前两架构实测），带颜色的那条才是 255 —— 控件那侧本来就只有一份，Form 绘图自己另存了一枚 | 新夹具一头 FD11/FD12（**两面**：新点要蓝、旧点仍红）+ 逐字回退重编那台跑同一夹具真红（False / pen=0）+ 哨兵新 S5（属性名回潮=0，假针证红）；23 份 check 全绿、邻域四枚零缺失、矩阵 4 件出 exe | 已过：门 #360（run 37415128806、head `ea8dc7c9`、attempt 1）= 11 job 全 completed/success、非绿 0，wall 8m31s |
 | 账 #236（§B66 = 门 #359 的 vbp#4 红归因到夹具：阈值收线的 `*_Timer` 里自增排在提前返回之后 => exe 永不关窗，被 60s 超时杀；修法=计数器先走，哨兵 `check_fixture_timer_close.ps1` 第 24 道钉住这条口径） | 已过：门 #360（run 37415128806、head `ea8dc7c9`、attempt 1）= 11 job 全 completed/success、非绿 0，wall 8m31s |
-| 账 #237（§B67 = Print 从 vb6forms.c 搬进绘图家族：DC / 字体 / 色彩 / 单位四件都改问已有权威，推进量取刚写那串字的 extent（与 TextHeight 同一个量）；顺带撤掉本文件自带那份只认缇的 v * dpi / 1440，换算全部交回 vb6_ScaleUserToPx / vb6_ScalePxToUser 并显式写纵/横） | FD13/FD14 推进 == TextHeight（缇、点）、FD16 = 72 点与 1 英寸同一行（蓝/红分居两个 x 窗口）；行为负控改回旧形三条全 False + 哨兵 S6/S7 四条假针逐条能红 | 已提交 `32b5eedf`，等门 |
+| 账 #237（§B67 = Print 从 vb6forms.c 搬进绘图家族：DC / 字体 / 色彩 / 单位四件都改问已有权威，推进量取刚写那串字的 extent（与 TextHeight 同一个量）；顺带撤掉本文件自带那份只认缇的 v * dpi / 1440，换算全部交回 vb6_ScaleUserToPx / vb6_ScalePxToUser 并显式写纵/横） | FD13/FD14 推进 == TextHeight（缇、点）、FD16 = 72 点与 1 英寸同一行（蓝/红分居两个 x 窗口）；行为负控改回旧形三条全 False + 哨兵 S6/S7 四条假针逐条能红 | 已过：门 #361（run 37421550422、head `d86b478c`、attempt 1）= 11 job 全 completed/success、非绿 0，wall 8m49s |
