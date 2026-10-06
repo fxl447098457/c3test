@@ -423,9 +423,13 @@ typedef struct vb6_ErrObject {
     int32_t number;
     BSTR description;
     BSTR source;
+    // Fix <vbeclipse> 2026-10-06: Err.LastDllError 快照 —— DLL 调用返回那一刻的
+    // GetLastError(), 由 vb6_ErrSetLastDllError 在调用点捕获; 访问 Err.LastDllError
+    // 返回此快照, 而非访问那一刻的 GetLastError() (中间 RTL/打印会重置 last-error)。
+    int32_t lastDllError;
 } vb6_ErrObject;
 
-static vb6_ErrObject vb6_err = {0, NULL, NULL};
+static vb6_ErrObject vb6_err = {0};
 
 // 全局错误处理状态 (由cgen生成的代码直接使用)
 int32_t vb6_err_resume_next = 0;
@@ -485,7 +489,16 @@ void vb6_RestoreErrState(void) {
 
 int32_t vb6_ErrNumber(void) { return vb6_err.number; }
 BSTR vb6_ErrDescription(void) { return vb6_err.description; }
-void vb6_ErrClear(void) { vb6_err.number = 0; vb6_err.description = NULL; vb6_err.source = NULL; }
+// Fix <vbeclipse> 2026-10-06: Err.Clear 清空 **全部** 属性 —— 含 LastDllError。
+// VB6/VBA 文档 "Clear Method (Err Object)" 的属性表逐项列出 Clear 后的取值:
+//   Description ""  HelpContext 0  HelpFile ""  LastDLLError 0  Number 0  Source ""
+// 且 Clear 会被 Resume / Exit Sub|Function|Property / On Error 语句**自动**调用
+// (本 RTL 里 Resume 已走 vb6_ErrClear, 见 cgen_jumps.cpp)。漏掉 lastDllError 会让
+// 快照跨过一次 Clear 存活, 与 VB6 不符。
+void vb6_ErrClear(void) {
+    vb6_err.number = 0; vb6_err.description = NULL; vb6_err.source = NULL;
+    vb6_err.lastDllError = 0;
+}
 
 // P21-27: Erl — 出错行号 (声明见 vb6rtl_class_com.h)
 // 行号嵌入机制未实现 (cgen 不生成 VB 行号标签), 按 VB6 语义返回 0 —— VB6 中源码
@@ -494,6 +507,10 @@ void vb6_ErrClear(void) { vb6_err.number = 0; vb6_err.description = NULL; vb6_er
 int32_t vb6_Erl(void) { return 0; }
 
 BSTR vb6_ErrSource(void) { return vb6_err.source; }
+
+// Fix <vbeclipse> 2026-10-06: Err.LastDllError 快照存取 (见 vb6_ErrObject.lastDllError)
+int32_t vb6_ErrLastDllError(void) { return vb6_err.lastDllError; }
+void vb6_ErrSetLastDllError(int32_t code) { vb6_err.lastDllError = code; }
 
 void vb6_ErrRaise(int32_t errNum, BSTR source, BSTR description) {
     vb6_err.number = errNum;
