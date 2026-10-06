@@ -924,6 +924,21 @@ asm 13/14、smoke 1/1；`Build C3.exe` 那片日志正文不含用例行（历�
 ① **语料 A/B 单变量**（BASE = 上一轮那台捕的 90 份）：`inputs=90 same=88 changed=2`，4 条差异行**全部**是那一枚处理器的`void*`→`int32_t`（声明 + 定义 × 两架构），**`oleguids.*` / `msdatasrc.*` 那一族真 COM 限定名（全语料 39 种 / 124 处）一条都不动** —— 这正是"只折该折的"要的证据。② 三处同源检具（52 枚 thunk）：thunk↔typedef 不符 0、thunk↔处理器不符 **1 → 0**，#222 那一族到此收平。③ 夹具 `tests/test_alias_spellings.bas` **两面都钉**：该折的折（`OLE_COLOR` 与 `stdole.OLE_COLOR` 同型）+ 不该折的不折（真外部类型 `StdFont` 两种拼法都留 `void*`），Absent 两条专防"把所有点号都剥掉"那种过折；BASE 那台跑同一份夹具 = 少一枚 needle 且命中一条 Absent ⇒ 真红。④ 真编译矩阵两架构：9 件工程 rc=0 出 exe（含被改到的 VBFlexGridDemo），ucProgressCircular 仍是那 1 条 C2065 裸名 `Count`。
 ⑤ 一条行尾读数的用处：`git ls-files --eol` 显示新夹具是 `i/lf`，一开始以为是漏了规矩，读了 `.gitattributes` 才确认**这就是本仓 `core.autocrlf=true` 下 .bas 的正常形态**（只有字节敏感的 ai/028 那几份标了 `-text`）⇒ 先读仓库自带的那份说明再动手"修"，别把正常项当缺陷。
 
+### B60 控件数组元素的 extender 属性读进 `&` 拼接 ⇒ 裸 int 进 BSTR 槽 = 两架构必崩（账 #229，**已提交 `7162cd2e`：门 待回填**）
+
+**症状按"属性名撞不撞内置函数名"分家，很误导**：同一枚数组元素，`& uArr(0).Left` 崩、`& uArr(0).Top` 只是绕远装箱、非数组的 `uPix.Left` 一切正常。三条读数放一起才看出来是**同一处**：类型推断里"`对象.成员` 的对象位是不是控件"这一问被抄成两份，一份只认 `控件名.属性`（P20-42 那条兜底前面），一份只认 `控件名(i).属性`（C29-1a 那份名单）。数组元素那一形从前一条前面掉下去，撞上"按成员**裸名**查模块符号" ⇒ `Left` 命中返回 String 的 VB 内置函数 ⇒ 判定为String ⇒ 拼接面不再套数值转换 ⇒ `vb6_BSTR_Concat(L"...", vb6_GetControlLeft(CtrlArr_GetAt(...)))`把 int32_t 当 BSTR 指针解引用。实测 ve_units 探针：x64 与 x86 都是 0xC0000005，且崩点就在那一行（`U-ARREXT-RAW` 整行不打印）。
+
+**改法**：两条对象形态收成**一个出口** `CCodeGen::ctrlTypeOfMemberObject(obj, outType)`（单枚 / 元素同一条规则，登记表 `knownFormControls_` 只这一处读），P20-42 那一处改问它，属性类型仍出自那张表 `controlPropType`。**残留没收干净，记在明处**：C29-1a 那一档（`kNumericFc` 13 条名字）仍是那张表通用段之外的一份自带名单，两处的名字集合重合 4 条 （left/top/width/height）—— 本轮不动它，因为要把 13 条逐条对上 `controlPropType` 的分型段，风险面比这一刀大。
+
+**判据（两头 + 负控）**：夹具 ve_units 加一头，`U-ARREXT-RAW l=3600 t=1320 w=1200 h=1140` 那一行**就是崩溃现场本身**（四枚读法全在 `&` 拼接里），另一行 `U-ARREXT=` 问四个变量等于设计期几何（3600/1320/1200/1140）—— 只钉 RAW 那一行会放过"值对不上"的修法，只钉判据行会放过崩溃。负控 = 用改前那台编译器跑**同一份**夹具 ⇒ 两架构 rc=0xC0000005 且 U-ARREXT 整行不出现；修后两架构 rc=0、两条读数逐字相同。
+
+**护栏**：语料 A/B（BASE = 上一轮 #228 之后那台捕的 90 份）⇒ `inputs=90 same=88 changed=2`，改到的只有 ve_units（两架构各一份），差异行**全是本轮夹具自身新增的 15 行**（纯插入，产品发码零改动）—— 这条读数的含义是：**全语料没有别的数组元素 extender 读法**，所以这一刀只能靠新夹具守，指望存量用例发现它是做梦。 真编译矩阵两架构：9 件工程 rc=0 出 exe（Charts 2020 全家 / czUI / VBFlexGridDemo / ve_units），ucProgressCircular 仍 1 条 C2065 裸名 Count；LabelPlus 那一条 MISSING 是它压根没有 .vbp（无效输入，不是红）。合并 github/dev 的 rev39（LoadRes* 一族）之后重跑同一份夹具：两档 15 条读数全 True。
+
+### B61 数组元素的 extender 属性**写后读回不是请求值**（缇→像素→缇 取整损失），VB6 存的是缇（账 #230，**已量到，未开工**）
+
+同一轮探针量出来的：`uArr(0).Left = 5000` 之后读回 **4995**（5000 缇 = 333.33 像素，控件位置只能落整数像素，读回时再乘回去就丢 5 缇）。VB6 的 `Left` 是**属性值**而不是窗口位置的投影，写什么读什么。同族的既有账是 #206（`Panels(i).Width` 交回请求值还是排版后的宽，单位口径待量）—— 两格合起来是一个问题：**控件几何属性到底以哪一侧为准**（存 VB 侧的值 vs 问窗口）。动它之前要先定口径（VB6 语义 = 存 VB 侧），并且别忘了 `Move` 与容器排版会改窗口而不改 VB 侧的值。
+
+
 
 ## C. 仍在生效的口径与工具事实（与本文档等长的一半价值在这里；完整版见记忆库）
 
@@ -1130,3 +1145,4 @@ asm 13/14、smoke 1/1；`Build C3.exe` 那片日志正文不含用例行（历�
 | 账 #226（§B57 = `vb6_UserControlDesc` **末尾**加 `click` 槽 + `uc_host_window.c` 在 mouseUp 转调之后补一次 + `cgen_form.cpp` 发 `ucHostClick` 封装与末槽） | 语料里六枚 Charts UC 的 `RaiseEvent Click` 全写在 `UserControl_Click`，而那条子过程此前没人调（desc 压根没有 click 槽；`dblClick` 槽也 0 调用者）；#222 把兜底 arm gate 掉之后不补落点就是"编得过但一条 Click 都收不到" | 真跑真手势 `U-ARRCLICK=True`（`U-ARRCLICK-RAW hw=True idx=2 hits=1 ret=0`，两档相同）；负控 = 注释掉那条转调重编 ⇒ `U-ARRCLICK=False` 现场 `idx=-1 hits=0` 而 Fire 那头照旧 True；哨兵 C1/C2/C3 钉末槽与转调顺序 | 已过门：#351（run 37386871868、head `482c3273`、attempt 1）= 11 job 全 completed/success、非绿 0 |
 | 账 #227（§B58 = `uc_host_window.c` 补 `case WM_LBUTTONDBLCLK` → `desc->dblClick` 一档 + 夹具第三头问 dbl/hits 两个计数 + 哨兵 C4 逐槽钉非零） | 与 #226 同形：desc 按位置填满 ⇒ 发码面永远看不出，`desc->` 读数里 dblClick 0 个调用者；六枚 UC 的 `RaiseEvent DblClick` 全静默（`CS_DBLCLKS` 早就立着） | 真跑两档 `U-ARRDBL=True`（`hw=True idx=2 dbl=1 hits=0 ret=0`）；负控 = 注释那条转调 ⇒ False 且现场 `idx=-1 dbl=0 hits=0`，另两头照旧 True；C4 假形状真红 2 条、还原 MD5 相同；92 份 emit 与上一轮逐份相同（纯 RTL 那一刀） | 门 #352（run 37388004707、head `50fb6d5f`、attempt 1）= 11 job 全绿、非绿 0，wall 8m41s |
 | 账 #228（§B59 = `mapTypeRef` 的别名档改问类型本名 `aliasName`（点号最后一段），符号那几档不动 + 夹具 `tests/test_alias_spellings.bas` 两面钉） | 同一 VB 类型两种拼法给出两种 C 类型：`OLE_COLOR`→`int32_t` 而同义的 `stdole.OLE_COLOR` 掉兜底 `void*`；实物 = `.ctl` 声明 `EditSetupWindow(... As OLE_COLOR)` 而容器写 `As stdole.OLE_COLOR` ⇒ 发送侧交 4 字节、处理器收 8 字节指针（x64 高 32 位是垃圾） | 单变量 A/B `inputs=90 same=88 changed=2`、4 条差异全是那一枚处理器的 `void*`→`int32_t`，真 COM 限定名一族（39 种 / 124 处）零改动；三处同源检具 52 枚 thunk 的两类不符 → 0/0；BASE 那台跑同一夹具真红（少一枚 needle + 命中一条 Absent）；9 件工程两架构 rc=0 | 门 #353 |
+| 账 #229（§B60 = 两条对象形态收成一处出口 `ctrlTypeOfMemberObject`，P20-42 的兜底改问它；类型仍出自 `controlPropType` 那张表） | `& uArr(0).Left` 判成 String（撞内置函数 Left）⇒ 拼接不套数值转换 ⇒ 裸 int 进 BSTR 槽 = 两架构 0xC0000005；同元素 `.Top` 只绕远装箱、非数组 `.Left` 正常 ⇒ 症状按名字分家很误导 | 夹具两头（RAW = 崩溃现场本身 + 四枚变量对上设计期几何）；BASE 那台跑同一份夹具两架构真崩、修后两架构 rc=0 读数相同；语料 A/B 90 份里只有 ve_units 变（纯夹具新增行，产品发码零改动） | 已提交 `7162cd2e`，门 待回填 |
