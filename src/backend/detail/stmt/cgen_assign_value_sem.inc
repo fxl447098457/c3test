@@ -421,6 +421,56 @@
                     }
                 }
             }
+            // Fix P24-10b(2): 目标是标量**数组元素**时 knownXxxVars_ 与
+            // IdentifierExpr 兜底都捡不到 —— 目标串是 `VB6_SA_AT(float, arr, i)`
+            // / `VB6_SA_ND_AT2(int32_t, ...)` 下标宏, 裸 COM 结果(RHS 为
+            // vb6_ComCallByDispid 等返回值 void* 承载 VARIANT*)原样赋给元素
+            // → C2440 "无法从 void* 转换为 float" (Charts2020 ucTreeMaps
+            // `Values(i) = cValues(i)` 实测, Values As Single())。
+            // 元素 C 类型按宏第一实参解析, 与下方 valueIsVariant 分支
+            // (账 038b-6/086 的 VB6_SA_AT(...) 判定) 同口径。
+            if (tgtCt124.empty()) {
+                static const std::string kSaAt   = "VB6_SA_AT(";
+                static const std::string kSaNdAt = "VB6_SA_ND_AT2(";
+                size_t elemPos = std::string::npos;
+                if (target.compare(0, kSaAt.size(), kSaAt) == 0) {
+                    elemPos = kSaAt.size();
+                } else if (target.compare(0, kSaNdAt.size(), kSaNdAt) == 0) {
+                    elemPos = kSaNdAt.size();
+                }
+                if (elemPos != std::string::npos) {
+                    size_t comma = target.find(',', elemPos);
+                    if (comma != std::string::npos) {
+                        std::string elemCt = target.substr(elemPos, comma - elemPos);
+                        size_t tb = elemCt.find_first_not_of(" \t");
+                        size_t te = elemCt.find_last_not_of(" \t");
+                        if (tb != std::string::npos)
+                            elemCt = elemCt.substr(tb, te - tb + 1);
+                        if (elemCt == "float" || elemCt == "double")
+                            tgtCt124 = "double";
+                        else if (elemCt == "BSTR")
+                            tgtCt124 = "BSTR";
+                        else if (elemCt == "int32_t" || elemCt == "int16_t"
+                                 || elemCt == "uint8_t" || elemCt == "LONG")
+                            tgtCt124 = "int32_t";
+                    }
+                }
+            }
+            // Fix P24-10b(2b): UDT 成员目标 (`me->mData.fValue = ...` 折算后
+            // 目标串带 `->` 点链) 同样不在 known 集合/裸标识符/SA_AT 三类里——
+            // 按 Fix 084n 同款 inferUdtFieldVb6Type 补问一次声明类型, 否则
+            // 裸 COM 结果原样赋给 float/double 字段 → C2440。
+            if (tgtCt124.empty()) {
+                Vb6Type udtT124 = inferUdtFieldVb6Type(node.target.get());
+                if (udtT124 == Vb6Type::String) tgtCt124 = "BSTR";
+                else if (udtT124 == Vb6Type::Long || udtT124 == Vb6Type::Integer
+                         || udtT124 == Vb6Type::Byte || udtT124 == Vb6Type::Boolean
+                         || udtT124 == Vb6Type::ULong || udtT124 == Vb6Type::LongPtr)
+                    tgtCt124 = "int32_t";
+                else if (udtT124 == Vb6Type::Double || udtT124 == Vb6Type::Single
+                         || udtT124 == Vb6Type::Currency || udtT124 == Vb6Type::Date)
+                    tgtCt124 = "double";
+            }
             if (tgtCt124 == "double" || tgtCt124 == "float") {
                 c_.emitLine(target + " = vb6_VariantToDouble(" + unwrapped + ");");
                 return;
