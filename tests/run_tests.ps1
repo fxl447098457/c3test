@@ -763,6 +763,21 @@ function Test-RtlResourceIds {
         $out | Select-Object -First 6 | ForEach-Object { Write-Host "  $_" }
     }
 }
+# 账 #240: RTL 的头与体必须同一张签名（参数个数）。本机那台 cl 在 C 模式下不诊断「实参过多」，
+# 头追不上体的缺陷只有 runner 上新 cl 才报 error C2197 ⇒ 判据不能靠真编，只能对着源码比。
+function Test-RtlProtoArity {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] rtl_proto_arity ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\check_rtl_proto_arity.ps1" 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        $out | Select-Object -First 8 | ForEach-Object { Write-Host "  $_" }
+    }
+}
 function Test-UcArrayEventSites {
     $script:total++
     Write-Host -NoNewline "  [STATIC] uc_array_event_sites ... "
@@ -4621,6 +4636,7 @@ if ($Category -in @("all", "compile")) {
     Test-DocHostAuthority
     Test-RtlNakedNames
     Test-RtlResourceIds
+    Test-RtlProtoArity
     Test-UcArrayEventSites
     Test-SubclassSlotSites
     Test-CtrlArrayMemberSites

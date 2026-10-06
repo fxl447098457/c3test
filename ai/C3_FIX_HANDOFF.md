@@ -1222,6 +1222,27 @@ S9.4 打标记那一路的 PictureBox 判据必须问表、且不许把成员名
 **开工顺序**：(1) 立 `canvas_drawing.hpp`，先把 `cls` / `print` 两档搬过去 —— 预期 A/B `changed=0`；(2) 把 `pset` / `circle` / `point` / `line` 的 Form 档搬进同一张表，withm 的 Form/Printer 段改成按表里的形状 packing —— 仍应 `changed=0`；(3) 语义层的折叠器上线（这一步才是 ① 真正修好的时刻：`Cls` / `PSet` / `Circle` 三形从 C2065 变成通），判据两头钉 = `tests/fdraw` 加一形真跑像素证人 + 一条发码针（"三形都不许再出现未声明裸调用，也不许出现 `vb6_ComCall`"）+ 负控用改前那台数 C2065 的条数。**③ 那一格必须另开**（裸 `Line (0,0)-(10,10)` 在 token 层就报错：`TokenKind::Line` 在 `parser_stmt.cpp:136` 只认 `Line Input`，而坐标对续画的吸收住在 `parser_expr_postfix.cpp:183-189` 且**只认 callee 是 MemberAccessExpr 且成员名是 line** ⇒ 语义层折叠救不了它，得动 parser；动 parser 时按 ①-c 那同一张表放行，不要再列第四份动词名单）。
 
 **两件别顺手做**：(a) 别把裸形折进 `cgen_file_io.cpp` 的 `isFormPrint` 那条 —— 那是 parser 认 `Print` 是**关键字**才有的路，`Cls` / `PSet` 不是关键字，照抄就要动词法 ⇒ 白多一份形状；(b) 折叠判据里"名字查不到符号"这一问必须留着 —— 用户自己写 `Sub PSet(x, y)` 时那枚过程**该**赢（VB6 的模块内作用域），无条件折就是"修一处静默、造一处调错函数"。
+### B71 门 #369/370 那两条红只有 runner 上现形 —— 本机那台 cl 压根不诊断「实参过多」（账 #240，**已出：门待回填**）
+
+**读数**：门 #369（run 37456420314、head `39d9b119`、branch dev）11 job 里两片红，各红一条且是同一枚夹具的两个架构 —— `Tests (vbp #2)` = `[VBP-BUILD] olecon ... FAIL rc=1 exe=False`（该片 PASS=54 FAIL=1 SKIP=1）、`Tests (vbp #3)` = `olecon_x86`（PASS=53 FAIL=1 SKIP=0）；其余九片全绿。**引入方式不是改了产品**：`39d9b119` 那轮新增 [STATIC] vbp_fixture_census 把五份"跟踪着却没登记"的 .vbp 逼出册登记成编译面用例，olecon 是其中一份（提交说明里写着本地 x64+x86 rc=0 且出 exe）。同批登记的 dbgdlg（就是那枚缺 `vb6_di_PageSetupDlgA` 桩、为它才补的夹具）在两片上都 PASS ⇒ 桩表与 RTL 内嵌在 CI 上是对上的，红只跟着 olecon 走。
+
+**已排除的六条**（每条都有实物，不是推理）：(1) 夹具没进仓 —— `git ls-files tests/olecon` 有 .frm+.vbp 两份，且目录里根本没有 .frx（那条 `oc_src.bin` 只在运行期读）；(2) CI 那台 C3.exe 与我本地这台不同 —— 把 run #369 的 `c3-exe` 工件下载下来真跑，x64 与 x86 都 rc=0 出 exe；(3) `-Incremental` —— `Test-VbpBuild` 压根不传 `--incremental`；(4) 架构/命令行差异 —— 本地按登记时的两条命令行（默认 x64 与 `--arch x86`）逐字复跑；(5) RTL 内嵌资源 id 对调（账 #225 那一族）—— 那样会全线 LNK2005×1225，不会只有一条红；(6) 源码本身依赖注册表里的 VB6 类型库 —— olecon 走的是仓内原生那一条（`driver_link.cpp:45` 每次都带 `vb6forms_olecon.c`，产物里全是 `vb6_OleCon_*`/`vb6_RegisterOleConClass`，没有查注册表的路）。
+
+**剩下的唯一差异是机器**：runner 用 vswhere -latest（VS2022 + 新 SDK），本机只有 VS2019 14.29.30133 + SDK 10.0.19041。红出现在 `runLinker` 那一段（只有那一支才打 `intermediates kept at`），而 cl/link 的整段输出只落在 `c3-error.log` —— 它既不被 `Test-VbpBuild` 打印，也不在 CI 的工件通配符（`output/**/*.out|*.err|*.txt|*.dat|scores.txt`）里 ⇒ **门上看不见病因**。
+
+**本刀（一）**（`tests/run_tests.ps1`，+23/-0，纯测试面）：`Show-BuildErrorLog` 接进 `Test-VbpBuild` 的失败分支，挑 `error C####` / `: error ` / `fatal error` / `LNK####` / `unresolved external` / `=== C3 Diagnostics` 那几行（最多 25），一条都不匹配时退回尾巴 15 行。判据形状来自本地实物：一枚刻意失败的工程（b475）日志 264 行，262 行是 RTL 的 C4819/C5105/C4028 警告，直接摊 40 行尾巴会把唯一的 `error C2063` 挤出去。
+
+**归因（门 #370 的 [diag] 读数，两片各 4 行，一模一样）**：`Form1.c(100): error C2197: 'void vb6_OleCon_Init(void *,const wchar_t *,int,int,int,int)': too many arguments for call` —— **4 行 = 10 个实参减 6 个形参**，一枚多余实参报一行。对着源码量：定义 `src/rtl/core/vb6forms/vb6forms_olecon.c:920` 是 10 参（`... autoActivate, autoVerbMenu, borderStyle, sourceDoc, sourceItem`），发码 `src/backend/detail/module/cgen_form_ctrl_style_apply.inc:970` 也发 10 个，只有 `vb6forms_prop_ctrl.h:334` 那份原型还停在 6 参 —— 体 grew 上去、头没跟。**为什么只有 runner 红**：VS2019 的 cl 在 C 模式下对「实参多于原型」根本不诊断（本机用 6 参原型 + 10 实参的最小夹具 `b481/t10.c` 实测 rc=0，只在类型对不上那一枚上给 warning C4024），新 cl 把它按 C 标准的约束报成 error ⇒ 本机真编两遍都编不出这个病，判据必须换形状。
+
+**修法（本刀二）**：`vb6forms_prop_ctrl.h` 的原型补齐成 10 参（+3/-1，只动头；`src/rtl/**` 改了要 touch `src/driver/c3rtl.rc` 再重编 C3.exe，否则内嵌的还是旧字节 —— 账 #156 那条）。运行面零改动：10 个实参本来就一直发着，本机那台把多余 4 枚照 cdecl 传过去了，所以旧产物行为不变；这一刀只是让**下一台编译器**也认。本地验：新 C3.exe 真编 olecon `=== x64 rc=0 OleCon.exe 465920 字节 / === x86 rc=0 OleCon.exe 414720 字节`（这两个数与登记那轮记录逐字对上）。
+
+**本刀（三）= 结构性哨兵**`scripts/check_rtl_proto_arity.ps1`（第 27 道 —— 本轮之前实测 26 份 check_*.ps1）+ `run_tests.ps1` 的 `[STATIC] rtl_proto_arity`：判据 = RTL 里**两头都有**的名字，声明侧参数个数集合必须等于定义侧（R1），外加 census 地板「文件数 >= 100 且比较对数 >= 900」（R2，实测 127 份 / 1237 对）—— 路径写错或正则被改坏时不许变成"绿着的空转"。两条设计约束记下：① **只有第 0 列开始的行算签名**，这一条同时把所有调用点排干净（调用都缩进在函数体里），② 只比**个数**不比类型拼写（头写 `const X*`、体写 `X*` 是合法的，硬比只造噪声），认不出的参数形态（数组/函数指针/默认值）跳过、不计入也不报红。**负控两头跑过**：把头削回 4 参 ⇒ rc=1 并点名 `vb6_OleCon_Init: 头 4 参 (…prop_ctrl.h:334) 对不上 体 10 参 (…vb6forms_olecon.c:920)`；改回 10 参 ⇒ rc=0（同一份 census 读数 1237 对）。
+
+**这一轮为什么不跑语料 A/B**：本刀只动一份 RTL 头，而 `--emit-c` 的产物里压根没有 RTL（记忆里那条老读数），C++ 源一行没动 ⇒ 编译器的发码逻辑同一个程序，只有内嵌的 RCDATA 变了。90 份 emit 的 BASE 那台已被覆盖，拿它比只会量到这一个月的**夹具漂移**（账 #239 那条教训：改了夹具再跑 A/B = 假归因），所以换成正对靶子的三面：
+① 发码实物 = 10 个实参（本地 keep-for-debug 的 `Form1.c:100` 逐字读过）；② 定义 = 10 参；③ 头补齐后 = 10 参 —— 三头同值，再加两架构真编 rc=0 出 exe。**这一族的边界（记下别越界）**：哨兵管"头追不上体"，管不到"发码递的实参个数 ≠ 体"。真要钉那一头得让**每个控件方法的发码形状**与 RTL 原型对账，那是把 `controlOneArgMethod` / `controlZeroArgMethod` 那几张表的签名也拖进对账面的一件大活（且只有新 cl 才看得见后果）—— 已另立 §B72 记着，本轮不顺手做。
+
+
+
 ## C. 仍在生效的口径与工具事实（与本文档等长的一半价值在这里；完整版见记忆库）
 
 - **子类化分层的槽位口径（账 #185 起）**：RTL 里**每一层**窗口子类用**自己**的窗口属性名存它下面那层的 wndproc ——
