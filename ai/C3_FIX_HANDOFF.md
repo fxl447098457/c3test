@@ -953,6 +953,22 @@ asm 13/14、smoke 1/1；`Build C3.exe` 那片日志正文不含用例行（历�
 **工具事实（踩过才记）**：python 的 **bytes** 字面量里写 "src" + 反斜杠 + "rtl" 时，那枚反斜杠-r 会被折成一枚真 CR 塞进文件 —— 于是那一行被劈成两半，PowerShell 报 ParserError 而**字节数看着完全正常**。此后校验 CRLF 文件必须同时数 `lone_lf` 与 `lone_cr`（只数 LF 会放过这一类）。
 
 
+### B63 Form 的绘图状态属性：写侧从没接线（C2106，压根编不出来）+ 读回恒 +1 + 笔位在一个属性名上挂两种编码（账 #233，**已提交 `0c971018`，等门**）
+
+**这一族的缺陷形状是"只接了一半"**。rev38（`9a420157`）新做了 Form/Printer 的绘图方法家族，读侧四条属性（`Me.CurrentX / CurrentY / ForeColor / DrawWidth`）硬编码在 `cgen_expr_member_form_builtin.inc` 的一份**侧表**里，注释写着"写侧走赋值语句自己的发射路径，在这里加写侧是不可达的死代码"—— 实测**恰好相反**：赋值发 C 时先问 `getControlPropWriteFn(Form, 名)`，没登记就退化成"把读函数当左值" ⇒ `Me.DrawWidth = 3` 发成 `vb6_Form_DrawGetWidth(vb6_hwnd_X) = 3;` ⇒ **C2106，两架构一条产物都出不来**。RTL 那四个 setter 其实**早就写好也声明好了**（`vb6forms_draw.h:51-54`），只差 cgen 那张表没登记 —— "备齐了入口却没人接"。
+
+**同一刀量到的另外两格**：① `vb6_DrawSetI` 存 `v+1` 而 `vb6_DrawGetI` 不减 ⇒ 写 3 读回 4，且 `PSet/Line` 的 Step 那一路每画一次多带 1（累积漂移）；② `VB6_CurrentX/Y` 这**一个窗口属性名**上挂着两套编码 —— 绘图家族 int32(+1)、`vb6_Form_Print`（`vb6forms.c:1541`）float 位图案 ⇒ `Print` 把笔位推到 46 之后 `PSet` 读到 779103232，反过来 `PSet` 之后 `Print` 永远打在 y=0；③ 顺带一格：`vb6_DrawScaleMode` 按"带 +1 的编码"读 `VB6_ScaleMode`，而它唯一的写者 `vb6_SetScaleMode` 存裸值（第三种编码撞同一个名）。
+
+**改法（三处都朝"一处权威 + 读写成对"收）**：① cgen 把 currentx/currenty/drawwidth **读写成对**登记进 `getControlPropReadFn` / `getControlPropWriteFn` 的 Form 档（与 #197 那条 `scalemode` 同一格口径），侧表整块删掉；② `vb6_DrawSetI` 存裸值，与 `vb6_DrawGetI` 同一套编码（"0 与没设过不可分辨"这一问改由各属性自己的缺省档兜：`DrawWidth` setter 先钳 >=1、`VB6_BackColor` 的写者本来就存裸值）；③ 笔位归一 —— 绘图家族内部 6 处读 / 8 处写改问那份 **float 出口**（`vb6_GetCurrentX/SetCurrentX`），并撤掉本文件那四个 int32 导出访问器；`vb6_DrawScaleMode` 改问 `vb6_WindowScaleModeSelf`。`forecolor` **刻意没动**：它早就由通用行答给 `vb6_GetControlForeColor`（侧表那一条从没命中过），与绘图家族自带的 `VB6_DrawForeColor` 是两份存储 —— 那一问另开账（见下）。
+
+**读数（改前 / 改后各一头）**：新夹具 `tests/fdraw/FDemo.vbp`（Form 绘图状态真跑，Timer 第一拍）—— 改前用上一台编译器跑**同一份夹具**：两架构 build-rc=1、4 条 C2106、产物出不来；改后两架构 rc=0、10 条读数全对（`FD04-RAW xy=300,130 dw=3`、`FD07-PIXEL=True` 画到就问得到、`FD08-neg=True raw=15790320` 旁边那点还是背景色、`FD09-AFTERPRINT=0,46` 即 Print 推进的数**绘图这一路读得到**）。FD09 那行的 y 与字号/DPI 有关 ⇒ 只打印不当判据，判据换成落在 30..3000 的那枚布尔（FD10）。
+
+**护栏**：语料 A/B（BASE = `C3_base231.exe`）⇒ 90 份 vbp + 250 份单文件 .bas = **340 份捕获 `changed=0`** —— 这条读数同时说明"全语料没有一处这样写"，也就是这一族能带着 C2106  shipped 的原因：**零覆盖**。所以补了哨兵 `scripts/check_form_draw_state.ps1`（S1 笔位窗口属性只许 `vb6forms_widget_prop.c` 一处 / S2 cgen 侧表那四个名回潮 = 0 / S3 三个名在读写两张表的 Form 档**成对** / S4 `vb6_DrawSetI` 那条 SetPropW 不许再 +1），四条各用一处假改动证明会红（S3 那条假改动改的正是本次的伤：write=0），跑完按 md5 还原。23 份 `check_*.ps1` 逐份绿；邻域真跑四枚夹具（fdrawstate / pclinedraw / dcsurf / ve_units）期望串零缺失；真编译矩阵 4 件全出 exe。
+
+**留给下一格（账 #224 剩下的）**：`vb6_DrawAcquire` 与 `vb6_ControlDrawDC` 是"拿 DC"这个决定的两份实现，而 `check_control_dc.ps1` 扫不到前者；`Print` 按像素推进、绘图按用户单位收 —— 单位口径那一问本刀刻意没碰；以及 `Me.ForeColor`（存 `VB6_ForeColor`）与画点用的 `VB6_DrawForeColor` 是两份色彩存储。
+
+
+
 
 
 ## C. 仍在生效的口径与工具事实（与本文档等长的一半价值在这里；完整版见记忆库）
@@ -1162,3 +1178,4 @@ asm 13/14、smoke 1/1；`Build C3.exe` 那片日志正文不含用例行（历�
 | 账 #228（§B59 = `mapTypeRef` 的别名档改问类型本名 `aliasName`（点号最后一段），符号那几档不动 + 夹具 `tests/test_alias_spellings.bas` 两面钉） | 同一 VB 类型两种拼法给出两种 C 类型：`OLE_COLOR`→`int32_t` 而同义的 `stdole.OLE_COLOR` 掉兜底 `void*`；实物 = `.ctl` 声明 `EditSetupWindow(... As OLE_COLOR)` 而容器写 `As stdole.OLE_COLOR` ⇒ 发送侧交 4 字节、处理器收 8 字节指针（x64 高 32 位是垃圾） | 单变量 A/B `inputs=90 same=88 changed=2`、4 条差异全是那一枚处理器的 `void*`→`int32_t`，真 COM 限定名一族（39 种 / 124 处）零改动；三处同源检具 52 枚 thunk 的两类不符 → 0/0；BASE 那台跑同一夹具真红（少一枚 needle + 命中一条 Absent）；9 件工程两架构 rc=0 | 门 #353 |
 | 账 #229（§B60 = 两条对象形态收成一处出口 `ctrlTypeOfMemberObject`，P20-42 的兜底改问它；类型仍出自 `controlPropType` 那张表） | `& uArr(0).Left` 判成 String（撞内置函数 Left）⇒ 拼接不套数值转换 ⇒ 裸 int 进 BSTR 槽 = 两架构 0xC0000005；同元素 `.Top` 只绕远装箱、非数组 `.Left` 正常 ⇒ 症状按名字分家很误导 | 夹具两头（RAW = 崩溃现场本身 + 四枚变量对上设计期几何）；BASE 那台跑同一份夹具两架构真崩、修后两架构 rc=0 读数相同；语料 A/B 90 份里只有 ve_units 变（纯夹具新增行，产品发码零改动） | 已过：门 #355（run 37398206822、head `187dc3e7`、attempt 1）= 11 job 全 completed/success、非绿 0，wall 10m16s |
 | 账 #231（§B62 = C29-1a/1b/C29-9 手抄在 `inferExprType` 里的三份名单（`kNumericFc`/`kStringFc3`/`kStrFcCd`+`kNumFcCd`）逐条搬进 `controlPropType` 那张表，问话只留一次且仍在 case 最前；`!= Unknown` 那道闸跟进表里） | 控件属性的**类型**两处各答，重合的四条靠"恰好一样"才没出事（#229 就是这道缝）；表外那 28 条名字散在推断函数里，改一处就把另一处的旧答案留在原地 | 这一刀**刻意零发码改动**：BASE 先冷存复捕证明与上一轮 90 份逐字节相同，改后 `inputs=90 changed=0 same=90`；新哨兵 `check_ctrl_prop_type_authority.ps1`（A1 旧名单回潮 0 / A2+A3 一处定义+恰好一个调用者 / A4 28 条名字逐条在表里 / A5 Unknown 闸 1 处）+ 三条负控各让一条红；22 份 check 全绿、真编译 4 件全出 exe | 已过：门 #356（run 37401361458、head `442da251`、attempt 1）= 11 job 全 completed/success、非绿 0，wall 10m23s |
+| 账 #233（§B63 = Form 的绘图状态属性收成"两张表成对登记 + 一份笔位存储 + 一套编码"：cgen 侧表删掉、`vb6_DrawSetI` 存裸值、笔位归 float 那一户、ScaleMode 改问 #197 那道权威） | `Me.DrawWidth = 3` 发成"把读函数当左值" ⇒ **C2106，两架构零产物**（写侧从没登记）；读回恒 +1（Step 累积漂）；`VB6_CurrentX` 一个属性名两套编码（绘图 int32 vs Print float 位图案）互读必错 | 新夹具 tests/fdraw 两头钉（写后读回 + 像素证人 + Print 之后读得到同一个数），BASE 那台跑同一份夹具真红；语料 A/B 340 份 changed=0（= 这一族零覆盖）；新哨兵 check_form_draw_state.ps1（S1 存储唯一 / S2 侧表不回潮 / S3 读写成对 / S4 编码对称）四条各证能红 | 等门（提交 `0c971018`） |
