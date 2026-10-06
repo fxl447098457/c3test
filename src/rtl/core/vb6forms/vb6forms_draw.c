@@ -7,8 +7,8 @@
 // COM dispatch 桩（cgen_expr_member_form_builtin.inc 末尾那段注释写明"运行时不可靠"），
 // 于是方法既不画也不报错。
 //
-// HDC 来源（关键）：**不新建 DC，沿用窗体自己的**。口径与
-// vb6_ControlDrawDC（vb6forms_ctrl.c:709）完全一致：
+// HDC 来源：**本文件不答这一问**。唯一口径在 vb6forms_ctrl.c 的 vb6_ControlDrawDC
+// （账 #185/#196 收口，账 #234 起这里改成问它，不再自己写第二份）：
 //     1. 先问窗口属性 VB6_PaintDC —— WM_PAINT 派发期宿主已经 BeginPaint 过了
 //        （cgen_form_wndproc_subclass.inc:384 与 create.inc:18 两处都 SetPropW 了），
 //        此时必须用**那一张**，另 GetDC 会画到别处、且 WM_PAINT 里 GetDC 是错用法；
@@ -28,6 +28,7 @@
 // （ScaleX/ScaleY/ScaleWidth/ScaleHeight），本文件只在 ScaleMode==vbPixels(3) 时
 // 直通像素、其余按缇换算，与 vb6_ScaleUserToPx 同款判据。
 #include "vb6forms.h"
+#include "vb6forms_internal.h"   // 账 #234: 取 DC 的唯一口径在那儿声明
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -52,17 +53,13 @@ static vb6_draw_dc_t vb6_DrawAcquire(void* hwndOrNull) {
     HWND hw = (HWND)hwndOrNull;
     out.dc = NULL;
     out.fromPaint = FALSE;
-    if (hw) {
-        HDC painting = (HDC)GetPropW(hw, L"VB6_PaintDC");
-        if (painting) {           // 优先用派发期那张 (见文件头口径 1)
-            out.dc = painting;
-            out.fromPaint = TRUE;
-            return out;
-        }
-    }
-    // Printer: 传进来的 hwndOrNull 是 NULL 之外的哨兵时另走 g_printerDC,
-    // 由 vb6_DrawAcquirePrinter 单独处理。
-    out.dc = hw ? GetDC(hw) : NULL;
+    // Printer 那一路传进来的不是 HWND (由 vb6_DrawAcquirePrinter 单独处理)。
+    if (!hw) return out;
+    // 账 #234: 「这枚窗口的绘图 DC 从哪儿来」不在本文件再答一遍 —— 派发期先问
+    // VB6_PaintDC、否则 GetDC、fromPaint 那张不 Release, 这一整条口径的唯一权威是
+    // vb6forms_ctrl.c 的 vb6_ControlDrawDC (账 #185/#196 收口)。以前这里另写了一份,
+    // 而 check_control_dc.ps1 的名单扫不到本文件 ⇒ census 上开了一个洞。
+    out.dc = vb6_ControlDrawDC(hw, &out.fromPaint);
     return out;
 }
 

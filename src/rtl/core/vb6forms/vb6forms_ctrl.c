@@ -706,7 +706,7 @@ LRESULT vb6_CtlColorBtnBrush(HWND child, HWND parent) {
 // 归还（见 vb6forms_picture_prop.c）。以前这条没处走：`.hDC` 只能撞
 // `cgen_expr_with.cpp` 那条 "hwnd.成员" 兜底 = C2039（真工程物证 ucTreeMaps PropPagFMR.c:74）。
 
-static HDC vb6_ControlDrawDC(HWND hw, BOOL* pFromPaint) {
+HDC vb6_ControlDrawDC(HWND hw, BOOL* pFromPaint) {
     HDC hdc = (HDC)GetPropW(hw, L"VB6_PaintDC");
     *pFromPaint = (hdc != NULL) ? TRUE : FALSE;
     if (hdc) return hdc;

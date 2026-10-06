@@ -106,4 +106,14 @@ static inline void vb6_wideToU8Buf(const wchar_t* w, char* out, int cap) {
     out[cap - 1] = 0;
 }
 
+// ============================================================
+// 绘图 DC 的唯一取法 (定义在 vb6forms_ctrl.c)。
+// 账 #185/#196 把「这枚窗口的绘图 DC 从哪儿来」收成一处: WM_PAINT 派发期用宿主
+// BeginPaint 后挂在窗口属性 VB6_PaintDC 上的那张, 否则 GetDC。*pFromPaint=TRUE 就
+// 意味着这张**不许** ReleaseDC (派发期那张由宿主的 EndPaint 收尾)。
+// 账 #234 起绘图方法家族 (vb6forms_draw.c 的 PSet/Line/Circle/Point/Cls) 也问它 ——
+// 那里原本自己又写了一份同样口径, 而 check_control_dc.ps1 的名单扫不到那个文件。
+// ============================================================
+HDC vb6_ControlDrawDC(HWND hw, BOOL* pFromPaint);
+
 #endif // VB6C3_VB6FORMS_INTERNAL_H

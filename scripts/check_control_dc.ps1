@@ -18,6 +18,8 @@
 #   D4  缓存槽位 VB6_ObjectDC: 写者(SetPropW) = 恰好 1, 归还(ReleaseDC) >= 1, 撤名(RemovePropW) >= 1
 #   D5  后端: 表里 `return "vb6_GetControlHDC";` = 恰好 2 (PictureBox 与 Form 各一条, 不给通用行),
 #       且 src/backend 里手拼发码 `"vb6_GetControlHDC(` = 0 (表交的是名字, 别处不许再拼一遍)
+#   D13 vb6forms_draw.c 不许自己开 DC (账 #234: 那份重复的"先问 VB6_PaintDC 否则 GetDC"撤掉了,
+#       它现在只许问权威 D1 那一处; D2 的调用点数因此从 5 涨到 6)
 #
 # 用法:  pwsh -File scripts\check_control_dc.ps1
 # 退出码: 0 = 全绿; 1 = 红
@@ -46,9 +48,9 @@ function Get-RtlLine {
 $rtl = @(Get-RtlLine)
 
 # ---- D1: 权威恰好一处, 两档都还在 ----
-$defs = @($rtl | Where-Object { $_.Text -match 'HDC\s+vb6_ControlDrawDC\s*\(' -and $_.Text -notmatch '=' })
+$defs = @($rtl | Where-Object { $_.Text -match 'HDC\s+vb6_ControlDrawDC\s*\(' -and $_.Text -notmatch '=' -and -not $_.Text.EndsWith(";") })
 if ($defs.Count -ne 1) {
-    $bad += ("D1 vb6_ControlDrawDC defined " + $defs.Count + " times (want exactly 1) -> " +
+    $bad += ("D1 vb6_ControlDrawDC defined " + $defs.Count + " times (want exactly 1; 账 #234 起它在 vb6forms_internal.h 里有一条以 ; 结尾的**声明**, 那不算第二处定义) -> " +
              (($defs | ForEach-Object { $_.File + ":" + $_.Line }) -join " | "))
 }
 if (Test-Path -LiteralPath $ctrl) {
@@ -69,12 +71,18 @@ if (Test-Path -LiteralPath $ctrl) {
 }
 
 # ---- D2: 调用点形状与条数 ----
-# 5 处: Cls / Print / GetControlHDC / ControlMeasureTextPx / ControlLine
+# 6 处: Cls / Print / GetControlHDC / ControlMeasureTextPx / ControlLine
+#        + vb6forms_draw.c 的 vb6_DrawAcquire (账 #234: 绘图方法家族 PSet/Line/Circle/Point/Cls
+#        整族都从这一条拿, 不再自己写第二份口径)
 # （账 #196 第二条把文字量也接到同一处口径上；账 #221 把 Line 接进来 —— 绘图面每一型都只从这一处拿 DC）
+$acq = @($rtl | Where-Object { $_.File -eq "vb6forms_draw.c" -and $_.Text -match 'vb6_ControlDrawDC\s*\(' })
+if ($acq.Count -lt 1) {
+    $bad += "D2 vb6forms_draw.c no longer goes through the authority (账 #234 那一处合成又分家了)"
+}
 $calls = @($rtl | Where-Object { $_.Text.Contains("= vb6_ControlDrawDC(") })
-if ($calls.Count -ne 5) {
+if ($calls.Count -ne 6) {
     $bad += ("D2 call sites of the drawing-DC authority = " + $calls.Count +
-             " (want exactly 5: Cls / Print / GetControlHDC / ControlMeasureTextPx / ControlLine) -> " +
+             " (want exactly 6: Cls / Print / GetControlHDC / ControlMeasureTextPx / ControlLine / draw-acquire) -> " +
              (($calls | ForEach-Object { $_.File + ":" + $_.Line }) -join " | "))
 }
 
@@ -356,6 +364,24 @@ if (-not $scBlk.Success) {
         $bad += "D12 表长了通用行 (List1.ScaleX 也答一个数 = 伪造成功)"
     }
 }
+
+# ---- D13: 绘图方法家族不许再自己开 DC (账 #234) ----
+# rev38 在 vb6forms_draw.c 里把"派发期先问 VB6_PaintDC、否则 GetDC"这整条口径又写了一份,
+# 而本哨兵的名单原本只盯 vb6forms_ctrl.c ⇒ census 上开了个洞 (两份实现同口径, 但一改就分家)。
+# 现在那个文件只许**问权威**: 行内不许出现 GetDC( / GetPropW(...VB6_PaintDC)。
+$drawRel = "src\rtl\core\vb6forms\vb6forms_draw.c"
+$draw = Join-Path $root $drawRel
+if (Test-Path -LiteralPath $draw) {
+    $ln = 0
+    foreach ($line in ([System.IO.File]::ReadAllText($draw) -split "`r?`n")) {
+        $ln++
+        $t = $line.Trim()
+        if ($t.StartsWith("//")) { continue }
+        if ($t.Contains("GetDC(") -or ($t.Contains("GetPropW") -and $t.Contains('L"VB6_PaintDC"'))) {
+            $bad += ("D13 " + $drawRel + ":" + $ln + " opens a DC itself again (" + $t.Substring(0, [Math]::Min(60, $t.Length)) + ")")
+        }
+    }
+} else { $bad += ("D13 missing " + $drawRel) }
 
 if ($bad.Count -eq 0) {
     Write-Host ("PASS Control drawing DC: 定义 " + $defs.Count + " / 调用 " + $calls.Count +
