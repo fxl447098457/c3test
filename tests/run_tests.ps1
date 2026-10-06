@@ -835,6 +835,20 @@ function Test-FormDrawState {
         $out | Select-Object -First 6 | ForEach-Object { Write-Host "  $_" }
     }
 }
+function Test-FixtureTimerClose {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] fixture_timer_close ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\check_fixture_timer_close.ps1" 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        $out | Select-Object -First 6 | ForEach-Object { Write-Host "  $_" }
+    }
+}
+
 
 function Test-EventHandlerNames {
     $script:total++
@@ -4450,6 +4464,7 @@ if ($Category -in @("all", "compile")) {
     Test-CtrlArrayMemberSites
     Test-CtrlPropTypeAuthority
     Test-FormDrawState
+    Test-FixtureTimerClose
     Test-EventHandlerNames
     Test-UcInstanceExit
 

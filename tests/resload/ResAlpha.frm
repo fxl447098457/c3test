@@ -44,13 +44,17 @@ Private Sub Form_Load()
 End Sub
 
 Private Sub tChk_Timer()
-    If done Then Exit Sub
-    If imgA.Picture Is Nothing Then Exit Sub
-    done = True
-    ' 断言以发码形状为准 (透明渲染的正确性由人工/截图核验):
-    ' PICSET=True 即 Picture 已挂上、Image 子类接管绘制; 像素采样受
-    ' DPI 虚拟化/窗口位置干扰, 不适合做无头门禁断言。
-    Debug.Print "PAINTED=" & (Not (imgA.Picture Is Nothing))
+    ' FIX 236: the close used to sit BEHIND the done-guard. Once done was set, every
+    ' later tick returned before the counter got its increment, so the threshold was
+    ' never reached and the exe ran until the harness killed it (CI: run timeout 60s).
+    ' The counter now advances first, so every path is bounded.
     tick = tick + 1
-    If tick >= 30 Then Unload Me
+    If imgA.Picture Is Nothing Then
+        If tick >= 30 Then Unload Me
+        Exit Sub
+    End If
+    If done Then Exit Sub
+    done = True
+    Debug.Print "PAINTED=" & (Not (imgA.Picture Is Nothing))
+    Unload Me
 End Sub
