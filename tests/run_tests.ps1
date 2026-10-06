@@ -3642,6 +3642,11 @@ if ($Category -in @("all", "run", "vbp")) {
         "FD13-printadvance-twips=True", "FD14-printadvance-points=True",
         "FD15-RAW", "sm0=1 sm1=2",
         "FD16-paint-units=True", "FD17-RAW",
+        # 232-2: the same two canvas entries with an explicit receiver (Me.Cls / Me.Print).
+        # Before they compiled to a COM no-op on the form HWND, so the ink survived a Cls
+        # and the pen never moved. Each judge is ink + pen, so a fake "did something"
+        # cannot win it.
+        "FD18-mecls=True", "FD19-mepaint=True", "FD20-mepen=True",
         "FD-DONE")
     Test-Vbp "fdrawstate" "$Tests\fdraw\FDemo.vbp" $fdrawExpected
     Test-Vbp "fdrawstate_x86" "$Tests\fdraw\FDemo.vbp" $fdrawExpected -Arch "x86"
@@ -5071,6 +5076,20 @@ if ($Category -in @("all", "syntax")) {
         "vb6_VarCmpEq(&gV, &gD)",
         "vb6_VarCmpGt(&v, &d)",
         "vb6_VarCmpLt(&d, &v)")
+
+    # 账 #232② + 账 #224⑤: 窗体绘图家族的发码形状针 —— 语料里那一族的**每一条**都必须
+    # 落在 RTL 真出口上，一条都不许留在 COM 兜底里（兜底对一枚 HWND 发 Invoke = 编得过、
+    # 链接过、跑起来一笔不画，正是本线踩过四次的同一味）。Absent 面把整条兜底钉死：
+    # 这一份产物里压根不该出现针对窗体槽的 ComCall / ComGetObjectProp，也不该出现 ComCallObject。
+    Test-CodegenNote "form_canvas_family" @("$Tests\fdraw\FDemo.vbp") @(
+        "vb6_ControlCls((void*)vb6_hwnd_FDForm);  /* Form.Cls */",
+        "vb6_ControlPrint((void*)vb6_hwnd_FDForm,",
+        "vb6_Form_Print(vb6_hwnd_FDForm",
+        "vb6_Form_PSet((void*)vb6_hwnd_FDForm",
+        "vb6_ControlTextHeight((void*)vb6_hwnd_FDForm") @(
+        "vb6_ComCall(vb6_hwnd_FDForm",
+        "vb6_ComGetObjectProp(vb6_hwnd_FDForm",
+        "vb6_ComCallObject(")
 
     Test-CodegenNote "alias_type_spelling_same_ctype" @("$Tests\test_alias_spellings.bas") @(
         "void vb6_BareColor(int32_t c);",

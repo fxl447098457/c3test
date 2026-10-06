@@ -1114,7 +1114,7 @@ Print 之后笔位推进 `0 → 13`（= 同一枚控件自己答的 `TextHeight`
 `vb6_ComCall(vb6_hwnd_<Form>, L"Cls", NULL, 0)`（emit 物证 `.build/b373_emit_base.c:327`），运行期 no-op。
 所以家族那份 `vb6_Form_Cls` 今天只被控件那户到达；窗体自己的 Cls 何时能跑，等 #232 那条前端出口。
 
-### B70 窗体绘图语句的"裸形"与 "Me." 形各缺一条路（账 #232，**已量完，未开工**）
+### B70 窗体绘图语句的"裸形"与 "Me." 形各缺一条路（账 #232，**② 已出等门；①③ 未开工**）
 
 探针 `.build/b433_shapes.txt`（同一枚 `.frm` 每次只放一条语句，`--emit-c` 看发码；工具 `.build/b431_232probe.py` 那套形状表）。**七形七样**（窗体上）：
 
@@ -1140,6 +1140,62 @@ Print 之后笔位推进 `0 → 13`（= 同一枚控件自己答的 `TextHeight`
 `cgen_file_io.cpp:83-93` 那条"无文件号的 Print 语句 = 窗体 Print"的改写，而 `Me.Print` 是成员调用形 ⇒
 表里没有 `print` 这一档 ⇒ 落 COM 兜底。所以 ② 的最小形状 = 让这两种写法进到**已有**的那条分派，
 而不是新增第二份答案。
+
+**② 已出（本刀，等门）—— 先订正上一轮那条读码结论**：窗体自己那枚接收者**本来就认得**，
+`cgen_form_ctrl_registry.inc:10` 把窗体名也登记进 `knownFormControls_`（类型 Form），
+所以缺的不是"入口"而是**名字表少两档**。证据 = 同一条 `Me.` 上 `Me.TextHeight("AB")` 一直是通的
+（`vb6_ControlTextHeight((void*)vb6_hwnd_<窗体>, …)`，走的正是 `formCtrlSlot` + 表那两条码头），
+只有 `print` / `cls` 因为不在表里、而三处画布码头又各自硬编码 PictureBox 才落进兜底。
+
+**语料先扫（按上面定的规矩）**：`Me.Cls` 0 处、`Me.Print` 0 处、裸 `Cls` / `PSet` / `Circle` 0 处、
+`PictureN.Cls` 5 处（本来就通）⇒ 这一格是**潜伏缺陷**（编得过、跑得起、一笔不画那一族，本线第四次），
+不是当前的编译阻塞；"编不过"那两格是 ① 与 ③。
+
+**十三形实测**（探针 `.build/b434probe/Me232Form.frm`：同一份 .frm 把两接收者 × 两成员 × 括号/实参/裸形全摆上，
+`--emit-c` 逐行看，比上一轮"一次一条"更快也更硬）。改前只有两条坏：
+`Me.Cls` → `vb6_ComCall(vb6_hwnd_Me232Form, L"Cls", NULL, 0)`、
+`Me.Print "AB"` → `vb6_ComCallObject(vb6_ComGetObjectProp(同一 HWND, L"Print"), L"Item", …)`；
+改后十三形全部落到真出口，`Me.Cls` 与 `Me.Cls()` 从此给**同一条** `vb6_ControlCls((void*)vb6_hwnd_X);  /* Form.Cls */`，
+`Me.Print "AB"` / `Me.Print ("CD")` → `vb6_ControlPrint(…, BSTR)`、裸 `Me.Print` → `(…, 0)`（VB6 的空行），
+而 `Pic1.Cls` / `Pic1.Print "GH"` 两形**连尾注释都逐字节没动**（`/* PictureBox.Cls */` 那一份原样保住）。
+
+**收成一处（三条码头 + 一处打标记问同一张表）**：
+① 表 `controlCanvasMethod` 加 `cls` / `print` 两档，接收者给 `Form` 与 `PictureBox`；`line` 那一档**仍只给 PictureBox**
+—— Form 的 Line 是 12 参签名 `vb6_Form_Line`（带 Step 相对位），签名不同不能并表，那是账 #224 剩下的口径，别顺手并进去。
+② 表达式码头（`cgen_expr_call_callee_withm.inc` 原 Fix 185 那块）改成 `formCtrlSlot` + 表驱动，实参形状按成员各自签名拼
+（cls 一条不交、print 交第 0 条、缺实参交 0 = 空行）；同文件下面的 Line 码头，接收者折开也改问 `formCtrlSlot`
+（它以前自己查 `knownFormControls_`，只认裸小写名那一形态）。
+③ 语句码头（`stmt/cgen_call.cpp` 原 PictureBox 硬编码那块）同样改问表 + `formCtrlSlot`。
+④ 打标记那一路（`cgen_expr_member_form_builtin.inc:401`）撤掉 `print` / `cls` 名单，只问表 —— 表加一档它自动跟着长
+（这一处以前正是"表加一档、它漏一档"的洞）。
+⑤ 撤掉重复的答案：Form/Printer 绘图段里 `cls` 的 **Form 那一支删掉**（画布两档已由表先接走），只留 Printer ——
+`Printer.Cls` 在 VB6 是"结束文档"(`vb6_Printer_EndDoc`)，不是清画布。
+
+**判据三面**：
+① 真跑夹具 `tests/fdraw/FDForm.frm` 加 FD18 / FD19 / FD20，每条两头钉（墨 + 笔位）。
+FD20 要写成**增量**（`Me.CurrentY - penBefore` 对 `TextHeight` 取等）：第一版写成 `Me.CurrentY = thA`，
+在改前那台上因为继承上一行裸 `Print` 的推进而**假绿**（读数 16,16）—— 判据钉错方向的现场，留着当反面教材。
+BASE 那台同一份夹具 = 两架构三条**全 False**（`FD18 raw=3,-1` / `FD19 raw=-1` / `FD20 raw=0,16`），
+新台两架构三条全 True（`FD18 raw=3,-1` 的两头由笔位那一半负责红：改前 Cls 没跑，但墨被窗口自己重画抹掉过，
+所以只看墨会读数一样 —— 这也是为什么每条都要两头）。
+② 发码针 `Test-CodegenNote "form_canvas_family"`（顺带把账 #224 欠的 ⑤ 一次还掉）：五枚必须出现 + 三枚必须不出现
+（`vb6_ComCall(vb6_hwnd_FDForm` / `vb6_ComGetObjectProp(vb6_hwnd_FDForm` / `vb6_ComCallObject(`）；
+BASE 产物实测"缺 2 枚 + 命中 3 枚各 1"⇒ 两头都真能红。
+③ 哨兵 `scripts/check_form_draw_state.ps1` 加 S9 四条：S9.1 三个 C 出口名只许住在表文件里（任何码头自己拼名字 = 又一份答案）；
+S9.2 表里 `cls` / `print` / `line` 三档与 `Form` / `PictureBox` 两档接收者齐；S9.3 调用点恰好 7（定义 1 + 声明 1 + 码头 5）；
+S9.4 打标记那一路的 PictureBox 判据必须问表、且不许把成员名抄成名单。**只看代码行**（S8 那条"注释里出现名字把判据读哑"
+的教训已经交过学费）。两条假改动各证红：码头自己拼 `vb6_ControlCls` → S9.1 + S9.3 双红；名单抄回打标记处 → S9.4 红。
+
+**护栏**：语料 A/B `inputs=90 changed=0 same=90` —— 这一刀只改"谁能答"、不改"答什么"，所以**逐字节相同**才是对的判据
+（与账 #231 / #234 同一口径）；25 道 [STATIC] 全跑一遍 rc=0（门 #344 那条"往一族加站点要同时跑别人的名单哨兵"的教训）。
+
+**边界与下一格**：`With pic : .Cls` / `.Print "x"` 仍没接 —— With 那条码头问的是 `controlZeroArgMethod` /
+`controlOneArgMethod` 两张**按实参个数**分的表，画布家族不住在那里；要接就把 With 码头也改问这张表
+（与账 #224 的 ③「With 里带实参那形没接」是同一个问题，一起定口径）。剩下两格照旧：① 裸 `Cls` / `PSet` / `Circle`
+发成未声明的 C 调用（C2065；语料 0 处，但先于 ③ 做 —— `Print` 那条"窗体上下文语句"改写已有先例可以照）；
+③ 裸 `Line` 两形在 parser 就拒。另记一条形状：`Print` 现在有两个入口名 —— 语句形 `Print "x"` 由 parser 打了
+`isFormPrint` 直调 `vb6_Form_Print`，画布形走表给的 `vb6_ControlPrint`；账 #239 之后这两枚是**同一份身体**
+（前者转调后者），等 ① 那一刀把语句形也收进同一张表时一起归一。
 ## C. 仍在生效的口径与工具事实（与本文档等长的一半价值在这里；完整版见记忆库）
 
 - **子类化分层的槽位口径（账 #185 起）**：RTL 里**每一层**窗口子类用**自己**的窗口属性名存它下面那层的 wndproc ——
@@ -1354,3 +1410,4 @@ Print 之后笔位推进 `0 → 13`（= 同一枚控件自己答的 `TextHeight`
 | 账 #237（§B67 = Print 从 vb6forms.c 搬进绘图家族：DC / 字体 / 色彩 / 单位四件都改问已有权威，推进量取刚写那串字的 extent（与 TextHeight 同一个量）；顺带撤掉本文件自带那份只认缇的 v * dpi / 1440，换算全部交回 vb6_ScaleUserToPx / vb6_ScalePxToUser 并显式写纵/横） | FD13/FD14 推进 == TextHeight（缇、点）、FD16 = 72 点与 1 英寸同一行（蓝/红分居两个 x 窗口）；行为负控改回旧形三条全 False + 哨兵 S6/S7 四条假针逐条能红 | 已过：门 #361（run 37421550422、head `d86b478c`、attempt 1）= 11 job 全 completed/success、非绿 0，wall 8m49s |
 | 账 #239（§B69 = 控件那户 `Print` / `Cls` 撤掉自存的像素笔位 `VB6_PrintX` / `VB6_PrintY`，两条函数改成只转调家族的 `vb6_Form_Print` / `vb6_Form_Cls`；家族那份 `Cls` 的背景色改问带 Fix 187 哨兵那份唯一出口 `vb6_GetControlBackColor`） | `pic.Print` 既不读也不动 `pic.CurrentX/Y`（实测推进 0 而同一枚控件答 `TextHeight` = 13、笔位放 60 而墨落在第 2 行、`Cls` 之后 `CurrentY` 仍是 400）= #237 在 Form 侧刚拆掉的「一份存储两种单位」在控件侧重演；而合并之后若不换色彩出口，控件那户 `Cls` 会从实测 0 变成按钮面 | `tests/pcline` 加一枚 picP + 五条 needle（PL08-PEN / PL09-CLSPEN / PL10-TWIPADV / PL11-BLACKCLS / PL12-STACK + 两条 RAW）两架构真跑；BASE 那台跑同一份夹具真红（Q01 推进 0 / Q03 Cls 后仍 400 / Q05 笔位不动）；三处**行为**负控各让自己那一条红（推进归零 → 08/10/12、像素当用户单位存回 → 只 10、色彩自己答 → 只 11）；哨兵 `check_form_draw_state.ps1` 新 S8 四条假针各证红（属性名回潮 0 / 两条码头必须转调 / 定义恰好一次且住在家族里 / `Cls` 只许问那条色彩出口，且**只看代码行** —— 先前只查体内文本时注释把判据顶成假绿）；`check_control_dc.ps1` 的 D2 因这一刀 6→4（哨兵先响，归因写进规则注释）；24 份 check 全绿 + 邻域 fdraw / pbsub / dcsurf 两架构零缺失；零后端改动 ⇒ 发码逐字节不可能变（RTL 是 exe 的资源），判据只能落在真跑那一头 | 已过：门 #364（run 37429327451、head `e5c66e4d`、branch dev、attempt 1）= 11 job 全 completed/success、非绿 0，wall 12m40s |
 | 账 #238（§B68 = `vb6_VarCmp*(&A,&B)` 那四个取址点以前按"名字形状像左值"决定能不能 &，现在全问一处判据 `CCodeGen::cmpOperandMayTakeAddr`（回答只来自 `isDefinitelyVariantExpr`：声明那几张表 + 符号表），不许取址就走 `_Generic vb6_VariantFromValue` 装箱） | `Dim d As Double` 的地址被当 `vb6_VARIANT*` 递进 RTL ⇒ 按 VARIANT 布局读一个 8 字节标量：**相等的两个数答 False**（VC01..05 / VC10 / VC15 七条实测，两架构一致），且读过头；编译、运行、诊断都不响 = 静默给错答案那一族（#123 的 Byte 是同一形状的另一档）。FD13/FD14 当初因此只能写成 `Abs(a-b)<0.001` | 新夹具 `tests/test_varcmp_scalar.bas` 16 条两架构真跑（每条相等配一条近似不等，Long/String 两条本来通的腿也钉住）+ BASE 同一份夹具 7 条 False + 发码针 `varcmp_scalar_boxed`（必须装箱 / 五条旧形状必须不出现）+ FD13/FD14 换回直接相等 + 新哨兵 `check_variant_cmp_boxing.ps1`（第 25 道 [STATIC]，V1 一处判据且真问权威 / V2 五处问话 / V3 每条 & 拼接都被问过 + 旧形状禁回潮）三条假改动各证红；语料 A/B inputs=90 changed=2 逐行归因完（未归因 0），唯一真形状变化在编不过的 ucProgressCircular 裸名 `Count` ⇒ 能编过的语料零暴露；邻域 fdraw / pcline / bool_display / datelit 两架构零回归（后两条输出与 BASE 逐行相同）。附带订正：上一轮那句"暴露面 0 处"只统计了找得到声明的名字，漏了未声明裸名那一形 | 已过：门 #365（run 37436391539、head `9b9c1551`、branch dev、attempt 1）= 11 job 全 completed/success、非绿 0，wall 9m40s |
+| 账 #232 ②（§B70 = `Me.Cls` 落 `vb6_ComCall(hwnd, L"Cls")`、`Me.Print "AB"` 落"取 Print 属性 + Item 下标"，两形都编得过、跑得起、一笔不画） | 画布家族的名字被答了四遍（成员侧名单 + 表达式码头 + 语句码头 + Form/Printer 段），而每一处都只认 PictureBox。**订正**：窗体自己那枚接收者其实认得（`cgen_form_ctrl_registry.inc:10` 把窗体名也登记进 knownFormControls_，类型 Form），缺的是 `controlCanvasMethod` 里 `cls` / `print` 那两档 ⇒ 上一轮"零实参的对象.方法在语句位置压根没进分派"那条结论只对了一半。语料 `Me.Cls` / `Me.Print` 各 0 处 ⇒ 潜伏缺陷；与账 #143 / #149 / #221 同一味（落 COM 兜底 = 静默空转，本线第四次） | 表加两档（Form + PictureBox；`line` 刻意仍只给 PictureBox —— Form 那一形是 12 参签名 `vb6_Form_Line`，签名不同不并表）+ 三条码头与打标记处全改问这张表与 `formCtrlSlot` + 撤掉 Form/Printer 段里 `cls` 的 Form 那一支（只留 Printer=EndDoc）。判据三面：①FDForm 加 FD18/19/20（墨 + 笔位两头钉，FD20 必须量**增量**，写成 `Me.CurrentY = thA` 会在改前那台因为继承上一行 Print 的推进而假绿）= BASE 两架构三条全 False、新台两架构全 True；②发码针 `form_canvas_family` 五必须出现 + 三必须不出现（BASE 缺 2 命中 3 ⇒ 两头能红），顺带还掉账 #224 的 ⑤；③`check_form_draw_state.ps1` 新 S9 四条（名字只在表里 / 三档两接收者齐 / 调用点恰好 7 / 打标记处必须问表），只看代码行，两条假改动各证红。护栏 = 语料 A/B inputs=90 **changed=0 / same=90**（只改谁能答）+ 25 道 [STATIC] 全绿 | 等门 |
