@@ -979,7 +979,7 @@ asm 13/14、smoke 1/1；`Build C3.exe` 那片日志正文不含用例行（历�
 **读数**：23 份 `check_*.ps1` 全绿；邻域真跑四枚夹具（`fdrawstate` 含 FD07 像素证人 / `pclinedraw` / `dcsurf` / `ve_units`）28 条 needle **零缺失**；语料 emit A/B 90 份 `changed=0`（RTL 改动天然不进 `--emit-c`，这条只证前端没被碰到，不当行为护栏）；真编译矩阵 4 件全出 exe、诊断 0 条。踩到的一次真红：第一次行切片把 `vb6_DrawAcquire` 的收尾 `}` 一起替换掉了 ⇒ C2143/C2065 一片、四枚夹具 build-rc=1 —— 又是"哨兵只扫源码抓不到、必须真编译"那一族，插入/替换的边界必须是**整条语句**。
 
 
-### B65 画笔色有**两份存储**从不汇合 —— `Me.ForeColor = vbRed` 之后不带颜色的 `PSet` 画出来是黑（账 #235，**已提交 `2ab90321`，等门**）
+### B65 画笔色有**两份存储**从不汇合 —— `Me.ForeColor = vbRed` 之后不带颜色的 `PSet` 画出来是黑（账 #235，**已出：已过：门 #360（run 37415128806、head `ea8dc7c9`、branch dev、attempt 1）= 11 job 全 completed/success、非绿 0，wall 8m31s**）
 
 **读数是这格的起点**（`.build/b308probe`，两架构一致）：`Me.ForeColor = vbRed` 之后，**不带颜色参数的** `Me.PSet` 落笔是 **0（黑）**，而 `Me.PSet (x,y), vbRed` 是 255。成因不是"写侧没接"（那是 #233），而是**同一件事有两份存储**：`Me.ForeColor` 走通用行 → `vb6_SetControlForeColor`（窗口属性 `VB6_ForeColor`），而绘图家族取色走私有的 `vb6_DrawForeColor`（另一枚属性 `VB6_DrawForeColor`，自带一套 +1/-1）。**控件那侧一直只有一份** —— `vb6forms_ctrl.c` 的 Line(:800) / Print(:854) / 子控件回显(:642) 全问 `vb6_GetControlForeColor` ⇒ 这一刀是把 Form 绘图**对齐到已经正确的那一份**，不是新立口径。
 
@@ -999,7 +999,7 @@ asm 13/14、smoke 1/1；`Build C3.exe` 那片日志正文不含用例行（历�
 
 
 
-### B66 门 #359 那条红不是产品坏了 —— 夹具的收线坐在自己那道闸后面（账 #236，**已提交 `ffcb52f7`，等门**）
+### B66 门 #359 那条红不是产品坏了 —— 夹具的收线坐在自己那道闸后面（账 #236，**已出：已过：门 #360（run 37415128806、head `ea8dc7c9`、branch dev、attempt 1）= 11 job 全 completed/success、非绿 0，wall 8m31s**）
 
 症状只有半条：`Tests (vbp #4)` 退 1，别的十片全绿。拿不到 job 日志（PAT 没有 actions:read），
 但**工件（artifact）拿得到** —— `actions/artifacts/<id>/zip` 会先 302 到签名 URL，跟过去时**必须把
@@ -1232,5 +1232,5 @@ core.autocrlf 是 CRLF —— 按 `
 | 账 #231（§B62 = C29-1a/1b/C29-9 手抄在 `inferExprType` 里的三份名单（`kNumericFc`/`kStringFc3`/`kStrFcCd`+`kNumFcCd`）逐条搬进 `controlPropType` 那张表，问话只留一次且仍在 case 最前；`!= Unknown` 那道闸跟进表里） | 控件属性的**类型**两处各答，重合的四条靠"恰好一样"才没出事（#229 就是这道缝）；表外那 28 条名字散在推断函数里，改一处就把另一处的旧答案留在原地 | 这一刀**刻意零发码改动**：BASE 先冷存复捕证明与上一轮 90 份逐字节相同，改后 `inputs=90 changed=0 same=90`；新哨兵 `check_ctrl_prop_type_authority.ps1`（A1 旧名单回潮 0 / A2+A3 一处定义+恰好一个调用者 / A4 28 条名字逐条在表里 / A5 Unknown 闸 1 处）+ 三条负控各让一条红；22 份 check 全绿、真编译 4 件全出 exe | 已过：门 #356（run 37401361458、head `442da251`、attempt 1）= 11 job 全 completed/success、非绿 0，wall 10m23s |
 | 账 #233（§B63 = Form 的绘图状态属性收成"两张表成对登记 + 一份笔位存储 + 一套编码"：cgen 侧表删掉、`vb6_DrawSetI` 存裸值、笔位归 float 那一户、ScaleMode 改问 #197 那道权威） | `Me.DrawWidth = 3` 发成"把读函数当左值" ⇒ **C2106，两架构零产物**（写侧从没登记）；读回恒 +1（Step 累积漂）；`VB6_CurrentX` 一个属性名两套编码（绘图 int32 vs Print float 位图案）互读必错 | 新夹具 tests/fdraw 两头钉（写后读回 + 像素证人 + Print 之后读得到同一个数），BASE 那台跑同一份夹具真红；语料 A/B 340 份 changed=0（= 这一族零覆盖）；新哨兵 check_form_draw_state.ps1（S1 存储唯一 / S2 侧表不回潮 / S3 读写成对 / S4 编码对称）四条各证能红 | 已过：门 #357（run 37405355138、head `05f04f31`、attempt 1）= 11 job 全 completed/success、非绿 0，wall 10m05s。订正一句读数方法：那台 watcher 回读 jobs 时被本机代理顶了一次，只写出 `jobs=0 non-success=0` 就收线 —— `conclusion=success` 配 0 条 job 不是"全绿"，是**没拿到读数**；补一次按 run id 回 API 复核才数到 11 条 （`.build/b309_verify357.py`） |
 | 账 #234（§B64 = 绘图方法家族改问唯一权威 `vb6_ControlDrawDC`；`vb6forms_internal.h` 声明、`vb6_DrawAcquire` 只挡 NULL；census 跟着长：D1 排除声明行 / D2 5→6 / 新 D13 禁 draw.c 自己开 DC） | 无 bug 症状的重复实现：两份同口径 ⇒ 一改就静默分家，而 `check_control_dc.ps1` 的名单原本扫不到第二份所在文件 | 零行为改动（两分支逐条等价）+ 三条负控各证哨兵会红 + 邻域四枚真跑夹具 28 条 needle 零缺失 + emit A/B 90 份 changed=0 + 矩阵 4 件出 exe | 已过：门 #358（run 37409833257、head `2b3baf82`、attempt 1）= 11 job 全 completed/success、非绿 0，wall 9m44s |
-| 账 #235（§B65 = 画笔色两份存储合一：`vb6_DrawForeColor` 改问唯一出口 `vb6_GetControlForeColor`，撤掉私有 setter 与两个零引用导出；Printer 那族不动） | `Me.ForeColor = vbRed` 之后不带颜色的 `Me.PSet` 画出来是 **0（黑）**（改前两架构实测），带颜色的那条才是 255 —— 控件那侧本来就只有一份，Form 绘图自己另存了一枚 | 新夹具一头 FD11/FD12（**两面**：新点要蓝、旧点仍红）+ 逐字回退重编那台跑同一夹具真红（False / pen=0）+ 哨兵新 S5（属性名回潮=0，假针证红）；23 份 check 全绿、邻域四枚零缺失、矩阵 4 件出 exe | 等门（提交 `2ab90321`） |
-| 账 #236（§B66 = 门 #359 的 vbp#4 红归因到夹具：阈值收线的 `*_Timer` 里自增排在提前返回之后 => exe 永不关窗，被 60s 超时杀；修法=计数器先走，哨兵 `check_fixture_timer_close.ps1` 第 24 道钉住这条口径） | 已提交 `ffcb52f7`，等门 |
+| 账 #235（§B65 = 画笔色两份存储合一：`vb6_DrawForeColor` 改问唯一出口 `vb6_GetControlForeColor`，撤掉私有 setter 与两个零引用导出；Printer 那族不动） | `Me.ForeColor = vbRed` 之后不带颜色的 `Me.PSet` 画出来是 **0（黑）**（改前两架构实测），带颜色的那条才是 255 —— 控件那侧本来就只有一份，Form 绘图自己另存了一枚 | 新夹具一头 FD11/FD12（**两面**：新点要蓝、旧点仍红）+ 逐字回退重编那台跑同一夹具真红（False / pen=0）+ 哨兵新 S5（属性名回潮=0，假针证红）；23 份 check 全绿、邻域四枚零缺失、矩阵 4 件出 exe | 已过：门 #360（run 37415128806、head `ea8dc7c9`、attempt 1）= 11 job 全 completed/success、非绿 0，wall 8m31s |
+| 账 #236（§B66 = 门 #359 的 vbp#4 红归因到夹具：阈值收线的 `*_Timer` 里自增排在提前返回之后 => exe 永不关窗，被 60s 超时杀；修法=计数器先走，哨兵 `check_fixture_timer_close.ps1` 第 24 道钉住这条口径） | 已过：门 #360（run 37415128806、head `ea8dc7c9`、attempt 1）= 11 job 全 completed/success、非绿 0，wall 8m31s |
