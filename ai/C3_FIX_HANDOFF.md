@@ -1197,6 +1197,31 @@ S9.4 打标记那一路的 PictureBox 判据必须问表、且不许把成员名
 ③ 裸 `Line` 两形在 parser 就拒。另记一条形状：`Print` 现在有两个入口名 —— 语句形 `Print "x"` 由 parser 打了
 `isFormPrint` 直调 `vb6_Form_Print`，画布形走表给的 `vb6_ControlPrint`；账 #239 之后这两枚是**同一份身体**
 （前者转调后者），等 ① 那一刀把语句形也收进同一张表时一起归一。
+
+**① 的开工家底（同一轮只读盘点 + 实测，file:line 都核过）**。探针 `.build/b463probe/B232A.frm`（一份 .frm 里把裸形与 `Me.` 形各摆两条，`--emit-c` 逐行看）读数：
+
+| 写的形状 | 今天发出来 | 判 |
+| --- | --- | --- |
+| `PSet (100, 100)` | `PSet(100, 100);` | C2065，编不过 |
+| `PSet 120, 120`（无括号） | `PSet(120, 120);` | 同上 |
+| `Me.PSet (110, 110)` | `vb6_Form_PSet((void*)vb6_hwnd_B232A, 0, 1, 110, 110, 0, 0)` | 通（当基准） |
+| `Circle (200, 200), 50` | `Circle(200, 200, vb6_VariantEmpty(), 50);` | C2065；**还自己补了一枚 Empty 实参** |
+| `Circle 220, 220, 60` | `Circle(220, 220, 60);` | C2065 |
+| `Me.Circle (210, 210), 55` | `vb6_Form_Circle((void*)vb6_hwnd_B232A, 0, 1, 210, 210, 55, 0, 0, 0, 0, 0, 0, 0, 0, 0)` | 通 |
+| `Cls` | `Cls();` + 一条 VB3001「未声明的标识符」 | C2065 |
+| `Me.Cls` | `vb6_ControlCls((void*)vb6_hwnd_B232A);  /* Form.Cls */` | 通（② 那一刀刚接的） |
+
+三条结论：
+
+**①-a 两形是两条不同的路**。`Cls` 走 `stmt/cgen_call.cpp:420` 那条 "Fix 010m 裸调用"（`callExpr` 里没有 `(` ⇒ 自己拼实参表，:581 `callExpr += "(" + bareArgList + ")"`）；`PSet (100, 100)` / `Circle (200, 200), 50` 走表达式路（postfix 已经把括号里的东西做成实参表，所以 `Circle` 那枚 `vb6_VariantEmpty()` 是**可选形参补齐**补出来的）⇒ 裸形一旦进了正确的分派，那套补齐与 Step/hasXY 旗标都不必重写。AST 侧也印证（`--dump-ast`）：裸 `Cls` 的 callee 是 `IdentifierExpr`，而 `PSet (...)` 的 callee 是 `IndexOrCallExpr(IdentifierExpr, args)` ⇒ **折叠器两种都要认**。
+
+**①-b 折叠的位置在语义层，不在 cgen**。`SemanticAnalyzer::visit(CallStmt&)`（`src/semantics/semantic_analyzer_stmt.cpp:219`，今天整函数只有 `analyzeExpr(*node.callee);` 一行）是这一族唯一"语句已成形、符号查得到、文档种类也知道"的位置（`currentModule_->docKind` 由 `driver_frontend.cpp:254-257` 一处写：UserControl / PropertyPage / Form / Standard）。在那里把"callee 是查不到符号的裸标识符 + 名字是画布动词 + 本模块是有画布的那三种 docKind"折成 `Me.<verb>`（`MemberAccessExpr(MeExpr, 名)`；`IndexOrCallExpr` 那一形就换它内层的 callee）—— 折完之后**下游一行都不用改**：`Me.Cls` 走 ② 那轮的画布表、`Me.PSet` / `Me.Circle` 走 withm 的 Form/Printer 段，`Option Explicit` 那条 VB3001 也自然停掉（名字不再"未声明"）。反过来若在 cgen 的两条码头各拦一次 = 第 5、6 份答案，正是 ② 那一轮刚清掉的形状。
+
+**①-c "画布动词"这份名单必须有唯一的家，而且要两层都能问**。现状是三处各自硬编码：`cgen_util_ctrl.cpp::controlCanvasMethod`（cls / print / line）、`cgen_expr_call_callee_withm.inc:636` 的 `isPrinterDraw`（pset / line / circle / point / cls）、以及语义层也在问的那张宿主伪成员表 `src/common/host_pseudo.hpp:73`（`usercontrol` / `cls` 一行，`HPF_METHOD` ⇒ 限定名才生效，裸名要 `HPF_BARE` 那一位）。本仓对"两层都要问的单一出口"已有定死做法 —— `host_pseudo.hpp` / `float_literal.hpp` / `int_literal.hpp` 都住 `src/common/`（账 #159 / #188 / #194 那三轮的结论）。所以这一刀的**第一步是新增**`src/common/canvas_drawing.hpp`：一行一个动词，字段 =（小写名、哪些接收者有这一档、**实参形状那一档**），然后 `controlCanvasMethod`、`isPrinterDraw`、语义层的折叠判据三处全改成问它。"实参形状"那一档必须有：`Line` 在 Form 与 PictureBox 上签名不同（12 参 `vb6_Form_Line` 带 Step/hasXY，对 7 参 `vb6_ControlLine`），这正是 ② 那一轮**没有**把 line 给 Form 那一档的原因（上面记着）；形状收进表之后，"签名不同不能并表"这条边界就变成表里的一个取值，而不是两处代码。
+
+**开工顺序**：(1) 立 `canvas_drawing.hpp`，先把 `cls` / `print` 两档搬过去 —— 预期 A/B `changed=0`；(2) 把 `pset` / `circle` / `point` / `line` 的 Form 档搬进同一张表，withm 的 Form/Printer 段改成按表里的形状 packing —— 仍应 `changed=0`；(3) 语义层的折叠器上线（这一步才是 ① 真正修好的时刻：`Cls` / `PSet` / `Circle` 三形从 C2065 变成通），判据两头钉 = `tests/fdraw` 加一形真跑像素证人 + 一条发码针（"三形都不许再出现未声明裸调用，也不许出现 `vb6_ComCall`"）+ 负控用改前那台数 C2065 的条数。**③ 那一格必须另开**（裸 `Line (0,0)-(10,10)` 在 token 层就报错：`TokenKind::Line` 在 `parser_stmt.cpp:136` 只认 `Line Input`，而坐标对续画的吸收住在 `parser_expr_postfix.cpp:183-189` 且**只认 callee 是 MemberAccessExpr 且成员名是 line** ⇒ 语义层折叠救不了它，得动 parser；动 parser 时按 ①-c 那同一张表放行，不要再列第四份动词名单）。
+
+**两件别顺手做**：(a) 别把裸形折进 `cgen_file_io.cpp` 的 `isFormPrint` 那条 —— 那是 parser 认 `Print` 是**关键字**才有的路，`Cls` / `PSet` 不是关键字，照抄就要动词法 ⇒ 白多一份形状；(b) 折叠判据里"名字查不到符号"这一问必须留着 —— 用户自己写 `Sub PSet(x, y)` 时那枚过程**该**赢（VB6 的模块内作用域），无条件折就是"修一处静默、造一处调错函数"。
 ## C. 仍在生效的口径与工具事实（与本文档等长的一半价值在这里；完整版见记忆库）
 
 - **子类化分层的槽位口径（账 #185 起）**：RTL 里**每一层**窗口子类用**自己**的窗口属性名存它下面那层的 wndproc ——
