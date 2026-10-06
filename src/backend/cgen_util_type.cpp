@@ -407,13 +407,14 @@ Vb6Type CCodeGen::inferExprType(Expr& expr) const {
             // 实测 `SSTab1.Tab` 撞上返回 BSTR 的内置函数 `Tab` → 判成 String →
             // Debug.Print 拼接不套 vb6_CStr(vb6_VariantFromValue(...)), 而 RTL 的
             // vb6_SSTab_GetTab 返回 int32_t → 整数当 BSTR 指针解引用 → 0xC0000005。
-            if (ma.object && ma.object->kind == ASTNodeKind::IdentifierExpr) {
-                auto& objIdCtl = static_cast<IdentifierExpr&>(*ma.object);
-                std::string objLowerCtl = Symbol::toLower(objIdCtl.name);
-                auto itCtl = knownFormControls_.find(objLowerCtl);
-                if (itCtl != knownFormControls_.end()) {
-                    Vb6Type pt = controlPropType(itCtl->second, ma.memberName);
-                    if (pt != Vb6Type::Unknown) return pt;
+            // 账 #229: 这一处以前只认 `控件名.属性`，控件数组元素那一形 (`uArr(0).Left`)
+            // 从这儿掉下去撞内置函数 Left ⇒ 拼接不套数值转换 ⇒ 裸 int 进 BSTR 槽 = AV。
+            // 两条对象形态改问同一个出口 (单枚 / 数组元素同一条规则)。
+            {
+                FrmControlType ctlType229 = FrmControlType::Unknown;
+                if (ctrlTypeOfMemberObject(ma.object.get(), ctlType229)) {
+                    Vb6Type pt229 = controlPropType(ctlType229, ma.memberName);
+                    if (pt229 != Vb6Type::Unknown) return pt229;
                 }
             }
             // 查找成员函数/属性的返回类型

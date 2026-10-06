@@ -160,6 +160,21 @@ Private Sub Form_Load()
     hM2 = mHits
     Debug.Print "U-ARRDBL-RAW hw=" & (hElem <> 0) & " idx=" & mIdx & " dbl=" & dM & " hits=" & hM2 & " ret=" & mRet
     Debug.Print "U-ARRDBL=" & CStr(hElem <> 0 And mIdx = 2 And dM = 1 And hM2 = 0 And mRet = 0)
+    ' account 229: read an ARRAY ELEMENT's extender property INSIDE a & concat. Before
+    ' the fix the element form fell through to the bare-member-name symbol lookup, and
+    ' `Left` is also a VB builtin returning String => the concat emitted no numeric->BSTR
+    ' conversion => a raw int went into a BSTR slot = 0xC0000005 on BOTH arches (the
+    ' element's .Top/.Width only boxed wide, so the symptom looked name-dependent).
+    ' Two readings, both required: the RAW line is the inline concat (the crash site) and
+    ' it must carry the design-time geometry; the verdict line asks the four variables.
+    Dim exL As Long, exT As Long, exW As Long, exH As Long, exS As String
+    exL = uArr(1).Left
+    exT = uArr(1).Top
+    exW = uArr(1).Width
+    exH = uArr(1).Height
+    exS = "U-ARREXT-RAW l=" & uArr(1).Left & " t=" & uArr(1).Top & " w=" & uArr(1).Width & " h=" & uArr(1).Height
+    Debug.Print exS
+    Debug.Print "U-ARREXT=" & CStr(exL = 3600 And exT = 1320 And exW = 1200 And exH = 1140)
     Debug.Print "U-DONE"
     Unload Me
 End Sub

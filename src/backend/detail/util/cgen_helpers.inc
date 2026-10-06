@@ -414,6 +414,9 @@
     static bool controlClickFromNativeNotify(FrmControlType ctrlType);
     // 账 #222: 控件数组元素的键 (见 cgen_util_ctrl.cpp 的定义处)。
     static std::string ctrlElemKey(const std::string& ctrlName, int index);
+    // 账 #229: `对象.成员` 的对象位是不是窗体控件（单枚 / 数组元素两形同归），
+    // 定义与实测症状在 cgen_util_ctrl.cpp。
+    bool ctrlTypeOfMemberObject(const Expr* obj, FrmControlType& outType) const;
     // C29-SL-g: 同理，但排除的是**焦点**通知（TextBox/ComboBox/ListBox/命令按钮那六类的
     // GotFocus/LostFocus 由父窗的 WM_COMMAND 码供，见 cgen_form_wndproc_dispatch.inc 开头）。
     // 三处使用点：发 arm（subclass）、装子类化（frame_menu）、拆子类化（dispatch）——

@@ -3936,7 +3936,8 @@ if ($Category -in @("all", "run", "vbp")) {
         "U-ARR-RAW count=3 lb=0 ub=2", "U-ARRM-methods=3", "U-ARR=True",
         "U-ARREVT-RAW i1=1 h1=1 i2=2 h2=2 ret=7", "U-ARREVT=True",
         "U-ARRCLICK-RAW hw=True idx=2 hits=1 ret=0", "U-ARRCLICK=True",
-        "U-ARRDBL-RAW hw=True idx=2 dbl=1 hits=0 ret=0", "U-ARRDBL=True", "U-DONE")
+        "U-ARRDBL-RAW hw=True idx=2 dbl=1 hits=0 ret=0", "U-ARRDBL=True",
+        "U-ARREXT-RAW l=3600 t=1320 w=1200 h=1140", "U-ARREXT=True", "U-DONE")
     Test-Vbp "ve_units" "$Tests\ve_units\Units.vbp" $veUnitsExpected
     Test-Vbp "ve_units_x86" "$Tests\ve_units\Units.vbp" $veUnitsExpected -Arch "x86"
 

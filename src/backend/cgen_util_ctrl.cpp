@@ -1936,6 +1936,32 @@ std::string CCodeGen::ctrlElemKey(const std::string& ctrlName, int index) {
     return k;
 }
 
+// 账 #229: "`对象.成员` 的对象位是不是一枚窗体控件、什么类型" —— 这一问在类型推断里原本
+// 抄成两份，一份只认 `控件名.属性`（P20-42 那条），一份只认 `控件名(i).属性`（C29-1a 那条）。
+// 于是数组元素那一形从前一条前面掉下去，撞上"按成员裸名查模块符号"：`Left` 同时是返回 String
+// 的 VB 内置函数 ⇒ 被判成 String ⇒ 拼接面不再套数值转换 ⇒ 裸 int 进 BSTR 槽 = 0xC0000005。
+// 实测 ve_units: `qq = "Q3-array-left=" & uArr(0).Left` 两架构都崩；同一枚元素的 .Top 只是
+// 绕远装箱不崩，非数组的 `uPix.Left` 也正常 —— 症状按"属性名撞不撞内置函数名"分家，很误导。
+// 两条对象形态合成这一个出口。返回 false = 对象位不是窗体控件（调用方照旧走原兜底）。
+bool CCodeGen::ctrlTypeOfMemberObject(const Expr* obj, FrmControlType& outType) const {
+    if (!obj) return false;
+    std::string name;
+    if (obj->kind == ASTNodeKind::IdentifierExpr) {
+        name = Symbol::toLower(static_cast<const IdentifierExpr&>(*obj).name);
+    } else if (obj->kind == ASTNodeKind::IndexOrCallExpr) {
+        // 控件数组的元素 (`uArr(1).Left`)：对象位是 `名字(下标)`，与单枚同一条规则。
+        auto& call = static_cast<const IndexOrCallExpr&>(*obj);
+        if (!call.callee || call.callee->kind != ASTNodeKind::IdentifierExpr ||
+            call.positional.size() != 1) return false;
+        name = Symbol::toLower(static_cast<const IdentifierExpr&>(*call.callee).name);
+    } else {
+        return false;
+    }
+    auto it = knownFormControls_.find(name);
+    if (it == knownFormControls_.end()) return false;
+    outType = it->second;
+    return true;
+}
 bool CCodeGen::controlClickFromNativeNotify(FrmControlType ctrlType) {
     switch (ctrlType) {
     case FrmControlType::CommandButton:
