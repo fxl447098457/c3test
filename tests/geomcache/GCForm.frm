@@ -1,0 +1,226 @@
+VERSION 5.00
+Begin VB.Form GCForm 
+   Caption         =   "GeomCache"
+   ClientHeight    =   3400
+   ClientLeft      =   120
+   ClientTop       =   465
+   ClientWidth     =   6800
+   ScaleHeight     =   3400
+   ScaleMode       =   1  
+   ScaleWidth      =   6800
+   StartUpPosition =   3  
+   Begin VB.Timer tmrGC 
+      Interval        =   150
+      Left            =   120
+      Top             =   1560
+   End
+   Begin VB.ComboBox cboA 
+      Height          =   247
+      Left            =   4607
+      TabIndex        =   4
+      Top             =   2213
+      Width           =   1507
+   End
+   Begin VB.TextBox txtA 
+      Height          =   247
+      Left            =   1007
+      TabIndex        =   0
+      Top             =   449
+      Width           =   3001
+   End
+   Begin VB.PictureBox picP 
+      Height          =   1201
+      Left            =   2000
+      ScaleMode       =   1  
+      TabIndex        =   1
+      Top             =   1003
+      Width           =   2003
+      Begin VB.Label lblP 
+         Height          =   211
+         Left            =   311
+         TabIndex        =   5
+         Top             =   222
+         Width           =   907
+      End
+   End
+   Begin VB.PictureBox picX 
+      Height          =   801
+      Left            =   4201
+      ScaleMode       =   3  
+      TabIndex        =   2
+      Top             =   1003
+      Width           =   1401
+      Begin VB.Label lblX 
+         Height          =   21
+         Left            =   101
+         TabIndex        =   6
+         Top             =   44
+         Width           =   203
+      End
+   End
+End
+Attribute VB_Name = "GCForm"
+Attribute VB_GlobalNameSpace = False
+Attribute VB_Creatable = False
+Attribute VB_PredeclaredId = True
+Attribute VB_Exposed = False
+Option Explicit
+' Ledger 230 = the four control geometry properties are VB-side VALUES, not a
+' projection of the window rect. Reading GetWindowRect and converting back loses
+' one step of the pixel grid: `txtA.Left = 5000` answered 4995, and the numbers
+' the .frm designed are re-quantized the same way. A corpus scan over 105 design
+' files measured 238 geometry values that are NOT a multiple of 15 (NewTab-test 86,
+' ctrlslider 22, btnfocus 15, ... -- positions authored on a 120-DPI machine), so
+' every one of those read back wrong before this fixture existed.
+'   GC01/GC02   design numbers read back exactly (form route + container-child route)
+'   GC03        placement witness: the window is still at the pixels the design
+'               number implies, so the stored value did NOT move anything
+'   GC04/GC05   runtime write and Move read back exactly (write side is the same
+'               cache -- Move was the unverified half of ledger 193)
+'   GC06        a pixel-mode container still reads pixels (the stored-twips cache
+'               fails the unit gate there -- measured identical before/after)
+'   GC07        switching the container's ScaleMode re-projects, switching back
+'               returns the VB-side number again
+'   GC08        self-heal: ComboBox is resized by the RTL at creation (dropdown
+'               area), so its cached design height is stale and the read follows
+'               the window instead -- the pixel gate is what makes that safe
+
+Private Declare PtrSafe Function GetWindowRect Lib "user32" (ByVal hwnd As LongPtr, ByRef lpRect As RECTAPI) As Long
+Private Declare PtrSafe Function GetParent Lib "user32" (ByVal hwnd As LongPtr) As LongPtr
+Private Declare PtrSafe Function ScreenToClient Lib "user32" (ByVal hwnd As LongPtr, ByRef lpPoint As POINTAPI) As Long
+Private Declare PtrSafe Function GetDeviceCaps Lib "gdi32" (ByVal hdc As LongPtr, ByVal nIndex As Long) As Long
+Private Declare PtrSafe Function GetDC Lib "user32" (ByVal hwnd As LongPtr) As LongPtr
+Private Declare PtrSafe Function ReleaseDC Lib "user32" (ByVal hwnd As LongPtr, ByVal hdc As LongPtr) As Long
+Private Declare PtrSafe Function MulDiv Lib "kernel32" (ByVal nNumber As Long, ByVal nNumerator As Long, ByVal nDenominator As Long) As Long
+
+Private Type RECTAPI
+    Left As Long
+    Top As Long
+    Right As Long
+    Bottom As Long
+End Type
+Private Type POINTAPI
+    x As Long
+    y As Long
+End Type
+
+Private Function TF(ByVal b As Boolean) As String
+    If b Then TF = "True" Else TF = "False"
+End Function
+
+' The window's own position in the parent's client pixels -- asked straight from
+' user32, so it cannot be the cached number answering for itself.
+Private Function PxLeft(ByVal h As LongPtr) As Long
+    Dim rc As RECTAPI
+    Dim pt As POINTAPI
+    GetWindowRect h, rc
+    pt.x = rc.Left
+    pt.y = rc.Top
+    ScreenToClient GetParent(h), pt
+    PxLeft = pt.x
+End Function
+
+Private Function PxTop(ByVal h As LongPtr) As Long
+    Dim rc As RECTAPI
+    Dim pt As POINTAPI
+    GetWindowRect h, rc
+    pt.x = rc.Left
+    pt.y = rc.Top
+    ScreenToClient GetParent(h), pt
+    PxTop = pt.y
+End Function
+
+Private Function PxW(ByVal h As LongPtr) As Long
+    Dim rc As RECTAPI
+    GetWindowRect h, rc
+    PxW = rc.Right - rc.Left
+End Function
+
+Private Function PxH(ByVal h As LongPtr) As Long
+    Dim rc As RECTAPI
+    GetWindowRect h, rc
+    PxH = rc.Bottom - rc.Top
+End Function
+
+' The witnesses below are built from kernel32 MulDiv + the real device DPI, i.e.
+' from the same two primitives the RTL's placement uses -- but asked from outside
+' the product, so the cached number cannot be answering for itself. (Me.ScaleX was
+' the first thing to try here and is NOT used: a Double handed back to a VB Long
+' truncates on this path, so it reads 13 where MulDiv says 14.)
+Private dpiX As Long
+Private dpiY As Long
+
+Private Sub ReadDpi()
+    Dim d As LongPtr
+    d = GetDC(0)
+    dpiX = GetDeviceCaps(d, 88)   ' LOGPIXELSX
+    dpiY = GetDeviceCaps(d, 90)   ' LOGPIXELSY
+    ReleaseDC 0, d
+End Sub
+
+Private Function ToPx(ByVal twips As Long) As Long
+    ToPx = MulDiv(twips, dpiX, 1440)
+End Function
+
+Private Function ToPy(ByVal twips As Long) As Long
+    ToPy = MulDiv(twips, dpiY, 1440)
+End Function
+
+Private Function ToTwipX(ByVal px As Long) As Long
+    ToTwipX = MulDiv(px, 1440, dpiX)
+End Function
+
+Private Function ToTwipY(ByVal px As Long) As Long
+    ToTwipY = MulDiv(px, 1440, dpiY)
+End Function
+
+Private Sub tmrGC_Timer()
+    tmrGC.Enabled = False
+    ReadDpi
+
+    Dim ok1 As Boolean, ok2 As Boolean, ok3 As Boolean
+    Dim ok4 As Boolean, ok5 As Boolean, ok6 As Boolean
+    Dim ok7 As Boolean, ok8 As Boolean
+    Dim pxSwitch As Long
+
+    ok1 = (txtA.Left = 1007) And (txtA.Top = 449) And (txtA.Width = 3001) And (txtA.Height = 247)
+    Debug.Print "GC01-design=" & TF(ok1) & " raw=" & txtA.Left & "," & txtA.Top & "," & txtA.Width & "," & txtA.Height
+
+    ok2 = (lblP.Left = 311) And (lblP.Top = 222) And (lblP.Width = 907) And (lblP.Height = 211)
+    Debug.Print "GC02-child=" & TF(ok2) & " raw=" & lblP.Left & "," & lblP.Top & "," & lblP.Width & "," & lblP.Height
+
+    ok3 = (PxLeft(txtA.hwnd) = ToPx(1007)) And (PxTop(txtA.hwnd) = ToPy(449)) _
+        And (PxW(txtA.hwnd) = ToPx(3001)) And (PxH(txtA.hwnd) = ToPy(247))
+    Debug.Print "GC03-place=" & TF(ok3) & " raw=" & PxLeft(txtA.hwnd) & "," & PxTop(txtA.hwnd) & "," & PxW(txtA.hwnd) & "," & PxH(txtA.hwnd) & "," & ToPx(1007)
+
+    txtA.Left = 5000
+    txtA.Top = 444
+    txtA.Width = 7777
+    txtA.Height = 3001
+    ok4 = (txtA.Left = 5000) And (txtA.Top = 444) And (txtA.Width = 7777) And (txtA.Height = 3001) _
+        And (PxLeft(txtA.hwnd) = ToPx(5000)) And (PxW(txtA.hwnd) = ToPx(7777)) _
+        And (PxTop(txtA.hwnd) = ToPy(444)) And (PxH(txtA.hwnd) = ToPy(3001))
+    Debug.Print "GC04-write=" & TF(ok4) & " raw=" & txtA.Left & "," & txtA.Top & "," & txtA.Width & "," & txtA.Height
+
+    txtA.Move 1231, 451, 3007, 247
+    ok5 = (txtA.Left = 1231) And (txtA.Top = 451) And (txtA.Width = 3007) And (txtA.Height = 247) _
+        And (PxTop(txtA.hwnd) = ToPy(451)) And (PxH(txtA.hwnd) = ToPy(247))
+    Debug.Print "GC05-move=" & TF(ok5) & " raw=" & txtA.Left & "," & txtA.Top & "," & txtA.Width & "," & txtA.Height
+
+    ok6 = (lblX.Left = PxLeft(lblX.hwnd)) And (lblX.Width = PxW(lblX.hwnd)) _
+        And (PxLeft(lblX.hwnd) = ToPx(101)) And (PxW(lblX.hwnd) = ToPx(203))
+    Debug.Print "GC06-pixbox=" & TF(ok6) & " raw=" & lblX.Left & "," & PxLeft(lblX.hwnd) & "," & lblX.Width & "," & ToPx(203)
+
+    picP.ScaleMode = 3
+    pxSwitch = lblP.Left
+    ok7 = (pxSwitch = PxLeft(lblP.hwnd)) And (lblP.Width = PxW(lblP.hwnd))
+    picP.ScaleMode = 1
+    ok7 = ok7 And (lblP.Left = 311) And (lblP.Width = 907)
+    Debug.Print "GC07-modesw=" & TF(ok7) & " raw=" & pxSwitch & "," & PxLeft(lblP.hwnd) & "," & lblP.Left
+
+    ok8 = (cboA.Height <> 247) And (cboA.Height = ToTwipY(PxH(cboA.hwnd)))
+    Debug.Print "GC08-stale=" & TF(ok8) & " raw=" & cboA.Height & ",247," & PxH(cboA.hwnd) & "," & ToTwipY(PxH(cboA.hwnd))
+
+    Debug.Print "GC-DONE"
+    Unload Me
+End Sub

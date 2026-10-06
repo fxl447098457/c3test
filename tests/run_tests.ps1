@@ -874,6 +874,19 @@ function Test-FormDrawState {
         $out | Select-Object -First 6 | ForEach-Object { Write-Host "  $_" }
     }
 }
+function Test-CtrlGeomCache {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] ctrl_geom_cache ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\check_ctrl_geom_cache.ps1" 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        $out | Select-Object -First 6 | ForEach-Object { Write-Host "  $_" }
+    }
+}
 function Test-VariantCmpBoxing {
     $script:total++
     Write-Host -NoNewline "  [STATIC] variant_cmp_boxing ... "
@@ -3751,6 +3764,20 @@ if ($Category -in @("all", "run", "vbp")) {
     Test-Vbp "fdrawstate" "$Tests\fdraw\FDemo.vbp" $fdrawExpected
     Test-Vbp "fdrawstate_x86" "$Tests\fdraw\FDemo.vbp" $fdrawExpected -Arch "x86"
 
+    # --- 账 #230: 控件几何的 VB 侧读数 (Left/Top/Width/Height 写什么读什么) ---
+    # 改前那一台跑**同一份夹具**：GC01..GC05 全 False (1007 读回 1005、5000 读回 4995)，
+    # 因为读的是窗口位置的投影 —— 编译链接一路不响，语料里也没有一条针量过它 (238 处设计值
+    # 不是 15 的倍数，没有一处读数被钉过)。GC03/GC04/GC05 各带一枚像素证人 (user32 rect +
+    # kernel32 MulDiv)，钉住"存下那个数"没有把窗口挪走；GC06 是像素档容器的边界 (改前后同数，
+    # 不当罪证)；GC07 切档回投影、切回还是那一个数；GC08 ComboBox 被 RTL 自己加高 ⇒ 缓存作废、
+    # 跟着窗口答 —— 那一格是"别人挪过窗口"这一问的唯一防线。
+    # raw 里那几个数是 DPI 相关的，只钉 =True 的判据，不钉绝对数 (本线口径)。
+    $geomExpected = @("GC01-design=True", "GC02-child=True", "GC03-place=True",
+        "GC04-write=True", "GC05-move=True", "GC06-pixbox=True",
+        "GC07-modesw=True", "GC08-stale=True", "GC-DONE")
+    Test-Vbp "geomcache" "$Tests\geomcache\GCCache.vbp" $geomExpected
+    Test-Vbp "geomcache_x86" "$Tests\geomcache\GCCache.vbp" $geomExpected -Arch "x86"
+
     # --- P20-42: SSTab (SysTabControl32 复刻) ---
     # 期望串取自夹具真实输出 (别缩写标签)。TS25..TS28 是切页显隐: vb6_GetControlVisible
     # 走 IsWindowVisible 沿父链传播, 所以断言放在 Timer 里 (窗体已显示之后)。
@@ -4665,6 +4692,7 @@ if ($Category -in @("all", "compile")) {
     Test-CtrlArrayMemberSites
     Test-CtrlPropTypeAuthority
     Test-FormDrawState
+    Test-CtrlGeomCache
     Test-FixtureTimerClose
     Test-VariantCmpBoxing
     Test-EventHandlerNames

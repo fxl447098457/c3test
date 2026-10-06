@@ -134,13 +134,58 @@ int32_t vb6_WindowScaleModeSelf(void* hwnd) {
     return vb6_GetScaleMode(hwnd);
 }
 
+/* 账 #230: 控件几何的 **VB 侧读数**。
+   VB6 的 Left/Top/Width/Height 是属性值，不是窗口位置的投影：写 1007 就读回 1007，
+   哪怕窗口只能落在 67 像素（= 1005 缇）上。此前这四个 getter 一律现问 GetWindowRect
+   再折算 ⇒ 每一次读写都掉一个 1/15 的量化坑（写 5000 读回 4995），而且 .frm 里的设计值
+   也一样被重算 —— 语料实测 **238 处**设计几何值不是 15 的倍数（NewTab-test 86 处、
+   ctrlslider 22 处、btnfocus 15 处…，多半是在 120 DPI 上排出来的），今天没有一处读得回
+   当初写进去的那个数。
+   存的是 (数, 写它时容器的 ScaleMode)。两道闸决定用它还是退回投影：
+     · 容器的 ScaleMode 换过 ⇒ 那个数已经不代表同一件事了 ⇒ 投影
+       （VB6 在切换 ScaleMode 之后交回新单位的数 —— 探针 G10/G11 钉住这一头）；
+     · 按存着的数换算出来的像素 ≠ 窗口现在的像素 ⇒ **别人**挪过这枚窗口
+       （ComboBox 建窗时自己补下拉高度、PictureBox AutoSize、SSTab 翻页排版…，
+        这类点位不列清单，靠这一问自愈）⇒ 投影。
+   窗口属性名各一档（账 #185 那一课：一层一个名字，别拿同名槽位互相挤掉）。
+   值存 2v+1：它恒为奇数 ⇒ 永远不会是 0，而 SetPropW(…,0) 等于删属性（账 #107）。 */
+static const wchar_t* vb6_GeomSlotName(int slot) {
+    switch (slot) {
+        case VB6_GEOM_LEFT:  return L"VB6_GeomL";
+        case VB6_GEOM_TOP:   return L"VB6_GeomT";
+        case VB6_GEOM_WIDTH: return L"VB6_GeomW";
+        default:             return L"VB6_GeomH";
+    }
+}
+
+void vb6_GeomCacheWrite(void* hwnd, int slot, int value, int32_t mode) {
+    if (!hwnd) return;
+    SetPropW((HWND)hwnd, L"VB6_GeomMode", (HANDLE)(INT_PTR)(mode + 1));
+    SetPropW((HWND)hwnd, vb6_GeomSlotName(slot), (HANDLE)(INT_PTR)((INT_PTR)value * 2 + 1));
+}
+
+int vb6_GeomCacheRead(void* hwnd, int slot, int actualPx, int32_t mode, int fallback) {
+    if (!hwnd) return fallback;
+    HANDLE hm = GetPropW((HWND)hwnd, L"VB6_GeomMode");
+    if (!hm) return fallback;
+    if ((int32_t)(INT_PTR)hm - 1 != mode) return fallback;
+    HANDLE hv = GetPropW((HWND)hwnd, vb6_GeomSlotName(slot));
+    if (!hv) return fallback;
+    int v = (int)(((INT_PTR)hv - 1) / 2);
+    /* slot & 1 = 竖直那一轴（TOP/HEIGHT 都是奇数档），与下面各 getter 传 vert 的口径一致 */
+    if (vb6_ScaleUserToPx((double)v, mode, slot & 1) != actualPx) return fallback;
+    return v;
+}
+
 int vb6_GetControlLeft(void* hwnd) {
     if (!hwnd) return 0;
     RECT rc;
     GetWindowRect((HWND)hwnd, &rc);
     POINT pt = { rc.left, rc.top };
     ScreenToClient(GetParent((HWND)hwnd), &pt);
-    return (int)vb6_ScalePxToUser((double)pt.x, vb6_ContainerScaleMode(GetParent((HWND)hwnd)), 0);
+    int32_t cm = vb6_ContainerScaleMode(GetParent((HWND)hwnd));
+    return vb6_GeomCacheRead(hwnd, VB6_GEOM_LEFT, pt.x, cm,
+                             (int)vb6_ScalePxToUser((double)pt.x, cm, 0));
 }
 
 void vb6_SetControlLeft(void* hwnd, int left) {
@@ -149,8 +194,10 @@ void vb6_SetControlLeft(void* hwnd, int left) {
     GetWindowRect((HWND)hwnd, &rc);
     POINT pt = { rc.left, rc.top };
     ScreenToClient(GetParent((HWND)hwnd), &pt);
-    SetWindowPos((HWND)hwnd, NULL, vb6_ScaleUserToPx((double)left, vb6_ContainerScaleMode(GetParent((HWND)hwnd)), 0),
+    int32_t cm = vb6_ContainerScaleMode(GetParent((HWND)hwnd));
+    SetWindowPos((HWND)hwnd, NULL, vb6_ScaleUserToPx((double)left, cm, 0),
                  pt.y, 0, 0, SWP_NOSIZE | SWP_NOZORDER);
+    vb6_GeomCacheWrite(hwnd, VB6_GEOM_LEFT, left, cm);
 }
 
 int vb6_GetControlTop(void* hwnd) {
@@ -159,7 +206,9 @@ int vb6_GetControlTop(void* hwnd) {
     GetWindowRect((HWND)hwnd, &rc);
     POINT pt = { rc.left, rc.top };
     ScreenToClient(GetParent((HWND)hwnd), &pt);
-    return (int)vb6_ScalePxToUser((double)pt.y, vb6_ContainerScaleMode(GetParent((HWND)hwnd)), 1);
+    int32_t cm = vb6_ContainerScaleMode(GetParent((HWND)hwnd));
+    return vb6_GeomCacheRead(hwnd, VB6_GEOM_TOP, pt.y, cm,
+                             (int)vb6_ScalePxToUser((double)pt.y, cm, 1));
 }
 
 void vb6_SetControlTop(void* hwnd, int top) {
@@ -168,41 +217,53 @@ void vb6_SetControlTop(void* hwnd, int top) {
     GetWindowRect((HWND)hwnd, &rc);
     POINT pt = { rc.left, rc.top };
     ScreenToClient(GetParent((HWND)hwnd), &pt);
+    int32_t cm = vb6_ContainerScaleMode(GetParent((HWND)hwnd));
     SetWindowPos((HWND)hwnd, NULL, pt.x,
-                 vb6_ScaleUserToPx((double)top, vb6_ContainerScaleMode(GetParent((HWND)hwnd)), 1),
+                 vb6_ScaleUserToPx((double)top, cm, 1),
                  0, 0, SWP_NOSIZE | SWP_NOZORDER);
+    vb6_GeomCacheWrite(hwnd, VB6_GEOM_TOP, top, cm);
 }
 
 int vb6_GetControlWidth(void* hwnd) {
     if (!hwnd) return 0;
     RECT rc;
     GetWindowRect((HWND)hwnd, &rc);
-    return (int)vb6_ScalePxToUser((double)(rc.right - rc.left), vb6_ContainerScaleMode(GetParent((HWND)hwnd)), 0);
+    int px = rc.right - rc.left;
+    int32_t cm = vb6_ContainerScaleMode(GetParent((HWND)hwnd));
+    return vb6_GeomCacheRead(hwnd, VB6_GEOM_WIDTH, px, cm,
+                             (int)vb6_ScalePxToUser((double)px, cm, 0));
 }
 
 void vb6_SetControlWidth(void* hwnd, int width) {
     if (!hwnd) return;
     RECT rc;
     GetWindowRect((HWND)hwnd, &rc);
+    int32_t cm = vb6_ContainerScaleMode(GetParent((HWND)hwnd));
     SetWindowPos((HWND)hwnd, NULL, 0, 0,
-                 vb6_ScaleUserToPx((double)width, vb6_ContainerScaleMode(GetParent((HWND)hwnd)), 0),
+                 vb6_ScaleUserToPx((double)width, cm, 0),
                  rc.bottom - rc.top, SWP_NOMOVE | SWP_NOZORDER);
+    vb6_GeomCacheWrite(hwnd, VB6_GEOM_WIDTH, width, cm);
 }
 
 int vb6_GetControlHeight(void* hwnd) {
     if (!hwnd) return 0;
     RECT rc;
     GetWindowRect((HWND)hwnd, &rc);
-    return (int)vb6_ScalePxToUser((double)(rc.bottom - rc.top), vb6_ContainerScaleMode(GetParent((HWND)hwnd)), 1);
+    int px = rc.bottom - rc.top;
+    int32_t cm = vb6_ContainerScaleMode(GetParent((HWND)hwnd));
+    return vb6_GeomCacheRead(hwnd, VB6_GEOM_HEIGHT, px, cm,
+                             (int)vb6_ScalePxToUser((double)px, cm, 1));
 }
 
 void vb6_SetControlHeight(void* hwnd, int height) {
     if (!hwnd) return;
     RECT rc;
     GetWindowRect((HWND)hwnd, &rc);
+    int32_t cm = vb6_ContainerScaleMode(GetParent((HWND)hwnd));
     SetWindowPos((HWND)hwnd, NULL, 0, 0, rc.right - rc.left,
-                 vb6_ScaleUserToPx((double)height, vb6_ContainerScaleMode(GetParent((HWND)hwnd)), 1),
+                 vb6_ScaleUserToPx((double)height, cm, 1),
                  SWP_NOMOVE | SWP_NOZORDER);
+    vb6_GeomCacheWrite(hwnd, VB6_GEOM_HEIGHT, height, cm);
 }
 
 // Fix 162a-extlist: VB6 `obj.Move Left[, Top[, Width[, Height]]]` —— 语言级方法
@@ -252,6 +313,13 @@ void vb6_ControlMove(void* hwnd, double L, double T, double W, double H, int mas
      *   (ucFolder.ViewArea_Resize 里自己就 Move 视图窗体)。*/
     int sizeChanged = ((w != rc.right - rc.left) || (h != rc.bottom - rc.top));
     SetWindowPos(hW, NULL, x, y, w, h, SWP_NOZORDER | SWP_NOACTIVATE);
+    /* 账 #230: Move 与属性赋值是同一件事的两个来路 ⇒ 给的哪几档就存哪几档。
+       漏了这一处，Move 之后读 Left 会读到上一轮的旧缓存（缓存自己会被像素闸拦下，
+       但那正是"存什么读什么"失效的那一格）。 */
+    if (mask & 1) vb6_GeomCacheWrite(hwnd, VB6_GEOM_LEFT, (int)L, cm);
+    if (mask & 2) vb6_GeomCacheWrite(hwnd, VB6_GEOM_TOP, (int)T, cm);
+    if (mask & 4) vb6_GeomCacheWrite(hwnd, VB6_GEOM_WIDTH, (int)W, cm);
+    if (mask & 8) vb6_GeomCacheWrite(hwnd, VB6_GEOM_HEIGHT, (int)H, cm);
     /* Fix <vbeclipse> rev24: 设计期子控件的 `<Ctrl>_Resize` 事件在这里**排队**
      * (rev22 曾直接在这里跑 ⇒ 递归; rev23 把触发改到宿主 WM_SIZE, 但那只覆盖
      * "**宿主自己**尺寸变了"这一种 —— 见下面为什么不够)。

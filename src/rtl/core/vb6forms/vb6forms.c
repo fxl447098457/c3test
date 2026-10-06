@@ -567,6 +567,21 @@ void* vb6_CreateControl(const char* win32Class, const char* controlName,
        SetPropW(…, 0) 等于删属性（账 #107 那一课）。 */
     if (hwnd) SetPropW(hwnd, L"VB6_TabStop", (HANDLE)(DWORD_PTR)((style & WS_TABSTOP) ? 1 : 2));
 
+    /* 账 #230: 设计期那四个数一起存进 VB 侧读数，**单位记成缇**。
+       .frm 的 Left/Top/Width/Height 恒按缇写，与容器自己声明的 ScaleMode 无关 ——
+       实证 tests/czUI-main/frmDemo.frm：那枚窗体写 `ScaleMode = 3  'Pixel`，同时写
+       `ClientWidth = 6600` 与 `ScaleWidth = 440`（同一块客户区的两种单位），而子控件
+       `Width = 6240` —— 按缇是 416 像素（占满 440 宽的客户区，对），按像素就是 6240
+       像素（放不下）。⇒ 上面那句 vb6_TwipToX 的换算本来就是对的，这里只是把"按缇写进去
+       的那个数"留住，别让它被像素量化重算掉（写 1007 读回 1005 那一格）。
+       容器真是像素档时，读侧的档位闸对不上 ⇒ 自动回落投影，交回的就是像素数。 */
+    if (hwnd) {
+        vb6_GeomCacheWrite(hwnd, VB6_GEOM_LEFT, x, 1);
+        vb6_GeomCacheWrite(hwnd, VB6_GEOM_TOP, y, 1);
+        vb6_GeomCacheWrite(hwnd, VB6_GEOM_WIDTH, width, 1);
+        vb6_GeomCacheWrite(hwnd, VB6_GEOM_HEIGHT, height, 1);
+    }
+
     // 设置默认字体 (VB6使用MS Sans Serif 8.25pt)
     if (hwnd) {
         // Fix 181: 原先直接用 GetStockObject(DEFAULT_GUI_FONT) —— 现代 Windows 上
