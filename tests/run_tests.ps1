@@ -1711,6 +1711,28 @@ function Test-VbpBuildFail {
 # 输出目录**按用例隔离**：这四份 .vbp 的 ExeName32 全写着 Proyecto1.exe，共用 $OutDir 会互相盖掉
 # （#166 那条"exe 名有两个权威"的姊妹坑：名字修对了还会串味）。先删干净再编，
 # 免得 Test-Path 命中上一轮的旧 exe —— 记忆里那条教训原话是「Test-Path $exe 不是构建成功的判据」。
+# 红的用例必须自带诊断：Test-VbpBuild 的 stdout 只有 C3 那几行「编译失败 (exit code 2)」，
+# 真正的 cl/link 报错只落在 outputDir/c3-error.log 里 (driver_compile.cpp:791/:801 -> writeErrorLog,
+# 而 msvc_driver.cpp:416 把 cl/link 的整段输出也写进同一个文件)，CI 的工件通配符
+# (output/**/*.out|*.err|*.txt|*.dat|scores.txt) 收不到这个文件名 ⇒ 门上只剩一行 FAIL rc=1 exe=False，
+# 本地两台都编得过时只能猜 (2026-10-06 的 olecon 就是这么卡的)。
+# 只挑报错行、别摊尾巴：本地实物 (b475 一枚刻意失败的工程) 量过，那 264 行里绝大部分是 RTL 的
+# C4819/C5105/C4028 警告，摊 40 行尾巴只会把 LNK/error 那几行挤出去。
+function Show-BuildErrorLog {
+    param([string]$Dir)
+    $logPath = Join-Path $Dir "c3-error.log"
+    if (-not (Test-Path $logPath)) {
+        Write-Host ("    [diag] no c3-error.log under " + $Dir) -ForegroundColor DarkGray
+        return
+    }
+    $lines = @(Get-Content -LiteralPath $logPath -ErrorAction SilentlyContinue)
+    Write-Host ("    [diag] c3-error.log lines=" + $lines.Count) -ForegroundColor DarkGray
+    $bad = @($lines | Where-Object { $_ -match '(error C[0-9]{4}|: error |fatal error|LNK[0-9]{4}|unresolved external|=== C3 Diagnostics)' })
+    Write-Host ("    [diag] error-ish lines=" + $bad.Count + " (first 25):") -ForegroundColor DarkGray
+    foreach ($ln in ($bad | Select-Object -First 25)) { Write-Host ("      " + $ln) -ForegroundColor DarkGray }
+    if ($bad.Count -eq 0) { foreach ($ln in ($lines | Select-Object -Last 15)) { Write-Host ("      " + $ln) -ForegroundColor DarkGray } }
+}
+
 function Test-VbpBuild {
     param([string]$Name, [string]$VbpFile, [string]$Arch = "")
     $script:total++
@@ -1733,6 +1755,7 @@ function Test-VbpBuild {
         Write-Host ("FAIL rc=" + $rc + " exe=" + (Test-Path $exePath)) -ForegroundColor Red
         Write-Host ("    找的是 " + $exePath) -ForegroundColor DarkGray
         if ($Verbose) { Write-Host $text }
+        Show-BuildErrorLog $buildDir
     }
 }
 
