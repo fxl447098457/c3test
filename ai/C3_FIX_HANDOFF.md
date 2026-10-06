@@ -1114,7 +1114,7 @@ Print 之后笔位推进 `0 → 13`（= 同一枚控件自己答的 `TextHeight`
 `vb6_ComCall(vb6_hwnd_<Form>, L"Cls", NULL, 0)`（emit 物证 `.build/b373_emit_base.c:327`），运行期 no-op。
 所以家族那份 `vb6_Form_Cls` 今天只被控件那户到达；窗体自己的 Cls 何时能跑，等 #232 那条前端出口。
 
-### B70 窗体绘图语句的"裸形"与 "Me." 形各缺一条路（账 #232，**② 已出：门 #368（run 37454147931、head `9e5c9f91`、branch dev、attempt 1）= 11 job 全 completed/success、非绿 0，wall 9m46s；①③ 未开工**）
+### B70 窗体绘图语句的"裸形"与 "Me." 形各缺一条路（账 #232，**② 已出：门 #368（run 37454147931、head `9e5c9f91`、branch dev、attempt 1）= 11 job 全 completed/success、非绿 0，wall 9m46s；**① 已出：门待回填**；③ 未开工**）
 
 探针 `.build/b433_shapes.txt`（同一枚 `.frm` 每次只放一条语句，`--emit-c` 看发码；工具 `.build/b431_232probe.py` 那套形状表）。**七形七样**（窗体上）：
 
@@ -1222,6 +1222,22 @@ S9.4 打标记那一路的 PictureBox 判据必须问表、且不许把成员名
 **开工顺序**：(1) 立 `canvas_drawing.hpp`，先把 `cls` / `print` 两档搬过去 —— 预期 A/B `changed=0`；(2) 把 `pset` / `circle` / `point` / `line` 的 Form 档搬进同一张表，withm 的 Form/Printer 段改成按表里的形状 packing —— 仍应 `changed=0`；(3) 语义层的折叠器上线（这一步才是 ① 真正修好的时刻：`Cls` / `PSet` / `Circle` 三形从 C2065 变成通），判据两头钉 = `tests/fdraw` 加一形真跑像素证人 + 一条发码针（"三形都不许再出现未声明裸调用，也不许出现 `vb6_ComCall`"）+ 负控用改前那台数 C2065 的条数。**③ 那一格必须另开**（裸 `Line (0,0)-(10,10)` 在 token 层就报错：`TokenKind::Line` 在 `parser_stmt.cpp:136` 只认 `Line Input`，而坐标对续画的吸收住在 `parser_expr_postfix.cpp:183-189` 且**只认 callee 是 MemberAccessExpr 且成员名是 line** ⇒ 语义层折叠救不了它，得动 parser；动 parser 时按 ①-c 那同一张表放行，不要再列第四份动词名单）。
 
 **两件别顺手做**：(a) 别把裸形折进 `cgen_file_io.cpp` 的 `isFormPrint` 那条 —— 那是 parser 认 `Print` 是**关键字**才有的路，`Cls` / `PSet` 不是关键字，照抄就要动词法 ⇒ 白多一份形状；(b) 折叠判据里"名字查不到符号"这一问必须留着 —— 用户自己写 `Sub PSet(x, y)` 时那枚过程**该**赢（VB6 的模块内作用域），无条件折就是"修一处静默、造一处调错函数"。
+**① 已出（门待回填）—— 三条改动、三面判据、外加一道补刀（旧哨兵那条断言是假绿）**
+
+**读数（同一份夹具、两台编译器的 `--emit-c`，前后只差两行）**：改前 `Cls` 发 `Cls();`、`PSet (170, 130)` 发 `PSet(170, 130);`，而 stderr 还多一条 VB3001「未声明的标识符 'Cls'」；改后这两行是 `vb6_ControlCls((void*)vb6_hwnd_FDForm); /* Form.Cls */` 与 `vb6_Form_PSet((void*)vb6_hwnd_FDForm, 0, 1, 170, 130, 0, 0); /* Form.PSet */`。真编译那一面更硬：基线台两架构都死在 `LNK2019 无法解析的外部函数 Cls（在 vb6_tmrF_Timer 中被引用）` + 同族那条 `PSet` + `LNK1120` ⇒ **压根没有 exe**。所以这一格不是"跑起来一笔不画"那一族，是"编不过"那一族。
+
+**六形实测（探针 `.build/b494_probe2/ShForm.frm`：一份 .frm 把裸形全摆上，`--emit-c` 逐行读）**：`Cls` / `PSet (5, 6)` / `PSet 12, 13`（无括号那形）/ `Circle 30, 31, 32` / `Point (40, 41)` 五形都折成真出口；**只剩 `Circle (20, 21), 22` 没折**，仍发 `Circle(20, 21, vb6_VariantEmpty(), 22);`。⇒ 欠的那一格是**同一族的续写形**（坐标对 + 逗号尾巴被 parser 吸收之后，callee 树比折叠器认的两形多套一层：`foldBareCanvasVerb` 只下一层去取最内层 IdentifierExpr，`src/semantics/semantic_analyzer_util.cpp:779`）—— 这一句是**假说、不是读数**，读数只到"发出来还是裸名"那一层。挨着 ③ 一起做，别为它单开一轮。
+
+**收成一处（新增 common + 三处码头改问它）**：`src/common/canvas_drawing.hpp` = 15 行（动词, 接收者）矩阵 + owner 两档（METHOD / DRAW）+ 四个 accessor，与 `host_pseudo.hpp` / `float_literal.hpp` / `int_literal.hpp` 同一层（common 不向上依赖 semantics）。`controlCanvasMethod` 退成"把 ctrlType 换成接收者位再问表"；withm 绘图码头那段 `isPrinterDraw` 的五条名字硬名单改成 `canvasDrawEntry(名, 接收者)`；打标记那一路的 enddoc 也改问表。**折叠本身住在语义层一条语句的位置**：`visit(CallStmt&)` 里 `analyzeExpr` 之前调 `foldBareCanvasVerb`，五道门 = pass 2 / docKind==Form / callee 是裸 IdentifierExpr 或 IndexOrCallExpr 的内层那枚 / 名字在那张表里有 Form 档 / 三问查不到符号（`symTab_`、工程级、祖先）。折完下游一行没动 —— `Me.Cls` 走 ② 那张表，`Me.PSet` 走 Form/Printer 段。
+
+**判据三面**：① 真跑 `tests/fdraw` 加 FD21（墨问两次：画完 `>0`、裸 `Cls` 之后 `<0`，读数 `raw=3,-1`）与 FD22（`Me.ForeColor = vbBlue` 之后裸 `PSet (170, 130)`，问得到那一条蓝行 = `raw=130`），两架构 24 行输出全对、stderr 0 字节。② **边界证人** FD23：模块里自己写了 `Private Sub Circle(x, y)` 时那枚过程**该赢** —— `Circle 7, 9` 发成 `vb6_Circle((&(int32_t){7}), (&(int32_t){9}))`、读数 `FD23-usercircle=1`；上一段那条"三问查不到符号"的门不是装饰，这一枚就是它。③ 发码针 `Test-CodegenNote "form_canvas_bare"`：present 三枚（两条真出口 + 那枚 `vb6_Circle`）、absent 四枚（`Cls();` / `PSet(170, 130);` / `VB3001` / `vb6_Form_Circle((void*)vb6_hwnd_FDForm`）；基线台实测「缺 1 枚 + 命中 3 枚」⇒ 真会红。present/absent 里那对边界针在两台上都绿 —— 它钉的是"不许过折"，不是这一刀的形状。
+
+**补刀 = 上一版那条断言是假绿**：S9.2 只查"每个动词名在不在表里"，于是把 `{"point",  CR_CANVAS_FORM, …}` 整行删掉它 **rc=0 一声不响**（负控实测）。而"只接了一半接收者"恰恰是 ② 那一轮的定义。现在换成（动词 × 接收者）15 对矩阵 + 行数恰好 15：删同一行 ⇒ rc=1 两条（`has 14 rows, want exactly 15` 与 `no longer pairs point with CR_CANVAS_FORM`），恢复 ⇒ rc=0。另两条假改动（码头自己拼名字 / backend 不再问表）上一轮已各证红。
+
+**护栏**：语料 A/B 用**这一对编译器**重捕 90 份 = `inputs=90 changed=0`；而同一对编译器在带裸形的 `tests/fdraw` 上差 2 行 ⇒ 这对编译器确实有区分力，那个 0 是语料真没有裸形（与本账早先"裸 `Cls` / `PSet` / `Circle` 语料 0 处"的扫描对上）。`scripts/check_form_draw_state.ps1` rc=0；`run_tests.ps1` ParserError=0。
+
+**边界**：Printer 那一族的名字这轮一起搬进表（`pset` / `circle` / `point` / `line` / `enddoc` 各有一行 PRINTER），但 `Printer.Cls` = 结束文档那层语义只在表里挂一行 DRAW，没有新造第二种"清画布"。`With pic : .Cls` 照上一轮的记录押后；③ 裸 `Line` 两形照旧（parser 就不认）。
+
 ### B71 门 #369/370 那两条红只有 runner 上现形 —— 本机那台 cl 压根不诊断「实参过多」（账 #240，**已出：门 #371（run 37471108271、head `bb252705`、branch dev、attempt 1）= 11 job 全 completed/success、非绿 0；红过的 olecon / olecon_x86 两片转绿，新的 [STATIC] rtl_proto_arity 跟着 Tests (compile) 一起跑绿；dev 已镜像到 gitcode（origin/dev 由 `39d9b119` 快进到 `bb252705`）**）
 
 **读数**：门 #369（run 37456420314、head `39d9b119`、branch dev）11 job 里两片红，各红一条且是同一枚夹具的两个架构 —— `Tests (vbp #2)` = `[VBP-BUILD] olecon ... FAIL rc=1 exe=False`（该片 PASS=54 FAIL=1 SKIP=1）、`Tests (vbp #3)` = `olecon_x86`（PASS=53 FAIL=1 SKIP=0）；其余九片全绿。**引入方式不是改了产品**：`39d9b119` 那轮新增 [STATIC] vbp_fixture_census 把五份"跟踪着却没登记"的 .vbp 逼出册登记成编译面用例，olecon 是其中一份（提交说明里写着本地 x64+x86 rc=0 且出 exe）。同批登记的 dbgdlg（就是那枚缺 `vb6_di_PageSetupDlgA` 桩、为它才补的夹具）在两片上都 PASS ⇒ 桩表与 RTL 内嵌在 CI 上是对上的，红只跟着 olecon 走。
