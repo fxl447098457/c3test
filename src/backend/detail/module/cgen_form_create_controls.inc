@@ -724,7 +724,7 @@
                             // 旧实现只给路径加了 size()==1 守卫, altClsid143 却对任意
                             // 条目数都取 front() —— 多 OCX 工程下正在生成 B 控件时拿到
                             // A.ocx 的 CLSID, 而此时 ocxPath143 为空 (下方 ocxFiles_
-                            // 按 tlKey143 也查不到), ocxCreateAny 会退到 CoCreateInstance
+                            // 按 tlKey143 也查不到), vb6_ocxCreateAny 会退到 CoCreateInstance
                             // 用 A 的 CLSID 激活出 A 的控件, 代码生成侧却按 B 处理,
                             // 静默用错控件。单 OCX 工程 front() 就是自己, 回退语义不变。
                             // Fix 148: front() 前必须判空 — ocxRefs_ 为空时是 UB, 实测段错误.

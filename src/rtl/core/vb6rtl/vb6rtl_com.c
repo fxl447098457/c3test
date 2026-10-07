@@ -885,7 +885,7 @@ void vb6_SavePicture(void* hBitmap, BSTR filename) {
 // czUI fix: 环境字体必须有有效 Name — Bag 重放路径 ReadProperty("Font",
 // Ambient.Font) 会把此对象设为控件字体; Name=NULL 时 GdipCreateFontFamily
 // 失败 → 所有 GDI+ 文字静默消失 (Charts2020 图表标题/百分比实测)
-vb6_ComIface_Font g_vb6_UserControl_FontObj = { NULL, 8.25f, 0, 0, 0, 0, 400, 0 };
+vb6_ComIface_Font vb6_UserControl_FontObj = { NULL, 8.25f, 0, 0, 0, 0, 400, 0 };
 
 // --- UserControl host state ---
 int32_t vb6_UserControl_ScaleWidth  = 0;
@@ -905,11 +905,11 @@ int16_t vb6_UserControl_RightToLeft = 0;
 void*   vb6_UserControl_ParentControls = NULL;
 void*   vb6_UserControl_Controls = NULL;
 void*   vb6_Screen_MouseIcon = NULL;       // Fix <vbeclipse>: Screen.MouseIcon 槽   // Fix <vbeclipse>: UserControl.Controls (集合未建模, 恒 NULL)
-vb6_ComIface_Font* vb6_UserControl_Font = &g_vb6_UserControl_FontObj;
-struct vb6_UserControl_Ambient_Type vb6_UserControl_Ambient = { &g_vb6_UserControl_FontObj };
+vb6_ComIface_Font* vb6_UserControl_Font = &vb6_UserControl_FontObj;
+struct vb6_UserControl_Ambient_Type vb6_UserControl_Ambient = { &vb6_UserControl_FontObj };
 
 // --- Ambient host environment ---
-vb6_ComIface_Font* vb6_Ambient_Font = &g_vb6_UserControl_FontObj;
+vb6_ComIface_Font* vb6_Ambient_Font = &vb6_UserControl_FontObj;
 int16_t vb6_Ambient_UserMode   = -1;         // compiled output is runtime
 BSTR    vb6_Ambient_DisplayName = NULL;     // set to control instance name at runtime
 int32_t vb6_Ambient_ForeColor  = 0;          // black

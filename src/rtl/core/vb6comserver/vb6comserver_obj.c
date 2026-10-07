@@ -498,7 +498,7 @@ void* vb6_ComObject_GetInstance(void* pdisp) {
          * cgen 对 `Set x = <Variant 值>` 一律生成
          *   (vb6_cls_X*)vb6_ComObject_GetInstance(vb6_VariantToObjectVal(v))
          * 而 Controls.Item/Add 给出的是 UserControl **宿主 HWND** (不是 vb6_ComObject)。
-         * vb6_UC_InstanceOf 只遍历 g_uc_recs 比较 hwnd, 对任意指针安全 (含 NULL /
+         * vb6_UC_InstanceOf 只遍历 vb6_ucRecs 比较 hwnd, 对任意指针安全 (含 NULL /
          * 裸 HWND / 非宿主指针), 命中即返回该宿主的 vb6_cls_<UC>* 实例。 */
         { extern void* vb6_UC_InstanceOf(void* hwnd);
           void* inst = vb6_UC_InstanceOf(pdisp); if (inst) return inst; }

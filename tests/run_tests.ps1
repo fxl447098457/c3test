@@ -1975,7 +1975,7 @@ if ($Category -in @("all", "run", "bas")) {
     # C2373 + C2166 给 const 赋值 —— 改前探针实测 BUILD-RC=1 / 5 条诊断 / no exe。旗标现在由
     # parser 在 Line 的 style 位置折成字面量, 这两个名字整条归还给用户 (位置那一头见 pcline 的
     # [CODEGEN-NOTE]，两处不许互相覆盖)。
-    $ncNeedles = @("NC-B=13 NC-BFLEN=2", "NC-ACC=15", "NC-BOX=3/8", "NC-DONE")
+    $ncNeedles = @("NC-B=13 NC-BFLEN=2", "NC-ACC=15", "NC-BOX=3/8", "NC-DONE", "NC2-SUM=2101", "NC2-INDEP=101/600")
     Add-BasTest "test_nameclash" "$Tests\test_nameclash.bas" $ncNeedles
     Add-BasTest "test_nameclash_x86" "$Tests\test_nameclash.bas" $ncNeedles -Arch "x86"
     # 账 #219: RTL 那枚裸名全局 Changed 撤掉后, 模块级 Public Changed As Long 整个归用户。

@@ -262,7 +262,7 @@ private:
 
     // Fix <vbeclipse> 2026-10-06: Object= OCX 组件表 {ProgID, CLSID, coclass名, 相对exe路径},
     // runTypeLibImport 收集, cgen 烘焙进产物入口点 (vb6_OcxRefRegister). 运行期
-    // Me.Controls.Add 按 ProgID 命中后走 ocxCreateAny 免注册.
+    // Me.Controls.Add 按 ProgID 命中后走 vb6_ocxCreateAny 免注册.
     std::vector<std::array<std::string, 4>> ocxLibRefs_;
 
     // Fix 160: vbp ComLib= 声明的组件 DLL (canonical 小写绝对路径 → 相对 exe 路径).

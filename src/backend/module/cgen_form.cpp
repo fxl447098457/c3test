@@ -203,7 +203,7 @@ void CCodeGen::emitDesignerControlDecls(const FrmFormDesc& frmDesc, DocumentKind
     // czUI fix: 设计器子控件句柄改为按实例槽位 — 全局句柄被最后创建的实例覆盖,
     // 导致 11 个实例只有最后一个的 timer/textbox 生效 (开关动画死、文本框错乱)。
     // Fix VbEclipse: 必须传 `me` — UC 实例方法多由外部模块直接 C 调用发起,
-    // 此时全局 g_uc_current 已 pop 成 NULL, 只按上下文的旧签名会退化成共享
+    // 此时全局 vb6_ucCurrent 已 pop 成 NULL, 只按上下文的旧签名会退化成共享
     // orphan 槽 (恒 NULL), 面板 SetParent/Move 全部落空。
     c_.emitLine("extern void** vb6_UC_DesignSlotOf(void* inst, const char* name);");
     for (const auto& child : frmDesc.formControl.children) {

@@ -36,7 +36,7 @@ static int vb6_TabNavKey(const MSG *msg);
 
 
 // 全局变量
-HINSTANCE g_hInstance = NULL;
+HINSTANCE vb6_hInstance = NULL;
 static int g_nextControlId = 100;  // 控件ID从100开始 (1-99保留给菜单)
 // 账 #156: 计时器 id **不能**跟着控件 id 走。控件 id 每建一枚窗体就复位一次
 // (cgen_form_create_controls.inc 发 vb6_ResetControlId())，而 g_timerTable 是进程内
@@ -931,11 +931,11 @@ void* vb6_GetFormUserData(void* hwnd) {
 // ============================================================
 
 void* vb6_GetAppInstance(void) {
-    return (void*)g_hInstance;
+    return (void*)vb6_hInstance;
 }
 
 void vb6_SetAppInstance(void* hInstance) {
-    g_hInstance = (HINSTANCE)hInstance;
+    vb6_hInstance = (HINSTANCE)hInstance;
 }
 
 // Fix 149 诊断: C3_CRASH_TRACE=1 时安装未处理异常过滤器, 把崩溃栈各帧的

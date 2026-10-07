@@ -39,7 +39,7 @@ void* vb6_Form_ControlsAdd(void* hwnd, const wchar_t* progId, const wchar_t* ctr
 // ============================================================
 // cgen 在入口点烘焙: 每个 vbp Object= 引用的 OCX, 其 typelib 导入后收集的全部
 // coclass {ProgID, CLSID, coclass名, 相对exe路径} 进此表。vb6_Form_ControlsAdd 按
-// ProgID 命中后改走 ocxCreateAny (LoadLibrary+DllGetClassObject), 完全绕开注册表 ——
+// ProgID 命中后改走 vb6_ocxCreateAny (LoadLibrary+DllGetClassObject), 完全绕开注册表 ——
 // 与设计期 vb6_OcxHost_Create 用 ocxFiles_ 免注册同款机制。未命中 → 原有注册表路径.
 #define VB6_MAX_OCXREFS 256
 typedef struct Vb6OcxRef {

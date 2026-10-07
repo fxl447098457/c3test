@@ -18,8 +18,8 @@ void vb6_HostObj_Register(void* hwnd, const char* name, const char* vbTypeName,
                           int32_t isForm, int32_t index) {
     if (!hwnd) return;
     if (vb6_ho_find(hwnd)) return;
-    if (g_hoCount >= VB6_UC_MAX_OBJ) return;
-    vb6_HostObjRec* h = &g_ho[g_hoCount++];
+    if (vb6_ucHoCount >= VB6_UC_MAX_OBJ) return;
+    vb6_HostObjRec* h = &vb6_ucHo[vb6_ucHoCount++];
     memset(h, 0, sizeof(*h));
     h->hwnd = hwnd;
     h->isForm = isForm;
@@ -51,10 +51,10 @@ const wchar_t* vb6_HostObj_GetName(void* hwnd) {
     vb6_HostObjRec* r = vb6_ho_find(hwnd);
     return r ? r->name : L"";
 }
-int32_t vb6_HostObj_Count(void) { return g_hoCount; }
+int32_t vb6_HostObj_Count(void) { return vb6_ucHoCount; }
 void* vb6_HostObj_At(int32_t i) {
-    if (i < 0 || i >= g_hoCount) return NULL;
-    return g_ho[i].hwnd;
+    if (i < 0 || i >= vb6_ucHoCount) return NULL;
+    return vb6_ucHo[i].hwnd;
 }
 
 vb6_HostObjRec* vb6_ho_findWindow(const void* hwnd) {

@@ -5,7 +5,7 @@
     vb6_uc_trace("create.begin", typeName, NULL);
     const vb6_UserControlDesc* desc = vb6_uc_findDesc(typeName);
     if (!desc) return NULL;
-    if (g_uc_recCount >= VB6_UC_MAX_INST) return NULL;
+    if (vb6_ucRecCount >= VB6_UC_MAX_INST) return NULL;
 
     // czUI fix: Ambient.BackColor 应反映容器窗体的 BackColor (VB6 语义)。
     // 控件 RedrawControl 用它做底色填充, 取不到就落到 BTNFACE 灰/系统色,
@@ -25,16 +25,16 @@
     vb6_uc_registerClass((HINSTANCE)hInstance);
     vb6_uc_gdiplusInit();
 
-    vb6_UCRec* r = &g_uc_recs[g_uc_recCount];
+    vb6_UCRec* r = &vb6_ucRecs[vb6_ucRecCount];
     memset(r, 0, sizeof(*r));
     r->desc = desc;
     r->parent = (HWND)hParent;
     r->enabled = -1;
     r->index = index;
     // Fix 119: 装入 cgen 预先设定的实例字体 (.frm BeginProperty Font)
-    if (g_uc_pendingFont) {
-        r->font = g_uc_pendingFont;
-        g_uc_pendingFont = NULL;
+    if (vb6_ucPendingFont) {
+        r->font = vb6_ucPendingFont;
+        vb6_ucPendingFont = NULL;
     }
     r->scaleWidth = vb6_TwipToX(width);
     r->scaleHeight = vb6_TwipToY(height);
@@ -69,14 +69,14 @@
     vb6_uc_trace("window.created", typeName, hwnd);
     if (!hwnd) return NULL;
     r->hwnd = hwnd;
-    g_uc_recCount++;
+    vb6_ucRecCount++;
 
     // Fix 122: 修正 VB6 z 序 (先声明者在上)
     vb6_uc_fixZOrder(hwnd);
 
     // 登记: 供 Controls 枚举 / TypeName / 宿主对象分派
-    if (g_hoCount < VB6_UC_MAX_OBJ) {
-        vb6_HostObjRec* h = &g_ho[g_hoCount++];
+    if (vb6_ucHoCount < VB6_UC_MAX_OBJ) {
+        vb6_HostObjRec* h = &vb6_ucHo[vb6_ucHoCount++];
         memset(h, 0, sizeof(*h));
         h->hwnd = (void*)hwnd;
         h->isForm = 0;
@@ -106,7 +106,7 @@ if (GetEnvironmentVariableW(L"C3_COM_TRACE", NULL, 0) > 0) { fprintf(stderr, "[C
         r->ready = 1;   // Fix 112: 之后窗口消息 (Resize/Show/Paint) 才允许进入实例
         vb6_uc_trace("instance.ready", desc->typeName, r->me);
         vb6_uc_pop(&saved);
-        if (g_hoCount) g_ho[g_hoCount - 1].instance = r->me;
+        if (vb6_ucHoCount) vb6_ucHo[vb6_ucHoCount - 1].instance = r->me;
     }
 
     ShowWindow(hwnd, SW_SHOW);

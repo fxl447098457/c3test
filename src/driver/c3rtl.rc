@@ -117,7 +117,7 @@
 //      各设计期子控件各调一次。**不能挂 vb6_ControlMove** (所有摆位的收口, 看似
 //      最自然) —— `ViewArea.Move` 正是 UserControl_Resize 内部发的, 而那个过程经
 //      WM_SIZE→push→resize→Move 链进来 ⇒ Move 里再跑子控件事件 = 无限递归。
-//      也不能加 `if (g_uc_current) return 0` —— 实测 WM_SIZE 尾部 g_uc_current
+//      也不能加 `if (vb6_ucCurrent) return 0` —— 实测 WM_SIZE 尾部 vb6_ucCurrent
 //      仍**非空** (WM_SIZE 是 SetWindowPos 的同步 SendMessage, 跑在 pop 之前),
 //      那道判据等于永不触发。
 //   修前 play78: ucFolder.ctl:529 `ViewArea_Resize` (ViewArea 的 Resize 事件, 是把

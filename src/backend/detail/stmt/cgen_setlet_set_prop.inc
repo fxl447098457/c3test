@@ -334,7 +334,7 @@
                 //   VBFlexGrid.c:2082 prop_let_Font → prop_set_Font(me, &(void*){NewFont})
                 //   → me->PropFont = 复合字面量地址(栈) → 2099 CreateGDIFontFromOLEFont
                 //   → Common.c:1068 vb6_ComGetObjectProp(Font, L"hFont") 的 disp 是栈地址、
-                //   其首 8 字节恰为 &g_vb6_UserControl_FontObj → 当成 vtable 调用 →
+                //   其首 8 字节恰为 &vb6_UserControl_FontObj → 当成 vtable 调用 →
                 //   RIP 落进 .data。**C 里 void** 传成 vb6_ComIface_Font* 只是指针不匹配
                 //   警告, 所以编译期全绿、错误数为 0 也照样崩。**别再加回无条件包装。**
                 bool _psValByVal166 = !_psSym->params.empty()

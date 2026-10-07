@@ -15,11 +15,11 @@ extern "C" {
 
 /* vb6_UserControlDesc 定义见 vb6forms.h (生成代码与 RTL 共用同一份) */
 
-const vb6_UserControlDesc* g_uc_descs[VB6_UC_MAX_DESC];
-int32_t g_uc_descCount = 0;
+const vb6_UserControlDesc* vb6_ucDescs[VB6_UC_MAX_DESC];
+int32_t vb6_ucDescCount = 0;
 
-vb6_UCRec g_uc_recs[VB6_UC_MAX_INST];
-int32_t g_uc_recCount = 0;
+vb6_UCRec vb6_ucRecs[VB6_UC_MAX_INST];
+int32_t vb6_ucRecCount = 0;
 // Fix 112: 可选生命周期日志；每行立即关闭文件，异常退出也保留最后阶段。
 void vb6_uc_trace(const char* phase, const char* type, void* me) {
     const char* path = getenv("C3_UC_TRACE");
@@ -30,7 +30,7 @@ void vb6_uc_trace(const char* phase, const char* type, void* me) {
     fclose(f);
 }
 
-vb6_UCRec* g_uc_current = NULL;   // 最近一次进入的实例 (供 Refresh/PropertyChange)
+vb6_UCRec* vb6_ucCurrent = NULL;   // 最近一次进入的实例 (供 Refresh/PropertyChange)
 
 // Fix 119: 待应用的实例字体。VB6 里每个控件实例有独立的 Font 对象(.frm 的
 // BeginProperty Font 块), 且控件会在 InitProperties 里以 UserControl.Font 为
@@ -38,10 +38,10 @@ vb6_UCRec* g_uc_current = NULL;   // 最近一次进入的实例 (供 Refresh/Pr
 // 实例初始化**之前**就位 —— cgen 在 vb6_UC_HostCreate 之前调用
 // vb6_UC_SetPendingFont(), HostCreate 把它装进 r->font, push 时既成为
 // vb6_UserControl_Font 也成为 Ambient.Font。
-vb6_ComIface_Font* g_uc_pendingFont = NULL;
+vb6_ComIface_Font* vb6_ucPendingFont = NULL;
 
 void vb6_UC_SetPendingFont(void* f) {
-    g_uc_pendingFont = (vb6_ComIface_Font*)f;
+    vb6_ucPendingFont = (vb6_ComIface_Font*)f;
 }
 
 // Fix 122: VB6 的 z 序规则 —— .frm 中**先声明**的控件在**最上层**。
@@ -65,15 +65,15 @@ static void vb6_uc_fixZOrder(HWND hwnd) {
 // 宿主对象登记表: hwnd → VB6 名 / 类型名
 // ============================================================
 
-vb6_HostObjRec g_ho[VB6_UC_MAX_OBJ];
-int32_t g_hoCount = 0;
+vb6_HostObjRec vb6_ucHo[VB6_UC_MAX_OBJ];
+int32_t vb6_ucHoCount = 0;
 
 // 合成对象: Controls 集合
 
 // 合成对象: Font (stdole.StdFont 的最小形态)
 
-vb6_UCFontRec* g_uc_fonts;
-extern vb6_ComIface_Font g_vb6_UserControl_FontObj;
+vb6_UCFontRec* vb6_ucFonts;
+extern vb6_ComIface_Font vb6_UserControl_FontObj;
 
 // Fix 112c: 前置声明 (定义在宿主分派节, Collection 实现会用到)
 
@@ -100,29 +100,29 @@ int32_t vb6_uc_isControls(const void* p) {
 int32_t vb6_uc_isFont(const void* p) {
     // Fix 112e: 先按身份识别裸字体；不可将 Name 字段当 IDispatch vtable。
     if (!p) return 0;
-    if (p == &g_vb6_UserControl_FontObj) return 1;
-    for (vb6_UCFontRec* f = g_uc_fonts; f; f = f->next)
+    if (p == &vb6_UserControl_FontObj) return 1;
+    for (vb6_UCFontRec* f = vb6_ucFonts; f; f = f->next)
         if (p == f->font || p == f) return 1;
     return 0;
 }
 
 vb6_HostObjRec* vb6_ho_find(const void* hwnd) {
-    for (int32_t i = 0; i < g_hoCount; i++) {
-        if (g_ho[i].hwnd == hwnd) return &g_ho[i];
+    for (int32_t i = 0; i < vb6_ucHoCount; i++) {
+        if (vb6_ucHo[i].hwnd == hwnd) return &vb6_ucHo[i];
     }
     return NULL;
 }
 
 vb6_UCRec* vb6_uc_findByHwnd(const void* hwnd) {
-    for (int32_t i = 0; i < g_uc_recCount; i++) {
-        if ((void*)g_uc_recs[i].hwnd == hwnd) return &g_uc_recs[i];
+    for (int32_t i = 0; i < vb6_ucRecCount; i++) {
+        if ((void*)vb6_ucRecs[i].hwnd == hwnd) return &vb6_ucRecs[i];
     }
     return NULL;
 }
 
 vb6_UCRec* vb6_uc_findByInstance(const void* inst) {
-    for (int32_t i = 0; i < g_uc_recCount; i++) {
-        if (g_uc_recs[i].me == inst) return &g_uc_recs[i];
+    for (int32_t i = 0; i < vb6_ucRecCount; i++) {
+        if (vb6_ucRecs[i].me == inst) return &vb6_ucRecs[i];
     }
     return NULL;
 }
@@ -158,7 +158,7 @@ void vb6_uc_push(vb6_UCRec* r, vb6_UCSaved* saved) {
     saved->hWnd = vb6_UserControl_hWnd;
     saved->autoRedraw = vb6_UserControl_AutoRedraw;
     saved->ext = vb6_UserControl_Extender;
-    saved->current = g_uc_current;
+    saved->current = vb6_ucCurrent;
     saved->displayName = (void*)vb6_Ambient_DisplayName;
 
     vb6_uc_defaultFont();
@@ -193,7 +193,7 @@ void vb6_uc_push(vb6_UCRec* r, vb6_UCSaved* saved) {
     vb6_UserControl_AutoRedraw = 1;                 // Fix 133u: 事件驱动重绘
     vb6_UserControl_Extender.Visible = -1;          // Fix 133u: 默认可见
     vb6_UserControl_Extender.Height = r->scaleHeight; // Fix 133u
-    g_uc_current = r;
+    vb6_ucCurrent = r;
 
     // Fix 116: Ambient.DisplayName = 控件实例名 (VB6 语义)。
     // 控件内常见用法: m_Title = .ReadProperty("Title", Ambient.DisplayName)
@@ -223,7 +223,7 @@ void vb6_uc_pop(const vb6_UCSaved* saved) {
     vb6_UserControl_hWnd = saved->hWnd;              // Fix 133u
     vb6_UserControl_AutoRedraw = saved->autoRedraw;  // Fix 133u
     vb6_UserControl_Extender = saved->ext;           // Fix 133u
-    g_uc_current = saved->current;
+    vb6_ucCurrent = saved->current;
     vb6_Ambient_DisplayName = (BSTR)saved->displayName;   // Fix 116
 }
 
@@ -260,7 +260,7 @@ static int32_t g_uc_ctxDepth = 0;
 
 static void vb6_uc_snapshot(vb6_UCSaved* s) {
     // 把当前全局原样抄一份 (不改变任何值): Pop 时等值还原
-    vb6_UCRec* cur = g_uc_current;
+    vb6_UCRec* cur = vb6_ucCurrent;
     if (cur) { vb6_uc_push(cur, s); return; }     // 已知实例: 重推一次即可自洽
     s->scaleWidth = vb6_UserControl_ScaleWidth;
     s->scaleHeight = vb6_UserControl_ScaleHeight;
@@ -277,7 +277,7 @@ static void vb6_uc_snapshot(vb6_UCSaved* s) {
     s->hWnd = vb6_UserControl_hWnd;
     s->autoRedraw = vb6_UserControl_AutoRedraw;
     s->ext = vb6_UserControl_Extender;
-    s->current = g_uc_current;
+    s->current = vb6_ucCurrent;
     s->displayName = (void*)vb6_Ambient_DisplayName;
 }
 
@@ -321,12 +321,12 @@ void vb6_UserControl_Cls(void) {
 //   vb6_ComGetIntProp(hwnd, ...) 由"宿主对象 → 属性"解析 (vb6forms_uc.c).
 //   这里以控件的容器窗口为起点, GetAncestor(GA_ROOT) 找到顶层窗体窗口.
 static HWND vb6_uc_ParentHwndRaw(void) {
-    if (!g_uc_current) return NULL;
-    HWND ctrl = g_uc_current->hwnd ? g_uc_current->hwnd
-               : (HWND)(intptr_t)g_uc_current->parent;
+    if (!vb6_ucCurrent) return NULL;
+    HWND ctrl = vb6_ucCurrent->hwnd ? vb6_ucCurrent->hwnd
+               : (HWND)(intptr_t)vb6_ucCurrent->parent;
     if (!ctrl) return NULL;
     HWND root = GetAncestor(ctrl, GA_ROOT);
-    HWND parent = g_uc_current->parent;
+    HWND parent = vb6_ucCurrent->parent;
     if (parent && root && parent != root)
         return root;              // 顶层窗体窗口
     return parent ? parent : root;
@@ -351,18 +351,18 @@ void vb6_UC_ParentMove(int32_t left, int32_t top, int32_t width, int32_t height)
 
 void vb6_UC_Register(const vb6_UserControlDesc* desc) {
     if (!desc || !desc->typeName) return;
-    for (int32_t i = 0; i < g_uc_descCount; i++) {
-        if (_stricmp(g_uc_descs[i]->typeName, desc->typeName) == 0) return;  // 已注册
+    for (int32_t i = 0; i < vb6_ucDescCount; i++) {
+        if (_stricmp(vb6_ucDescs[i]->typeName, desc->typeName) == 0) return;  // 已注册
     }
-    if (g_uc_descCount < VB6_UC_MAX_DESC) g_uc_descs[g_uc_descCount++] = desc;
+    if (vb6_ucDescCount < VB6_UC_MAX_DESC) vb6_ucDescs[vb6_ucDescCount++] = desc;
 }
 
 static const vb6_UserControlDesc* vb6_uc_findDesc(const char* typeName) {
     if (!typeName) return NULL;
     const char* dot = strrchr(typeName, '.');
     if (dot) typeName = dot + 1;   // 接受 "Proyecto1.ucChartBar"
-    for (int32_t i = 0; i < g_uc_descCount; i++) {
-        if (_stricmp(g_uc_descs[i]->typeName, typeName) == 0) return g_uc_descs[i];
+    for (int32_t i = 0; i < vb6_ucDescCount; i++) {
+        if (_stricmp(vb6_ucDescs[i]->typeName, typeName) == 0) return vb6_ucDescs[i];
     }
     return NULL;
 }
@@ -601,8 +601,8 @@ static LRESULT CALLBACK vb6_uc_timerProc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
         // czUI fix: 回调前换入归属实例的宿主上下文 (tmrTrack_Timer 读
         // ScaleWidth/hWnd 等按当前实例; 全局句柄已被最后创建的实例覆盖)
         vb6_UCRec* rec = NULL;
-        for (int i = 0; i < g_uc_recCount; i++) {
-            if (g_uc_recs[i].me == ctx) { rec = &g_uc_recs[i]; break; }
+        for (int i = 0; i < vb6_ucRecCount; i++) {
+            if (vb6_ucRecs[i].me == ctx) { rec = &vb6_ucRecs[i]; break; }
         }
         if (rec && !rec->ready) return 0;
         if (rec) {
@@ -631,9 +631,9 @@ static LRESULT CALLBACK vb6_uc_timerProc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
 //   #define vb6_hwnd_txtEmbed (*vb6_UC_DesignSlotOf(me, "txtEmbed"))
 // 无上下文时指向孤儿槽 (NULL), 行为与旧全局一致。
 //
-// Fix VbEclipse: 原签名只吃 name, 依赖全局 g_uc_current。但 cgen 生成的
+// Fix VbEclipse: 原签名只吃 name, 依赖全局 vb6_ucCurrent。但 cgen 生成的
 // UC 实例方法 (vb6_ucFolder_AddView 等) 绝大多数是**直接 C 调用**, 由外部
-// 模块 (ucPerspective.CreateFolder) 在任意上下文里发起 —— 此时 g_uc_current
+// 模块 (ucPerspective.CreateFolder) 在任意上下文里发起 —— 此时 vb6_ucCurrent
 // 已被 pop 成 NULL ⇒ 槽位退化成共享 orphan 槽 (实测恒为 NULL) ⇒
 // SetParent(view, NULL) 落空, 视图窗体留在桌面顶层, 停靠面板一片空白。
 // 拆成两个入口: Of(inst) 按实例定位 (方法体内有 me, 可靠), 无 inst 的
@@ -657,7 +657,7 @@ void** vb6_UC_DesignSlotOf(void* inst, const char* name) {
     vb6_UCRec* r = inst ? vb6_uc_findByInstance(inst) : NULL;
     // 回退到窗口上下文: 事件回调/设计期路径只拿得到 hwnd, 或 inst 尚未登记
     // (HostCreate 里 desc->init(r->me) 之前 rec->me 才刚赋值, 见 uc_host_create.inc)。
-    if (!r) r = g_uc_current;
+    if (!r) r = vb6_ucCurrent;
     if (!r) return &orphan;
     void** slot = vb6_uc_designSlotIn(r, name);
     return slot ? slot : &orphan;
@@ -671,8 +671,8 @@ void** vb6_UC_DesignSlotOf(void* inst, const char* name) {
 //   只认"那个被改了尺寸的控件", 不能凭"同属一个 UC"就全体触发。
 int32_t vb6_UC_DesignCtrlOwner(const void* hwnd, void** outInst, const char** outName) {
     if (!hwnd) return 0;
-    for (int32_t i = 0; i < g_uc_recCount; i++) {
-        vb6_UCRec* r = &g_uc_recs[i];
+    for (int32_t i = 0; i < vb6_ucRecCount; i++) {
+        vb6_UCRec* r = &vb6_ucRecs[i];
         for (int j = 0; j < r->designCount; j++) {
             if (r->design[j].value == (void*)hwnd) {
                 if (outInst) *outInst = r->me;
@@ -692,8 +692,8 @@ int32_t vb6_UC_DesignCtrlOwner(const void* hwnd, void** outInst, const char** ou
 // 控件会再进一层, 共享一块 saved 会被内层 pop 掉外层值"的隔离要求。
 // 返回 1 = 事件跑了; 0 = 没跑 (无宿主上下文 / 不是设计期子控件 / 未 ready)。
 //
-// ⚠ 调用方 (vb6_ControlMove) 必须**已经**判过"不在 UC 上下文里" (g_uc_current
-//   为空), 否则这里 push 会与外层 push 打架: 内层 pop 把 g_uc_current 恢复成
+// ⚠ 调用方 (vb6_ControlMove) 必须**已经**判过"不在 UC 上下文里" (vb6_ucCurrent
+//   为空), 否则这里 push 会与外层 push 打架: 内层 pop 把 vb6_ucCurrent 恢复成
 //   外层 push 前的值, 外层继续往下走就踩空。
 int32_t vb6_UC_RunDesignResize(const void* hwnd) {
     void* inst = NULL;
@@ -706,8 +706,8 @@ int32_t vb6_UC_RunDesignResize(const void* hwnd) {
     // :30 desc → :102 me → :106 ready), 那段窗口还带着设计期尺寸。
     if (!r || !r->ready || !r->desc || !r->desc->designResize) return 0;
     /* 重入防护靠"**同控件**"而不是"有没有 UC 上下文"。
-     * ⚠ 别加 `if (g_uc_current) return 0` —— 那样等于永不触发:
-     *   实测 (play78 --arch x86) WM_SIZE 处理尾部 g_uc_current 仍**非空**, 因为
+     * ⚠ 别加 `if (vb6_ucCurrent) return 0` —— 那样等于永不触发:
+     *   实测 (play78 --arch x86) WM_SIZE 处理尾部 vb6_ucCurrent 仍**非空**, 因为
      *   WM_SIZE 是 SetWindowPos 触发的同步 SendMessage, 它在 vb6_uc_pop 之前
      *   就跑完了。而 ViewArea_Resize 恰恰需要在这里被调。
      *   换句话说: "已在 UC 上下文里" 正是本调用点的**常态**, 不是异常。
