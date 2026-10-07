@@ -1,4 +1,4 @@
-#include "backend/cgen.hpp"
+﻿#include "backend/cgen.hpp"
 #include <algorithm>
 #include <cctype>
 #include <iostream>
@@ -561,6 +561,9 @@ std::string CCodeGen::udtFieldObjCType(const std::string& udtCType,
         // Fix 177: String 字段 → "BSTR"。调用方 appendUdtObjFieldMarker 只对
         // "void*"/"vb6_cls_*" 追加对象标记, 故新增此返回不影响既有分派;
         // 供 udtFieldIsBstrInCTarget 判定"该字段赋值必须走 vb6_BSTR_Assign 深拷贝"。
+        // Fix <vbeclipse> 2026-10-06: 数组成员 (`parts() As String`) 的 mi.type 是
+        // String|Array 位组合, 上面的 == 判等天然排除, 其 C 类型是
+        // vb6_SafeArray1D* 不是 BSTR, 另走动态数组链路。
         if (mi.type == Vb6Type::String) return "BSTR";
         // 标量/数组等非对象字段
         return "";

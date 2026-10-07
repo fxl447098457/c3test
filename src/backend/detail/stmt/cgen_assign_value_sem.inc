@@ -1,4 +1,4 @@
-// cgen_assign_value_sem.inc - visit(AssignmentStmt&) 函数体片段：值语义（返回值变量 / BSTR / Variant 赋值）
+﻿// cgen_assign_value_sem.inc - visit(AssignmentStmt&) 函数体片段：值语义（返回值变量 / BSTR / Variant 赋值）
 // 由 src/backend/stmt/cgen_assign.cpp 拆出（2026-09-17），在函数体内被 #include，非独立编译单元。
 // 内容 = 原文件第 1056~1362 行，逐行未改。
 
@@ -41,6 +41,19 @@
         // 里 148/148 行读到同一个 "149"/列头, 写 "ZZZ" 后读回是指针数值。
         // 交给下方 targetIsBstr 分支 → vb6_BSTR_Assign (释放旧值 + 深拷贝)。
         if (!targetIsBstr && udtFieldIsBstrInCTarget(target)) targetIsBstr = true;
+        // Fix <vbeclipse> 2026-10-06: **裸 UDT 变量**的 String 字段 (`r.name = ...` /
+        // With 块 `.name = ...`, 含嵌套链 `a.b.name`)。账 #118 当时只修了定长串字段
+        // (fixedStrLenOfExpr), 动态 String 字段刻意留下 (注释"那是另一笔账") ——
+        // udtFieldIsBstrInCTarget 只认 SA_AT 宏形状, 裸 UDT 变量捡不到 ⇒ 落最底下
+        // 裸赋值 `r.name = r.num;`: 整型 RHS 静默把数字当 BSTR 指针存进字段
+        // (第一次读/释放就崩), 浮点 RHS 才是 C2440。udtFieldCTypeOfTarget 对
+        // MemberAccessExpr/WithMemberExpr 返回成员 C 类型, == "BSTR" 即 String
+        // 字段 (数组成员被 == 判等天然排除), 交上方 targetIsBstr 分支走
+        // vb6_BSTR_Assign + 账 #122 的隐式 CStr。
+        if (!targetIsBstr) {
+            std::string fieldCType206 = udtFieldCTypeOfTarget(node.target.get());
+            if (fieldCType206 == "BSTR") targetIsBstr = true;
+        }
         // Fix <vbeclipse> rev11: **String 数组元素赋值** (`m_Keys(Position) = Key`,
         // `arr(i) = s`) 的目标 C 串是 `VB6_SA_AT(BSTR, me->m_Keys, Position)` ——
         // 一个**表达式**, 上面四道按名字/符号表的判据全都捡不到它, 于是落到最底下的
