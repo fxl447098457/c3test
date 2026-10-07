@@ -332,6 +332,9 @@ uint8_t vb6_CByte(double v);
 uint8_t vb6_ChkByte(int32_t v);
 int16_t vb6_ChkInt(int32_t v);
 int32_t vb6_ChkLong(int64_t v);
+// 账 #248: 浮点交给整数目标时**先取整**这一件事只有一个出口 (CLng/CInt 与隐式赋值同源)。
+// C 的参数转换是截断，发码把 `vb6_ChkLong(<double>)` 直接递进去就丢了 VB6 的取整。
+int64_t vb6_FltToLng(double x);
 float vb6_CSng(double v);
 double vb6_CDate(vb6_VARIANT v);
 BSTR vb6_Hex(int32_t n);

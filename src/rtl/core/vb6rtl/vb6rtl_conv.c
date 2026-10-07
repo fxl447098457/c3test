@@ -162,16 +162,25 @@ int32_t vb6_ChkLong(int64_t v) {
     return (int32_t)vb6_OvfChk(v, -2147483647LL - 1, 2147483647LL);
 }
 
+/* 账 #248: 浮点→整数目标的取整**只有这一处**答案。
+   为什么单开一条：发码把浮点表达式直接递进 vb6_ChkLong(int64_t) —— C 在调用边界上按
+   截断转换，于是 `l = 6.73` 交 6、`l = 7 / 2` 交 3；而**同一句**写成 `l = CLng(7 / 2)`
+   走 round() 交 4。同一件事两个答案，正是本仓反复量出来的"同一个决定抄了两遍"那一族
+   (#234 拿 DC / #235 画笔色 / #239 笔位 / #247 几何宿主路) 的最新一例。
+   半值远离零（不是银行家舍入）是 rev37 那段注释里**写明保留**的取舍 —— 这一处只解决
+   "别再截断"，顺带把 CLng/CInt 与隐式赋值并到同一个答案上。 */
+int64_t vb6_FltToLng(double x) { return (int64_t)round(x); }
+
 #ifdef vb6_CInt
 #undef vb6_CInt      // vb6rtl_builtin.h 的 _Generic 宏在定义处必须关闭
 #endif
 // CInt/CLng/CByte 在 VB6 里同样查表 (`CByte(300)` = Error 6), 不是截断。
-int16_t vb6_CInt(double x) { return (int16_t)vb6_OvfChk((int64_t)round(x), -32768, 32767); }
+int16_t vb6_CInt(double x) { return (int16_t)vb6_OvfChk(vb6_FltToLng(x), -32768, 32767); }
 #ifdef vb6_CLng
 #undef vb6_CLng
 #endif
 int32_t vb6_CLng(double x) {
-    return (int32_t)vb6_OvfChk((int64_t)round(x), -2147483647LL - 1, 2147483647LL);
+    return (int32_t)vb6_OvfChk(vb6_FltToLng(x), -2147483647LL - 1, 2147483647LL);
 }
 #ifdef vb6_CDbl
 #undef vb6_CDbl

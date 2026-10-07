@@ -1055,7 +1055,17 @@ std::string CCodeGen::narrowCheckAssign(Expr* target, Expr* value,
     default: return cValue;
     }
 
-    int srcBits = value ? cgenIntBits(inferExprType(*value)) : 0;
+    Vb6Type vt = value ? inferExprType(*value) : Vb6Type::Unknown;
+    // 账 #248: 浮点源**必须在这一套检查之前先过那一份取整出口**。
+    // 直接把 double 递进 vb6_ChkLong(int64_t) 会让 C 在调用边界上截断 —— 实测
+    // `l = 6.73` 交 6、`l = 7 / 2` 交 3，而**同一句**写成 `l = CLng(7 / 2)` 交 4
+    // (vb6_CLng 内部走 round())。同一件事两个答案就是"同一个决定抄了两遍"那一族。
+    // 也**不能**靠下面那句"装得下, 不套"放过：cgenIntBits(Single) 答 32，Long 目标 32，
+    // 于是 `l = 某Single` 以前连检查都不进 —— 截得更彻底。
+    if (vt == Vb6Type::Single || vt == Vb6Type::Double || vt == Vb6Type::Currency)
+        return std::string(fn) + "(vb6_FltToLng(" + cValue + "))";
+
+    int srcBits = value ? cgenIntBits(vt) : 0;
     if (srcBits != 0 && srcBits <= tgtBits) return cValue;   // 装得下, 不套
 
     return std::string(fn) + "(" + cValue + ")";

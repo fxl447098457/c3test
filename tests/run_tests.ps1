@@ -874,6 +874,19 @@ function Test-FormDrawState {
         $out | Select-Object -First 6 | ForEach-Object { Write-Host "  $_" }
     }
 }
+function Test-FloatToIntRound {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] float_to_int_round ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\check_float_to_int_round.ps1" 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        $out | Select-Object -First 6 | ForEach-Object { Write-Host "  $_" }
+    }
+}
 function Test-CtrlGeomCache {
     $script:total++
     Write-Host -NoNewline "  [STATIC] ctrl_geom_cache ... "
@@ -2042,6 +2055,20 @@ if ($Category -in @("all", "run", "bas")) {
         "VC13-var-eq-string=True", "VC14-var-eq-string-false=True",
         "VC15-var-eq-date=True", "VC16-var-eq-date-false=True", "VC-DONE")
     Add-BasTest "test_varcmp_scalar" "$Tests\test_varcmp_scalar.bas" $varcmpNeedles
+    # 账 #248: 浮点交给整数目标以前是**截断** (发码把 double 直接递进 vb6_ChkLong(int64_t),
+    # C 在调用边界上截)，而同一句写成 CLng 走 round() ⇒ 一个决定两个答案 (#234/#235/#239/#247
+    # 那一族)。现在两边都只问 vb6_FltToLng。改前那台跑**同一份夹具**：F2L01..04/06..10 九条 False
+    # (6.73→6、7/2→3、-2.6→-2、.5 那两条 parity 也 False)，F2L05/11/12/13 两边同 True
+    # —— 后三条是"没动的东西不许动"的护栏 (整除、Double 目标、越界仍报 6)。
+    # F2L08 那一环特意用 x.75 (截断与舍入永远不同) —— 第一版写成 k/(2k+1) 恒小于 .5，
+    # 在坏编译器上照样绿，这条教训记在夹具头注释里。
+    $f2lngNeedles = @("F2L-01-dbl-round-up=True", "F2L-02-dbl-round-neg=True",
+        "F2L-03-div-half-up=True", "F2L-04-div-third=True",
+        "F2L-05-single-down=True", "F2L-06-single-neg-up=True", "F2L-07-integer-target=True",
+        "F2L-08-rounds-not-truncates=True", "F2L-09-parity-clng-ties=True",
+        "F2L-10-parity-cint=True", "F2L-11-overflow-still-6=True",
+        "F2L-12-intdiv-untouched=True", "F2L-13-double-untouched=True", "F2L-DONE")
+    Add-BasTest "test_f2lng" "$Tests\test_f2lng.bas" $f2lngNeedles
     Write-Host ""
 
         # --- P5.5 数据类型兼容性测试 ---
@@ -2202,6 +2229,7 @@ if ($Category -in @("all", "run", "bas")) {
     Add-BasTest "test_interface" "$Tests\test_interface.bas" @("ITF-SOFT:12", "ITF-1:OK", "ITF-2:OK", "INTERFACE-DONE")
     Add-BasTest "test_interface_x86" "$Tests\test_interface.bas" @("ITF-SOFT:12", "ITF-1:OK", "ITF-2:OK", "INTERFACE-DONE") -Arch "x86"
     Add-BasTest "test_varcmp_scalar_x86" "$Tests\test_varcmp_scalar.bas" $varcmpNeedles -Arch "x86"
+    Add-BasTest "test_f2lng_x86" "$Tests\test_f2lng.bas" $f2lngNeedles -Arch "x86"
     Add-BasTest "test_bool_display_x86" "$Tests\test_bool_display.bas" $boolNeedles -Arch "x86"
 
     # ai/009 5.10 (P3, 溢出检查): 窄整型收窄赋值越界必须报 Error 6, 边界值 (255 /
@@ -4719,6 +4747,7 @@ if ($Category -in @("all", "compile")) {
     Test-CtrlPropTypeAuthority
     Test-FormDrawState
     Test-CtrlGeomCache
+    Test-FloatToIntRound
     Test-FixtureTimerClose
     Test-VariantCmpBoxing
     Test-EventHandlerNames
@@ -5267,6 +5296,20 @@ if ($Category -in @("all", "syntax")) {
         "vb6_VarCmpEq(&gV, &gD)",
         "vb6_VarCmpGt(&v, &d)",
         "vb6_VarCmpLt(&d, &v)")
+
+    # 账 #248 的发码形状针: 浮点→整数目标的**四条来路**都必须穿那一份取整出口 ——
+    # 变量源 / 字面量源 / 除法表达式源 / **Single 变量源** (最后这一条以前连溢出检查都进不
+    # 去: cgenIntBits(Single)=32 与 Long 目标"装得下"就放过，截得更彻底)。必须不出现的那几条
+    # 就是改之前的形状本身 (拿 BASE 那台 emit 逐条验过都在)，所以这枚针两头都能红。
+    Test-CodegenNote "f2lng_round" @("$Tests\test_f2lng.bas") @(
+        "l = vb6_ChkLong(vb6_FltToLng(d));",
+        "l = vb6_ChkLong(vb6_FltToLng(s));",
+        "l = vb6_ChkLong(vb6_FltToLng(vb6_Num_Div((double)(7), (double)(2))));",
+        "i = vb6_ChkInt(vb6_FltToLng(6.7300000000000004));") @(
+        "vb6_ChkLong(d);",
+        "vb6_ChkLong(s);",
+        "vb6_ChkLong(vb6_Num_Div",
+        "vb6_ChkInt(6.7300000000000004);")
 
     # 账 #232② + 账 #224⑤: 窗体绘图家族的发码形状针 —— 语料里那一族的**每一条**都必须
     # 落在 RTL 真出口上，一条都不许留在 COM 兜底里（兜底对一枚 HWND 发 Invoke = 编得过、
