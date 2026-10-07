@@ -78,6 +78,9 @@ Private gRepeat As String
 Private gHops As Long
 Private gBusy As Boolean
 Private gStray As Long
+' 相位之间要求的真实间隔（秒）—— 见 tMain_Timer 里那道闸的注释
+Private Const PHASE_MIN_SEC = 0.03
+Private gLastBeat As Double
 
 Private Declare PtrSafe Function PostMessage Lib "user32" Alias "PostMessageW" (ByVal hWnd As LongPtr, ByVal Msg As Long, ByVal wParam As LongPtr, ByVal lParam As LongPtr) As Long
 Private Declare PtrSafe Function GetFocus Lib "user32" () As LongPtr
@@ -150,6 +153,16 @@ Private Sub tMain_Timer()
         gStray = gStray + 1
         Exit Sub
     End If
+    ' 账 #253: 在途的 WM_TIMER 会连着排空（busy 那一枚数的就是它们），而 VK_TAB 是 post
+    ' 给泵**异步**消化的 ⇒ 两拍挤在同一瞬间时读到的是「还没动」，第一次回头就被提前判定
+    ' （CI 实测 MW2 从 cmdX 变成 txtSecond、hops 3→1；同一份产物本地两台编译器都给 3）。
+    ' 这道闸只认真实间隔：不满 30ms 的拍不计相位，等下一拍 —— 与 #162 / #213 同族，
+    ' 那两条的界同样是「在途条数不是不变量」。
+    If gLastBeat <> 0 And (Timer - gLastBeat) < PHASE_MIN_SEC Then
+        gStray = gStray + 1
+        Exit Sub
+    End If
+    gLastBeat = Timer
     gState = gState + 1
     If gState = 1 Then
         gBusy = True
