@@ -2067,7 +2067,16 @@ if ($Category -in @("all", "run", "bas")) {
         "F2L-05-single-down=True", "F2L-06-single-neg-up=True", "F2L-07-integer-target=True",
         "F2L-08-rounds-not-truncates=True", "F2L-09-parity-clng-ties=True",
         "F2L-10-parity-cint=True", "F2L-11-overflow-still-6=True",
-        "F2L-12-intdiv-untouched=True", "F2L-13-double-untouched=True", "F2L-DONE")
+        "F2L-12-intdiv-untouched=True", "F2L-13-double-untouched=True",
+        "F2L-14-member-long=True", "F2L-15-member-integer=True", "F2L-16-member-byte=True",
+        "F2L-17-member-from-double-expr=True", "F2L-18-module-udt-member=True",
+        "F2L-19-static-array-long=True", "F2L-20-static-array-byte=True", "F2L-21-dyn-array-long=True",
+        "F2L-22-array-of-udt-member=True", "F2L-23-parity-member-ties=True",
+        "F2L-24-member-intdiv-untouched=True", "F2L-25-array-int-source-untouched=True",
+        "F2L-26-member-double-untouched=True",
+        "F2L-27-whole-array-assign-untouched=True", "F2L-28-member-array-elem-open-defect=True",
+        "F2L-29-member-array-whole-assign=True", "F2L-30-member-array-whole-assign-parens=True",
+        "F2L-DONE")
     Add-BasTest "test_f2lng" "$Tests\test_f2lng.bas" $f2lngNeedles
     Write-Host ""
 
@@ -5482,15 +5491,46 @@ if ($Category -in @("all", "syntax")) {
     # 变量源 / 字面量源 / 除法表达式源 / **Single 变量源** (最后这一条以前连溢出检查都进不
     # 去: cgenIntBits(Single)=32 与 Long 目标"装得下"就放过，截得更彻底)。必须不出现的那几条
     # 就是改之前的形状本身 (拿 BASE 那台 emit 逐条验过都在)，所以这枚针两头都能红。
+    #
+    # 账 #261 把同一枚针推到**目标侧**: 成员 (Long / Integer / Byte 三档)、本模块数组元素
+    # (静态 / 动态)、数组元素的字段 —— 六形在改前都是裸赋值 (右边那份浮点直接进整数槽)，
+    # 下面那六条 Absent 就是 BASE emit 里逐字节取回的原始形状，所以这一半也是两头红的。
     Test-CodegenNote "f2lng_round" @("$Tests\test_f2lng.bas") @(
         "l = vb6_ChkLong(vb6_FltToLng(d));",
         "l = vb6_ChkLong(vb6_FltToLng(s));",
         "l = vb6_ChkLong(vb6_FltToLng(vb6_Num_Div((double)(7), (double)(2))));",
-        "i = vb6_ChkInt(vb6_FltToLng(6.7300000000000004));") @(
+        "i = vb6_ChkInt(vb6_FltToLng(6.7300000000000004));",
+        "r.Px = vb6_ChkLong(vb6_FltToLng(6.7300000000000004));",
+        "r.Pi = vb6_ChkInt(vb6_FltToLng(vb6_Num_Div((double)(((4 * 1) + 3)), (double)(4))));",
+        "r.Pb = vb6_ChkByte(vb6_FltToLng(6.7300000000000004));",
+        "VB6_SA_AT(int32_t, arr, 0) = vb6_ChkLong(vb6_FltToLng(6.7300000000000004));",
+        "VB6_SA_AT(uint8_t, bArr, 1) = vb6_ChkByte(vb6_FltToLng(6.7300000000000004));",
+        "VB6_SA_AT(vb6_type_RectF2L, ur, 0).Px = vb6_ChkLong(vb6_FltToLng(6.7300000000000004));",
+        # F2L27 的那道闸: 空下标是**整体数组赋值** (Fix 170)，发的是数组描述符指针而不是元素值。
+        # 这一条必须保持裸形 —— 给它套上标量检查 = rev36 那枚 error 6 换一条入口 (实测漏闸时
+        # test_array.bas EXIT=0x00000006、四条 wa-* 判据整片不打印)。
+        "dst2 = vb6_ArrayAssign1D(dst2, src2);",
+        # F2L29/30 那一格 (账 #261 的自伤负控): 成员数组的**整体赋值**左边是描述符指针。
+        # 只把 `Data() As Byte` 的元素档当档位来认 ⇒ 给它套上 ChkByte = VbQRCodegen 的
+        # Project1 启动期 error 6 (BUILD-RC=0 而进程自己弹 Unhandled VB6 Error #6)。
+        "p.Nums = vb6_ArrayAssign1D(p.Nums, src3);",
+        # F2L28 的那条边界: 成员数组的元素 (callee 不是裸标识符) 这一刀刻意不接管 —— 它自己
+        # 的发码还有另一格缺陷 (§B90 / 账 #262)。两头都钉: 裸形必须在、套了检查的形式必须不在，
+        # 这样 #262 落地时这一格会**主动红**，逼着把判据换成 7 (别把边界读成"已修")。
+        "p.Pixels[0] = 6.7300000000000004;") @(
         "vb6_ChkLong(d);",
         "vb6_ChkLong(s);",
         "vb6_ChkLong(vb6_Num_Div",
-        "vb6_ChkInt(6.7300000000000004);")
+        "vb6_ChkInt(6.7300000000000004);",
+        "r.Px = 6.7300000000000004;",
+        "r.Pb = 6.7300000000000004;",
+        "VB6_SA_AT(int32_t, arr, 0) = 6.7300000000000004;",
+        "VB6_SA_AT(uint8_t, bArr, 1) = 6.7300000000000004;",
+        "VB6_SA_AT(vb6_type_RectF2L, ur, 0).Px = 6.7300000000000004;",
+        "dst2 = vb6_ChkLong(vb6_ArrayAssign1D(dst2, src2));",
+        "p.Nums = vb6_ChkLong(vb6_ArrayAssign1D(p.Nums, src3));",
+        "p.Pixels[0] = vb6_ChkByte(vb6_FltToLng(6.7300000000000004));")
+
 
     # 账 #232② + 账 #224⑤: 窗体绘图家族的发码形状针 —— 语料里那一族的**每一条**都必须
     # 落在 RTL 真出口上，一条都不许留在 COM 兜底里（兜底对一枚 HWND 发 Invoke = 编得过、

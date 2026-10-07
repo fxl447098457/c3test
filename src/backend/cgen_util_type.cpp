@@ -985,18 +985,62 @@ static int cgenIntBits(Vb6Type t) {
     }
 }
 
-std::string CCodeGen::narrowCheckAssign(Expr* target, Expr* value,
-                                        const std::string& cValue) const {
-    if (!target || cValue.empty()) return cValue;
-    // 目标只认裸标量标识符。成员/数组/属性写入各自另有类型解析链, 猜错会把
-    // 合法赋值判成越界 (那比不检查更糟), 保持改动前的行为。
-    if (target->kind != ASTNodeKind::IdentifierExpr) return cValue;
+// 账 #261 (§B77②): 「这枚左值是哪档窄整型」只在这里回答一次。
+// 三条口径:
+//   1) 答案只许是 Byte / Integer / Long 三档之一。认不出 (Array 旗标 / UDT 整体 /
+//      String / Object / Variant / 推不出) 一律答 Unknown, 调用方原样发 —— 与改前同形。
+//      猜错会把合法赋值判成越界 (那比不检查更糟), 所以宁可答 Unknown。
+//   2) 数组元素按**声明的元素类型**答 (arrayElemTypes_ 那张表由六条声明路填),
+//      不是按索引表达式。
+//   3) UDT 字段问 inferUdtFieldVb6Type —— 那是字段声明类型的既有唯一出口; 它带着
+//      Array 旗标 (整型数组成员) 时在这里退回 Unknown, 绝不套标量检查 (rev36 那枚
+//      run-time error 6 就是这么来的: 指针被当 Byte 值送进 vb6_ChkByte)。
+Vb6Type CCodeGen::narrowTargetTypeOf(Expr* target) const {
+    if (!target) return Vb6Type::Unknown;
+
+    if (target->kind == ASTNodeKind::MemberAccessExpr ||
+        target->kind == ASTNodeKind::WithMemberExpr) {
+        // ⚠ 数组成员不是标量槽。`Data() As Byte` 这类字段的 mi.type 存的是**元素**档
+        //   (数组性在 mi.isArrayDynamic / mi.arraySize 上), 所以光看档位认不出它 ——
+        //   实测把 `With x : .Data = baData` 包成 `vb6_ChkByte(数组描述符指针)`，
+        //   VbQRCodegen 的 Project1 从此启动期 Unhandled VB6 Error #6 (BASE 同一份源不报)。
+        //   与 rev36 那枚雷同一形状, 只是换了一条入口。
+        bool fldIsArray = false;
+        Vb6Type ft = inferUdtFieldVb6Type(target, &fldIsArray);
+        if (fldIsArray) return Vb6Type::Unknown;
+        if (ft == Vb6Type::Byte || ft == Vb6Type::Integer || ft == Vb6Type::Long) return ft;
+        return Vb6Type::Unknown;
+    }
+
+    if (target->kind == ASTNodeKind::IndexOrCallExpr) {
+        auto& ioc = static_cast<IndexOrCallExpr&>(*target);
+        // 只接**本模块数组**的元素 (callee 是裸标识符)。成员数组 `h.M(3, 3)` 那一形
+        // 的发码本身另有缺陷 (多维被折成一维), 不在这一刀的判据面上。
+        if (!ioc.callee || ioc.callee->kind != ASTNodeKind::IdentifierExpr)
+            return Vb6Type::Unknown;
+        // ⚠ **空下标 = 整体数组赋值** (Fix 170 那一形: `dst() = src()` / `bb() = s`)。
+        //   它发成的 C 是 `dst = vb6_ArrayAssign1D(dst, src)` —— 右边是**数组描述符指针**，
+        //   不是元素值。实测把它按元素档套上检查 ⇒ `vb6_ChkByte(vb6_StringToByteArray(s))`
+        //   ⇒ 指针送进标量闸 ⇒ run-time error 6 (test_array.bas 改后 EXIT=0x00000006,
+        //   wa-clone/wa-ub/wa-str/wa-rt 四行整片不打印)。与 rev36 那条同一个雷, 只是
+        //   换了一条入口, 所以这一档先问"有没有下标"再问元素类型。
+        if (ioc.positional.empty()) return Vb6Type::Unknown;
+        auto& cid = static_cast<IdentifierExpr&>(*ioc.callee);
+        std::string cLower = cid.name;
+        std::transform(cLower.begin(), cLower.end(), cLower.begin(), ::tolower);
+        auto it = arrayElemTypes_.find(cLower);
+        if (it == arrayElemTypes_.end()) return Vb6Type::Unknown;
+        Vb6Type et = it->second;
+        if (et == Vb6Type::Byte || et == Vb6Type::Integer || et == Vb6Type::Long) return et;
+        return Vb6Type::Unknown;
+    }
+
+    if (target->kind != ASTNodeKind::IdentifierExpr) return Vb6Type::Unknown;
 
     // 这里**故意不复用** inferExprType 来定目标类型: 它把 Integer 答成 Long、
     // 把 Byte 答成 Variant/Unknown, 那是几十个消费点共同依赖的既有口径, 动它
     // 等于给 Debug.Print / Variant 装箱等一整条链换答案。这里只为溢出检查
     // 单独查一遍精确的窄整型, 顺带靠这个局部性把影响面关在收窄赋值里。
-    Vb6Type tt;
     auto& id = static_cast<IdentifierExpr&>(*target);
     std::string lower = id.name;
     std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
@@ -1029,7 +1073,7 @@ std::string CCodeGen::narrowCheckAssign(Expr* target, Expr* value,
     //   cgen_base_generate_state_scan.inc:53-54 的 mLower/oLower)。三处都试一遍,
     //   否则带前缀的那条(实测就是它)永远命不中 —— 漏这一步会让本修复看起来"没生效"。
     if (knownByteArrayVars_.count(lower) || classByteArrayMembers_.count(lower))
-        return cValue;
+        return Vb6Type::Unknown;
     {
         std::string bare = lower;
         if (bare.compare(0, 4, "me->") == 0) bare = bare.substr(4);
@@ -1037,14 +1081,22 @@ std::string CCodeGen::narrowCheckAssign(Expr* target, Expr* value,
                  && bare.back() == ')') bare = bare.substr(2, bare.size() - 3);
         if (bare != lower
             && (knownByteArrayVars_.count(bare) || classByteArrayMembers_.count(bare)))
-            return cValue;
+            return Vb6Type::Unknown;
     }
 
-    if (knownByteVars_.count(lower))        tt = Vb6Type::Byte;
-    else if (knownIntVars_.count(lower))    tt = Vb6Type::Integer;
-    else if (knownBoolVars_.count(lower))   return cValue;   // 值域只有 -1/0
-    else if (knownLongVars_.count(lower))   tt = Vb6Type::Long;
-    else                                    tt = inferExprType(*target);
+    if (knownByteVars_.count(lower))        return Vb6Type::Byte;
+    if (knownIntVars_.count(lower))         return Vb6Type::Integer;
+    if (knownBoolVars_.count(lower))        return Vb6Type::Unknown;  // 值域只有 -1/0
+    if (knownLongVars_.count(lower))        return Vb6Type::Long;
+    return inferExprType(*target);
+}
+
+std::string CCodeGen::narrowCheckAssign(Expr* target, Expr* value,
+                                        const std::string& cValue) const {
+    if (!target || cValue.empty()) return cValue;
+    // 账 #261: 目标的窄整型档只从上面那一处出口问来 (改前这里自带一道
+    // `kind != IdentifierExpr` 的闸门, 成员/数组元素两形因此整片不经检查)。
+    Vb6Type tt = narrowTargetTypeOf(target);
 
     const char* fn = nullptr;
     int tgtBits = 0;

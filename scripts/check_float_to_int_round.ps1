@@ -17,6 +17,15 @@
 #   S6  helper 只住一处: vb6_FltToLng( 在 src/backend 里只许出现在 narrowCheckAssign 那一处，
 #       且 vb6_ChkByte/Int/Long 这三个名字在 src/backend 里恰好 3 次 (就是那张 switch) ——
 #       别处再拼一份 Chk 调用，等于把这条链挪出判据面
+#   ---- 以下两条是账 #261 (§B77②) 加的目标侧 ----
+#   S7  目标侧也只有一个答案: 「这枚左值是哪档窄整型」只住在 narrowTargetTypeOf (定义一次、
+#       声明一次、只被 narrowCheckAssign 问一次)，且它的体内必须问那两条既有出口
+#       (UDT 字段 = inferUdtFieldVb6Type / 数组元素 = arrayElemTypes_) —— 抄一份新的类型表
+#       就是把这条链再劈成两半；数组那一档还必须**拒绝空下标** (`dst() = src()` 是整枚数组
+#       描述符指针，不是元素槽 —— 套上检查就是 rev36 那枚 error 6 换路重来)
+#   S8  「只认裸标识符」那道闸门不许回潮: 改前 narrowCheckAssign 第一行就是
+#       `target->kind != IdentifierExpr -> 原样发`，成员/数组元素两形整片不经检查 (实测六形
+#       全截断)。这条判据专门拦"为了稳妥又把闸门加回来"
 #
 # 用法:  pwsh -File scripts\check_float_to_int_round.ps1
 # 退出码: 0 = 全绿; 1 = 红
@@ -30,10 +39,12 @@ $beDir = Join-Path $root "src\backend"
 $convRel = "src\rtl\core\vb6rtl\vb6rtl_conv.c"
 $hdrRel = "src\rtl\core\vb6rtl\vb6rtl_builtin.h"
 $typeRel = "src\backend\cgen_util_type.cpp"
+$helpRel = "src\backend\detail\util\cgen_helpers.inc"
 $conv = Join-Path $root $convRel
 $hdr = Join-Path $root $hdrRel
 $typeFile = Join-Path $root $typeRel
-foreach ($need in @($conv, $hdr, $typeFile)) {
+$helpFile = Join-Path $root $helpRel
+foreach ($need in @($conv, $hdr, $typeFile, $helpFile)) {
     if (-not (Test-Path -LiteralPath $need)) {
         Write-Host ("FAIL S0 missing " + $need) -ForegroundColor Red
         exit 1
@@ -43,6 +54,7 @@ foreach ($need in @($conv, $hdr, $typeFile)) {
 $convText = [System.IO.File]::ReadAllText($conv)
 $hdrText = [System.IO.File]::ReadAllText($hdr)
 $typeText = [System.IO.File]::ReadAllText($typeFile)
+$helpText = [System.IO.File]::ReadAllText($helpFile)
 
 function Get-SrcFiles($dir) {
     Get-ChildItem -LiteralPath $dir -Recurse -File |
@@ -122,8 +134,66 @@ if ($others.Count -ne 0) {
 $swNames = @([regex]::Matches($typeText, '"vb6_Chk(Byte|Int|Long)"')).Count
 if ($swNames -ne 3) { $bad += ("S6 narrow-type table names = " + $swNames + " (expected 3: Byte / Integer / Long)") }
 
+# ---- S7: 目标侧只有一处回答 (账 #261) ----
+# "这枚左值是哪档窄整型" 必须只住在 narrowTargetTypeOf 里，narrowCheckAssign 只许问它一次。
+# 三条判据各自会红的假改动: 把答案抄回调用方 (nHelper2=2 / asked=2)、认不出时猜一档
+# (accept=3 之外的档位在 switch 里自己红)、数组元素不按声明类型答 (S7 的第二条)。
+$nResolve = @([regex]::Matches($typeText, 'Vb6Type CCodeGen::narrowTargetTypeOf\s*\(\s*Expr\s*\*\s*target\s*\)\s*const\s*\{')).Count
+if ($nResolve -ne 1) { $bad += ("S7 narrowTargetTypeOf definitions = " + $nResolve + " (expected 1)") }
+$nDecl = @([regex]::Matches($helpText, 'Vb6Type narrowTargetTypeOf\s*\(\s*Expr\s*\*\s*target\s*\)\s*const;')).Count
+if ($nDecl -ne 1) { $bad += ("S7 narrowTargetTypeOf declarations in cgen_helpers.inc = " + $nDecl + " (expected 1)") }
+$nAsk = @([regex]::Matches($typeText, 'narrowTargetTypeOf\(\s*target\s*\)')).Count
+if ($nAsk -ne 1) { $bad += ("S7 narrowCheckAssign asks the target type " + $nAsk + " times (expected 1)") }
+$mRes = [regex]::Match($typeText, 'Vb6Type CCodeGen::narrowTargetTypeOf\s*\([^)]*\)\s*const\s*\{[\s\S]*?\n\}')
+if (-not $mRes.Success) {
+    $bad += "S7 narrowTargetTypeOf body not found in cgen_util_type.cpp"
+} else {
+    $resBody = $mRes.Value
+    # 只许答三档 (Byte / Integer / Long)，且必须是从那两条既有出口 (字段声明类型 /
+    # 数组元素声明类型) 拿来的值 —— 不许在这里现拼类型表。
+    $accept = @([regex]::Matches($resBody, '== Vb6Type::(Byte|Integer|Long)')).Count
+    if ($accept -lt 3) { $bad += ("S7 the resolver's three accepted narrow tiers = " + $accept + " (expected >= 3)") }
+    if ($resBody -notmatch 'inferUdtFieldVb6Type\s*\(\s*target\s*,\s*&') {
+        $bad += "S7 the member branch no longer asks inferUdtFieldVb6Type(target, &isArray) -- array members hold a descriptor, not a scalar slot (VbQRCodegen error 6)"
+    }
+    if ($resBody -notmatch 'if\s*\(\s*fldIsArray\s*\)\s*return Vb6Type::Unknown') {
+        $bad += "S7 the member branch no longer refuses array members (a member array is a descriptor, not a scalar slot)"
+    }
+    if ($resBody -notmatch 'arrayElemTypes_\.find\s*\(') {
+        $bad += "S7 the array branch no longer reads arrayElemTypes_.find( (the declared element type)"
+    }
+    # 空下标那一形 (`dst() = src()`, Fix 170) 发的是**整枚数组描述符指针**，不是元素槽。
+    # 实测漏这道闸的产物: test_array.bas 改后 EXIT=0x00000006、四条 wa-* 判据整片不打印
+    # (`vb6_ChkByte(vb6_StringToByteArray(s))` = rev36 那枚雷换一条入口重来)。
+    if ($resBody -notmatch 'positional\.empty\s*\(\)') {
+        $bad += "S7 the array branch no longer refuses the empty-index whole-array form (Fix 170)"
+    }
+    if ($resBody -match 'Vb6Type::Boolean') {
+        $bad += "S7 the resolver claims Boolean -- its value range is -1/0, wrapping it is noise (pre-#261 behaviour)"
+    }
+}
+
+# ---- S8: 旧的"只认裸标识符"那道闸门不许回潮 (账 #261) ----
+# 那一道闸门就是这一格的根因本身: 目标的窄整型问题被"目标长什么样"提前判死，
+# 成员/数组元素两形整片走截断。留着这条判据, 有人"为了稳妥"把它加回来时就会红。
+$nOldGate = @([regex]::Matches($typeText, 'target->kind\s*!=\s*ASTNodeKind::IdentifierExpr\s*\)\s*return cValue')).Count
+if ($nOldGate -ne 0) {
+    $bad += ("S8 the identifier-only target gate is back (" + $nOldGate + " site(s)) -- that gate IS ledger 261")
+}
+# 出口普查: 整个 backend 里除 narrowTargetTypeOf 的定义与声明之外, 别人不许问它
+# (声明那份在 cgen_helpers.inc, S7 已经按"恰好一次"钉住了, 这里只查真调用)
+$nOtherAsk = 0
+foreach ($f in Get-SrcFiles $beDir) {
+    if ($f.FullName -eq $typeFile) { continue }
+    if ($f.FullName -eq $helpFile) { continue }
+    $nOtherAsk += @([regex]::Matches([System.IO.File]::ReadAllText($f.FullName), 'narrowTargetTypeOf')).Count
+}
+if ($nOtherAsk -ne 0) {
+    $bad += ("S8 narrowTargetTypeOf consumed outside cgen_util_type.cpp: " + $nOtherAsk + " site(s)")
+}
+
 if ($bad.Count -ne 0) {
     foreach ($b in $bad) { Write-Host ("FAIL " + $b) -ForegroundColor Red }
     exit 1
 }
-Write-Host "PASS float_to_int_round (S1 one helper, S2 one round(), S3 CLng/CInt same source, S4 three float types gated, S5 two emission paths, S6 census clean)"
+Write-Host "PASS float_to_int_round (S1 one helper, S2 one round(), S3 CLng/CInt same source, S4 three float types gated, S5 two emission paths, S6 census clean, S7 one target-type answer, S8 no identifier-only gate)"

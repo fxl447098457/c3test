@@ -459,9 +459,14 @@
     // ChkInt/ChkLong), 越界即 run-time error 6。原先这类赋值是裸 `t = v;`, 由 C
     // 静默截断 (`a As Byte: a = -1` ⇒ a=255)。
     // 只在右值类型**可能**超出目标范围时套; 同宽/更窄的右值套上去是恒真的噪声。
-    // 目标限 IdentifierExpr —— 成员访问/数组下标的目标类型另有一整套解析, 不在
-    // 这里猜 (返回原值 = 不套检查, 与改动前的行为一致)。
+    // 目标的窄整型档由下面那条出口答 (账 #261 起不再是"只认裸标识符")。
     std::string narrowCheckAssign(Expr* target, Expr* value, const std::string& cValue) const;
+
+    // 账 #261 (§B77②): 「这枚左值是哪档窄整型」的**唯一**回答处 —— 标量标识符、
+    // UDT 字段 (含 With 成员、数组元素身上的字段)、本模块数组的元素三形都问这里。
+    // 只许答 Byte / Integer / Long; 认不出 (Array 旗标 / UDT 整体 / Variant / 对象 /
+    // String / 推不出) 一律 Unknown ⇒ narrowCheckAssign 原样发, 与改前同形。
+    Vb6Type narrowTargetTypeOf(Expr* target) const;
 
     // P20-42: 窗体控件的**属性返回类型**。见 cgen_util_type.cpp 的 MemberAccessExpr
     // 分支: 那里对 `对象.成员` 的兜底是 lookupModule(memberName), 只按成员**裸名**
@@ -853,7 +858,7 @@
     // Fix 084n: 推断 target 是否为 UDT 字段链, 是则返回该字段的 Vb6Type (含 Array 标志), 否则 Unknown.
     // 供赋值语句判断 Variant RHS 需转换的目标类型 (如 cZipArchive 的 .FileName As String
     // ← vb6_VariantArrayGet → vb6_VariantToString; uBuf.MaxMatch As Long ← At() → vb6_VariantToLong)
-    Vb6Type inferUdtFieldVb6Type(const ASTNode* target) const;
+    Vb6Type inferUdtFieldVb6Type(const ASTNode* target, bool* outIsArray = nullptr) const;
 
     // ai/022 B08f-1 (D37): 走同一条 UDT 解析路, 但返回字段在 C 里的**对象类型**
     // (`vb6_cls_X*` / `void*` / "" = 不是对象字段或推不出)。判"这个左值到底是不是 Variant

@@ -356,9 +356,16 @@ std::string CCodeGen::inferUdtTypeOfExpr(const ASTNode& expr) const {
 }
 
 
-// Fix 084n: 推断 target 是否为 UDT 字段链, 是则返回字段 Vb6Type (含 Array 标志), 否则 Unknown.
+// Fix 084n: 推断 target 是否为 UDT 字段链, 是则返回字段 Vb6Type, 否则 Unknown.
 // 供赋值语句 (cgen_stmt) 将 Variant RHS 转换为目标字段类型.
-Vb6Type CCodeGen::inferUdtFieldVb6Type(const ASTNode* target) const {
+// ⚠ 账 #261 订正头注释: 这里**从来没带过 Array 标志** —— 语义层把数组成员记在
+// `mi.isArrayDynamic` / `mi.arraySize` 上 (semantic_analyzer_decl_type.cpp:130-136),
+// `mi.type` 存的是**元素**档。所以"`Data() As Byte` 这个字段"答出来就是 Byte。
+// 想知道这一槽是不是数组本体 (拿标量检查套它会 error 6: 实测 VbQRCodegen 的
+// `.Data = baData` 被包成 `vb6_ChkByte(指针)` ⇒ 启动期 Unhandled VB6 Error #6)，
+// 由 outIsArray 在**同一趟** udtMembers 走查里带回 —— 不开第二张表、不再抄一遍查表。
+Vb6Type CCodeGen::inferUdtFieldVb6Type(const ASTNode* target, bool* outIsArray) const {
+    if (outIsArray) *outIsArray = false;
     if (!target) return Vb6Type::Unknown;
     std::string memName;
     if (target->kind == ASTNodeKind::MemberAccessExpr) {
@@ -395,7 +402,10 @@ Vb6Type CCodeGen::inferUdtFieldVb6Type(const ASTNode* target) const {
     if (!udtSym || udtSym->kind != SymbolKind::UserDefinedType) return Vb6Type::Unknown;
     std::string memLower = Symbol::toLower(memName);
     for (auto& mi : udtSym->udtMembers) {
-        if (Symbol::toLower(mi.name) == memLower) return mi.type;
+        if (Symbol::toLower(mi.name) == memLower) {
+            if (outIsArray) *outIsArray = (mi.isArrayDynamic || mi.arraySize > 0);
+            return mi.type;
+        }
     }
     return Vb6Type::Unknown;
 }
