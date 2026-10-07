@@ -255,6 +255,30 @@ Private Sub tmrGC_Timer()
     ok12 = (gwBack = 6011) And (Me.Width = 6011)
     Debug.Print "GC12-direct-write=" & TF(ok12) & " raw=" & gwBack & "," & Me.Width
 
+    ' GC13..GC14 -- ledger 250. The Controls arm of the host model asked the emitter
+    ' that deliberately answers Empty, so a late-bound caller got NULL and every
+    ' downstream branch (Count / Item / For Each -- all of which were already written
+    ' for collections) saw an empty set. VB6: a form's Controls enumerates its own
+    ' children, so both numbers below are counts of real windows (5 here: the timer,
+    ' the combo, the textbox and the two picture boxes; the labels live in the boxes).
+    ' What an item still cannot answer is its VB name -- standard controls created by
+    ' the emitted route carry no host-side name record (measured: firstName is empty
+    ' while TypeName answers Control). That half is ledger 252, not this one.
+    Dim ok13 As Boolean, ok14 As Boolean
+    Dim n As Long
+    n = CLng(Me.Controls.Count)
+    ok13 = (n >= 4) And (n <= 8)
+    Debug.Print "GC13-coll-count=" & TF(ok13) & " raw=" & n
+
+    Dim it As Long
+    Dim o As Object
+    it = 0
+    For Each o In Me.Controls
+        it = it + 1
+    Next
+    ok14 = (it >= 4) And (it <= 8)
+    Debug.Print "GC14-foreach-iters=" & TF(ok14) & " raw=" & it
+
     Debug.Print "GC-DONE"
     Unload Me
 End Sub

@@ -75,8 +75,17 @@
     if (_wcsicmp(name, L"hDC") == 0)      { vb6_ho_setVariantLong(out, (int32_t)(intptr_t)GetDC((HWND)obj)); return 1; }
     if (_wcsicmp(name, L"Count") == 0)    { vb6_ho_setVariantLong(out, 0); return 1; }
     if (_wcsicmp(name, L"Controls") == 0) {
+        /* 账 #250: 这一档以前用的是 setVariantDispatch —— 那一枚**刻意**只交 Empty
+           (让字体代理那一路继续走 Nothing 分支, 见 uc_hostmodel.c 的注释)。
+           rev14 给"真交对象"另立了出口 setVariantObject, 但只把 `Item` / `Add` 两个
+           调用点改过去, `Controls` 这一档漏了 ⇒ 上层拿到 NULL, 下游三条
+           (Controls.Count / Item / For Each，都在 vb6com_foreach.c 里备好了集合分支)
+           一条也进不去: 实测窗体上 `Me.Controls.Count`=0、`For Each` 零条,
+           Charts 的 ClsResizer (`For Each oCtrl In oForm.Controls`) 因此静默不做。
+           释放侧安全: 集合指针由 vb6_Host_IsHostObject 认得, 且 vb6_ComIsDispatchable
+           守卫不会对它调 Release —— 与 Item 那一档同一个口径。 */
         vb6_UCControls* c = vb6_uc_newControls(obj);
-        vb6_ho_setVariantDispatch(out, c); return 1;
+        vb6_ho_setVariantObject(out, c); return 1;
     }
     if (_wcsicmp(name, L"Caption") == 0 || _wcsicmp(name, L"Text") == 0) {
         // Fix 190: 窗口层是 Unicode —— 必须 GetWindowTextW。旧代码用 GetWindowTextA

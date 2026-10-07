@@ -3830,11 +3830,17 @@ if ($Category -in @("all", "run", "vbp")) {
     # —— 读侧自己 GetWindowRect + 写死缇，写侧四档一起 MoveWindow 且不存 VB 侧读数，于是同一句
     # `对象.Width = 7222` 两条路给两个数 (实测发码那路读 7222、宿主那路读 7215)。四条钉的是
     # 「两条路同数 + 写什么读什么 + 窗口真在那个像素上」。
+    # 账 #250 补 GC13..GC14：宿主模型的 `Controls` 那一档以前问的是「刻意只交 Empty」那枚出口
+    # (rev14 给 Item/Add 换了真交对象的出口，这一档漏了) ⇒ 上层拿到 NULL，Count / Item / For Each
+    # 三条下游全哑 (窗体上实测 Count=0、For Each 零条)，Charts 的 ClsResizer 因此静默不做。
+    # 两条钉的是「集合交得出对象 + 枚举真走得完」；成员名那一半另立账 #252 (实测 iters=5 而 Name 空)。
     $geomExpected = @("GC01-design=True", "GC02-child=True", "GC03-place=True",
         "GC04-write=True", "GC05-move=True", "GC06-pixbox=True",
         "GC07-modesw=True", "GC08-stale=True",
         "GC09-late-write=True", "GC10-late-height=True", "GC11-late-place=True",
-        "GC12-direct-write=True", "GC-DONE")
+        "GC12-direct-write=True",
+        "GC13-coll-count=True", "GC14-foreach-iters=True",
+        "GC-DONE")
     Test-Vbp "geomcache" "$Tests\geomcache\GCCache.vbp" $geomExpected
     Test-Vbp "geomcache_x86" "$Tests\geomcache\GCCache.vbp" $geomExpected -Arch "x86"
 
