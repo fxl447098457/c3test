@@ -15,27 +15,41 @@ extern "C" {
 // 窗体/控件登记 (供宿主对象分派)
 // ============================================================
 
+static void ho_fillField(wchar_t* dst, const char* src) {
+    if (!src) return;
+    size_t n = strlen(src);
+    if (n >= VB6_UC_NAME_LEN) n = VB6_UC_NAME_LEN - 1;
+    for (size_t i = 0; i < n; i++) dst[i] = (wchar_t)src[i];
+    dst[n] = 0;
+}
+
 void vb6_HostObj_Register(void* hwnd, const char* name, const char* vbTypeName,
                           int32_t isForm, int32_t index) {
     if (!hwnd) return;
-    if (vb6_ho_find(hwnd)) return;
+    /* 账 #257: 「同 hwnd 已登记」以前整条 return —— 后到的**带名**登记被静默丢掉，
+       于是同一枚窗口第二次说话永远说不出口（窗体先由 vb6_Forms_Register 登记，
+       名字晚一步到就再也进不去）。现在只补还空着的 name / typeName 两格。
+       isForm 与 index 刻意不动：那是存量答案的一部分（非数组控件的 .Index 恒 -1，
+       夹具 GC22 就钉着这个数），不能让后到的登记顺手改。 */
+    vb6_HostObjRec* found = vb6_ho_find(hwnd);
+    if (found) {
+        if (!found->name[0] && name) ho_fillField(found->name, name);
+        if (!found->typeName[0] && vbTypeName) {
+            const char* dot = strrchr(vbTypeName, '.');
+            ho_fillField(found->typeName, dot ? dot + 1 : vbTypeName);
+        }
+        return;
+    }
     if (vb6_ucHoCount >= VB6_UC_MAX_OBJ) return;
     vb6_HostObjRec* h = &vb6_ucHo[vb6_ucHoCount++];
     memset(h, 0, sizeof(*h));
     h->hwnd = hwnd;
     h->isForm = isForm;
     h->index = index;
-    if (name) {
-        size_t n = strlen(name);
-        if (n >= VB6_UC_NAME_LEN) n = VB6_UC_NAME_LEN - 1;
-        for (size_t i = 0; i < n; i++) h->name[i] = (wchar_t)name[i];
-    }
+    ho_fillField(h->name, name);
     if (vbTypeName) {
         const char* dot = strrchr(vbTypeName, '.');
-        if (dot) vbTypeName = dot + 1;
-        size_t n = strlen(vbTypeName);
-        if (n >= VB6_UC_NAME_LEN) n = VB6_UC_NAME_LEN - 1;
-        for (size_t i = 0; i < n; i++) h->typeName[i] = (wchar_t)vbTypeName[i];
+        ho_fillField(h->typeName, dot ? dot + 1 : vbTypeName);
     }
 }
 

@@ -396,6 +396,78 @@ Private Sub tmrGC_Timer()
     ok23 = (bkH <> 0) And (bkH = CLng(picP.hwnd))
     Debug.Print "GC23-bynamed-lookup=" & TF(ok23) & " raw=" & bkH & "/" & CLng(picP.hwnd)
 
+    ' GC24..GC27 -- ledger 257. The host model had no Container/Parent arm at all, so
+    ' `oCtrl.Container` answered Empty and the save-loop line in Charts,
+    ' `If oCtrl.Container.Name = oForm.Name Then`, passed only because BOTH sides were
+    ' empty (probe255 mode P: container-type=[Empty], gate=True) -- a form registered
+    ' itself with a NULL name, so "name = name" proved nothing. The arm now answers the
+    ' same relation the Controls collection already uses for membership, so the gate
+    ' means "this member is in this form's own set".
+    ' Both heads pinned. True head: every member of Me.Controls that has a window names
+    ' THIS form, and the name is non-empty on both sides -- plus a witness only the real
+    ' window can give (its caption, and its hWnd compared against Me.hwnd), so an arm
+    ' that merely echoed a string would not pass. False head: a member of picP's own set
+    ' is contained by picP, so the same comparison must answer False -- that is exactly
+    ' what the line filters on, and a build where every Container resolved to the form
+    ' would fail it.
+    Dim ok24 As Boolean, ok25 As Boolean, ok26 As Boolean, ok27 As Boolean, ok28 As Boolean
+    Dim cntForm As Long, cntNone As Long, cntOther As Long
+    Dim nmForm As String, nmTxt As String, capTxt As String
+    Dim hTxt As Long, hSelf As Long
+    Dim nmBoxMember As String, nmBoxContainer As String
+    Dim pb As Object, m4 As Object
+    cntForm = 0
+    cntNone = 0
+    cntOther = 0
+    nmTxt = ""
+    capTxt = ""
+    hTxt = 0
+    nmForm = CStr(Me.Name)
+    hSelf = CLng(Me.hwnd)
+    For Each oC In Me.Controls
+        If TypeName(oC.Container) = "Form" Then
+            If CStr(oC.Container.Name) = nmForm Then
+                cntForm = cntForm + 1
+            Else
+                cntOther = cntOther + 1
+            End If
+        ElseIf TypeName(oC.Container) = "Empty" Then
+            cntNone = cntNone + 1
+        Else
+            cntOther = cntOther + 1
+        End If
+        If CStr(oC.Name) = "txtA" Then
+            nmTxt = CStr(oC.Container.Name)
+            capTxt = CStr(oC.Container.Caption)
+            hTxt = CLng(oC.Container.hWnd)
+        End If
+    Next
+    ' no third answer, and a range too: "cntForm + cntNone + cntOther = n" alone would
+    ' read True on a build where the arm is missing and every member answers Empty
+    ' (the lesson of ledger 254 -- pin the identity AND the size).
+    ok24 = (cntOther = 0) And (cntForm + cntNone = n) And (cntForm >= 3)
+    Debug.Print "GC24-container-set=" & TF(ok24) & " raw=" & cntForm & "+" & cntNone & "+" & cntOther & "/" & n
+    ok25 = (Len(nmForm) > 0) And (nmTxt = nmForm) And (nmTxt = "GCForm")
+    Debug.Print "GC25-container-name=" & TF(ok25) & " raw=[" & nmForm & "]/[" & nmTxt & "]"
+    ok26 = (capTxt = "GeomCache") And (hTxt <> 0) And (hTxt = hSelf)
+    Debug.Print "GC26-container-window=" & TF(ok26) & " raw=[" & capTxt & "]/" & hTxt & "/" & hSelf
+    nmBoxMember = ""
+    nmBoxContainer = ""
+    Set pb = Me.Controls("picP")
+    For Each m4 In pb.Controls
+        nmBoxMember = CStr(m4.Name)
+        nmBoxContainer = CStr(m4.Container.Name)
+    Next
+    ok27 = (nmBoxMember = "lblP") And (nmBoxContainer = "picP") And (nmBoxContainer <> nmForm)
+    Debug.Print "GC27-nested-container=" & TF(ok27) & " raw=[" & nmBoxMember & "]/[" & nmBoxContainer & "]/[" & nmForm & "]"
+    ' The fourth head: the form itself has no container (top-level window, no parent), so
+    ' the arm is provably not just handing the receiver back -- a self-reference would read
+    ' "GCForm" here and GC25 would still pass. Late-bound through g (Set g = Me, GC15).
+    Dim tySelf As String
+    tySelf = TypeName(g.Container)
+    ok28 = (tySelf = "Empty")
+    Debug.Print "GC28-form-has-no-container=" & TF(ok28) & " raw=[" & tySelf & "]"
+
     Debug.Print "GC-DONE"
     Unload Me
 End Sub

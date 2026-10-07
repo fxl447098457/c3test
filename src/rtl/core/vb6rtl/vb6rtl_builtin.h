@@ -312,7 +312,7 @@ void*  vb6_Printers_Collection(void);
 // P18-C: Forms 集合
 int32_t vb6_Forms_Count(void);
 void*  vb6_Forms_Item(int32_t index);  // 0-based
-void   vb6_Forms_Register(void* hwnd);   // 窗体创建时注册
+void   vb6_Forms_Register(void* hwnd, const char* name);   // 窗体创建时注册（账 #257: 带上 VB 模块名，宿主模型的 .Name 从此有数可问）
 void   vb6_Forms_Unregister(void* hwnd); // 窗体销毁时注销
 void   vb6_Forms_LoopDepth(int delta);   // Fix 188: 消息循环进出 (最后一个窗体卸载才投 WM_QUIT)
 void*  vb6_Forms_GetActive(void);        // Fix 146: 当前活动窗体 (Screen.ActiveForm)

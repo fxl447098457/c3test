@@ -192,7 +192,7 @@
                 // Fix 159-F: 对象是**过程级变量** (symTab_ 只看模块作用域, 形参/局部
                 // 不可见 → isVarName 误判为 false) 而成员是 hWnd 时, 直接取该变量的值.
                 // 运行时约定"窗体/控件对象值本身就是它的 HWND"
-                //   (vb6_Forms_Register(void* hwnd)、Me→vb6_hwnd_MainForm、
+                //   (vb6_Forms_Register(hwnd, 名)、Me→vb6_hwnd_MainForm、
                 //    控件实例经 vb6_UC_InstanceOf(vb6_hwnd_X) 反查),
                 // 故 VB6 的 Form.hWnd / RefForm.hWnd / CurrControl.hWnd 即该变量本身.
                 // 此前落到下面的"模块.成员"分支: memSym 命中 VBFlexGrid.ctl 的 hWnd 属性

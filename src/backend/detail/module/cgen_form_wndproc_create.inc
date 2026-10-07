@@ -42,7 +42,10 @@
     c_.indent();
     c_.emitLine("CREATESTRUCTA* cs = (CREATESTRUCTA*)lParam;");
     c_.emitLine(createFn + "((void*)hwnd, (void*)cs->hInstance);");
-    c_.emitLine("vb6_Forms_Register((void*)hwnd);");
+    // 账 #257: 登记窗体时把 VB 模块名一起交进去。窗体自身的 `.Name` 以前两条读法都答
+    // 空串（这一处恒传 NULL 登记），于是 Charts 排版器那句
+    // `If oCtrl.Container.Name = oForm.Name` 是「空 = 空」的真空通过 —— 现在两边都是数。
+    c_.emitLine("vb6_Forms_Register((void*)hwnd, \"" + formName + "\");");
 
     // P24: Form.Icon from .frx - load and set window icon
     // Fix 161f: 判定用 prelude 算好的 formIconHasData_ (readPicture 非空),

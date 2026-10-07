@@ -3868,6 +3868,20 @@ if ($Category -in @("all", "run", "vbp")) {
         # —— 这条是防以后有人填表时顺手传 0。成员那条读 .Tag 仍空（晚绑定字符串读法，另一问，未钉）。
         "GC20-member-name=True", "GC21-member-typename=True",
         "GC22-member-index=True", "GC23-bynamed-lookup=True",
+        # 账 #257：宿主模型里 `Container`/`Parent` 一档**压根没有**，而窗体自己的 `.Name` 从没登记
+        # （vb6_Forms_Register 恒传 NULL）⇒ Charts 排版器那句 `If oCtrl.Container.Name = oForm.Name`
+        # 是「空 = 空」的真空通过。这一批两半一起补，顺序不能反（先补名字会让那句翻 False、整条
+        # 保存循环停摆）。口径不是新决定：容器成员资格在 uc_controls.c 里本来就是 GetParent(控件)==容器。
+        # GC24 钉「没有第三种答案」+ 范围（#254 那条教训：光恒等式会放过「两边都坏」那一族）；
+        # GC25 钉「相等是有内容的相等」（两边非空、且就是模块名）；
+        # GC26 钉证人只能来自窗口本身（Caption 与 Me.hwnd，纯拼字符串的修法过不了这一格）；
+        # GC27 钉**反面**：picP 自己的成员属于 picP，同一句判据必须答 False —— 否则「全都相等」
+        # 与「空 = 空」在这一格里长得一模一样。
+        "GC24-container-set=True", "GC25-container-name=True",
+        "GC26-container-window=True", "GC27-nested-container=True",
+        # GC28 钉的是「窗体自己没有容器」那一路（顶层窗口无父 ⇒ 交回空值）：反面证人是
+        # 「这一档不是把接收者原样退回来」—— 若真退自己，GC25 那句相等照样成立。
+        "GC28-form-has-no-container=True",
         "GC-DONE")
     Test-Vbp "geomcache" "$Tests\geomcache\GCCache.vbp" $geomExpected
     Test-Vbp "geomcache_x86" "$Tests\geomcache\GCCache.vbp" $geomExpected -Arch "x86"
@@ -3887,6 +3901,15 @@ if ($Category -in @("all", "run", "vbp")) {
     )
     Test-EmitcAbsent "gc_emitc_with_member_raw" @("$Tests\geomcache\GCCache.vbp") @(
         'void* _vb6_with_2 = (void*)vb6_ComCallByDispid(collC, 0, (void*[]){vb6_ComPackInt(iC)}, 1)  /* With object ref */;'
+    )
+    # 账 #257 的发码那一半：窗体登记必须把 VB 模块名带进去（读侧只问登记表，名字没处来
+    # 就等于 `.Name` 恒空、排版器那句 gate 永远靠「空 = 空」）。两头都钉：带名的形在，
+    # 旧的那条无名形不在 —— 少了反面这一格，「名字传了但传的是空串」也能蒙过去。
+    Test-EmitcShape "gc_emitc_form_name_registered" @("$Tests\geomcache\GCCache.vbp") @(
+        'vb6_Forms_Register((void*)hwnd, "GCForm");'
+    )
+    Test-EmitcAbsent "gc_emitc_form_name_missing" @("$Tests\geomcache\GCCache.vbp") @(
+        'vb6_Forms_Register((void*)hwnd);'
     )
     # 账 #252：两条创建路各登记一次 VB 身份。lblP 是容器子控件（第二条创建路），txtA 是顶层 ——
     # 两条路必须都发，少一条就是「容器里的控件答不出名字」那种半通状态。

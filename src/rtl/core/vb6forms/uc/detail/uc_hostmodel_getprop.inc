@@ -92,6 +92,23 @@
         vb6_UCControls* c = vb6_uc_newControls(obj);
         vb6_ho_setVariantObject(out, c); return 1;
     }
+    /* 账 #257: `Container` / `Parent` 这一档以前**压根没有** ⇒ `oCtrl.Container` 交回空值，
+       `oCtrl.Container.Name` 交回空串。实测（探针 probe255 模式 P）Charts 的 ClsResizer
+       保存循环第一句 `If oCtrl.Container.Name = oForm.Name Then` 因此靠「空 = 空」真空通过
+       （窗体自己的 `.Name` 也是空，两边一起才是那个假通过；名字那一半在同一批补）。
+       口径**不是新决定**：容器成员资格在 uc_controls.c 的 `vb6_uc_collectChildren` 里本来
+       就是「GetParent(控件) == 容器」，这一档问同一条关系 ⇒ 「oCtrl.Container.Name = X.Name」
+       与「oCtrl 属于 X.Controls」从此是同一件事，不会两套答案互相矛盾（PictureBox 有自己的
+       Controls 集合、里面的 Label 不在窗体集合里，实测 n=5，与此口径一致）。
+       交对象走 #250 立的那条唯一出口 `vb6_ho_setVariantObject`，不开第二份；
+       顶层窗体自己没有父 ⇒ 交回空值（VB6 里 Form 无 Container）。
+       另一层同名答案记下：`vb6forms_axcontainer.c:195` 那档是 OCX 扩展器对象（自己一套
+       合成 IDispatch，记录里只有 hwndForm），问的不是这一条链，本刀刻意不动它。 */
+    if (_wcsicmp(name, L"Container") == 0 || _wcsicmp(name, L"Parent") == 0) {
+        void* parentHwnd = (void*)GetParent((HWND)obj);
+        if (!parentHwnd) { vb6_ho_setVariantEmpty(out); return 1; }
+        vb6_ho_setVariantObject(out, parentHwnd); return 1;
+    }
     if (_wcsicmp(name, L"Caption") == 0 || _wcsicmp(name, L"Text") == 0) {
         // Fix 190: 窗口层是 Unicode —— 必须 GetWindowTextW。旧代码用 GetWindowTextA
         // 再逐字节提升为 wchar_t (= 按 Latin-1 解码 ACP 字节), 中文读回来就是乱码,
