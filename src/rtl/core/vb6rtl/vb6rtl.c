@@ -162,14 +162,20 @@ void vb6_Init(void) {
         AddVectoredExceptionHandler(1, vb6_CrashTraceVEH);
     }
 #endif
-    // P20-44: OLE 拖放 RTL 自测 —— 环境变量 C3_OLEDDB_TEST=1 时, 把
-    // IDataObject/IDropTarget 的 DragEnter/DragOver/Drop 走一遍并写结果文件。
+    // P20-44: OLE 拖放 RTL 自测 —— **显式** C3_OLEDDB_SELFTEST=1 才跑
+    // (C3_OLEDDB_TEST=1 只负责"无头驱动"链路, 不让自测混进应用启动热路径)。
+    // 自测内容: 把 IDataObject/IDropTarget 的 DragEnter/DragOver/Drop 走一遍并写结果文件。
     // 无头环境没法真拖 (DoDragDrop 是模态循环), 直接调 IDropTarget 的方法才测得动。
+    // 历史: 自测曾是 C3_OLEDDB_TEST=1 的隐式前置步骤, 在 frmevents GA 上偶发
+    // 0xC0000005 (memmove ← do_GetData ← vb6_oleDD_SelfTest ← vb6_Init), 空输出红。
+    // 拆成独立开关: 需要验 RTL 自测时手动开, 用例/应用启动不受影响。
     {
         // 用 W 版取环境变量: 输出路径可能含非 ASCII (fwprintf/_wfopen 全宽链路)
-        wchar_t oleOut43[MAX_PATH] = { 0 };
+        wchar_t oleSelf43[8] = { 0 };
         wchar_t oleFlag43[8] = { 0 };
-        if (GetEnvironmentVariableW(L"C3_OLEDDB_TEST", oleFlag43, 8) > 0) {
+        if (GetEnvironmentVariableW(L"C3_OLEDDB_SELFTEST", oleSelf43, 8) > 0
+            && GetEnvironmentVariableW(L"C3_OLEDDB_TEST", oleFlag43, 8) > 0) {
+            wchar_t oleOut43[MAX_PATH] = { 0 };
             if (!GetEnvironmentVariableW(L"C3_OLEDDB_TEST_OUT", oleOut43, MAX_PATH))
                 lstrcpyW(oleOut43, L"oledd_test.txt");
             extern int32_t vb6_oleDD_SelfTest(const wchar_t* outPath);
