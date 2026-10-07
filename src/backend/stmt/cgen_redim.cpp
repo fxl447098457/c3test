@@ -1,4 +1,4 @@
-#include "backend/cgen.hpp"
+﻿#include "backend/cgen.hpp"
 #include <algorithm>
 #include <cctype>
 #include <iostream>
@@ -409,7 +409,11 @@ void CCodeGen::visit(EraseStmt& node) {
         if (it != arrayDimCounts_.end() && it->second > 1) {
             c_.emitLine("vb6_SafeArrayDestroyND((vb6_SafeArrayND*)" + cName + "); " + cName + " = NULL;");
         } else {
-            c_.emitLine("vb6_SafeArrayDestroy1D(" + cName + "); " + cName + " = NULL;");
+            // Fix <vbeclipse> 2026-10-06: 1D 数组统一走 vb6_EraseArrayVar —
+            // 动态数组释放存储置 NULL, **固定数组保留存储**只把元素重置
+            // (数值/BSTR/Variant 按 VB6 文档口径; 此前固定数组也被整块释放,
+            //  Erase VarArray 后再访问 UBound/元素直接错误 9, t3.bas 实测)。
+            c_.emitLine("vb6_EraseArrayVar(&" + cName + ");");
         }
     }
 }

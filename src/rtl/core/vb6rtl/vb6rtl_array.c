@@ -228,6 +228,46 @@ void vb6_SafeArrayDestroy1D(vb6_SafeArray1D* arr) {
     free(arr);
 }
 
+// Fix <vbeclipse> 2026-10-06: Erase 语句的数组变量出口 (VB6 文档口径):
+//   · 动态数组 → 释放存储, 变量置 NULL (须 ReDim 才能用);
+//   · 固定数组 → **保留存储**, 元素重置: 数值/UDT 置零, BSTR 逐个置零长串,
+//     Variant 逐个置 Empty (先清各元素持有的 BSTR, 同 Destroy1D 的既有清理口径)。
+// 此前固定数组也走 Destroy1D 被整块释放, 之后再访问 VarArray(i) → 错误 9
+// (.temp/errtest/t3.bas 实测: Erase VarArray 后 UBound 直接退 9)。
+// UDT 元素只置零不释放内嵌 BSTR/数组 (与 Destroy1D 同一限制), 记为已知偏差。
+void vb6_EraseArrayVar(vb6_SafeArray1D** parr) {
+    if (!parr) return;
+    vb6_SafeArray1D* arr = *parr;
+    if (!arr) return;
+    if (arr->isDynamic) {
+        vb6_SafeArrayDestroy1D(arr);
+        *parr = NULL;
+        return;
+    }
+    if (arr->data) {
+        if (arr->elemType == vb6_sa_bstr) {
+            for (int32_t i = 0; i < arr->count; i++) {
+                BSTR* slot = (BSTR*)((char*)arr->data + i * arr->elemSize);
+                if (*slot) vb6_BSTR_Free(*slot);
+            }
+        } else if (arr->elemType == vb6_sa_variant) {
+            /* 固定 Variant 数组: 每元素置 Empty — vb6_VariantClear 递归释放
+               元素持有的 BSTR/嵌套数组后清零 (docs: "Each element set to Empty") */
+            for (int32_t i = 0; i < arr->count; i++) {
+                vb6_VARIANT* slot = (vb6_VARIANT*)((char*)arr->data + i * arr->elemSize);
+                vb6_VariantClear(slot);
+            }
+        } else if (arr->elemType == vb6_sa_ptr) {
+            /* 对象数组: 每元素置 Nothing — Release 后清指针 */
+            for (int32_t i = 0; i < arr->count; i++) {
+                void** slot = (void**)((char*)arr->data + i * arr->elemSize);
+                if (*slot) vb6_ReleaseObject(slot);
+            }
+        }
+        memset(arr->data, 0, (size_t)arr->count * arr->elemSize);
+    }
+}
+
 // Fix 170: VB6 整体数组赋值 `A() = B()` —— 返回 src 的**深拷贝**新载体, 并销毁原 dst。
 // 不能直接把 src 的指针赋给 dst: 两个名字会指向同一个 vb6_SafeArray1D, 作用域结束时
 // 各自 vb6_SafeArrayDestroy1D → double free (且一侧 ReDim 会神秘改变另一侧内容)。
