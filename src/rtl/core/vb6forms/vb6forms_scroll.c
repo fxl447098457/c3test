@@ -160,10 +160,8 @@ int vb6_GetTimerInterval(void* hwnd) {
     return 0;
 }
 
-extern void vb6_picdbg(const char* fmt, ...);
 void vb6_SetTimerInterval(void* hwnd, int interval) {
     if (!hwnd) return;
-    { vb6_picdbg("[SetTimerInterval] hwnd=%p iv=%d\n", hwnd, interval); }
     if (interval < 0) interval = 0;
     if (interval > 65535) interval = 65535;      // VB6 口径
     SetPropW((HWND)hwnd, L"VB6_TimerInterval", (HANDLE)(INT_PTR)interval);
@@ -179,7 +177,6 @@ int vb6_GetTimerEnabled(void* hwnd) {
 
 void vb6_SetTimerEnabled(void* hwnd, int enabled) {
     if (!hwnd) return;
-    { vb6_picdbg("[SetTimerEnabled] hwnd=%p en=%d\n", hwnd, enabled); }
     SetPropW((HWND)hwnd, L"VB6_TimerEnabled", (HANDLE)(INT_PTR)((enabled ? 1 : 0) + 1));
     vb6_TimerSetEnabled(hwnd, enabled);
 }

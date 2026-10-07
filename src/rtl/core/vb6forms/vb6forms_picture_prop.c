@@ -13,8 +13,6 @@
 #include "vb6forms.h"
 #include "vb6forms_internal.h"
 #include <stdio.h>
-
-void vb6_picdbg(const char* fmt, ...);
 #include <stdarg.h>
 
 #include <stdlib.h>   /* malloc, free */
@@ -45,11 +43,9 @@ static void vb6_MirrorPictureToAutoRedraw(HWND hw) {
 void vb6_FormPaintBlitAutoRedraw(void* hwndForm, void* hdc) {
     if (!hwndForm || !hdc) return;
     HDC ar = (HDC)GetPropW((HWND)hwndForm, L"VB6_AutoRedrawDC");
-    if (!ar) { vb6_picdbg("[FormPaint] hw=%p NO-ARDC\n", hwndForm); return; }
+    if (!ar) return;
     RECT rc;
     if (!GetClientRect((HWND)hwndForm, &rc)) return;
-    { static int s_fp = 0; if (s_fp < 8) { s_fp++;
-      vb6_picdbg("[FormPaint] hw=%p rc=%ldx%ld ar=%p\n", hwndForm, (long)rc.right, (long)rc.bottom, (void*)ar); } }
     BitBlt((HDC)hdc, 0, 0, rc.right, rc.bottom, ar, 0, 0, SRCCOPY);
 }
 
@@ -65,31 +61,10 @@ void* vb6_GetControlPicture(void* hwnd) {
     return hProp;  // HBITMAP/HICON handle
 }
 
-void vb6_picdbg(const char* fmt, ...) {
-    static wchar_t path[MAX_PATH];
-    static int resolved = 0;
-    if (!resolved) {
-        resolved = 1;
-        wchar_t exe[MAX_PATH];
-        DWORD n = GetModuleFileNameW(NULL, exe, MAX_PATH);
-        wchar_t* slash = n && n < MAX_PATH ? wcsrchr(exe, L'\\') : NULL;
-        if (!slash || slash == exe) {
-            lstrcpynW(path, L"C:\\picdbg.txt", MAX_PATH);
-        } else {
-            *slash = 0;
-            wsprintfW(path, L"%ls\\picdbg.txt", exe);
-        }
-    }
-    FILE* f = path[0] ? _wfopen(path, L"a") : NULL;
-    if (!f) return;
-    va_list ap; va_start(ap, fmt); vfprintf(f, fmt, ap); va_end(ap);
-    fflush(f); fclose(f);
-}
-
 void vb6_SetControlPicture(void* hwnd, void* hPicture) {
     if (!hwnd) return;
     HWND hw = (HWND)hwnd;
-    vb6_picdbg("[SetControlPicture] hwnd=%p hPicture=%p registered=%d\n", (void*)hw, hPicture, hPicture ? vb6_PictureIsRegistered(hPicture) : 0);
+    
     /* Picture 双支持 (Fix P-BMP-3D): 本管线 LoadPicture 产出的 COM IPicture*
      * 走 COM 子类化渲染路径; 原始 GDI 句柄 (设计期 frx/资源/API) 走经典
      * STATIC 路径。二者在 vb6rtl_com.c 的注册表里可安全区分。 */
@@ -162,7 +137,7 @@ void vb6_SetControlPicture(void* hwnd, void* hPicture) {
 void vb6_SetControlPictureFromCom(void* hwnd, void* pPictureDisp) {
     if (!hwnd) return;
     HWND hw = (HWND)hwnd;
-    vb6_picdbg("[FromCom] hwnd=%p pic=%p\n", (void*)hw, pPictureDisp);
+    
 
     /* NULL COM setter clears the picture (release COM ref + clear props). */
     if (!pPictureDisp) {
@@ -193,9 +168,7 @@ void vb6_SetControlPictureFromCom(void* hwnd, void* pPictureDisp) {
     if (FAILED(hr)) { pPic->lpVtbl->Release(pPic); return; }
     hr = pPic->lpVtbl->get_Handle(pPic, &hOle);
     if (FAILED(hr)) { pPic->lpVtbl->Release(pPic); return; }
-    vb6_picdbg("[FromCom2] hw=%p type=%d hOle=%08lX obj=%08lX\n", (void*)hw, (int)nType,
-               (unsigned long)(UINT_PTR)hOle,
-               hOle ? (unsigned long)GetObjectType((HGDIOBJ)(UINT_PTR)hOle) : 0UL);
+    
 
     /* QI already acquired the new reference, including self-assignment.
      * Transfer that reference to the control and release exactly one old ref. */
@@ -243,10 +216,7 @@ vb6_InstallImageSubclass(hwnd);
 vb6_MirrorPictureToAutoRedraw(hw);
     {   HDC arDbg = (HDC)GetPropW(hw, L"VB6_AutoRedrawDC");
         IPicture* pDbg = (IPicture*)GetPropW(hw, L"VB6_IPicture");
-        vb6_picdbg("  [FromCom] hwnd=%p afterMirror ar=%p px0=%06X pic=%p\n",
-                    (void*)hw, (void*)arDbg,
-                    arDbg ? (unsigned)GetPixel(arDbg, 0, 0) : 0u,
-                    (void*)pDbg);
+        
     }
   }
 int vb6_GetPictureAutoSize(void* hwnd) {
@@ -451,9 +421,7 @@ static void vb6_ImagePaintHelper(HWND hwnd, HDC hdc) {
             && GetObjectType((HGDIOBJ)(UINT_PTR)hOle206) == OBJ_BITMAP
             && vb6_DrawBitmapAlpha(hdc, (void*)(UINT_PTR)hOle206, 0, 0, dstW, dstH)) {
             { static int s_h = 0; if (s_h < 40) { s_h++;
-                vb6_picdbg("[PaintHlp] hw=%p br=ALPHA hm=%ldx%ld dst=%dx%d clt=%ldx%ld px10=%06X\n",
-                    (void*)hwnd, (long)hmW, (long)hmH, dstW, dstH, (long)rc.right, (long)rc.bottom,
-                    (unsigned)GetPixel(hdc, 10, 10)); } }
+                 } }
             return;
         }
 
@@ -464,9 +432,7 @@ static void vb6_ImagePaintHelper(HWND hwnd, HDC hdc) {
         HRESULT hrR = pPic->lpVtbl->Render(pPic, hdc, 0, 0, dstW, dstH,
                              0, hmH, hmW, -hmH, NULL);
         { static int s_h2 = 0; if (s_h2 < 40) { s_h2++;
-            vb6_picdbg("[PaintHlp] hw=%p br=RENDER hr=%08lX hm=%ldx%ld dst=%dx%d clt=%ldx%ld px10=%06X\n",
-                (void*)hwnd, (unsigned long)hrR, (long)hmW, (long)hmH, dstW, dstH, (long)rc.right, (long)rc.bottom,
-                (unsigned)GetPixel(hdc, 10, 10)); } }
+             } }
         return;
     }
 
@@ -474,8 +440,7 @@ static void vb6_ImagePaintHelper(HWND hwnd, HDC hdc) {
     int picType = (int)(INT_PTR)GetPropW(hwnd, L"VB6_PictureType");
     if (!hPict) {
         static int s_h3 = 0; if (s_h3 < 40) { s_h3++;
-            vb6_picdbg("[PaintHlp] hw=%p br=NOPIC ipic=%d tp=%d\n",
-                (void*)hwnd, GetPropW(hwnd, L"VB6_IPicture") ? 1 : 0, picType); }
+             }
         return;
     }
 

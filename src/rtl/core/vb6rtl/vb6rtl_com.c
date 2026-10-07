@@ -140,8 +140,7 @@ static int vb6_OleEnsureInit(void) {
         CoInitialize(NULL);
         oleInited = 2;
     }
-    extern void vb6_picdbg(const char* fmt, ...);
-    vb6_picdbg("[OleInit] hr=0x%08X mode=%d tid=%lu\n", (unsigned)hrO, oleInited, (unsigned long)GetCurrentThreadId());
+    
     return oleInited;
 }
 
@@ -164,7 +163,6 @@ static DWORD WINAPI vb6_picProbeThread(void* p) {
 // P21-18: LoadPictureEx — OleLoadPicturePath for all image types (BMP/ICO/EMF/WMF/JPG/GIF/PNG)
 // 返回活着的 IPicture* (带一次引用); 失败返回 NULL。用完请 vb6_ReleasePicture。
 void* vb6_LoadPictureEx(BSTR pathname) {
-    extern void vb6_picdbg(const char* fmt, ...);
     if (!pathname) return NULL;
     int oinit = vb6_OleEnsureInit();
     IPicture* pPicture = NULL;
@@ -191,7 +189,7 @@ void* vb6_LoadPictureEx(BSTR pathname) {
                 pd.bmp.hpal = NULL;
                 IPicture* pWrap = NULL;
                 if (SUCCEEDED(OleCreatePictureIndirect(&pd, &IID_IPicture, TRUE, (void**)&pWrap))) {
-                    vb6_picdbg("[LoadPictureEx] gdiFallback pic=%p path=%S\n", (void*)pWrap, pathname);
+                    
                     vb6_PictureRegister(pWrap);
                     return (void*)pWrap;
                 }
@@ -199,7 +197,7 @@ void* vb6_LoadPictureEx(BSTR pathname) {
                  * over instead. vb6_SetControlPicture's registered==0 path stores
                  * it as a plain GDI handle and paints it (STATIC + STM_SETIMAGE).
                  * Only reachable when oleaut32's COM picture layer is dead. */
-                vb6_picdbg("[LoadPictureEx] gdiRawHbitmap=%p path=%S\n", (void*)hBmp, pathname);
+                
                 return (void*)hBmp;
             }
             /* Diagnostic block: only for existing files where both the COM parser
@@ -222,8 +220,7 @@ void* vb6_LoadPictureEx(BSTR pathname) {
                     GlobalFree(hg);
                 }
             }
-            vb6_picdbg("[LoadPictureEx] oi=%d fa=0x%08X hr=0x%08X alt=0x%08X altPic=%p rd=%lu/%lu err=%lu path=%S\n",
-                        oinit, (unsigned)fa, (unsigned)hr, (unsigned)hrAlt, (void*)pAlt, (unsigned long)rd, (unsigned long)sizeF, (unsigned long)GetLastError(), pathname);
+            
             {   /* in-app COM ground truth on the SAME file: fresh-thread STA, raw
                  * CoCreateInstance(CLSID_StdPicture), and GDI LoadImageW decode. */
                 vb6_picProbeArgs s;
@@ -239,14 +236,13 @@ void* vb6_LoadPictureEx(BSTR pathname) {
                     if (pCC) pCC->lpVtbl->Release(pCC);
                 }
                 void* hImg = NULL;
-                vb6_picdbg("  [probe] tidMain=%lu hrThr=0x%08X cc=0x%08X ccObj=%p gdi=%p\n",
-                            (unsigned long)GetCurrentThreadId(), (unsigned)s.hr, (unsigned)hrCC, (void*)pCC, hImg);
+                
             }
             if (pAlt) pAlt->lpVtbl->Release(pAlt);
         }
         return NULL;
     }
-    vb6_picdbg("[LoadPictureEx] oi=%d hr=0x%08X pic=%p path=%S\n", oinit, (unsigned)hr, (void*)pPicture, pathname);
+    
     vb6_PictureRegister(pPicture);
     return (void*)pPicture;
 }

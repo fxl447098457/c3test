@@ -789,16 +789,6 @@ intptr_t vb6_GetControlHDC(void* hwnd) {
     BOOL fromPaint = FALSE;
     HDC hdc = vb6_ControlDrawDC(hw, &fromPaint);   // 口径只有上面那一处
     if (!hdc) return 0;
-    if (!GetPropW(hw, L"C3_HDCDbg")) {
-        SetPropW(hw, L"C3_HDCDbg", (HANDLE)1);
-        HDC ardDbg2 = (HDC)GetPropW(hw, L"VB6_AutoRedrawDC");
-        HDC heldDbg2 = (HDC)GetPropW(hw, L"VB6_ObjectDC");
-        unsigned px = (unsigned)GetPixel(ardDbg2 ? ardDbg2 : hdc, 0, 0);
-        FILE* f = fopen("picdbg.txt", "a");
-        if (f) { fprintf(f, "[HDC] hwnd=%p fromPaint=%d ard=%p held=%p px0=%06X\n",
-                          (void*)hw, fromPaint ? 1 : 0, (void*)ardDbg2, (void*)heldDbg2, px);
-                 fclose(f); }
-    }
     if (fromPaint) return (intptr_t)hdc;           // 派发期那张：既不缓存也不释放
     // Fix <vbeclipse> 2026-10-07: AutoRedraw 控件/窗体的 `.hDC` = 记忆 DC (VB6 语义)。
     // 旧版回落 GetDC(窗口) —— 对**隐藏 / 从未画过**的 PictureBox，那张 DC 恒为空，
@@ -814,10 +804,6 @@ intptr_t vb6_GetControlHDC(void* hwnd) {
          * ARDC 内容每 10ms 都在更新, 但没人 InvalidateRect → 窗口停在首次 WM_PAINT
          * 的平图 (3DMenu 实测: ARDC 里环+底图齐全, 屏幕恒 F0F0F0)。标记脏即可,
          * 不在这里 UpdateWindow — 绘制还没结束, 重绘交给泵在本 tick 回调返回后做。 */
-        { static int s_invDbg = 0;
-          if (s_invDbg < 5) { s_invDbg++;
-              FILE* f = fopen("picdbg.txt", "a");
-              if (f) { fprintf(f, "[InvF] hw=%p n=%d\n", (void*)hw, s_invDbg); fclose(f); } } }
         InvalidateRect(hw, NULL, FALSE);
         return (intptr_t)ard;
     }
