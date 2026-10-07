@@ -14,6 +14,30 @@ namespace vb6c3 {
 // COM辅助 (P6.2)
 // ============================================================
 
+// 账 #255: 「一个 COM 调用的结果被当**对象引用**用」这一问的唯一点。
+//
+// 这些调用交回的是 VARIANT 指针 (calloc 出来的包装)，不是对象本身；直接 (void*) 硬转
+// 得到的是 VARIANT 结构体的地址，于是 `With 集合(1) : .Width = …` 的接收者谁都认不出
+// (RTL 侧一路 fall through 到 `vb6_ComSetProp: property "Width" not found`)，写在虚空里。
+// Set 那一路早就做了这件事 (改名成 vb6_ComCallObject，内部 Unpack+Free)；With 那一路
+// 只认「表达式是 VARIANT **值**」那一档 (Fix 090e / 092j)，漏了「VARIANT* 指针」这一档。
+//
+// vb6_ComCallObject / vb6_ComGetObjectProp 交回的已经是对象，不在清单里 (再套一层就错)。
+// ByDispid 那一路没有一体化出口，只能就地 Unpack —— 那条 VARIANT* 的释放缺口与本刀无关，
+// 今天同样在漏 (没有把它交给任何 VarFree)。
+std::string CCodeGen::comObjectRefFromCallExpr(const std::string& expr) {
+    auto top = [&expr](const char* head) {
+        return expr.compare(0, std::char_traits<char>::length(head), head) == 0;
+    };
+    if (top("vb6_ComCall(")) {
+        return "vb6_ComCallObject" + expr.substr(std::char_traits<char>::length("vb6_ComCall"));
+    }
+    if (top("vb6_ComCallByDispid(") || top("vb6_ComGetProp(")) {
+        return "vb6_ComUnpackObject(" + expr + ")";
+    }
+    return expr;
+}
+
 std::string CCodeGen::resolveComValue(const std::string& unpackType) {
     // P24-07: 早期绑定 — 利用签名returnType选择正确的解包函数
     if (!isComMarker_) return lastExpr_;

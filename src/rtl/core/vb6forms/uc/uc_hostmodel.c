@@ -326,10 +326,25 @@ static HRESULT STDMETHODCALLTYPE HW_QI(IDispatch* self, REFIID riid, void** out)
 static ULONG STDMETHODCALLTYPE HW_AddRef(IDispatch* self) {
     Vb6HostWrap* w = (Vb6HostWrap*)self; return ++w->refs;
 }
+/* 账 #255: 包装器和它在 (wrap->target) 表里的登记必须同生同死。
+   表只在 vb6_UC_WrapHostObject 里追加、从来没人撤，而 free 掉的块地址会被下一枚
+   包装器原样复用 —— vb6_UC_UnwrapHost 从 i=0 扫表、先撞上那条早已释放的旧登记，
+   于是「每一枚成员」都解回「第一枚被包过的对象」。
+   实测 (probe255 模式 M)：For Each o In Me.Controls 的三枚成员 hWnd 同为 4326406、
+   Left 同为 120（那是 Timer 的设计期值），对它写 .Width 只落在这枚 Timer 的存属性上，
+   txtA/picP 一动不动；Charts 的 ClsResizer 因此把 N 格存成同一枚控件。 */
+static void vb6_UC_DropWrapPair(void* wrap) {
+    for (int i = 0; i < g_uc_wrapCount; i++) {
+        if (g_uc_wraps[i].wrap == wrap) {
+            g_uc_wraps[i] = g_uc_wraps[--g_uc_wrapCount];  /* 末位填补：查表按指针，次序无意义 */
+            return;
+        }
+    }
+}
 static ULONG STDMETHODCALLTYPE HW_Release(IDispatch* self) {
     Vb6HostWrap* w = (Vb6HostWrap*)self;
     ULONG r = --w->refs;
-    if (r == 0) free(w);
+    if (r == 0) { vb6_UC_DropWrapPair(w); free(w); }
     return r;
 }
 static HRESULT STDMETHODCALLTYPE HW_GetTypeInfoCount(IDispatch* self, UINT* n) {

@@ -725,7 +725,11 @@ void CCodeGen::visit(WithStmt& node) {
                 if (withIsVariantVal090e) {
                     c_.emitLine(tempType + " " + tempVar + " = vb6_VariantToObjectVal(" + lastExpr_ + ")  /* With object ref */;");
                 } else {
-                    c_.emitLine(tempType + " " + tempVar + " = (" + tempType + ")" + lastExpr_ + "  /* With object ref */;");
+                    // 账 #255: 上面那两条只管「表达式是 VARIANT **值**」；COM 调用交回的
+                    // 是 VARIANT*，(void*) 硬转会把结构体地址当对象用 ⇒ With 体内每一档属性
+                    // 都落 `not found`。解封口径与 Set 那一路共用同一个出口。
+                    c_.emitLine(tempType + " " + tempVar + " = (" + tempType + ")"
+                                + comObjectRefFromCallExpr(lastExpr_) + "  /* With object ref */;");
                 }
             } else {
                 // Fix 092j: inferClassTypeOfExpr 非空 (按 VB 声明推断出项目类) 但
@@ -758,12 +762,19 @@ void CCodeGen::visit(WithStmt& node) {
                 if (withIsVariantVal092j) {
                     c_.emitLine(tempType + " " + tempVar + " = vb6_VariantToObjectVal(" + lastExpr_ + ")  /* With object ref */;");
                 } else {
-                    c_.emitLine(tempType + " " + tempVar + " = (" + tempType + ")" + lastExpr_ + "  /* With object ref */;");
+                    // 账 #255: 同 090e 那一档 —— COM 调用交回的是 VARIANT*，裸转把结构体地址当对象。
+                    c_.emitLine(tempType + " " + tempVar + " = (" + tempType + ")"
+                                + comObjectRefFromCallExpr(lastExpr_) + "  /* With object ref */;");
                 }
             }
             }  /* Fix 160w: 宿主结构体 else 闭合 (tempType == "void*" 分支) */
         } else {
-            c_.emitLine(tempType + " " + tempVar + " = (" + tempType + ")" + lastExpr_ + "  /* With object ref */;");
+            // 账 #255: `With 集合(1)` (VB 侧类型不是 Variant、也不是项目类, 例：As Collection
+            // 的默认成员) 以前一路走这里裸转 —— 而 COM 调用交回的是 VARIANT*，于是 With 体内
+            // 每一档属性都落 `vb6_ComSetProp: property "…" not found`，写在虚空里 (Charts 的
+            // ClsResizer 实测 14 枚控件 × 4 档全丢)。解封口径与 Set 那一路共用同一个出口。
+            c_.emitLine(tempType + " " + tempVar + " = (" + tempType + ")"
+                        + comObjectRefFromCallExpr(lastExpr_) + "  /* With object ref */;");
         }
     }
 

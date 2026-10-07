@@ -87,6 +87,8 @@ Option Explicit
 '   GC09..GC12  the late-bound route (the RTL host model behind IDispatch) answers
 '               the same numbers as the emitted one -- it used to carry a second
 '               geometry implementation that never stored the VB-side value
+'   GC17..GC19  a member enumerated out of Controls is that control and nobody else's,
+'               and a With block over a Collection member writes that control
 
 Private Declare PtrSafe Function GetWindowRect Lib "user32" (ByVal hwnd As LongPtr, ByRef lpRect As RECTAPI) As Long
 Private Declare PtrSafe Function GetParent Lib "user32" (ByVal hwnd As LongPtr) As LongPtr
@@ -307,6 +309,49 @@ Private Sub tmrGC_Timer()
     s16 = "L" & Me.Left
     ok16 = (Len(s16) > 2)
     Debug.Print "GC16-me-left-concat=" & TF(ok16) & "/" & s16
+
+    ' GC17..GC19 -- ledger 255. Two knives, both on the route Charts 2020's ClsResizer
+    ' walks: `For Each oCtrl In oForm.Controls` fills a Collection, and that collection
+    ' is then written through `With CtrlNames(i)`.
+    '   (b) each enumerated member comes back wrapped in a live COM object so the stack
+    '       VARIANT can be VariantCleared. The (wrapper -> target) table was append-only
+    '       while a freed block address gets handed to the next wrapper, so the scan from
+    '       slot 0 always hit the FIRST stale pair and every member unwrapped to the same
+    '       object: measured here before the fix all five members answered the Timer's
+    '       hWnd and Left (120) and Width (0), and a Width write landed on the Timer while
+    '       no control moved.
+    '   (a) the With receiver was the address of the calloc'd VARIANT that the default
+    '       Item returns, not the dispatch inside it; receivers are named by identity, so
+    '       every member of the block fell through to "property ... not found" -- 168 of
+    '       them on Charts 2020 and not one position applied.
+    ' GC17 pins the members are DISTINCT (one sum only matches if each answers for
+    ' itself). GC18/GC19 pin the write through With, both heads -- what the control
+    ' reports and what the window itself says -- because "it only landed in a cache" is
+    ' one of the ways this could still be wrong. picX is left out of the pins: it is a
+    ' pixel-mode container, so its Width is not the same number in both units.
+    Dim ok17 As Boolean, ok18 As Boolean, ok19 As Boolean
+    Dim oC As Object
+    Dim collC As Collection
+    Dim iC As Long
+    Dim sumW As Long, ownW As Long
+    ownW = txtA.Width + picP.Width + picX.Width + cboA.Width
+    Set collC = New Collection
+    For Each oC In Me.Controls
+        sumW = sumW + CLng(oC.Width)
+        collC.Add oC
+    Next
+    ok17 = (sumW = ownW) And (ownW > 0)
+    Debug.Print "GC17-item-identity=" & TF(ok17) & " raw=" & sumW & "/" & ownW & "/" & CLng(collC.Count)
+
+    For iC = 1 To CLng(collC.Count)
+        With collC(iC)
+            .Width = 1234
+        End With
+    Next
+    ok18 = (txtA.Width = 1234) And (picP.Width = 1234) And (cboA.Width = 1234)
+    Debug.Print "GC18-with-item-write=" & TF(ok18) & " raw=" & txtA.Width & "," & picP.Width & "," & cboA.Width & "," & picX.Width
+    ok19 = (PxW(txtA.hwnd) = ToPx(1234)) And (PxW(picP.hwnd) = ToPx(1234))
+    Debug.Print "GC19-with-item-place=" & TF(ok19) & " raw=" & PxW(txtA.hwnd) & "," & ToPx(1234) & "," & PxW(picP.hwnd)
 
     Debug.Print "GC-DONE"
     Unload Me

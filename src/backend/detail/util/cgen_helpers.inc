@@ -457,6 +457,9 @@
     // 返回 Unknown 表示"这张表不管", 调用方照旧走原有兜底。
     Vb6Type controlPropType(FrmControlType ctrlType, const std::string& propName) const;
 
+    // 账 #255: COM 调用交回的 VARIANT* 当对象引用用时唯一的解封点 (cgen_util_com.cpp)。
+    static std::string comObjectRefFromCallExpr(const std::string& expr);
+
     // Fix 029: 严格 Variant 推断 — 仅当表达式"明确"为 Variant/Variant 数组时返回 true.
     // 与 inferExprType 不同: inferExprType 对内置函数/Udt 字段访问等无法识别的情况
     // 会回退到 Variant (默认值), 此处不认为那些是 Variant, 避免误用 vb6_VariantToXxx 包装.

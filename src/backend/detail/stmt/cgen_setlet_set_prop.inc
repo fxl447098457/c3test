@@ -424,10 +424,10 @@
 
     // 如果ComCall/ComGetProp返回VARIANT*含对象, 需要UnpackObject
     // 使用一体化函数: vb6_ComCallObject 内部完成 UnpackObject+VarFree
-    if (value.find("vb6_ComCall(") == 0) {
-        // vb6_ComCall(obj, L"Method", args, argc) → vb6_ComCallObject(obj, L"Method", args, argc)
-        value = "vb6_ComCallObject" + value.substr(strlen("vb6_ComCall"));
-    }
+    // 账 #255: 这一段原本是就地手改字符串前缀 = 「COM 调用的结果当对象引用用」这一问的第二份
+    // 抄本 (With 那一路漏了 VARIANT* 这一档, 于是 Charts 的 `With CtrlNames(i)` 全丢)。
+    // 现在两路共用 comObjectRefFromCallExpr；对 vb6_ComCall( 的结果一字不变。
+    value = comObjectRefFromCallExpr(value);
 
     // Fix 037b: 项目类 typed 字段的 Item 属性调用返回 VARIANT, Set 语句需要提取 void* 对象引用.
     // 检测: value 以 "vb6_" 开头且第一个 '(' 恰在 "_prop_get_Item" 之后 → 顶层 Item 调用.

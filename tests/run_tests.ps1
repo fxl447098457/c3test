@@ -3850,6 +3850,16 @@ if ($Category -in @("all", "run", "vbp")) {
         # 成员名就掉去按裸名查模块符号，撞上返回 String 的内置函数 `Left` ⇒ 类型答 String
         # ⇒ 拼接面不套数值转换。崩点就是 GC16 那一行（BASE 上整行不出现，GC-DONE 也跟着没）。
         "GC16-me-left-concat=True",
+        # 账 #255：Charts 的排版器走的两步 —— `For Each oCtrl In oForm.Controls` 存进集合，
+        # 再 `With 集合(i)` 写回去。两步各有一刀：
+        #   GC17 钉「成员彼此不是同一枚」：包装器 (wrap->target) 表只追加不撤销，而 free 掉的
+        #        块地址会被下一枚包装器复用，从第 0 格扫表永远先撞上那条旧登记 ⇒ 五枚成员一律
+        #        解回第一枚（BASE 读数 4006/7918）。
+        #   GC18/GC19 钉「With 的接收者是集合成员本身」：以前交的是那次默认 Item 调用返回的
+        #        calloc VARIANT 的**地址**，宿主模型按身份认接收者，认不出的整座 With 块都掉进
+        #        「property not found」（Charts 实测 168 条，一格都没落）。两头都钉：控件自报
+        #        的数 + 窗口自己的像素。
+        "GC17-item-identity=True", "GC18-with-item-write=True", "GC19-with-item-place=True",
         "GC-DONE")
     Test-Vbp "geomcache" "$Tests\geomcache\GCCache.vbp" $geomExpected
     Test-Vbp "geomcache_x86" "$Tests\geomcache\GCCache.vbp" $geomExpected -Arch "x86"
@@ -3862,6 +3872,13 @@ if ($Category -in @("all", "run", "vbp")) {
     )
     Test-EmitcAbsent "gc_emitc_meleft_raw" @("$Tests\geomcache\GCCache.vbp") @(
         'vb6_BSTR_AssignMove(&s16, vb6_BSTR_Concat(vb6_BSTR_FromStr(L"L"), vb6_GetControlLeft(vb6_hwnd_GCForm)  /* Form.Left via Me */));'
+    )
+    # 账 #255 的发码那一半：With 的接收者必须先把那次调用返回的 VARIANT 解成里面的 dispatch。
+    Test-EmitcShape "gc_emitc_with_member_unpack" @("$Tests\geomcache\GCCache.vbp") @(
+        'vb6_ComUnpackObject(vb6_ComCallByDispid(collC, 0, (void*[]){vb6_ComPackInt(iC)}, 1))  /* With object ref */;'
+    )
+    Test-EmitcAbsent "gc_emitc_with_member_raw" @("$Tests\geomcache\GCCache.vbp") @(
+        'void* _vb6_with_2 = (void*)vb6_ComCallByDispid(collC, 0, (void*[]){vb6_ComPackInt(iC)}, 1)  /* With object ref */;'
     )
 
     # --- P20-42: SSTab (SysTabControl32 复刻) ---
