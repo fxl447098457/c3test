@@ -361,6 +361,14 @@
                 ("vb6_CtrlArr_GetAt(&vb6_arr_" + cIdent(ctrl.controlName) + ", " +
                  std::to_string(ctrl.index >= 0 ? ctrl.index : 0) + ")") :
                 ("vb6_hwnd_" + cIdent(ctrl.controlName));
+            // 账 #252: 控件的 VB 身份在这里记一次。晚绑定的 `.Name` / `.Index` / `TypeName`
+            // 与 `Controls("名字")` 四条读法都只问这张登记表（vb6_HostObj_Register），
+            // 而以前只有**窗体**登记过（vb6rtl_system.c 那一处）—— 标准控件全靠 IsWindow
+            // 兜底认成宿主，于是名字一律答空串、类型一律答 Control、按名查找一律 NULL。
+            // 类型名交原样串（"VB.CommandButton"），去掉 "VB." 那一档由 RTL 那一处统一做。
+            c_.emitLine("vb6_HostObj_Register((void*)" + dsHwnd + ", \"" + ctrl.controlName
+                        + "\", \"" + ctrl.controlTypeName + "\", 0, "
+                        + std::to_string(ctrl.index) + ");  /* VB identity */");
             emitDesignerStyleProps(ctrl, dsHwnd);
             emitDesignerStateProps(ctrl, dsHwnd);  // 账 #125: Enabled / Visible / Value
             emitDesignerStringProps(ctrl, dsHwnd);  // 账 #142: ToolTipText / Tag（非空才发）

@@ -89,6 +89,8 @@ Option Explicit
 '               geometry implementation that never stored the VB-side value
 '   GC17..GC19  a member enumerated out of Controls is that control and nobody else's,
 '               and a With block over a Collection member writes that control
+'   GC20..GC23  an enumerated member can say who it is (.Name / TypeName / .Index)
+'               and Controls("name") finds that same window again
 
 Private Declare PtrSafe Function GetWindowRect Lib "user32" (ByVal hwnd As LongPtr, ByRef lpRect As RECTAPI) As Long
 Private Declare PtrSafe Function GetParent Lib "user32" (ByVal hwnd As LongPtr) As LongPtr
@@ -352,6 +354,47 @@ Private Sub tmrGC_Timer()
     Debug.Print "GC18-with-item-write=" & TF(ok18) & " raw=" & txtA.Width & "," & picP.Width & "," & cboA.Width & "," & picX.Width
     ok19 = (PxW(txtA.hwnd) = ToPx(1234)) And (PxW(picP.hwnd) = ToPx(1234))
     Debug.Print "GC19-with-item-place=" & TF(ok19) & " raw=" & PxW(txtA.hwnd) & "," & ToPx(1234) & "," & PxW(picP.hwnd)
+
+    ' GC20..GC23 -- ledger 252. A control never carried its VB identity: the identity
+    ' table (vb6_ucHo) has name/typeName/index columns and four readers that already ask
+    ' it -- late-bound `.Name`, `.Index`, `TypeName(obj)` and Controls("name") -- but only
+    ' FORMS were ever registered, so standard controls fell through IsWindow and answered
+    ' empty name / "Control" / -1 / NULL. Measured on this form before the fix: all five
+    ' members answered name=[] type=Control and Controls("picP") handed back nothing.
+    ' Charts 2020 is the traffic: ClsResizer picks the font/property tables with
+    ' `If TypeName(CtrlNames(i)) = FBuf(j).CtrlTypeName`, and "Control" never equals
+    ' "LabelPlus.LabelClass", so not one row applied even after ledger 255 delivered the
+    ' right receiver. The registration now happens at BOTH creation routes.
+    ' `.Tag` through a member is still empty -- that is the late-bound string read,
+    ' a separate face (family of #88), deliberately not pinned here.
+    Dim ok20 As Boolean, ok21 As Boolean, ok22 As Boolean, ok23 As Boolean
+    Dim m2 As Object
+    Dim foundH As Long, foundT As String, foundI As Long
+    foundH = 0
+    foundT = ""
+    foundI = -999
+    For Each m2 In Me.Controls
+        If CStr(m2.Name) = "txtA" Then
+            foundH = CLng(m2.hWnd)
+            foundT = TypeName(m2)
+            foundI = CLng(m2.Index)
+        End If
+    Next
+    ' two heads: the name has to point at the window the emitted route owns
+    ok20 = (foundH <> 0) And (foundH = CLng(txtA.hwnd))
+    Debug.Print "GC20-member-name=" & TF(ok20) & " raw=" & foundH & "/" & CLng(txtA.hwnd)
+    ok21 = (foundT = "TextBox")
+    Debug.Print "GC21-member-typename=" & TF(ok21) & " raw=[" & foundT & "]"
+    ' a non-array control answers Index = -1 on both routes -- recorded so a future
+    ' registration that "helpfully" passes 0 shows up as a red judge, not a silent change
+    ok22 = (foundI = -1)
+    Debug.Print "GC22-member-index=" & TF(ok22) & " raw=" & foundI
+    Dim bk As Object
+    Dim bkH As Long
+    Set bk = Me.Controls("picP")
+    bkH = CLng(bk.hWnd)
+    ok23 = (bkH <> 0) And (bkH = CLng(picP.hwnd))
+    Debug.Print "GC23-bynamed-lookup=" & TF(ok23) & " raw=" & bkH & "/" & CLng(picP.hwnd)
 
     Debug.Print "GC-DONE"
     Unload Me

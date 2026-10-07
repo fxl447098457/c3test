@@ -3860,6 +3860,14 @@ if ($Category -in @("all", "run", "vbp")) {
         #        「property not found」（Charts 实测 168 条，一格都没落）。两头都钉：控件自报
         #        的数 + 窗口自己的像素。
         "GC17-item-identity=True", "GC18-with-item-write=True", "GC19-with-item-place=True",
+        # 账 #252：控件的 VB 身份以前只有**窗体**登记过（vb6rtl_system.c 那一处），标准控件从没进
+        # 那张表 —— 而四条读法（晚绑定 .Name / .Index / TypeName(对象) / Controls("名字")）本来就
+        # 只问这张表，于是名字一律空串、类型一律 Control、按名查找一律 NULL。Charts 的 ClsResizer
+        # 拿 `TypeName(CtrlNames(i)) = FBuf(j).CtrlTypeName` 挑字体档 ⇒ 恒不等，一条也不落地。
+        # GC20 两头钉（成员自报的名字必须指向发码那条路自己那枚窗口），GC22 钉住「非数组答 -1」
+        # —— 这条是防以后有人填表时顺手传 0。成员那条读 .Tag 仍空（晚绑定字符串读法，另一问，未钉）。
+        "GC20-member-name=True", "GC21-member-typename=True",
+        "GC22-member-index=True", "GC23-bynamed-lookup=True",
         "GC-DONE")
     Test-Vbp "geomcache" "$Tests\geomcache\GCCache.vbp" $geomExpected
     Test-Vbp "geomcache_x86" "$Tests\geomcache\GCCache.vbp" $geomExpected -Arch "x86"
@@ -3879,6 +3887,12 @@ if ($Category -in @("all", "run", "vbp")) {
     )
     Test-EmitcAbsent "gc_emitc_with_member_raw" @("$Tests\geomcache\GCCache.vbp") @(
         'void* _vb6_with_2 = (void*)vb6_ComCallByDispid(collC, 0, (void*[]){vb6_ComPackInt(iC)}, 1)  /* With object ref */;'
+    )
+    # 账 #252：两条创建路各登记一次 VB 身份。lblP 是容器子控件（第二条创建路），txtA 是顶层 ——
+    # 两条路必须都发，少一条就是「容器里的控件答不出名字」那种半通状态。
+    Test-EmitcShape "gc_emitc_identity_both_create_routes" @("$Tests\geomcache\GCCache.vbp") @(
+        'vb6_HostObj_Register((void*)vb6_hwnd_txtA, "txtA", "VB.TextBox", 0, -1);  /* VB identity */',
+        'vb6_HostObj_Register((void*)vb6_hwnd_lblP, "lblP", "VB.Label", 0, -1);  /* VB identity */'
     )
 
     # --- P20-42: SSTab (SysTabControl32 复刻) ---

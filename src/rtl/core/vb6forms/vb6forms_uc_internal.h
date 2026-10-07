@@ -43,7 +43,12 @@ extern "C" {
 
 #define VB6_UC_MAX_DESC 32
 #define VB6_UC_MAX_INST 64
-#define VB6_UC_MAX_OBJ  128
+/* 账 #252: 这张表现在也存「每枚标准控件的 VB 身份」(名字/类型/下标)，而登记表是**进程级**的
+   —— 一份工程里所有窗体的控件都往这里挤。实测语料：VBFlexGridDemo 182 枚、Charts 2020 164 枚
+   （单文件最多 73 枚），128 会**静默装不下**（vb6_HostObj_Register 满了直接 return，那几枚
+   退回「答不出名字」的旧行为）。提到 512：静态多约 110KB（一格约 292B），
+   而 collectChildren 的 kids[] 也跟着从 1KB 变 4KB，两条都远低于栈预算。 */
+#define VB6_UC_MAX_OBJ  512
 #define VB6_UC_NAME_LEN 64
 
 // 合成对象 tag
