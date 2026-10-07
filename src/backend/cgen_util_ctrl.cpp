@@ -2215,6 +2215,26 @@ Vb6Type CCodeGen::defaultPropType(FrmControlType ctrlType) {
 
 
 // ============================================================
+// 账 #258 (§B87): 与 ctrlDefaultPropOf 对称的那一问 —— 「这枚裸控件名作为**对象**交出去时发什么」。
+// 只许有一条答案：设计期控件 → makeCtrlHwndArg (同一条句柄出口；ListView 的槽变量、ImageList 的
+// vb6_com_<名>、Menu 的 GetMenu(...) 各有各的拼法，手拼 vb6_hwnd_ 会发出 C 里根本不存在的名字)，
+// WithEvents 控件变量 → 那枚变量自己 (C 侧就是持有 HWND 的变量)，都不认识才退回 vb6_hwnd_<名>。
+// 消费点 = cgen_expr_ident_symbol.inc 的 suppressDefaultProp_ 那一支（With 块 / 对象形参 / Set 右值三档共用）。
+// ============================================================
+
+std::string CCodeGen::ctrlObjectRefExpr(const std::string& lower,
+                                        const std::string& cNameFallback) const {
+    auto itWE = knownWithEventsCtrlVars_.find(lower);
+    if (itWE != knownWithEventsCtrlVars_.end()) {
+        auto itOrig = knownWithEventsCtrlOrigNames_.find(lower);
+        return (itOrig != knownWithEventsCtrlOrigNames_.end()) ? itOrig->second : cNameFallback;
+    }
+    auto itFC = knownFormControls_.find(lower);
+    if (itFC != knownFormControls_.end()) return makeCtrlHwndArg(lower, itFC->second);
+    return "vb6_hwnd_" + cNameFallback;
+}
+
+// ============================================================
 // 账 #256: 「这枚裸控件名会被折成哪一枚默认属性读数、折出来是什么型」只此一处回答
 //         （声明与背景见 cgen_helpers.inc 的 CtrlDefaultProp）。
 // 两个消费点：① 标识符发码那条路（cgen_expr_ident_symbol.inc）拿 readFn/prop/ctrlType
@@ -2225,6 +2245,7 @@ Vb6Type CCodeGen::defaultPropType(FrmControlType ctrlType) {
 CCodeGen::CtrlDefaultProp CCodeGen::ctrlDefaultPropOf(const std::string& lower) const {
     CtrlDefaultProp r;
     if (suppressDefaultProp_) return r;   // With 块 / 对象形参那一档：交出的是控件本身（HWND）
+
     auto it = knownFormControls_.find(lower);
     bool isWE = false;
     if (it == knownFormControls_.end()) {

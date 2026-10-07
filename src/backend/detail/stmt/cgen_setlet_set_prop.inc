@@ -12,7 +12,7 @@
         auto& ma09c = static_cast<MemberAccessExpr&>(*node.target);
         if (ma09c.object && ma09c.object->kind == ASTNodeKind::IdentifierExpr
             && Symbol::toLower(static_cast<IdentifierExpr&>(*ma09c.object).name) == "mybase") {
-            emitExpr(*node.value);
+            emitSetObjectRhs(node.value);
             std::string rhs09c = std::move(lastExpr_);
             if (tryEmitMyBaseAssign(ma09c, rhs09c, /*forSet=*/true)) return;
         }
@@ -188,7 +188,7 @@
                         && !_rhsRawName.empty()) {
                         _rhsRhsIsComPicture = true;
                     }
-                    emitExpr(*node.value);
+                    emitSetObjectRhs(node.value);
                     // Resolve COM marker on RHS
                     // Bug #3 fix: also detect vb6_ComIface_Picture* function return
                     bool _rhsIsComPicture = _rhsRhsIsComPicture;
@@ -297,7 +297,7 @@
                               + "*)vb6_UC_InstanceOf(" + hwnd160 + ")";
                     }
                 }
-                emitExpr(*node.value);
+                emitSetObjectRhs(node.value);
                 std::string _valE = std::move(lastExpr_);
                 // Task #43: RHS 是窗体控件属性读 (Set iDlg.Font = SSTabEx1.Font)
                 // 时, Fix 023e/089d 兜底只留下裸 hwnd + isComMarker_ — 不消费则
@@ -375,7 +375,7 @@
         isComMarker_ = false;
         std::string objExpr = std::move(comObjExpr_);
         std::string memberName = std::move(comMemberName_);
-    emitExpr(*node.value);
+    emitSetObjectRhs(node.value);
     // COM属性值: 如果右侧是COM属性, 解析为值
     if (isComMarker_) resolveComValue();
     std::string value = std::move(lastExpr_);
@@ -398,7 +398,7 @@
         return;
     }
 
-    emitExpr(*node.value);
+    emitSetObjectRhs(node.value);
     // Set语句: 如果右侧是COM调用返回的VARIANT*, 需要解封为对象
     if (isComMarker_) {
         // COM属性值作为对象引用: vb6_ComUnpackObject(vb6_ComGetProp(...))
@@ -406,21 +406,9 @@
     }
     std::string value = std::move(lastExpr_);
 
-    // P16: Set cmd = Command1 → value应为vb6_hwnd_Command1而非默认属性值
-    {
-        std::string targetLower = target;
-        std::transform(targetLower.begin(), targetLower.end(), targetLower.begin(), ::tolower);
-        if (knownWithEventsCtrlVars_.count(targetLower)) {
-            // value可能是vb6_GetControlXxx(vb6_hwnd_Name)形式, 需提取为vb6_hwnd_Name
-            size_t hwndPos = value.find("vb6_hwnd_");
-            if (hwndPos != std::string::npos) {
-                size_t endPos = value.find(")", hwndPos);
-                if (endPos != std::string::npos) {
-                    value = value.substr(hwndPos, endPos - hwndPos);
-                }
-            }
-        }
-    }
+    // 账 #258 (§B87) 撤掉了这里那截 P16 事后手术（在发好的 value 文本里 find("vb6_hwnd_") 再截取，
+    // 只认 knownWithEventsCtrlVars_ 的目标）—— 那是「Set 的右值该不该折默认属性」这一问的第二份答案。
+    // 现在右值发码走 emitSetObjectRhs，`Set cmd = Command1` 直接交出 vb6_hwnd_Command1。
 
     // 如果ComCall/ComGetProp返回VARIANT*含对象, 需要UnpackObject
     // 使用一体化函数: vb6_ComCallObject 内部完成 UnpackObject+VarFree

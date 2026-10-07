@@ -64,6 +64,16 @@
     // 生成C表达式字符串, 存入lastExpr_
     void emitExpr(Expr& expr);
 
+    // 账 #258 (§B87): Set 语句的右值 = **对象引用上下文**（VB6 在这里交出对象本身，
+    // 默认属性只在值上下文展开）。这一问的唯一出口 —— 五个 Set 右值发码点都转调它，
+    // 不许再在别处抄第二份（P16 那种"发好之后在文本里截 vb6_hwnd_"的事后手术已撤）。
+    void emitSetObjectRhs(const ExprPtr& value);
+
+    // 账 #258 (§B87): 「把这枚控件名当**对象**交出去」发什么 C —— 与折叠那支的接收者同一份权威。
+    // 改前 suppressDefaultProp_ 那一支手拼 "vb6_hwnd_" + 名，对 WithEvents 控件变量
+    // (C 侧是 static HWND cmdW)、ListView 槽变量、ImageList (vb6_com_<名>) 与 Menu 四档都拼错。
+    std::string ctrlObjectRefExpr(const std::string& lower, const std::string& cNameFallback) const;
+
     // ---- 语句生成 ----
 
     // 生成语句列表

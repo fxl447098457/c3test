@@ -4405,6 +4405,33 @@ if ($Category -in @("all", "run", "vbp")) {
         'vb6_ComSetProp(_vb6_with_1, L"CompareMode", vb6_ComPackValue(d1));  /* With COM SetProp */',
         'vb6_ComSetProp(_vb6_with_4, L"CompareMode", vb6_ComPackValue(source));  /* With COM SetProp */')
 
+    # 账 #258 = C29-GE-j: Set 的右值是**对象引用上下文** —— `Set o = <控件名>` 交出的是控件本身,
+    # 默认属性只在**值上下文**里展开 (`s = Text1` 才是 .Text)。改前 With 那一支之外还有一处按值发:
+    # 泛对象槽存进一枚 BSTR (`o = vb6_GetControlText(vb6_hwnd_Text1)  /* default prop: .Text */`)、
+    # Variant 槽存进默认属性的数值档 (`vt=3`)，而这一问当时有**两份答案** —— 环境闸 suppressDefaultProp_
+    # (With 块 / As Object 形参) 与 P16 事后在发好的文本里 find("vb6_hwnd_") 再截取 (只认 typed 控件变量目标)。
+    # 收成一处: 五个 Set 右值发码点全转调 CCodeGen::emitSetObjectRhs，句柄拼法转调 ctrlObjectRefExpr，
+    # P16 那截手术撤掉。闸只在右值**整枚是一枚标识符**时开 —— 子树 (`Set o = f(Text1)`) 照旧按值上下文。
+    # SO4/SO5/SO6 是证人 (BASE 上也是 True): SO4 拦「一律不折」那种修法, SO5 钉 P16 撤掉后 typed 控件
+    # 变量那一档逐字不变, SO6 钉「裸 HWND 当对象交出去」这个表示本来就被宿主模型认得 (晚绑定属性写落地)。
+    $setObjExpected = @("SO1-RAW err=0 tn=TextBox own=beta read=beta", "SO1=True",
+        "SO2-RAW got=gamma own=gamma", "SO2=True",
+        "SO3-RAW err=0 vt=9 tn=CheckBox", "SO3=True",
+        "SO4-RAW s=gamma", "SO4=True",
+        "SO5-RAW err=0 cap=cmd", "SO5=True",
+        "SO6-RAW err=0 got=delta own=delta", "SO6=True", "SO-DONE")
+    Test-Vbp "setobj" "$Tests\setobj\SetObj.vbp" $setObjExpected
+    Test-Vbp "setobj_x86" "$Tests\setobj\SetObj.vbp" $setObjExpected -Arch "x86"
+    # 发码两头: 正面三条 (泛对象槽 / Variant 槽 / typed 控件变量那枚证人形 = P16 撤后的同一串),
+    # 反面两条正是 BASE (`aeb883a9` 那台) 原地发出去的默认属性形。
+    Test-EmitcShape "so_emitc_set_rhs_is_object" @("$Tests\setobj\SetObj.vbp") @(
+        'o = vb6_hwnd_Text1;  /* Set */',
+        'v = vb6_VariantFromValue(vb6_hwnd_Check1);  /* Set */',
+        'cmdW = vb6_hwnd_Command1;  /* Set */')
+    Test-EmitcAbsent "so_emitc_default_prop_in_set" @("$Tests\setobj\SetObj.vbp") @(
+        'o = vb6_GetControlText(vb6_hwnd_Text1)  /* default prop: .Text */;  /* Set */',
+        'v = vb6_VariantFromValue(vb6_GetCheckValue(vb6_hwnd_Check1)  /* default prop: .Value */);  /* Set */')
+
     # <vbeclipse> 回归夹子 (evtcase) 账 #190: 控件事件臂调用的函数名必须按 **Sub 自己的拼写** 发。
     # VB6 的标识符大小写不敏感、C 敏感: 以前臂里那个名字是拿控件的设计期拼写现拼的, 于是
     # "改了控件名没改过程名" (VB6 完全合法) 就变成引用一个没人定义的函数 —— 链接期 LNK2019。
