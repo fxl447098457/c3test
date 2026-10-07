@@ -747,6 +747,16 @@
         if (hasMouseDown) {
             c_.emitLine("case WM_LBUTTONDOWN: case WM_RBUTTONDOWN: case WM_MBUTTONDOWN: {");
             c_.indent();
+            // Fix <c3-menu3d-click>: VB6 在鼠标按下时**捕获鼠标** (SetCapture)。
+            // 实证: VB6 的 Form_MouseMove 在按住左键拖出窗体时仍持续触发, 且 X/Y 会出现
+            // 负值/超出 ScaleWidth|Height —— 只有持有 capture 才可能。缺这一步时按下与抬起
+            // 不配对: 光标只要在抬起的一刻不在本窗体客户区上 (被别的前台窗/图标遮住、
+            // 窗体在忙没及时泵消息), 那条 WM_xBUTTONUP 就归别人, `Form_MouseUp` 永不触发
+            // ⇒ 应用侧"按下"标志卡在 True (3DMenu 的 Remote.Pressed) ⇒ 标题不再重画、
+            // 整屏停在同一帧, 看上去就是"点一下就卡死、不再随点击变化"。
+            // capture 保证 DOWN/UP 一定成对回到本窗体, 与 UC 宿主同口径
+            // (见 vb6forms/uc/uc_host_window.c)。
+            c_.emitLine("SetCapture(hwnd);");
             c_.emitLine("{ int16_t vb6_button = 0; int16_t vb6_shift = 0;");
             c_.emitLine("if (msg == WM_LBUTTONDOWN) vb6_button = 1;");
             c_.emitLine("else if (msg == WM_RBUTTONDOWN) vb6_button = 2;");
@@ -757,10 +767,17 @@
             c_.emitLine("break;");
             c_.dedent();
             c_.emitLine("}");
+        } else {
+            // 无 Form_MouseDown 处理器的窗体也要捕获, 否则上面的 UP 可能归别人。
+            c_.emitLine("case WM_LBUTTONDOWN: case WM_RBUTTONDOWN: case WM_MBUTTONDOWN: SetCapture(hwnd); break;");
         }
         if (hasMouseUp || hasFormClick43) {
             c_.emitLine("case WM_LBUTTONUP: case WM_RBUTTONUP: case WM_MBUTTONUP: {");
             c_.indent();
+            // Fix <c3-menu3d-click>: 与上面的 SetCapture 配对。放在用户处理器**之前** ——
+            // VB6 语义是"这一拍按钮已抬起, 隐式捕获随之结束"; 处理器内部要自己接着捕获
+            // (拖拽类用法) 时, 早放不会把它刚设上的 capture 抹掉。
+            c_.emitLine("if (GetCapture() == hwnd) ReleaseCapture();");
             // Fix 161f: 参数计算裸块只在真有 Form_MouseUp 处理器时才发。
             // 此前 "{ int16_t vb6_button ... " 的闭合 "}" 挂在 MouseUp 调用行尾,
             // 工程"只有 Form_Click 没有 Form_MouseUp"时裸块永不闭合 ⇒ 后续所有
@@ -781,6 +798,10 @@
             c_.emitLine("break;");
             c_.dedent();
             c_.emitLine("}");
+        } else {
+            // 无 Form_MouseUp/Form_Click 处理器的窗体: 仍要把配对按下时设的捕获放掉,
+            // 否则鼠标被本窗体一直攥着, 之后所有点击都到不了别的窗口。
+            c_.emitLine("case WM_LBUTTONUP: case WM_RBUTTONUP: case WM_MBUTTONUP: if (GetCapture() == hwnd) ReleaseCapture(); break;");
         }
         if (hasMouseMove) {
             c_.emitLine("case WM_MOUSEMOVE: {");

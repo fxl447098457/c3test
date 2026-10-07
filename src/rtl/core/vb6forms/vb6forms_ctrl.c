@@ -705,6 +705,26 @@ void vb6_SetControlBackColor(void* hwnd, int color) {
 // ============================================================
 LRESULT vb6_ApplyCtlColorStatic(HDC hdc, HWND child) {
     if (!hdc || !child) return 0;
+    // Fix <c3-menu3d-labelbg>: Label BackStyle=0 (Transparent) —— VB6 里这种 Label
+    // **完全不画背景**, 文字直接坐在父窗底色上。窗口层这边 Label 是 STATIC 窗口类,
+    // 它的 WM_PAINT 会用本消息返回的刷子把控件矩形整块填一遍; 不接管就落到
+    // DefWindowProcW 的类背景刷 (COLOR_WINDOW = 纯白) ⇒ 一块白方块。
+    // 口径与 vb6_CtlColorBtnBrush 对 CheckBox/OptionButton 的处理**完全一致**:
+    // 空刷 → 不填背景 → 透出父窗。
+    // 两处细节:
+    //   · 还必须 SetBkMode(TRANSPARENT) —— 否则 STATIC 画文字时按 DC 当前背景色
+    //     在每个字形后面糊一块底色 (LblSub 的 "PROGDVB IRDETO" 就会带白边)。
+    //   · 前景色仍要下发 —— 否则 STATIC 用 DC 默认黑, 丢掉 Label.ForeColor
+    //     (3DMenu 的 LblSub(0) 是浅绿 &H0080FF80&)。
+    // ⚠ 必须排在下面的 VB6_BackColorSet 检查**之前**: BackStyle=0 的 Label 通常
+    // 压根没写 BackColor (3DMenu 的 Label3/LblSub 都是), 落到下面直接 return 0。
+    if (GetPropW(child, L"VB6_BackStyle0")) {
+        COLORREF tfg = (COLORREF)vb6_GetControlForeColor((void*)child);
+        if (tfg & 0x80000000L) tfg = GetSysColor(tfg & 0xFF);
+        SetTextColor(hdc, tfg);
+        SetBkMode(hdc, TRANSPARENT);
+        return (LRESULT)GetStockObject(HOLLOW_BRUSH);
+    }
     // Fix 187: 只看 Set 哨兵, 不看值 — color=0 (黑) 的值属性是 NULL, 但它是合法色。
     if (!GetPropW(child, L"VB6_BackColorSet")) return 0;  // 未显式设色 → 调用方走默认绘制
     COLORREF bg = (COLORREF)(INT_PTR)GetPropW(child, L"VB6_BackColor");

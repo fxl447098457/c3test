@@ -144,22 +144,6 @@ static int vb6_OleEnsureInit(void) {
     return oleInited;
 }
 
-typedef struct vb6_picProbeArgs {
-    const wchar_t* path;
-    HRESULT hr;
-} vb6_picProbeArgs;
-
-typedef HRESULT (__stdcall* vb6_PicPathFn)(const wchar_t*, void*, DWORD, BOOL, const void*, void**);
-
-static DWORD WINAPI vb6_picProbeThread(void* p) {
-    vb6_picProbeArgs* s = (vb6_picProbeArgs*)p;
-    OleInitialize(NULL);
-    IPicture* pic = NULL;
-    s->hr = OleLoadPicturePath(s->path, NULL, 0, 0, &IID_IPicture, (void**)&pic);
-    if (pic) pic->lpVtbl->Release(pic);
-    return 0;
-}
-
 // P21-18: LoadPictureEx — OleLoadPicturePath for all image types (BMP/ICO/EMF/WMF/JPG/GIF/PNG)
 // 返回活着的 IPicture* (带一次引用); 失败返回 NULL。用完请 vb6_ReleasePicture。
 void* vb6_LoadPictureEx(BSTR pathname) {
@@ -200,10 +184,11 @@ void* vb6_LoadPictureEx(BSTR pathname) {
                 
                 return (void*)hBmp;
             }
-            /* Diagnostic block: only for existing files where both the COM parser
-             * and the GDI fallback failed. Missing files skip all of this. */
+            /* Last resort: same file via an IStream + OleLoadPicture. GDI's
+             * LoadImageW only decodes BMP/ICO/CUR, so for an existing file that
+             * reached here (e.g. a JPEG/PNG that LoadImageW cannot read) this is
+             * the only remaining decode path. */
             IPicture* pAlt = NULL;
-            HRESULT hrAlt = (HRESULT)0xDEAD;
             DWORD rd = 0, sizeF = 0;
             HANDLE hf = CreateFileW(pathname, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
             if (hf != INVALID_HANDLE_VALUE) {
@@ -214,29 +199,11 @@ void* vb6_LoadPictureEx(BSTR pathname) {
                 CloseHandle(hf);
                 IStream* st = NULL;
                 if (pv && SUCCEEDED(CreateStreamOnHGlobal(hg, TRUE, &st))) {
-                    hrAlt = OleLoadPicture(st, (LONG)rd, FALSE, &IID_IPicture, (void**)&pAlt);
+                    OleLoadPicture(st, (LONG)rd, FALSE, &IID_IPicture, (void**)&pAlt);
                     st->lpVtbl->Release(st);
                 } else if (pv) {
                     GlobalFree(hg);
                 }
-            }
-            
-            {   /* in-app COM ground truth on the SAME file: fresh-thread STA, raw
-                 * CoCreateInstance(CLSID_StdPicture), and GDI LoadImageW decode. */
-                vb6_picProbeArgs s;
-                s.path = pathname;
-                s.hr = 0;
-                HANDLE hT = CreateThread(NULL, 0, vb6_picProbeThread, &s, 0, NULL);
-                if (hT) { WaitForSingleObject(hT, 5000); CloseHandle(hT); }
-                IPicture* pCC = NULL;
-                HRESULT hrCC = 0;
-                {   CLSID cs = CLSID_StdPicture;
-                    IID iid = IID_IPicture;
-                    hrCC = CoCreateInstance(&cs, NULL, CLSCTX_INPROC_SERVER, &iid, (void**)&pCC);
-                    if (pCC) pCC->lpVtbl->Release(pCC);
-                }
-                void* hImg = NULL;
-                
             }
             if (pAlt) pAlt->lpVtbl->Release(pAlt);
         }

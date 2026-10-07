@@ -129,7 +129,11 @@ struct vb6_TimerSlot {
     UINT  period;     // ms
     int   running;
     int   inCallback; // 1 = 这一格的 Timer 事件过程正在执行 (VB6: 不可重入, 见 vb6_DispatchTimer)
-    int   useMm;      // 1 = winmm timeSetEvent, 0 = 退回 SetTimer
+    int   useMm;      // 1 = winmm timeSetEvent (兜底), 0 = SetTimer (正常路径)
+    // 兜底路径 (winmm + PostMessageW) 专用："已经有一条 WM_TIMER 在队列里等着"标志。
+    // 正常路径走 Win32 SetTimer，由系统维护"同一计时器至多一条待处理"，此标志恒为 0。
+    // 见 vb6_MmThunk / vb6_TimerStart。
+    volatile LONG posted;
     UINT  mmId;
 };
 static struct vb6_TimerSlot g_timerTable[VB6_MAX_TIMERS];
@@ -700,12 +704,20 @@ static struct vb6_TimerSlot* vb6_SlotById(int id) {
 
 // winmm 的回调跑在它自己的线程上，**不能**直接调 VB 的事件处理函数（生成代码里那个
 // 事件体属于 UI 线程）。所以只把到期事件投回派发窗，仍走原来的
-// case WM_TIMER -> vb6_DispatchTimer，语义与 SetTimer 一致，只是不再等 15.6 ms 的地板。
+// case WM_TIMER -> vb6_DispatchTimer。
+//
+// ⚠ Fix <c3-menu3d-click>: 这条路现在**只是兜底**（派发窗无效时才走），正常运行走
+// Win32 的 SetTimer —— 原因见 vb6_TimerStart 里的长注释：自己 PostMessage 出去的
+// WM_TIMER 是一条**真实待处理消息**，会长期占住线程队列，把硬件输入（鼠标/键盘）
+// 顶到后面去甚至饿死。这条路保留 posted 合并 (Win32 的"同一计时器至多一条待处理"
+// 不变式) 只是为了兜底时症状不至于无限恶化：投递成功到派发之间不再重复投递。
 static void CALLBACK vb6_MmThunk(UINT mmCssId, UINT msg, DWORD user, DWORD dw1, DWORD dw2) {
     (void)mmCssId; (void)msg; (void)dw1; (void)dw2;
     struct vb6_TimerSlot* e = vb6_SlotById((int)user);
-    if (e && e->running) PostMessageW(e->hwnd, WM_TIMER, (WPARAM)e->timerId, 0);
-    { static int s_mmN = 0; if (s_mmN < 3) { s_mmN++;  } }
+    if (!e || !e->running) return;
+    if (InterlockedExchange(&e->posted, 1) == 0) {
+        PostMessageW(e->hwnd, WM_TIMER, (WPARAM)e->timerId, 0);
+    }
 }
 
 static void vb6_TimerStop(struct vb6_TimerSlot* e) {
@@ -717,17 +729,48 @@ static void vb6_TimerStop(struct vb6_TimerSlot* e) {
         KillTimer(e->hwnd, (UINT_PTR)e->timerId);
     }
     e->running = 0;
+    InterlockedExchange(&e->posted, 0);  // Fix <c3-menu3d-click>: 停了就不再持有"已投递"名额
 }
 
 static void vb6_TimerStart(struct vb6_TimerSlot* e) {
     // VB6 语义: Interval 合法 1..65535，0 = 停止
     if (e->running || e->period == 0 || e->period > 65535) return;
+    InterlockedExchange(&e->posted, 0);
+    // Fix <c3-menu3d-click>: **必须用 Win32 的 SetTimer**，不要自己 PostMessage 一条
+    // WM_TIMER 去"顶掉 15.6 ms 的地板"。
+    //
+    // 为什么：SetTimer 的 WM_TIMER 是**低优先级合成消息** —— 它不占队列槽位，只在
+    // "线程队列里没有别的消息"时才被合成出来，同一枚计时器任意时刻至多一条待处理。
+    // 这正是 VB6 Timer 控件的实现（VB6 内部就是 SetTimer），所以计时器再密也**不会**
+    // 影响真实输入。
+    //
+    // 一旦改成 winmm + PostMessageW 自发 WM_TIMER，这条性质就没了：投递出去的是一条
+    // **真实待处理消息**，会一直占着队列。只要队列里长期有待处理的投递消息，硬件输入
+    // (鼠标/键盘) 就永远轮不到 —— 实测 3DMenu: Timer_Menu.Interval=10 而一拍里要做
+    // Me.Cls + 10 枚图标各一次 SetWindowPos 与透明贴图，投递速率长期 ≥ 消费速率，于是
+    // 点下鼠标后 WM_LBUTTONUP 几秒都取不到（trace 里只剩 WM_TIMER，连 WM_MOUSEMOVE
+    // 都没有），Form_MouseUp 不执行 ⇒ MRemote.Pressed 永远为 True ⇒
+    // Timer_Menu_Timer 里的 TitoloTrasparente / Timer_Shift.Enabled=True 全被跳过
+    // ⇒ 红色标题不再重画、逐帧动画停住，看上去就是"点一下标题消失、窗体卡住、不随
+    // 点击变换"。而 VB6 编译的同代码一切正常（因为它走 SetTimer）。改用 SetTimer 后
+    // 既不占队列，也**不需要** posted 合并（系统自带这条不变式）。
+    if (e->hwnd && IsWindow(e->hwnd)) {
+        UINT elapse = e->period;
+        // 系统地板 (USER_TIMER_MINIMUM = 10ms)，与 VB6 一致：VB6 的 Interval<10 也是这个值
+        if (elapse < USER_TIMER_MINIMUM) elapse = USER_TIMER_MINIMUM;
+        if (SetTimer(e->hwnd, (UINT_PTR)e->timerId, elapse, NULL)) {
+            e->running = 1; e->useMm = 0; return;
+        }
+    }
+    // 兜底 (派发窗无效 / SetTimer 失败): 仍退回 winmm，见 vb6_MmThunk 的说明
     vb6_MmProbe();
     if (vb6_pTimeSetEvent) {
         UINT id = vb6_pTimeSetEvent(e->period, 1, vb6_MmThunk, (DWORD)e->timerId, TIME_PERIODIC);
         if (id != 0) { e->mmId = id; e->useMm = 1; e->running = 1; return; }
     }
-    if (SetTimer(e->hwnd, (UINT_PTR)e->timerId, e->period, NULL)) { e->running = 1; }
+    if (e->hwnd && IsWindow(e->hwnd) && SetTimer(e->hwnd, (UINT_PTR)e->timerId, e->period, NULL)) {
+        e->running = 1;
+    }
 }
 
 // 挂一枚计时器。owner = 派发窗（窗体），key = Timer 控件自己的不可见句柄 ——
@@ -743,7 +786,7 @@ void vb6_TimerAttach(void* owner, void* key, int period, void* callback, int ena
     e->key = (HWND)key;
     e->callback = (vb6_TimerCallback)callback;
     e->period = (UINT)period;
-    e->running = 0; e->useMm = 0; e->mmId = 0;
+    e->running = 0; e->useMm = 0; e->mmId = 0; e->posted = 0;
     if (enabled) vb6_TimerStart(e);
 }
 
@@ -786,7 +829,7 @@ int vb6_SetTimer(void* hwnd, int interval, void* callback) {
     e->timerId = id; e->hwnd = (HWND)hwnd; e->key = (HWND)hwnd;
     e->callback = (vb6_TimerCallback)callback;
     e->period = (UINT)(interval > 65535 ? 65535 : (interval < 0 ? 0 : interval));
-    e->running = 0; e->useMm = 0; e->mmId = 0;
+    e->running = 0; e->useMm = 0; e->mmId = 0; e->posted = 0;
     vb6_TimerStart(e);
     return id;
 }
@@ -816,8 +859,16 @@ void vb6_DispatchTimer(int timerId) {
     // 顺带这也是"卡"的一半: 本该等按键的空转期在做整屏 Cls + 10 枚图标重合成。
     for (int i = 0; i < g_timerCount; i++) {
         if (g_timerTable[i].timerId == timerId) {
+            // Fix <c3-menu3d-click>: 这条 WM_TIMER 已经从队列里取走了, 立刻把"已投递"
+            // 名额还回去, 下一拍才投得出来 (见 vb6_MmThunk 的合并说明)。
+            InterlockedExchange(&g_timerTable[i].posted, 0);
+            // 已 Enabled=False / 已 Detach 的计时器: 队列里那条迟到的 WM_TIMER 不再回调
+            // (Win32 KillTimer 本来就会丢掉待处理的那条, VB6 同理)。
+            if (!g_timerTable[i].running) return;
             if (g_timerTable[i].callback) {
-                if (g_timerTable[i].inCallback) return;   // 上一拍还没返回 → 丢弃这一拍
+                if (g_timerTable[i].inCallback) {   // 上一拍还没返回 → 丢弃这一拍
+                    return;
+                }
                 g_timerTable[i].inCallback = 1;
                 g_timerTable[i].callback();
                 g_timerTable[i].inCallback = 0;
