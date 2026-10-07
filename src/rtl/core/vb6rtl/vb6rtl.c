@@ -672,6 +672,27 @@ void vb6_RaiseError(int32_t errNum, BSTR description) {
             int n = swprintf(line, 600, L"Unhandled VB6 Error #%d: %ls\n", errNum,
                              description ? description : L"(no description)");
             if (n > 0) vb6_ConWriteErrW(line, n);
+#ifdef _WIN32
+            /* 3DMenu P-BMP-3D 排查: 把抛错时 C 栈帧按 RVA 打到 stderr,
+             * 便于对回生成 .c 定位 (无 PDB 就用模块名+偏移猜函数)。 */
+            {
+                void* fr[24];
+                USHORT fn = CaptureStackBackTrace(0, 24, fr, NULL);
+                HMODULE hSelf = GetModuleHandleA(NULL);
+                for (USHORT i = 0; i < fn; i++) {
+                    wchar_t bl[160];
+                    if ((char*)fr[i] >= (char*)hSelf &&
+                        (char*)fr[i] < (char*)hSelf + 0x1000000) {
+                        swprintf(bl, 160, L"  #%u rva=0x%lX\n", (unsigned)i,
+                                 (unsigned long)((char*)fr[i] - (char*)hSelf));
+                    } else {
+                        swprintf(bl, 160, L"  #%u 0x%p (outside exe)\n",
+                                 (unsigned)i, fr[i]);
+                    }
+                    { int bn = (int)wcslen(bl); if (bn > 0) vb6_ConWriteErrW(bl, bn); }
+                }
+            }
+#endif
         } else {
             // 无处可写 (双击启动的 GUI 程序): 弹 VB6 风格错误对话框
             wchar_t msg[512];

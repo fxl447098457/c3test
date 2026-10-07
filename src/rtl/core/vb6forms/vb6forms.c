@@ -128,6 +128,7 @@ struct vb6_TimerSlot {
     vb6_TimerCallback callback;
     UINT  period;     // ms
     int   running;
+    int   inCallback; // 1 = 这一格的 Timer 事件过程正在执行 (VB6: 不可重入, 见 vb6_DispatchTimer)
     int   useMm;      // 1 = winmm timeSetEvent, 0 = 退回 SetTimer
     UINT  mmId;
 };
@@ -700,10 +701,12 @@ static struct vb6_TimerSlot* vb6_SlotById(int id) {
 // winmm 的回调跑在它自己的线程上，**不能**直接调 VB 的事件处理函数（生成代码里那个
 // 事件体属于 UI 线程）。所以只把到期事件投回派发窗，仍走原来的
 // case WM_TIMER -> vb6_DispatchTimer，语义与 SetTimer 一致，只是不再等 15.6 ms 的地板。
+extern void vb6_picdbg(const char* fmt, ...);
 static void CALLBACK vb6_MmThunk(UINT mmCssId, UINT msg, DWORD user, DWORD dw1, DWORD dw2) {
     (void)mmCssId; (void)msg; (void)dw1; (void)dw2;
     struct vb6_TimerSlot* e = vb6_SlotById((int)user);
     if (e && e->running) PostMessageW(e->hwnd, WM_TIMER, (WPARAM)e->timerId, 0);
+    { static int s_mmN = 0; if (s_mmN < 3) { s_mmN++; vb6_picdbg("[MmThunk] user=%d slot=%p running=%d\n", (int)user, (void*)e, (e && e->running) ? 1 : 0); } }
 }
 
 static void vb6_TimerStop(struct vb6_TimerSlot* e) {
@@ -718,19 +721,28 @@ static void vb6_TimerStop(struct vb6_TimerSlot* e) {
 }
 
 static void vb6_TimerStart(struct vb6_TimerSlot* e) {
-    // VB6 口径: Interval 合法域 1..65535，0 = 不跑
-    if (e->running || e->period == 0 || e->period > 65535) return;
+    // VB6 语义: Interval 合法 1..65535，0 = 停止
+    if (e->running || e->period == 0 || e->period > 65535) {
+        vb6_picdbg("[TimerStart] skip id=%d running=%d period=%u\n", e->timerId, e->running ? 1 : 0, e->period);
+        return;
+    }
     vb6_MmProbe();
     if (vb6_pTimeSetEvent) {
         UINT id = vb6_pTimeSetEvent(e->period, 1, vb6_MmThunk, (DWORD)e->timerId, TIME_PERIODIC);
-        if (id != 0) { e->mmId = id; e->useMm = 1; e->running = 1; return; }
+        if (id != 0) { e->mmId = id; e->useMm = 1; e->running = 1;
+            vb6_picdbg("[TimerStart] mm id=%d mmId=%u period=%u hwnd=%p\n", e->timerId, id, e->period, (void*)e->hwnd);
+            return; }
     }
-    if (SetTimer(e->hwnd, (UINT_PTR)e->timerId, e->period, NULL)) e->running = 1;
+    if (SetTimer(e->hwnd, (UINT_PTR)e->timerId, e->period, NULL)) { e->running = 1;
+        vb6_picdbg("[TimerStart] user id=%d period=%u hwnd=%p\n", e->timerId, e->period, (void*)e->hwnd); }
+    else vb6_picdbg("[TimerStart] FAIL id=%d period=%u hwnd=%p err=%lu\n", e->timerId, e->period, (void*)e->hwnd, (unsigned long)GetLastError());
 }
 
 // 挂一枚计时器。owner = 派发窗（窗体），key = Timer 控件自己的不可见句柄 ——
 // 有了 key，运行期 `Timer1.Enabled = True` / `Timer1.Interval = 100` 才找得回这一格。
+extern void vb6_picdbg(const char* fmt, ...);
 void vb6_TimerAttach(void* owner, void* key, int period, void* callback, int enabled) {
+    { vb6_picdbg("[TimerAttach] owner=%p key=%p period=%d enabled=%d count=%d\n", owner, key, period, enabled, g_timerCount); }
     if (g_timerCount >= VB6_MAX_TIMERS) return;
     if (period < 0) period = 0;
     if (period > 65535) period = 65535;
@@ -750,10 +762,12 @@ void vb6_TimerSetEnabled(void* key, int enabled) {
     for (int i = 0; i < g_timerCount; i++) {
         struct vb6_TimerSlot* e = &g_timerTable[i];
         if (e->key == (HWND)key) {
+            vb6_picdbg("[TimerSetEnabled] hit key=%p en=%d id=%d\n", key, enabled ? 1 : 0, e->timerId);
             if (enabled) vb6_TimerStart(e); else vb6_TimerStop(e);
             return;
         }
     }
+    vb6_picdbg("[TimerSetEnabled] MISS key=%p en=%d count=%d\n", key, enabled ? 1 : 0, g_timerCount);
 }
 
 // 运行期 Interval：改了立刻按新周期重排（VB6 就是这个行为，不是"下一轮才生效"）
@@ -770,6 +784,7 @@ void vb6_TimerSetPeriod(void* key, int period) {
             return;
         }
     }
+    vb6_picdbg("[TimerSetPeriod] MISS key=%p period=%d count=%d\n", key, period, g_timerCount);
 }
 
 // 兼容旧入口：没有身份窗时派发窗自己当身份，建完即启。
@@ -798,11 +813,91 @@ void vb6_KillTimer(int timerId) {
 }
 
 // P24-Timer: WndProc中分发WM_TIMER (替代消息循环拦截)
+static BOOL CALLBACK vb6_ArScanChild(HWND hw, LPARAM lp) {
+    FILE* f = (FILE*)lp;
+    HDC ar = (HDC)GetPropW(hw, L"VB6_AutoRedrawDC");
+    if (!ar) return TRUE;
+    RECT rc;
+    if (!GetClientRect(hw, &rc)) return TRUE;
+    int w = rc.right, h = rc.bottom;
+    if (w <= 0 || h <= 0) return TRUE;
+    unsigned seen[64]; int nSeen = 0, nonBg = 0;
+    COLORREF bg = GetPixel(ar, 0, 0);
+    for (int y = 0; y < h; y += (h > 40 ? h / 20 : 2)) {
+        for (int x = 0; x < w; x += (w > 40 ? w / 20 : 2)) {
+            COLORREF c = GetPixel(ar, x, y);
+            if (c != bg) nonBg++;
+            int dup = 0;
+            for (int k = 0; k < nSeen; k++) if (seen[k] == (unsigned)c) { dup = 1; break; }
+            if (!dup && nSeen < 64) seen[nSeen++] = (unsigned)c;
+        }
+    }
+    fprintf(f, "[ChildAR] hw=%p %dx%d corner=%06X nonBg=%d distinct=%d\n",
+            (void*)hw, w, h, (unsigned)bg, nonBg, nSeen);
+    return TRUE;
+}
+
 void vb6_DispatchTimer(int timerId) {
+    static int s_timerDbg = 0;
+    if (s_timerDbg < 40) {
+        s_timerDbg++;
+        FILE* f = fopen("picdbg.txt", "a");
+        if (f) { fprintf(f, "[TimerDispatch] id=%d n=%d\n", timerId, s_timerDbg); fclose(f); }
+    }
+    if (timerId == 1001) {
+        static int s_formArDbg = 0;
+        s_formArDbg++;
+        if (s_formArDbg == 8 || s_formArDbg == 60) {
+            for (int i = 0; i < g_timerCount; i++) {
+                if (g_timerTable[i].timerId == timerId) {
+                    HWND owner = (HWND)g_timerTable[i].hwnd;
+                    HDC ar = (HDC)GetPropW(owner, L"VB6_AutoRedrawDC");
+                    FILE* f = fopen("picdbg.txt", "a");
+                    if (f) {
+                        if (ar) {
+                            int minX = -1, maxX = -1, minY = -1, maxY = -1, hit = 0;
+                            for (int y = 0; y < 600; y += 2) {
+                                for (int x = 0; x < 800; x += 2) {
+                                    COLORREF c = GetPixel(ar, x, y);
+                                    if (c != RGB(0xF0, 0xF0, 0xF0)) {
+                                        hit++;
+                                        if (minX < 0 || x < minX) minX = x;
+                                        if (x > maxX) maxX = x;
+                                        if (minY < 0 || y < minY) minY = y;
+                                        if (y > maxY) maxY = y;
+                                    }
+                                }
+                            }
+                            fprintf(f, "[FormAR n=%d] ar=%p nonBk=%d bbox=(%d,%d)-(%d,%d)\n",
+                                    s_formArDbg, (void*)ar, hit, minX, minY, maxX, maxY);
+                        } else {
+                            fprintf(f, "[FormAR n=%d] NO-ARDC hwnd=%p\n", s_formArDbg, (void*)owner);
+                        }
+                        EnumChildWindows(owner, vb6_ArScanChild, (LPARAM)f);
+                        fclose(f);
+                    }
+                    break;
+                }
+            }
+        }
+    }
+    // Fix <c3-menu3d>: VB6 的 Timer 事件过程**不可重入**。
+    // 过程还在执行时 (哪怕它自己调了 DoEvents 让出), 同一枚 Timer 的下一拍必须排队等
+    // —— VB6 不会在 Timer_Menu_Timer 还没返回时就再投一次 WM_TIMER 给它。
+    // 缺这条守卫时 3DMenu 是这样坏的: Timer_Menu_Timer → RuotaMenu(True) → 画标题 →
+    // WaitKeyMenu 在 `Do While KeyPress=0: DoEvents: Loop` 里等按键, DoEvents 把
+    // WM_TIMER 也泵了进来 ⇒ Timer_Menu_Timer 重进, RuotaMenu 开头那句 Me.Cls 无条件
+    // 清掉整张记忆位图; 而重进后 Rotazione 已偏离目标角, RuotaMenu 恒返回 False,
+    // 于是 `If RuotaMenu = True` 里的 TitoloTrasparente 再也补不回来 —— 实测 4 秒里
+    // Cls 跑了 182 次、标题只画了 1 次, 红色标题永远不上屏 (参考图有标题)。
+    // 顺带这也是"卡"的一半: 本该等按键的空转期在做整屏 Cls + 10 枚图标重合成。
     for (int i = 0; i < g_timerCount; i++) {
         if (g_timerTable[i].timerId == timerId) {
             if (g_timerTable[i].callback) {
+                if (g_timerTable[i].inCallback) return;   // 上一拍还没返回 → 丢弃这一拍
+                g_timerTable[i].inCallback = 1;
                 g_timerTable[i].callback();
+                g_timerTable[i].inCallback = 0;
             }
             break;
         }
@@ -842,6 +937,7 @@ int vb6_AnyThreadWindowVisible(void) {
 
 int vb6_MessageLoop(void) {
     MSG msg;
+    { vb6_picdbg("[MessageLoop] enter\n"); }
     // czUI fix: 消息循环启动后设计器 Timer 才允许触发 (VB6 语义: Timer 事件
     // 排队等消息循环; 否则处理器在 Form_Load 前对未就绪实例运行 → AV)
     extern int vb6_uc_timersStarted;  // czUI fix (定义在 vb6forms_uc.c)
@@ -922,6 +1018,13 @@ int vb6_DoEvents(void) {
         count++;
         // 安全限制: 防止无限循环 (VB6 DoEvents行为: 处理完就返回)
         if (count > 1000) break;
+    }
+    // Fix <c3-menu3d> 2026-10-07: 队列空时让出时间片。WaitKeyMenu 那类
+    // `Do While ... DoEvents ... Loop` 忙等 (3DMenu 常驻状态) 会把一个核打满,
+    // 整机发卡。VB6 的 DoEvents 本质是让 CPU 给系统; 这里队列空就最多等 10ms,
+    // 有消息 (按键/Timer 到点) 立即醒来, 不影响响应性。
+    if (count == 0) {
+        MsgWaitForMultipleObjects(0, NULL, FALSE, 10, QS_ALLINPUT);
     }
     return count;
 }
@@ -1379,12 +1482,16 @@ static void vb6_ApplyInitialFocus(HWND hwnd) {
 // 窗体 (如停靠视图 frmViewViews) 在交给 ucFolder 之前已完成 Form_Load 初始化。
 void vb6_LoadForm(void* hwnd) {
     if (!hwnd) return;
+    { vb6_picdbg("[LoadForm] hwnd=%p\n", hwnd); }
     const UINT kDeferredFormLoad = 0x7FF0;
     MSG msg;
+    int vb6_lfdrain = 0;
     while (PeekMessageW(&msg, (HWND)hwnd, kDeferredFormLoad, kDeferredFormLoad, PM_REMOVE)) {
         TranslateMessage(&msg);
         DispatchMessageW(&msg);
+        vb6_lfdrain++;
     }
+    { vb6_picdbg("[LoadForm] drained=%d\n", vb6_lfdrain); }
 }
 
 // Fix <vbeclipse> rev28: 窗体 Form_Resize 排到消息循环 (与 UC 侧 rev23 同理)。
@@ -1448,6 +1555,8 @@ void vb6_ShowForm(void* hwnd, int modal) {
     }
     if (!hwnd) return;
 
+    { vb6_picdbg("[ShowForm] enter hwnd=%p modal=%d\n", hwnd, modal); }
+
     // Fix 115: 恢复 VB6 的 "先 Form_Load, 后 Show" 顺序。
     // 编译器把 Form_Load 用 PostMessageW(hwnd, 0x7FF0, 0, 0) 延迟到消息队列
     // (见 cgen_form_wndproc_create.inc 的 WM_CREATE 处理), 而这里的
@@ -1459,10 +1568,13 @@ void vb6_ShowForm(void* hwnd, int modal) {
     {
         const UINT kDeferredFormLoad = 0x7FF0;   // 编译器生成的"延迟 Form_Load"消息
         MSG msg;
+        int vb6_sfdrain = 0;
         while (PeekMessageW(&msg, (HWND)hwnd, kDeferredFormLoad, kDeferredFormLoad, PM_REMOVE)) {
             TranslateMessage(&msg);
             DispatchMessageW(&msg);
+            vb6_sfdrain++;
         }
+        { vb6_picdbg("[ShowForm] drained=%d\n", vb6_sfdrain); }
     }
 
     ShowWindow((HWND)hwnd, SW_SHOWDEFAULT);

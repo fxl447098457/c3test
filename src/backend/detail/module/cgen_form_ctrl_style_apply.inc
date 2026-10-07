@@ -430,6 +430,48 @@
             }
         }
 
+        // Fix <c3-menu3d>: PictureBox/Image 设计期 AutoSize=True 此前从不消费。
+        // 3DMenu 的 ImgMenu(9) 全套 AutoSize=True + 设计期 25x25, .Picture 指派 127x127
+        // 图标后控件必须放大到图片本征尺寸 (VB6 语义), 否则 TransBltNow 源 (.hdc 的
+        // ARDC) 只有 25x25, 图标内容中心全被裁掉、角区又透明 → 格子恒 BackColor,
+        // 环永远画不出来。RT 侧 vb6_SetControlPictureFromCom 的 AutoSize 块读的正是
+        // 这个属性 —— 此前没人写它, 块恒不生效。
+        if (ctrl.controlType == FrmControlType::PictureBox ||
+            ctrl.controlType == FrmControlType::Image) {
+            auto asItPb = ctrl.properties.find("AutoSize");
+            if (asItPb != ctrl.properties.end() && asItPb->second.intValue != 0) {
+                std::string asPLower = ctrl.controlName; std::transform(asPLower.begin(), asPLower.end(), asPLower.begin(), ::tolower);
+                std::string asPHwnd = knownControlArrays_.count(asPLower) ?
+                    ("vb6_CtrlArr_GetAt(&vb6_arr_" + cIdent(ctrl.controlName) + ", " +
+                     std::to_string(ctrl.index >= 0 ? ctrl.index : 0) + ")") :
+                    ("vb6_hwnd_" + cIdent(ctrl.controlName));
+                c_.emitLine("vb6_SetPictureAutoSize((void*)" + asPHwnd + ", -1);  /* design AutoSize */");
+            }
+        }
+
+        // Fix <c3-menu3d>: PictureBox/Image 设计期 AutoRedraw=True 此前从不消费。
+        // 3DMenu 的 ImgTitolo 只在 .frm 里写了 AutoRedraw=True —— VB 代码**从不**
+        // 重新指派它 (而 ImgMenu/ImgMenuBack/ImgSub 都在 Form_Load 里又写了
+        // `.AutoRedraw = True`, 那只顺手把它们的 ARDC 建了起来)。缺这一条时
+        // ImgTitolo 永远拿不到 VB6_AutoRedrawDC: `.hdc` 落到 GetDC(隐藏窗口) 那张
+        // 空 DC (实测 px0=FFFFFFFF = GetPixel 直接失败), 于是 TitoloTrasparente 的
+        // `GetPixel` 取不到透明色、`TransBltNow` 从空源合成 → 红色标题永不上屏。
+        // 另一半是 RT 侧的 vb6_AutoRedrawRefit: 它开头就 `if (!ARDC) return;`,
+        // 所以 SetControlPicture 的 AutoSize 缩放/镜像也救不了这个洞 —— 必须先
+        // 由这里把 ARDC 建出来, 后续指派 Picture 才会 refit+mirror 正确尺寸。
+        if (ctrl.controlType == FrmControlType::PictureBox ||
+            ctrl.controlType == FrmControlType::Image) {
+            auto arIt = ctrl.properties.find("AutoRedraw");
+            if (arIt != ctrl.properties.end() && arIt->second.intValue != 0) {
+                std::string arNLower = ctrl.controlName; std::transform(arNLower.begin(), arNLower.end(), arNLower.begin(), ::tolower);
+                std::string arHwnd = knownControlArrays_.count(arNLower) ?
+                    ("vb6_CtrlArr_GetAt(&vb6_arr_" + cIdent(ctrl.controlName) + ", " +
+                     std::to_string(ctrl.index >= 0 ? ctrl.index : 0) + ")") :
+                    ("vb6_hwnd_" + cIdent(ctrl.controlName));
+                c_.emitLine("vb6_SetAutoRedraw((void*)" + arHwnd + ", -1);  /* design AutoRedraw */");
+            }
+        }
+
         // P20-12: CausesValidation property from .frm (default=True, only set when explicitly False)
         {
             auto cvIt = ctrl.properties.find("CausesValidation");

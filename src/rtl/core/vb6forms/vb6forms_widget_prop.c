@@ -253,6 +253,16 @@ void vb6_SetAutoRedraw(void* hwnd, int32_t val) {
     }
 }
 
+/* Fix <c3-menu3d>: AutoSize 把控件从设计期 25x25 放大到图片本征尺寸 (127x127) 之后,
+ * ARDC 仍是 WM_CREATE 时按旧客户区建的小位图 —— 镜像 127x127 图标照样被 25x25 裁掉,
+ * 格子只剩 BackColor。按新客户区重建记忆位图 (与 SetAutoRedraw 同口径)。 */
+void vb6_AutoRedrawRefit(void* hwnd) {
+    if (!hwnd) return;
+    if (!GetPropW((HWND)hwnd, L"VB6_AutoRedrawDC")) return;
+    vb6_SetAutoRedraw(hwnd, 0);
+    vb6_SetAutoRedraw(hwnd, 1);
+}
+
 int32_t vb6_GetScaleMode(void* hwnd) {
     if (!hwnd) return 1;  // Default: Twips
     HANDLE hProp = GetPropW((HWND)hwnd, L"VB6_ScaleMode");

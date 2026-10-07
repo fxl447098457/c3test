@@ -313,6 +313,10 @@ intptr_t __stdcall vb6_di_CloseThemeData(intptr_t Theme) {
 intptr_t __stdcall vb6_di_CopyIcon(intptr_t hIcon) {
     return ((intptr_t (WINAPI *)(intptr_t))CopyIcon)(hIcon);
 }
+/* CreateBitmap */
+intptr_t __stdcall vb6_di_CreateBitmap(intptr_t nWidth, intptr_t nHeight, intptr_t nPlanes, intptr_t nBitCount, void* lpBits) {
+    return ((intptr_t (WINAPI *)(intptr_t, intptr_t, intptr_t, intptr_t, void*))CreateBitmap)(nWidth, nHeight, nPlanes, nBitCount, lpBits);
+}
 /* CopyImage */
 intptr_t __stdcall vb6_di_CopyImage(intptr_t hImage, intptr_t uType, intptr_t cxDesired, intptr_t cyDesired, intptr_t fuFlags) {
     return ((intptr_t (WINAPI *)(intptr_t, intptr_t, intptr_t, intptr_t, intptr_t))CopyImage)(hImage, uType, cxDesired, cyDesired, fuFlags);

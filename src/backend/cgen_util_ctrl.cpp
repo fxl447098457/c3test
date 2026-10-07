@@ -451,6 +451,7 @@ std::string CCodeGen::getControlPropReadFn(FrmControlType ctrlType, const std::s
         // 账 #197: ScaleMode 的读法与几何换算必须是**同一处** (vb6_WindowScaleModeSelf)，
         // 否则程序读到一个数、量出来按另一个数走。写侧成对登记。
         if (propLower == "scalemode") return "vb6_WindowScaleModeSelf";
+        if (propLower == "autoredraw") return "vb6_GetAutoRedraw";
         if (propLower == "caption") return "vb6_GetControlText";
         if (propLower == "picture") return "vb6_GetControlPicture";
         if (propLower == "autosize") return "vb6_GetPictureAutoSize";
@@ -962,9 +963,10 @@ std::string CCodeGen::getControlPropWriteFn(FrmControlType ctrlType, const std::
         break;
     case FrmControlType::PictureBox:
         // 账 #192: 与读表成对（只给读侧的话 `.CurrentX = 0` 会落到 HWND 结构体字段上）。
-        if (propLower == "currentx") return "vb6_SetCurrentX";
+if (propLower == "currentx") return "vb6_SetCurrentX";
         if (propLower == "currenty") return "vb6_SetCurrentY";
-        if (propLower == "scalemode") return "vb6_SetScaleMode";  // 账 #197: 与读侧成对
+        if (propLower == "scalemode") return "vb6_SetScaleMode";  // �� #197: �����ɶ�
+        if (propLower == "autoredraw") return "vb6_SetAutoRedraw";  // P23-1: With img .AutoRedraw
         if (propLower == "caption") return "vb6_SetControlText";
         if (propLower == "picture") return "vb6_SetControlPicture";
         if (propLower == "autosize") return "vb6_SetPictureAutoSize";
