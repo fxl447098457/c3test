@@ -89,6 +89,11 @@ intptr_t __stdcall vb6_di_SetWindowLongA(intptr_t hWnd, intptr_t nIndex, intptr_
     return ((intptr_t (WINAPI *)(intptr_t, intptr_t, intptr_t))SetWindowLongA)(hWnd, nIndex, dwNewLong);
 }
 
+/* SetWindowLongPtrA */
+intptr_t __stdcall vb6_di_SetWindowLongPtrA(intptr_t hWnd, intptr_t nIndex, intptr_t dwNewLong) {
+    return ((intptr_t (WINAPI *)(intptr_t, intptr_t, intptr_t))SetWindowLongPtrA)(hWnd, nIndex, dwNewLong);
+}
+
 /* SystemParametersInfoA */
 intptr_t __stdcall vb6_di_SystemParametersInfoA(intptr_t uAction, intptr_t uParam, void* lpvParam, intptr_t fuWinIni) {
     return ((intptr_t (WINAPI *)(intptr_t, intptr_t, void*, intptr_t))SystemParametersInfoA)(uAction, uParam, lpvParam, fuWinIni);
