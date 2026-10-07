@@ -50,16 +50,12 @@
                 emitExpr(*node.value);
                 std::string valHp = std::move(lastExpr_);
                 std::string packFnHp = comPackExpr(*node.value);
-                if (isComMarker_) {
-                    // RHS 本身是 COM 属性读 → 按 packer 反推解封类型
-                    std::string hintHp = "Variant";
-                    if (packFnHp == "vb6_ComPackDouble") hintHp = "Double";
-                    else if (packFnHp == "vb6_ComPackInt") hintHp = "Long";
-                    else if (packFnHp == "vb6_ComPackBSTR") hintHp = "BSTR";
-                    else if (packFnHp == "vb6_ComPackObject") hintHp = "Object";
-                    resolveComValue(hintHp);
-                    valHp = std::move(lastExpr_);
-                }
+                // 账 #260: 这一份 hint 表与写侧另两处同源，收进 comMarkerValueForWrite
+                // （取值顺序与改前一致: 先摘 lastExpr_、再算 packer、最后才消费标记）。
+                // 它原来把「其余 packer」一律按 Variant 解封，其中 Boolean 那一档会发出
+                // vb6_ComPackBool(vb6_VARIANT 结构体) —— 现在跟着同一张表走 Long 档
+                // (与 resolveComMarkerForPack 对 Boolean 的答案一致)。
+                valHp = comMarkerValueForWrite(packFnHp, valHp);
                 if (isParentHp) {
                     // Parent.<prop> = v → 宿主对象上的 IDispatch 后期绑定写
                     c_.emitLine("vb6_ComSetProp(vb6_UC_ParentObject(), L\""

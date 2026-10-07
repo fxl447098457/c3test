@@ -633,6 +633,14 @@
     // unresolvedType: 期望的解封类型, 默认为BSTR (最通用)
     std::string resolveComValue(const std::string& unresolvedType = "BSTR");
 
+    // 账 #260: **写侧值位**上消费 COM 标记的唯一一处 —— `emitExpr(右值)` 之后如果右值整枚
+    // 就是 `对象.成员`，成员名还挂在 comMemberName_ 上、lastExpr_ 停在对象本体；不消费就
+    // 整段丢失（`With w : .Count = d.Count` 发成 `vb6_ComSetProp(w, L"Count",
+    // vb6_ComPackValue(d))`）。解封类型按 packer 反推，这张映射只许住在这个函数里
+    // （Fix 110i / P25b 原先各抄一份，其中一份还漏了 Integer 那一档）。
+    std::string comMarkerValueForWrite(const std::string& packFn,
+                                       const std::string& valExpr);
+
     // Fix 092m: With 块类字段写的 COM 解包 hint — 按目标类字段的 VB 类型名
     // (Symbol::memberFieldTypes, 语义分析阶段填充 + driver 跨模块拷贝) 映射到
     // resolveComValue 期望的解封类型:

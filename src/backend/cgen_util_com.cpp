@@ -699,6 +699,20 @@ std::string CCodeGen::comNewExprFor(const Symbol* comSym) {
 // P25: 解析COM标记为类型化属性取值, 用于COM调用参数打包
 // 当isComMarker_为true时, 根据packFnHint选择对应类型的COM属性取值函数
 // 如果isComMarker_为false, 返回空串
+std::string CCodeGen::comMarkerValueForWrite(const std::string& packFn,
+                                             const std::string& valExpr) {
+    if (!isComMarker_) return valExpr;
+    std::string hint = "BSTR";
+    if (packFn == "vb6_ComPackDouble") hint = "Double";
+    else if (packFn == "vb6_ComPackInt") hint = "Long";
+    else if (packFn == "vb6_ComPackBool") hint = "Long";
+    else if (packFn == "vb6_ComPackBSTR") hint = "BSTR";
+    else if (packFn == "vb6_ComPackObject") hint = "Object";
+    else if (packFn == "vb6_ComPackValue") hint = "Variant";
+    resolveComValue(hint);
+    return lastExpr_;
+}
+
 std::string CCodeGen::resolveComMarkerForPack(const std::string& packFnHint) {
     // P26: vb6_ComPackVariant / Fix 030: vb6_ComPackValue 需要把 COM 调用返回的
     // VARIANT* 转成 vb6_VARIANT (即使 isComMarker_ 已被消费, lastExpr_ 仍可能是 COM 调用结果).
@@ -805,18 +819,18 @@ std::string CCodeGen::resolveComMarkerForPack(const std::string& packFnHint) {
         }
     }
 
-    // 后期绑定: 根据packFnHint推断所需的属性取值函数
-    // packFnHint由comPackExpr根据上下文确定, 代表参数期望的C类型
+    // 后期绑定: 按 packer 反推解封类型 —— 这张表与 comMarkerValueForWrite 同一份口径
+    // （Boolean 走 Int 档是 resolveComMarkerForPack 一直以来的答案）。
     if (packFnHint == "vb6_ComPackObject") {
         return "vb6_ComGetObjectProp(" + objExpr + ", L\"" + memName + "\")";
     } else if (packFnHint == "vb6_ComPackBSTR" || packFnHint.empty()) {
         return "vb6_ComGetStringProp(" + objExpr + ", L\"" + memName + "\")";
     } else if (packFnHint == "vb6_ComPackInt") {
         return "vb6_ComGetIntProp(" + objExpr + ", L\"" + memName + "\")";
-    } else if (packFnHint == "vb6_ComPackDouble") {
-        return "vb6_ComGetDoubleProp(" + objExpr + ", L\"" + memName + "\")";
     } else if (packFnHint == "vb6_ComPackBool") {
         return "vb6_ComGetIntProp(" + objExpr + ", L\"" + memName + "\")";
+    } else if (packFnHint == "vb6_ComPackDouble") {
+        return "vb6_ComGetDoubleProp(" + objExpr + ", L\"" + memName + "\")";
     }
     // vb6_ComPackVariant / Fix 030 vb6_ComPackValue: 需要把 COM 返回的 VARIANT* 转成 vb6_VARIANT
     if (packFnHint == "vb6_ComPackVariant" || packFnHint == "vb6_ComPackValue") {

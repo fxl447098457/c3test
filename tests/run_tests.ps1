@@ -4377,6 +4377,34 @@ if ($Category -in @("all", "run", "vbp")) {
     Test-Vbp "ve_units" "$Tests\ve_units\Units.vbp" $veUnitsExpected
     Test-Vbp "ve_units_x86" "$Tests\ve_units\Units.vbp" $veUnitsExpected -Arch "x86"
 
+    # 账 #260 = C29-GE-i: With 块里的属性写，右值**整枚就是一枚 `对象.成员` 读取**时那一步被整段丢掉 ——
+    # 发出来的是 `vb6_ComSetProp(w, L"CompareMode", vb6_ComPackValue(d1))`，即把另一枚对象塞进数值档，
+    # 而 With 外同一句一直是对的 ⇒ 同一张「packer → 解封类型」的表抄了两遍、第三处出口没问它。
+    # 夹具只用 Scripting.Dictionary（晚绑定、不碰类型库 ⇒ 与本机注册表和 Reference= 相对路径无关）。
+    # 存在性 = CW-WITH / CW-LOCAL / CW-PARAM 三条（三种接收者各一枚；形参那一枚在 BASE 上直接 err=13）；
+    # CW-DIRECT / CW-EXPR 在 BASE 上也是 False，但那是**同一个根的第二症状**：With 那一支把标记漏给下一条
+    # 语句，于是 BASE 把 `e1 = Err.Number` 发成了「把 Err.Number 再写进上一条挂着的 d1.CompareMode」⇒
+    # d1 变 13，后面两头自然跟着 13。只有 CW-LIT（With 内右值是字面量）两台都 True ⇒ 它是反面证人，
+    # 拦「把值位一律改回字面量档」那种修法，不当存在性证据。
+    $comWithExpected = @("CW-WITH-RAW err=0 cm=1", "CW-WITH=True",
+        "CW-LOCAL-RAW err=0 cm=1", "CW-LOCAL=True",
+        "CW-PARAM-RAW err=0 cm=1", "CW-PARAM=True",
+        "CW-EXPR-RAW err=0 cm=1", "CW-EXPR=True",
+        "CW-DIRECT-RAW err=0 cm=1", "CW-DIRECT=True",
+        "CW-LIT-RAW err=0 cm=0", "CW-LIT=True", "CW-DONE")
+    Test-Vbp "comwith" "$Tests\comwith\WithCopy.vbp" $comWithExpected
+    Test-Vbp "comwith_x86" "$Tests\comwith\WithCopy.vbp" $comWithExpected -Arch "x86"
+    # 发码那一半，两头都钉：正面三条（三种接收者各一条 + With 外那条证人形），
+    # 反面三条正是 BASE 上原地发出去的那三句（BASE 的 emit 实测过：两条 ComPackValue(d1) + 一条 ComPackValue(source)）。
+    Test-EmitcShape "cw_emitc_with_member_read_resolved" @("$Tests\comwith\WithCopy.vbp") @(
+        'vb6_ComSetProp(_vb6_with_0, L"CompareMode", vb6_ComPackValue(vb6_VariantFromComResult(vb6_ComCall(d1, L"CompareMode", NULL, 0))));  /* With COM SetProp */',
+        'vb6_ComSetProp(_vb6_with_4, L"CompareMode", vb6_ComPackValue(vb6_VariantFromComResult(vb6_ComCall(source, L"CompareMode", NULL, 0))));  /* With COM SetProp */',
+        'vb6_ComSetProp(d4, L"CompareMode", vb6_ComPackValue(vb6_VariantFromComResult(vb6_ComCall(d1, L"CompareMode", NULL, 0))));  /* COM SetProp */')
+    Test-EmitcAbsent "cw_emitc_with_object_over_value" @("$Tests\comwith\WithCopy.vbp") @(
+        'vb6_ComSetProp(_vb6_with_0, L"CompareMode", vb6_ComPackValue(d1));  /* With COM SetProp */',
+        'vb6_ComSetProp(_vb6_with_1, L"CompareMode", vb6_ComPackValue(d1));  /* With COM SetProp */',
+        'vb6_ComSetProp(_vb6_with_4, L"CompareMode", vb6_ComPackValue(source));  /* With COM SetProp */')
+
     # <vbeclipse> 回归夹子 (evtcase) 账 #190: 控件事件臂调用的函数名必须按 **Sub 自己的拼写** 发。
     # VB6 的标识符大小写不敏感、C 敏感: 以前臂里那个名字是拿控件的设计期拼写现拼的, 于是
     # "改了控件名没改过程名" (VB6 完全合法) 就变成引用一个没人定义的函数 —— 链接期 LNK2019。
