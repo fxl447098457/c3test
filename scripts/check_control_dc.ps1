@@ -48,6 +48,16 @@ function Get-RtlLine {
 
 $rtl = @(Get-RtlLine)
 
+# 判"这枚函数的体里有没有某个调用"之前先把注释剥掉。
+# 为什么必须剥（账 #261 那轮撞上的）：合并进来的 3DMenu/AutoRedraw 那笔（`90fb8069`）在
+# vb6_GetControlHDC 的**注释**里写了"旧版在这里 GetDC(过程)" —— 按字面匹配判据把一句说明
+# 读成一次调用 ⇒ D3 整条假红。哨兵钉的是代码里有没有那条口径，不是散文里提没提那个名字。
+function Remove-CStyleComments($s) {
+    $t = [regex]::Replace($s, '/\*[\s\S]*?\*/', " ")
+    $t = [regex]::Replace($t, '//[^\r\n]*', " ")
+    return $t
+}
+
 # ---- D1: 权威恰好一处, 两档都还在 ----
 $defs = @($rtl | Where-Object { $_.Text -match 'HDC\s+vb6_ControlDrawDC\s*\(' -and $_.Text -notmatch '=' -and -not $_.Text.EndsWith(";") })
 if ($defs.Count -ne 1) {
@@ -60,10 +70,11 @@ if (Test-Path -LiteralPath $ctrl) {
     if (-not $body.Success) {
         $bad += "D1 authority body not found"
     } else {
-        if ($body.Value -notmatch 'L"VB6_PaintDC"') {
+        $bodyClean = Remove-CStyleComments $body.Value
+        if ($bodyClean -notmatch 'L"VB6_PaintDC"') {
             $bad += "D1 the authority no longer honors the _Paint-dispatch DC (BeginPaint 那张会被当成泄漏释放掉)"
         }
-        if ($body.Value -notmatch 'GetDC\(') {
+        if ($bodyClean -notmatch 'GetDC\(') {
             $bad += "D1 the authority no longer falls back to the window DC (派发期之外没人给 DC 了)"
         }
     }
@@ -96,20 +107,24 @@ if ($exitDef.Count -ne 1) {
     $bad += ("D3 vb6_GetControlHDC defined " + $exitDef.Count + " times in src/rtl (want exactly 1; 头文件那条声明在 .h 里以 ; 结尾, 不算)")
 } else {
     $txt = [System.IO.File]::ReadAllText($exitDef[0].Full)
-    $blk = [regex]::Match($txt, 'intptr_t\s+vb6_GetControlHDC\s*\([\s\S]{0,900}?\r?\n\}')
+    # 窗口原来是定长 900（#234 那轮的体长 + 余量）。vbeclipse 另一路的 3DMenu/AutoRedraw 那笔
+    # (`90fb8069`) 把这张出口长到 ~1350 字符 ⇒ 定长窗口读不到体尾的 `}`，整条 D3 假红。
+    # 修法不是换个更大的数：懒配到**第一个顶格的 }** 就是"这枚函数的体"本身，不含任何尺寸假设。
+    $blk = [regex]::Match($txt, 'intptr_t\s+vb6_GetControlHDC\s*\([\s\S]*?\r?\n\}')
     if (-not $blk.Success) {
         $bad += "D3 exit body not found"
     } else {
-        if ($blk.Value -notmatch 'vb6_ControlDrawDC\(') {
+        $blkClean = Remove-CStyleComments $blk.Value
+        if ($blkClean -notmatch 'vb6_ControlDrawDC\(') {
             $bad += "D3 the exit no longer goes through the authority (口径又分家了)"
         }
-        if ($blk.Value -notmatch 'SetPropW\([^;]*L"VB6_ObjectDC"') {
+        if ($blkClean -notmatch 'SetPropW\([^;]*L"VB6_ObjectDC"') {
             $bad += "D3 the exit no longer caches one-DC-per-object (反复读会换句柄)"
         }
-        if ($blk.Value -notmatch 'ReleaseDC\(') {
+        if ($blkClean -notmatch 'ReleaseDC\(') {
             $bad += "D3 the exit no longer returns the free GetDC (每读一次漏一张)"
         }
-        if ($blk.Value -match 'GetDC\(') {
+        if ($blkClean -match 'GetDC\(') {
             $bad += "D3 the exit grabs a DC itself (绕过权威的第二处口径)"
         }
     }
