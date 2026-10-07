@@ -169,6 +169,16 @@
                         c_.emitLine("vb6_SetLabelAutoSize((void*)" + childHwndRead(child)
                                   + ", -1);  /* design AutoSize */");
                     }
+                    // Fix <c3-menu3d>: 与顶层路径同口径 —— 容器里的 PictureBox/Image
+                    // 设计期 AutoSize=True 同样要发 (RT 的 FromCom AutoSize 块读它)。
+                    if (asIt162d != child.properties.end() &&
+                        asIt162d->second.type == FrmValueType::Integer &&
+                        asIt162d->second.intValue != 0 &&
+                        (child.controlType == FrmControlType::PictureBox ||
+                         child.controlType == FrmControlType::Image)) {
+                        c_.emitLine("vb6_SetPictureAutoSize((void*)" + childHwndRead(child)
+                                  + ", -1);  /* design AutoSize */");
+                    }
                 }
 
                 emitDesignerFontProps(child, childHwndRead(child));    // 账 #154: 同上（字体两条也两路都发）

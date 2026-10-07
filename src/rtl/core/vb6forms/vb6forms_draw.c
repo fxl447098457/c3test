@@ -341,6 +341,21 @@ void vb6_Form_Circle(void* hwnd,
 void vb6_Form_Cls(void* hwnd) {
     HWND hw = (HWND)hwnd;
     if (!hw) return;
+    // Fix <c3-menu3d> 2026-10-07: AutoRedraw 窗体/控件的 Cls 必须清**记忆位图**
+    // (VB6 语义: ARDC 是唯一绘图表面), 而不是屏幕 DC。此前 vb6_DrawAcquire 落
+    // GetDC(窗口) → 每 tick 一次全屏 BackColor 刷屏, 下一次 WM_PAINT 又把 ARDC
+    // (带着上一帧残影) 整幅 blit 回来 —— 图标重影 + 剧烈闪烁 (3DMenu 实测)。
+    HDC ar = (HDC)GetPropW(hw, L"VB6_AutoRedrawDC");
+    if (ar) {
+        RECT rcA;
+        GetClientRect(hw, &rcA);
+        HBRUSH brA = CreateSolidBrush((COLORREF)vb6_GetControlBackColor(hwnd));
+        if (brA) { FillRect(ar, &rcA, brA); DeleteObject(brA); }
+        InvalidateRect(hw, NULL, FALSE);   // 上屏交给泵 (与 .hDC 那条同口径, 不擦底)
+        vb6_DrawSetCurX(hw, 0);
+        vb6_DrawSetCurY(hw, 0);
+        return;
+    }
     vb6_draw_dc_t d = vb6_DrawAcquire(hwnd);
     if (!d.dc) return;
     RECT rc;

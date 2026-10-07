@@ -16,6 +16,10 @@
     c_.indent();
     c_.emitLine("PAINTSTRUCT _vb6_ps;");
     c_.emitLine("HDC _vb6_hdc = BeginPaint(hwnd, &_vb6_ps);");
+    // Fix <vbeclipse> 2026-10-07: AutoRedraw=True 的窗体, GDI 合成 (Form.hdc) 全部落进
+    // 记忆 DC, WM_PAINT 必须先把记忆位图刷上屏 (VB6 语义; 3DMenu 每 10ms 旋转合成一次
+    // Me.hdc, 缺这步画面恒为零)。非 AutoRedraw 窗体无 ARDC, helper 直接 no-op。
+    c_.emitLine("vb6_FormPaintBlitAutoRedraw((void*)hwnd, (void*)_vb6_hdc);  /* Fix <vbeclipse>: AutoRedraw 记忆 DC 上屏 */");
     if (std::getenv("C3_OCX_NO_PAINT") == nullptr) {
         c_.emitLine("vb6_OcxHost_PaintAll((void*)hwnd, (void*)_vb6_hdc);  /* Fix 143d: 无窗口/窗口化 OCX 绘制 */");
     }
@@ -47,6 +51,16 @@
     // `If oCtrl.Container.Name = oForm.Name` 是「空 = 空」的真空通过 —— 现在两边都是数。
     c_.emitLine("vb6_Forms_Register((void*)hwnd, \"" + formName + "\");");
 
+    // Fix <vbeclipse> 2026-10-07: 窗体设计期 AutoRedraw=True 时, WM_CREATE 就建记忆 DC
+    // (vb6_SetAutoRedraw 按当前客户区建 VB6_AutoRedrawDC), 之后 `.hdc` 合成才落进记忆
+    // 位图、WM_PAINT 才会镜像上屏 (VB6 语义)。必须赶在下面 P24 的 bgpic → ARDC 那步之前。
+    {
+        auto arFrmIt = frmDesc.formControl.properties.find("AutoRedraw");
+        if (arFrmIt != frmDesc.formControl.properties.end() && arFrmIt->second.intValue != 0) {
+            c_.emitLine("vb6_SetAutoRedraw((void*)hwnd, -1);  /* design AutoRedraw */");
+        }
+    }
+
     // P24: Form.Icon from .frx - load and set window icon
     // Fix 161f: 判定用 prelude 算好的 formIconHasData_ (readPicture 非空),
     // 与数组生成同一判定, 避免"引用发了、数组没生成"的 C2065。
@@ -60,7 +74,19 @@
     if (formPicHasData_) {
         std::string varName = "vb6_frx_bgpic_" + cIdent(formName);
         c_.emitLine("{ void* vb6_bgpic = vb6_LoadPictureFromMemory(" + varName + ", " + varName + "_size);");
-        c_.emitLine("  if (vb6_bgpic) SetPropW(hwnd, L\"VB6_Picture\", (HANDLE)vb6_bgpic); }");
+        c_.emitLine("  if (vb6_bgpic) SetPropW(hwnd, L\"VB6_Picture\", (HANDLE)vb6_bgpic);");
+        // Fix <vbeclipse> 2026-10-07: AutoRedraw 窗体的背景 .Picture 也要进记忆 DC
+        // (VB6: 窗体 .Picture 初始就画进 AR 位图, WM_PAINT 镜像后可见)。位图判定与
+        // WM_ERASEBKGND 那条同口径 (GetObjectType==OBJ_BITMAP)。
+        c_.emitLine("  { HDC vb6_ard = (HDC)GetPropW(hwnd, L\"VB6_AutoRedrawDC\");");
+        c_.emitLine("    if (vb6_ard && vb6_bgpic && GetObjectType((HGDIOBJ)vb6_bgpic) == OBJ_BITMAP) {");
+        c_.emitLine("      BITMAP vb6_bmBg; GetObjectW((HBITMAP)vb6_bgpic, sizeof(vb6_bmBg), &vb6_bmBg);");
+        c_.emitLine("      HDC vb6_mcBg = CreateCompatibleDC(vb6_ard);");
+        c_.emitLine("      HBITMAP vb6_obBg = (HBITMAP)SelectObject(vb6_mcBg, (HBITMAP)vb6_bgpic);");
+        c_.emitLine("      BitBlt(vb6_ard, 0, 0, vb6_bmBg.bmWidth, vb6_bmBg.bmHeight, vb6_mcBg, 0, 0, SRCCOPY);");
+        c_.emitLine("      SelectObject(vb6_mcBg, vb6_obBg); DeleteDC(vb6_mcBg);");
+        c_.emitLine("    } }");
+        c_.emitLine("}");
     }
 
     // P20-40: 从.frm属性初始化Form属性
@@ -139,6 +165,12 @@
         if (picIt != frmDesc.formControl.properties.end() && picIt->second.type == FrmValueType::FrxReference && frxLoaded) {
             c_.emitLine("case WM_ERASEBKGND: {");
             c_.indent();
+            // Fix <vbeclipse> 2026-10-07: AutoRedraw 窗体不改页面 — 记忆 DC 是唯一真相,
+            // 擦除填充 (BTNFACE) 会在下一次镜像前把合成内容盖白 (3DMenu 50ms 刷一次
+            // Refresh 正是这个擦除主导了空白画面)。VB6: AutoRedraw 窗体不做背景擦除。
+            // Fix <c3-menu3d>: 必须直接 return 1 —— break 会落进 DefWindowProc 用类刷
+            // 把整幅客户区擦一遍再被 ARDC blit 盖掉 = 每帧一闪。
+            c_.emitLine("if (GetPropW(hwnd, L\"VB6_AutoRedrawDC\")) return 1;");
             c_.emitLine("HANDLE vb6_bg = GetPropW(hwnd, L\"VB6_Picture\");");
             c_.emitLine("if (vb6_bg && GetObjectType((HGDIOBJ)vb6_bg) == OBJ_BITMAP) {");
             c_.indent();

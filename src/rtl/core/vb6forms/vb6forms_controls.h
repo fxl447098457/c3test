@@ -110,6 +110,12 @@ void* vb6_AxContainer_CreateExtender(void* hwndForm, const wchar_t* ctrlName);
 // BeginPaint/EndPaint 之间调用 (IViewObject::Draw).
 void vb6_OcxHost_PaintAll(void* hwndForm, void* hdc);
 
+// Fix <vbeclipse> 2026-10-07: 窗体 AutoRedraw=True 时, 把记忆 DC (VB6_AutoRedrawDC)
+// 整块 BitBlt 到屏幕 DC — VB6 语义: AutoRedraw 窗体的所有 GDI 绘制先落记忆位图,
+// WM_PAINT 再把记忆位图刷上屏 (见 3DMenu: 每 10ms 把环形图标合成进 Me.hdc, 靠窗体
+// WM_PAINT 镜像可见)。无 ARDC 时不动作 (非 AutoRedraw 窗体走原生直绘)。
+void vb6_FormPaintBlitAutoRedraw(void* hwndForm, void* hdc);
+
 // ============================================================
 // Fix 112: in-project UserControl (.ctl) instance host + form/control host object model
 // ============================================================

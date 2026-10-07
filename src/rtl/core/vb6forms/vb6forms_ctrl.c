@@ -19,6 +19,7 @@
 #include <olectl.h>   /* IPicture, OleLoadPicture, OLE_HANDLE */
 
 
+
 // ============================================================
 // 控件属性读写 (P7.5)
 // ============================================================
@@ -789,6 +790,23 @@ intptr_t vb6_GetControlHDC(void* hwnd) {
     HDC hdc = vb6_ControlDrawDC(hw, &fromPaint);   // 口径只有上面那一处
     if (!hdc) return 0;
     if (fromPaint) return (intptr_t)hdc;           // 派发期那张：既不缓存也不释放
+    // Fix <vbeclipse> 2026-10-07: AutoRedraw 控件/窗体的 `.hDC` = 记忆 DC (VB6 语义)。
+    // 旧版回落 GetDC(窗口) —— 对**隐藏 / 从未画过**的 PictureBox，那张 DC 恒为空，
+    // 于是 `TransBltNow(Me.hdc, …, ImgMenu(Num).hdc, …)` 从空源合成，图标永远画不出来
+    // (3DMenu 全套 AutoRedraw=True 实测)。镜像 (vb6forms_picture_prop.c 的
+    // vb6_MirrorPictureToAutoRedraw) 已经把 Picture 画进 VB6_AutoRedrawDC，
+    // 这里只需把它交还出去。若本进程连 ARDC 都没有再落旧路。
+    HDC ard = (HDC)GetPropW(hw, L"VB6_AutoRedrawDC");
+    if (ard) {
+        ReleaseDC(hw, hdc);
+        /* VB6 语义: 往 AutoRedraw 记忆 DC 画完, 屏幕会在泵里跟着重绘 (Cls/hdc 绘制
+         * 都不显式 Refresh, 环形菜单的定时器动画全靠这一点上屏)。C3 此前缺这一步:
+         * ARDC 内容每 10ms 都在更新, 但没人 InvalidateRect → 窗口停在首次 WM_PAINT
+         * 的平图 (3DMenu 实测: ARDC 里环+底图齐全, 屏幕恒 F0F0F0)。标记脏即可,
+         * 不在这里 UpdateWindow — 绘制还没结束, 重绘交给泵在本 tick 回调返回后做。 */
+        InvalidateRect(hw, NULL, FALSE);
+        return (intptr_t)ard;
+    }
     HDC held = (HDC)GetPropW(hw, L"VB6_ObjectDC");
     if (held) { ReleaseDC(hw, hdc); return (intptr_t)held; }   // 刚才那张是白拿的
     SetPropW(hw, L"VB6_ObjectDC", (HANDLE)hdc);

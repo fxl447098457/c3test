@@ -37,6 +37,11 @@ std::unique_ptr<DeclareDecl> Parser::parseDeclareDecl(AccessLevel access, bool i
 
     auto nameTok = expectName("expected Declare name");
 
+    // 与变量声明同口径 (Fix 028 / Task #40): 剥掉类型后缀 ($%&!#@),
+    // 否则符号名带着 & 进符号表, 同名调用点被使用侧剥成一裸名, 两头对不上。
+    auto suffixInfo = stripTypeSuffix(nameTok.text);
+    const std::string& declareName = suffixInfo.name;
+
     expect(TokenKind::Lib, DiagnosticID::ParseExpectedToken,
            "expected 'Lib' in Declare statement");
     auto libTok = expect(TokenKind::StringLiteral, "expected library name string");
@@ -59,9 +64,19 @@ std::unique_ptr<DeclareDecl> Parser::parseDeclareDecl(AccessLevel access, bool i
     if (procKind == ProcKind::Function && match(TokenKind::As)) {
         returnType = parseTypeRef();
     }
+    // Fix <vbeclipse> 2026-10-07: `Declare Function Foo& Lib …` 无 `As Type` 时,
+    // 类型后缀即返回类型 (&→Long %→Integer $→String …), 与变量声明同一映射。
+    // 不补这口的旧结局: DeclareFunc 符号落 Variant → inferExprType(调用) = Variant
+    // → cgen 收窄检查把 API 调用结果 (x86 上句柄 / COLORREF, 值域 0x80000000..
+    // 0xFFFFFFFF 属常态) 包进 vb6_ChkLong → 高位值误判 Overflow(Error 6)。
+    // 实测 3DMenu TransBltNow 每个 BitBlt/SetBkColor/CreateCompatibleDC 结果
+    // 都被包, 首次进入即崩; 原始 VB6 x86 把 32 位句柄原样存入 Long, 从不报 6。
+    if (!returnType && procKind == ProcKind::Function && !suffixInfo.typeName.empty()) {
+        returnType = std::make_unique<SimpleTypeRef>(loc, suffixInfo.typeName);
+    }
 
     return std::make_unique<DeclareDecl>(loc, access, procKind,
-        nameTok.text, libTok.text, aliasName, callingConv, isPtrSafe,
+        declareName, libTok.text, aliasName, callingConv, isPtrSafe,
         std::move(params), std::move(returnType), isWide);
 }
 
@@ -344,6 +359,14 @@ std::unique_ptr<ParameterDecl> Parser::parseParameter() {
         } else {
             asType = parseTypeRef();
         }
+    }
+
+    // Task #40 (变量) / parseDeclareDecl 同口径: `ByVal hDestDC&` 的类型后缀
+    // 即实参类型 (&→Long …)。不注入的话形参落 Variant, 调用点实参被包
+    // vb6_VariantFromValue 塞进元素为 int32_t 的 C 签名 → C2172/C2440。
+    // (3DMenu 的 gdi32 Declare 全套用 `ByVal x&` 写法, 实测必炸。)
+    if (!asType && !suffixInfo.typeName.empty()) {
+        asType = std::make_unique<SimpleTypeRef>(loc, suffixInfo.typeName);
     }
 
     ExprPtr defaultValue;

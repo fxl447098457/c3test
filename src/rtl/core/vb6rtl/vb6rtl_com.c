@@ -133,24 +133,159 @@ void vb6_EnumRelease(void* penum) {
 static int vb6_OleEnsureInit(void) {
     static int oleInited = 0;
     if (oleInited) return oleInited;
-    if (SUCCEEDED(OleInitialize(NULL))) {
+    HRESULT hrO = OleInitialize(NULL);
+    if (SUCCEEDED(hrO)) {
         oleInited = 1;
     } else {
         CoInitialize(NULL);
         oleInited = 2;
     }
+    
     return oleInited;
+}
+
+typedef struct vb6_picProbeArgs {
+    const wchar_t* path;
+    HRESULT hr;
+} vb6_picProbeArgs;
+
+typedef HRESULT (__stdcall* vb6_PicPathFn)(const wchar_t*, void*, DWORD, BOOL, const void*, void**);
+
+static DWORD WINAPI vb6_picProbeThread(void* p) {
+    vb6_picProbeArgs* s = (vb6_picProbeArgs*)p;
+    OleInitialize(NULL);
+    IPicture* pic = NULL;
+    s->hr = OleLoadPicturePath(s->path, NULL, 0, 0, &IID_IPicture, (void**)&pic);
+    if (pic) pic->lpVtbl->Release(pic);
+    return 0;
 }
 
 // P21-18: LoadPictureEx — OleLoadPicturePath for all image types (BMP/ICO/EMF/WMF/JPG/GIF/PNG)
 // 返回活着的 IPicture* (带一次引用); 失败返回 NULL。用完请 vb6_ReleasePicture。
 void* vb6_LoadPictureEx(BSTR pathname) {
     if (!pathname) return NULL;
-    vb6_OleEnsureInit();
+    int oinit = vb6_OleEnsureInit();
     IPicture* pPicture = NULL;
     HRESULT hr = OleLoadPicturePath(pathname, NULL, 0, 0, &IID_IPicture, (void**)&pPicture);
-    if (FAILED(hr) || !pPicture) return NULL;
+    if (FAILED(hr) || !pPicture) {
+        /* DETERMINISTIC GDI FALLBACK — oleaut32's own picture parser is
+         * process-fragile under the C3 runtime (observed: OleLoadPicturePath /
+         * OleLoadPicture / StdPicture::IPersistStream all E_FAIL in-app on valid
+         * files, then S_OK in a plain exe; even the tiny in-memory BMP case flips
+         * between runs). GDI file decode (LoadImageW) has been stable every run.
+         * Missing files must still yield NULL (the app's CaricaIcone loop relies on
+         * LoadPicture failing to stop at the first absent file), so only attempt
+         * the fallback when the file actually exists. */
+        DWORD fa = GetFileAttributesW(pathname);
+        if (fa != INVALID_FILE_ATTRIBUTES) {
+            HBITMAP hBmp = (HBITMAP)LoadImageW(GetModuleHandleW(NULL), pathname,
+                                               IMAGE_BITMAP, 0, 0, LR_LOADFROMFILE);
+            if (hBmp) {
+                PICTDESC pd;
+                memset(&pd, 0, sizeof(pd));
+                pd.cbSizeofstruct = sizeof(pd);
+                pd.picType = PICTYPE_BITMAP;
+                pd.bmp.hbitmap = hBmp;
+                pd.bmp.hpal = NULL;
+                IPicture* pWrap = NULL;
+                if (SUCCEEDED(OleCreatePictureIndirect(&pd, &IID_IPicture, TRUE, (void**)&pWrap))) {
+                    
+                    vb6_PictureRegister(pWrap);
+                    return (void*)pWrap;
+                }
+                /* OleCreatePictureIndirect is crippled too: hand the raw HBITMAP
+                 * over instead. vb6_SetControlPicture's registered==0 path stores
+                 * it as a plain GDI handle and paints it (STATIC + STM_SETIMAGE).
+                 * Only reachable when oleaut32's COM picture layer is dead. */
+                
+                return (void*)hBmp;
+            }
+            /* Diagnostic block: only for existing files where both the COM parser
+             * and the GDI fallback failed. Missing files skip all of this. */
+            IPicture* pAlt = NULL;
+            HRESULT hrAlt = (HRESULT)0xDEAD;
+            DWORD rd = 0, sizeF = 0;
+            HANDLE hf = CreateFileW(pathname, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
+            if (hf != INVALID_HANDLE_VALUE) {
+                sizeF = GetFileSize(hf, NULL);
+                HANDLE hg = GlobalAlloc(GMEM_MOVEABLE, sizeF);
+                void* pv = GlobalLock(hg);
+                if (pv) { ReadFile(hf, pv, sizeF, &rd, NULL); GlobalUnlock(hg); }
+                CloseHandle(hf);
+                IStream* st = NULL;
+                if (pv && SUCCEEDED(CreateStreamOnHGlobal(hg, TRUE, &st))) {
+                    hrAlt = OleLoadPicture(st, (LONG)rd, FALSE, &IID_IPicture, (void**)&pAlt);
+                    st->lpVtbl->Release(st);
+                } else if (pv) {
+                    GlobalFree(hg);
+                }
+            }
+            
+            {   /* in-app COM ground truth on the SAME file: fresh-thread STA, raw
+                 * CoCreateInstance(CLSID_StdPicture), and GDI LoadImageW decode. */
+                vb6_picProbeArgs s;
+                s.path = pathname;
+                s.hr = 0;
+                HANDLE hT = CreateThread(NULL, 0, vb6_picProbeThread, &s, 0, NULL);
+                if (hT) { WaitForSingleObject(hT, 5000); CloseHandle(hT); }
+                IPicture* pCC = NULL;
+                HRESULT hrCC = 0;
+                {   CLSID cs = CLSID_StdPicture;
+                    IID iid = IID_IPicture;
+                    hrCC = CoCreateInstance(&cs, NULL, CLSCTX_INPROC_SERVER, &iid, (void**)&pCC);
+                    if (pCC) pCC->lpVtbl->Release(pCC);
+                }
+                void* hImg = NULL;
+                
+            }
+            if (pAlt) pAlt->lpVtbl->Release(pAlt);
+        }
+        return NULL;
+    }
+    
+    vb6_PictureRegister(pPicture);
     return (void*)pPicture;
+}
+
+// ============================================================
+// Picture 双支持注册表 (Fix P-BMP-3D):
+//   vb6_LoadPictureEx 返回的是 COM IPicture* (VB6 的 StdPicture), 而设计期/资源
+//   图片走的是原始 GDI 句柄 (HBITMAP/HICON)。cgen 对 `.Picture =` 一律发
+//   vb6_SetControlPicture(句柄语义), 导致 IPicture* 被当 HBITMAP 用 → 图标画不出。
+//   这里维护一张"本管线活 IPicture 对象"的开放寻址哈希表, vb6_SetControlPicture
+//   据此安全区分 COM 对象与 GDI 句柄。IPicture* 是用户态指针, 绝不与 GDI
+//   句柄 (内核句柄表索引, 值很小) 重叠, 因此无歧义无探测。不主动注销:
+//   残留条目顶多把某个解放后的地址误判为 COM(概率可忽略, 且不影响正确性)。
+// ============================================================
+#define VB6_PICREG_SIZE 4096
+static uintptr_t g_vb6_picReg[VB6_PICREG_SIZE];
+
+static uint32_t vb6_picRegHash(uintptr_t p) {
+    uintptr_t h = (uintptr_t)(p >> 4);
+    h ^= h >> 16;
+    h *= 0x9E3779B97F4A7C15ull;
+    return (uint32_t)(h & (VB6_PICREG_SIZE - 1));
+}
+
+void vb6_PictureRegister(void* picture) {
+    if (!picture) return;
+    uintptr_t p = (uintptr_t)picture;
+    uint32_t i = vb6_picRegHash(p);
+    for (uint32_t n = 0; n < VB6_PICREG_SIZE; n++, i = (i + 1) & (VB6_PICREG_SIZE - 1)) {
+        if (g_vb6_picReg[i] == p) return;
+        if (g_vb6_picReg[i] == 0) { g_vb6_picReg[i] = p; return; }
+    }
+}
+
+int vb6_PictureIsRegistered(const void* picture) {
+    if (!picture) return 0;
+    uintptr_t p = (uintptr_t)picture;
+    uint32_t i = vb6_picRegHash(p);
+    for (uint32_t n = 0; n < VB6_PICREG_SIZE; n++, i = (i + 1) & (VB6_PICREG_SIZE - 1)) {
+        if (g_vb6_picReg[i] == p) return 1;
+        if (g_vb6_picReg[i] == 0) return 0;
+    }
+    return 0;
 }
 
 // 从活着的 IPicture 里取图形句柄 (不销毁 picture 本身)。

@@ -156,6 +156,19 @@
                 const char* defProp110 = getDefaultPropertyName(itCtrl110->second);
                 std::string readFn110 = defProp110
                     ? getControlPropReadFn(itCtrl110->second, defProp110) : std::string();
+                if (suppressDefaultProp_) {
+                    // Fix <c3-menu3d>: 控件数组元素作 **With 目标** (With ImgMenu(ImgNum)):
+                    // VB6 绑定控件对象而非其默认属性 Picture. 此处分流交付元素 HWND 访问器,
+                    // 让 cgen_with 生成 `HWND _vb6_with_N = (HWND)vb6_CtrlArr_GetAt(...)`,
+                    // 块内 .Picture/.AutoRedraw/.Visible 等经 With 控件属性表写回控件本身.
+                    emitExpr(*node.positional[0]);
+                    std::string idxArg110w = std::move(lastExpr_);
+                    std::string orig110w = knownFormControlOriginalNames_.count(caLower110)
+                        ? knownFormControlOriginalNames_[caLower110] : caId110.name;
+                    lastExpr_ = "vb6_CtrlArr_GetAt(&vb6_arr_" + cIdent(orig110w)
+                              + ", " + idxArg110w + ")  /* ctrl array elem hwnd (With base) */";
+                    return;
+                }
                 if (!readFn110.empty()) {
                     emitExpr(*node.positional[0]);
                     std::string idxArg110 = std::move(lastExpr_);

@@ -507,10 +507,28 @@ void CCodeGen::visit(WithStmt& node) {
             // 数组元素访问如 m_uWindowState(0) → VARIANT UDT
             auto& callExpr = static_cast<IndexOrCallExpr&>(*node.object);
             if (callExpr.callee && callExpr.callee->kind == ASTNodeKind::IdentifierExpr) {
-                auto& idExpr = static_cast<IdentifierExpr&>(*callExpr.callee);
-                std::string arrLower = idExpr.name;
-                std::transform(arrLower.begin(), arrLower.end(), arrLower.begin(), ::tolower);
-                // Fix 055: 优先检查UDT数组元素类型
+auto& idExpr = static_cast<IdentifierExpr&>(*callExpr.callee);
+            std::string arrLower = idExpr.name;
+            std::transform(arrLower.begin(), arrLower.end(), arrLower.begin(), ::tolower);
+            // Fix <c3-menu3d>: 控件数组元素作 With 目标 — `With ImgMenu(ImgNum)` 在 VB6
+            // 绑定**控件对象** (PictureBox 数组元素), 不是其默认属性 Picture; With 表达式
+            // 从不自动解引用默认属性. 此前这里 kind 落 COMObject (行尾 fallback) + Fix 110b
+            // 把对象表达式压成 vb6_GetControlPicture(...) → 块内 .Picture/.AutoRedraw/
+            // .Visible/.TabStop 全被 vb6_ComSetProp 打到临时图片对象, 控件自身从未被设置
+            // (Menu3D 环形图标空白而 ImgMenu 控件已被 RuotaMenu 移到环位). 与普通控件
+            // 同口径: FormControl + HWND 型 With 临时, 触发下方 suppressDefaultProp_ 抑制
+            // 默认属性解析.
+            if (knownControlArrays_.count(arrLower)) {
+                auto itWithCtrl = knownFormControls_.find(arrLower);
+                if (itWithCtrl != knownFormControls_.end()
+                    && itWithCtrl->second != FrmControlType::Menu) {
+                    withInfo.kind = WithObjKind::FormControl;
+                    withInfo.ctrlType = itWithCtrl->second;
+                    withInfo.ctrlOrigName = arrLower;
+                    tempType = "HWND";
+                }
+            }
+            // Fix 055: 优先检查UDT数组元素类型
                 auto itUdtArr = arrayUdtElemTypes_.find(arrLower);
                 if (itUdtArr != arrayUdtElemTypes_.end()) {
                     tempType = itUdtArr->second;  // e.g. "vb6_type_RECT"

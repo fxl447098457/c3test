@@ -66,6 +66,11 @@ void* vb6_LoadPictureEx(BSTR pathname);
 void* vb6_PictureHandleOf(void* picture, int32_t* kind);
 void  vb6_ReleasePicture(void* picture);
 
+// Picture 双支持: vb6_LoadPictureEx 产出的 IPicture 对象登记进哈希表,
+// vb6_SetControlPicture 据此把 COM IPicture 与原始 GDI 句柄区分开 (Fix P-BMP-3D)
+void vb6_PictureRegister(void* picture);
+int  vb6_PictureIsRegistered(const void* picture);
+
 // ============================================================
 // COM 互操作 (P6)
 // ============================================================
