@@ -1330,10 +1330,16 @@ S9.4 打标记那一路的 PictureBox 判据必须问表、且不许把成员名
 新哨兵 `scripts/check_ctrl_geom_cache.ps1`（第 26 道 [STATIC]）：S1 存储唯一 / S2 四档读写成对 / S3 来路计数 8+4 / S4 建窗记缇（并禁建窗路问容器 ScaleMode）/ S5 四个 getter 各过缓存一次且 `return (int)vb6_ScalePxToUser` 那一形 0 次 / S6 像素闸还在。**六条各用一处假改动证过能红**（植完立刻还原，还原后 PASS 且文件逐字节相同）。
 护栏：语料 A/B（BASE = 改前那台**本机冷编** `.build/wt_base230`，见 §B73 那条口径）⇒ inputs=90 **changed=0 / same=90**；会读几何的存量夹具**同一份产物两台编译器对输出**（x64，`.build/b511_geocheck.py`）共 15 枚跑出读数 —— ctrlslider / btnfocus / ctrltabindex / ctrlprop / combofocus / c29listview / ctrlmanifest / ctrlshape / ctrlsstab / ctrlstatusbar / scalemode / sbfont / dcsurf **13 枚逐行相同**，只有两条差异且都是天生抖的数：`modal` 的 `M2 …/busy=0→8` = **在途 tick 条数**（夹具自己的注释就写着"那个界是看负载的"，账 #162 同族；套件钉的是前缀 `M2-returned=Y` ⇒ 不在断言面里），`ve_units` 的 `U-CNT-RAW cnt=3015690→3146762` = 那一行打印的是**容器 HWND 本身**（两边的 `ok=True/True` 都在）。`NewTab-test` / `tabwalk` 本地没跑出读数（exe 名没猜中），`VBFlexGridDemo` 两台都超时不自退 ⇒ 这三枚由门覆盖，而本轮门 #376 绿。
 
-### B75 控件几何还有**第二份实现**没接上这张缓存 —— UC 宿主模型那一对 getprop/setprop（账 #230 顺手量到，**未开工**）
+### B75 控件几何的第二份实现撤掉了 —— UC 宿主模型那对 getprop/setprop 现在只问 vb6forms_ctrl.c 的出口（账 #247 = §B75 那一格，**已出：门待回填，head `a22cb110`、branch dev**）
 
-`src/rtl/core/vb6forms/uc/detail/uc_hostmodel_getprop.inc:44-66` 与 `..._setprop.inc:25-35` 各自处理 `Left/Top/Width/Height`：读侧自己 `vb6_ho_ctrlRect` + `vb6_XToTwipX`，写侧自己 `MoveWindow(obj, vb6_TwipToX(l), …)` —— 两头都**硬编码缇**，既不写这份缓存也不读它。于是同一句 `对象.Left = 100` 走发码那条路（`vb6_SetControlLeft`，按容器 ScaleMode + 存缓存）与走 IDispatch 派发这条路（宿主模型，恒按缇 + 不存）**给的是两种结果**。这正是 #234（拿 DC 两份实现）/#235（画笔色两份存储）那一族的第三个样本，只是它住在 RTL 的宿主层而不是 cgen。
-开工前先量**哪些调用真走这条路**（窗体对象、`Controls` 集合成员、UC 实例的 `Extender` 一族各是一形），别按"看着像同源"就并表 —— 并错了会把 #175 的像素档语义搬进宿主层。收法照 §B74：两条路都改问 `vb6_GeomCache*`，哨兵 S1 从"只许住在 vb6forms_ctrl.c"升级成"读写都只许问那一处出口"。
+- **读数**（探针 `.build/probe247/`，同一枚窗体两条路对跑，x64）：`Set f = Me` 之后 `f.Width = 7222` ⇒ 晚绑定那路读回 **7215**、发码那路也读回 **7215**（两条都退化成投影，写进去的数压根没存）；反过来 `Me.Width = 6011` 之后发码读回 6011、晚绑定读回 **6015** ⇒ 同一枚窗口同一个属性两个答案。负控 = 本笔父提交 `571ca6aa` 本机冷编那台跑**同一份夹具**：GC09/GC10/GC12 三条 False（7215 / 3330 / 6015），GC01..GC08 与 GC11 逐行同数（x64 与 x86 两片都是这三条翻红，没有第四行）。
+- **病灶**：读侧自己量窗口矩形 + `vb6_XToTwipX`（恒按缇），写侧把四档一起读成缇再整体 `MoveWindow` 推回 —— 所以写 `.Left` 会顺带把 Top/Width/Height 重量化一遍，而两边都不碰账 #230 那张 VB 侧读数缓存。这是 #234（拿 DC）/ #235（画笔色）/ #239（笔位）那一族的第四个样本，住在 RTL 的宿主层而不是 cgen。
+- **改法**：四档读写都转调 `vb6_Get/SetControl(Left|Top|Width|Height)`（`vb6forms_prop.h` 进 uc_hostmodel.c 的 include），单位跟着**所在容器的 ScaleMode**（#175 的口径），写进去的数进同一张缓存；写侧从此各档写各档。被这一刀断了调用点的两份自带实现（`vb6_ho_ctrlRect` / `vb6_ho_isForm`）一起删。
+- **刻意没并的那一格**：`ScaleWidth` / `ScaleHeight` 仍走宿主自带的 `vb6_ho_clientTwips` + `scaleMode == 3` 折算。它们的另一份权威是 `vb6_GetScaleWidth`（问窗口**自身** ScaleMode），两者是不是同一件事没量过 —— 并错了会把 #175 的「容器档位」搬进「自身档位」，所以留在原样，开工前先按 §B79 那条一起量。
+- **语料暴露面**（90 份 emit 捕获里数「晚绑定读/写几何」的调用点，每架构）：**60 处** —— VBFlexGridDemo 31 / Charts 2020 主工程 21 / czUI-main 4 / c29listview 3 / ctrltoolbar 1。Charts 那一处的源形就是 `With CtrlNames(i) : .Left = FW * Rects(i-1).Left / 100`（`ClsResizer.cls:138-142`，唯一调用点 `Form2.frm:581`）—— 而它今天**因为 §B79 一条也不执行**，所以这一刀在 Charts 上是「接线接上但没有流量」；真流量是 czUI 的 `With Parent : .Left/.Top/.Width/.Height`（读侧）。窗体那一档两条路等价是有根据的：表单创建传 `hWndParent = NULL`（`vb6forms.c:396`）⇒ `GetParent` 给 0 ⇒ `ScreenToClient(0, …)` 不改点、`vb6_GetScaleMode(NULL)` 答 1=缇 ⇒ 与改动前逐字节同一。
+- **判据** = `tests/geomcache` 升 GC09..GC12 四条（晚写晚读 / 晚写直读 / 像素证人 / 直写晚读；两架构真跑，NEW 12/12 True）+ 哨兵 `check_ctrl_geom_cache.ps1` 加 **S7**（四档两头各问出口恰好一次、`MoveWindow(` 与自带投影助手回潮 = 0）。S7 五处各用一处假改动证过能红（`.build/b583_redproof.py`，植完按 md5 还原，还原后 PASS）。全套 30 道 [STATIC] 零红。护栏：这一刀只动 RTL，`c3rtl.rc` 未增删文件（`check_rtl_resource_ids` 绿），发码面零改动 ⇒ 语料 A/B 天然是 0，所以行为护栏交给夹具两架构 + 门上的 Charts2020 / czUI 两片。
+- **本轮自己撞的一条工具口径（值钱）**：**别拿 `git checkout -- <file>` 当「还原我的改动」** —— 它还原到 HEAD，会把这一格尚未提交的刀一起抹掉（本轮真抹了一次，靠重新应用才回来；哨兵的假改动还原一律按字节写回自己存的那份）。
+- **边界**：窗体**自身** Left/Top 写后再读那条 AV（§B78）与 Controls 集合答空（§B79）都是改前就有的独立缺陷，本刀一条没碰；GC09..GC12 刻意只走 Width/Height，就是为了不把判据押在会崩的那一形上。
 
 ### B76 浮点交给整数目标时**截断**，而 VB6 四舍五入 —— 两条路各错一半（账 #248，**已出：门 #380（run 37556525156、head `09621c38`、branch dev、attempt 1）= 11 job 全 completed/success、非绿 0**）
 
@@ -1356,6 +1362,25 @@ S9.4 打标记那一路的 PictureBox 判据必须问表、且不许把成员名
 ② **非裸标识符目标仍在截断**：`narrowCheckAssign` 第一道门就是 `target->kind != IdentifierExpr ⇒ 原样返回`（成员 / 数组元素 / 属性写入各有自己的类型解析链，猜错会把合法赋值判成越界，这条保守是函数头写明的）。所以 `arr(0) = a / b`、`u.field = 6.73`、`对象.Left = 1000 * 1.5` 这三形今天仍截断。开工先量语料里「右侧浮点、左侧成员或下标」的赋值有几处（上一轮只数了裸标识符那一档 = 36 处），再决定是把同一道闸搬进那几条链，还是各链自己问 `vb6_FltToLng`。
 
 
+
+### B78 窗体**自身**的 Left/Top 赋值之后，再读那个属性就 AV（账 #249，**未开工**）
+
+探针 `.build/probe247/PForm.frm`（v7 那一版，一步一句）：`Me.Width` / `Me.Height` / `Me.Left` / `Me.Top` 四枚**读**全数正常（Q1..Q4 打出 7035 / 3990 / 780 / 780），紧跟一句 `Me.Left = 1231` 之后再去读 ⇒ 进程 0xC0000005，`[C3_CRASH] av read target=0xaa6`（读的是 NULL 基址 + 0xAA6 偏移）。崩点不在赋值那一句里：v6 探针先经宿主那路写完四档、又把四档读回来（P09 全 True 打出来了），**下一句**里只要出现「直接读窗体的 Left」就死 —— 也就是「写过位置之后的第一次直接读」那一格。
+**与本刀无关，已经钉死**：改前那台（`571ca6aa` 本机冷编）跑同一份 v7 探针在**同一行**崩，读数一字不差。所以这是存量缺陷，不是 #247 带出来的；本刀的夹具因此刻意绕开 Left/Top 那一形。
+开工先量两件事：① 崩的是读侧还是写侧留下的状态（把 `Debug.Print` 换成不读任何东西的空句，看崩点是否还来）；② 语料里有没有真在跑「改窗体自身位置之后再读位置」的写法（`vb6_ControlMove` 那条路把四档都写进缓存，缓存里存的是**缇**而窗体的实际屏幕像素随 StartUpPosition 漂 ⇒ 那道像素闸每次都不认，怀疑就在这一问的某条换算里）。
+
+### B79 窗体的 `Controls` 集合与 `Count` 答空 —— Charts 的 ClsResizer 在唯一调用点上静默不做任何事（账 #250，**未开工**）
+
+探针（同一份 v8）：一枚带 TextBox + Timer 的窗体上 `Me.Controls.Count` = **0**、`Me.Count` = **0**、`Me.Controls.Item(1).Name` = **空串**、`.Width` = **0**（不崩，一律空值），`For Each e In Me.Controls` 循环体**一次都不进**。
+落点已经看清一半：宿主模型的 `Controls` 那一档是有实现的（`uc_hostmodel_getprop.inc:88` 造 `vb6_uc_newControls`，`uc_controls.c:47` 的 `vb6_uc_collectChildren` 先查登记表、再兜底 `GetWindow(GW_CHILD)` 真枚举子窗口），但发码交出去的是 `vb6_ComGetObjectProp(vb6_hwnd_PForm, L"Controls")`（emit 实测）—— 这一档与 `vb6_ComGetProp` 不是同一条路，宿主分支有没有接上没查实；`Count` 那一档更直白：`getprop.inc:87` 对**任何**宿主对象一律 `setVariantLong(out, 0)`。
+后果是真实工程里的一整块排版：`tests/Charts 2020/ClsResizer.cls` 的 `InitControls` 里 `ReDim Rects(oForm.Count - 1)` ⇒ `ReDim Rects(-1)`，`ResizeControls` 又挂着 `On Error Resume Next` ⇒ 全程静默。VB6 里 `Form.Count` 压根不是这个属性（VB6 窗体没有 `Count`，那是 UserControl 的 `Controls.Count`），所以「答 0」不是正确答案这一点还要先对 VB6 口径，别照本仓现状定修法。
+判据形状先想好：一枚窗体 + 两枚控件，`Controls.Count` / `Item(1).Name` / `For Each` 三条各钉一数，再加一枚负钉（不该出现的成员不许答非空）。这一格修好之后，§B75 那一刀在 Charts 上才第一次有流量 —— 两条的先后顺序因此定成 #250 在前、Charts 的读数在后。
+
+### B80 `vb6_UC_ParentMove` 把**缇**直接交给 `MoveWindow`（账 #251，**未开工**）
+
+`src/rtl/core/vb6forms/uc/uc_host.c:347` —— `MoveWindow(fw, left, top, width, height, TRUE)`，四个实参一个换算都没有。而它的调用方 czUI（`frmDemo` 全屏那一支）存进 `m_Saved*` 的数来自**宿主模型读出的缇**（`With Parent : .Left = …`），发码那侧 `UserControl.Parent.Move l,t,w,h` 又确实是缇口径 ⇒ 差 15 倍那一族的老形状（#175 / #247），只是这次住在 call 那一路。
+同一格里还有一问没定：`Parent.Move` 的目标是**顶层窗体**，MoveWindow 对它用的是屏幕坐标，而控件那一路用的是父客户区坐标 —— 单位之外还有坐标空间这一档，开工先一起定口径（并照 §B75 的收法：转调 `vb6_ControlMove`，别在这层再拼一份 MoveWindow）。
+判据要在 UC 里量：现成的 czUI-main 是一片真工程夹具（门上跑 Test-GuiVbp，读数只有窗口起没起 / dump 色数），要钉数得先有一枚能在无头下打 Debug.Print 的 UC 夹具 —— 那一格与 §B79 的夹具是同一件活，一起做。
 
 ## C. 仍在生效的口径与工具事实（与本文档等长的一半价值在这里；完整版见记忆库）
 
