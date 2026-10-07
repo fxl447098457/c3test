@@ -2181,6 +2181,71 @@ const char* CCodeGen::getDefaultPropertyName(FrmControlType ctrlType) {
 }
 
 
+// ============================================================
+// 账 #256: 默认属性的**型**（与上面那张名字表一行一行对着写）。
+// 为什么另开一张而不问 controlPropType：那张表答的是「显式写出来的 `<对象>.<属性>` 读法」
+// 的型，而 Text / Caption / Value 挂在默认属性上时从没在里面登记过（实测 TextBox 的 text、
+// Label 的 caption 在那里都答 Unknown）。裸控件名被折成默认属性时，**打包档必须跟着折出来的
+// 那个值**，所以这一问的答案就是各行 RTL getter 的 C 返回型（已逐条回头看过）：
+//   vb6_GetControlText  -> wchar_t*  (String)
+//   vb6_GetCheckValue   -> int       (VB6 侧 CheckBox.Value 是 0/1/2 的 Integer)
+//   vb6_GetOptionValue  -> int       (账 #128-b：答的就是 VB6 的 -1/0 ⇒ Boolean)
+//   vb6_GetScrollValue  -> int       (VB6 侧 ScrollBar.Value 是 Integer)
+//   vb6_GetControlPicture -> void*   (对象：这一格刻意维持今天的打包路，见 comPackExpr 的白名单)
+// 只有 ctrlDefaultPropOf 问它（发码那一路不读 valueType，打包那一路只读 valueType）。
+// ============================================================
+
+Vb6Type CCodeGen::defaultPropType(FrmControlType ctrlType) {
+    switch (ctrlType) {
+    case FrmControlType::TextBox:
+    case FrmControlType::ListBox:
+    case FrmControlType::ComboBox:
+    case FrmControlType::Label:
+    case FrmControlType::CommandButton:
+    case FrmControlType::Frame:
+    case FrmControlType::Form:
+    case FrmControlType::MDIForm:      return Vb6Type::String;
+    case FrmControlType::CheckBox:     return Vb6Type::Integer;
+    case FrmControlType::OptionButton: return Vb6Type::Boolean;
+    case FrmControlType::HScrollBar:
+    case FrmControlType::VScrollBar:   return Vb6Type::Integer;
+    default:                           return Vb6Type::Unknown;
+    }
+}
+
+
+// ============================================================
+// 账 #256: 「这枚裸控件名会被折成哪一枚默认属性读数、折出来是什么型」只此一处回答
+//         （声明与背景见 cgen_helpers.inc 的 CtrlDefaultProp）。
+// 两个消费点：① 标识符发码那条路（cgen_expr_ident_symbol.inc）拿 readFn/prop/ctrlType
+// 去发 `readFn(句柄)`；② 晚绑定实参的打包档（comPackExpr）只问 valueType。
+// 两边问同一个 suppressDefaultProp_，所以「发的是值」与「按什么型装箱」不可能各说一遍。
+// ============================================================
+
+CCodeGen::CtrlDefaultProp CCodeGen::ctrlDefaultPropOf(const std::string& lower) const {
+    CtrlDefaultProp r;
+    if (suppressDefaultProp_) return r;   // With 块 / 对象形参那一档：交出的是控件本身（HWND）
+    auto it = knownFormControls_.find(lower);
+    bool isWE = false;
+    if (it == knownFormControls_.end()) {
+        it = knownWithEventsCtrlVars_.find(lower);   // P20-31: WithEvents 控件变量同一档语义
+        if (it == knownWithEventsCtrlVars_.end()) return r;
+        isWE = true;
+    }
+    const char* prop = getDefaultPropertyName(it->second);
+    if (!prop) return r;
+    std::string readFn = getControlPropReadFn(it->second, prop);
+    if (readFn.empty()) return r;        // 没有读函数 ⇒ 发码那条路本来就不会折
+    r.folds = true;
+    r.isWithEvents = isWE;
+    r.ctrlType = it->second;
+    r.prop = prop;
+    r.readFn = std::move(readFn);
+    r.valueType = defaultPropType(it->second);
+    return r;
+}
+
+
 
 
 // ============================================================

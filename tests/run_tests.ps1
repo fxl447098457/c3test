@@ -3882,6 +3882,16 @@ if ($Category -in @("all", "run", "vbp")) {
         # GC28 钉的是「窗体自己没有容器」那一路（顶层窗口无父 ⇒ 交回空值）：反面证人是
         # 「这一档不是把接收者原样退回来」—— 若真退自己，GC25 那句相等照样成立。
         "GC28-form-has-no-container=True",
+        # 账 #256：裸控件名出现在**晚绑定调用的实参位**时，发码会把默认属性折成一个值（BSTR / int），
+        # 而装箱档以前只听类型 oracle —— 它对任何控件名都答 Object ⇒ vb6_ComPackObject(BSTR) 存进
+        # VT_DISPATCH，语句收尾的 VariantClear 无条件 Release ⇒ 按那枚串的头几字节解 vtable，
+        # 崩点就在那条 Add 上（BASE 编译这台夹具：GC01..GC28 全 True，GC29 那一行不出现，
+        # EXIT=0xC0000005，GC-DONE 也没有 —— 两架构同形）。轴的订正见 §B85：不是「对象位 vs 值位」
+        # （VB6 对 Variant 形参取默认属性恰恰是对的），而是「装箱档跟不跟上一步真正交出的值」。
+        # 三格钉的是新那张表的**两行**都真的驱动打包：String 那行给 Text 与 Caption（两枚不同控件、
+        # 两个不同属性名，读数各自回来），Integer 那行给 CheckBox.Value。每格都回读集合里那一枚，
+        # 所以「活下来了」不是判据 —— 值必须是控件自己嘴里那句串。
+        "GC29-pack-text=True", "GC30-pack-caption=True", "GC31-pack-checkvalue=True",
         "GC-DONE")
     Test-Vbp "geomcache" "$Tests\geomcache\GCCache.vbp" $geomExpected
     Test-Vbp "geomcache_x86" "$Tests\geomcache\GCCache.vbp" $geomExpected -Arch "x86"
@@ -3916,6 +3926,23 @@ if ($Category -in @("all", "run", "vbp")) {
     Test-EmitcShape "gc_emitc_identity_both_create_routes" @("$Tests\geomcache\GCCache.vbp") @(
         'vb6_HostObj_Register((void*)vb6_hwnd_txtA, "txtA", "VB.TextBox", 0, -1);  /* VB identity */',
         'vb6_HostObj_Register((void*)vb6_hwnd_lblP, "lblP", "VB.Label", 0, -1);  /* VB identity */'
+    )
+
+    # 账 #256 的发码那一半：晚绑定实参的**装箱档必须跟着折出来的值**。两头都钉，三格一行一条 ——
+    # 只钉 GC 读数会放过「打包改了但发码那条折法又跟着改错」，只钉一头会放过「旧形还在某一份里」。
+    # 反面那三条正是 BASE 上原地崩掉的那三句（见 .build/gc256_base*/run_stdout.txt：GC29 那行不出现）。
+    # 第四格是**证人**：`collC.Add oC`（oC 是 For Each 出来的 Object 变量，不是控件名）必须**照旧**
+    # 按对象打包 —— 少了这一格，「把所有实参都改成标量档」那种修法也能过前三条。
+    Test-EmitcShape "gc_emitc_pack_follows_default_prop" @("$Tests\geomcache\GCCache.vbp") @(
+        'vb6_ComVarFree((void*)vb6_ComCall(collC, L"Add", (void*[]){vb6_ComPackBSTR(vb6_GetControlText(vb6_hwnd_txtA)  /* default prop: .Text */), vb6_ComPackBSTR(vb6_BSTR_FromStr(L"k29"))}, 2));  /* COM call, discard result */',
+        'vb6_ComVarFree((void*)vb6_ComCall(collC, L"Add", (void*[]){vb6_ComPackBSTR(vb6_GetControlText(vb6_hwnd_lblP)  /* default prop: .Caption */), vb6_ComPackBSTR(vb6_BSTR_FromStr(L"k30"))}, 2));  /* COM call, discard result */',
+        'vb6_ComVarFree((void*)vb6_ComCall(collC, L"Add", (void*[]){vb6_ComPackInt(vb6_GetCheckValue(vb6_hwnd_chkA)  /* default prop: .Value */), vb6_ComPackBSTR(vb6_BSTR_FromStr(L"k31"))}, 2));  /* COM call, discard result */',
+        'vb6_ComVarFree((void*)vb6_ComCall(collC, L"Add", (void*[]){vb6_ComPackObject(oC)}, 1));  /* COM call, discard result */'
+    )
+    Test-EmitcAbsent "gc_emitc_pack_object_over_value" @("$Tests\geomcache\GCCache.vbp") @(
+        'vb6_ComPackObject(vb6_GetControlText(vb6_hwnd_txtA)  /* default prop: .Text */)',
+        'vb6_ComPackObject(vb6_GetControlText(vb6_hwnd_lblP)  /* default prop: .Caption */)',
+        'vb6_ComPackObject(vb6_GetCheckValue(vb6_hwnd_chkA)  /* default prop: .Value */)'
     )
 
     # --- P20-42: SSTab (SysTabControl32 复刻) ---

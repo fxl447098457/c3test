@@ -427,6 +427,10 @@
     // 空字符串表示该控件类型无默认属性
     static const char* getDefaultPropertyName(FrmControlType ctrlType);
 
+    // 账 #256: 上面那张名字表配套的一问 —— 「折出来那个值是什么型」。
+    // 只有裸控件名被折成默认属性那一路问它（打包档），别的属性读法仍问 controlPropType。
+    static Vb6Type defaultPropType(FrmControlType ctrlType);
+
     // 生成类方法函数体中的Me引用名
     std::string classMeParam() const;
 
@@ -586,6 +590,29 @@
     // ---- COM辅助 (P6.2) ----
     // 推断COM参数的封装函数: 根据表达式类型选择vb6_ComPackBSTR/Int/Double/Object
     std::string comPackExpr(Expr& expr);
+
+    // 账 #256: 「这枚裸控件名会不会被折成默认属性读数、折出来是什么 VB 型」只此一处回答。
+    // 两个消费点共用它：标识符发码那条路拿 readFn/prop/ctrlType 去发 `readFn(句柄)`，
+    // 晚绑定实参的打包档只问 valueType。以前打包档只听 inferExprType —— 它对控件名答
+    // Object ⇒ `vb6_ComPackObject(vb6_GetControlText(...))`：里面是一枚 BSTR，外面按
+    // IDispatch 装进 VT_DISPATCH，栈上 VARIANT 收尾无条件 Release ⇒ 按 BSTR 头几字节解
+    // vtable = 0xC0000005（实测 `coll.Add txtA, "k1"`，探针 .build/p256）。
+    // folds=false 的情形：名字不是窗体控件 / 该控件没有默认属性 / 没有对应读函数 /
+    // 当前处在**抑制默认属性**的上下文（With 块、对象形参那一档）—— 旗标只有一个，
+    // 所以发码与打包不会各说一遍。
+    struct CtrlDefaultProp {
+        bool folds = false;
+        bool isWithEvents = false;             // 折的是 WithEvents 控件变量（接收者 = 变量名）
+        FrmControlType ctrlType = FrmControlType::Form;
+        const char* prop = nullptr;            // "Text" / "Caption" / "Value" / ...
+        std::string readFn;                    // vb6_GetControlText / vb6_GetCheckValue / ...
+        Vb6Type valueType = Vb6Type::Unknown;  // 折出来那个值的 VB 型（打包档问的就是它）
+    };
+    CtrlDefaultProp ctrlDefaultPropOf(const std::string& lower) const;
+
+    // Vb6Type → 打包函数名。comPackExpr 的类型分支与上面那条折叠共用这一张映射；
+    // 空串 = 这一型在这里答不了，交回调用方兜底（不擅自换默认档）。
+    static std::string comPackFnForVbType(Vb6Type vt);
 
     // Fix 177b: 创建 coclass 实例的表达式 (New / Dim As New 自动实例化共用).
     // 默认 vb6_NewObject(L"<ProgID>") — 运行期按 ProgID 走 CoCreateInstance.

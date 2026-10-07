@@ -561,6 +561,31 @@ std::string CCodeGen::comPackExpr(Expr& expr) {
         auto& id = static_cast<IdentifierExpr&>(expr);
         std::string lower = id.name;
         std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+        // 账 #256: 裸控件名在发码那条路上会被**折成默认属性读数**（一枚标量/BSTR），
+        // 而 inferExprType 与 knownObjectVars_ 对这个名字都答 Object ⇒ 以前一路走到
+        // 下面的 ComPackObject：`vb6_ComPackObject(vb6_GetControlText(...))` 把 BSTR 当
+        // IDispatch 装进 VT_DISPATCH，栈上 VARIANT 收尾无条件 Release ⇒ 按 BSTR 头几字节
+        // 解 vtable = 0xC0000005（实测 `coll.Add txtA, "k1"`，探针 .build/p256 两架构同崩）。
+        // 现在打包与折叠问同一条出口 ctrlDefaultPropOf ⇒ 装箱档跟着**实际交出的值**走。
+        // 这一问必须排在下面那串"已知变量型"之前：控件名同时登记在 knownObjectVars_ 里
+        // （实测：把它放在那串之后，这一格一条都不变）。反过来的担心是"局部变量与控件同名"
+        // —— knownFormControls_ 只由 .frm 的控件清单填，永远不含用户变量；真同名的话
+        // 发码走的是变量那条路，而打包会按默认属性的型装 ⇒ 编译期 C2440 响，不会静默错值。
+        // 刻意只接管能明确映射的那几型：Picture（PictureBox / Image 的默认属性）在 defaultPropType
+        // 里答 Unknown ⇒ 继续走今天那条 ComPackObject 路（那本来就是个对象，装箱成对象是对的），
+        // 本刀不动它。
+        {
+            CtrlDefaultProp fold256 = ctrlDefaultPropOf(lower);
+            if (fold256.folds) {
+                switch (fold256.valueType) {
+                    case Vb6Type::String: case Vb6Type::Integer: case Vb6Type::Long:
+                    case Vb6Type::Boolean: case Vb6Type::Single: case Vb6Type::Double:
+                        return comPackFnForVbType(fold256.valueType);
+                    default:
+                        break;
+                }
+            }
+        }
         // Fix 110v: knownVariantVars_ 先于 knownObjectVars_ 判定. `Dim Value As Variant`
         // 的局部变量在 For Each 语境下同时被登记进 knownObjectVars_ (旧代码把
         // For-Each 元素一律当对象), 使 Variant 变量走 vb6_ComPackObject →
@@ -602,44 +627,50 @@ std::string CCodeGen::comPackExpr(Expr& expr) {
     }
     // 根据表达式类型推断应该用的VARIANT封装函数
     Vb6Type vt = inferExprType(expr);
+    {
+        std::string packForVt = comPackFnForVbType(vt);
+        if (!packForVt.empty()) return packForVt;
+    }
+    // ---- 以下是原 switch 的 default 分支（答不了型时的兜底），一字未改 ----
+    // Variant/未知: 尝试用BSTR封装 (运行时会处理转换)
+    // 更安全的做法: 检查已知变量类型
+    if (expr.kind == ASTNodeKind::IdentifierExpr) {
+        auto& id = static_cast<IdentifierExpr&>(expr);
+        std::string lower = id.name;
+        std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+        if (knownObjectVars_.count(lower)) return "vb6_ComPackObject";
+        if (knownBstrVars_.count(lower)) return "vb6_ComPackBSTR";
+        if (knownDoubleVars_.count(lower)) return "vb6_ComPackDouble";
+        if (knownLongVars_.count(lower)) return "vb6_ComPackInt";
+        if (knownVariantVars_.count(lower)) return "vb6_ComPackVariant";
+    }
+    if (expr.kind == ASTNodeKind::MemberAccessExpr) {
+        auto& ma = static_cast<MemberAccessExpr&>(expr);
+        if (ma.object && ma.object->kind == ASTNodeKind::IdentifierExpr) {
+            auto& objId = static_cast<IdentifierExpr&>(*ma.object);
+            std::string objLower = objId.name;
+            std::transform(objLower.begin(), objLower.end(), objLower.begin(), ::tolower);
+            if (knownVariantVars_.count(objLower)) return "vb6_ComPackVariant";
+        }
+    }
+    return "vb6_ComPackInt";  // 默认整数封装
+}
+
+
+// 账 #256: Vb6Type → 打包函数名，comPackExpr 的类型分支与「裸控件名折成默认属性」那条
+// 折叠共用这一张映射（折叠那边只问 String/Integer/Long/Boolean/Single/Double 六档）。
+// 空串 = 这一型在这里答不了，交回调用方兜底 —— 与改前 switch 的 default 分支同一语义。
+std::string CCodeGen::comPackFnForVbType(Vb6Type vt) {
     switch (vt) {
-        case Vb6Type::String:
-            return "vb6_ComPackBSTR";  // BSTR → VARIANT
+        case Vb6Type::String:  return "vb6_ComPackBSTR";    // BSTR → VARIANT
         case Vb6Type::Integer:
-        case Vb6Type::Long:
-            return "vb6_ComPackInt";   // int32_t → VARIANT
-        case Vb6Type::Boolean:
-            return "vb6_ComPackBool";  // VB6 Boolean → VARIANT VT_BOOL
+        case Vb6Type::Long:    return "vb6_ComPackInt";     // int32_t → VARIANT
+        case Vb6Type::Boolean: return "vb6_ComPackBool";    // VB6 Boolean → VARIANT VT_BOOL
         case Vb6Type::Single:
-        case Vb6Type::Double:
-            return "vb6_ComPackDouble"; // double → VARIANT
-        case Vb6Type::Object:
-            return "vb6_ComPackObject"; // void* → VARIANT
-        case Vb6Type::Variant:
-            return "vb6_ComPackValue";  // Fix 030: 通用打包宏 — 路由任意 C 类型实参 (inferExprType 回退 Variant 时安全)
-        default:
-            // Variant/未知: 尝试用BSTR封装 (运行时会处理转换)
-            // 更安全的做法: 检查已知变量类型
-            if (expr.kind == ASTNodeKind::IdentifierExpr) {
-                auto& id = static_cast<IdentifierExpr&>(expr);
-                std::string lower = id.name;
-                std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
-                if (knownObjectVars_.count(lower)) return "vb6_ComPackObject";
-                if (knownBstrVars_.count(lower)) return "vb6_ComPackBSTR";
-                if (knownDoubleVars_.count(lower)) return "vb6_ComPackDouble";
-                if (knownLongVars_.count(lower)) return "vb6_ComPackInt";
-                if (knownVariantVars_.count(lower)) return "vb6_ComPackVariant";
-            }
-            if (expr.kind == ASTNodeKind::MemberAccessExpr) {
-                auto& ma = static_cast<MemberAccessExpr&>(expr);
-                if (ma.object && ma.object->kind == ASTNodeKind::IdentifierExpr) {
-                    auto& objId = static_cast<IdentifierExpr&>(*ma.object);
-                    std::string objLower = objId.name;
-                    std::transform(objLower.begin(), objLower.end(), objLower.begin(), ::tolower);
-                    if (knownVariantVars_.count(objLower)) return "vb6_ComPackVariant";
-                }
-            }
-            return "vb6_ComPackInt";  // 默认整数封装
+        case Vb6Type::Double:  return "vb6_ComPackDouble";  // double → VARIANT
+        case Vb6Type::Object:  return "vb6_ComPackObject";  // void* → VARIANT
+        case Vb6Type::Variant: return "vb6_ComPackValue";   // Fix 030: _Generic 通用打包宏
+        default:               return std::string();
     }
 }
 

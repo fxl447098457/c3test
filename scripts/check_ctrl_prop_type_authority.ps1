@@ -15,6 +15,13 @@
 #   A4  搬进来的那 28 条属性名必须逐条在表里答到 (`p == "<名>"`)。语料不覆盖的名字在
 #       emit A/B 上是哑的 (#229 那轮的教训: changed 全是夹具自身新增行), 所以这条硬钉。
 #   A5  表里那道 "不是 Unknown" 的闸必须还在、且只有 1 处 (自定义 OCX 的属性面归类型库)
+#   A6 (256) defaultPropType = 3 (definition + declaration + **exactly 1** call site) and that
+#       call site is inside ctrlDefaultPropOf - the box a late-bound argument gets has to follow the
+#       value the emitter hands over, so the fold is the only place allowed to ask the default
+#       property's type. Asking controlPropType from there again = two tables for one question.
+#   A7 (256) ctrlDefaultPropOf = 4: definition + declaration + the TWO consumers (the identifier
+#       emission and the late-bound argument packing). Before this knife those two each carried
+#       their own copy of the decision, which is exactly how a BSTR ended up in a VT_DISPATCH slot.
 #
 # 用法:  pwsh -File scripts\check_ctrl_prop_type_authority.ps1
 # 退出码: 0 = 全绿; 1 = 红
@@ -91,6 +98,51 @@ if ($body -ne "") {
     }
     $g = @([regex]::Matches($body, 'ctrlType\s*!=\s*FrmControlType::Unknown')).Count
     if ($g -ne 1) { $bad += ("A5 the not-Unknown gate is present " + $g + " times in the table (want 1)") }
+}
+
+# ---- A6 / A7 (256): the folded default property is asked from one place, by two consumers ----
+$r6 = Count-Mentions 'defaultPropType'
+if ($r6[0] -ne 3) {
+    $bad += ('A6 defaultPropType mentioned ' + $r6[0] +
+             ' times (want definition + declaration + exactly 1 call site) -> ' + $r6[1])
+}
+$foldBody = ''
+if (Test-Path -LiteralPath $auth) {
+    $h6 = [System.IO.File]::ReadAllText($auth)
+    $m6 = [regex]::Match($h6, 'CCodeGen::ctrlDefaultPropOf\([\s\S]*?\r?\n\}')
+    if (-not $m6.Success) { $bad += 'A6 ctrlDefaultPropOf body not found' } else { $foldBody = $m6.Value }
+}
+if ($foldBody -ne '') {
+    if ($foldBody -notmatch 'valueType\s*=\s*defaultPropType\s*\(') {
+        $bad += 'A6 ctrlDefaultPropOf no longer asks defaultPropType (the argument box stopped following the folded value)'
+    }
+    if ($foldBody -match 'controlPropType\s*\(') {
+        $bad += 'A6 ctrlDefaultPropOf asks controlPropType again - two type tables for one question'
+    }
+}
+$want7 = @{ 'cgen_util_ctrl.cpp' = 1; 'cgen_helpers.inc' = 1; 'cgen_util_com.cpp' = 1;
+            'cgen_expr_ident_symbol.inc' = 1 }
+$got7 = @{}
+foreach ($f in $files) {
+    $c7 = @([regex]::Matches(([System.IO.File]::ReadAllText($f.FullName)), 'ctrlDefaultPropOf\s*\(')).Count
+    if ($c7 -ne 0) { $got7[$f.Name] = $c7 }
+}
+$tot7 = 0
+foreach ($k in $got7.Keys) { $tot7 += $got7[$k] }
+if ($tot7 -ne 4) {
+    $bad += ('A7 ctrlDefaultPropOf mentioned ' + $tot7 +
+             ' times (want definition + declaration + the two consumers) -> ' +
+             (($got7.Keys | ForEach-Object { $_ + '=' + $got7[$_] }) -join ' '))
+}
+foreach ($k in $want7.Keys) {
+    if (-not $got7.ContainsKey($k)) {
+        $bad += ('A7 consumer disappeared: ' + $k + ' no longer asks ctrlDefaultPropOf')
+    } elseif ($got7[$k] -ne $want7[$k]) {
+        $bad += ('A7 ' + $k + ' asks ctrlDefaultPropOf ' + $got7[$k] + ' times (want ' + $want7[$k] + ')')
+    }
+}
+if ($got7.Count -ne $want7.Count) {
+    $bad += ('A7 a new file asks ctrlDefaultPropOf: ' + (($got7.Keys | Where-Object { -not $want7.ContainsKey($_) }) -join ' '))
 }
 
 if ($bad.Count -eq 0) {

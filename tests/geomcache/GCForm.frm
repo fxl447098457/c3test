@@ -14,6 +14,13 @@ Begin VB.Form GCForm
       Left            =   120
       Top             =   1560
    End
+   Begin VB.CheckBox chkA 
+      Height          =   315
+      Left            =   1007
+      TabIndex        =   7
+      Top             =   2800
+      Width           =   1507
+   End
    Begin VB.ComboBox cboA 
       Height          =   247
       Left            =   4607
@@ -336,7 +343,7 @@ Private Sub tmrGC_Timer()
     Dim collC As Collection
     Dim iC As Long
     Dim sumW As Long, ownW As Long
-    ownW = txtA.Width + picP.Width + picX.Width + cboA.Width
+    ownW = txtA.Width + picP.Width + picX.Width + cboA.Width + chkA.Width
     Set collC = New Collection
     For Each oC In Me.Controls
         sumW = sumW + CLng(oC.Width)
@@ -467,6 +474,50 @@ Private Sub tmrGC_Timer()
     tySelf = TypeName(g.Container)
     ok28 = (tySelf = "Empty")
     Debug.Print "GC28-form-has-no-container=" & TF(ok28) & " raw=[" & tySelf & "]"
+
+    ' GC29..GC31 -- ledger 256. A bare control name appearing in a LATE-BOUND argument
+    ' position is folded into its default property (the emitted payload is a BSTR for
+    ' Text/Caption, an int for CheckBox.Value), while the box around it came from a type
+    ' oracle that answers "Object" for any control name. VB6 boxes VT_DISPATCH there, the
+    ' stack VARIANT is VariantCleared at the end of the statement and Release is
+    ' unconditional, so the payload's first bytes get read as a vtable -- 0xC0000005 right
+    ' at the Add (measured with the pre-fix compiler on the same two arches this fixture
+    ' runs on: the probe never reached its last line).
+    ' The axis is NOT "object slot vs value slot": VB6 really does take the default
+    ' property for a Variant parameter. What was wrong is that the box did not follow the
+    ' value, so both rows of the new default-property type table get pinned here (String
+    ' and Integer), and each reads back what the control itself says -- "it survived" is
+    ' not the judgment.
+    ' The third head is a witness only the window can give: the item has to be the string
+    ' that is IN the control (txtA.Text read on the emitted route), not a literal copied
+    ' into the judge.
+    Dim ok29 As Boolean, ok30 As Boolean, ok31 As Boolean
+    Dim k29 As String, k30 As String, k31 As String
+    Dim ty29 As String, ty31 As String
+    Dim v31 As Long
+    txtA.Text = "GC29TXT"
+    lblP.Caption = "GC30CAP"
+    chkA.Value = 1
+    collC.Add txtA, "k29"
+    k29 = CStr(collC.Item("k29"))
+    ty29 = TypeName(collC.Item("k29"))
+    ok29 = (ty29 = "String") And (k29 = "GC29TXT") And (k29 = txtA.Text)
+    Debug.Print "GC29-pack-text=" & TF(ok29) & " raw=[" & k29 & "]/[" & ty29 & "]"
+
+    collC.Add lblP, "k30"
+    k30 = CStr(collC.Item("k30"))
+    ok30 = (k30 = "GC30CAP") And (k30 = lblP.Caption) And (k30 <> k29)
+    Debug.Print "GC30-pack-caption=" & TF(ok30) & " raw=[" & k30 & "]"
+
+    collC.Add chkA, "k31"
+    v31 = CLng(collC.Item("k31"))
+    ty31 = TypeName(collC.Item("k31"))
+    k31 = CStr(chkA.Value)
+    ' Integer lands in VT_I4 (vb6_ComPackInt) -- that width is today's packing口径,
+    ' not this ledger's question, so the reading is pinned as-is rather than as
+    ' "not Object": if the Integer box ever moves to VT_I2 this judge goes red on purpose.
+    ok31 = (v31 = CLng(k31)) And (v31 = 1) And (ty31 = "Long")
+    Debug.Print "GC31-pack-checkvalue=" & TF(ok31) & " raw=" & v31 & "/[" & ty31 & "]/" & k31
 
     Debug.Print "GC-DONE"
     Unload Me
