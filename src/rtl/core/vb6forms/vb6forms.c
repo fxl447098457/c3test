@@ -900,10 +900,22 @@ int vb6_MessageLoop(void) {
     return (int)msg.wParam;
 }
 
+// 259: WM_QUIT 全进程只有一份，谁把它抽出来谁就负责把它投回去。
+// 最后一个窗体卸载时 vb6_Forms_Unregister 投的那条 quit，若被内层泵（DoEvents / 模态 Show）
+// 抽走，外层主循环再也等不到退出信号 ⇒ 窗口一个不剩、进程驻留（实测：CI 饿机器上
+// combofocus_x86 跑满 60s 不退，判据全打完、CPU 62ms；本地用“在 DoEvents 里把最后一个窗体卸掉”
+// 那个形状写的确定性探针 6/6 挂。原本循环体里那行 "WM_QUIT 模态循环结束" 的 trace 是死码：
+// GetMessage 取到 quit 时返回 0，循环直接结束，从来不会把它送进循环体。
+static void vb6_RePostQuitIfTaken(const MSG* m) {
+    if (m && m->message == WM_QUIT) PostQuitMessage((int)m->wParam);
+}
+
 int vb6_DoEvents(void) {
     MSG msg;
     int count = 0;
     while (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
+        // 259: 抽到 quit 就投回去并停泵 —— 这条 quit 是给最外层主循环的退出信号。
+        if (msg.message == WM_QUIT) { vb6_RePostQuitIfTaken(&msg); break; }
         // P24-Timer: WM_TIMER现在由WndProc分发, DoEvents不再拦截
         TranslateMessage(&msg);
         DispatchMessage(&msg);
@@ -1518,6 +1530,8 @@ void vb6_ShowForm(void* hwnd, int modal) {
             if (msg.message == WM_QUIT && traceModal)
                 fprintf(stderr, "[C3_MODAL] 收到 WM_QUIT, 模态循环结束 (hwnd=%p)\n", hwnd);
         }
+        // 259: 模态循环也是内层泵：它的 GetMessage 若把那条 quit 抄了，Show 还回去、主循环则永久阻塞。
+        vb6_RePostQuitIfTaken(&msg);
         if (traceModal)
             fprintf(stderr, "[C3_MODAL] 模态循环退出: IsWindow=%d (hwnd=%p, owner=%p)\n",
                     IsWindow((HWND)hwnd) ? 1 : 0, hwnd, owner);

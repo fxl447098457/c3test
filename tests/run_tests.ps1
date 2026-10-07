@@ -2613,6 +2613,18 @@ if ($Category -in @("all", "run", "vbp")) {
                     "CF-tx=1/1", "CF-each=Y", "CF-cross=Y")
     Test-Vbp "combofocus" "$Tests\combofocus\CbApp.vbp" $cbNeedles
     Test-Vbp "combofocus_x86" "$Tests\combofocus\CbApp.vbp" $cbNeedles -Arch "x86"
+    # 259：最后一个窗体卸载时那条 WM_QUIT 全进程只有一份，谁抽走谁负责投回去。内层泵
+    # （DoEvents / 模态 Show 的循环）把它抄走的后果是外层主循环再也等不到退出信号 ——
+    # 门 #395 唯一红就是这一族在 CI 上的样子（combofocus_x86 七行判据全打完、进程 60s 不退、
+    # CPU 62ms、窗口一个不剩）。夹具把「卸载发生在内层泵里」这个形状做成确定性的：每拍 Sleep 80
+    # 而 Interval=40 ⇒ DoEvents 起手时那条 WM_TIMER 已经在队列里，不必再等饿机器碰。
+    # 判据两层：Q-ORDER 钉「形状真到了那一格」（少了它，一个从没进过洞的编译也照样绿），
+    # 而**进程自己退**才是这一账的本体 —— run_tests.ps1 对 run timeout 直接判 FAIL，
+    # 所以这一格不需要往夹具里加「等一等再断言」那种拍号（#213 那条教训）。
+    $qNeedles = @("Q-DONE", "Q-ORDER=unload-inside-doevents")
+    Test-Vbp "appqquit" "$Tests\appqquit\QApp.vbp" $qNeedles
+    Test-Vbp "appqquit_x86" "$Tests\appqquit\QApp.vbp" $qNeedles -Arch "x86"
+
     Test-EmitcShape "cb_emitc_codes" @("$Tests\combofocus\CbApp.vbp") @(
         'if (id == 104 && code == 3) { extern void vb6_cb2_GotFocus();',              # CBN_SETFOCUS
         'if (id == 105 && code == 4) { extern void vb6_cb1_LostFocus();',             # CBN_KILLFOCUS
