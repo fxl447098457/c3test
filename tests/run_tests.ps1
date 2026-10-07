@@ -3834,12 +3834,16 @@ if ($Category -in @("all", "run", "vbp")) {
     # (rev14 给 Item/Add 换了真交对象的出口，这一档漏了) ⇒ 上层拿到 NULL，Count / Item / For Each
     # 三条下游全哑 (窗体上实测 Count=0、For Each 零条)，Charts 的 ClsResizer 因此静默不做。
     # 两条钉的是「集合交得出对象 + 枚举真走得完」；成员名那一半另立账 #252 (实测 iters=5 而 Name 空)。
+    # 账 #254 补第三条：`Form.Count` 与 `Controls.Count` 是同一件事。宿主模型那一档以前硬填 0，
+    # 而 Charts 的 ClsResizer 用 `ReDim Rects(oForm.Count - 1)` 给 `For Each Controls` 铺格子
+    # ⇒ 格子是空的，第一格写 Rects(0) 就是错误 9，启动期整进程退出（CI 报成「窗口 5s 没出现」）。
     $geomExpected = @("GC01-design=True", "GC02-child=True", "GC03-place=True",
         "GC04-write=True", "GC05-move=True", "GC06-pixbox=True",
         "GC07-modesw=True", "GC08-stale=True",
         "GC09-late-write=True", "GC10-late-height=True", "GC11-late-place=True",
         "GC12-direct-write=True",
         "GC13-coll-count=True", "GC14-foreach-iters=True",
+        "GC15-form-count=True",
         "GC-DONE")
     Test-Vbp "geomcache" "$Tests\geomcache\GCCache.vbp" $geomExpected
     Test-Vbp "geomcache_x86" "$Tests\geomcache\GCCache.vbp" $geomExpected -Arch "x86"

@@ -73,7 +73,12 @@
     }
     if (_wcsicmp(name, L"Enabled") == 0)  { vb6_ho_setVariantLong(out, IsWindowEnabled((HWND)obj) ? -1 : 0); return 1; }
     if (_wcsicmp(name, L"hDC") == 0)      { vb6_ho_setVariantLong(out, (int32_t)(intptr_t)GetDC((HWND)obj)); return 1; }
-    if (_wcsicmp(name, L"Count") == 0)    { vb6_ho_setVariantLong(out, 0); return 1; }
+    /* 账 #254: VB6 的 `Form.Count` = 这枚窗体上的子控件枚数，与 `Controls.Count` 同一件事，
+       所以数法转调集合那一条出口，不在这里填常数。以前这一档硬填 0 —— #250 把 Controls
+       集合接通之后 Charts 的 ClsResizer 第一次有了流量，它 `ReDim Rects(oForm.Count - 1)`
+       铺出来的格子是空的，`For Each` 第一格写 `Rects(0)` 就是错误 9（下标越界），
+       启动期整个进程退出（CI 把它报成「窗口 5s 内没出现」）。 */
+    if (_wcsicmp(name, L"Count") == 0)    { vb6_ho_setVariantLong(out, vb6_UC_ControlsCountOf(obj)); return 1; }
     if (_wcsicmp(name, L"Controls") == 0) {
         /* 账 #250: 这一档以前用的是 setVariantDispatch —— 那一枚**刻意**只交 Empty
            (让字体代理那一路继续走 Nothing 分支, 见 uc_hostmodel.c 的注释)。

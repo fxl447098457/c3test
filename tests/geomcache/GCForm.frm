@@ -279,6 +279,21 @@ Private Sub tmrGC_Timer()
     ok14 = (it >= 4) And (it <= 8)
     Debug.Print "GC14-foreach-iters=" & TF(ok14) & " raw=" & it
 
+    ' GC15 -- ledger 254. VB6's Form.Count is the SAME set the Controls collection
+    ' enumerates, so the two readings have to agree. The host model used to answer a
+    ' hardcoded 0 here. Charts 2020's ClsResizer sizes its cache with
+    ' ReDim Rects(oForm.Count - 1) and then fills it with For Each over Controls, so a
+    ' 0 left it writing Rects(0) into an empty array -> runtime error 9 at startup.
+    ' Read it late-bound (Set g = Me), which is the shape the resizer uses.
+    ' The range is pinned TOO, not only the agreement: before ledger 250 both numbers
+    ' were 0, so "fc = n" alone would read True on a compiler where nothing works.
+    Dim ok15 As Boolean
+    Dim fc As Long
+    Set g = Me
+    fc = CLng(g.Count)
+    ok15 = (fc = n) And (fc >= 4) And (fc <= 8)
+    Debug.Print "GC15-form-count=" & TF(ok15) & " raw=" & fc & "/" & n
+
     Debug.Print "GC-DONE"
     Unload Me
 End Sub

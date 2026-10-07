@@ -311,6 +311,9 @@ int32_t vb6_Collection_IsCollection(void* p);
 void* vb6_Collection_EnumInit(void* coll);
 int32_t vb6_Collection_EnumNext(void* enumPtr, void* outVariant);
 int32_t vb6_UC_ControlsCount(void* coll);
+// 账 #254: 接收者是窗体/UC 自身时 (VB6 的 `Form.Count`) 的同一个数 —— 两条读法共用
+// 一处收集，见 uc_controls.c。
+int32_t vb6_UC_ControlsCountOf(void* formHwnd);
 void* vb6_UC_ControlsItem(void* coll, int32_t index);
 // Fix <vbeclipse> rev14: 裸 `UserControl.Controls` 的进程级单例 (后端发射点)。
 // 必须在此声明 —— 生成代码经 vb6forms.h 伞头看到它; 缺声明会走 C4013 隐式

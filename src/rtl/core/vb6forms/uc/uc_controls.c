@@ -80,6 +80,15 @@ int32_t vb6_UC_ControlsCount(void* coll) {
     return vb6_uc_collectChildren(vb6_uc_controlsForm(coll), kids, VB6_UC_MAX_OBJ);
 }
 
+/* 账 #254: 「这枚容器上有多少枚子控件」的第二个问法 —— 接收者是**窗体/UC 自己**
+   (VB6 的 `Form.Count`)，手上没有集合对象。数法转调上面同一条收集，不开第二份：
+   Charts 的 ClsResizer 用 `ReDim Rects(oForm.Count - 1)` 给 `For Each oCtrl In
+   oForm.Controls` 铺格子，这两个数一旦不等，循环第一格就写下标越界。 */
+int32_t vb6_UC_ControlsCountOf(void* formHwnd) {
+    void* kids[VB6_UC_MAX_OBJ];
+    return vb6_uc_collectChildren(formHwnd, kids, VB6_UC_MAX_OBJ);
+}
+
 void* vb6_UC_ControlsItem(void* coll, int32_t index) {
     if (!vb6_uc_isControls(coll)) return NULL;
     void* kids[VB6_UC_MAX_OBJ];
