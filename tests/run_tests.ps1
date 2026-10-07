@@ -3826,9 +3826,15 @@ if ($Category -in @("all", "run", "vbp")) {
     # 不当罪证)；GC07 切档回投影、切回还是那一个数；GC08 ComboBox 被 RTL 自己加高 ⇒ 缓存作废、
     # 跟着窗口答 —— 那一格是"别人挪过窗口"这一问的唯一防线。
     # raw 里那几个数是 DPI 相关的，只钉 =True 的判据，不钉绝对数 (本线口径)。
+    # 账 #247 补 GC09..GC12：晚绑定那一路 (IDispatch → RTL 宿主模型) 以前自带第二份几何实现
+    # —— 读侧自己 GetWindowRect + 写死缇，写侧四档一起 MoveWindow 且不存 VB 侧读数，于是同一句
+    # `对象.Width = 7222` 两条路给两个数 (实测发码那路读 7222、宿主那路读 7215)。四条钉的是
+    # 「两条路同数 + 写什么读什么 + 窗口真在那个像素上」。
     $geomExpected = @("GC01-design=True", "GC02-child=True", "GC03-place=True",
         "GC04-write=True", "GC05-move=True", "GC06-pixbox=True",
-        "GC07-modesw=True", "GC08-stale=True", "GC-DONE")
+        "GC07-modesw=True", "GC08-stale=True",
+        "GC09-late-write=True", "GC10-late-height=True", "GC11-late-place=True",
+        "GC12-direct-write=True", "GC-DONE")
     Test-Vbp "geomcache" "$Tests\geomcache\GCCache.vbp" $geomExpected
     Test-Vbp "geomcache_x86" "$Tests\geomcache\GCCache.vbp" $geomExpected -Arch "x86"
 

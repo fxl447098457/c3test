@@ -84,6 +84,9 @@ Option Explicit
 '   GC08        self-heal: ComboBox is resized by the RTL at creation (dropdown
 '               area), so its cached design height is stale and the read follows
 '               the window instead -- the pixel gate is what makes that safe
+'   GC09..GC12  the late-bound route (the RTL host model behind IDispatch) answers
+'               the same numbers as the emitted one -- it used to carry a second
+'               geometry implementation that never stored the VB-side value
 
 Private Declare PtrSafe Function GetWindowRect Lib "user32" (ByVal hwnd As LongPtr, ByRef lpRect As RECTAPI) As Long
 Private Declare PtrSafe Function GetParent Lib "user32" (ByVal hwnd As LongPtr) As LongPtr
@@ -220,6 +223,37 @@ Private Sub tmrGC_Timer()
 
     ok8 = (cboA.Height <> 247) And (cboA.Height = ToTwipY(PxH(cboA.hwnd)))
     Debug.Print "GC08-stale=" & TF(ok8) & " raw=" & cboA.Height & ",247," & PxH(cboA.hwnd) & "," & ToTwipY(PxH(cboA.hwnd))
+
+    ' GC09..GC12 -- ledger 247. The IDispatch route (the RTL host model, which is
+    ' what a late-bound `With obj : .Width = ...` or a UserControl's `Parent.Width`
+    ' really calls) carried its OWN geometry code: reads did GetWindowRect + a
+    ' hardcoded twips conversion, writes moved all four axes at once and stored
+    ' nothing. So the same property answered two different numbers depending on
+    ' which route the statement took -- measured before the fix: `f.Width = 7222`
+    ' read back 7222 on the emitted route only after the window had been moved,
+    ' and 7215 on the late-bound one. Both routes now ask vb6forms_ctrl.c.
+    Dim ok9 As Boolean, ok10 As Boolean, ok11 As Boolean, ok12 As Boolean
+    Dim g As Object
+    Set g = Me
+    Dim gwHost As Long, ghHost As Long, gwBack As Long
+
+    g.Width = 7222
+    gwHost = CLng(g.Width)
+    ok9 = (gwHost = 7222) And (Me.Width = 7222)
+    Debug.Print "GC09-late-write=" & TF(ok9) & " raw=" & gwHost & "," & Me.Width
+
+    g.Height = 3333
+    ghHost = CLng(g.Height)
+    ok10 = (ghHost = 3333) And (Me.Height = 3333)
+    Debug.Print "GC10-late-height=" & TF(ok10) & " raw=" & ghHost & "," & Me.Height
+
+    ok11 = (PxW(Me.hwnd) = ToPx(7222)) And (PxH(Me.hwnd) = ToPy(3333))
+    Debug.Print "GC11-late-place=" & TF(ok11) & " raw=" & PxW(Me.hwnd) & "," & ToPx(7222) & "," & PxH(Me.hwnd) & "," & ToPy(3333)
+
+    Me.Width = 6011
+    gwBack = CLng(g.Width)
+    ok12 = (gwBack = 6011) And (Me.Width = 6011)
+    Debug.Print "GC12-direct-write=" & TF(ok12) & " raw=" & gwBack & "," & Me.Width
 
     Debug.Print "GC-DONE"
     Unload Me

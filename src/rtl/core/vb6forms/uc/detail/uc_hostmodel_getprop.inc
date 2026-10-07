@@ -26,7 +26,6 @@
     vb6_HostObjRec* h = vb6_ho_find(obj);
     if (!r && !h && !IsWindow((HWND)obj)) return 0;
 
-    int32_t isForm = r ? 0 : vb6_ho_isForm(obj);
     int32_t scaleMode = r ? (r->desc ? r->desc->scaleMode : 1) : 1;
 
     if (_wcsicmp(name, L"hwnd") == 0 || _wcsicmp(name, L"hWnd") == 0) {
@@ -40,32 +39,22 @@
         vb6_ho_setVariantLong(out, h ? h->index : (r ? r->index : -1)); return 1;
     }
     if (_wcsicmp(name, L"ScaleMode") == 0) { vb6_ho_setVariantLong(out, scaleMode); return 1; }
-    if (_wcsicmp(name, L"ScaleWidth") == 0 || _wcsicmp(name, L"ScaleHeight") == 0 ||
-        _wcsicmp(name, L"Width") == 0   || _wcsicmp(name, L"Height") == 0 ||
-        _wcsicmp(name, L"Left") == 0    || _wcsicmp(name, L"Top") == 0) {
+    /* 账 #247: Left/Top/Width/Height 在这一层**没有第二份实现** —— 读写都问
+       vb6forms_ctrl.c 那四个出口 (容器 ScaleMode 的单位 + VB 侧读数缓存)。
+       以前这一支自己量窗口矩形 + 硬编码缇, 于是同一句
+       `对象.Width = 7222` 走发码 (vb6_SetControlWidth: 存下 7222) 与走 IDispatch
+       (宿主模型: 换算到像素就丢, 且不存) 给两种答案 —— 探针实测两条路都读回 7215。 */
+    if (_wcsicmp(name, L"Left") == 0)   { vb6_ho_setVariantLong(out, vb6_GetControlLeft(obj));  return 1; }
+    if (_wcsicmp(name, L"Top") == 0)    { vb6_ho_setVariantLong(out, vb6_GetControlTop(obj));   return 1; }
+    if (_wcsicmp(name, L"Width") == 0)  { vb6_ho_setVariantLong(out, vb6_GetControlWidth(obj)); return 1; }
+    if (_wcsicmp(name, L"Height") == 0) { vb6_ho_setVariantLong(out, vb6_GetControlHeight(obj)); return 1; }
+    if (_wcsicmp(name, L"ScaleWidth") == 0 || _wcsicmp(name, L"ScaleHeight") == 0) {
         int32_t w = 0, hh = 0;
-        if (_wcsicmp(name, L"ScaleWidth") == 0 || _wcsicmp(name, L"ScaleHeight") == 0) {
-            vb6_ho_clientTwips(obj, &w, &hh);
-        } else if (isForm) {
-            RECT rc; GetWindowRect((HWND)obj, &rc);
-            w = vb6_XToTwipX(rc.right - rc.left); hh = vb6_YToTwipY(rc.bottom - rc.top);
-            if (_wcsicmp(name, L"Left") == 0 || _wcsicmp(name, L"Top") == 0) {
-                w = vb6_XToTwipX(rc.left); hh = vb6_YToTwipY(rc.top);
-            }
-        } else {
-            vb6_ho_ctrlRect(obj, NULL, NULL, &w, &hh);
-            if (_wcsicmp(name, L"Left") == 0 || _wcsicmp(name, L"Top") == 0) {
-                int32_t l = 0, t = 0; vb6_ho_ctrlRect(obj, &l, &t, NULL, NULL);
-                w = l; hh = t;
-            }
-        }
-        int32_t val = (_wcsicmp(name, L"ScaleWidth") == 0 || _wcsicmp(name, L"Width") == 0 ||
-                       _wcsicmp(name, L"Left") == 0) ? w : hh;
+        vb6_ho_clientTwips(obj, &w, &hh);
+        int32_t val = (_wcsicmp(name, L"ScaleWidth") == 0) ? w : hh;
         // ScaleWidth/ScaleHeight 需按对象自身 ScaleMode 换算
-        if (_wcsicmp(name, L"ScaleWidth") == 0 || _wcsicmp(name, L"ScaleHeight") == 0) {
-            if (scaleMode == 3)   /* Fix 184: twips -> pixels via the shared DPI source */
-                val = (_wcsicmp(name, L"ScaleHeight") == 0) ? vb6_TwipToY(val) : vb6_TwipToX(val);
-        }
+        if (scaleMode == 3)   /* Fix 184: twips -> pixels via the shared DPI source */
+            val = (_wcsicmp(name, L"ScaleHeight") == 0) ? vb6_TwipToY(val) : vb6_TwipToX(val);
         vb6_ho_setVariantLong(out, val); return 1;
     }
     // Fix <vbeclipse>: `Visible` 必须读**自身 WS_VISIBLE 位**, 不能用 IsWindowVisible。

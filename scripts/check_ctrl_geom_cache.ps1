@@ -21,6 +21,8 @@
 #   S6  读侧那道像素闸不许被删: vb6_GeomCacheRead 体内必须问 vb6_ScaleUserToPx —— 存着的数
 #       换算出的像素与窗口现在的像素对不上，就说明**别人**挪过这枚窗口 (ComboBox 建窗时自己
 #       补下拉高度就是这一格)，此时必须回投影而不是回缓存
+#   S7  账 #247: 宿主模型 (IDispatch 那一路) 的四个几何名两头都只许问 vb6forms_ctrl.c 的
+#       出口；它自己那份 MoveWindow / vb6_ho_ctrlRect 投影一出现就是又开了第二份实现
 #
 # 用法:  pwsh -File scripts\check_ctrl_geom_cache.ps1
 # 退出码: 0 = 全绿; 1 = 红
@@ -126,8 +128,38 @@ if (@([regex]::Matches($propText, 'enum \{ VB6_GEOM_LEFT')).Count -ne 1) {
     $bad += "S6 the slot enum is not declared exactly once in vb6forms_prop.h"
 }
 
+# ---- S7: 账 #247 —— 宿主模型 (IDispatch 那一路) 不许自带第二份几何实现 ----
+# 晚绑定的 `With obj : .Width = ...`、UserControl 里的 `Parent.Width` 都落在
+# vb6_Host_GetProp / vb6_Host_SetProp。这两支以前自己 GetWindowRect + 写死缇、
+# 写侧四档一起 MoveWindow 且不存 VB 侧读数 —— 同一句话两条路给两个数 (实测宿主
+# 那路 `f.Width = 7222` 读回 7215)。现在四档两头都必须问 vb6forms_ctrl.c 的出口。
+$hoGetRel = "src\rtl\core\vb6forms\uc\detail\uc_hostmodel_getprop.inc"
+$hoSetRel = "src\rtl\core\vb6forms\uc\detail\uc_hostmodel_setprop.inc"
+$hoGet = Join-Path $root $hoGetRel
+$hoSet = Join-Path $root $hoSetRel
+foreach ($need in @($hoGet, $hoSet)) {
+    if (-not (Test-Path -LiteralPath $need)) {
+        Write-Host ("FAIL S7 missing " + $need) -ForegroundColor Red
+        exit 1
+    }
+}
+$hoGetText = [System.IO.File]::ReadAllText($hoGet)
+$hoSetText = [System.IO.File]::ReadAllText($hoSet)
+foreach ($s in @("Left", "Top", "Width", "Height")) {
+    $n = @([regex]::Matches($hoGetText, 'vb6_ho_setVariantLong\(out,\s*vb6_GetControl' + $s + '\(obj\)\)')).Count
+    if ($n -ne 1) { $bad += ("S7 host-model read of " + $s + " asks vb6_GetControl" + $s + " " + $n + " times (need exactly 1)") }
+    $n2 = @([regex]::Matches($hoSetText, 'vb6_SetControl' + $s + '\(obj,\s*vb6_ho_variantToLong\(v\)\)')).Count
+    if ($n2 -ne 1) { $bad += ("S7 host-model write of " + $s + " asks vb6_SetControl" + $s + " " + $n2 + " times (need exactly 1)") }
+}
+if (@([regex]::Matches($hoSetText, 'MoveWindow\(')).Count -ne 0) {
+    $bad += "S7 the host model moved a window itself again -- geometry writes must go through the four setters (they own the unit + the VB-side cache)"
+}
+if (@([regex]::Matches($hoGetText + $hoSetText, 'vb6_ho_ctrlRect')).Count -ne 0) {
+    $bad += "S7 the host model's own geometry projection helper came back"
+}
+
 if ($bad.Count -ne 0) {
     foreach ($b in $bad) { Write-Host ("FAIL " + $b) -ForegroundColor Red }
     exit 1
 }
-Write-Host "PASS ctrl_geom_cache (S1 one store, S2 four slots read+write, S3 8+4 write routes, S4 creation records twips, S5 every getter cached, S6 pixel gate alive)"
+Write-Host "PASS ctrl_geom_cache (S1 one store, S2 four slots read+write, S3 8+4 write routes, S4 creation records twips, S5 every getter cached, S6 pixel gate alive, S7 host model asks the same exit)"

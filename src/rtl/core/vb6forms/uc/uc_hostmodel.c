@@ -4,6 +4,7 @@
 // 跨族共享符号见 vb6forms_uc_internal.h
 
 #include "vb6forms_uc_internal.h"
+#include "vb6forms_prop.h"      // 账 #247: 控件几何的唯一出口 (vb6_Get/SetControlLeft|Top|Width|Height)
 #include "vb6forms_prop_ctrl.h"   // Fix 143: vb6_AddItem/RemoveItem/ClearList (原生列表 COM 晚绑定)
 
 #ifdef __cplusplus
@@ -115,11 +116,6 @@ const wchar_t* vb6_Host_TypeNameOf(void* obj) {
 // 宿主对象属性/方法分派
 // ============================================================
 
-static int32_t vb6_ho_isForm(const void* hwnd) {
-    vb6_HostObjRec* h = vb6_ho_find(hwnd);
-    return (h && h->isForm) ? 1 : 0;
-}
-
 static int32_t vb6_ho_isControl(const void* hwnd) {
     vb6_HostObjRec* h = vb6_ho_find(hwnd);
     return (h && !h->isForm) ? 1 : 0;
@@ -192,18 +188,6 @@ double vb6_ho_variantToDouble(const vb6_VARIANT* v) {
 
 BSTR vb6_ho_variantToBstr(const vb6_VARIANT* v) {
     return (v && v->vt == vb6_vtBSTR) ? v->bstrVal : NULL;
-}
-
-// 控件的几何: 相对父窗口客户区, 缇
-static void vb6_ho_ctrlRect(void* hwnd, int32_t* l, int32_t* t, int32_t* w, int32_t* h) {
-    RECT rc; GetWindowRect((HWND)hwnd, &rc);
-    POINT pt = { rc.left, rc.top };
-    HWND p = GetParent((HWND)hwnd);
-    ScreenToClient(p ? p : hwnd, &pt);
-    if (l) *l = vb6_XToTwipX(pt.x);
-    if (t) *t = vb6_YToTwipY(pt.y);
-    if (w) *w = vb6_XToTwipX(rc.right - rc.left);
-    if (h) *h = vb6_YToTwipY(rc.bottom - rc.top);
 }
 
 static void vb6_ho_clientTwips(void* hwnd, int32_t* w, int32_t* h) {
