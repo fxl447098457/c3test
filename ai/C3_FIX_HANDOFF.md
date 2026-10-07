@@ -1397,6 +1397,9 @@ S9.4 打标记那一路的 PictureBox 判据必须问表、且不许把成员名
 开工先定两格，别一上来就发码：① `Index` —— 非数组控件今天答 **-1**，注册时若图省事传 0，就是把存量答案改了（必须保持 -1）；② `typeName` —— 登记表里一空，`TypeName` 就从 "Control" 变成真类型名（VB6 语义更对，但那是**公共答案的改变**，要先数有多少条存量针在钉 `TypeName`，与 #159 那张宿主伪成员表对一遍再动）。修法本身在 cgen：把 VB 名（和后面的类型名）从 `cgen_form_create_controls.inc` 递进创建/注册那一步，而不是在 RTL 里猜。
 
 - 2026-10-07 账 #255 那轮的补读（同一份窗体、枚枚成员各答各的之后）：**身份**那一半已经不是本账的事了 —— 三枚子控件的 `.hWnd` 是三个数、`.Left` 跟着各自的数、经 `For Each` 写 `.Width` 落在自己窗口上（GC17..GC19 已进门禁）。剩下的仍是名字面：`.Name` 空、`TypeName` 答 Control、成员那条读 `.Tag` 也空。
+- **2026-10-07 第二轮读数（#255 落地之后，探针 `.build/probe255/` 模式 N）—— 身份面缺的到底是哪几块**：成员 hWnd 已各答各的（本账原来那条「成员答不出身份」的前提要收窄），剩下的缺口是：① `.Name` **两条路都空**（不只晚绑定：直读 `txtA.Name` 也交空串）⇒ 不是「成员没有身份」而是「创建时压根没记名字」；② `TypeName` 直读答 **String**、晚绑定答 **Control**，VB6 两边都该答 `TextBox` —— 这一条有**真流量**：Charts 的 ClsResizer 按 `If TypeName(CtrlNames(i)) = FBuf(j).CtrlTypeName` 挑字体档，两边恒不等 ⇒ 排版算式即便接通也一条也配不上（#255 只把「写给谁」修对，「是不是这型」还没对）；③ `.Tag` 只有晚绑定路空（直读 `txtA.Tag` 交 TAG-TXTA 正常）⇒ 晚绑定的字符串属性读法另有一问（与 #88 同族）；④ `Me.Controls("picP")` 交回 NULL。
+- **可开工的形态（本轮找到的单一存放点）**：`vb6_ucHo[]` 每格**已有** `name` / `index` 字段，Fix 148 的按名查找 `vb6_UC_ControlsItemByName` 就是拿它比对 `_wcsicmp(r->name, base)` —— 只是标准控件创建时**从没填过**（两条创建路把 `vb6_CreateControl` 的第二形参当 caption 传，而 RTL 那个形参名叫 controlName，两边读反了）。所以这一格 = 「**两条创建路各填一次那份现成的记录**（含类型名），四个读面（直/晚 × `.Name`/`TypeName`、`Controls(name)`、`.Index`）都改问它」，不需要新开表。填表时守住实测：非数组控件 `.Index` 今天两条路一致答 **-1**，别顺手传成 0。
+
 
 ### B82 窗体**自身**的 `Count` 那一档硬填 0 —— Controls 集合接通之后 Charts 2020 启动期错误 9（账 #254 = C29-GE-c，**已出：门 #389（run 37581465287、head `9936cf3f`、branch dev、attempt 1）= 11 job 全 completed/success、非绿 0**）
 
