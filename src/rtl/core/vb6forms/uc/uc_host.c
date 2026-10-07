@@ -317,8 +317,8 @@ void vb6_UserControl_Cls(void) {
 
 // Fix 133u: UserControl.Parent (容器窗体对象).
 //   czUI.ctl 用它做全屏/恢复: Parent.hWnd / Parent.Icon.Handle 读取窗体,
-//   Parent.Move 移动窗体, With Parent 内 .Left/.Top/.Width/.Height 经
-//   vb6_ComGetIntProp(hwnd, ...) 由"宿主对象 → 属性"解析 (vb6forms_uc.c).
+//   Parent.Move 移动窗体, With Parent 内 .Left/.Top/.Width/.Height 走宿主模型的
+//   属性分派 (vb6_Host_GetProp/SetProp → vb6forms_ctrl.c 那四对进出口, 账 #247).
 //   这里以控件的容器窗口为起点, GetAncestor(GA_ROOT) 找到顶层窗体窗口.
 static HWND vb6_uc_ParentHwndRaw(void) {
     if (!vb6_ucCurrent) return NULL;
@@ -346,7 +346,15 @@ void* vb6_UC_ParentIconHandle(void) {
 
 void vb6_UC_ParentMove(int32_t left, int32_t top, int32_t width, int32_t height) {
     HWND fw = vb6_uc_ParentHwndRaw();
-    if (fw) MoveWindow(fw, left, top, width, height, TRUE);
+    if (!fw) return;
+    /* 账 #251: 这四个数是 VB 侧的量纲 (缇 —— 宿主模型读出的 Parent.Left/.Width 就是它，
+       czUI 的全屏那一支存的也是它)，而 MoveWindow 要的是像素。此前这里原样交出去 ⇒
+       607 缇落在 607 像素上 (差 15 倍那一族 #175/#247 的老形状，只是这次住在 call 那一路)。
+       摆位只有一个收口: vb6_ControlMove (它管单位换算、坐标空间、#230 那张 VB 侧几何
+       缓存、以及尺寸真变时的 Resize)。本单元不 include vb6forms_prop.h —— 与
+       vb6_ControlMove 自己 extern vb6_InvokeFormResize 同一条纪律 (三头混一个 TU 会撞)。*/
+    extern void vb6_ControlMove(void* hwnd, double l, double t, double w, double h, int mask);
+    vb6_ControlMove((void*)fw, (double)left, (double)top, (double)width, (double)height, 15);
 }
 
 void vb6_UC_Register(const vb6_UserControlDesc* desc) {

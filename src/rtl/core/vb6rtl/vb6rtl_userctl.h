@@ -113,10 +113,12 @@ void   vb6_UserControl_Cls(void);
 // Fix 133u: UserControl.Parent (容器窗体对象). czUI.ctl 用它做全屏/恢复窗体:
 //   UserControl.Parent.hWnd       → vb6_UC_ParentHwnd(void)
 //   UserControl.Parent.Icon.Handle→ vb6_UC_ParentIconHandle(void)
-//   UserControl.Parent.Move l,t,w,h → vb6_UC_ParentMove(l,t,w,h)
+//   UserControl.Parent.Move l,t,w,h → vb6_UC_ParentMove(l,t,w,h) —— 四档是 **VB 侧量纲**
+//                                   (窗体容器=缇)，账 #251 起内部转调 vb6_ControlMove，
+//                                   不在这里自己拼 MoveWindow
 //   With UserControl.Parent       → vb6_UC_ParentObject(void) (返回窗体 HWND,
-//                                   With 内 .Left/.Top/.Width/.Height 经
-//                                   vb6_ComGetIntProp 以窗体 HWND 解析)
+//                                   With 内 .Left/.Top/.Width/.Height 走宿主模型的属性
+//                                   分派, 两头都问 vb6forms_ctrl.c 那四对进出口)
 // 由 cgen 生成端文本重写 (CodeEmitter::emitLine, Fix 133u) 把生成 C 里的
 // "vb6_UserControl_Parent.<成员>" 链改写为这些函数 — 见 cgen_base.cpp.
 void*   vb6_UC_ParentObject(void);

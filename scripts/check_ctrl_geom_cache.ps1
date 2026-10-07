@@ -23,6 +23,9 @@
 #       补下拉高度就是这一格)，此时必须回投影而不是回缓存
 #   S7  账 #247: 宿主模型 (IDispatch 那一路) 的四个几何名两头都只许问 vb6forms_ctrl.c 的
 #       出口；它自己那份 MoveWindow / vb6_ho_ctrlRect 投影一出现就是又开了第二份实现
+#   S8  账 #251: UC 里 `UserControl.Parent.Move l,t,w,h` 那条 call 路 (vb6_UC_ParentMove)
+#       也只许转调同一个收口一次，四档全交 (mask 15)；函数体里出现 MoveWindow(/SetWindowPos(
+#       就是把缇当像素摆位的第二份实现回潮
 #
 # 用法:  pwsh -File scripts\check_ctrl_geom_cache.ps1
 # 退出码: 0 = 全绿; 1 = 红
@@ -158,8 +161,34 @@ if (@([regex]::Matches($hoGetText + $hoSetText, 'vb6_ho_ctrlRect')).Count -ne 0)
     $bad += "S7 the host model's own geometry projection helper came back"
 }
 
+# ---- S8: 账 #251 —— UC 里 `Parent.Move` 那条 call 路也只许问同一个收口 ----
+# vb6_UC_ParentMove 以前把四个 VB 侧的数 (窗体容器 = 缇) 原样交给 MoveWindow, 于是
+# 607 缇落在 607 像素上, 而且四档都不进 VB 侧缓存 (Move 之后读 Me.Width 是投影)。
+# 它是 §B75/§B76 那一族的第三条来路: 属性赋值 / 宿主模型之外, 还有语言级 Move 的
+# call 那一路。规则: 函数体内恰好一次那条转调语句, 且不许自带摆位 API。
+$ucHostRel = "src\rtl\core\vb6forms\uc\uc_host.c"
+$ucHost = Join-Path $root $ucHostRel
+if (-not (Test-Path -LiteralPath $ucHost)) {
+    Write-Host ("FAIL S8 missing " + $ucHost) -ForegroundColor Red
+    exit 1
+}
+$ucHostText = [System.IO.File]::ReadAllText($ucHost)
+$mPM = [regex]::Match($ucHostText, '(?s)void vb6_UC_ParentMove\([^\)]*\)\s*\{.*?\r?\n\}')
+if (-not $mPM.Success) {
+    $bad += "S8 vb6_UC_ParentMove is gone from uc_host.c -- the Parent.Move call path needs its single placement forwarder"
+} else {
+    $body = $mPM.Value
+    if (@([regex]::Matches($body, 'vb6_ControlMove\(\(void\*\)fw, \(double\)left, \(double\)top, \(double\)width, \(double\)height, 15\);')).Count -ne 1) {
+        $bad += "S8 Parent.Move no longer forwards all four axes to vb6_ControlMove (mask 15) exactly once"
+    }
+    foreach ($pat in @('MoveWindow\(', 'SetWindowPos\(')) {
+        $n = @([regex]::Matches($body, $pat)).Count
+        if ($n -ne 0) { $bad += ("S8 Parent.Move placed a window by itself again (" + $pat + " x" + $n + ") -- twips/units/cache only come from the one authority") }
+    }
+}
+
 if ($bad.Count -ne 0) {
     foreach ($b in $bad) { Write-Host ("FAIL " + $b) -ForegroundColor Red }
     exit 1
 }
-Write-Host "PASS ctrl_geom_cache (S1 one store, S2 four slots read+write, S3 8+4 write routes, S4 creation records twips, S5 every getter cached, S6 pixel gate alive, S7 host model asks the same exit)"
+Write-Host "PASS ctrl_geom_cache (S1 one store, S2 four slots read+write, S3 8+4 write routes, S4 creation records twips, S5 every getter cached, S6 pixel gate alive, S7 host model asks the same exit, S8 Parent.Move forwards the four axes too)"
