@@ -154,6 +154,18 @@ void CCodeGen::emitLocalDeclCode(LocalDeclStmt& node) {
                 break;
             }
 
+            // 账 #118: 局部的名字与**模块级定长串**同名时构成遮蔽 —— 必须先把过程入口
+            // 从 moduleFixedStringLen_ 恢复进来的那条撤掉, 否则 `Private gT As String * 5`
+            // 的模块里写 `Dim gT As String` (普通动态串), 后面每句 `gT = ...` 都会被
+            // 按 5 位收口。定长的那一种在本函数后面 (FixedStringTypeRef 分支) 会重新登记,
+            // 故这里只在"不是定长串"时才撤。
+            {
+                std::string fsShadow = var.name;
+                std::transform(fsShadow.begin(), fsShadow.end(), fsShadow.begin(), ::tolower);
+                if (!(var.asType && var.asType->kind == ASTNodeKind::FixedStringTypeRef))
+                    knownFixedStringLen_.erase(fsShadow);
+            }
+
             std::string cType = mapTypeRef(var.asType.get());
 
             // 记录变量类型集合 (用于Debug.Print和COM解封类型推断)

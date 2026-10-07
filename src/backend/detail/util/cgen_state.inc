@@ -296,6 +296,21 @@
     // 用于LSet/RSet使用固定长度而非SysStringLen
     std::unordered_map<std::string, std::string> knownFixedStringLen_;
 
+    // 账 #118: 定长字符串 **UDT 字段** 的长度表 (UDT 的 C 类型名 → 成员小写名 → 长度表达式)。
+    // `Type Rec: f As String * 8` 的 `r.f = ...` / `Len(r.f)` 靠它收口到 8。
+    // 在 visit(TypeDecl&) 里按声明填 (那一步的 C 类型名就是 key), 全模块有效 —— **不随
+    // 过程入口 clear** (与 knownFixedStringLen_ 不同), 所以别把它加进任何一个 clear 列表。
+    // 跨模块 UDT 查不到 (符号表按模块隔离, 同 udtFieldObjCType 的既有边界)。
+    std::unordered_map<std::string, std::unordered_map<std::string, std::string>> udtFixedStrFieldLen_;
+
+    // 账 #118: **模块级**定长串的持久副本 (小写变量名 → 长度表达式)。knownFixedStringLen_
+    // 在每个过程入口 clear (cgen_decl_func.cpp / cgen_decl_proc.cpp / cgen_decl_prop.cpp),
+    // 而模块级 `Private gT As String * 5` 是在 declaration 阶段登记的 —— 于是第一个过程
+    // 一入口那条登记就没了, `gT = "ab"` 与 `Len(gT)` 双双退回"普通动态串"口径 (实测
+    // A-len=2 / A=[ab])。与 classBstrMembers_ / moduleUdtMembers_ 同一套办法:
+    // 在 cgen_base_generate_state_scan.inc 里扫一遍留底, 每个过程入口再插回来。
+    std::unordered_map<std::string, std::string> moduleFixedStringLen_;
+
     // M22: Declare A版API函数名集合 (小写) - 需要BSTR->ANSI转换的ByVal String参数
     // 判断: 函数名或Alias以'A'结尾 (如 GetWindowTextA, Alias "WritePrivateProfileStringA")
     std::unordered_set<std::string> knownDeclareAnsi_;

@@ -620,6 +620,40 @@ bool CCodeGen::udtFieldIsBstrInCTarget(const std::string& target) const {
 }
 
 
+// ---- 账 #118: 定长串 (String * N) 的长度查询 ----
+// 见 cgen_helpers.inc 的声明注释。返回非空 = 是定长串, 值即长度表达式。
+std::string CCodeGen::fixedStrLenOfExpr(const ASTNode& expr,
+                                        const std::string& altCName) const {
+    // ① 裸标识符: 模块级变量 / 局部 / 形参 / 返回值槽
+    if (expr.kind == ASTNodeKind::IdentifierExpr) {
+        const std::string lower = Symbol::toLower(
+            static_cast<const IdentifierExpr&>(expr).name);
+        auto it = knownFixedStringLen_.find(lower);
+        if (it != knownFixedStringLen_.end()) return it->second;
+        if (!altCName.empty()) {
+            auto itAlt = knownFixedStringLen_.find(Symbol::toLower(altCName));
+            if (itAlt != knownFixedStringLen_.end()) return itAlt->second;
+        }
+        return "";
+    }
+    // ② UDT 字段: `r.f` —— 先求对象是哪个 UDT (inferUdtTypeOfExpr 认得裸 UDT 变量、
+    //    嵌套 UDT 字段、SA_AT 数组元素等既有形状), 再查该 UDT 的定长字段表。
+    //    刻意**不问**字段名跨 UDT 是否唯一: 类型来自对象, 同名不同 UDT 各查各的。
+    if (expr.kind == ASTNodeKind::MemberAccessExpr) {
+        auto& ma = static_cast<const MemberAccessExpr&>(expr);
+        if (!ma.object) return "";
+        const std::string objUdt = inferUdtTypeOfExpr(*ma.object);
+        if (objUdt.rfind("vb6_type_", 0) != 0) return "";
+        auto uit = udtFixedStrFieldLen_.find(objUdt);
+        if (uit == udtFixedStrFieldLen_.end()) return "";
+        auto mit = uit->second.find(Symbol::toLower(ma.memberName));
+        if (mit == uit->second.end()) return "";
+        return mit->second;
+    }
+    return "";
+}
+
+
 std::string CCodeGen::appendUdtObjFieldMarker(const std::string& objExpr,
                                               const std::string& udtCType,
                                               const std::string& member,

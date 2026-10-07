@@ -13,6 +13,9 @@
 
     // BSTR赋值检测: 如果目标是BSTR变量, 使用vb6_BSTR_Assign防止悬垂指针和双重释放
     bool targetIsBstr = false;
+    // 账 #118: "这个目标是不是定长串, 定长多少" —— 在下面 targetIsBstr 块内算一次,
+    // 发码处(本文件 240 行那一支)还要用它把值收口到 N, 故提到块外。
+    std::string fixedLenTarget;
     {
         // 检查目标是否是已知BSTR变量 (me->field 或 模块级变量)
         std::string checkName = target;
@@ -74,6 +77,14 @@
             && inferExprType(*node.target) == Vb6Type::String) {
             targetIsBstr = true;
         }
+        // 账 #118 ①: 定长串 UDT 字段 (`Type Rec: f As String * 8` 的 `r.f = ...`)。
+        // 上面 udtFieldIsBstrInCTarget 那条只认 **SA_AT 宏**形状 (它要求对象部分以 ')' 收尾),
+        // 对象是裸 UDT 变量时捡不到 ⇒ 此前连 BSTR 分支都进不来, 落最底下的裸赋值
+        // (`r.f = vb6_BSTR_FromStr(L"ef")`), 既不收口到 8, 重赋也不释放旧值。
+        // 判据刻意**只认定长**字段 (宽度可静态得知): 动态 String 字段维持既有口径,
+        // 免得顺手改了 UDT 字段赋值的深拷贝/借用语义 (那是另一笔账)。
+        fixedLenTarget = fixedStrLenOfExpr(*node.target);
+        if (!targetIsBstr && !fixedLenTarget.empty()) targetIsBstr = true;
     }
     // P8.4: Variant赋值检测 - 如果目标是Variant变量, 用Variant构造函数包装值
     bool targetIsVariant = false;
@@ -236,7 +247,17 @@
             }
         }
         // #122 折出来的 `vb6_CStrXxx(...)` 是刚 alloc 的新块, 与字面量/拼接同属"自有"。
-        if (valueOwned113 || wrapped122) {
+        if (!fixedLenTarget.empty()) {
+            // 账 #118 ①: 定长串赋值的收口 —— 短则右侧补空格、长则截右 (VB6 手册 + 真机
+            // CopyMemory 实测一致, 与 LSet 同口径)。必须先 fit 成一只**新** BSTR 再 move
+            // 进目标: 先 Assign 再回头改长度会多留一只临时, 而裸赋值连长度都不对。
+            // RHS 是自有临时串那一侧用 vb6_LSetFree 顺手把它释放 —— 尺与下面
+            // AssignMove/Assign 的选择同一把, 否则每次赋值都漏一块 (账 #118 ②)。
+            const std::string fitFn118 =
+                (valueOwned113 || wrapped122) ? "vb6_LSetFree" : "vb6_LSet";
+            c_.emitLine("vb6_BSTR_AssignMove(&" + target + ", " + fitFn118 + "(" + value
+                        + ", " + fixedLenTarget + "));");
+        } else if (valueOwned113 || wrapped122) {
             c_.emitLine("vb6_BSTR_AssignMove(&" + target + ", " + value + ");");
         } else {
             c_.emitLine("vb6_BSTR_Assign(&" + target + ", " + value + ");");

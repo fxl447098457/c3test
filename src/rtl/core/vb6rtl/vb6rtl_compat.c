@@ -372,6 +372,15 @@ BSTR vb6_LSet(BSTR str, int32_t length) {
     return result;
 }
 
+BSTR vb6_LSetFree(BSTR str, int32_t length) {
+    /* 账 #118: 定长串赋值收口 —— LSet 同款结果, 顺带释放入参。
+     * 发码侧只在"RHS 是自有临时串"那一侧发这个 (与 vb6_BSTR_AssignMove 的选择同一把尺),
+     * 借用侧 (变量/形参/字段) 发裸 vb6_LSet —— 那时不能释放别人的串。 */
+    BSTR r = vb6_LSet(str, length);
+    vb6_BSTR_Free(str);
+    return r;
+}
+
 BSTR vb6_RSet(BSTR str, int32_t length) {
     if (length <= 0) return vb6_BSTR_Empty();
     wchar_t* buf = (wchar_t*)calloc(length + 1, sizeof(wchar_t));

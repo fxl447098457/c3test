@@ -340,6 +340,19 @@
         std::string lenLower = lenIdent.name;
         std::transform(lenLower.begin(), lenLower.end(), lenLower.begin(), ::tolower);
         if (lenLower == "len" && node.positional.size() == 1) {
+            // 账 #118 ①: **定长串的 Len 恒为声明长度 N**, 与当前装着几个字符无关
+            // (`Dim a As String * 5: a = "ab"` 在真 VB6 里 Len(a) = 5)。
+            // 此前落通用 vb6_Len 路 ⇒ SysStringLen 给的是**值的长度** (2)。
+            // 这一条必须排在下面所有 sizeof 兜底**之前**: 模块级定长串不进
+            // knownBstrVars_ (那张表每过程入口 clear), 会被"兜底桶"当数值发成
+            // sizeof(指针) —— x64 读 8 (LEN-DECL 实测), 而定长串要给的就是 N。
+            {
+                const std::string fsLen118 = fixedStrLenOfExpr(*node.positional[0]);
+                if (!fsLen118.empty()) {
+                    lastExpr_ = "((int32_t)(" + fsLen118 + "))";
+                    return;
+                }
+            }
             // VB6 口径 (真 VB6 实测): Len 的实参不是 String 就必须**能落到变量上** ——
             // 非 String 的 Len 取的是"存储宽度", 字面量没有存储宽度可言, 真 VB6 直接
             // 编译错误 "Variable required - can't assign to this expression"

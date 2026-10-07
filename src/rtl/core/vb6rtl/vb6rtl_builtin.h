@@ -381,6 +381,10 @@ void*    vb6_StrPtr(BSTR s);          // StrPtr: address of string data
 uintptr_t vb6_ObjPtr(void* obj);       // ObjPtr: address of object
 BSTR   vb6_LSet(BSTR str, int32_t length);  // LSet: left-justify
 BSTR   vb6_RSet(BSTR str, int32_t length);  // RSet: right-justify
+// 账 #118: 定长串赋值 (`Dim s As String * N: s = 值`) 的收口函数 —— LSet 同款
+// (不足右侧补空格/超长截右), 顺带释放入参。给发码侧"值本身是自有临时串"那一侧用:
+// 定长串赋值必须先 fit 成一只**新** BSTR 再 move 进目标, 裸 LSet 会把 RHS 临时串漏掉。
+BSTR   vb6_LSetFree(BSTR str, int32_t length);
 BSTR   vb6_WeekdayName(int32_t weekday, int32_t abbreviate, int32_t firstDayOfWeek);
 BSTR   vb6_MonthName(int32_t month, int32_t abbreviate);
 BSTR   vb6_FormatCurrency(double value, int32_t numDigits, int32_t incLeading, int32_t useParens, int32_t groupDigits);

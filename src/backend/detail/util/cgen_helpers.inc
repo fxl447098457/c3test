@@ -778,6 +778,18 @@
     std::string udtFieldObjCType(const std::string& udtCType,
                                  const std::string& memberLower) const;
 
+    // ---- 账 #118: 定长串 (String * N) 的长度查询 ----
+    // 给定一个表达式, 若它是**定长串**则返回其长度的 C 表达式 (如 "8"), 否则返回空串。
+    // 认两种形态:
+    //   · 裸标识符 —— 模块级变量 / 局部变量 / 形参 / 函数(属性)返回值槽, 按小写名查
+    //     knownFixedStringLen_。altCName 给"发码后名字会被改写"的场合兜一次底:
+    //     VB6 里 `F = "ab"` (给函数名赋值) 的发码目标是 vb6_ret_F, 而 AST 侧名字仍是 F。
+    //   · UDT 字段 —— `r.f` (对象按 inferUdtTypeOfExpr 求出 UDT 的 C 型), 查
+    //     udtFixedStrFieldLen_。
+    // 用途: 赋值收口 (右侧补空格/超长截右) 与 Len(定长串) ≡ N 两处。
+    std::string fixedStrLenOfExpr(const ASTNode& expr,
+                                  const std::string& altCName = "") const;
+
     // Fix 177: 目标已是**生成的 C 串**时, 判断它是否为 UDT 动态数组元素上的 String
     // 字段 (`VB6_SA_AT(vb6_type_TCELL, ...).Text`) → 赋值必须走 vb6_BSTR_Assign。
     bool udtFieldIsBstrInCTarget(const std::string& target) const;

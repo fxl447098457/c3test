@@ -3151,20 +3151,46 @@ if ($Category -in @("all", "run", "vbp")) {
     # ⇒ std::bad_alloc 没人接 → abort()：退出码 3、零诊断，调试版 CRT 还弹一个前台模态框
     # (把跑夹具的人的会话整个卡住)。BASE 上这个文件**一行 C 都不发**，所以下面每条形状读数
     # 本身就是修复前的红点；再补一条 ICE 文案的缺席断言，防这一族以后换个形态回来。
-    # 口径：本用例只钉"六个定长串落点都能正常发码"。VB6 那套空格补齐/截断语义还欠着
-    # (模块级与 UDT 成员这两处发的仍是普通动态串)，所以刻意不做成运行用例。
+    # 口径：本用例只钉"六个定长串落点都能正常发码"。VB6 那套收口语义 (补空格/截断/Len≡N)
+    # 已由账 #118 补齐, 运行侧判据在 test_fixedstr_sem.bas (下面 5 行是它的**发码形状**侧)。
     Test-EmitcShape "fixedstr_emitc_decl" @("$Tests\test_fixedstr_decl.bas") @(
         'BSTR gT = NULL;',                              # 模块级：崩溃就崩在这一行发不出来
         'BSTR vb6_F(void) {',                           # Function 返回类型那一处
         'void vb6_S(BSTR x);',                          # 形参那一处
-        'BSTR f;',                                    # UDT 成员
-        'BSTR lT = vb6_BSTR_FixedSTR(4);',              # 局部仍走补空格那条(唯一补的一条)
-        'vb6_DebugWriteLong((int32_t)(vb6_Len(gT)));'   # 模块级 String 的 Len 照旧是字符数
+        'BSTR f;',                                      # UDT 成员
+        'BSTR lT = vb6_BSTR_FixedSTR(4);',              # 局部定长串初始化 (NUL 填充, 见 RTL 注释)
+        # 账 #118: 赋值收口 —— 补/截都收在这一条上 (目标定长 8, 右侧补到 8)。
+        # 用 LSetFree 而不是 LSet: RHS 是自有临时串 (字面量) 那一侧顺手释放, 否则每次赋值漏一块。
+        'vb6_BSTR_AssignMove(&gT, vb6_LSetFree(vb6_BSTR_FromStr(L"ab"), 8));',
+        'vb6_BSTR_AssignMove(&r.f, vb6_LSetFree(vb6_BSTR_FromStr(L"ef"), 8));',   # UDT 定长字段同款
+        'vb6_BSTR_AssignMove(&vb6_ret_F, vb6_LSetFree(vb6_BSTR_FromStr(L"ab"), 5));',  # 返回值槽
+        'vb6_DebugWriteBSTR(x);',                       # 形参按**字符串**打 (账 #118 ③)
+        'vb6_DebugWriteLong((int32_t)(((int32_t)(8))));'  # Len(模块级定长串) ≡ 声明长度 N
     )
     Test-EmitcAbsent "fixedstr_emitc_no_ice" @("$Tests\test_fixedstr_decl.bas") @(
         '(ICE)',                                        # ICE 兜底文案: 出现即本批又崩了
-        '((int32_t)sizeof(gT))'                         # 别把定长串的 Len 折成指针宽
+        '((int32_t)sizeof(gT))',                        # 别把定长串的 Len 折成指针宽
+        'vb6_Len(gT)',                                  # 更别退回"值长度"那条 (账 #118 就是它)
+        'vb6_DebugWriteLong((int32_t)x)'                # 形参按数值打的旧形状, 不许回来
     )
+    # 账 #118 运行侧判据: 七个落点的补空格/截断/Len≡N, 双架构。
+    # 「初始化用 0 填充」那一条**不在这里钉** —— NUL 在 Debug.Print 上不可见, 见用例头注释;
+    # 第 ⑦ 段 `FS-i=[...]` 也**不做判据**: 调用点实参侧的收口本批没做 (用例头写了原因与修法)。
+    $fsSemNeedles = @(
+        "FS-a-len=5", "FS-a=[ab   ]",                   # 模块级: 短→右补空格
+        "FS-b-len=5", "FS-b=[abcde]",                   # 模块级: 长→截右
+        "FS-c-len=5", "FS-c=[cd   ]",                   # 局部: 短
+        "FS-d-len=5", "FS-d=[cdefg]",                   # 局部: 长
+        "FS-e-len=8", "FS-e=[ef      ]",                # UDT 定长成员: 短
+        "FS-f-len=8", "FS-f=[efghijkl]",                # UDT 定长成员: 长
+        "FS-g-len=5", "FS-g=[ab   ]",                   # Function 返回值槽
+        "FS-h-len=4", "FS-h=[z   ]",                    # Property Get 返回值槽
+        "FS-i-len=4",                                   # ByVal 定长形参: Len=声明长度 (旧: sizeof=8)
+        "FS-j-len=5", "FS-j=[zz   ]", "FS-j2=[zz   ]",  # 借用侧: 收口 + 深拷贝 (改 v 不改 l)
+        "FS-k-len=5", "FS-k=[200  ]",                   # 循环内反复收口
+        "FIXEDSTR-DONE")
+    Add-BasTest "test_fixedstr_sem" "$Tests\test_fixedstr_sem.bas" $fsSemNeedles
+    Add-BasTest "test_fixedstr_sem_x86" "$Tests\test_fixedstr_sem.bas" $fsSemNeedles -Arch "x86"
     # 账 #119: AssignMove 铺到局部/形参/ByRef 写穿三类目标 (以前只有模块级目标走这条)。
     # 这四行是"机制本体"的直接断言 —— 真跑那只 S119-leak-ok 只说结果, 这里钉的是发码形状:
     #   136 行那条循环体 (Left 的自有临时) / 定长串 String$ / ByRef 形参解引用目标

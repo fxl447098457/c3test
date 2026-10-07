@@ -84,6 +84,8 @@ void CCodeGen::visit(PropertyDecl& node) {
     if (isClassModule_) knownClassVars_["me"] = moduleName_;
     // P6.11: 恢复类模块成员变量类型 (clear后从持久化集合恢复)
     knownBstrVars_.insert(classBstrMembers_.begin(), classBstrMembers_.end());
+    // 账 #118: 同 cgen_decl_func.cpp —— 模块级定长串跨过程恢复。
+    knownFixedStringLen_.insert(moduleFixedStringLen_.begin(), moduleFixedStringLen_.end());
     knownDoubleVars_.insert(classDoubleMembers_.begin(), classDoubleMembers_.end());
     knownLongVars_.insert(classLongMembers_.begin(), classLongMembers_.end());
     // Fix 010n: 恢复类模块UDT成员变量 (knownUdtVars_被clear后需要从classUdtMembers_恢复)
@@ -283,6 +285,16 @@ void CCodeGen::visit(PropertyDecl& node) {
             else if (retVb6Type == Vb6Type::Double) knownDoubleVars_.insert(retLower);
             else if (retVb6Type == Vb6Type::Long || retVb6Type == Vb6Type::Integer || retVb6Type == Vb6Type::Boolean) knownLongVars_.insert(retLower);
             else if (retVb6Type == Vb6Type::Variant) knownVariantVars_.insert(retLower);
+            // 账 #118 ①: 定长串返回类型 (`Property Get P() As String * 5`) —— 与
+            // cgen_decl_func.cpp 那处同款同口径 (两处都得记, 漏一处就少一种落点)。
+            // 长度表在**这个 if (node.returnType) 块内**才拿得到 returnType。
+            if (node.returnType->kind == ASTNodeKind::FixedStringTypeRef) {
+                emitExpr(*static_cast<FixedStringTypeRef&>(*node.returnType).length);
+                if (!lastExpr_.empty()) {
+                    knownFixedStringLen_[Symbol::toLower(node.name)] = lastExpr_;
+                    knownFixedStringLen_[retLower] = lastExpr_;
+                }
+            }
         }
     }
 

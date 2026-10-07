@@ -101,6 +101,8 @@ void CCodeGen::visit(SubDecl& node) {
     if (isClassModule_) knownClassVars_["me"] = moduleName_;
     // P6.11: 恢复类模块成员变量类型 (clear后从持久化集合恢复)
     knownBstrVars_.insert(classBstrMembers_.begin(), classBstrMembers_.end());
+    // 账 #118: 同 cgen_decl_func.cpp —— 模块级定长串跨过程恢复 (窗体/类模块过程走本文件)。
+    knownFixedStringLen_.insert(moduleFixedStringLen_.begin(), moduleFixedStringLen_.end());
     knownDoubleVars_.insert(classDoubleMembers_.begin(), classDoubleMembers_.end());
     knownLongVars_.insert(classLongMembers_.begin(), classLongMembers_.end());
     // Fix 010n: 恢复类模块UDT成员变量 (knownUdtVars_被clear后需要从classUdtMembers_恢复)
@@ -122,6 +124,22 @@ void CCodeGen::visit(SubDecl& node) {
             std::string pLower = p->name;
             std::transform(pLower.begin(), pLower.end(), pLower.begin(), ::tolower);
             knownVariantVars_.insert(pLower);
+        }
+        // 账 #118: 形参同名遮蔽模块级定长串 → 先撤掉过程入口恢复进来的那条
+        // (定长形参下面那一格会重新登记)。与 cgen_decl_func.cpp 同款。
+        {
+            std::string pShadowFs = p->name;
+            std::transform(pShadowFs.begin(), pShadowFs.end(), pShadowFs.begin(), ::tolower);
+            knownFixedStringLen_.erase(pShadowFs);
+        }
+        // 账 #118 ③: 定长串形参 — 与 cgen_decl_func.cpp 那处一字一样 (窗体/类模块的
+        // 过程走本文件, 漏这里就收不到)。理由见那边的长注释。
+        if (p->asType && p->asType->kind == ASTNodeKind::FixedStringTypeRef) {
+            std::string pFsLower = p->name;
+            std::transform(pFsLower.begin(), pFsLower.end(), pFsLower.begin(), ::tolower);
+            knownBstrVars_.insert(pFsLower);
+            emitExpr(*static_cast<FixedStringTypeRef&>(*p->asType).length);
+            if (!lastExpr_.empty()) knownFixedStringLen_[pFsLower] = lastExpr_;
         }
         if (p->asType && p->asType->kind == ASTNodeKind::SimpleTypeRef) {
             auto& simpleP = static_cast<SimpleTypeRef&>(*p->asType);
