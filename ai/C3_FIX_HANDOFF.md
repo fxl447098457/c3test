@@ -1369,18 +1369,28 @@ S9.4 打标记那一路的 PictureBox 判据必须问表、且不许把成员名
 **与本刀无关，已经钉死**：改前那台（`571ca6aa` 本机冷编）跑同一份 v7 探针在**同一行**崩，读数一字不差。所以这是存量缺陷，不是 #247 带出来的；本刀的夹具因此刻意绕开 Left/Top 那一形。
 开工先量两件事：① 崩的是读侧还是写侧留下的状态（把 `Debug.Print` 换成不读任何东西的空句，看崩点是否还来）；② 语料里有没有真在跑「改窗体自身位置之后再读位置」的写法（`vb6_ControlMove` 那条路把四档都写进缓存，缓存里存的是**缇**而窗体的实际屏幕像素随 StartUpPosition 漂 ⇒ 那道像素闸每次都不认，怀疑就在这一问的某条换算里）。
 
-### B79 窗体的 `Controls` 集合与 `Count` 答空 —— Charts 的 ClsResizer 在唯一调用点上静默不做任何事（账 #250，**未开工**）
+### B79 窗体的 `Controls` 集合与 `Count` 答空 —— Charts 的 ClsResizer 在唯一调用点上静默不做任何事（账 #250 = C29-GE-b，**已出：门待回填**）
 
-探针（同一份 v8）：一枚带 TextBox + Timer 的窗体上 `Me.Controls.Count` = **0**、`Me.Count` = **0**、`Me.Controls.Item(1).Name` = **空串**、`.Width` = **0**（不崩，一律空值），`For Each e In Me.Controls` 循环体**一次都不进**。
-落点已经看清一半：宿主模型的 `Controls` 那一档是有实现的（`uc_hostmodel_getprop.inc:88` 造 `vb6_uc_newControls`，`uc_controls.c:47` 的 `vb6_uc_collectChildren` 先查登记表、再兜底 `GetWindow(GW_CHILD)` 真枚举子窗口），但发码交出去的是 `vb6_ComGetObjectProp(vb6_hwnd_PForm, L"Controls")`（emit 实测）—— 这一档与 `vb6_ComGetProp` 不是同一条路，宿主分支有没有接上没查实；`Count` 那一档更直白：`getprop.inc:87` 对**任何**宿主对象一律 `setVariantLong(out, 0)`。
-后果是真实工程里的一整块排版：`tests/Charts 2020/ClsResizer.cls` 的 `InitControls` 里 `ReDim Rects(oForm.Count - 1)` ⇒ `ReDim Rects(-1)`，`ResizeControls` 又挂着 `On Error Resume Next` ⇒ 全程静默。VB6 里 `Form.Count` 压根不是这个属性（VB6 窗体没有 `Count`，那是 UserControl 的 `Controls.Count`），所以「答 0」不是正确答案这一点还要先对 VB6 口径，别照本仓现状定修法。
-判据形状先想好：一枚窗体 + 两枚控件，`Controls.Count` / `Item(1).Name` / `For Each` 三条各钉一数，再加一枚负钉（不该出现的成员不许答非空）。这一格修好之后，§B75 那一刀在 Charts 上才第一次有流量 —— 两条的先后顺序因此定成 #250 在前、Charts 的读数在后。
+- **改前读数**（探针 `.build/probe247/` v8 + 同一份夹具两架构对跑）：一枚带 TextBox + PictureBox 的窗体上 `Me.Controls.Count` = **0**、`For Each o In Me.Controls` **零条**、`Me.Controls.Item(1).Name` = **空**、`.Width` = **0**（一律空值，不崩）。
+- **根因一句话**：`uc_hostmodel_getprop.inc` 的 Controls 档问的是 `vb6_ho_setVariantDispatch` —— 而那一枚**刻意**只交 Empty（注释写着：让字体代理那一路继续走 Nothing 分支，别对裸指针调 Release）。rev14 为了「真交对象」另立了 `vb6_ho_setVariantObject`，**但只把 `Item` / `Add` 两个调用点改过去** ⇒ Controls 交回 NULL。而下游三条其实**全都写好了**：`vb6com_foreach.c:35/123/175` 认这个集合，`uc_hostmodel_call.inc:35/53` 的 Item 用的正是新出口 —— 断的只有最上面那一档。
+- **改**：Controls 那一档换 `vb6_ho_setVariantObject`；**Font 代理那一档保持 Empty 原样**（它依赖 Nothing 分支，别顺手并表 —— 那一格与 #247 的「并到唯一出口」方向相反，是有意的）。
+- **改后读数**：`Controls.Count` = **5**、`For Each` 走完 **5** 条；其余十四行与改前逐字节相同（x64 与 x86 两片都是这样）。负控 = 本笔父提交 `a22cb110` 本机冷编那台跑**同一份夹具** ⇒ 只有 GC13/GC14 两条 False raw=0 → True raw=5，别的行一条不差。
+- **与 #247 的先后**：上一刀撤掉的那份第二实现，是**在这一刀之后才第一次被走到** —— `For Each oCtrl In oForm.Controls` ⇒ 成员 ⇒ `.Left = …` 落宿主模型 setprop，而那条路今天已经是转调四个出口。所以 Charts 的 resizer（`ClsResizer.cls:92` 的 `For Each`，唯一调用点 `Form2.frm:581`）从今天起才有流量；#247 的台账里那句「接上但没有流量」到这里才闭合。
+- **判据** = `tests/geomcache` 的 GC13/GC14 两条（钉「集合交得出对象 + 枚举走得完」，负控两面验过）。**不新立哨兵**：这一格的失效形状被那两条读数直接咬住，翻回去就红。
+- **没修的那一半另立 §B81（账 #252）**：枚举出来的成员**答不出自己的 VB 名**（`o.Name` 空、`TypeName` 答 Control）。数出来的 5 条是真的，名字那一档还是空的。
 
 ### B80 `vb6_UC_ParentMove` 把**缇**直接交给 `MoveWindow`（账 #251，**未开工**）
 
 `src/rtl/core/vb6forms/uc/uc_host.c:347` —— `MoveWindow(fw, left, top, width, height, TRUE)`，四个实参一个换算都没有。而它的调用方 czUI（`frmDemo` 全屏那一支）存进 `m_Saved*` 的数来自**宿主模型读出的缇**（`With Parent : .Left = …`），发码那侧 `UserControl.Parent.Move l,t,w,h` 又确实是缇口径 ⇒ 差 15 倍那一族的老形状（#175 / #247），只是这次住在 call 那一路。
 同一格里还有一问没定：`Parent.Move` 的目标是**顶层窗体**，MoveWindow 对它用的是屏幕坐标，而控件那一路用的是父客户区坐标 —— 单位之外还有坐标空间这一档，开工先一起定口径（并照 §B75 的收法：转调 `vb6_ControlMove`，别在这层再拼一份 MoveWindow）。
 判据要在 UC 里量：现成的 czUI-main 是一片真工程夹具（门上跑 Test-GuiVbp，读数只有窗口起没起 / dump 色数），要钉数得先有一枚能在无头下打 Debug.Print 的 UC 夹具 —— 那一格与 §B79 的夹具是同一件活，一起做。
+
+### B81 窗体的直接子控件没有 VB 侧身份记录 —— `For Each` 出来的成员答不出 `.Name`（账 #252，**未开工**）
+
+读数（#250 那一刀的同一轮探针，改后）：`For Each` 走完 **5** 条，但第一条的 `CStr(o.Name)` = **空串**，`TypeName(o)` = **Control**。集合本身是通的，缺的是成员的身份。
+两处叠在一起：① 发码那条创建路把 `vb6_CreateControl` 的**第二形参（controlName）恒传空串**（emit 实测：`"EDIT", ""`）；② 标准控件**压根不进宿主登记表** —— 全仓只有一个调用点 `vb6rtl_system.c:549` 给**窗体**注册过（`vb6_HostObj_Register(hwnd_, NULL, "Form", 1, -1)`）。于是 `vb6_Host_GetProp` 的 Name 档（`h && h->name[0] ? h->name : (r && r->ctrlName[0] ? … : L"")`）对窗体子控件一律交空。
+后果面：`Controls("txtDoc(0)")` 那档按名查找（`uc_controls.c:91` 的桥已经写好）、`ClsResizer` 的名字比较、以及任何 `ctrl.Name` 写法今天都拿不到数 —— 所以这一格是 #250 的**下半场**，做完 Controls 集合才算真通。
+开工先定两格，别一上来就发码：① `Index` —— 非数组控件今天答 **-1**，注册时若图省事传 0，就是把存量答案改了（必须保持 -1）；② `typeName` —— 登记表里一空，`TypeName` 就从 "Control" 变成真类型名（VB6 语义更对，但那是**公共答案的改变**，要先数有多少条存量针在钉 `TypeName`，与 #159 那张宿主伪成员表对一遍再动）。修法本身在 cgen：把 VB 名（和后面的类型名）从 `cgen_form_create_controls.inc` 递进创建/注册那一步，而不是在 RTL 里猜。
 
 ## C. 仍在生效的口径与工具事实（与本文档等长的一半价值在这里；完整版见记忆库）
 
