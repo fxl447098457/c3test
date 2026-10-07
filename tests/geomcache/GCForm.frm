@@ -294,6 +294,20 @@ Private Sub tmrGC_Timer()
     ok15 = (fc = n) And (fc >= 4) And (fc <= 8)
     Debug.Print "GC15-form-count=" & TF(ok15) & " raw=" & fc & "/" & n
 
+    ' GC16 -- ledger 249. Reading the FORM's own Left inside a & concatenation handed
+    ' the raw int straight to vb6_BSTR_Concat: the "is this object slot a control"
+    ' authority did not know the MeExpr shape, so the member name was looked up as a
+    ' bare module symbol, hit the String-returning VB builtin Left(), the type oracle
+    ' answered String, and the concat face skipped the numeric wrap. The crash site IS
+    ' the judge -- on the pre-fix compiler this line never prints (0xC0000005 mid-timer).
+    ' The digits are pinned too: surviving is not the same as answering.
+    ' (.Top / .Width / .Height never crashed, only because those names do not collide.)
+    Dim ok16 As Boolean
+    Dim s16 As String
+    s16 = "L" & Me.Left
+    ok16 = (Len(s16) > 2)
+    Debug.Print "GC16-me-left-concat=" & TF(ok16) & "/" & s16
+
     Debug.Print "GC-DONE"
     Unload Me
 End Sub

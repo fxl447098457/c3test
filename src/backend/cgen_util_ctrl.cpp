@@ -2017,6 +2017,20 @@ std::string CCodeGen::ctrlElemKey(const std::string& ctrlName, int index) {
 // 两条对象形态合成这一个出口。返回 false = 对象位不是窗体控件（调用方照旧走原兜底）。
 bool CCodeGen::ctrlTypeOfMemberObject(const Expr* obj, FrmControlType& outType) const {
     if (!obj) return false;
+    // 账 #249: `Me.<成员>` —— 窗体模块里的 MeExpr 对象位就是这枚窗体**自己**。knownFormControls_
+    // 的键是窗体名（cgen_form_ctrl_registry.inc 登记的），而 MeExpr 不带名字，于是这一问以前
+    // 一律答"不是控件"，成员名就掉进"按裸名查模块符号"那一档 —— `Left` 撞返回 String 的 VB
+    // 内置函数 ⇒ 判成 String ⇒ `&` 拼接面不套数值转换 ⇒ 裸 int 进 BSTR 槽 = 0xC0000005
+    // （实测 `Debug.Print "x=" & Me.Left` 两形五样都崩，而 .Top/.Width/.Height 只因不撞名而幸免；
+    // 赋给 Long 变量也正常 —— 症状按"属性名撞不撞内置函数名"分家，与 #229 同一族）。
+    // 认成 Form 之后，答案仍出自 controlPropType 那一张表，本函数不答任何具体类型。
+    if (obj->kind == ASTNodeKind::MeExpr) {
+        if (isFormModule_ && !knownFormName_.empty()) {
+            outType = FrmControlType::Form;
+            return true;
+        }
+        return false;
+    }
     std::string name;
     if (obj->kind == ASTNodeKind::IdentifierExpr) {
         name = Symbol::toLower(static_cast<const IdentifierExpr&>(*obj).name);

@@ -2493,8 +2493,10 @@ if ($Category -in @("all", "run", "vbp")) {
     # txtMain → cmdY → cmdX → txtSecond → 回头），顺序那一刀另记账 #163。这里钉三件事：
     # 四枚可聚焦的**都走到**（MW-new=4）、**回头落在起点**（MW-repeat=txtMain）、
     # 回到起点前走过 3 枚新站（MW-hops=3）。改之前焦点压根不动 ⇒ MW-new=1。
-    # 同一份产物还带一条开关侧负控：`C3_OCX_NO_DLGMSG=1` 把泵里这一句关掉 ⇒ MW-new 回到 1
-    # （本地实测；开关与模态那条循环共用，先例 Fix 144b）。
+    # 开关侧负控只剩一条还活着：`C3_OCX_NO_TABNAV=1` 退回 z-order ⇒ 红 `MW-seq`。
+    # `C3_OCX_NO_DLGMSG=1` 对这一相**已无效**（2026-10-07 实测：设与不设，MW-new/MW-seq 一字不差）——
+    # 账 #163 之后主泵里 `vb6_TabNavKey` 排在 `IsDialogMessageW` 之前，VK_TAB 已被自研导航器吃掉，
+    # 那个开关只剩非 Tab 的几条对话框键。旧文案「MW-new 回到 1」是接管前的行为（账 #253 第二半清的就是这条）。
     $mdNeedles = @("MODAL-DONE", "M1-startup=Y", "M2-returned=Y", "D1-first=Y",
                     "D2-notB=Y", "D3-notLbl=Y", "D4-notOff=Y", "D5-notDis=Y",
                     "D6-notHidden=Y", "D7-ticks=Y",
@@ -3844,9 +3846,23 @@ if ($Category -in @("all", "run", "vbp")) {
         "GC12-direct-write=True",
         "GC13-coll-count=True", "GC14-foreach-iters=True",
         "GC15-form-count=True",
+        # 账 #249：`& Me.Left` 把裸 int 交给 vb6_BSTR_Concat —— 对象位那一问不认 MeExpr，
+        # 成员名就掉去按裸名查模块符号，撞上返回 String 的内置函数 `Left` ⇒ 类型答 String
+        # ⇒ 拼接面不套数值转换。崩点就是 GC16 那一行（BASE 上整行不出现，GC-DONE 也跟着没）。
+        "GC16-me-left-concat=True",
         "GC-DONE")
     Test-Vbp "geomcache" "$Tests\geomcache\GCCache.vbp" $geomExpected
     Test-Vbp "geomcache_x86" "$Tests\geomcache\GCCache.vbp" $geomExpected -Arch "x86"
+    # 发码两头：套了数值转换的形必须在，裸传 vb6_GetControlLeft 进 Concat 的形必须不在。
+    # 只钉读数会放过"两边都不套"那一族；这一格是发码面的形状，直接钉形状。
+    # (整条语句作针：PSParser 在 `@(` 续行里按**字面**数括号，单引号串里不配平的括号会让
+    #  后面的 `)` 变成野 token —— 整份 run_tests.ps1 ParserError，而退出码照旧 0。)
+    Test-EmitcShape "gc_emitc_meleft_wrap" @("$Tests\geomcache\GCCache.vbp") @(
+        'vb6_BSTR_AssignMove(&s16, vb6_BSTR_Concat(vb6_BSTR_FromStr(L"L"), vb6_CStrLong(vb6_GetControlLeft(vb6_hwnd_GCForm)  /* Form.Left via Me */)));'
+    )
+    Test-EmitcAbsent "gc_emitc_meleft_raw" @("$Tests\geomcache\GCCache.vbp") @(
+        'vb6_BSTR_AssignMove(&s16, vb6_BSTR_Concat(vb6_BSTR_FromStr(L"L"), vb6_GetControlLeft(vb6_hwnd_GCForm)  /* Form.Left via Me */));'
+    )
 
     # --- P20-42: SSTab (SysTabControl32 复刻) ---
     # 期望串取自夹具真实输出 (别缩写标签)。TS25..TS28 是切页显隐: vb6_GetControlVisible

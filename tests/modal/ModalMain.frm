@@ -140,8 +140,10 @@ End Function
 ' 不是逐拍读数 —— 某一拍没动不会假红（与 WS17 / 账 #162 那一族「条数是时序不是不变量」分开）。
 ' VB6 的次序 = 父窗内 `TabIndex`：txtMain(1) → txtSecond(2) → cmdX(3) → cmdY(4) → 回 txtMain；
 ' 交给 `IsDialogMessage` 时走的是 z-order（`txtMain → cmdY → cmdX → txtSecond`）。
-' ⇒ 负控有两条开关，各红各的：`C3_OCX_NO_TABNAV=1` 退回 z-order（红 `MW-seq`），
-' `C3_OCX_NO_DLGMSG=1` 关掉泵里的 `IsDialogMessage`（红 `MW-new` ⇒ 回到 1）。
+' ⇒ 负控只剩一条开关：`C3_OCX_NO_TABNAV=1` 退回 z-order（红 `MW-seq`；实测两架构都是
+' txtMain → cmdY → cmdX → txtSecond）。`C3_OCX_NO_DLGMSG=1` 对这一相**没有作用**（2026-10-07 实测：
+' 设与不设读数一字不差）—— 账 #163 之后 `vb6_TabNavKey` 排在 `IsDialogMessageW` 之前，VK_TAB 已被
+' 自研导航器吃掉，那个开关只剩非 Tab 那几条对话框键。旧文案「MW-new 回到 1」是接管前的行为。
 
 Private Sub tMain_Timer()
     Dim f As LongPtr
