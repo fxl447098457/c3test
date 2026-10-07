@@ -13,6 +13,12 @@ Begin VB.Form QForm
       Left            =   120
       Top             =   120
    End
+   Begin VB.Timer t2 
+      Enabled         =   -1   'True
+      Interval        =   20
+      Left            =   120
+      Top             =   240
+   End
 End
 Attribute VB_Name = "QForm"
 Attribute VB_GlobalNameSpace = False
@@ -27,47 +33,67 @@ Option Explicit
 ' outer GetMessage waiting forever with no window left, so the process just sits there.
 '
 ' Not theoretical: gate #395's only red was combofocus_x86 writing all seven judgment lines
-' and then never exiting (60 s, 62 ms CPU, no window). On a starved machine tick 6's DoEvents
-' pulls the already-queued WM_TIMER for tick 7, so tick 7 -- the one that unloads -- runs
-' INSIDE tick 6's pump, and the quit posted there is eaten by that same pump.
+' and then never exiting (60 s, 62 ms CPU, no window).
 '
-' This fixture makes that shape deterministic instead of waiting for a loaded machine: every
-' tick sleeps 80 ms while the interval is 40 ms, so a WM_TIMER is always already queued when
-' DoEvents starts, which puts the unloading tick inside an inner pump.
+' SHAPE, reshaped for gate #403 (this fixture was that gate's only real red). The unload has
+' to land INSIDE an inner pump, and it has to land there every run. It used to be done with
+' ONE timer: tick 6 slept 80 ms so tick 7's WM_TIMER was already queued, and DoEvents
+' dispatched it, which put the unloading tick inside that pump. That only worked because a
+' Timer event process was re-entrant. 90fb8069 made it NOT re-entrant (VB6 semantics:
+' vb6_DispatchTimer drops the next beat of the SAME timer while its process has not
+' returned), so gate #403 read Q-ORDER=unload-outside. The guard is right; the fixture is
+' what went stale. The hole is still there, so the witness moves to the OTHER timer: t1
+' (40 ms) still sleeps 80 ms before its tick-6 DoEvents, which guarantees t2's (20 ms)
+' WM_TIMER is already in the queue when that pump starts, and t2 owns the unload -- a
+' different timer's beat is exactly what the new guard does NOT drop. gLetGo is offered only
+' on tick 6, so t2 can never unload early, and the unload can never be credited to a pump it
+' did not run in.
 '
-'   Q-DONE                         the judgments were all written
-'   Q-ORDER=unload-inside-doevents  witness that the unload really happened inside the pump
-'                                   (without it a build that never reaches the hole would
-'                                    still pass)
-'   the process exiting on its own  is the actual judgment -- run_tests.ps1 fails a case on a
-'                                   run timeout, so a swallowed quit is red by itself
+'   Q-ORDER=unload-inside-doevents   witness that the unload really happened inside the pump
+'                                    (without it a build that never reaches the hole would
+'                                     still pass)
+'   Q-ORDER=unload-outside           the pump ran but t2 never took the offer: the shape is
+'                                    gone and the quit path is not being tested -- red by the
+'                                    needle above, by design
+'   Q-DONE                           the judgments were all written
+'   the process exiting on its own   is the actual judgment -- run_tests.ps1 fails a case on
+'                                    a run timeout, so a swallowed quit is red by itself
 ' ASCII only.
 
 Private Declare PtrSafe Sub Sleep Lib "kernel32" (ByVal dwMilliseconds As Long)
 
 Private gTick As Long
+Private gLetGo As Long
 Private gUnloaded As Long
 
 Private Sub t1_Timer()
     Dim my As Long
     my = gTick + 1
     gTick = my
-    If my <= 6 Then
+    If my < 6 Then
         Sleep 80
         DoEvents
-        If my = 6 Then
-            If gUnloaded = 1 Then
-                Debug.Print "Q-ORDER=unload-inside-doevents"
-            Else
-                Debug.Print "Q-ORDER=unload-outside"
-            End If
-        End If
         Exit Sub
     End If
-    If my = 7 Then
-        Debug.Print "Q-DONE"
-        t1.Enabled = False
-        gUnloaded = 1
-        Unload Me
+    If my > 6 Then Exit Sub
+    gLetGo = 1
+    Sleep 80
+    DoEvents
+    If gUnloaded = 1 Then
+        Debug.Print "Q-ORDER=unload-inside-doevents"
+    Else
+        Debug.Print "Q-ORDER=unload-outside"
     End If
+    gLetGo = 0
+    Debug.Print "Q-DONE"
+End Sub
+
+Private Sub t2_Timer()
+    If gLetGo = 0 Then Exit Sub
+    If gUnloaded = 1 Then Exit Sub
+    gUnloaded = 1
+    gLetGo = 0
+    t1.Enabled = False
+    t2.Enabled = False
+    Unload Me
 End Sub
