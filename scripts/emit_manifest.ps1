@@ -1,13 +1,15 @@
 ﻿# emit_manifest.ps1 - build a **toolchain-attributable** shape manifest for the corpus.
 #
-# Why (ledger 245 / B73): the emitted C is what a shipped program is made of, but two
-# C3.exe binaries built from the *same commit* with different MSVC versions disagree on
-# 14 of 788 corpus captures (all Charts 2020 UC projects, all in one shape: which COM
-# getter a With-target member read is allowed to use). A gate that builds and tests with
-# the same binary can never see that, and a local A/B can only ever describe the local
-# binary's answer. So CI records *its* answer here: one sha256 line per input plus the
-# toolset that produced it. Not a pass/fail check (yet) - the point is that evidence for
-# "what does the shipped codegen look like" stops being local-only.
+# Why (ledger 245 / B73): the emitted C is what a shipped program is made of, and a gate
+# that builds and tests with the *same* binary can never see a codegen that depends on
+# anything outside the commit. So CI hashes its own answer - one line per corpus input -
+# and, since 账 #245/#267 landed (gate #418), compares it with the checked-in
+# emit-manifest.expected.txt: a mismatch fails the job. Local and CI now agree row-for-row
+# on all 395 inputs, which is what turns this from a record into a judgment.
+# Two things had to be true first: the artifact bytes must not depend on the machine
+# (--emit-c used to be re-encoded to the console codepage - 账 #267), and no corpus input
+# may read machine state (tests/VBFlexGridDemo pointed a Reference= at a type library only
+# this dev box has registered - 账 #245's last row).
 #
 # x64 only: the measured divergence has the same lines and same shape on both arches, so
 # a second arch costs ~2x wall time for no new coverage.
@@ -22,6 +24,8 @@
 param(
     [string]$Root = "",
     [string]$Out = "",
+    [string]$Expect = "",
+    [switch]$Bless,
     [string]$Samples = "tests/acc/acc_main.bas,tests/asm/AsmTest.bas,tests/Charts 2020/ucChartArea/Proyecto1.vbp,tests/VBFlexGridDemo/VBFlexGridDemo.vbp"
 )
 $ErrorActionPreference = 'Continue'
@@ -124,3 +128,30 @@ foreach ($in0 in $inputs) {
 if (Test-Path $tmp) { Remove-Item $tmp -Force }
 Set-Content -Path $Out -Value $lines -Encoding UTF8
 Write-Host ("manifest=$Out lines=$($lines.Count) inputs=$($inputs.Count) rc!=0=$fail")
+# 出完清单就与 checked-in 的期望比一次 —— 比较与「重新登记」两处逻辑都只在 compare_emit_manifest.ps1
+# 那一份里：CI 判红、本机复算、-Bless 重登记全走它，别在这里再抄一份 (那正是本项目一直在防的形状)。
+$cmp = Join-Path $PSScriptRoot "compare_emit_manifest.ps1"
+$expectPath = if ($Expect) { $Expect } else { Join-Path $Root "emit-manifest.expected.txt" }
+if (-not (Test-Path $cmp)) {
+    # 找不到比较脚本 = 这一格压根没判。别静默绿：把「没判」写进清单本身，并非零退出
+    # （台账 §B73 那一课：不判红的那一步也要自证，与 publish 那格同形）。
+    Add-Content -LiteralPath $Out -Encoding UTF8 -Value "# expectation-check=NO-CMP-SCRIPT"
+    Write-Host ("manifest-expectation NO-CMP-SCRIPT (找不到 " + $cmp + ")")
+    exit 3
+}
+$cmpArgv = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $cmp,
+             "-Manifest", $Out, "-Expect", $expectPath)
+if ($Bless) { $cmpArgv += "-Bless" }
+& powershell @cmpArgv
+$cmpRc = $LASTEXITCODE
+# 判定结果也写进清单本身（行首 '#' 不参与比较）：红不红本机未必读得到作业状态（api.github.com
+# 那条被本地反代挡着），所以让结论随工件与 ci/emit-manifest 分支一起回来。
+$verdict = if ($cmpRc -eq 0) { "PASS" } else { "FAIL rc=" + $cmpRc }
+Add-Content -LiteralPath $Out -Encoding UTF8 -Value ("# expectation-check=" + $verdict)
+Write-Host ("expectation-check=" + $verdict + " expect=" + $expectPath)
+if ($Bless) { exit $cmpRc }
+if ($cmpRc -ne 0) {
+    Write-Host ("manifest-expectation MISMATCH (rc=" + $cmpRc + ") —— 先归因，再考虑 -Bless 重新登记")
+    exit 4
+}
+Write-Host "manifest-expectation OK"
