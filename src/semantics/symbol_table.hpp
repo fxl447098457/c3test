@@ -331,7 +331,13 @@ struct Symbol {
         std::string name;           // 成员名 (保留大小写)
         Vb6Type type = Vb6Type::Empty;  // 成员类型
         std::string typeRefName;    // 若类型为UDT, 保存UDT名称
-        int32_t arraySize = 0;      // 固定大小数组: 0=非数组, >0=上界+1
+        int32_t arraySize = 0;      // 固定大小数组: 0=非数组, >0=**是**定长数组 (占位标记)
+        // ⚠ 这里存的**不是**元素个数 (语义层只写 1) —— 真正的格数只在发码侧由
+        // tryEvalConstInt 从 AST 折出 (cgen_decl.cpp 的 UDT 成员那一支是唯一算它的地方)。
+        // 上一格账 (#261) 就是被这种"注释说带尺寸、其实只带标记"的字段骗过一次。
+        // 账 #262: 定长数组的**秩** (维数)。0=标量或动态数组, 1=一维, >=2=多维。
+        // 只有秩、没有各维格数 —— 各维格数属于发码侧，这里刻意不留第二份真相。
+        int32_t arrayRank = 0;
         // Fix 037: 动态数组标记. `memberName() As Type` 语法, arraySize=0 且 isArrayDynamic=true.
         // 用于 UDT C 结构体 emit `vb6_SafeArray1D* Member;` 并支持 obj.member(idx) → VB6_SA_AT.
         bool isArrayDynamic = false;

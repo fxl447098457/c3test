@@ -48,6 +48,7 @@ End Type
 Private Type PicF2L
     Pixels(4) As Byte
     Nums() As Long
+    Grid(1, 1) As Byte
 End Type
 
 Private m_r As RectF2L
@@ -195,14 +196,14 @@ Public Sub Main()
     dst2() = src2()
     Chk "27-whole-array-assign-untouched", dst2(2), 22
 
-    ' F2L28: the boundary this knife deliberately keeps. An element of a *member* array
-    ' (`p.Pixels(0)`) has a callee that is not a bare identifier, so the resolver answers
-    ' Unknown and the store stays a plain truncation -- that shape belongs to ledger 262 /
-    ' §B90 (UDT member arrays are emitted as a folded one-D slot today). PINNED AS 6 ON PURPOSE:
-    ' the day §B90 lands, this line must be flipped to 7, and if it isn't, §B90 was not really fixed.
+    ' F2L28: an element of a *member* array (`p.Pixels(0)`). Ledger 261 deliberately left this
+    ' shape alone because the callee is not a bare identifier AND, more importantly, because the
+    ' lvalue itself was wrong (multi-D members were folded to one-D). Ledger 262 fixed the lvalue,
+    ' so the store now goes through the same round-and-check source as every other narrow slot:
+    ' 6.73 -> 7. (It read 6 before 262 -- PINNED AS 7 HERE so a re-fold of that boundary goes red.)
     Dim p As PicF2L
     p.Pixels(0) = 6.73
-    Chk "28-member-array-elem-open-defect", CLng(p.Pixels(0)), 6
+    Chk "28-member-array-elem-rounded", CLng(p.Pixels(0)), 7
 
     ' F2L29/30: WHOLE-member-array assignment -- the shape that bit this knife in CI-prep.
     ' `Data` / `Nums` are array members, so the lvalue is the array itself (a descriptor
@@ -219,6 +220,15 @@ Public Sub Main()
     Chk "29-member-array-whole-assign", p.Nums(1), 8
     p.Nums() = src3()
     Chk "30-member-array-whole-assign-parens", p.Nums(1), 8
+
+    ' F2L31/32 (ledger 262 made these reachable): elements of a MULTI-D member array. Before 262
+    ' `Grid(0, 0)` and `Grid(0, 1)` were the SAME C slot, so a rounding pin here could not tell
+    ' "rounds" from "collapses". Both cells now exist, both take the wrap, and they keep their own
+    ' values -- 6.73 -> 7 in one, 2.4 -> 2 next to it.
+    p.Grid(0, 1) = 6.73
+    p.Grid(0, 0) = 2.4
+    Chk "31-member-2d-elem-rounded", CLng(p.Grid(0, 1)), 7
+    Chk "32-member-2d-elem-neighbour", CLng(p.Grid(0, 0)), 2
 
     Debug.Print "F2L-DONE"
 End Sub

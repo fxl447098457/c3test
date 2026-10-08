@@ -137,6 +137,16 @@ public:
     // 且 isArrayDynamic=true; 标量字段两者皆 false/nullptr. 用于区分 UDT 动态数组字段
     // (emit `vb6_SafeArray1D* Member`) 与普通标量字段 (`type Member`).
     bool isArrayDynamic = false;
+    // 账 #262: 多维定长成员 (`M(0 To 4, 0 To 4) As Single`) 的第 2..N 维。
+    // arraySize 恒是第一维的上界 (所有既有消费者照旧读它)，这里只存"多出来的那些维"，
+    // 所以一档一源、没有第二份真相。空 = 一维或标量或动态数组。
+    // 下界今天和第一维同口径 (只留语法，折算按 0..upper 处理)。
+    struct MoreDim {
+        ExprPtr lower;  // 可为 nullptr (`M(3, 3)` 这种没写 To 的)
+        ExprPtr upper;
+    };
+    std::vector<MoreDim> moreDims;
+    int arrayRank() const { return arraySize ? (1 + (int)moreDims.size()) : 0; }
 
     TypeMember(SourceLocation loc, std::string n, TypeRefPtr t, ExprPtr arrSize)
         : Decl(ASTNodeKind::TypeMember, loc),

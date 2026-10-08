@@ -1014,10 +1014,7 @@ Vb6Type CCodeGen::narrowTargetTypeOf(Expr* target) const {
 
     if (target->kind == ASTNodeKind::IndexOrCallExpr) {
         auto& ioc = static_cast<IndexOrCallExpr&>(*target);
-        // 只接**本模块数组**的元素 (callee 是裸标识符)。成员数组 `h.M(3, 3)` 那一形
-        // 的发码本身另有缺陷 (多维被折成一维), 不在这一刀的判据面上。
-        if (!ioc.callee || ioc.callee->kind != ASTNodeKind::IdentifierExpr)
-            return Vb6Type::Unknown;
+        if (!ioc.callee) return Vb6Type::Unknown;
         // ⚠ **空下标 = 整体数组赋值** (Fix 170 那一形: `dst() = src()` / `bb() = s`)。
         //   它发成的 C 是 `dst = vb6_ArrayAssign1D(dst, src)` —— 右边是**数组描述符指针**，
         //   不是元素值。实测把它按元素档套上检查 ⇒ `vb6_ChkByte(vb6_StringToByteArray(s))`
@@ -1025,6 +1022,21 @@ Vb6Type CCodeGen::narrowTargetTypeOf(Expr* target) const {
         //   wa-clone/wa-ub/wa-str/wa-rt 四行整片不打印)。与 rev36 那条同一个雷, 只是
         //   换了一条入口, 所以这一档先问"有没有下标"再问元素类型。
         if (ioc.positional.empty()) return Vb6Type::Unknown;
+        if (ioc.callee->kind == ASTNodeKind::MemberAccessExpr ||
+            ioc.callee->kind == ASTNodeKind::WithMemberExpr) {
+            // 账 #262 之后才敢接这一形: 成员数组的**元素**槽 (`p.Pixels(0)` / `m.M(0, 1)`)。
+            // 以前它的左值本身就是错的 —— 多维被折成一维, 三个下标写进同一格, 再套一层
+            // 取整只会把两格缺陷搅成一格读数。现在那几格是确定的了。
+            // 必须问出**数组性**: 认不出是数组就答 Unknown (不是数组的带括号左值各有各的
+            // 解析链, 猜一档会把合法赋值判成越界)。
+            bool fldIsArray = false;
+            Vb6Type et = inferUdtFieldVb6Type(ioc.callee.get(), &fldIsArray);
+            if (!fldIsArray) return Vb6Type::Unknown;
+            if (et == Vb6Type::Byte || et == Vb6Type::Integer || et == Vb6Type::Long) return et;
+            return Vb6Type::Unknown;
+        }
+        // 裸标识符 = 本模块数组的元素。
+        if (ioc.callee->kind != ASTNodeKind::IdentifierExpr) return Vb6Type::Unknown;
         auto& cid = static_cast<IdentifierExpr&>(*ioc.callee);
         std::string cLower = cid.name;
         std::transform(cLower.begin(), cLower.end(), cLower.begin(), ::tolower);

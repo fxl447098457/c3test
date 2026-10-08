@@ -415,12 +415,24 @@
                                         // 个数用 sizeof(数组)/sizeof(元素) 由 C 编译器
                                         // 自算 —— 语义层 UdtMemberInfo.arraySize 目前
                                         // 只是"是定长数组"的占位 (=1), 不是元素个数。
+                                        // 账 #262: 那"一层 [0]"要按**秩**剥到底 —— 秩 2 的成员
+                                        // C 类型是 `T f[r][c]`，`(f)[0]` 是一**行**，拿它算元素
+                                        // 尺寸会把整行当一个元素 (秩 1 时逐字不变，所以语料零 churn)。
+                                        // ⚠ 载体仍是 1-D 的 vb6_SafeArray1D：把多维成员整体交给
+                                        // 一维描述符这一形语料里 0 处、也没实测过，这里只保证
+                                        // "数出来的格数与字节"是对的，别把它读成"多维 ByRef 已支持"。
                                         Vb6Type elemT44 = static_cast<Vb6Type>(
                                             static_cast<uint16_t>(calleeParams[i].type)
                                             & ~static_cast<uint16_t>(Vb6Type::Array));
+                                        std::string deep44 = "(" + argVal + ")";
+                                        int32_t lay44 = mi44.arrayRank;
+                                        if (lay44 < 1) lay44 = 1;
+                                        for (int32_t d44 = 0; d44 < lay44; d44++) {
+                                            deep44 += "[0]";
+                                        }
                                         std::string cnt44 =
                                             "(int32_t)(sizeof(" + argVal
-                                            + ")/sizeof((" + argVal + ")[0]))";
+                                            + ")/sizeof(" + deep44 + "))";
                                         // 形参是 vb6_SafeArray1D** (指向"载体指针变量"
                                         // 的指针), 函数体 (*abBytes) 先解一层。所以不能
                                         // 只传 &(结构字面量) (那是 SafeArray1D*, 解一层
@@ -430,7 +442,7 @@
                                         // 都在最外层 full-expression 内生存, 覆盖调用。
                                         argVal = "&(vb6_SafeArray1D*[]){&(vb6_SafeArray1D){0x5A1D, "
                                             + mapSaElemType(elemT44)
-                                            + ", (int32_t)sizeof((" + argVal + ")[0])"
+                                            + ", (int32_t)sizeof(" + deep44 + ")"
                                             + ", 0, (" + cnt44 + " - 1), " + cnt44
                                             + ", (void*)(" + argVal + "), 0}}";
                                         wholeArr158 = true;

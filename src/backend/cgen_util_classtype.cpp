@@ -410,6 +410,27 @@ Vb6Type CCodeGen::inferUdtFieldVb6Type(const ASTNode* target, bool* outIsArray) 
     return Vb6Type::Unknown;
 }
 
+// 账 #262: 定长成员数组的下标折算 —— 秩在这里，层数就只在这里定。
+// 发码形态是 C 的多维数组 (`float M[5][5]`)，所以每层一个括号、步长归 C 算，
+// 不需要另开一张"每行几格"的表 (那张表迟早和 cgen_decl.cpp 的折尺寸分家)。
+std::string CCodeGen::udtFixedMemberIndex(const std::string& fieldExpr,
+                                          const std::vector<ExprPtr>& args, int32_t rank) {
+    int32_t layers = rank < 1 ? 1 : rank;
+    std::string out = fieldExpr;
+    for (int32_t k = 0; k < layers; k++) {
+        std::string idx;
+        if (k < (int32_t)args.size() && args[k]) {
+            emitExpr(*args[k]);   // ⚠ emitExpr 覆写 lastExpr_，每层当场取走
+            idx = std::move(lastExpr_);
+            if (idx.empty()) idx = "0";   // 空表达式不发 `field[]`
+        } else {
+            idx = "0";            // 缺的那层 (含省略实参): 给一个确定的在范围内的格子 (VB6 此处报下标越界)
+        }
+        out += "[" + idx + "]";
+    }
+    return out;
+}
+
 // <vbeclipse> <VBFlexGridDemo>: 返回左值 UDT 字段的**声明类型名** (`mi.typeRefName`)。
 // 空串 = 无声明类型 (真 Variant 槽), 非空 = 声明了具体类型 (Object/接口/类/UDT)。
 // 与 Set-RHS 装箱 guard 配套 —— VTableHandle.bas `Set VTableIPAOData.OriginalIOleIPAO = This`
@@ -888,25 +909,32 @@ std::string CCodeGen::emitUdtCopyBlock() const {
             bool scalarOwned = (bt == Vb6Type::String || bt == Vb6Type::Variant);
 
             if (mi.arraySize > 0) {
-                // 定长数组成员: 发射形态是 `T Name[N]`, 不能整体赋值
+                // 定长数组成员: 发射形态是 `T Name[...]` (账 #262 起多维也是 —— `T Name[r][c]`)，
+                // 不能整体赋值。
                 if (!scalarOwned && !subOwned) {
                     out += "    memcpy(" + dl + ", " + sl + ", sizeof(" + dl + "));\n";
                     continue;
                 }
-                std::string idx = fn + "[_i]";
-                out += "    { int32_t _n = (int32_t)(sizeof(d->" + fn
-                     + ") / sizeof(d->" + idx + ")); int32_t _i;\n";
+                // 账 #262/#265: 逐格走**扁平元素指针**，秩有几维都只数一遍格子。
+                // 旧写法是 `sizeof(d->S) / sizeof(d->S[_i])` —— 两个毛病: ① `_i` 写在
+                // 它自己那条声明**之前** ⇒ C2065 (实物: 任何带定长 String/Variant 数组成员
+                // 且会被赋值的 UDT 都编不过，语料里 0 处所以从没响过)；② 多维成员那样数出来
+                // 的是**行数**，会把 4 格当 2 格拷。`sizeof(*_dp)` 由 C 按元素类型算，与秩无关。
+                std::string elemC = (bt == Vb6Type::String) ? "BSTR"
+                              : (bt == Vb6Type::Variant) ? "vb6_VARIANT" : subUdt;
+                if (elemC.empty()) continue;   // 认不出元素档就不动这一格 (按位拷已过)
+                out += "    { " + elemC + "* _dp = (" + elemC + "*)&d->" + fn
+                     + "; const " + elemC + "* _sp = (const " + elemC + "*)&s->" + fn + ";\n";
+                out += "      int32_t _i; int32_t _n = (int32_t)(sizeof(d->" + fn
+                     + ") / sizeof(*_dp));\n";
                 out += "      for (_i = 0; _i < _n; _i++) {\n";
                 if (bt == Vb6Type::String) {
-                    out += "        BSTR _o = d->" + idx + "; d->" + idx
-                         + " = s->" + idx + " ? SysAllocString(s->" + idx + ") : NULL;\n"
-                           "        if (_o && _o != s->" + idx + ") vb6_BSTR_Free(_o);\n";
+                    out += "        BSTR _o = _dp[_i]; _dp[_i] = _sp[_i] ? SysAllocString(_sp[_i]) : NULL;\n"
+                           "        if (_o && _o != _sp[_i]) vb6_BSTR_Free(_o);\n";
                 } else if (bt == Vb6Type::Variant) {
-                    out += "        vb6_VariantClear(&d->" + idx + "); vb6_VariantCopy(&d->"
-                         + idx + ", &s->" + idx + ");\n";
+                    out += "        vb6_VariantClear(&_dp[_i]); vb6_VariantCopy(&_dp[_i], &_sp[_i]);\n";
                 } else {
-                    out += "        vb6_udtcpy_" + udtNameOfCType(subUdt) + "(&d->" + idx
-                         + ", &s->" + idx + ");\n";
+                    out += "        vb6_udtcpy_" + udtNameOfCType(subUdt) + "(&_dp[_i], &_sp[_i]);\n";
                 }
                 out += "      }\n    }\n";
                 continue;

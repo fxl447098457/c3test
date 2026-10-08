@@ -503,13 +503,27 @@ void CCodeGen::visit(TypeDecl& node) {
             // Fix 010d: 优先用常量折叠将数组维度求值为字面量
             // Private Const 只发射到.c, 不在.h中, 跨模块#include时会变成未声明标识符(C2065/C2057/C2229)
             // tryEvalConstInt覆盖: LiteralExpr, UnaryExpr, BinaryExpr(算术/位运算), IdentifierExpr(跨模块Const/EnumMember)
+            // 账 #262: 每一维都走同一条折叠出口，所以 `M(0 To 4, 0 To 4)` 发得出
+            // `float M[5][5]` —— 100 字节连片，正是 GDI+ ColorMatrix 要的那个形状
+            // (以前只发得出第一维，第二维整个不见)。折不动的维沿用旧形 `(expr) + 1`。
+            // 下界与第一维同口径: 只留语法、折算按 0..upper (声明 1 To 4 会多空一格)。
             int64_t arrVal;
+            std::string brackets;
             if (tryEvalConstInt(member->arraySize.get(), arrVal)) {
-                h_.emitLine(memType + " " + memName + "[" + std::to_string(arrVal + 1) + "];");
+                brackets = "[" + std::to_string(arrVal + 1) + "]";
             } else {
                 emitExpr(*member->arraySize);
-                h_.emitLine(memType + " " + memName + "[(" + lastExpr_ + ") + 1];");
+                brackets = "[(" + lastExpr_ + ") + 1]";
             }
+            for (auto& md : member->moreDims) {
+                if (tryEvalConstInt(md.upper.get(), arrVal)) {
+                    brackets += "[" + std::to_string(arrVal + 1) + "]";
+                } else {
+                    emitExpr(*md.upper);
+                    brackets += "[(" + lastExpr_ + ") + 1]";
+                }
+            }
+            h_.emitLine(memType + " " + memName + brackets + ";");
         } else if (member->isArrayDynamic) {
             // Fix 037 Pattern B: 动态数组成员 (`Data() As Byte`) emit `vb6_SafeArray1D* Member;`
             // 之前 bug: arraySize==nullptr 与无括号成员无法区分, emit `uint8_t Data;` (单标量字段),

@@ -855,10 +855,20 @@
                                         const std::string& member,
                                         const std::string& accessOp = ".") const;
 
-    // Fix 084n: 推断 target 是否为 UDT 字段链, 是则返回该字段的 Vb6Type (含 Array 标志), 否则 Unknown.
+    // Fix 084n: 推断 target 是否为 UDT 字段链, 是则返回该字段的 Vb6Type, 否则 Unknown.
     // 供赋值语句判断 Variant RHS 需转换的目标类型 (如 cZipArchive 的 .FileName As String
     // ← vb6_VariantArrayGet → vb6_VariantToString; uBuf.MaxMatch As Long ← At() → vb6_VariantToLong)
+    // ⚠ 返回值**不带**数组性 (账 #261 量出来的: 数组性住在 isArrayDynamic/arraySize 上,
+    // 从来不在 mi.type 里) —— 要知道是不是数组，用 outIsArray 那个出参。
     Vb6Type inferUdtFieldVb6Type(const ASTNode* target, bool* outIsArray = nullptr) const;
+
+    // 账 #262: 定长成员数组的**下标折算唯一一处** —— 秩 (mi.arrayRank) 决定发几层方括号。
+    // `M(0 To 4, 0 To 4)` 的发码形态是 C 多维数组 `float M[5][5]`，每层下标各一个括号，
+    // 步长由 C 自己算 ⇒ 不需要第二份"每行几格"的表。实参不够补 0 (VB6 在这种情况下报
+    // "下标越界"，这里给一个确定的、在范围内的格子)；实参多于秩就照发，让 C 当场报错，
+    // 别静默少折一维 —— 那正是这一格原来的病。
+    std::string udtFixedMemberIndex(const std::string& fieldExpr,
+                                    const std::vector<ExprPtr>& args, int32_t rank);
 
     // ai/022 B08f-1 (D37): 走同一条 UDT 解析路, 但返回字段在 C 里的**对象类型**
     // (`vb6_cls_X*` / `void*` / "" = 不是对象字段或推不出)。判"这个左值到底是不是 Variant

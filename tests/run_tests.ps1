@@ -2074,10 +2074,25 @@ if ($Category -in @("all", "run", "bas")) {
         "F2L-22-array-of-udt-member=True", "F2L-23-parity-member-ties=True",
         "F2L-24-member-intdiv-untouched=True", "F2L-25-array-int-source-untouched=True",
         "F2L-26-member-double-untouched=True",
-        "F2L-27-whole-array-assign-untouched=True", "F2L-28-member-array-elem-open-defect=True",
+        "F2L-27-whole-array-assign-untouched=True", "F2L-28-member-array-elem-rounded=True",
         "F2L-29-member-array-whole-assign=True", "F2L-30-member-array-whole-assign-parens=True",
+        "F2L-31-member-2d-elem-rounded=True", "F2L-32-member-2d-elem-neighbour=True",
         "F2L-DONE")
     Add-BasTest "test_f2lng" "$Tests\test_f2lng.bas" $f2lngNeedles
+    # 账 #262（+ 顺手抓到的 #265）：UDT 成员的**多维**定长数组。旧折法把第 2..N 维在 parser
+    # 里"解析并丢弃"，于是 `M(3, 3) As Long` 只发出 `int32_t M[4]`，`m.M(0, 1)` / `.M(0, 2)` /
+    # `.M(0, 3)` 三格并成一格 —— 不响不崩，静默错值（真流量 = Charts LabelPlus 的 GDI+ 色彩矩阵，
+    # GDI+ 从一枚 20 字节的结构体里读 100 字节）。每条读数写的都是**第一维相同、第二维不同**的格子，
+    # 就是旧折法会撞进同一格的那一族；MD-LEN 钉布局（64/64 而不是 16/16），MD-ALIAS=N 钉不变式。
+    # #265 是这份夹具顺手量出来的另一条：带定长 String/Variant 数组成员、又会被整体赋值的 UDT，
+    # 自动深拷贝助手在**声明 _i 的那句里**就用 `_i` ⇒ C2065，工程编不过（语料里 0 处，所以从没响过）。
+    # 负控：BASE（本刀父提交那台）编同一份夹具 ⇒ BUILD-RC=1，一条 error C2065(_i)；把 String 成员
+    # 摘掉再比（探针 .build/p262/m262b.bas）⇒ BASE 答 33/33/33、222/222、3/3、LEN=16/16，改后逐条对上。
+    $memdimNeedles = @("MD-LONG=11/22/33", "MD-SINGLE=111/222", "MD-R3=1/3/40",
+        "MD-ONE=9", "MD-WITH=11/77", "MD-MODULE=44/55",
+        "MD-STR=ab/cd", "MD-STR-COPY=ab/cd", "MD-LEN=64/64/16",
+        "MD-ALIAS=N", "MD-DONE")
+    Add-BasTest "test_memdim" "$Tests\test_memdim.bas" $memdimNeedles
     Write-Host ""
 
         # --- P5.5 数据类型兼容性测试 ---
@@ -2239,6 +2254,7 @@ if ($Category -in @("all", "run", "bas")) {
     Add-BasTest "test_interface_x86" "$Tests\test_interface.bas" @("ITF-SOFT:12", "ITF-1:OK", "ITF-2:OK", "INTERFACE-DONE") -Arch "x86"
     Add-BasTest "test_varcmp_scalar_x86" "$Tests\test_varcmp_scalar.bas" $varcmpNeedles -Arch "x86"
     Add-BasTest "test_f2lng_x86" "$Tests\test_f2lng.bas" $f2lngNeedles -Arch "x86"
+    Add-BasTest "test_memdim_x86" "$Tests\test_memdim.bas" $memdimNeedles -Arch "x86"
     Add-BasTest "test_bool_display_x86" "$Tests\test_bool_display.bas" $boolNeedles -Arch "x86"
 
     # ai/009 5.10 (P3, 溢出检查): 窄整型收窄赋值越界必须报 Error 6, 边界值 (255 /
@@ -2627,7 +2643,7 @@ if ($Category -in @("all", "run", "vbp")) {
     # 门 #395 唯一红就是这一族在 CI 上的样子（combofocus_x86 七行判据全打完、进程 60s 不退、
     # CPU 62ms、窗口一个不剩）。夹具把「卸载发生在内层泵里」这个形状做成确定性的：t1 每拍 Sleep 80
     # 再 DoEvents，而**卸载归另一枚计时器 t2**（Interval=20 ⇒ 那 80ms 里 t2 一定已经到期，
-    # DoEvents 起手就把它派发进来）。门 #403 唯一真红就是这一格：原来只用一枚 t1、让「卸载那一拍」
+    # DoEvents 起手就把它派发进来）。门 #405 唯一真红就是这一格：原来只用一枚 t1、让「卸载那一拍」
     # 在 t1 自己的泵里重进 —— 90fb8069 按 VB6 语义把 Timer 事件过程改成不可重入（同一枚的下一拍丢弃），
     # 于是读成 Q-ORDER=unload-outside。守卫是对的，过时的是夹具形状；换成第二枚计时器之后**洞里那条
     # 路一点没少走**（卸载仍在内层泵里、那条唯一的 WM_QUIT 仍被内层泵抽走），两台各三连跑稳定。
@@ -5518,10 +5534,13 @@ if ($Category -in @("all", "syntax")) {
         # 只把 `Data() As Byte` 的元素档当档位来认 ⇒ 给它套上 ChkByte = VbQRCodegen 的
         # Project1 启动期 error 6 (BUILD-RC=0 而进程自己弹 Unhandled VB6 Error #6)。
         "p.Nums = vb6_ArrayAssign1D(p.Nums, src3);",
-        # F2L28 的那条边界: 成员数组的元素 (callee 不是裸标识符) 这一刀刻意不接管 —— 它自己
-        # 的发码还有另一格缺陷 (§B90 / 账 #262)。两头都钉: 裸形必须在、套了检查的形式必须不在，
-        # 这样 #262 落地时这一格会**主动红**，逼着把判据换成 7 (别把边界读成"已修")。
-        "p.Pixels[0] = 6.7300000000000004;") @(
+        # F2L28/31/32 这三格（账 #261 留的边界、账 #262 落地那天一起翻）：成员数组的**元素**
+        # 现在和别的窄槽同一条出口 —— 6.73 存进 Byte 元素得 7，而 `Grid(0, 1)` 与 `Grid(0, 0)`
+        # 是两个格子（#262 之前它们是一格，那条取整针根本分不开"会舍"和"会并"）。
+        # 反过来，成员数组的**整体**赋值仍必须裸形（见上面那两条 Absent）。
+        "p.Pixels[0] = vb6_ChkByte(vb6_FltToLng(6.7300000000000004));",
+        "p.Grid[0][1] = vb6_ChkByte(vb6_FltToLng(6.7300000000000004));",
+        "p.Grid[0][0] = vb6_ChkByte(vb6_FltToLng(2.3999999999999999));") @(
         "vb6_ChkLong(d);",
         "vb6_ChkLong(s);",
         "vb6_ChkLong(vb6_Num_Div",
@@ -5533,7 +5552,30 @@ if ($Category -in @("all", "syntax")) {
         "VB6_SA_AT(vb6_type_RectF2L, ur, 0).Px = 6.7300000000000004;",
         "dst2 = vb6_ChkLong(vb6_ArrayAssign1D(dst2, src2));",
         "p.Nums = vb6_ChkLong(vb6_ArrayAssign1D(p.Nums, src3));",
-        "p.Pixels[0] = vb6_ChkByte(vb6_FltToLng(6.7300000000000004));")
+        # 账 #262 之前那三形的残留必须一个不剩: 元素裸存 (截断)、多维被折成一格、结构体少维。
+        # `uint8_t Grid[2];` 与 `p.Grid[0] = 6.73…` 都是**整串**比 (结尾的 `;` 不一样)，
+        # 所以它们不会误伤 `Grid[2][2]` / `Grid[0][1]` 那两条正确形。
+        "p.Pixels[0] = 6.7300000000000004;",
+        "p.Grid[0] = 6.7300000000000004;",
+        "uint8_t Grid[2];")
+
+    # 账 #262 + #263 的发码形状针（两头都钉）。真流量 = Charts 2020 LabelPlus 的 GDI+ 色彩矩阵
+    # `M(0 To 4, 0 To 4) As Single` —— 以前那枚结构体只有 20 字节而 GDI+ 从里面读 100 字节。
+    Test-CodegenNote "memdim_layout" @("$Tests\test_memdim.bas") @(
+        # 布局: 每维自己折一档，几维就几层括号 (步长归 C 算，不留第二份"每行几格"的表)。
+        "int32_t M[4][4];", "float K[5][3];", "int32_t T[2][3][4];", "BSTR S[2][3];",
+        # 两条下标路（obj.M(i, j) 与 With 里的 .M(i, j)）都问同一个出口，必须答同一串下标。
+        "m.M[0][1] = 11;", "m.M[0][2] = 22;", "s.K[1][2] = 222;", "t.T[0][0][3] = 3;",
+        "_vb6_with_0->M[0][2] = 77;", "g_m.M[0][1] = 44;",
+        'w.S[0][1] = vb6_BSTR_FromStr(L"ab");',
+        # 账 #263: 含所有权元素的定长成员数组逐格走扁平元素指针 —— 先声明 _i 才用它，
+        # 格数由 C 按元素类型算，与秩无关。
+        "int32_t _i; int32_t _n = (int32_t)(sizeof(d->S) / sizeof(*_dp));") @(
+        # 旧折法的三种残留: 少一维的结构体、少一层括号的下标，以及那句把 _i 用在它自己
+        # 那条声明里的 sizeof —— 那正是 #263 的 C2065（BASE 实测一条 error 就编不过）。
+        "int32_t M[4];", "float K[5];", "BSTR S[2];",
+        "m.M[0] = 11;", "m.M[1] = 22;", "_vb6_with_0->M[2] = 77;",
+        "sizeof(d->S[_i])", "d->S[_i]")
 
 
     # 账 #232② + 账 #224⑤: 窗体绘图家族的发码形状针 —— 语料里那一族的**每一条**都必须

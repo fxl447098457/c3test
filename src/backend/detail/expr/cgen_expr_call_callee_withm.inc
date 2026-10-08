@@ -69,9 +69,11 @@
                                 if (mi.arraySize > 0) {
                                     // Pattern A: 固定大小数组字段 → tempVar->member[idx]
                                     // Fix 081j-2: With 块临时变量是指针，用 -> 访问成员
-                                    emitExpr(*node.positional[0]);
-                                    std::string idx = std::move(lastExpr_);
-                                    lastExpr_ = tempVar + "->" + cIdent(mi.name) + "[" + idx + "]";
+                                    // 账 #262: 括号层数与 obj.member(i, j) 那一形同一条出口
+                                    // (udtFixedMemberIndex)，两形必须答同一串下标。
+                                    lastExpr_ = udtFixedMemberIndex(
+                                        tempVar + "->" + cIdent(mi.name),
+                                        node.positional, mi.arrayRank);
                                     isHandled = true;
                                 } else if (mi.isArrayDynamic) {
                                     // Pattern B: 动态数组字段 → VB6_SA_AT(elemType, tempVar->member, idx)
