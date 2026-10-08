@@ -10,7 +10,11 @@
 #   P1  vb6forms.c 里的泵数 = 4：主循环两条（OLE 探针那条 + 正常那条）+ 模态一条 + DoEvents 一条。
 #       数字变了必须来说清哪条是外层、哪条是内层。
 #   P2  vb6_RePostQuitIfTaken 提及 = 3（定义 + **恰好两个**内层泵各调一次）。
-#   P3  DoEvents 的循环体第一句就是 quit 挡（抽到就投回去并停泵）。
+#   P3  DoEvents 那条泵：抽到 WM_QUIT ⇒ 先 hand-back、再 break，中间不许先 Translate/Dispatch。
+#       扫窗懒配到第一个**顶格 }**、判据前**先剥注释** —— 那条臂里现在写着第二条规则的说明，
+#       定长窗口或不剥注释都会把「别人合理加的那段」读成假红（同族坑见 §C）。
+#   P6  同一条 quit 被抽到**第二次**（`>= 2`）⇒ vb6_End()：调用者停在 DoEvents 忙等里没有外层泵时，
+#       VB6 的口径是「最后一个窗体卸载 ⇒ 程序结束」；`C3_NO_QUIT_IN_DOEVENTS` 是退回纯投递的开关。
 #   P4  模态那条 while 的收尾紧跟一条 hand-back。
 #   P5  PostQuitMessage 在 vb6forms.c / vb6rtl_system.c 里 = 2（登记处那一条投 + 助手那一条补投），
 #       并且**主循环那条泵里没有** hand-back —— 外层是消费者，给它加投回等于把退出信号弄丢两次。
@@ -50,12 +54,38 @@ if ($bad.Count -eq 0) {
     $nRe = Count-Of $t1 'vb6_RePostQuitIfTaken\s*\('
     if ($nRe -ne 3) { $bad += ("P2 vb6_RePostQuitIfTaken mentioned " + $nRe + " times (want definition + exactly 2 inner pumps)") }
 
-    # ---- P3: DoEvents 的循环体第一句 ----
-    $mDE = [regex]::Match($t1, 'int vb6_DoEvents\(void\)\s*\{[\s\S]*?\}')
-    if (-not $mDE.Success) { $bad += "P3 vb6_DoEvents body not found" }
+    # ---- P3: DoEvents 那条内层泵 —— 抽到 quit 就投回去并停泵 ----
+    # 扫窗懒配到**第一个顶格 }**（定长窗口会把别人后来加进那条臂的分支截掉 = 假红，
+    # 与 check_control_dc 那条同族坑同一形状）；判据前先剥注释（那条臂里本来就写着中文说明）。
+    $mDE = [regex]::Match($t1, 'int vb6_DoEvents\(void\)\s*\{[\s\S]*?\r?\n\}')
+    if (-not $mDE.Success) { $bad += 'P3 vb6_DoEvents body not found' }
     else {
-        $g = @([regex]::Matches($mDE.Value, 'msg\.message == WM_QUIT\) \{ vb6_RePostQuitIfTaken\(&msg\); break; \}')).Count
-        if ($g -ne 1) { $bad += "P3 DoEvents no longer stops at the quit and hands it back (a swallowed quit = the process never exits)" }
+        $codeDE = ($mDE.Value -replace '//[^\r\n]*', '') -replace '/\*[\s\S]*?\*/', ''
+        $iQ = $codeDE.IndexOf('msg.message == WM_QUIT')
+        if ($iQ -lt 0) { $bad += 'P3 DoEvents no longer has a WM_QUIT guard at all' }
+        else {
+            $after = $codeDE.Substring($iQ)
+            $iRe = $after.IndexOf('vb6_RePostQuitIfTaken(&msg)')
+            $iBr = $after.IndexOf('break;')
+            $iTr = $after.IndexOf('TranslateMessage')
+            if ($iRe -lt 0 -or $iBr -lt 0 -or $iRe -gt $iBr) {
+                $bad += 'P3 DoEvents stopped handing the quit back before it breaks (a swallowed quit = the process never exits)'
+            }
+            if ($iTr -ge 0 -and ($iTr -lt $iRe -or $iTr -lt $iBr)) {
+                $bad += 'P3 DoEvents dispatches messages before dealing with the quit (the quit gets eaten by an inner pump)'
+            }
+            # ---- P6: 同一条 quit 被抽到第二次 = 没有外层泵在等它 ⇒ 程序结束（3DMenu 那轮定的口径）----
+            $nEnd = @([regex]::Matches($codeDE, 'vb6_End\s*\(\s*\)')).Count
+            if ($nEnd -ne 1) {
+                $bad += ('P6 DoEvents calls vb6_End() ' + $nEnd + ' times on the second take (want 1: a caller stuck in a DoEvents busy-wait has no outer pump to exit through)')
+            }
+            if ($codeDE -notmatch '>=\s*2') {
+                $bad += 'P6 the second-take rule no longer counts takes (>= 2) - the first take must still just break'
+            }
+            if ($codeDE -notmatch 'C3_NO_QUIT_IN_DOEVENTS') {
+                $bad += 'P6 the second-take exit lost its escape hatch C3_NO_QUIT_IN_DOEVENTS (the A/B switch the 259 contract needs)'
+            }
+        }
     }
 
     # ---- P4: 模态那条循环的收尾 ----

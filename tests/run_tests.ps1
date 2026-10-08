@@ -892,6 +892,58 @@ function Test-FormDrawState {
         $out | Select-Object -First 6 | ForEach-Object { Write-Host "  $_" }
     }
 }
+function Test-QuitPumpInvariant {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] quit_pump_invariant ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\check_quit_pump_invariant.ps1" 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        $out | Select-Object -First 6 | ForEach-Object { Write-Host "  $_" }
+    }
+}
+function Test-ComMarkerWriteSites {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] com_marker_write_sites ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\check_com_marker_write_sites.ps1" 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        $out | Select-Object -First 6 | ForEach-Object { Write-Host "  $_" }
+    }
+}
+function Test-SetRhsObjectContext {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] set_rhs_object_context ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\check_set_rhs_object_context.ps1" 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        $out | Select-Object -First 6 | ForEach-Object { Write-Host "  $_" }
+    }
+}
+function Test-UdtMemberDims {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] udt_member_dims ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\check_udt_member_dims.ps1" 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        $out | Select-Object -First 6 | ForEach-Object { Write-Host "  $_" }
+    }
+}
 function Test-ComPropTypeAuthority {
     $script:total++
     Write-Host -NoNewline "  [STATIC] com_prop_type_authority ... "
@@ -5086,6 +5138,10 @@ if ($Category -in @("all", "compile")) {
     Test-VariantCmpBoxing
     Test-EventHandlerNames
     Test-UcInstanceExit
+    Test-QuitPumpInvariant
+    Test-ComMarkerWriteSites
+    Test-SetRhsObjectContext
+    Test-UdtMemberDims
 
     Write-Host ""
 
