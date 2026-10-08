@@ -1701,14 +1701,18 @@ CI 那一枚（`pe-lnk=14.51`）稳定落进 `int16_t` 档 ⇒ 发成 `vb6_ComGe
 - **哨兵跟着换形状**（`scripts/check_com_prop_type_authority.ps1`，C4 那句「名单外再开第五处读法必须先回来把口径并进来」这回兑现）： C3 改盯唯一出口 —— 出口里必须仍有 VARIANT 兜底、必须仍看 `sv.isGet`、且**整个函数体剥掉注释之后**不许出现 `unpackType` / `packFnHint` （第一条就踩了 `check_control_dc` 那条老坑：说明文字里本来就写着 `unpackType`，不剥注释 = 假红，方向照旧是**变严不是变松**）； C4 钉三件 —— `src\backend` 里读这张表的文件恰好 1 份、`comMethods.find(` 在其中恰好出现 1 次、以前那四处消费者必须**仍逐处** `comSigViewOf(`。 七档对照（`.build/b639_neg.txt`，全部在一份拷贝里做，不碰工作树）：绿控 rc=0；N1 摘掉 getter 闸 / N2 摘掉 VARIANT 兜底 / N3 让上下文猜档复活 / N4 重开第五处读法 / N5 让某个消费者不再问出口 / N6 在权威里放第二次 find —— 六档**各自点名相应规则**；N7（无关改动）仍绿。
 - 仍欠的那格没变：**COM 签名表的定序**（`insertComMethod` 的写入次序与消费者读取次序之间没有任何断言）+ 上面那枚行为针。
 
-### B95 四道 [STATIC] 哨兵从来没被门跑过 —— 其中一道早已过期成假红（2026-10-08，**已修：登记 + P3 换形状，门待回填**）
+### B95 四道 [STATIC] 哨兵从来没被门跑过 —— 其中一道早已过期成假红（2026-10-08，**已修：登记 + P3 换形状 = 门 #428（head `1564827f`）12 格全绿；那句 census 也已钉成第 37 道（门待回填）**）
 
 起因是本轮把 36 道 `scripts/check_*.ps1` 全跑了一遍（§B94 改了其中一道，想确认没撞别人）：**35 绿 1 红**，红的正是 `check_quit_pump_invariant.ps1` 的 P3 —— 而门 #420/#421/#424/#426/#427 全是绿的。两条读数一起看才知道不是产品：
 - 逐份数登记（`tests/run_tests.ps1` 里 grep `check_.*\.ps1`）：`scripts/` 有 **36** 道，登记进 harness 的只有 **32** 道。 从没跑过的四道 = `check_quit_pump_invariant` / `check_com_marker_write_sites` / `check_set_rhs_object_context` / `check_udt_member_dims`。 ⇒ **哨兵写在 scripts/ 里 ≠ 有门禁**：这道闸的覆盖面由「登记」那一行决定，而登记本身没人 census。这一格与 #166「两个权威」同族 —— 名单在两个地方各存一份。
 - P3 那条红的成因**不是不变量丢了，是判据的形状跟不上**：它把 DoEvents 的函数体用 `\{[\s\S]*?\}` 懒配到**第一个 `}`** ——  那是内层 `if` 的收尾（3e9c1baf 在臂里加了「第二抽就 `vb6_End()`」那一层），于是窗越收越小、真实现场落在窗外； 再加上它要匹配的是一条**单行**写法 `… WM_QUIT) { vb6_RePostQuitIfTaken(&msg); break; }`，而那句话后来被拆成多行还夹了注释。 ⇒ 同一条坑第二次出现（第一次是 `check_control_dc` 被别人的 1350 字符函数体打红，口径写在 §C）：**扫窗不许定长，判据不许吃行尾排版**。
 - 修法是把它换成结构问法：扫窗懒配到**第一个顶格 `}`**；判据前先剥 `//…` 与 `/*…*/`（那条臂里现在本来就写着中文说明，  不剥就会把散文读成一次调用 —— 同族另一半那条坑）；然后按**顺序**问三件事：`WM_QUIT` 那一步之后，  `vb6_RePostQuitIfTaken(&msg)` 必须排在 `break;` 之前，且两者都必须排在 `TranslateMessage` 之前（先到的那件若是 Translate，quit 就被内层泵吃掉了）。 顺带新写 **P6** 钉住 3e9c1baf 定下的那条口径：同一条 quit 被抽到**第二次**（`>= 2`）⇒ `vb6_End()` 恰好一次，且 `C3_NO_QUIT_IN_DOEVENTS` 那道开关不许消失。
 - 七档对照（全在一份拷贝里跑，`.build/b649_neg.txt`）：绿控（未动 / 还原后）rc=0； N1 摘掉 hand-back、N2 臂里不 break、N3 让 TranslateMessage 抢到前面、N4 把 `>= 2` 改成 `>= 1`、N5 撤掉 `vb6_End()`、N6 改名那道开关 ——  **六档各自红并点名相应规则**。
-- 登记动作：四道一起补进 `run_tests.ps1`（照现有 `Test-*` 那套逐字抄形：`$script:total++` / `[STATIC] <label> ...` / rc=0 才 PASS /   失败打前六行输出），登记数 **32 → 36**，`PSParser` tokenize **0 错**，BOM+CRLF 原样。登记之后门才会真的替这道闸守着；  census 那句「登记数必须等于 scripts/ 里的道数」眼下还没钉 —— 这是本格剩下的那一刀（下次顺手做，别再让它靠人记得跑）。
+- 登记动作：四道一起补进 `run_tests.ps1`（照现有 `Test-*` 那套逐字抄形：`$script:total++` / `[STATIC] <label> ...` / rc=0 才 PASS /   失败打前六行输出），登记数 **32 → 36**，`PSParser` tokenize **0 错**，BOM+CRLF 原样。登记之后门才会真的替这道闸守着；  **这一句下一段就钉上了**（第 37 道哨兵，见下面三条读数）。
+- **第 37 道 = `scripts/check_static_sentinel_registration.ps1`**（登记后本机跑绿：`37 sentinels on disk, all registered`）。 三条规则：**R1** 盘上每一道 `check_*.ps1` 必须被 `tests/run_tests.ps1` 按**文件名**引用一次以上（新做哨兵忘记登记 = 当场红并点名）； **R2** 引用到的每一个 `check_*.ps1` 必须真在盘上（登记一个不存在的名字 = 那一格永远看不见失败，与 `Test-Compile` 重名遮蔽同族）； **DETAIL** 红的时候报两边的条数（`onDisk=` / `referenced=`），好分辨是漏登记还是名字打错。
+- **R1b 是这一道自己的负控教出来的**：我拿「把调用行删掉、只留 `function` 定义」当假改动，R1 居然照样绿 ——  因为函数体里那句 `-File …\check_x.ps1` 本身就是一次引用。⇒ 补一条按结构问的 **R1b**：引用某道哨兵的那个 `Test-*` 函数必须**还有一处调用** （数 `^\s+Test-X\s*$`），没有就点名 dead cell。**覆盖面是「跑不跑」，不是「提没提」** —— 与这一格的起因（存在面 != 登记面）是同一件事的两层。
+- 五档对照（`.build/b663_neg.txt`，在一份 `scripts/` + `tests/run_tests.ps1` 的拷贝里跑，不碰工作树）：绿控两档 rc=0（发货态 / 还原后）； N1 只删调用行 ⇒ **R1b** 点名 `Test-StaticSentinelRegistration`；N2 盘上多一道没登记的 ⇒ **R1**（`onDisk=38 referenced=37`）； N3 引用一个盘上没有的名字 ⇒ **R2**（`onDisk=37 referenced=38`）；N4 整段登记（函数 + 调用）删掉 ⇒ **R1**。 顺带一条自证：**这一道第一次跑就是因为自己没登记而红** —— R1 在那一刻被真实地验活了一次，之后才把它自己补进 harness。
+- 全道复跑（含这一道）：**37 道绿、0 红**（`scripts/check_*.ps1` 逐道 powershell 跑，读数 `.build/b666_sweep.txt`）。
 
 ## C. 仍在生效的口径与工具事实（与本文档等长的一半价值在这里；完整版见记忆库）
 

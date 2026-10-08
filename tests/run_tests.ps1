@@ -892,6 +892,19 @@ function Test-FormDrawState {
         $out | Select-Object -First 6 | ForEach-Object { Write-Host "  $_" }
     }
 }
+function Test-StaticSentinelRegistration {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] static_sentinel_registration ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\check_static_sentinel_registration.ps1" 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        $out | Select-Object -First 8 | ForEach-Object { Write-Host "  $_" }
+    }
+}
 function Test-QuitPumpInvariant {
     $script:total++
     Write-Host -NoNewline "  [STATIC] quit_pump_invariant ... "
@@ -5138,6 +5151,7 @@ if ($Category -in @("all", "compile")) {
     Test-VariantCmpBoxing
     Test-EventHandlerNames
     Test-UcInstanceExit
+    Test-StaticSentinelRegistration
     Test-QuitPumpInvariant
     Test-ComMarkerWriteSites
     Test-SetRhsObjectContext
