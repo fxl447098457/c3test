@@ -112,6 +112,14 @@ jobs:
           path: emit-manifest.txt
           retention-days: 14
 
+      - name: Upload raw emit samples (a few inputs, un-normalized)
+        uses: actions/upload-artifact@v4
+        with:
+          name: emit-samples
+          path: .build/emit-samples
+          if-no-files-found: error
+          retention-days: 14
+
   regression:
     name: "Tests (${{ matrix.category }}${{ matrix.shard && format(' #{0}', matrix.shard) || '' }})"
     needs: build

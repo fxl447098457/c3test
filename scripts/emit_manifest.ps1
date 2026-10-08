@@ -21,7 +21,8 @@
 # Usage:  powershell -File scripts/emit_manifest.ps1 [-Root <repo>] [-Out <file>]
 param(
     [string]$Root = "",
-    [string]$Out = ""
+    [string]$Out = "",
+    [string]$Samples = "tests/acc/acc_main.bas,tests/asm/AsmTest.bas,tests/Charts 2020/ucChartArea/Proyecto1.vbp"
 )
 $ErrorActionPreference = 'Continue'
 if (-not $Root) { $Root = (Split-Path -Parent $PSScriptRoot) }
@@ -52,18 +53,29 @@ function Get-NormHash([string]$path) {
 $exeHash = (Get-NormHash $c3)[0]
 $exeSize = (Get-Item $c3).Length
 
-# Toolset identity: which VS/MSVC this machine has. CI's Build job picks `vswhere -latest`,
-# so this is the version that produced the binary we are hashing.
+# Toolset identity. 两处读数，缺一不可：
+#   * pe-lnk = 从**这枚二进制自己的 PE 头**读链接器版本 (optional header 的 MajorLinkerVersion/
+#     MinorLinkerVersion) —— 这是"谁编出它"的唯一硬证据，与本机装了几个 VS 无关。
+#   * msvc-installed = 这台机器上装的 MSVC 工具目录**全部列出**。曾经这里只写
+#     `Get-ChildItem | Select -First 1`，那是"按字母序最小的一档"，runner 上多版本共存时
+#     会把实际用的那档漏掉（门 #410 就因此报成 msvc=14.29.30133，看着和本机一样，
+#     而 Build 作业按 vswhere -latest 选的工具集未必是它）⇒ 那一版读数不能用来判"两侧工具链相同"。
 $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"
-$vsVer = "unknown"; $msvcDir = "unknown"
+$vsVer = "unknown"; $msvcList = "unknown"
 if (Test-Path $vswhere) {
     $vsVer = (& $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationVersion 2>$null)
     $vsPath = (& $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath 2>$null)
     if ($vsPath) {
         $tools = Join-Path $vsPath "VC\Tools\MSVC"
-        if (Test-Path $tools) { $msvcDir = (Get-ChildItem $tools | Select-Object -First 1).Name }
+        if (Test-Path $tools) { $msvcList = ((Get-ChildItem $tools | ForEach-Object { $_.Name }) -join '+') }
     }
 }
+$peLnk = "unknown"
+try {
+    $bytes = [System.IO.File]::ReadAllBytes($c3)
+    $off = [BitConverter]::ToInt32($bytes, 0x3C)          # e_lfanew
+    $peLnk = ("{0}.{1}" -f $bytes[$off + 4 + 2], $bytes[$off + 4 + 3])
+} catch { }
 
 $inputs = Get-ChildItem -Path (Join-Path $Root "tests") -Recurse -File |
     Where-Object { $_.Extension -match '^\.(vbp|bas)$' } |
@@ -72,9 +84,12 @@ $inputs = Get-ChildItem -Path (Join-Path $Root "tests") -Recurse -File |
 
 $lines = @()
 $lines += "# c3-exe sha256=$exeHash size=$exeSize"
-$lines += "# toolset vs=$vsVer msvc=$msvcDir runner=$env:COMPUTERNAME"
+$lines += "# toolset pe-lnk=$peLnk vs=$vsVer msvc-installed=$msvcList runner=$env:COMPUTERNAME"
 $lines += "# arch=x64 inputs=$($inputs.Count)"
 $tmp = Join-Path ([System.IO.Path]::GetTempPath()) ("emitnorm_" + [guid]::NewGuid().ToString("N") + ".c")
+$sampleDir = Join-Path $Root ".build\emit-samples"
+if (Test-Path $sampleDir) { Remove-Item $sampleDir -Recurse -Force }
+New-Item -ItemType Directory -Force -Path $sampleDir | Out-Null
 $fail = 0
 foreach ($in0 in $inputs) {
     $rel = $in0.FullName.Substring($Root.Length + 1).Replace('\', '/')
@@ -88,6 +103,12 @@ foreach ($in0 in $inputs) {
     $pair = Get-NormHash $tmp
     $lines += ("{0}  rc={1}  bytes={2}  {3}" -f $pair[0], $rc, $pair[1], $rel)
     if ($rc -ne 0) { $fail++ }
+    # 清单只有哈希，跨机器对不出"差在哪一行"。$Samples 里点名的输入把**未归一化的原文**
+    # 一并留下（文件名把路径里的分隔符/空格折成下划线），两边一比就知道差的是内容还是环境串。
+    $flat = $rel -replace '[\\/ \-]', '_'
+    if (($Samples -split ',') -contains $rel -or ($Samples -split ',') -contains $flat) {
+        Copy-Item $tmp (Join-Path $sampleDir ($flat + '.c')) -Force
+    }
 }
 if (Test-Path $tmp) { Remove-Item $tmp -Force }
 Set-Content -Path $Out -Value $lines -Encoding UTF8
