@@ -43,11 +43,17 @@ function Get-NormHash([string]$path) {
         if ($form) { $text = $text.Replace($form, '<ROOT>') }
     }
     $rebytes = $lat.GetBytes($text)
+    # 第二列 = 只把**纯 ASCII 行**拿去哈希。理由（账 #267）：产品发出的中文注释字节随"编译 C3.exe 的那台
+    # 工具链"变（14.29 按 GBK、14.51 按 UTF-8），跨构建比清单时这一族会把每一行都刷成"不同"，
+    # 把真正的语义差淹掉（实测 319/395 vs 语义那 14 份）。ascii256 相同 + sha256 不同 ⇒ 只差在编码。
+    $ascii = (($text -split "`n") | Where-Object { $_ -notmatch '[^\x09\x0A\x0D\x20-\x7E]' }) -join "`n"
+    $ab = $lat.GetBytes($ascii)
     $sha = [System.Security.Cryptography.SHA256]::Create()
     try {
         $hex = ($sha.ComputeHash($rebytes) | ForEach-Object { $_.ToString("x2") }) -join ''
+        $ahex = ($sha.ComputeHash($ab) | ForEach-Object { $_.ToString("x2") }) -join ''
     } finally { $sha.Dispose() }
-    return @($hex, $rebytes.Length)
+    return @($hex, $rebytes.Length, $ahex)
 }
 
 $exeHash = (Get-NormHash $c3)[0]
@@ -88,6 +94,9 @@ $lines = @()
 $lines += "# c3-exe sha256=$exeHash size=$exeSize"
 $lines += "# toolset pe-lnk=$peLnk vs=$vsVer msvc-installed=$msvcList runner=$env:COMPUTERNAME"
 $lines += "# arch=x64 inputs=$($inputs.Count)"
+# 列义：sha256 = 归一化后全文哈希；ascii256 = 只取纯 ASCII 行的哈希（两侧对齐用它，见上面注释）；
+#        bytes = 归一化后全文字节数；最后一段是仓库内的相对路径。
+$lines += "# columns: sha256=<normalized全文> ascii256=<仅ASCII行> rc=<退出码> bytes=<归一化字节> <relpath>"
 $tmp = Join-Path ([System.IO.Path]::GetTempPath()) ("emitnorm_" + [guid]::NewGuid().ToString("N") + ".c")
 $sampleDir = Join-Path $Root ".build\emit-samples"
 if (Test-Path $sampleDir) { Remove-Item $sampleDir -Recurse -Force }
@@ -103,7 +112,7 @@ foreach ($in0 in $inputs) {
         -NoNewWindow -Wait -PassThru
     $rc = $p.ExitCode
     $pair = Get-NormHash $tmp
-    $lines += ("{0}  rc={1}  bytes={2}  {3}" -f $pair[0], $rc, $pair[1], $rel)
+    $lines += ("sha256={0} ascii256={1} rc={2} bytes={3} {4}" -f $pair[0], $pair[2], $rc, $pair[1], $rel)
     if ($rc -ne 0) { $fail++ }
     # 清单只有哈希，跨机器对不出"差在哪一行"。$Samples 里点名的输入把**未归一化的原文**
     # 一并留下（文件名把路径里的分隔符/空格折成下划线），两边一比就知道差的是内容还是环境串。

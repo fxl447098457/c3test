@@ -1377,6 +1377,12 @@ S9.4 打标记那一路的 PictureBox 判据必须问表、且不许把成员名
   与既有口径「夹具注释一律 ASCII」是同一族，只是这次在**产品自己**身上）。
   ⇒ 读清单时的操作口径：一行差里可能混着两类 —— 编码类（覆盖面大、语义无关）与 #245 的 COM 出口类（实测 14 份）；
   先按"差异行是否只含非 ASCII 字节"把前者剔掉，再看剩下的。
+· **清单加第二列 `ascii256`（只哈希纯 ASCII 行）+ 本刀的语料爆炸半径**：全语料 395 份输入里，账 #245 这一刀只改动 **7 份**
+  （`Charts 2020` 的 6 枚 UC 工程 + `tests/VBFlexGridDemo/VBFlexGridDemo.vbp`），其余 **388 份逐字节不变**、`rc` 一个都没变
+  ⇒ 零附带影响；而 §B73 之前那串"14 份捕获不同"就是同一批的另一面：7 份 × 两架构 = 14。
+  从此清单每行两列并排（`sha256` = 归一化全文、`ascii256` = 只取纯 ASCII 行）：**两侧 `ascii256` 相同而 `sha256` 不同 ⇒ 只差在编码族（#267）；
+  两列都不同才是语义差** ⇒ 跨工具链比对不会再被 319 行编码差淹没。CI 那份已经用 git 回读（`ci/emit-manifest` 分支，门 #413 起），
+  读数从此不需要 `api.github.com`。
 · **新工件 `emit-samples`**：清单只有哈希，跨机器对不出「差在哪一行」⇒ `-Samples` 点名的三份输入（`tests/acc/acc_main.bas`、`tests/asm/AsmTest.bas`、`tests/Charts 2020/ucChartArea/Proyecto1.vbp`）把**未归一化原文**一起留档 ⇒ 下一轮把 CI 那份与本机 `.build/emit-samples/` 直接 diff，那 7 个字节是什么一眼可见。
 **2026-10-08 账 #245 已修 = 根因是一处未初始化字段，跟构建期顺序无关**：`parseVarDesc` 只在
 `varkind == VAR_PERINSTANCE` 那一支给 `member.returnType` 赋值，而 **dual 接口的属性是 VAR_PROPERTY(3) 的
