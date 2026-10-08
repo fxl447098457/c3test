@@ -277,8 +277,11 @@ int vb6_RegisterFormClassBg(const char* className, void* wndProc, void* hInstanc
     wc.hInstance = (HINSTANCE)hInstance;
     wc.hCursor = LoadCursorW(NULL, IDC_ARROW);
     // czUI fix: .frm 的窗体级 BackColor — 用 .frm 颜色做类背景刷, 否则窗体永远
-    // 是 BTNFACE 灰 (czForm Demo 深蓝底变灰底). backColor<0 = 未指定, 走 VB6 默认.
-    if (backColor >= 0) {
+    // 是 BTNFACE 灰 (czForm Demo 深蓝底变灰底).
+    // Fix <c3-form-backcolor>: 哨兵是 -1 (后端 prelude 初值, 且 &H80000000 也绝非
+    // 合法表单色). 系统色 (&H800000xx, 高位置位 → 32 位有符号为负, 如 -2147483643)
+    // 是**合法值**, 必须放行到下面的 GetSysColor 翻译, 不能因 <0 被当未指定.
+    if (backColor != -1) {
         COLORREF cref = (backColor & 0x80000000L)
                             ? GetSysColor(backColor & 0xFF)
                             : (COLORREF)backColor;

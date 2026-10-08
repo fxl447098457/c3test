@@ -116,6 +116,22 @@
         emitDesignerScaleModeProp(frmDesc.formControl, "hwnd");
     }
 
+    // Fix <c3-form-backcolor>: 窗体自身设计期 BackColor —— 此前两条创建路都不发到
+    // 窗体 HWND 上 (只借 RegisterFormClassBg 做类背景刷, 但系统色被 `>= 0` 哨兵吞掉,
+    // 见 cgen_form_show.inc). 把属性显式 Set 到窗体句柄, 与控件级 Fix 187 同口径:
+    //   · Form.BackColor 可查 (vb6_GetControlBackColor(formHwnd) 不再恒答 BTNFACE);
+    //   · 子控件未显式设色的, 经 vb6_GetControlBackColor(parent) 继承到表单真实底色;
+    //   · 系统色 (&H800000xx, 高位置位→负) 原样下传, RTL 读取侧按 GetSysColor 翻译.
+    {
+        auto fbcIt = frmDesc.formControl.properties.find("BackColor");
+        if (fbcIt != frmDesc.formControl.properties.end()
+            && fbcIt->second.type == FrmValueType::Integer) {
+            c_.emitLine("vb6_SetControlBackColor((void*)hwnd, "
+                        + std::to_string((int)(unsigned int)fbcIt->second.intValue)
+                        + ");  /* design Form.BackColor */");
+        }
+    }
+
     // M22-fix: 在Form_Load之前先赋值vb6_hwnd_<Form>，这样Form_Load中
     // Me.Caption / Me.Text 等才能通过vb6_hwnd_引用到正确的HWND
     // CreateFormWindow还未返回，vb6_hwnd_尚未被赋值
