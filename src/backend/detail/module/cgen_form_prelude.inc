@@ -234,7 +234,8 @@
             if (!pic.data.empty()) {
                 formIconHasData_ = true;
                 std::string varName = "vb6_frx_icon_" + cIdent(formName);
-                h_.emitLine(bytesToHexArray(pic.data.data(), pic.data.size(), varName));
+                frxArrayDefs_.push_back(bytesToHexArray(pic.data.data(), pic.data.size(), varName));
+                h_.emitLine(bytesToHexArrayDecl(varName));
                 // Will be used in WM_CREATE to set window icon
                 // Store a flag for later code generation
             }
@@ -249,7 +250,8 @@
             if (!pic.data.empty()) {
                 formPicHasData_ = true;
                 std::string varName = "vb6_frx_bgpic_" + cIdent(formName);
-                h_.emitLine(bytesToHexArray(pic.data.data(), pic.data.size(), varName));
+                frxArrayDefs_.push_back(bytesToHexArray(pic.data.data(), pic.data.size(), varName));
+                h_.emitLine(bytesToHexArrayDecl(varName));
             }
         }
     }

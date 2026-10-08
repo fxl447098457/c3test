@@ -12,10 +12,22 @@
 
 namespace vb6c3 {
 
-// P24: Convert binary data to C hex array string
+// P24: Convert binary data to C hex array **definition** (file-scope, emitted into the
+// owning module's .c via the deferred frxArrayDefs_ queue) + the header-side declaration
+// helper bytesToHexArrayDecl() right below.
+//
+// C3 bloat fix (exe 13.4MB → ~3MB): 这两个 frx 数组 (窗体 Icon/Picture、控件 Picture、
+// ImageList、SSTab 页图) 原先以 `static const` 直接发在 **.h** 里, 而 .h 被工程内**每个**
+// .c include (menu3d: FrmMain/BitMapBas/Globali_Image/Grafica01/Remote_Globali 共 5 个) ——
+// `static` 是内链接, 所以每个 TU 各自物化一份完整的 2.6MB 只读数据。它们又不是 COMDAT,
+// /OPT:REF /OPT:ICF 一律删不动 → 链接期 5 份共存 → .rdata 12.6MB、exe 虚胖到 13.4MB
+// (VB6 原生仅 2.5MB)。修法: .h 只留 extern 声明, 定义集中到 owning 模块的 .c 里发一次
+// → 全程序仅一份 → 体积回落到数据本身大小。
 static std::string bytesToHexArray(const uint8_t* data, size_t size, const std::string& varName) {
     std::ostringstream ss;
-    ss << "static const unsigned char " << varName << "[] = {\n";
+    // 显式 extern: 生成物是 .c (MSVC 按 C 编译, 文件作用域 const 本就外链接), 但写明 extern
+    // 让 C / C++ 两种编译模式下都稳定拿到外链接 —— 与 .h 里的 extern 声明一一对应。
+    ss << "extern const unsigned char " << varName << "[] = {\n";
     for (size_t i = 0; i < size; i++) {
         if (i % 16 == 0) ss << "    ";
         ss << "0x" << std::setfill('0') << std::setw(2) << std::hex << (int)data[i];
@@ -24,7 +36,16 @@ static std::string bytesToHexArray(const uint8_t* data, size_t size, const std::
         else ss << " ";
     }
     ss << "};\n";
-    ss << "static const int " << varName << "_size = " << std::dec << size << ";";
+    ss << "extern const int " << varName << "_size = " << std::dec << size << ";";
+    return ss.str();
+}
+
+// Header-side declaration for a frx byte array whose definition lives in the owning
+// module's .c (see bytesToHexArray above). 让每个 include 本头的 TU 都能看见符号, 而不复制存储。
+static std::string bytesToHexArrayDecl(const std::string& varName) {
+    std::ostringstream ss;
+    ss << "extern const unsigned char " << varName << "[];\n";
+    ss << "extern const int " << varName << "_size;";
     return ss.str();
 }
 

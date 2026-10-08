@@ -156,7 +156,8 @@
                     if (!pic.data.empty()) {
                         std::string varName = "vb6_frx_pic_" + cIdent(ctrl.controlName);
                         if (ctrl.index >= 0) varName += "_" + std::to_string(ctrl.index);
-                        h_.emitLine(bytesToHexArray(pic.data.data(), pic.data.size(), varName));
+                        frxArrayDefs_.push_back(bytesToHexArray(pic.data.data(), pic.data.size(), varName));
+                        h_.emitLine(bytesToHexArrayDecl(varName));
                         bool isGraphicalBtn = (ctrl.controlType == FrmControlType::CommandButton ||
                                                ctrl.controlType == FrmControlType::OptionButton ||
                                                ctrl.controlType == FrmControlType::CheckBox) &&
@@ -532,7 +533,8 @@
                         imgIdx++;
                         std::string varName = "vb6_frx_imglist_" + cIdent(ctrl.controlName)
                                             + "_" + std::to_string(imgIdx);
-                        h_.emitLine(bytesToHexArray(pic.data.data(), pic.data.size(), varName));
+                        frxArrayDefs_.push_back(bytesToHexArray(pic.data.data(), pic.data.size(), varName));
+                        h_.emitLine(bytesToHexArrayDecl(varName));
                         std::string keyLit = "NULL";
                         auto keyIt = listImg.properties.find("Key");
                         if (keyIt != listImg.properties.end()
@@ -645,7 +647,8 @@
                                 // Generate byte array in .h file
                                 imgIdx++;
                                 std::string varName = "vb6_frx_imglist_" + cIdent(ctrl.controlName) + "_" + std::to_string(imgIdx);
-                                h_.emitLine(bytesToHexArray(pic.data.data(), pic.data.size(), varName));
+                                frxArrayDefs_.push_back(bytesToHexArray(pic.data.data(), pic.data.size(), varName));
+                                h_.emitLine(bytesToHexArrayDecl(varName));
 
                                 // Get Key property (may be empty string)
                                 std::string keyStr;

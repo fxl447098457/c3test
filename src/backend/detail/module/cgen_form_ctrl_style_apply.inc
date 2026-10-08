@@ -1125,7 +1125,8 @@
                     if (pic.data.empty()) continue;
                     std::string varName = "vb6_frx_tabpic_" + cIdent(ctrl.controlName)
                                         + "_" + std::to_string(idx2);
-                    h_.emitLine(bytesToHexArray(pic.data.data(), pic.data.size(), varName));
+                    frxArrayDefs_.push_back(bytesToHexArray(pic.data.data(), pic.data.size(), varName));
+                    h_.emitLine(bytesToHexArrayDecl(varName));
                     c_.emitLine("vb6_SSTab_SetTabPicture((void*)" + tsHwnd + ", "
                               + std::to_string(idx2) + ", " + varName + ", "
                               + varName + "_size);");

@@ -371,6 +371,10 @@ bool MsvcDriver::compileAndLink(const MsvcDriverOptions& options) {
         cmd << " /MACHINE:X86";
     }
 
+    // czUI fix (exe 体积): 与 msvc_driver_incremental.cpp 同步 —— /Gy 编出的函数级
+    // COMDAT 要靠 /OPT:REF 剔除未引用 RTL (winsock/data/ole/...), /OPT:ICF 折叠重复。
+    cmd << " /OPT:REF /OPT:ICF";
+
     if (options.verbose) {
         std::cout << "C3: 执行: " << cmd.str() << std::endl;
     }

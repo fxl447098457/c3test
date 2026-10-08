@@ -21,6 +21,12 @@
     // 代码输出
     CodeEmitter h_;   // .h 文件内容
     CodeEmitter c_;   // .c 文件内容
+    // C3 bloat fix: 窗体 frx 字节数组 (Icon/Picture/控件 Picture/ImageList/SSTab) 的**定义**。
+    // 这些定义在 emitFormFramework 期间从多个调用点产生, 但那些调用点大多落在生成代码的
+    // **函数体**里 (CreateControls 等) —— `extern ... = {...}` 在块作用域非法, 故统一攒到
+    // 这里, 等 emitFormFramework 返回、c_ 回到文件作用域时一次性发射 (见
+    // cgen_base_generate_decl_pass.inc)。.h 侧只发 extern 声明 (bytesToHexArrayDecl)。
+    std::vector<std::string> frxArrayDefs_;
     std::string header_;
     std::string source_;
     std::string baseName_;        // 输出文件基名 (如 "hello")
