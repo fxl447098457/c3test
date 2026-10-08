@@ -1437,6 +1437,9 @@ CI 那一枚（`pe-lnk=14.51`）稳定落进 `int16_t` 档 ⇒ 发成 `vb6_ComGe
 - 负控四条都对着 CI #418 那份**真清单**跑（不拿假文件糊）：绿控 `395/395 相同 rc=0`；**改一个哈希字符** ⇒ `rc=1` 且点名 `tests/acc/acc_fam.vbp`、把期望/实得两行都列出；**少一行输入** ⇒ `rc=1` 且点名 `tests/acc/acc_ok.vbp`；**期望文件不在** ⇒ `rc=2 MISSING`。`-Bless` 的形状核对：注脚留着、数据行整批换成新的。
 - 这一格踩到的工具坑（台账里「续行符是反引号」那条的又一件实物）：`Add-Content -LiteralPath $Out -Encoding UTF8 -Value` 把值写在**下一行**而没加反引号 ⇒ PS 5.1 报 `MissingArgument`，**可脚本退出码仍然是 0**，那句结论只 echo 在控制台、**从没进文件**（原图：`b498_manifest.txt` 里压根没有 `expectation-check` 那行）。只看 rc 会以为这一步通了 —— 判据要读工件本身。
 - §B73 到此合上的是「跨机器同不同」这一问；仍欠的那格没变：**COM 签名表定序 + `comMethods` 四处消费者合一**（账 #245 的尾巴）。从这一轮起，改发码形状若没先归因就登记，门会直接指出是哪一份输入变了。
+- **2026-10-08 第二次咬合，这回咬的不是本线**：门 **#423**（head `576b694d` = 用户的「窗体设计期 BackColor 含系统色现正确发射」那一刀）唯一红 = `Emit manifest (shape oracle)`，11 个 Tests 格全绿。清单照旧经 git 通道回来（`ci/emit-manifest` 尖端 `deace63b`，注明 `head=576b694d`），本机用**唯一那份比较逻辑**复算 ⇒ **395 行里 7 行差**，其余 388 行零动。两头读数把这一格钉死：① 语料里在 **form-level**（`Begin VB.Form` 那一层）写了 `BackColor` 的窗体恰好 **8 枚**，落在 7 个工程目录里（`Charts 2020/Form2`、ucChartArea/Form1、ucChartBar/Form1+Form2、ucPieChart/Form1、ucProgressCircular/Form2、czUI-main/frmDemo、dcsurf/DcForm）—— ucChartBar 两枚 ⇒ 它那行字节 **+180**，其余六份 **+89/+90** = 正好一行 `vb6_SetControlBackColor(…)`；② 另外 15 份带 `BackColor` 的 .frm 全在 depth>=2（控件层）⇒ 一行都没多发。**方向、条数、字节数三头一致 ⇒ 属「发码确实该变」那一档**，按注脚那条规则重登记，登记来源 = CI 那台 14.51 自己交的清单（不是本机复算）。
+- **登记之后两侧都过，且登记是活的**：`compare_emit_manifest.ps1` 拿 CI 那份对上新表 = **rc=0 / 395 全同**；往新表里改一个哈希字符 ⇒ **rc=1 并点名那一行**（`tests/cls_neg/ci_n22_outsider.bas`）。这扇门（#424）跑的就是这份新表配这份代码，绿了才算闭合。
+
 ### B74 控件几何写进去的数与读出来的数天生差一格 —— VB 侧读数从没被存过（账 #230，**已出：门 #376（run 37547498187、head `a9c47c82`、branch dev、attempt 1）= 11 job 全 completed/success、非绿 0**）
 
 读数（探针 `.build/b506geo`，两架构逐字相同）：`txtA.Left = 5000` 读回 **4995**、`.Top = 444` 读回 **441**、`.Width = 7777` 读回 **7770**；设计期写的 `1007,449,3001,247` 读回 `1005,450,3000,240`。原因不在值里而在**读法**：四个 getter 现场 `GetWindowRect` + `vb6_ScalePxToUser` ⇒ 每一次读写都被像素网格重新量化一遍。
