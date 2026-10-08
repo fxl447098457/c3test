@@ -1688,7 +1688,7 @@ CI 那一枚（`pe-lnk=14.51`）稳定落进 `int16_t` 档 ⇒ 发成 `vb6_ComGe
 - **门 #420 的收线读数**：12 条 check-run 全 success（Build / `Emit manifest (shape oracle)` / syntax / compile / smoke / asm / bas#1#2 / vbp#1..#4），而发码清单那边仍是 `# expectation-check=PASS`、395 行零差 ⇒ 这一刀**零发码变化**（只动 harness 与文档，符合预期）。另记两件常设事实：① 本仓 [STATIC] 哨兵从 35 道长成 **36 道**；② 以后谁要在 5.1 下跑本地回归，现在跑得动了（实测 `-Category compile` 在 5.1 下 PASS=42 FAIL=0，改前那台同一条命令整片 C1083）。
 
 
-### B94 量：`comMethods` 的消费者不止「四处」—— 四份文件五处 find，外加一处从不问这张表的写侧（账 #245 尾巴的开工测量，2026-10-08，**第一刀、第二刀（行为针 #270）都已出（见本节末）**）
+### B94 量：`comMethods` 的消费者不止「四处」—— 四份文件五处 find，外加一处从不问这张表的写侧（账 #245 尾巴的开工测量，2026-10-08，**三刀都已出（第二刀 = 行为针 #270，第三刀 = 写侧那格 #245/#271，见本节末）**）
 
 - **数据面**：`Symbol::comMethods` = `unordered_map<小写方法名, ComMethodSig>`（`src/semantics/symbol_table.hpp:282`，`ComMethodSig` 在 `:272-281`）。全仓**唯一**改写出口 = `insertComMethod`（`src/driver/driver_semantics.cpp:23-32`，落在 `:31` 那句 `sym.comMethods[key] = std::move(sig)`，`:28` 那条挡的是「setter 不许盖掉 getter」），三个调用点 `:153`（coclass 默认接口）/ `:218`（ComInterface）/ `:357`（ComGlobalNs 提升）；`clear` / `emplace` / `insert` / `erase` / 裸赋值 一处都没有。写侧是干净的，欠的一直在读侧。
 - **读侧 = `src/backend` 里五处 `comMethods.find(`、落在四份文件**（哨兵 C4 钉的正是这四份**文件名**，`scripts/check_com_prop_type_authority.ps1:98-108`，扫描范围只到 `src/backend`）：`cgen_util_com.cpp:326`（`resolveComValue`，`:330` 先问 `isPropertyGet`）/ `cgen_util_com.cpp:800`（`resolveComMarkerForPack`，`:801` 同样先问）/ `cgen_expr_call_arg_emit.inc:89`（`:90` 问）/ `cgen_expr_call_com_bind.inc:615`（`:620` 零实参那一读、`:637` 带实参的形状）/ `cgen_expr_call_prelude.inc:209`（`:230` 起）。⇒ 「四处」是**文件**口径，动手时要按**五处**数。
@@ -1723,6 +1723,15 @@ CI 那一枚（`pe-lnk=14.51`）稳定落进 `int16_t` 档 ⇒ 发成 `vb6_ComGe
   · **A/B**：同一份夹具在 §B94 之前的 BASE（`.build/b630_base_C3.exe`）与之后的 NEW 上发码**逐字节相同** ⇒ 这是**回归针，不是修复针**，钉的是「合一之后这条口径别再漂回去」。
   · **清单跟着进一格，但别用 `-Bless`**：`emit-manifest.expected.txt` 395 → **396** 行（`+1/-0`，只手插新夹具那一行）。理由：本机 `Sort-Object FullName` 与 CI 那份对同前缀的 `*.bas` / `*.vbp` 次序不同（`.` 0x2E 排在 `_` 0x5F 前），`-Bless` 会把 **23 行一起重排**成噪声（实测过，回退了）。插完 `compare_emit_manifest.ps1` 本地读 **396/396 全同**；次序不参与判定，所以 CI 那边照样对得上。
   · **37 道 `[STATIC]` 哨兵本地全 rc=0**。新增 `.bas` 不碰任何「恰好 N 处」的普查：`check_vbp_fixture_census` 只数 `.vbp`、`check_fixture_timer_close` 只数 `.frm`（下限 20）；`tests/` 那侧也没有「每枚 .bas 必须登记」的闸（只有 `run_tests.ps1:2484` 那条注册表自检，它走的是**已登记队列**，不是目录）。
+
+- **2026-10-09 · 第三刀落之前，先把上一轮那句「同类相撞语料 0 例」订正掉**。这一轮的探针不再只问「有没有覆盖」，而是问「**这次覆盖会不会改掉读取方真用的东西**」（`isPropertyGet` / `returnType` / 形参表的 名·型·方向 —— ByRef 出参探测读的就是后两样）。全 396 份输入的读数（`.build/b705_ambig.txt`、`.build/b708_quiet.txt`）：
+  · **blessed 那一向 put→get = 21930 次**。上一轮写的「46 处」是**按 (符号,名字) 去重之后的键数**，不是出现次数 —— 那句「46/46 全落在 put→get」方向没错，但把总量说小了一个数量级（同一条坑：要按**每条的重数**比，不能拿「这个词在这个块里出现过」当归因）。
+  · **同类 put→put = 994 次 ⇒ 「同类相撞语料 0 例」是错的**：实物就是 `Dictionary.item` / `IDictionary.item` —— `put_Item` 与 `putref_Item` 折成同一个小写键。它三项全同、读形没变，所以从来没有症状；**真正 0 例的是「读形变了又不是 blessed」那一种**。这条分界比上一轮的口径可判定得多，产品与判据都按它落。
+- **产品侧落点（还是那一处唯一写侧 `insertComMethod`，`src/driver/driver_semantics.cpp`）**：① 政策两条写在出口旁边；② 新助手 `comSigReadShapeDiffers` = 「这次覆盖会不会改掉发码读到的东西」这一问的唯一住所（比 getter 标志 / 返回档 / 形参 名·型·方向）；③ 一声 `C3: COMSIG-AMBIG` 走 stderr（§C 那条：note 级诊断在成功的编译里根本不打印），只在「读形变了 **且** 不是 blessed」时响，**响完仍然后写覆盖** —— 它是等实物来定政策的哨子，不是判死。
+- **两半边都有实测**：静的那半边 = 全 396 份输入 **0 条 AMBIG**，且发码清单 **396/396 逐字节不动**（stderr 不进哈希；顺带证了 `memid` / `vtableIndex` 不被发码读）。响的那半边 = 在 `.build/wt_b8` 把默认接口第一枚 getter 换个 `returnType` 再插一次 ⇒ 同一份 `tests/test_com_default_prop.bas` 当场响 **45 条** —— 而那枚输入正是新判据 `csa_emitc_no_ambig_noise` 盯的那一份，所以谁把条件放宽（去掉 `!blessed`，或让助手无条件 `return true`），CI 上就点名它。**判据两头：一条断它不许响，一条（第 38 道哨兵）断它凭什么响。**
+- **第 38 道哨兵 `scripts/check_com_sig_collision_policy.ps1`**（`[STATIC] com_sig_collision_policy`，登记数 37 → 38，`PSParser` 0 错、BOM+CRLF 原样）：W1 两张表的写侧各**恰好一条赋值语句**（按**出现次数**数，不按文件名 —— 第一版按文件名数，同一个文件里多开一处照样绿，M6 档把它抓出来了，已改）；W1b 事件表 `comSourceMethods` 也登记在册（它今天不吃这条政策，哪天要吃必须先回来并口径）；W2 getter-beats-setter 那道闸必须仍真的 `return`；W3 响声必须问 `comSigReadShapeDiffers(it->second, sig)`、条件里必须带 `!blessed`、标签必须就是 `C3: COMSIG-AMBIG`；W4 助手必须真比那五项；W5 必须以 `return false;` 收尾（不许退化成无条件响）；W6 写侧调用点恰好 3。**九档对照全 MATCH**（`.build/b714_neg.txt`）：绿控 + 无关改动绿，七档假改动各自点名相应规则。
+- **本轮自己踩到的实现坑（就记在这节里）**：`oldSetter = it->second.isPropertyPut || ...` 写在「先判 `it != end()`」**之前**，等于对 `end()` 解引用 —— 第一版就这么把编译器自己打成 `0xC0000409`，每份输入一进来就崩，`--emit-c` 连发码都到不了。教训两句：往哈希表里加东西的函数**先判存在再解引用**；改完先跑**一份最小真实输入**（本机当场三条输入全崩，而那道新哨兵那时是绿的 —— 静态判据看不见运行期的自己）。
+- §B94 到此三刀落完。这一格剩下的只有一句「等实物」：真出现两枚同类 getter 相撞且返回档不同时按什么定序 —— 哨子会先响，再由政策决定（今天的默认仍是后写覆盖）。
 
 ### B95 四道 [STATIC] 哨兵从来没被门跑过 —— 其中一道早已过期成假红（2026-10-08，**已修：登记 + P3 换形状 = 门 #428（head `1564827f`）12 格全绿；那句 census 也已钉成第 37 道 = 门 #429（head `c2fa956d`）12 格全绿**）
 

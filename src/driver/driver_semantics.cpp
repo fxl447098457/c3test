@@ -20,6 +20,22 @@ namespace {
 // isPropertyGet 变 false。于是 obj.Prop.Method() 这类链式访问被判成"标量取值",
 // 再对 int16_t 拼 C 结构体成员访问 → C2224 (vbman-demo 的 ctx.Request.QueryString)。
 // 读取路径只认 getter; 属性写入走名字化的晚绑定, 不查 comMethods, 故让 getter 优先。
+// 两枚签名之间「读取方真会用的东西」是否不同: getter 标志、返回档、形参表 (名 / 型 / 方向)。
+// 只有这里变了, 「谁赢」才是一个会改掉发码的决定; 其余的覆盖只是同一份答案写了两遍 ——
+// 实测全语料 994 次同类覆盖 (Dictionary / IDictionary 的 item: put_Item 与 putref_Item 折成同一个
+// 小写键) 三项全同, 所以它们不许响 (响了就是噪声, 见 scripts/check_com_sig_collision_policy.ps1)。
+bool comSigReadShapeDiffers(const Symbol::ComMethodSig& oldSig, const Symbol::ComMethodSig& newSig) {
+    if (oldSig.isPropertyGet != newSig.isPropertyGet) return true;
+    if (oldSig.returnType != newSig.returnType) return true;
+    if (oldSig.params.size() != newSig.params.size()) return true;
+    for (size_t i = 0; i < oldSig.params.size(); i++) {
+        if (oldSig.params[i].name != newSig.params[i].name) return true;
+        if (oldSig.params[i].type != newSig.params[i].type) return true;
+        if (oldSig.params[i].isByVal != newSig.params[i].isByVal) return true;
+    }
+    return false;
+}
+
 void insertComMethod(Symbol& sym, const std::string& key, Symbol::ComMethodSig sig,
                      ComMemberKind kind) {
     bool incomingSetter = (kind == ComMemberKind::PropertyPut
@@ -27,6 +43,32 @@ void insertComMethod(Symbol& sym, const std::string& key, Symbol::ComMethodSig s
     auto it = sym.comMethods.find(key);
     if (incomingSetter && it != sym.comMethods.end() && it->second.isPropertyGet) {
         return;  // 已有 getter, setter 不得覆盖
+    }
+    // 账 #245 / §B94 的政策就两条: ① getter 永远赢 over setter (上面那道闸, 两向都对); ② 其余的覆盖今天
+    // **没有任何政策**: 赢家决定的是返回档 (发 vb6_ComGet* 哪一种) 与 ByRef 对象出参探测用的形参表, 两处
+    // 都静默。响完仍然后写覆盖 —— 这一声是等实物来定政策的哨子, 不是判死。
+    // 实测分界 (全 396 份输入): blessed 那一向 put->get 21930 次; 同类 put->put 994 次 (put_Item 与
+    // putref_Item 折成同一个小写键, 读形三项全同) —— 两种都不许响。响的只剩「读形真的变了、又不是
+    // blessed 那一向」那一种 (实测语料 0 次)。
+    {
+        bool exists = (it != sym.comMethods.end());
+        // 注意顺序: 先判存在, 再解引用 it->second —— 反过来就是把 end() 迭代器当元素读
+        // (本机实测: 每台输入一进来就 0xC0000409 崩在 insertComMethod 里)。
+        bool oldSetter = exists && (it->second.isPropertyPut || it->second.isPropertyPutRef);
+        bool incomingGetter = (kind == ComMemberKind::PropertyGet);
+        bool blessed = (exists && oldSetter && incomingGetter);
+        if (exists && !blessed && comSigReadShapeDiffers(it->second, sig)) {
+            std::cerr << "C3: COMSIG-AMBIG sym=" << sym.name << " name=" << key
+                      << " old(get=" << (it->second.isPropertyGet ? 1 : 0)
+                      << " rt=" << static_cast<int>(it->second.returnType)
+                      << " n=" << it->second.params.size() << ")"
+                      << " new(get=" << (incomingGetter ? 1 : 0)
+                      << " rt=" << static_cast<int>(sig.returnType)
+                      << " n=" << sig.params.size() << ")"
+                      << " memid=" << it->second.memid << "/" << sig.memid
+                      << " vt=" << it->second.vtableIndex << "/" << sig.vtableIndex
+                      << std::endl;
+        }
     }
     sym.comMethods[key] = std::move(sig);
 }

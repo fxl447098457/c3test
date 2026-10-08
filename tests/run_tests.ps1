@@ -957,6 +957,20 @@ function Test-UdtMemberDims {
         $out | Select-Object -First 6 | ForEach-Object { Write-Host "  $_" }
     }
 }
+function Test-ComSigCollisionPolicy {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] com_sig_collision_policy ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$PSScriptRoot\..\scripts\check_com_sig_collision_policy.ps1" 2>&1
+    $rc = $LASTEXITCODE
+    if ($rc -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        $out | Select-Object -First 6 | ForEach-Object { Write-Host "  $_" }
+    }
+}
 function Test-ComPropTypeAuthority {
     $script:total++
     Write-Host -NoNewline "  [STATIC] com_prop_type_authority ... "
@@ -2376,6 +2390,13 @@ if ($Category -in @("all", "run", "bas")) {
     Test-EmitcAbsent "cvp_emitc_no_context_guess" @("$Tests\test_com_variant_prop.bas") @(
         'vb6_ComGetStringProp(at, L"value")',
         'vb6_ComGetIntProp(at, L"value")'
+    )
+    # 账 #245 最后一刀的「不许响」那半边：写侧那声 COMSIG-AMBIG 只在读形真的变了、又不是 blessed 那一向时响。
+    # 语料实测分界 —— blessed put->get 21930 次、同类 put->put 994 次 (put_Item 与 putref_Item 折成同一个小写
+    # 键，读形三项全同)，两种都不许响 ⇒ 拿真绑 Dictionary 的输入断 stderr 里一条都没有。谁把条件放宽 (去掉
+    # !blessed，或让助手无条件 return true)，这一格当场在 CI 上点名。
+    Test-EmitcAbsent "csa_emitc_no_ambig_noise" @("$Tests\test_com_default_prop.bas") @(
+        'C3: COMSIG-AMBIG'
     )
     Add-BasTest "test_bstr_concat_scalar" "$Tests\test_bstr_concat_scalar.bas" @("BCS:16/16")
     # 账 #115: Len() 的"存储宽度"兜底桶把模块级 String 也吞了 (knownBstrVars_ 每过程入口 clear,
@@ -5165,6 +5186,7 @@ if ($Category -in @("all", "compile")) {
     Test-CtrlPropTypeAuthority
     Test-FormDrawState
     Test-ComPropTypeAuthority
+    Test-ComSigCollisionPolicy
     Test-EmitcArtifactCaliber
     Test-CtrlGeomCache
     Test-FloatToIntRound
