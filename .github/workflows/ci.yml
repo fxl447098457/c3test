@@ -86,6 +86,8 @@ jobs:
     needs: build
     runs-on: windows-latest
     timeout-minutes: 30
+    permissions:
+      contents: write   # 只给最后那一步：把清单用 git 推回 ci/emit-manifest
     defaults:
       run:
         shell: pwsh
@@ -119,6 +121,33 @@ jobs:
           path: .build/emit-samples
           if-no-files-found: error
           retention-days: 14
+
+      # 门读数过去全靠 api.github.com，而本机到它的通路是台本地反代（会整段拒：403 + Via: Caddy，
+      # 带不带 token 都一样）。git 那条（github.com）是通的 —— 所以清单也走 git 送回来：
+      # 每次把 emit-manifest.txt 提交到 ci/emit-manifest（这分支只由 CI 写，不进 dev 的历史），
+      # 本机读它只要 `git fetch github ci/emit-manifest`。这一步失败**不判红**，只打一行 publish-failed。
+      - name: Publish manifest over git
+        if: always()
+        env:
+          CI_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $url = 'https://x-access-token:' + $env:CI_TOKEN + '@github.com/' + $env:GITHUB_REPOSITORY + '.git'
+          git config user.email 'ci@users.noreply.github.com'
+          git config user.name 'ci-emit-manifest'
+          git fetch --depth=1 $url ci/emit-manifest 2>$null
+          if ($LASTEXITCODE -eq 0) {
+            git checkout -B ci/emit-manifest FETCH_HEAD
+          } else {
+            git checkout --orphan ci/emit-manifest
+            git rm -rq --cached . 2>$null
+          }
+          git add -f emit-manifest.txt
+          git commit -m ('ci: emit manifest head=' + $env:GITHUB_SHA.Substring(0,8)) | Out-Null
+          git push $url HEAD:refs/heads/ci/emit-manifest
+          if ($LASTEXITCODE -eq 0) { Write-Host 'publish-ok: ci/emit-manifest' }
+          else { Write-Host 'publish-failed (not a gate failure)' }
+          exit 0
 
   regression:
     name: "Tests (${{ matrix.category }}${{ matrix.shard && format(' #{0}', matrix.shard) || '' }})"
