@@ -2480,20 +2480,20 @@ if ($Category -in @("all", "run", "vbp")) {
     # 通知接线这一刀没法在无头环境里真点一下, 所以断的是发码形状: 三条 WM_COMMAND 派发
     # (含 Dir 下钻的前置判定) + 设计期 Path/Pattern 落到初值。少了任何一条, 控件就是
     # "能显示、不联动" —— 而 CF12/CF13 是手工调 Sub 证明的, 不看这里就没人盯接线。
-    # ai/029 C29-T: VB.Timer 运行期真触发 + 精度提到 ms 级。
-    # 改之前的实测（029 §九 C29-T 那一格）：设计期 Enabled=0 的 Timer 压根不挂表，于是
-    # Timer1.Enabled = True 落到 vb6_SetTimerEnabled(vb6_hwnd_<timer>, ...) —— Timer 是无窗口
-    # 控件、句柄恒 NULL => SetPropW(NULL,...) 静默丢；Interval 改了也没人重排周期；精度只有
-    # SetTimer 那一档 ~15.6 ms 地板（Interval=20 实得 34.5 ms/tick、Interval=5 封顶 ~64/tick）。
-    # 现在 Enabled/Interval 真的起停与重排，底层走 winmm timeSetEvent（LoadLibrary 取，
-    # 不新增 import lib；取不到才退回 SetTimer）。读数是"秒级墙钟窗口里的 tick 数带区间"：
-    # 20 ms 名义 50 次，允许 [40,60]。负控（BASE 二进制）10 条全翻红且每条对上症状：
-    # T2=0 开不起来 / T3=32 改了不生效 / T5=16 关掉还在烧 / T6=32 精度地板。
-    # 账 #156 加 T11/T12（第二枚窗体 TmForm2，自己一枚 20ms 的 Timer）：计时器 id 原来
-    # 取自控件 id 那个计数器，而编译器每建一枚窗体都发一次 vb6_ResetControlId() ⇒ 第二枚
-    # 窗体的 Timer 与第一枚的第一枚 Timer 同号，派发按 id 查表又是"先建的那格先命中"，
-    # 于是第二枚的事件过程一次都不跑、第一枚的速率翻倍。负控读数：T11=N/0、T12=N/61
-    # （第一枚那 1 秒里名义只有 10 拍）。两条故意用差 5 倍的周期，翻红时差的是量级不是抖动。
+    # ai/029 C29-T + Fix <c3-menu3d-click>: VB.Timer 的运行期**机制**判据 (夹具 tests/c29timer)。
+    # 节拍口径 2026-10-08 改过: 走 Win32 SetTimer, 也就是**系统计时 tick** 那一档 (本机与 CI 实测
+    # ~15.6 ms; Interval 不足一个 tick 就往上取整, 另有一条 10 ms 钳位) —— 与 VB6 Timer 控件同形。
+    # 中间一度走 winmm timeSetEvent 把精度提到 ms 级 (Interval=20 实得 ~50 拍/秒), 那条路自发出去
+    # 的 WM_TIMER 是**真实待处理消息**、会长期占住线程队列, 把鼠标键盘饿死 (3DMenu 实测点一下就不
+    # 动, 而 VB6 编的同一份代码正常), 所以现在只留作派发窗无效时的兜底 (门 #407 的那六条红就是这
+    # 次换机制带来的读数变化, 不是产品回归)。
+    # ⇒ 判据因此**不钉绝对拍号** (那等于在钉这台机器的 tick), 只钉机制: 开了要跑 (T1/T2)、改
+    # Interval 两个方向都要重排 (T3/T4)、关掉要停 (T5)、每格自己的周期互不串 (T9/T10/T11/T12)、
+    # 小 Interval 到地板为止 (T6: 下限证明地板确实在跳, 上限 <=150 证明没人绕过 10 ms 钳位 ——
+    # winmm 那条路实测 199~200 拍/秒, 一超就红)。名义间隔取 100/200/500 ms 这一档, 所以系统 tick
+    # 是 15.6 ms 还是被别的进程用 timeBeginPeriod 提到 1 ms, 读数都落在同一条带 (取整误差 <=7%)。
+    # 负控 (换机制之前那一批的 BASE 读数): T2=0 开不起来 / T3=32 改了不生效 / T5=16 关掉还在烧 /
+    # 账 #156 的 id 撞车 => T11=0、T12 翻 5 倍。
     $tmNeedles = @("TIMERPROG-DONE") + (1..12 | ForEach-Object { "T$_=Y" })
     Test-Vbp "tmtimer" "$Tests\c29timer\TmApp.vbp" $tmNeedles
     # Fix <vbeclipse> 2026-10-06: LoadRes* 实装回归 — .res 资源段加载

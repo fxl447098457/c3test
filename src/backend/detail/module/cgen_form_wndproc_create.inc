@@ -199,10 +199,17 @@
     // (Test.exe "颜色没有写入到颜色对话左边的控件里")。RTL 统一入口
     // vb6_ApplyCtlColorStatic 仅在子控件显式 Set 过 VB6_BackColor 时接管,
     // 其余情形 break 到 DefWindowProcW 维持原生外观。
+    //
+    // Fix <c3-menu3d-labelbg>: 进这道门还要多一条 —— `VB6_BackStyle0`
+    // (Label.BackStyle=0 Transparent, 见 emitDesignerStyleProps)。这种 Label **必然
+    // 没有** BackColor (VB6 里 BackStyle=0 时 BackColor 不参与绘制, 设计期也就不写),
+    // 所以只按 VB6_BackColorSet 放行的话它永远进不来, 一路 break 到 DefWindowProcW,
+    // STATIC 的类背景刷 (COLOR_WINDOW = 纯白) 把整块控件矩形刷一遍 —— 3DMenu 的
+    // Label3 (241x33, 无 Caption) 就在窗体左下角留下一块白方块。
     c_.emitLine("case WM_CTLCOLORSTATIC: {");
     c_.indent();
     c_.emitLine("HWND vb6_clrchld = (HWND)lParam;");
-    c_.emitLine("if (vb6_clrchld && GetPropW(vb6_clrchld, L\"VB6_BackColorSet\")) {");
+    c_.emitLine("if (vb6_clrchld && (GetPropW(vb6_clrchld, L\"VB6_BackColorSet\") || GetPropW(vb6_clrchld, L\"VB6_BackStyle0\"))) {");
     c_.indent();
     c_.emitLine("LRESULT vb6_br187 = vb6_ApplyCtlColorStatic((HDC)wParam, vb6_clrchld);");
     c_.emitLine("if (vb6_br187) return vb6_br187;");

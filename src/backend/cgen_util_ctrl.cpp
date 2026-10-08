@@ -1203,6 +1203,29 @@ void CCodeGen::emitDesignerStyleProps(const FrmControl& ctrl, const std::string&
         (ctrl.controlType == FrmControlType::Label || ctrl.controlType == FrmControlType::TextBox)) {
         c_.emitLine("vb6_SetAlignment(" + hw + ", " + std::to_string((int)alIt->second.intValue) + ");");
     }
+
+    // Fix <c3-menu3d-labelbg>: Label 设计期 BackStyle 此前**两条创建路都不发**。
+    //
+    // VB6 语义: BackStyle=1 (Opaque, 默认) 时 Label 用 BackColor 填底; BackStyle=0
+    // (Transparent) 时**完全不画背景**, 文字直接坐在父窗底色/图片上。
+    // 窗口层这边 Label 是 STATIC 窗口类, 它的 WM_PAINT 会先拿 WM_CTLCOLORSTATIC
+    // 返回的刷子填一块底 —— 不接管就是类背景刷 (COLOR_WINDOW = 纯白)。
+    //
+    // 实测 (3DMenu): Label3 / LblSub 在 .frm 里都是 `BackStyle = 0 'Transparent`,
+    // 且**都没有 BackColor** (VB6 里 BackStyle=0 时 BackColor 不参与绘制, 设计期
+    // 就不写)。于是它拿不到 VB6_BackColorSet 这个哨兵, 一路走到 DefWindowProcW,
+    // 在窗体左下角留下一块 241x33 的纯白方块 (用户可见)。
+    //
+    // 发射口径: 只在 .frm **显式写过** BackStyle 时发 (VB6 默认 1, 没写的控件逐字节
+    // 维持今天的行为 —— 与 emitDesignerStateProps 的"反面才发"同一条纪律)。
+    // 两个值都发: 0 → 空刷透出父窗; 1 → 显式还原不透明, 让这条 API 的两个分支
+    // 都可达 (否则 val!=0 分支是死代码)。
+    auto bksIt = ctrl.properties.find("BackStyle");
+    if (bksIt != ctrl.properties.end() && ctrl.controlType == FrmControlType::Label
+        && bksIt->second.type == FrmValueType::Integer) {
+        c_.emitLine("vb6_SetLabelBackStyle(" + hw + ", "
+                    + std::to_string((int)bksIt->second.intValue) + ");  /* design BackStyle */");
+    }
 }
 
 // 账 #125: 设计期 Enabled / Visible / Value 三件此前**两条创建路都没打到窗口上**

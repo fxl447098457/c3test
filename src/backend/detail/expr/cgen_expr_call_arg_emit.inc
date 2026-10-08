@@ -1068,7 +1068,40 @@
                             break;
                         }
                     }
-                    if (isLvChain092z) {
+                    // ---------------------------------------------------------------
+                    // Fix <c3-menu3d-title>: **ByRef Variant 形参 ← 字段链左值实参**
+                    //   (Menu.select / With 的 .field / 结构体字段链).
+                    // 下面的 lvalue 快捷路直接发 `&(左值)`, 隐含假设"形参的 C 类型
+                    // == 实参的 C 类型"; 对 ByRef Variant (C 形参是 `vb6_VARIANT*`)
+                    // 这条假设不成立 —— 被调方按 16 字节 VARIANT 解析一块 4 字节
+                    // Long: `.vt` 读到的是**数值本身** (7, 而不是 VT_I4=3), 整型
+                    // 载荷落在相邻内存上, 于是 `vb6_VariantToLong((*Num))` 恒返回 0。
+                    // 实测: 3DMenu 的 `Private Sub TitoloTrasparente(Num)` (无 As
+                    // 子句 ⇒ Variant 形参) 被 `TitoloTrasparente (Menu.select)` 调用
+                    // 时 Num 恒为 0 ⇒ `ImgTitolo.Picture = ImgTit(0)` 永远贴第 0 张
+                    // 标题图, 点击不换标题 (真 VB6 每点一次换一张)。
+                    // 口径与上面 isSimpleIdent 分支的 Fix 092y 完全一致: 落一个只读
+                    // 的 Variant 临时再传址; 实参**本身就是 Variant 字段**时不装
+                    // (那种情况 &(字段) 正确, 见本文件 M22 default 档同一判据)。
+                    // ---------------------------------------------------------------
+                    bool lvArgIsVariantField092t = false;
+                    if (i < node.positional.size()) {
+                        lvArgIsVariantField092t =
+                            (inferUdtFieldVb6Type(node.positional[i].get()) == Vb6Type::Variant);
+                    }
+                    if (isLvChain092z && !lvArgIsVariantField092t
+                        && i < calleeParams.size()
+                        && !calleeParams[i].isByVal && !calleeParams[i].isParamArray
+                        && calleeParams[i].type == Vb6Type::Variant
+                        && cParamClassPtrType(calleeParams[i]).empty()
+                        && i < node.positional.size()
+                        && !cExprIsVariant(argVal)) {
+                        const std::string tmpLvVar092t =
+                            "_vb6_argvar" + std::to_string(tempCounter_++);
+                        c_.addPending("vb6_VARIANT " + tmpLvVar092t + " = "
+                                      + boxToVariant(node.positional[i].get(), argVal) + ";");
+                        argVal = "&" + tmpLvVar092t;
+                    } else if (isLvChain092z) {
                         argVal = "&(" + argVal + ")";
                     } else {
                     // 字面量或复杂表达式: 使用C11复合字面量
