@@ -252,7 +252,53 @@ jobs:
       # 编译器自己的默认路径仍是关的；要退回今天这条老路，删掉这个开关即可。
       - name: "Run regression (${{ matrix.category }}${{ matrix.shard && format(' #{0}', matrix.shard) || '' }})"
         shell: pwsh
-        run: pwsh -NoProfile -ExecutionPolicy Bypass -File tests/run_tests.ps1 -Category ${{ matrix.category }} -Jobs 20 ${{ matrix.shardArgs }} -Incremental -Verbose
+        run: |
+          # §B92：门红的时候本机只拿得到「exit code 1」—— job 日志与 artifact 端点要 actions:read，
+          # remote 内嵌那把凭据没有这一档 ⇒ 过去只能靠排除法猜「红在哪一枚夹具」（门 #418 就这么糊过去一次）。
+          # 这一层不动 harness（它 66 个前缀点 / 80 个计票点，全改等于重写），只认它**已经打出来**的行：
+          #   "  [类别] <用例名> ... <读数>" ⇒ 转成 ::error:: 注解，之后本机用匿名可读的
+          #   /repos/<o>/<r>/check-runs/<job-id>/annotations 就能直接点名。判红口径一字没改（仍看 run_tests 的退出码）。
+          # 一行不落照原样打到控制台（CI 那份日志与今天完全一致），同时把**剥掉颜色码**的行留在内存里判排版。
+          # 故意不写中间文件：Tee-Object 落盘的编码在 5.1 是 UTF-16、在 7 是 UTF-8，回读时把另一方的行当乱码 ——
+          # 这条通道不能建在「文件编码刚好对」上（本机复算就是这么把注解判成 0 条的，靠自证那条才发现）。
+          $ansi = [char]27 + "\[\??[0-9;]*[a-zA-Z]"
+          $clean = New-Object System.Collections.Generic.List[string]
+          pwsh -NoProfile -ExecutionPolicy Bypass -File tests/run_tests.ps1 -Category ${{ matrix.category }} -Jobs 20 ${{ matrix.shardArgs }} -Incremental -Verbose *>&1 | ForEach-Object { $s = [string]$_; Write-Host $s; $clean.Add(($s -replace $ansi, "")) } | Out-Null
+          $rc = $LASTEXITCODE
+          # 只在红的时候点名：绿轮里这条通道一声不出。前缀行是 -NoNewline 写的，万一被别人的换行截断，
+          # 「不是 PASS 就算失败」会在绿轮凭空点出名字来 —— 把这条限制钉死，注解面就只剩「红」这一种输入。
+          if ($rc -eq 0) { exit 0 }
+          # 注解正文一律 ASCII：Write-Host 的中文会被按系统代码页重编码（本机复算时两条自证行整条变 U+FFFD，
+          # 与账 #267 的 --emit-c 同一个根），而用例名/类别本来就是 ASCII —— 点名不靠中文，报错的行更不能靠它。
+          # 捕获组只能走正则对象：字符串上并没有 Matches 这个成员，写成 $_.Matches 的话命中了行也在取组那步抛 NullArray、
+          # 注解照样 0 条（本机第一版就是这么红的）。尾巴 (.*) 非收不可：harness 66 个前缀点后面接的 FAIL 有 77 个 token、
+          # 其中 26 个带原因（FAIL (compile) / FAIL rc=… / FAIL: a | b），另有几个计票点压根不打 FAIL 字样、
+          # 只打一行 DarkGray 读数 —— 所以判据是「用了例行的排版、且收尾不是 PASS/SKIP」，读数原样带进注解（它比 FAIL 五个字值钱）。
+          $rx = [regex] "^\s*\[(.+?)\]\s+(.+?)\s*\.\.\.\s*(.*)$"
+          $named = @($clean | ForEach-Object {
+              $m = $rx.Match($_)
+              if (-not $m.Success) { return }
+              $tail = $m.Groups[3].Value.Trim()
+              if ($tail -match "^(PASS|SKIP)") { return }
+              if ($tail -eq "") { $tail = "(no verdict token)" }
+              "[" + $m.Groups[1].Value.Trim() + "] " + $m.Groups[2].Value.Trim() + " ... " + $tail
+            })
+          foreach ($n in @($named | Select-Object -First 40)) { Write-Host ("::error::" + $n) }
+          if ($named.Count -gt 40) { Write-Host ("::error::more than 40 failing cases, annotating the first 40 (total " + $named.Count + ")") }
+          # 自证：这条通道按设计不判红，所以它得自己说「这次的点名能不能信」—— 三档都不许静默。
+          if ($named.Count -eq 0) {
+            Write-Host ("::error::run_tests exit code " + $rc + " but no case line matched -- the matcher is out of sync with the harness output, fix this cell")
+          }
+          # harness 全程只打一行 Results（tests/run_tests.ps1 里唯一一处），那就是它自己数出来的失败条数。
+          $tally = 0
+          $rxT = [regex] "Results:.*FAIL=(\d+)"
+          foreach ($l in $clean) { $mt = $rxT.Match($l); if ($mt.Success) { $tally = [int]$mt.Groups[1].Value } }
+          if ($tally -eq 0) {
+            Write-Host "::error::no run_tests Results line -- naming is not trustworthy (the run may have stopped before the summary)"
+          } elseif ($named.Count -lt $tally) {
+            Write-Host ("::error::harness tallied " + $tally + " failures but naming found only " + $named.Count + " -- some failure lines are outside the matcher, fix this cell")
+          }
+          exit $rc
 
       - name: Upload test logs
         if: always()
