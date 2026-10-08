@@ -1654,12 +1654,19 @@ CI 那一枚（`pe-lnk=14.51`）稳定落进 `int16_t` 档 ⇒ 发成 `vb6_ComGe
 - **负控**：本笔父提交那台（`.build/C3_base262.exe`）编同一份夹具 ⇒ **BUILD-RC=1、1 条 C2065(`_i`)**；把 String 成员摘掉的同一份源（探针 `.build/p262/m262b.bas`）两台都编得过，BASE 答的是 #262 那一族（`33/33/33`、`222/222`、`3/3`、`LEN=16/16`），改后 `11/22/33`、`111/222`、`1/3/40`、`64/64` ⇒ **两条账各自的读数在负控里分得开**，没有互相掩盖。
 - **风险记账**：语料 0 处 ⇒ A/B 里这一族只该出现在新夹具上；门上若出现"以前编不过的 UC 现在编得过"，先按这条归因。旁边一格**没量**：元素档是 `As <项目类>` / `As Object` 的定长成员数组走的是**上面那条 memcpy 快路**（`scalarOwned` 只认 String / Variant），也就是"两个 UDT 共享同一批对象引用、其中一边 Clear 就悬"——这一刀**没动**它（BASE 也那样），它到底是第几格缺陷要先数语料里有没有这种成员，别把这条读成"已修"。
 
-### B92 门红的时候拿不到「是哪一枚夹具红」—— 失败注解里只有 exit code 1（**开着**；2026-10-08 门 #418 那轮量到底）
+### B92 门红的时候拿不到「是哪一枚夹具红」—— 失败注解里只有 exit code 1（2026-10-08，**已出：门 #421 = run 37758983155、head `5fae2205`、branch dev、attempt 1 = 12 条 check-run 全 completed/success、非绿 0**；落地的形状与下面预计的不同，见收线那两条）
 
 - 现象：门 #418 的 `Tests (vbp #3)` 红，本机拿不到**用例名** ⇒ 只能用排除法（`f8ab0ab6` 吃的是同一份语料、那一片在 #419 全绿）判成「已知那族按负载抖」，红因没落到字面上。这类"看得见红、看不见是谁"的格子，下一轮还会再来。
 - 端点读数（三条都实测过）：`/actions/jobs/{id}/logs` 与 `/actions/artifacts/{id}/zip` 用本机 remote 里那把凭据一律 **401/403**（它没有 `actions:read`）；`/check-runs/{id}/annotations` **通**，但里面只有 `Process completed with exit code 1.` 加一条 Node 20 弃用警告。另：`/actions/runs`、`/actions/runs/{id}/jobs` 反而**匿名可读**（403 只在带那把凭据时出现 —— 反代也会随机把 JSON 顶成 HTML，判据是"正文不以 `{` 或 `[` 开头就重试"）。
 - 已经可以换掉的通道：**`/repos/<o>/<r>/commits/<sha8>/check-runs?per_page=50` 匿名可读**，逐 job 的 `name / conclusion / output.annotations_count` 都在，`id` 就等于 job id。以后"门看不见"那一路先走它，别再守 watcher 与 run-id 那条（历史坑：watcher 自己提前 exit 0、jobs=0 一律当失败）。
 - 欠的那一刀（小、常设）：`tests/run_tests.ps1` 每条用例失败时发一行 `::error::<用例名> FAILED <一句读数>` ⇒ GitHub 把它收成 failure annotation，下次门红就直接给用例名，不用再走排除法。做的时候两件事钉住：① **别动**现有的人读那套汇总行（两边读数都要在）；② 发完**不改退出码**（判红仍由汇总那一句决定）—— 这一格按设计不该自己变红，它只负责把名字带回来。
+
+- **收线（门 #421 = run 37758983155、head `5fae2205`、branch dev、attempt 1 = 12 条 check-run 全 completed/success、非绿 0；发码清单仍 395 行零差 ⇒ 这一刀零发码变化）**：落地的形状与上一条预计的**不是同一个地方** —— 没去动 `tests/run_tests.ps1`，改在 ci.yml 那一层认它**已经打出来**的行。理由（本轮实数）：harness 66 个前缀点 / 80 个计票点 / 78 处 FAIL 字样，逐点插 `::error::` 等于重写；而点名要的只是那 66 行的排版，一层就够。上面钉住的两条一字未违：① 人读的输出**一行不落原样打到控制台**（判排版用的是内存里剥掉颜色码的副本，CI 那份日志与做之前一致）；② **退出码照旧透传**（判红仍然只看 run_tests 自己那一句）。
+- 匹配式收成「用了例行的排版、且收尾不是 PASS/SKIP」，**不是**「行尾写 FAIL」：78 处 FAIL 字样里 26 处带原因（78 是含 "FAIL 字样的行数，其中 77 行是 Write-Host 直接打 token、另 1 行先把串拼进变量）（`FAIL (compile)` / `FAIL rc=…` / `FAIL: a | b`），另有 3 处 codegen 那族的计票点压根不打 FAIL 字样（`tests/run_tests.ps1:1509/1555/1580`）、只补一行 DarkGray 读数（missing / unexpected 那一族）—— 只认行尾 FAIL 会把这 26+ 处静默漏掉，而「没名字」在 CI 上看着跟「没失败」一模一样。读数原样进注解：它比 FAIL 那五个字值钱。
+- 三档不许静默：`rc=0` 直接退（否则前缀行被别人的换行截断会在**绿轮**里凭空点出名字）；`rc≠0` 却一条名没抓到 → 自证；点到的名比 harness 那一行 `Results: … FAIL=n` 少 → 自证。注解正文一律 **ASCII**：`Write-Host` 的中文会被按系统代码页重编码（本机复算时两条中文自证行整条变 U+FFFD），与账 #267 的 `--emit-c` 是同一个根；用例名与类别本来就是 ASCII，所以点名不靠中文。
+- 本机复算四档（测试副本由脚本从 ci.yml **机械抽出**、只把 run_tests 那一行换成桩 ⇒ 测的就是发货那一份）：`ok` 0 条注解 / `fail` 点名 3 条（三种排版各一：光 FAIL、FAIL 带原因、不打 FAIL 只给 DarkGray 读数）/ `short` 点名 1 条 + 「计票 3 只抓到 1」自证 1 条 / `weird` 两条自证；退出码 0/1/1/1 原样透传。外加 66 个前缀点 × 四种收尾的静态复算 **0 漏**。两条本机坑记档：`$_.Matches` 在 System.String 上不存在 ⇒ 命中了行也在取组那步抛 NullArray、注解照样 0 条（第一版就是这么红的，靠自证那条才没被误判成「没有失败用例」）；`Tee-Object` 落盘的编码 5.1 是 UTF-16、7 是 UTF-8 ⇒ 这条通道不能建在中间文件上。
+- **订正上面那条端点读数**：`commits/<sha>/check-runs` 里的 `output.annotations_count` 本机今天**读不到**（12 条 check-run 一律 `ann=null`），能用的只有 `/check-runs/<id>/annotations` 那个数组；而且**每一格本来就有 1 条 notice**（Node.js 20 弃用那条）⇒ 回读点名要按 `level` 筛，别把基数当成结果。
+- **CI 侧的红还没实跑过**：#421 是绿的，而这条通道按设计在绿轮里一声不出 ⇒ 目前的证据只有本机四档 + 66 点静态复算。**下一次门真红，第一件事是回读 `check-runs/<job-id>/annotations` 验点名**；若那条「少点」自证也响，就按它给的差额补匹配式，别再走排除法。
 
 ### B93 别人分支里「对我们有用」的两件已捞进 dev —— Join-Path 的 5.1 兼容真修 + vi 的三节待办（2026-10-08，**已出：门 #420（run 提交 head `dd463407`、branch dev、attempt 1）= 12 条 check-run 全 success、非绿 0**）
 
@@ -1671,6 +1678,15 @@ CI 那一枚（`pe-lnk=14.51`）稳定落进 `int16_t` 档 ⇒ 发成 `vb6_ComGe
 - **`FUNDING.md`（vi 那 5 笔里唯一没捞的）**：dev 有 `CONTRIBUTING.md` 没有 `FUNDING.md`。它讲捐赠渠道与分配规则，属仓库治理与法务口径，**不由我拍**，等用户点头再并。
 - **门 #420 的收线读数**：12 条 check-run 全 success（Build / `Emit manifest (shape oracle)` / syntax / compile / smoke / asm / bas#1#2 / vbp#1..#4），而发码清单那边仍是 `# expectation-check=PASS`、395 行零差 ⇒ 这一刀**零发码变化**（只动 harness 与文档，符合预期）。另记两件常设事实：① 本仓 [STATIC] 哨兵从 35 道长成 **36 道**；② 以后谁要在 5.1 下跑本地回归，现在跑得动了（实测 `-Category compile` 在 5.1 下 PASS=42 FAIL=0，改前那台同一条命令整片 C1083）。
 
+
+### B94 量：`comMethods` 的消费者不止「四处」—— 四份文件五处 find，外加一处从不问这张表的写侧（账 #245 尾巴的开工测量，2026-10-08，**未开工**）
+
+- **数据面**：`Symbol::comMethods` = `unordered_map<小写方法名, ComMethodSig>`（`src/semantics/symbol_table.hpp:282`，`ComMethodSig` 在 `:272-281`）。全仓**唯一**改写出口 = `insertComMethod`（`src/driver/driver_semantics.cpp:23-32`，落在 `:31` 那句 `sym.comMethods[key] = std::move(sig)`，`:28` 那条挡的是「setter 不许盖掉 getter」），三个调用点 `:153`（coclass 默认接口）/ `:218`（ComInterface）/ `:357`（ComGlobalNs 提升）；`clear` / `emplace` / `insert` / `erase` / 裸赋值 一处都没有。写侧是干净的，欠的一直在读侧。
+- **读侧 = `src/backend` 里五处 `comMethods.find(`、落在四份文件**（哨兵 C4 钉的正是这四份**文件名**，`scripts/check_com_prop_type_authority.ps1:98-108`，扫描范围只到 `src/backend`）：`cgen_util_com.cpp:326`（`resolveComValue`，`:330` 先问 `isPropertyGet`）/ `cgen_util_com.cpp:800`（`resolveComMarkerForPack`，`:801` 同样先问）/ `cgen_expr_call_arg_emit.inc:89`（`:90` 问）/ `cgen_expr_call_com_bind.inc:615`（`:620` 零实参那一读、`:637` 带实参的形状）/ `cgen_expr_call_prelude.inc:209`（`:230` 起）。⇒ 「四处」是**文件**口径，动手时要按**五处**数。
+- **五处干的是同一件事**：把 `mapType(returnType)` 翻成「发 `vb6_ComCallBSTR` / `Int` / `Double` / `Object` / 裸 `vb6_ComCall` 哪一个」。今天没有那个"一处出口"，事实上的基准是 `resolveComValue` 的早绑定分支（哨兵 C3 把它钉住：先看 `isPropertyGet`、类型未知就退 `vb6_VariantFromComResult(vb6_ComGetProp(` 而不许按 `unpackType` 猜档）。**分歧在 prelude 那一处**：`cgen_expr_call_prelude.inc:230-244` 拿到签名后直接按返回类型选，**没有 `isPropertyGet` 那道闸**（另四处都先问）⇒ 这就是「合一」要收的第一颗，也正是 C3 那条口径在第五处根本没人执行。
+- **还有第五种问法压根不问这张表**：属性**写入**那一路 `comMarkerValueForWrite`（`cgen_util_com.cpp:696-708`）纯按 `packFn` 名字反推类型档，`driver_semantics.cpp:22` 的注释就是这么写的（「属性写入走名字化的晚绑定, 不查 comMethods」）；同一文件的晚绑定 `unpackType` 阶梯（`:358-368`）也是按上下文猜。⇒ 收口那天这两处要么接进同一枚出口，要么把「为什么不能问」写在出口旁边；C4 那句「名单外再开第五处读法必须先回来把口径并进来再登记」现在正好轮到它自己兑现。
+- **判据面已有的**：`[STATIC] com_prop_type_authority`（`tests/run_tests.ps1:895` 的 `Test-ComPropTypeAuthority`，注册在 `:5081`）跑 C1..C4；行为面 = `test_earlybound`（`:2277`）/ `test_earlybound2`（`:2284`）/ `test_com_default_prop`（`:2288`）。**没有一处断言签名表的定序**（本轮把 tests/ 与 scripts/ 都 grep 过，零命中）⇒ #245 那条「定序」要么落成一枚真哨兵，要么在收线时写明它是本轮根因修（`VAR_PROPERTY` 的 `returnType` 未初始化那一族，见 §B73）的一部分，别再只挂名。
+- 开工顺序（还没动）：先把五处 `find` 收成一枚出口（一次问完「该发哪个 `vb6_Com*` + 是不是 getter」，prelude 那颗按 C3 的口径补齐），C4 那份「四个文件名」随之换成「一处出口 + 名单外不许再读」；写侧那两处单独立一条「为什么它不问」。布局与形状类改动 ⇒ 按既有口径 x86 与 x64 都要真编译，护栏仍是 90 份 emit 逐字节相同那一条。
 
 ## C. 仍在生效的口径与工具事实（与本文档等长的一半价值在这里；完整版见记忆库）
 
