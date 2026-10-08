@@ -1409,6 +1409,11 @@ CI 那一枚（`pe-lnk=14.51`）稳定落进 `int16_t` 档 ⇒ 发成 `vb6_ComGe
   `cgen_expr_call_arg_emit.inc` / `cgen_expr_call_com_bind.inc` / `cgen_expr_call_prelude.inc`）
   ⇒ "把这个问题合成一处出口"这一格还欠着；本轮把名单钉死、把其中两处口径并齐，第五种问法要进来必须先过这条。
 
+**2026-10-08 回读通道自己坏了两轮（门 #414/#415 全绿而清单从没上分支）**：本机到 `api.github.com` 那条被本地反代整段拒（403 + `Via: 2.0 Caddy`，带不带 token 都一样），而 `github.com` 的 git 通路是通的 ⇒ 清单改成 CI 用 git 推回 `ci/emit-manifest` 分支、本机 `git fetch` 读。**但这条通道上线后一直没送东西回来**：分支 tip 的提交信息始终停在 `head=1c84b437`（#413 那一趟），连 #414/#415 都没动过。两个**互相独立**的成因，都只在这一趟才凑齐：
+- ① **浅仓库拒绝 push**。`actions/checkout@v4` 默认 `fetch-depth: 1`，工作区带 `.git/shallow`；基于已有 tip 叠提交 ⇒ 祖先链上有浅标记，git 直接拒推。#413 侥幸成功是因为那轮分支还不存在、走的是 `--orphan`（历史被切断，压根没有缺失的父提交）⇒ **「上一趟成了」把这一条掩盖成「不是浅的问题」**。修法：`emit-manifest` 作业的 checkout 补 `fetch-depth: 0`（只这一档，其余作业不动：全量 fetch 的成本只落在一个 job 上）。
+- ② **`git checkout` 把手上那份清单换掉了**。`emit-manifest.txt` 在仓库根、被 .gitignore 忽略，而 checkout 对「被忽略的未跟踪文件」是直接覆盖的（不像普通未跟踪文件会拦）⇒ `checkout -B ci/emit-manifest FETCH_HEAD` 之后根上是**分支里那份旧的**，`add`/`commit` 看不见任何变化，`push` 回 `Everything up-to-date` 也是退出 0。修法：切分支前先 `Copy-Item` 到 `$env:RUNNER_TEMP`，切完再挪回来。
+- **这一族真正的教训是判据形状**：按设计「不判红」的那一步（`exit 0` + 只打一行）**默认是沉默的，沉默就会被读成成功**。#413 之后每一步都打 `publish-ok`，而它其实是 `Everything up-to-date` 那条 0 ⇒ 两轮白等。现在这一步收尾自己把远端 tip 读回来打一行 `publish-ok: base=<基> remote-tip=<sha>`，本机轮询按 `head=<本次 sha8>` 归属，**推没推上去不再需要读日志**；顺带去掉 `git commit ... | Out-Null`（吞掉的正是「nothing to commit」这条唯一线索）。
+- 顺手把 `if (-not (Test-Path $hold))` 补上：清单没生成时（前一步 throw）这一步打 `publish-skipped` 直接退，别拿分支里那份旧的去叠一个假提交。
 ### B74 控件几何写进去的数与读出来的数天生差一格 —— VB 侧读数从没被存过（账 #230，**已出：门 #376（run 37547498187、head `a9c47c82`、branch dev、attempt 1）= 11 job 全 completed/success、非绿 0**）
 
 读数（探针 `.build/b506geo`，两架构逐字相同）：`txtA.Left = 5000` 读回 **4995**、`.Top = 444` 读回 **441**、`.Width = 7777` 读回 **7770**；设计期写的 `1007,449,3001,247` 读回 `1005,450,3000,240`。原因不在值里而在**读法**：四个 getter 现场 `GetWindowRect` + `vb6_ScalePxToUser` ⇒ 每一次读写都被像素网格重新量化一遍。

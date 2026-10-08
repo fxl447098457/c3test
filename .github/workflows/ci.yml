@@ -93,6 +93,11 @@ jobs:
         shell: pwsh
     steps:
       - uses: actions/checkout@v4
+        with:
+          # fetch-depth 默认 1 = 浅克隆，而 git 拒绝从浅仓库 push。#413 侥幸推成功是因为那轮分支还
+          # 不存在、走的是 --orphan（历史被切断，没有缺失的父提交）；#414/#415 基于已有 tip 叠提交就一直
+          # 失败 —— 表现为"门全绿而 ci/emit-manifest 纹丝不动"（这一步按设计不判红）。
+          fetch-depth: 0
 
       - name: Download C3.exe artifact
         uses: actions/download-artifact@v4
@@ -135,8 +140,13 @@ jobs:
           $url = 'https://x-access-token:' + $env:CI_TOKEN + '@github.com/' + $env:GITHUB_REPOSITORY + '.git'
           git config user.email 'ci@users.noreply.github.com'
           git config user.name 'ci-emit-manifest'
-          # 不能加 --depth=1：浅(fetch)过的仓库 push 会被 git 拒（#414 就这么静默没推上——
-          # 这一步按设计不判红，所以门全绿而分支纹丝不动）。
+          # 切到 ci/emit-manifest 之前必须先把手上这份清单挪出去：它位于仓库根、被 .gitignore 忽略，
+          # 而 checkout 对"被忽略的未跟踪文件"是直接覆盖的 ⇒ 分支里那份旧的会把手上这份换掉，于是
+          # add/commit 看不见任何变化、push 回 "Everything up-to-date" 也是退出 0。#414/#415 的
+          # "门全绿、publish-ok、分支纹丝不动"就是这么来的（浅克隆那条是另一独立成因，见上面的 fetch-depth）。
+          $hold = Join-Path $env:RUNNER_TEMP 'emit-manifest.publish.txt'
+          Copy-Item emit-manifest.txt $hold -Force
+          if (-not (Test-Path $hold)) { Write-Host 'publish-skipped: no manifest produced this run'; exit 0 }
           git fetch $url ci/emit-manifest 2>$null
           if ($LASTEXITCODE -eq 0) {
             git checkout -B ci/emit-manifest FETCH_HEAD
@@ -144,11 +154,18 @@ jobs:
             git checkout --orphan ci/emit-manifest
             git rm -rq --cached . 2>$null
           }
+          Copy-Item $hold emit-manifest.txt -Force
           git add -f emit-manifest.txt
-          git commit -m ('ci: emit manifest head=' + $env:GITHUB_SHA.Substring(0,8)) | Out-Null
+          $before = (git rev-parse --short HEAD)
+          git commit -m ('ci: emit manifest head=' + $env:GITHUB_SHA.Substring(0,8))
           git push $url HEAD:refs/heads/ci/emit-manifest
-          if ($LASTEXITCODE -eq 0) { Write-Host 'publish-ok: ci/emit-manifest' }
-          else { Write-Host 'publish-failed (not a gate failure)' }
+          if ($LASTEXITCODE -eq 0) {
+            # 自证：把远端 tip 读回来打一行。回读通道按 head 归属，所以这行就是"本机下一步该 fetch 谁"。
+            $tip = (git ls-remote $url refs/heads/ci/emit-manifest 2>$null | ForEach-Object { ($_ -split "`t")[0] })
+            Write-Host ('publish-ok: ci/emit-manifest base=' + $before + ' remote-tip=' + $tip)
+          } else {
+            Write-Host 'publish-failed (not a gate failure)'
+          }
           exit 0
 
   regression:
