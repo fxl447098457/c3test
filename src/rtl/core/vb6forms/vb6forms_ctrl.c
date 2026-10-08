@@ -244,6 +244,12 @@ void vb6_SetControlWidth(void* hwnd, int width) {
                  vb6_ScaleUserToPx((double)width, cm, 0),
                  rc.bottom - rc.top, SWP_NOMOVE | SWP_NOZORDER);
     vb6_GeomCacheWrite(hwnd, VB6_GEOM_WIDTH, width, cm);
+    /* czUI fix (3DMenu 方块): AutoRedraw 控件运行时改 Width 时, VB6 会按新客户区
+     * 重建持久位图, 这里此前不动 ARDC —— 3DMenu 的 ImgMenuBack (AutoSize+AutoRedraw,
+     * Form_Load 里 .Width = ImgMenu(0).Width) 窗口已 127x127 而 ARDC 停在设计期
+     * 25x25, RuotaMenu/Timer_Shift 抓贴 127x127 背景全被裁成左上 25x25, 再贴回
+     * 图标左上角就是"缺一块背景色方块"。有 ARDC 就按新客户区重建。 */
+    if (GetPropW((HWND)hwnd, L"VB6_AutoRedrawDC")) vb6_AutoRedrawRefit(hwnd);
 }
 
 int vb6_GetControlHeight(void* hwnd) {
@@ -265,6 +271,8 @@ void vb6_SetControlHeight(void* hwnd, int height) {
                  vb6_ScaleUserToPx((double)height, cm, 1),
                  SWP_NOMOVE | SWP_NOZORDER);
     vb6_GeomCacheWrite(hwnd, VB6_GEOM_HEIGHT, height, cm);
+    /* czUI fix: 同 vb6_SetControlWidth —— 运行时改 Height 也要重建 ARDC。 */
+    if (GetPropW((HWND)hwnd, L"VB6_AutoRedrawDC")) vb6_AutoRedrawRefit(hwnd);
 }
 
 // Fix 162a-extlist: VB6 `obj.Move Left[, Top[, Width[, Height]]]` —— 语言级方法

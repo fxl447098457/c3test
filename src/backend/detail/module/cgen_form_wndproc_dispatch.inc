@@ -439,6 +439,11 @@
         if (formUnloadSym2) {
             // 生成trampoline: 桥接 int(*)(void) 回调和 void(int16_t*) VB6签名
             std::string trampoline = formUnloadFn + "_trampoline";
+            // czUI fix (3DMenu 关闭卡顿): 先标记"卸载中"。Form_Unload 里常见的
+            // `Me.Cls: Unload Me` 在 VB6 里第二次 Unload 是空操作; 不标记的话
+            // vb6_UnloadForm 再发 WM_CLOSE ⇒ WM_CLOSE→Form_Unload→Unload Me→WM_CLOSE
+            // 无限重入, 关窗卡一拍。RTL 的 vb6_UnloadForm 见此标记直接返回。
+            c_.emitLine("SetPropW(hwnd, L\"VB6_Unloading\", (HANDLE)1);");
             // P18-B: Form_QueryUnload - check if close is allowed before Unload
             {
                 std::string queryUnloadFn = cProcName("Form_QueryUnload", AccessLevel::Private);
@@ -446,7 +451,7 @@
                 if (quSym) {
                     c_.emitLine("{ int16_t vb6_cancel = 0; int16_t vb6_unloadmode = 0; /* 0=vbFormControlMenu */");
                     c_.emitLine("extern void " + queryUnloadFn + "(int16_t*, int16_t*); " + queryUnloadFn + "(&vb6_cancel, &vb6_unloadmode);");
-                    c_.emitLine("if (vb6_cancel != 0) return 0; /* Cancel close */ }");
+                    c_.emitLine("if (vb6_cancel != 0) { RemovePropW(hwnd, L\"VB6_Unloading\"); return 0; } /* Cancel close */ }");
                 }
             }
             c_.emitLine("vb6_SetFormUnloadCallback((void*)" + trampoline + ");");
@@ -454,6 +459,8 @@
             c_.indent();
             c_.emitLine("DestroyWindow(hwnd);");
             c_.dedent();
+            c_.emitLine("} else {");
+            c_.emitLine("  RemovePropW(hwnd, L\"VB6_Unloading\");  /* 关闭被 Form_Unload 取消, 解除标记 */");
             c_.emitLine("}");
         } else {
             c_.emitLine("DestroyWindow(hwnd);");

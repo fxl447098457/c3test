@@ -978,8 +978,25 @@ int vb6_MessageLoop(void) {
 // combofocus_x86 跑满 60s 不退，判据全打完、CPU 62ms；本地用“在 DoEvents 里把最后一个窗体卸掉”
 // 那个形状写的确定性探针 6/6 挂。原本循环体里那行 "WM_QUIT 模态循环结束" 的 trace 是死码：
 // GetMessage 取到 quit 时返回 0，循环直接结束，从来不会把它送进循环体。
-static void vb6_RePostQuitIfTaken(const MSG* m) {
-    if (m && m->message == WM_QUIT) PostQuitMessage((int)m->wParam);
+//
+// 账 <3DMenu-close> 2026-10-08: "投回去" 是有**隐含前提**的 —— 调用者最终一定会回到一个
+// GetMessage 泵。259 只覆盖了「内层泵把 quit 抄走、随后**返回**给外层泵」这一种形状；
+// 用户代码里的**忙等**不满足前提，投回去等于没投：
+//     Do While MRemote.KeyPress = 0 : DoEvents : Loop      (3DMenu 的 WaitKeyMenu)
+// 它没有 GetMessage。quit 被同一圈循环反复抽到 → 循环条件永远为真 → 窗早关了、进程却挂在
+// 一个 ~100 Hz 的 DoEvents 空转上（实测：关窗后 4 s 内烧掉 0.33–0.66 s 单核 CPU，窗口 0 个；
+// 残留进程还占着 exe，下一次构建直接 LNK1104）。
+// VB6 语义是「最后一个窗体卸载 ⇒ 程序结束」，**哪怕此刻正停在 DoEvents 忙等里**（3DMenu 在
+// VB6 下关窗就是立即退出）。判据：同一条 quit 被抽到**第二次** = 没有任何一个泵在等它 =
+// 由 DoEvents 自己结束进程。只抽到一次就 break 的老路径原样保留：appqquit 那种「内层泵抽走
+// quit 后控制权还给外层 GetMessage 泵」的形状仍然只抽到一次，不受影响。
+// 回归开关：C3_NO_QUIT_IN_DOEVENTS=1 退回 259 的纯投递行为（A/B 用）。
+static int g_quitReposts = 0;   // 账 <3DMenu-close>: quit 被投回去的次数
+
+static int vb6_RePostQuitIfTaken(const MSG* m) {
+    if (!m || m->message != WM_QUIT) return 0;
+    PostQuitMessage((int)m->wParam);
+    return ++g_quitReposts;   // 1 = 第一次还给最外层泵; >=2 = 它又回来了, 没有泵在等它
 }
 
 int vb6_DoEvents(void) {
@@ -987,7 +1004,17 @@ int vb6_DoEvents(void) {
     int count = 0;
     while (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
         // 259: 抽到 quit 就投回去并停泵 —— 这条 quit 是给最外层主循环的退出信号。
-        if (msg.message == WM_QUIT) { vb6_RePostQuitIfTaken(&msg); break; }
+        if (msg.message == WM_QUIT) {
+            if (vb6_RePostQuitIfTaken(&msg) >= 2) {
+                // 账 <3DMenu-close>: 第二次抽到 ⇒ 调用者不回泵 (忙等) ⇒ 程序结束。
+                extern void vb6_End(void);   // vb6rtl.c; 跑 vb6_Exit() 后 exit(), 不返回
+                static int noQuitExit = -1;
+                if (noQuitExit < 0)
+                    noQuitExit = (GetEnvironmentVariableW(L"C3_NO_QUIT_IN_DOEVENTS", NULL, 0) > 0);
+                if (!noQuitExit) vb6_End();
+            }
+            break;
+        }
         // P24-Timer: WM_TIMER现在由WndProc分发, DoEvents不再拦截
         TranslateMessage(&msg);
         DispatchMessage(&msg);
@@ -1631,6 +1658,12 @@ void vb6_ShowForm(void* hwnd, int modal) {
 
 void vb6_UnloadForm(void* hwnd) {
     if (!hwnd) return;
+    /* czUI fix (3DMenu 关闭卡顿): WM_CLOSE 处理入口后端已置 VB6_Unloading。
+     * Form_Unload / Form_Terminate 里再调 `Unload Me` 在 VB6 里是空操作 (窗体已在
+     * 卸载); 此前这里照发 WM_CLOSE ⇒ WM_CLOSE→Form_Unload→Unload Me→WM_CLOSE
+     * 无限重入, 直到把嵌套 SendMessage/堆栈耗尽 —— 关窗肉眼可见地卡一拍。
+     * 看到标记直接返回, 交回外层 WM_CLOSE 继续 DestroyWindow。 */
+    if (GetPropW((HWND)hwnd, L"VB6_Unloading")) return;
     if (GetEnvironmentVariableW(L"C3_OCX_TRACE", NULL, 0) > 0)
         fprintf(stderr, "[C3_MODAL] UnloadForm hwnd=%p\n", hwnd);
     // P20-43: **不能直接 DestroyWindow** —— 那会跳过 WM_CLOSE, 于是 VB 代码里的
