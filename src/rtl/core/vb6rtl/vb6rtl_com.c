@@ -207,6 +207,22 @@ void* vb6_LoadPictureEx(BSTR pathname) {
             }
             if (pAlt) pAlt->lpVtbl->Release(pAlt);
         }
+        /* VB6 语义: LoadPicture 指到**不存在**的文件要抛运行时错误 53 (File not found),
+         * 而不是静默返回 Nothing。3DMenu 的 CaricaIcone 循环正是靠
+         *   For i = 0 To 40 : On Error GoTo Err: Set Img(Num,i)=LoadPicture(Nfile) : ... : Next
+         * 里"第一个缺帧 ⇒ 抛错 ⇒ 跳 Err ⇒ 退出循环"来定 Totale(Num) 的。
+         * 早先这里只 return NULL: 循环跑满 40 次, Totale(Num) 被写成 40 (真实只有 18 帧),
+         * Timer_Shift 于是把 22 个空帧喂给 ImgMenu(sel) → Picture 被清空 → AutoRedraw 位图
+         * 回到 BackColor → `TrspCol = GetPixel(hdc,0,0)` 读到 0xE0E0E0 而不是图标角上的
+         * 透明色 0xFAE4E4 → TransBltNow 的 XOR/AND/XOR 掩码合成只能整片糊掉 ⇒
+         * 环顶那枚"中间的图标"消失/被背景色方块盖住。
+         * 空 pathname 不抛 (VB6 用 LoadPicture("") 清空 Picture, 合法且无错)。
+         * On Error Resume Next 下 vb6_RaiseError 会提前返回 —— CaricaIconeSub/CaricaTitoli/
+         * CaricaFondi 那些 Resume Next 站点行为不变。 */
+        if (pathname && pathname[0] && GetFileAttributesW(pathname) == INVALID_FILE_ATTRIBUTES) {
+            extern void vb6_RaiseError(int32_t errNum, BSTR description);
+            vb6_RaiseError(53, vb6_BSTR_FromStr(L"File not found"));
+        }
         return NULL;
     }
     
