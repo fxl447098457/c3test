@@ -656,6 +656,26 @@
     std::string comMarkerValueForWrite(const std::string& packFn,
                                        const std::string& valExpr);
 
+    // 账 #245/§B94: `Symbol::comMethods` 的**唯一读出口**。这张表以前在后端被读五遍
+    // （四份文件），每份自己写一遍「按 mapType(returnType) 挑哪一条 vb6_Com*」，其中两处还把
+    // 「类型未知」当成 BSTR 猜 —— 读表自此只住 comSigViewOf，档位选择只住下面两个函数。
+    struct ComSigView {
+        bool found = false;                  // 表里有没有这条成员（键 = 小写名）
+        bool isGet = false;                  // 这条签名是不是确认的属性 getter
+        std::string retCType;                // mapType(returnType)；未找到签名时为空串
+        const Symbol::ComMethodSig* sig = nullptr;  // 签名本体（形参表等细节仍要问它）
+    };
+    ComSigView comSigViewOf(const Symbol* comSym, const std::string& memberName) const;
+
+    // 属性 getter 的类型化解包表达式（哨兵 C3 的口径）：非确认的 getter ⇒ 返回空串，调用方
+    // 保留自己的晚绑定路；类型未知 ⇒ 交回原生 VARIANT，绝不按上下文猜一档。
+    std::string comGetterExpr(const ComSigView& sv, const std::string& objExpr,
+                              const std::string& memberName) const;
+
+    // 带实参调用的类型化表达式；callArgs 已是 `obj, L"Name", (void*[]){…}, argc`。
+    // 类型未知或表里没有这条签名 ⇒ 裸 vb6_ComCall（返回 void* 那一档）。
+    std::string comTypedCallExpr(const ComSigView& sv, const std::string& callArgs) const;
+
     // Fix 092m: With 块类字段写的 COM 解包 hint — 按目标类字段的 VB 类型名
     // (Symbol::memberFieldTypes, 语义分析阶段填充 + driver 跨模块拷贝) 映射到
     // resolveComValue 期望的解封类型:

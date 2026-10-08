@@ -84,26 +84,11 @@
                 isEarlyBoundCom_ = false;
                 const Symbol* comSym = earlyBoundSym_;
                 earlyBoundSym_ = nullptr;
-                std::string memLower = memName;
-                std::transform(memLower.begin(), memLower.end(), memLower.begin(), ::tolower);
-                auto it = comSym->comMethods.find(memLower);
-                if (it != comSym->comMethods.end() && it->second.isPropertyGet) {
-                    const auto& sig = it->second;
-                    std::string returnType = mapType(sig.returnType);
-                    if (returnType == "int32_t" || returnType == "int16_t") {
-                        lastExpr_ = "vb6_ComGetIntProp(" + objExpr + ", L\"" + memName + "\")";
-                    } else if (returnType == "BSTR") {
-                        lastExpr_ = "vb6_ComGetStringProp(" + objExpr + ", L\"" + memName + "\")";
-                    } else if (returnType == "double" || returnType == "float") {
-                        lastExpr_ = "vb6_ComGetDoubleProp(" + objExpr + ", L\"" + memName + "\")";
-                    } else if (returnType == "void*") {
-                        lastExpr_ = "vb6_ComGetObjectProp(" + objExpr + ", L\"" + memName + "\")";
-                    } else {
-                        lastExpr_ = "vb6_VariantFromComResult(vb6_ComGetProp(" + objExpr + ", L\"" + memName + "\"))";
-                    }
-                } else {
-                    lastExpr_ = "vb6_VariantFromComResult(vb6_ComGetProp(" + objExpr + ", L\"" + memName + "\"))";
-                }
+                std::string getter = comGetterExpr(comSigViewOf(comSym, memName), objExpr, memName);
+                // 表里没有确认的 getter ⇒ 这枚成员读按 VARIANT 收（原本就是这条兜底）。
+                lastExpr_ = getter.empty()
+                    ? "vb6_VariantFromComResult(vb6_ComGetProp(" + objExpr + ", L\"" + memName + "\"))"
+                    : getter;
             } else {
                 lastExpr_ = "vb6_VariantFromComResult(vb6_ComGetProp(" + objExpr + ", L\"" + memName + "\"))";  /* P25: late-bound VARIANT */
             }

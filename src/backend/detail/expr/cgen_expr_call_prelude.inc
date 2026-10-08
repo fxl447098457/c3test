@@ -206,7 +206,7 @@
 
             // 查找默认成员签名以确定返回类型
             std::string defLower = comSym->comDefaultMemberName;
-            auto itSig = comSym->comMethods.find(defLower);
+            ComSigView sv = comSigViewOf(comSym, defLower);
 
             // 有参数的默认属性调用: obj(args) → vb6_ComCall*(obj, L"Item", args, argc)
             std::vector<std::string> packedArgs;
@@ -227,22 +227,8 @@
             std::string callArgs = objExpr + ", L\"" + defMember + "\", " + argsArray + ", " + std::to_string(argc);
 
             // 根据签名返回类型选择类型化调用函数
-            if (itSig != comSym->comMethods.end()) {
-                std::string returnType = mapType(itSig->second.returnType);
-                if (returnType == "BSTR") {
-                    lastExpr_ = "vb6_ComCallBSTR(" + callArgs + ")";
-                } else if (returnType == "int32_t" || returnType == "int16_t") {
-                    lastExpr_ = "vb6_ComCallInt(" + callArgs + ")";
-                } else if (returnType == "double" || returnType == "float") {
-                    lastExpr_ = "vb6_ComCallDouble(" + callArgs + ")";
-                } else if (returnType == "void*") {
-                    lastExpr_ = "vb6_ComCallObject(" + callArgs + ")";
-                } else {
-                    lastExpr_ = "vb6_ComCall(" + callArgs + ")";
-                }
-            } else {
-                lastExpr_ = "vb6_ComCall(" + callArgs + ")";
-            }
+            // 账 #245/§B94: 档位选择收在 comTypedCallExpr（未知/表里没有 ⇒ 裸 vb6_ComCall）。
+            lastExpr_ = comTypedCallExpr(sv, callArgs);
             return;
         }
 

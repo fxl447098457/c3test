@@ -38,6 +38,45 @@ std::string CCodeGen::comObjectRefFromCallExpr(const std::string& expr) {
     return expr;
 }
 
+// 账 #245/§B94: comMethods 的唯一读出口 + 两条档位出口（声明见 cgen_helpers.inc）。
+CCodeGen::ComSigView CCodeGen::comSigViewOf(const Symbol* comSym,
+                                            const std::string& memberName) const {
+    ComSigView sv;
+    if (!comSym) return sv;
+    auto it = comSym->comMethods.find(Symbol::toLower(memberName));
+    if (it == comSym->comMethods.end()) return sv;
+    sv.found = true;
+    sv.isGet = it->second.isPropertyGet;
+    sv.retCType = mapType(it->second.returnType);
+    sv.sig = &it->second;
+    return sv;
+}
+
+std::string CCodeGen::comGetterExpr(const ComSigView& sv, const std::string& objExpr,
+                                    const std::string& memberName) const {
+    if (!sv.found || !sv.isGet) return "";   // put/method/未登记 ⇒ 调用方走晚绑定
+    std::string args = objExpr + ", L\"" + memberName + "\"";
+    if (sv.retCType == "BSTR") return "vb6_ComGetStringProp(" + args + ")";
+    if (sv.retCType == "int32_t" || sv.retCType == "int16_t") return "vb6_ComGetIntProp(" + args + ")";
+    if (sv.retCType == "double" || sv.retCType == "float") return "vb6_ComGetDoubleProp(" + args + ")";
+    if (sv.retCType == "void*") return "vb6_ComGetObjectProp(" + args + ")";
+    // 类型未知 (Enum→UserDefinedType / 签名压根没读到) ⇒ **不猜目标档**: 交回原生 VARIANT,
+    // 让运行期按 VARIANT 自己办。这一档以前有两处各自猜 (一处按 unpackType 猜 Long ⇒ BSTR 属性
+    // 发成 vb6_ComGetIntProp，读回是指针宽度当整数用; 一处直接发 StringProp ⇒ 未初始化的
+    // returnType 字段落的垃圾值被当成「这是个字符串」当真值用)。
+    return "vb6_VariantFromComResult(vb6_ComGetProp(" + args + "))";
+}
+
+std::string CCodeGen::comTypedCallExpr(const ComSigView& sv, const std::string& callArgs) const {
+    if (sv.found) {
+        if (sv.retCType == "BSTR") return "vb6_ComCallBSTR(" + callArgs + ")";
+        if (sv.retCType == "int32_t" || sv.retCType == "int16_t") return "vb6_ComCallInt(" + callArgs + ")";
+        if (sv.retCType == "double" || sv.retCType == "float") return "vb6_ComCallDouble(" + callArgs + ")";
+        if (sv.retCType == "void*") return "vb6_ComCallObject(" + callArgs + ")";
+    }
+    return "vb6_ComCall(" + callArgs + ")";   // 未知返回类型 / 表里没有: 返回 void*
+}
+
 std::string CCodeGen::resolveComValue(const std::string& unpackType) {
     // P24-07: 早期绑定 — 利用签名returnType选择正确的解包函数
     if (!isComMarker_) return lastExpr_;
@@ -321,31 +360,11 @@ std::string CCodeGen::resolveComValue(const std::string& unpackType) {
         isEarlyBoundCom_ = false;
         const Symbol* comSym = earlyBoundSym_;
         earlyBoundSym_ = nullptr;
-        std::string memLower = memberName;
-        std::transform(memLower.begin(), memLower.end(), memLower.begin(), ::tolower);
-        auto it = comSym->comMethods.find(memLower);
-        // 账 #245: 只有「确认是属性 getter」才允许按签名类型走带类型出口 —— 同族的另一处消费点
-        // (cgen_expr_call_arg_emit.inc) 本来就是这条口径, 这里以前不查 isPropertyGet,
-        // 于是 put/method 那一份签名也会被当成属性读来解包。
-        if (it != comSym->comMethods.end() && it->second.isPropertyGet) {
-            const auto& sig = it->second;
-            std::string returnType = mapType(sig.returnType);
-            std::string getPropArgs = objExpr + ", L\"" + memberName + "\"";
-            if (returnType == "BSTR") {
-                lastExpr_ = "vb6_ComGetStringProp(" + getPropArgs + ")";
-            } else if (returnType == "int32_t" || returnType == "int16_t") {
-                lastExpr_ = "vb6_ComGetIntProp(" + getPropArgs + ")";
-            } else if (returnType == "double" || returnType == "float") {
-                lastExpr_ = "vb6_ComGetDoubleProp(" + getPropArgs + ")";
-            } else if (returnType == "void*") {
-                lastExpr_ = "vb6_ComGetObjectProp(" + getPropArgs + ")";
-            } else {
-                // 类型未知 (Enum→UserDefinedType / 签名压根没读到) ⇒ **不猜目标档**:
-                // 交回原生 VARIANT, 让运行期按 VARIANT 自己办。以前这里按 unpackType 猜一档
-                // (调用点常给 "Long"), 于是 BSTR 属性被发成 vb6_ComGetIntProp —— 读回来是
-                // 指针宽度当整数用那一形; 未初始化字段落的也常常是这一档。
-                lastExpr_ = "vb6_VariantFromComResult(vb6_ComGetProp(" + getPropArgs + "))";
-            }
+        // 账 #245/§B94: 读表与档位选择都收在 comSigViewOf/comGetterExpr —— 只有确认的属性
+        // getter 才按签名走带类型出口，put/method 那份签名一律不当属性读来解包。
+        std::string getter = comGetterExpr(comSigViewOf(comSym, memberName), objExpr, memberName);
+        if (!getter.empty()) {
+            lastExpr_ = getter;
             isComMarker_ = false;
             return lastExpr_;
         }
@@ -795,22 +814,8 @@ std::string CCodeGen::resolveComMarkerForPack(const std::string& packFnHint) {
         isEarlyBoundCom_ = false;
         const Symbol* comSym = earlyBoundSym_;
         earlyBoundSym_ = nullptr;
-        std::string memLower = memName;
-        std::transform(memLower.begin(), memLower.end(), memLower.begin(), ::tolower);
-        auto it = comSym->comMethods.find(memLower);
-        if (it != comSym->comMethods.end() && it->second.isPropertyGet) {
-            const auto& sig = it->second;
-            std::string returnType = mapType(sig.returnType);
-            if (returnType == "int32_t" || returnType == "int16_t") {
-                return "vb6_ComGetIntProp(" + objExpr + ", L\"" + memName + "\")";
-            } else if (returnType == "BSTR") {
-                return "vb6_ComGetStringProp(" + objExpr + ", L\"" + memName + "\")";
-            } else if (returnType == "double" || returnType == "float") {
-                return "vb6_ComGetDoubleProp(" + objExpr + ", L\"" + memName + "\")";
-            } else if (returnType == "void*") {
-                return "vb6_ComGetObjectProp(" + objExpr + ", L\"" + memName + "\")";
-            }
-        }
+        std::string getter = comGetterExpr(comSigViewOf(comSym, memName), objExpr, memName);
+        if (!getter.empty()) return getter;
     }
 
     // 后期绑定: 按 packer 反推解封类型 —— 这张表与 comMarkerValueForWrite 同一份口径

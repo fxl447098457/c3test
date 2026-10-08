@@ -15,14 +15,14 @@
 #   C2  交出去之前就有初值: typelib_parser.hpp 里 ComParamInfo / ComMemberInfo 两个 struct 的每个
 #       **标量数据成员**声明行都必须带 `=` (std::string / std::vector 豁免)。没有初值的枚举字段
 #       一旦被复制进 Symbol::ComMethodSig, 就是"每进程自洽、跨构建不同"的那一格。
-#   C3  消费点口径一致: cgen_util_com.cpp 的 resolveComValue 里, 早期绑定那一支必须
-#       ①先看 `it->second.isPropertyGet` (put/method 那份签名不许当属性读来解包),
-#       ②类型未知时退回 `vb6_VariantFromComResult(vb6_ComGetProp(` 而不是按 unpackType 猜一档
-#       (猜档就是 `L"Name"` 被发成 IntProp 的那条路; 同族另一处 cgen_expr_call_arg_emit.inc 本来就是退 VARIANT)。
-#   C4   census: 全仓直接 `comMethods.find(` 的后端文件名单钉死为四份 (cgen_util_com.cpp /
-#       cgen_expr_call_arg_emit.inc / cgen_expr_call_com_bind.inc / cgen_expr_call_prelude.inc)。
-#       这一格教的是"同一个问题被抄成几份"的代价, 所以这里不假装已经合一 ——
-#       名单外再开第五处读法 (即第五种问法) 必须先回来把口径并进来再登记。
+#   C3  口径住在唯一出口里: comGetterExpr (属性 getter 的档位选择) 必须
+#       ①先看 sv.isGet (put/method 那份签名不许当属性读来解包),
+#       ②类型未知时退回 `vb6_VariantFromComResult(vb6_ComGetProp(`，且**整个函数体里不许出现
+#       unpackType / packFnHint** —— 那两枚是「按调用上下文猜一档」的旧答案来源，同族另一处
+#       (cgen_expr_call_arg_emit.inc) 本来就是退 VARIANT。读表那处 comSigViewOf 必须仍交出 isPropertyGet。
+#   C4  census: `comMethods.find(` 在 src\backend 里只许出现一次，且就在 cgen_util_com.cpp 的
+#       comSigViewOf 里；以前那五处消费者（三份 .inc + cgen_util_com.cpp 的另一支）必须仍逐处
+#       问 comSigViewOf —— 名单是「谁在问」，不是「谁自己查表」。名单外再开一处读法必须先回来把口径并进来再登记。
 #
 # 用法: powershell -File scripts/check_com_prop_type_authority.ps1   (PASS ⇒ exit 0)
 
@@ -75,36 +75,73 @@ foreach ($st in @('ComParamInfo', 'ComMemberInfo')) {
     }
 }
 
-# ---- C3: resolveComValue 的早期绑定那一支 ----
+# ---- C3: 属性 getter 的档位口径（账 #245/§B94 之后住在唯一出口里）----
+$geIdx = $com.IndexOf('std::string CCodeGen::comGetterExpr(')
+if ($geIdx -lt 0) {
+    $fails += 'C3 comGetterExpr (the single typed-getter exit) is gone from cgen_util_com.cpp'
+} else {
+    $geTail = $com.IndexOf("`n}", $geIdx)
+    $geBlk = if ($geTail -gt 0) { $com.Substring($geIdx, $geTail - $geIdx) } else { $com.Substring($geIdx) }
+    # 判据前先剥 //… 与 /*…*/: 函数上方的说明里就写着 "unpackType"，不剥会把一句说明读成一次猜档。
+    $geCode = ($geBlk -replace '//[^\r\n]*', '') -replace '/\*[\s\S]*?\*/', ''
+    if ($geCode -notmatch 'vb6_VariantFromComResult\(vb6_ComGetProp\(') {
+        $fails += 'C3 unknown return type no longer falls back to the generic VARIANT read'
+    }
+    if ($geCode -notmatch '!sv\.isGet') {
+        $fails += 'C3 the getter exit stopped gating on the confirmed property-getter flag (a put/method signature must not be unpacked as a property read)'
+    }
+    if ($geCode -match 'unpackType|packFnHint') {
+        $fails += 'C3 the getter exit guesses a shape from the call context again (that is how BSTR props became ComGetIntProp)'
+    }
+}
+$svIdx = $com.IndexOf('CCodeGen::ComSigView CCodeGen::comSigViewOf(')
+if ($svIdx -lt 0) {
+    $fails += 'C3 comSigViewOf (the only reader of Symbol::comMethods) is gone'
+} else {
+    $svTail = $com.IndexOf("`n}", $svIdx)
+    $svBlk = $com.Substring($svIdx, $svTail - $svIdx)
+    if ($svBlk -notmatch 'isGet = it->second\.isPropertyGet') {
+        $fails += 'C3 comSigViewOf no longer hands out the isPropertyGet answer'
+    }
+}
 $ebIdx = $com.IndexOf('if (isEarlyBoundCom_ && earlyBoundSym_)')
 if ($ebIdx -lt 0) {
     $fails += 'C3 resolveComValue early-bound branch not found'
 } else {
-    # 支路自己第一行就是 8 空格缩进的 isEarlyBoundCom_ = false; —— 取"四空格缩进"那一行当支路尾
-    $tailIdx = $com.IndexOf("`n    isEarlyBoundCom_ = false;", $ebIdx)
-    $endIdx = if ($tailIdx -gt 0) { $tailIdx } else { $com.Length }
-    $blk = $com.Substring($ebIdx, $endIdx - $ebIdx)
-    if ($blk -notmatch 'it->second\.isPropertyGet') {
-        $fails += 'C3 early-bound branch stopped checking isPropertyGet (a put/method signature must not be unpacked as a property read)'
-    }
-    if ($blk -notmatch 'vb6_VariantFromComResult\(vb6_ComGetProp\(') {
-        $fails += 'C3 unknown return type no longer falls back to the generic VARIANT read'
-    }
-    if ($blk -match 'unpackType == "LongPtr"') {
-        $fails += 'C3 the early-bound branch guesses from unpackType again (that is how BSTR props became ComGetIntProp)'
+    $ebTail = $com.IndexOf("`n    }", $ebIdx)
+    $ebBlk = if ($ebTail -gt 0) { $com.Substring($ebIdx, $ebTail - $ebIdx) } else { $com.Substring($ebIdx) }
+    if ($ebBlk -notmatch 'comGetterExpr\(comSigViewOf\(') {
+        $fails += 'C3 resolveComValue no longer routes its early-bound read through the single exit'
     }
 }
 
-# ---- C4: 消费者名单 ----
+# ---- C4: census —— 读这张表的地方只剩一处，问它的地方一处不少 ----
 $backendDir = Join-Path $root 'src\backend'
-$hits = Get-ChildItem -Path $backendDir -Recurse -File -Include *.cpp,*.inc,*.hpp |
+$readers = @((Get-ChildItem -Path $backendDir -Recurse -File -Include *.cpp,*.inc,*.hpp |
         Where-Object { (Get-Content -Raw -Encoding UTF8 $_.FullName) -match 'comMethods\.find\(' } |
-        ForEach-Object { $_.Name } | Sort-Object -Unique
-$want = @('cgen_expr_call_arg_emit.inc', 'cgen_expr_call_com_bind.inc',
-          'cgen_expr_call_prelude.inc', 'cgen_util_com.cpp')
-if ($hits.Count -ne $want.Count -or (Compare-Object $hits $want)) {
-    $fails += ('C4 comMethods.find consumers changed: expected ' + ($want -join ', ') +
-               '; got ' + ($hits -join ', '))
+        ForEach-Object { $_.Name }))
+$authority = 'cgen_util_com.cpp'
+if ($readers.Count -ne 1 -or $readers[0] -ne $authority) {
+    $fails += ('C4 Symbol::comMethods must be read only in ' + $authority +
+               ' (comSigViewOf); found readers: ' + ($readers -join ', '))
+}
+$findCount = ([regex]::Matches($com, 'comMethods\.find\(')).Count
+if ($findCount -ne 1) {
+    $fails += ('C4 comMethods.find( appears ' + $findCount +
+               ' times in ' + $authority + '; exactly the one inside comSigViewOf is allowed')
+}
+$askers = @{
+    'cgen_util_com.cpp'               = $comPath
+    'cgen_expr_call_arg_emit.inc'    = (Join-Path $backendDir 'detail\expr\cgen_expr_call_arg_emit.inc')
+    'cgen_expr_call_com_bind.inc'    = (Join-Path $backendDir 'detail\expr\cgen_expr_call_com_bind.inc')
+    'cgen_expr_call_prelude.inc'     = (Join-Path $backendDir 'detail\expr\cgen_expr_call_prelude.inc')
+}
+foreach ($k in ($askers.Keys | Sort-Object)) {
+    $fp = $askers[$k]
+    if (-not (Test-Path $fp)) { $fails += ('C4 missing former consumer file: ' + $k); continue }
+    if ((Get-Content -Raw -Encoding UTF8 $fp) -notmatch 'comSigViewOf\(') {
+        $fails += ('C4 ' + $k + ' no longer asks comSigViewOf (a reader must route through the exit, not vanish)')
+    }
 }
 
 if ($fails.Count -gt 0) {
