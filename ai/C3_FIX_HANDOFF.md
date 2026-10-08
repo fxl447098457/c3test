@@ -1661,7 +1661,7 @@ CI 那一枚（`pe-lnk=14.51`）稳定落进 `int16_t` 档 ⇒ 发成 `vb6_ComGe
 - 已经可以换掉的通道：**`/repos/<o>/<r>/commits/<sha8>/check-runs?per_page=50` 匿名可读**，逐 job 的 `name / conclusion / output.annotations_count` 都在，`id` 就等于 job id。以后"门看不见"那一路先走它，别再守 watcher 与 run-id 那条（历史坑：watcher 自己提前 exit 0、jobs=0 一律当失败）。
 - 欠的那一刀（小、常设）：`tests/run_tests.ps1` 每条用例失败时发一行 `::error::<用例名> FAILED <一句读数>` ⇒ GitHub 把它收成 failure annotation，下次门红就直接给用例名，不用再走排除法。做的时候两件事钉住：① **别动**现有的人读那套汇总行（两边读数都要在）；② 发完**不改退出码**（判红仍由汇总那一句决定）—— 这一格按设计不该自己变红，它只负责把名字带回来。
 
-### B93 别人分支里「对我们有用」的两件已捞进 dev —— Join-Path 的 5.1 兼容真修 + vi 的三节待办（2026-10-08，**已提交待门**）
+### B93 别人分支里「对我们有用」的两件已捞进 dev —— Join-Path 的 5.1 兼容真修 + vi 的三节待办（2026-10-08，**已出：门 #420（run 提交 head `dd463407`、branch dev、attempt 1）= 12 条 check-run 全 success、非绿 0**）
 
 - **口径**（用户 2026-10-08 定）：只维护 `dev` 一条线；别人名下的分支（`origin/ferock/*`、`origin/vi/dev`、`github/main` 那条 orphan）默认不对齐，**但里面的内容对我们有用就捞过来**。所以判据不是「哪条分支多几笔提交」，而是「这段文字/这一刀在 dev 上有没有等价存在」。
 - **怎么核分叉**（本轮实测的办法）：`git merge-base --is-ancestor <ref> github/dev` 找谁不在 dev 里，再对多出的那笔**按新增行**逐行去 dev 的文件版本里查在不在。用这条路核 gitcode 那份同名 `origin/dev`（与 github/dev 提交图分叉）独多的 `847ee9f4 docs: 账 #240 收线` —— 它新增 6 行，dev 现有版本 **6/6 都在** ⇒ 内容不欠，别去「合」它。
@@ -1669,6 +1669,8 @@ CI 那一枚（`pe-lnk=14.51`）稳定落进 `int16_t` 档 ⇒ 发成 `vb6_ComGe
 - **哨兵 = `scripts/check_ps51_joinpath.ps1`（第 36 道 [STATIC]）**：走真 AST（`Language.Parser::ParseFile` + `CommandAst`），只数**位置参数**（具名参数后面的值单独扣掉，所以 `-Path a -ChildPath b` 不误报），大于 2 就红；扫 `tests` 与 `scripts` 下全部 `.ps1` = 58 份。**它第一跑就钓出三条没人知道的**：① `regress_all.ps1` 那三行是同一缺陷的第二份；② `tests/run_small.ps1` 是「**.bat 的内容挂 .ps1 后缀**」（首行 `@echo off`，里面全是别人桌面的绝对路径，全仓 0 引用）⇒ 改名成 `run_small.bat`（`git mv`，字节不动）；③ `scripts/vswhere.ps1` **无 BOM 且 4 行中文在行尾** ⇒ PS 5.1 按 ANSI 读时吃掉换行、解析报「缺少右花括号」（记忆里那条老坑的又一件实物）⇒ 补 BOM。哨兵自带两条边界：文件数 < 40 直接 `exit 2`（「扫到 0 份」= 瞎了的判据），解析失败也算违规（否则 ②③ 这种「根本没被解析过」的文件永远隐身）。负控：临时放一枚三参数探针文件 ⇒ 违规 1 处、`rc=1`；删掉后 `rc=0`。
 - **第二件 = `todo/vi.md` 多出的三节**（MCP/CLI 对外接口、`.lib/.obj` 产物、WinDevLib 32→64 API 自动翻译）：先按**节**对过集合 —— dev 那份 6 节与分支版逐字相同、dev 无独有节 ⇒ 可安全并表，numstat **52/0 纯插入**。WinDevLib 那条与我们「x64 的 Declare 形状是源码活」的口径是**同一问题的两种答案**（它主张按 API 签名自动把 Long 提级成 LongPtr，我们主张改 VB 源），留在 todo 里作对照，不是马上做。
 - **`FUNDING.md`（vi 那 5 笔里唯一没捞的）**：dev 有 `CONTRIBUTING.md` 没有 `FUNDING.md`。它讲捐赠渠道与分配规则，属仓库治理与法务口径，**不由我拍**，等用户点头再并。
+- **门 #420 的收线读数**：12 条 check-run 全 success（Build / `Emit manifest (shape oracle)` / syntax / compile / smoke / asm / bas#1#2 / vbp#1..#4），而发码清单那边仍是 `# expectation-check=PASS`、395 行零差 ⇒ 这一刀**零发码变化**（只动 harness 与文档，符合预期）。另记两件常设事实：① 本仓 [STATIC] 哨兵从 35 道长成 **36 道**；② 以后谁要在 5.1 下跑本地回归，现在跑得动了（实测 `-Category compile` 在 5.1 下 PASS=42 FAIL=0，改前那台同一条命令整片 C1083）。
+
 
 ## C. 仍在生效的口径与工具事实（与本文档等长的一半价值在这里；完整版见记忆库）
 
