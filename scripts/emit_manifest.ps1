@@ -74,7 +74,9 @@ $peLnk = "unknown"
 try {
     $bytes = [System.IO.File]::ReadAllBytes($c3)
     $off = [BitConverter]::ToInt32($bytes, 0x3C)          # e_lfanew
-    $peLnk = ("{0}.{1}" -f $bytes[$off + 4 + 2], $bytes[$off + 4 + 3])
+    # PE\0\0 = 4 字节, IMAGE_FILE_HEADER = 20 字节 ⇒ optional header 在 off+24;
+    # 它的前两字节是 Magic，链接器版本在 +2/+3 ⇒ 绝对偏移 off+26 / off+27。
+    $peLnk = ("{0}.{1}" -f $bytes[$off + 26], $bytes[$off + 27])
 } catch { }
 
 $inputs = Get-ChildItem -Path (Join-Path $Root "tests") -Recurse -File |
