@@ -135,7 +135,9 @@ jobs:
           $url = 'https://x-access-token:' + $env:CI_TOKEN + '@github.com/' + $env:GITHUB_REPOSITORY + '.git'
           git config user.email 'ci@users.noreply.github.com'
           git config user.name 'ci-emit-manifest'
-          git fetch --depth=1 $url ci/emit-manifest 2>$null
+          # 不能加 --depth=1：浅(fetch)过的仓库 push 会被 git 拒（#414 就这么静默没推上——
+          # 这一步按设计不判红，所以门全绿而分支纹丝不动）。
+          git fetch $url ci/emit-manifest 2>$null
           if ($LASTEXITCODE -eq 0) {
             git checkout -B ci/emit-manifest FETCH_HEAD
           } else {
