@@ -887,6 +887,19 @@ function Test-ComPropTypeAuthority {
         $out | Select-Object -First 6 | ForEach-Object { Write-Host "  $_" }
     }
 }
+function Test-EmitcArtifactCaliber {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] emitc_artifact_caliber ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\check_emit_c_artifact_caliber.ps1" 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        $out | Select-Object -First 8 | ForEach-Object { Write-Host "  $_" }
+    }
+}
 function Test-FloatToIntRound {
     $script:total++
     Write-Host -NoNewline "  [STATIC] float_to_int_round ... "
@@ -1552,6 +1565,82 @@ function Test-EmitcAbsent {
     }
 }
 
+# 账 #267: --emit-c 打到 stdout 的那份 C，必须与 C3 自己写进中间目录、cl 按 /utf-8 编的那两份 .h/.c
+# **逐字节相同**。老写法是 std::cout << cgen.sourceCode() —— 而 stdout 一进进程就被 ConsoleUtf8Buf 接管，
+# 句柄是**管道/文件**那一支按**控制台代码页**转字节：本机钉 936 就交 GBK，CI 交 UTF-8 —— 同一个问题两个
+# 答案，其中一个还是机器的函数。诊断文本留在那一层是对的 (cmd/PowerShell 都按控制台代码页解码)，产物不该
+# 跟着走。修法 = encoding.hpp 的 writeStdoutRaw 把内部 UTF-8 直接落 fwrite (stdout 是文本流，'\n' 照旧翻成
+# CRLF，与 ofstream 写那两份文件的行为一致)。判据钉三件，缺一不算数：
+#   ① stdout 的前 len(.h)+2+len(.c)+2 个字节 == .h + CRLF + .c + CRLF (后面只许跟 --keep-for-debug 的诊断)；
+#   ② 控制台代码页钉成两档各跑一趟 (原档 + 936)，两档都必须过 ① —— 改前那一枚在 936 这档当场红；
+#   ③ 产物里要有非 ASCII 字节，且能按 UTF-8 **严格**解码 (出现半个汉字就是被代码页折过) —— 缺了 ③，
+#     ①② 在一枚纯 ASCII 的夹具上会空转。
+function Test-EmitcByteCaliber {
+    param([string]$Name, [string]$Source, [string]$ModuleBase)
+    # vbp 分片: 本片不跑这例 —— 闸门必须在任何副作用之前 (建目录/起进程)。
+    if (-not (Enter-VbpShard)) { return }
+    $script:total++
+    Write-Host -NoNewline "  [EMITC-CALIBER] $Name ... "
+    $why = @()
+    $orig = ((& cmd /c "chcp") -replace "[^0-9]", "")
+    if (-not $orig) { $orig = "65001" }
+    $cps = @($orig)
+    if ($orig -ne "936") { $cps += "936" }      # 第二档：钉一个装得下汉字的非 UTF-8 代码页
+    foreach ($cp in $cps) {
+        $c3c = Join-Path $env:TEMP "C3C"
+        $pre = @(Get-ChildItem $c3c -Directory -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName })
+        $outF = Join-Path $env:TEMP ("c3calib_" + [guid]::NewGuid().ToString("N") + ".bin")
+        & cmd /c ("chcp " + $cp + " >nul & " + '"' + $C3 + '" "' + $Source + '" --emit-c --keep-for-debug > "' + $outF + '" 2>nul') | Out-Null
+        $post = @(Get-ChildItem $c3c -Directory -ErrorAction SilentlyContinue |
+                  ForEach-Object { $_.FullName } | Where-Object { $pre -notcontains $_ })
+        if (-not (Test-Path $outF)) { $why += ("cp=" + $cp + ": 没有产物"); continue }
+        $got = [System.IO.File]::ReadAllBytes($outF)
+        Remove-Item $outF -Force -ErrorAction SilentlyContinue
+        if ($post.Count -ne 1) {
+            $why += ("cp=" + $cp + ": 中间目录应有且只有一趟新增 (实测 " + $post.Count + ")")
+        } else {
+            $hF = Join-Path $post[0] ($ModuleBase + ".h")
+            $cF = Join-Path $post[0] ($ModuleBase + ".c")
+            if (-not (Test-Path $hF) -or -not (Test-Path $cF)) {
+                $why += ("cp=" + $cp + ": 中间目录缺 " + $ModuleBase + ".h/.c")
+            } else {
+                $hb = [System.IO.File]::ReadAllBytes($hF)
+                $cb = [System.IO.File]::ReadAllBytes($cF)
+                $crlf = [byte[]](13, 10)
+                $ms = New-Object System.IO.MemoryStream
+                $ms.Write($hb, 0, $hb.Length); $ms.Write($crlf, 0, 2)
+                $ms.Write($cb, 0, $cb.Length); $ms.Write($crlf, 0, 2)
+                $want = $ms.ToArray(); $ms.Dispose()
+                if ($got.Length -lt $want.Length) {
+                    $why += ("cp=" + $cp + ": stdout 比那两份文件还短 (" + $got.Length + " < " + $want.Length + ")")
+                } else {
+                    $bad = -1
+                    for ($k = 0; $k -lt $want.Length; $k++) { if ($got[$k] -ne $want[$k]) { $bad = $k; break } }
+                    if ($bad -ge 0) {
+                        $why += ("cp=" + $cp + ": 第 " + $bad + " 字节与中间目录那两份不同 (stdout=" +
+                                 $got[$bad] + " 文件=" + $want[$bad] + ")")
+                    }
+                }
+            }
+            Remove-Item $post[0] -Recurse -Force -ErrorAction SilentlyContinue
+        }
+        if (@($got | Where-Object { $_ -gt 127 }).Count -eq 0) {
+            $why += ("cp=" + $cp + ": 产物里没有一个非 ASCII 字节 (判据空转)")
+        }
+        $strict = New-Object System.Text.UTF8Encoding($false, $true)
+        try { [void]$strict.GetString($got) }
+        catch { $why += ("cp=" + $cp + ": 不是合法 UTF-8 (被控制台代码页折过)") }
+    }
+    & cmd /c ("chcp " + $orig + " >nul") | Out-Null
+    if ($why.Count -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        foreach ($w in $why) { Write-Host ("    " + $w) }
+    }
+}
 function Test-SyntaxFail {
     param([string]$Name, [string]$Source, [string]$Needle)
     $script:total++
@@ -3228,6 +3317,7 @@ if ($Category -in @("all", "run", "vbp")) {
         '((int32_t)sizeof(gS))',                        # 修复前的形状：x64 读 8、x86 读 4
         '((int32_t)sizeof(gE))'
     )
+    Test-EmitcByteCaliber "emitc_artifact_bytes" "$Tests\acc\acc_main.bas" "AccMain"
 
     # 账 #116: `Dim X As String * N` 的 typeRef 是 FixedStringTypeRef，而三处发码点
     # (cgen_decl_var.cpp / cgen_decl_func.cpp / cgen_decl_prop.cpp) 把它按 SimpleTypeRef 读 ->name
@@ -4970,6 +5060,7 @@ if ($Category -in @("all", "compile")) {
     Test-CtrlPropTypeAuthority
     Test-FormDrawState
     Test-ComPropTypeAuthority
+    Test-EmitcArtifactCaliber
     Test-CtrlGeomCache
     Test-FloatToIntRound
     Test-FixtureTimerClose

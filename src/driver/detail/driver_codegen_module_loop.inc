@@ -138,8 +138,17 @@
         }
 
         // --emit-c 模式: 输出C代码后结束
+        // 账 #267: 这份产物要和上面那两份 .h/.c **同一口径**（内部 UTF-8 原样），所以绕开 std::cout
+        // 上那层「管道/文件就按控制台代码页转字节」的 streambuf —— 它是为给人看的诊断装的，
+        // 用在产物上就变成「同一个问题两个答案，其中一个随机器变」：本机 936 交 GBK、CI 65001 交 UTF-8。
+        // 先 flush 诊断，再直接 fwrite（stdout 是文本流，'\n' 照旧翻成 CRLF，与 ofstream 写的那两份一致）。
         if (options.emitC) {
-            std::cout << cgen.headerCode() << std::endl;
-            std::cout << cgen.sourceCode() << std::endl;
+            std::cout.flush();
+            std::string dump = cgen.headerCode();
+            dump += "\n";
+            dump += cgen.sourceCode();
+            dump += "\n";
+            writeStdoutRaw(dump);
+            std::fflush(stdout);
         }
     }

@@ -22,7 +22,7 @@
 param(
     [string]$Root = "",
     [string]$Out = "",
-    [string]$Samples = "tests/acc/acc_main.bas,tests/asm/AsmTest.bas,tests/Charts 2020/ucChartArea/Proyecto1.vbp"
+    [string]$Samples = "tests/acc/acc_main.bas,tests/asm/AsmTest.bas,tests/Charts 2020/ucChartArea/Proyecto1.vbp,tests/VBFlexGridDemo/VBFlexGridDemo.vbp"
 )
 $ErrorActionPreference = 'Continue'
 if (-not $Root) { $Root = (Split-Path -Parent $PSScriptRoot) }
