@@ -1378,6 +1378,30 @@ S9.4 打标记那一路的 PictureBox 判据必须问表、且不许把成员名
   ⇒ 读清单时的操作口径：一行差里可能混着两类 —— 编码类（覆盖面大、语义无关）与 #245 的 COM 出口类（实测 14 份）；
   先按"差异行是否只含非 ASCII 字节"把前者剔掉，再看剩下的。
 · **新工件 `emit-samples`**：清单只有哈希，跨机器对不出「差在哪一行」⇒ `-Samples` 点名的三份输入（`tests/acc/acc_main.bas`、`tests/asm/AsmTest.bas`、`tests/Charts 2020/ucChartArea/Proyecto1.vbp`）把**未归一化原文**一起留档 ⇒ 下一轮把 CI 那份与本机 `.build/emit-samples/` 直接 diff，那 7 个字节是什么一眼可见。
+**2026-10-08 账 #245 已修 = 根因是一处未初始化字段，跟构建期顺序无关**：`parseVarDesc` 只在
+`varkind == VAR_PERINSTANCE` 那一支给 `member.returnType` 赋值，而 **dual 接口的属性是 VAR_PROPERTY(3) 的
+VARDESC**（stdole 的 `StdFont` 八条属性全在这一档）⇒ 交出去的是没赋过值的 16 位枚举字段。临时探针实测：
+本机那一枚**连跑三次**读到 `29620 / 6971 / 50156`，三个垃圾值都落进 `mapType` 的 `default` ⇒ 本机发码"看着稳";
+CI 那一枚（`pe-lnk=14.51`）稳定落进 `int16_t` 档 ⇒ 发成 `vb6_ComGetIntProp`。**订正上一条那句
+"决定随构建变、构建内自洽"—— 真相更糟：它随进程变，只是本机这一档一直兜在同一支，A/B 才显得自洽。**
+修法三件：① `parseVarDesc` 无条件 `member.returnType = mapTypeDesc(&pVD->elemdescVar.tdesc, pTI)`
+（三种 varkind 的真类型都在 `elemdescVar.tdesc` 上）；② `ComMemberInfo`/`ComParamInfo` 四个标量字段补默认初值
+（`Vb6Type::Variant` = "不知道"，`direction = In`，`kind = Method`）；③ `resolveComValue` 的早期绑定支与同族
+另一处对齐口径 —— **先看 `it->second.isPropertyGet`**（put/method 那份签名不许当属性读来解包），
+**类型未知一律退 `vb6_VariantFromComResult(vb6_ComGetProp(...))`**，不再按 `unpackType` 猜一档
+（猜档就是 `L"Name"` 被发成 IntProp 的那条通道；同文件 800 行那条本来就查 `isPropertyGet` ⇒ 两处从此同口径）。
+判据：`ucChartArea/Proyecto1.vbp` 同机三台（BASE 未修 / NEW 已修 / CI 那枚 14.51）按**行多重集**对 ⇒
+`CI-vs-BASE = 12` 行、**`CI-vs-NEW = 5` 行，且这 5 行全是"CI 那枚还没修"的形状**
+（`ComGetIntProp(oFont, L"Name")` ⇄ 修好的 `ComGetStringProp(...)`）；NEW 交出的档位与类型库真值一致
+（`Name`→String、`Size`→double、`Charset/Weight/Bold/Italic/Underline/Strikethrough`→int）；
+真编译 `Proyecto1.exe` rc=0、零 error、零 C4244；本地 `-Category compile` 组 40/40 全绿。
+新哨兵 `scripts/check_com_prop_type_authority.ps1`（第 34 道 [STATIC]）C1/C2/C3a/C3b/C3c/C4 六条各用一处
+假改动证红、跑完逐份还原核 md5。两条 reusable：
+- **C2 的第一版是假绿**：判据只扫"以 `;` 结尾"的行，而这些声明行都带行尾中文注释 ⇒ 一条都看不见；
+  先脱 `//…` 再判才生效。**"注释让判据变哑"这一族已经第三次踩到**（脱注释、别按 EndsWith 过滤）。
+- **C4 census 顺手量到 `comMethods.find(` 的后端消费者是四处**（`cgen_util_com.cpp` /
+  `cgen_expr_call_arg_emit.inc` / `cgen_expr_call_com_bind.inc` / `cgen_expr_call_prelude.inc`）
+  ⇒ "把这个问题合成一处出口"这一格还欠着；本轮把名单钉死、把其中两处口径并齐，第五种问法要进来必须先过这条。
 
 ### B74 控件几何写进去的数与读出来的数天生差一格 —— VB 侧读数从没被存过（账 #230，**已出：门 #376（run 37547498187、head `a9c47c82`、branch dev、attempt 1）= 11 job 全 completed/success、非绿 0**）
 

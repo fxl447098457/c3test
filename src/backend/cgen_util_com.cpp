@@ -324,7 +324,10 @@ std::string CCodeGen::resolveComValue(const std::string& unpackType) {
         std::string memLower = memberName;
         std::transform(memLower.begin(), memLower.end(), memLower.begin(), ::tolower);
         auto it = comSym->comMethods.find(memLower);
-        if (it != comSym->comMethods.end()) {
+        // 账 #245: 只有「确认是属性 getter」才允许按签名类型走带类型出口 —— 同族的另一处消费点
+        // (cgen_expr_call_arg_emit.inc) 本来就是这条口径, 这里以前不查 isPropertyGet,
+        // 于是 put/method 那一份签名也会被当成属性读来解包。
+        if (it != comSym->comMethods.end() && it->second.isPropertyGet) {
             const auto& sig = it->second;
             std::string returnType = mapType(sig.returnType);
             std::string getPropArgs = objExpr + ", L\"" + memberName + "\"";
@@ -337,20 +340,11 @@ std::string CCodeGen::resolveComValue(const std::string& unpackType) {
             } else if (returnType == "void*") {
                 lastExpr_ = "vb6_ComGetObjectProp(" + getPropArgs + ")";
             } else {
-                // P24-07: 未知返回类型(如Enum→UserDefinedType) → 按目标变量类型选择
-                if (unpackType == "BSTR") {
-                    lastExpr_ = "vb6_ComGetStringProp(" + getPropArgs + ")";
-                } else if (unpackType == "LongPtr") {
-                    lastExpr_ = "vb6_ComGetLongPtrProp(" + getPropArgs + ")";
-                } else if (unpackType == "Int" || unpackType == "Long" || unpackType == "Boolean") {
-                    lastExpr_ = "vb6_ComGetIntProp(" + getPropArgs + ")";
-                } else if (unpackType == "Double" || unpackType == "Single") {
-                    lastExpr_ = "vb6_ComGetDoubleProp(" + getPropArgs + ")";
-                } else if (unpackType == "Object") {
-                    lastExpr_ = "vb6_ComGetObjectProp(" + getPropArgs + ")";
-                } else {
-                    lastExpr_ = "vb6_VariantFromComResult(vb6_ComCall(" + objExpr + ", L\"" + memberName + "\", NULL, 0))";
-                }
+                // 类型未知 (Enum→UserDefinedType / 签名压根没读到) ⇒ **不猜目标档**:
+                // 交回原生 VARIANT, 让运行期按 VARIANT 自己办。以前这里按 unpackType 猜一档
+                // (调用点常给 "Long"), 于是 BSTR 属性被发成 vb6_ComGetIntProp —— 读回来是
+                // 指针宽度当整数用那一形; 未初始化字段落的也常常是这一档。
+                lastExpr_ = "vb6_VariantFromComResult(vb6_ComGetProp(" + getPropArgs + "))";
             }
             isComMarker_ = false;
             return lastExpr_;

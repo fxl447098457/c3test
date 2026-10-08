@@ -874,6 +874,19 @@ function Test-FormDrawState {
         $out | Select-Object -First 6 | ForEach-Object { Write-Host "  $_" }
     }
 }
+function Test-ComPropTypeAuthority {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] com_prop_type_authority ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\check_com_prop_type_authority.ps1" 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        $out | Select-Object -First 6 | ForEach-Object { Write-Host "  $_" }
+    }
+}
 function Test-FloatToIntRound {
     $script:total++
     Write-Host -NoNewline "  [STATIC] float_to_int_round ... "
@@ -4956,6 +4969,7 @@ if ($Category -in @("all", "compile")) {
     Test-CtrlArrayMemberSites
     Test-CtrlPropTypeAuthority
     Test-FormDrawState
+    Test-ComPropTypeAuthority
     Test-CtrlGeomCache
     Test-FloatToIntRound
     Test-FixtureTimerClose
