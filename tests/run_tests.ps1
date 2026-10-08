@@ -2356,6 +2356,27 @@ if ($Category -in @("all", "run", "bas")) {
     # (前期绑定 CLSID 签名路径) 互补。断言蒸馏自真实输出 (首次红 = 编译期 C2440)。
     Add-BasTest "test_com_latebound" "$Tests\test_com_latebound.bas" @("LB-1:OK", "LB-2:OK", "LB-3:OK", "LB-4:OK", "LB-5:OK", "P24-10b: 5/5")
     Add-BasTest "test_com_optional" "$Tests\test_com_optional.bas" @("OP-1:OK", "OP-4:OK", "P24-11: 4/4")
+    # 账 #245/§B94 的行为针（夹具 tests/test_com_variant_prop.bas）。类型库属性 Get 的返回档落在
+    # mapType 的「未知」桶（这里是 VARIANT）时，唯一合法读法是 Variant 兜底 —— 不许按右值上下文猜成
+    # GetStringProp：那会把 BSTR* 交进 VARIANT 的槽，正是 #245 那一族未初始化读。四行各写进各自的
+    # 变量，于是每行发码唯一，四枚消费点被分开钉：v=（resolveComValue）、s1=（同上但目标是 String，
+    # 就是「猜档」那一刀唯一会红的一行）、s2 = at.value()（com_bind 的零实参支）、n = Len(...)（实参
+    # 打包那条）。s1 与 s2 只差变量名 —— 两支必须交回同一个读数：拼法不选档。
+    Test-EmitcShape "cvp_emitc_variant_fallback" @("$Tests\test_com_variant_prop.bas") @(
+        'v = vb6_VariantFromComResult(vb6_ComGetProp(at, L"value"));',
+        'vb6_BSTR_Assign(&s1, vb6_VariantToString(vb6_VariantFromComResult(vb6_ComGetProp(at, L"value"))));',
+        'vb6_BSTR_Assign(&s2, vb6_VariantToString(vb6_VariantFromComResult(vb6_ComGetProp(at, L"value"))));',
+        'n = vb6_Len(vb6_VariantToString(vb6_VariantFromComResult(vb6_ComGetProp(at, L"value"))))'
+    )
+    # 两面钉：证人（同一次读取里 nodeName 是真 BSTR 档，必须仍走 GetStringProp）+ 反面 —— 一旦有人
+    # 让上下文或成员名去猜档，这两种形状就会进场。
+    Test-EmitcShape "cvp_emitc_bstr_witness" @("$Tests\test_com_variant_prop.bas") @(
+        'vb6_BSTR_Assign(&s3, vb6_ComGetStringProp(at, L"nodeName"));'
+    )
+    Test-EmitcAbsent "cvp_emitc_no_context_guess" @("$Tests\test_com_variant_prop.bas") @(
+        'vb6_ComGetStringProp(at, L"value")',
+        'vb6_ComGetIntProp(at, L"value")'
+    )
     Add-BasTest "test_bstr_concat_scalar" "$Tests\test_bstr_concat_scalar.bas" @("BCS:16/16")
     # 账 #115: Len() 的"存储宽度"兜底桶把模块级 String 也吞了 (knownBstrVars_ 每过程入口 clear,
     # 只有局部声明/形参进表) => `Len(gS)` 发成 sizeof(gS): x64 读 8、x86 读 4。两条架构各真跑一次,
