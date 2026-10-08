@@ -73,6 +73,45 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
+  # 账 #245 (§B73): 发码形状的**神谕必须来自产物那一台工具链**。同一笔提交用不同 MSVC 编出来的 C3.exe
+  # 会在语料上分家（实测 788 份捕获里 14 份不同，全在 Charts 2020 的 UC 工程，形状只有一种：With 目标上
+  # 的 COM 成员读走「带类型出口」还是「泛型出口」）—— 而门里 Build 与 Tests 用的是同一枚工件，这种漂移
+  # 永远不会让门红；本机 A/B 又只能描述本机那枚的答案。这里按口径**不钉 VS 版本**（只要求 VS2019 及以上），
+  # 改成让 CI 把自己那份答案留档：每个输入一行 sha256 + 产出它的工具链版本。
+  # 先只留档、不判红（两侧清单现在已知差 14 行）；等 #245 的机制修掉、两份清单逐行相同之后，
+  # 再把「与 checked-in 清单比对」升成硬判据。
+  # 只跑 x64：实测两架构的差同号同形，多一档只把墙钟翻倍、覆盖不变。
+  emit-manifest:
+    name: "Emit manifest (shape oracle)"
+    needs: build
+    runs-on: windows-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download C3.exe artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: c3-exe
+          path: .build/
+
+      - name: Hash the emitted C of every corpus input
+        run: |
+          pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/emit_manifest.ps1 -Out emit-manifest.txt
+          if ($LASTEXITCODE -ne 0) { throw "emit_manifest.ps1 failed" }
+          Get-Content emit-manifest.txt | Select-Object -First 3 | ForEach-Object { Write-Host $_ }
+
+      - name: Upload emit manifest
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: emit-manifest
+          path: emit-manifest.txt
+          retention-days: 14
+
   regression:
     name: "Tests (${{ matrix.category }}${{ matrix.shard && format(' #{0}', matrix.shard) || '' }})"
     needs: build
