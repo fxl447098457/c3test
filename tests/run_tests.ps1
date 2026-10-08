@@ -110,9 +110,9 @@ function Get-MsvcToolset {
     $binX86 = Join-Path $tool "bin\Hostx64\x86"
     $incDir = Join-Path $kitRoot "Include"
     $libDir = Join-Path $kitRoot "Lib"
-    $Include = "$tool\include;$(Join-Path $incDir $sdkVer um);$(Join-Path $incDir $sdkVer ucrt);$(Join-Path $incDir $sdkVer shared);$(Join-Path $incDir $sdkVer winrt);$(Join-Path $incDir $sdkVer cppwinrt)"
-    $LibX64  = "$(Join-Path $tool lib x64);$(Join-Path $libDir $sdkVer um x64);$(Join-Path $libDir $sdkVer ucrt x64)"
-    $LibX86  = "$(Join-Path $tool lib x86);$(Join-Path $libDir $sdkVer um x86);$(Join-Path $libDir $sdkVer ucrt x86)"
+    $Include = "$tool\include;$incDir\$sdkVer\um;$incDir\$sdkVer\ucrt;$incDir\$sdkVer\shared;$incDir\$sdkVer\winrt;$incDir\$sdkVer\cppwinrt"
+    $LibX64  = "$tool\lib\x64;$libDir\$sdkVer\um\x64;$libDir\$sdkVer\ucrt\x64"
+    $LibX86  = "$tool\lib\x86;$libDir\$sdkVer\um\x86;$libDir\$sdkVer\ucrt\x86"
     return [pscustomobject]@{ VsRoot=$vsRoot; ToolVer=$toolVer; SdkVer=$sdkVer;
         BinX64=$binX64; BinX86=$binX86; Include=$Include; LibX64=$LibX64; LibX86=$LibX86 }
 }
@@ -776,6 +776,24 @@ function Test-RtlProtoArity {
         $script:fail++
         Write-Host "FAIL" -ForegroundColor Red
         $out | Select-Object -First 8 | ForEach-Object { Write-Host "  $_" }
+    }
+}
+
+# §B93（从 origin/ferock/0.10.7 的 5735aff6 捞回）：Join-Path 在 Windows PowerShell 5.1 只有两个位置参数，
+# 第三段写成位置参数会抛 ParameterBindingException，而它常待在 "$(...)" 内插里 —— 报错只剩一行噪声、那一段**静默变空**。
+# 本机实测改前 Get-MsvcToolset：5.1 下 IncludeSegs 6→1、LibSegs 3→0、空段 8（SDK 五段全丢）⇒ cl C1083 找不到 stddef.h，
+# 而 pwsh 7 下一直是 6/3/0 ⇒ 这族缺陷真跑覆盖不到（CI 用 pwsh 7），只能靠结构判据钉住。
+function Test-Ps51JoinPath {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] ps51_joinpath ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\check_ps51_joinpath.ps1" 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        $out | Select-Object -First 10 | ForEach-Object { Write-Host "  $_" }
     }
 }
 function Test-UcArrayEventSites {
@@ -5054,6 +5072,7 @@ if ($Category -in @("all", "compile")) {
     Test-RtlNakedNames
     Test-RtlResourceIds
     Test-RtlProtoArity
+    Test-Ps51JoinPath
     Test-UcArrayEventSites
     Test-SubclassSlotSites
     Test-CtrlArrayMemberSites
