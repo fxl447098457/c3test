@@ -197,9 +197,6 @@ static inline void* vb6_PropertyPage_SelectedControls(int32_t index) {
 }
 
 // --- HitTest 常量 (VB6 HitResult) ---
-#define vbHitResultOutside     0
-#define vbHitResultTransparent 1
-#define vbHitResultHit         2
 
 // PropertyPage 的 Changed 只有 vb6_PropertyPage_Changed 这一个名字 (账 #219)。
 // 这里曾 extern 过一枚裸名 `int16_t Changed` 给"源码里裸写 Changed"落脚 —— 注释当时说
@@ -207,17 +204,6 @@ static inline void* vb6_PropertyPage_SelectedControls(int32_t index) {
 // 标准模块里 `Public Changed As Long` 在生成的模块 C 里就是裸名 (探针实测 C2371 / no exe)。
 
 // --- AsyncProperty / Picture 类型常量 (VB6 内建, 此前缺失) ---
-#define vbAsyncTypePicture     0
-#define vbAsyncTypeFile        1
-#define vbAsyncTypeByteArray   2
-#define vbAsyncReadSynchronous 0
-#define vbAsyncReadAsynchronous 2
-#define vbAsyncReadForceUpdate 4
-#define vbPicTypeNone          0
-#define vbPicTypeBitmap        1
-#define vbPicTypeMetafile      2
-#define vbPicTypeIcon          3
-#define vbPicTypeEMetafile     4
 
 // Picture.Line 的 B / BF 由 parser 在 style 位置折成字面量 1/2 (账 #220) —— 这里曾
 // extern 过两枚裸名 C 全局，与 VB 工程里叫 B 的模块级变量直接撞车，故删除。

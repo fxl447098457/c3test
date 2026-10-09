@@ -971,6 +971,23 @@ function Test-ComSigCollisionPolicy {
         $out | Select-Object -First 6 | ForEach-Object { Write-Host "  $_" }
     }
 }
+# 账 #218 第三刀: 内在常量的答案来源只许有一处 (那张表)。三格机制里 RTL 的 #define 与发码的
+# 逐名折叠各自管过一批名字, 语义层不知道 => 没 Option Explicit 的模块读 vbPicTypeBitmap 拿到
+# 隐式 Variant 变量的 Empty(实测 0), 而 vbUseSystem 在同一份源文件里两条读法交出 -1 与 0。
+# 哨兵钉的是「来源」, 不是某一次的读数: scripts/check_builtin_const_authority.ps1。
+function Test-BuiltinConstAuthority {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] builtin_const_authority ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$PSScriptRoot\..\scripts\check_builtin_const_authority.ps1" 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        $out | Select-Object -First 6 | ForEach-Object { Write-Host "  $_" }
+    }
+}
 function Test-ComPropTypeAuthority {
     $script:total++
     Write-Host -NoNewline "  [STATIC] com_prop_type_authority ... "
@@ -2398,6 +2415,26 @@ if ($Category -in @("all", "run", "bas")) {
     Test-EmitcAbsent "csa_emitc_no_ambig_noise" @("$Tests\test_com_default_prop.bas") @(
         'C3: COMSIG-AMBIG'
     )
+    # 账 #218 第三刀的行为针（夹具 tests/test_intrinsic_consts.bas，**故意不带 Option Explicit**
+    # —— 那才是缺陷现形的那一形）。BASE 上：赋值那三条交出 0,0,0；拼串那几条交出空串（隐式
+    # Variant 变量是 Empty）；`Const vbUseSystem` 交出 -1，而同一份文件里直接读交出 0 ——
+    # 一枚名字两个答案。NEW 上 40 枚全按表里的值交出，并且原先只在折叠里那 26 枚的读数一字
+    # 未动（IC-FOLD-* 两台相同），那是「只改数从哪来、不改数」的半边证据。
+    Add-BasTest "test_intrinsic_consts" "$Tests\test_intrinsic_consts.bas" @(
+        "IC-ASSIGN=1,2,2", "IC-RTL-PT=0,1,2,3,4", "IC-RTL-HR=0,1,2", "IC-RTL-AT=0,1,2",
+        "IC-RTL-AR=0,2,4", "IC-RTL-CONST=1", "IC-FOLD-CALL=1,2,3,13,14",
+        "IC-FOLD-ROP=13369376,8913094,15597702,5588696,66,16711782",
+        "IC-FOLD-LOG=1,2,3,4", "IC-FOLD-DFM=0,1,2,3,4", "IC-FOLD-WK=1,1,0",
+        "IC-FOLD-MISC=256,-1,-2", "IC-VS-CONST=0", "IC-VS-VAR=0", "IC-VS-DIRECT=0",
+        "IC PASS")
+    # 发码那一面：名字必须落成字面量（值来自表），隐式变量那一套自救行一条都不许在场。
+    Test-EmitcShape "ic_emitc_reads_are_literals" @("$Tests\test_intrinsic_consts.bas") @(
+        "p1 = 1;", "p2 = 2;", "p3 = 2;", "#define C_VS (0)", "#define C_PIC (1)")
+    Test-EmitcAbsent "ic_emitc_no_implicit_var" @("$Tests\test_intrinsic_consts.bas") @(
+        "#pragma push_macro(""vbPicTypeBitmap"")",
+        "#undef vbPicTypeBitmap",
+        "vb6_VARIANT vbPicTypeBitmap",
+        "vb6_ChkLong(vbPicTypeBitmap)")
     Add-BasTest "test_bstr_concat_scalar" "$Tests\test_bstr_concat_scalar.bas" @("BCS:16/16")
     # 账 #115: Len() 的"存储宽度"兜底桶把模块级 String 也吞了 (knownBstrVars_ 每过程入口 clear,
     # 只有局部声明/形参进表) => `Len(gS)` 发成 sizeof(gS): x64 读 8、x86 读 4。两条架构各真跑一次,
@@ -5187,6 +5224,8 @@ if ($Category -in @("all", "compile")) {
     Test-FormDrawState
     Test-ComPropTypeAuthority
     Test-ComSigCollisionPolicy
+    Test-BuiltinConstAuthority
+
     Test-EmitcArtifactCaliber
     Test-CtrlGeomCache
     Test-FloatToIntRound

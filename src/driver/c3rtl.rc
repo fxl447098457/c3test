@@ -495,3 +495,4 @@
 
 
 
+/* 账 #218 第三刀: vbPicType/vbHitResult/vbAsync* 14 枚 RTL #define 撤掉 —— 值改由 src/semantics/builtin/builtin_consts.inc 单一权威交出, vb6rtl_userctl.h 因此变动; re-embed 1791500270 */

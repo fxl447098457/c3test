@@ -1746,6 +1746,34 @@ CI 那一枚（`pe-lnk=14.51`）稳定落进 `int16_t` 档 ⇒ 发成 `vb6_ComGe
 - 五档对照（`.build/b663_neg.txt`，在一份 `scripts/` + `tests/run_tests.ps1` 的拷贝里跑，不碰工作树）：绿控两档 rc=0（发货态 / 还原后）； N1 只删调用行 ⇒ **R1b** 点名 `Test-StaticSentinelRegistration`；N2 盘上多一道没登记的 ⇒ **R1**（`onDisk=38 referenced=37`）； N3 引用一个盘上没有的名字 ⇒ **R2**（`onDisk=37 referenced=38`）；N4 整段登记（函数 + 调用）删掉 ⇒ **R1**。 顺带一条自证：**这一道第一次跑就是因为自己没登记而红** —— R1 在那一刻被真实地验活了一次，之后才把它自己补进 harness。
 - 全道复跑（含这一道）：**37 道绿、0 红**（`scripts/check_*.ps1` 逐道 powershell 跑，读数 `.build/b666_sweep.txt`）。  **CI 侧也数到同一件事**：门 #429 的 `Tests (syntax)` 那格里这 37 道全 PASS（含新登记的四加一道）， 而这一道自己被登记这件事由它自己守着 —— 它第一次跑就是因为没登记而红。
 
+### B96 内在常量其实有三处答案 —— RTL 的 `#define`、发码的逐名折叠、语义层那张表（账 #218 第三刀，**已出：门待回填**）
+
+**先订正自己的量法**：那张常量表住的是**两份**片段 —— `src/semantics/builtin/builtin_consts.inc` + `builtin_consts_ext.inc`（后者在 `registerBuiltins` 里排在后面，两段共用同一个 SymbolTable）。上一轮只读了第一份，于是报出「表 292 / 只在折叠里 26」，实际是 **表 485 名 / 折叠 56 处（54 个不同名字，`vbObject` 与 `vbUseSystemDayOfWeek` 各被折了两次）/ RTL 宏 14**。这一格不是小数点问题：「谁不知道谁」的判断一旦建立在漏了一份的名单上，改法就整条歪（下面第二条是它的账单）。
+
+**第一轮的真实红法**：把「只在折叠里」的 26 枚连同「只在 RTL 里」的 14 枚一起插进 consts.inc ⇒ 其中 6 枚（`vbGeneralDate/vbLongDate/vbShortDate/vbLongTime/vbShortTime/vbUseSystem`）ext 那份早就有了 ⇒ **每一份工程**编译都响 6 行 `error VB3002: 重复声明`（`.build/b738_run.ps1` 的读数，rc=1 而日志里没有一条 `error C` —— 语义层的错在构建日志里就是这么安静）。撤掉那 6 枚、只搬其余 34 枚，并把这条规矩钉成哨兵的 C4。
+
+**缺陷读数（BASE = HEAD `56d12f51` 本机冷编那台，NEW = 本刀之后）**：
+- 没有 `Option Explicit` 的模块里 `p = vbPicTypeBitmap`，发码是 `p = vb6_ChkLong(vbPicTypeBitmap)`，而 `vbPicTypeBitmap` 是**语义层按未声明标识符建起来的隐式 Variant 局部**（同一过程里还发 `#pragma push_macro("vbPicTypeBitmap")` + `#undef vbPicTypeBitmap` + `vb6_VARIANT vbPicTypeBitmap = vb6_VariantEmpty();`）⇒ 真跑交出 **0**（VB6 是 1）；拿它拼串交出的是**空串**（Empty 拼出来什么都没有）。夹具里那三条赋值在 BASE 上是 `0,0,0`。
+- **一枚名字两个答案**：`Const c = vbUseSystem` 折出 **-1**（读的是 ext 表），同一份文件里直接读 `vbUseSystem` 折出 **0**（读的是发码折叠）。谁对？仓库自带的 VB6 手册 `docs/vb6-manual/09-常数/Date 常数.md` 两张表都写 **0** ⇒ ext 那份错了（就在 `vbUseCompareOption(-1)` 隔壁，八成是让两枚混了一次），已按手册改成 0 并把值钉进哨兵 C5。
+- 反过来说，**带 `Option Explicit` 时那 14 枚读得是对的**（裸 C 名撞上 RTL 的 `#define`）。⇒ 判据必须挑那一形**不带** Option Explicit 的模块，拼串那一形当覆盖就是自欺（夹具头部因此写明「故意不带」并留了原因）。
+
+**改**：34 枚进表（14 枚 RTL + 20 枚原先只在折叠里；6 枚 ext 已有的不搬）；删 26 行逐名折叠、删 14 行 RTL `#define`；RTL 变了就在 `src/driver/c3rtl.rc` 末尾记一行 re-embed（那一格的血泪见 memory `rtl-reembed-c3rtl-rc-landmine`）；ext 的 `vbUseSystem` 改成 0。**刻意没动**那 54 枚「表里已有、发码仍逐名折叠」的存量 —— 那是另一刀的活，这一轮先把数量钉死不许长（C3 棘轮：出现次数 56 / 不同名字 54）。
+
+**逐行归因**（`.build/b759_att3.py`，原始字节 + `emit_manifest.ps1` 同一套归一化，不是 PowerShell 重编码那份）：396 行清单里 **15 行**变了，15/15 全部由三类指纹解释完 —— A 名字换成值（含 `(13369376)` → `13369376` 这种括号形状）、B 隐式变量那套自救行整段消失、C 装箱比较塌成直接比较（`vb6_VARIANT _vcmp_N = 值;` + `vb6_VarCmpLongEq(&_vcmp_N, E)` → `-(E == 值)`；Common.bas 3 处 / VisualStyles 2 处 / FlexGridDemo 7 处，**行数差正好等于这些装箱声明被删掉的条数**：4324→4321、1568→1566、86130→86123）。另有 4 行（`cc_id/Id.vbp`、`cc_id/Id2.vbp`、`pkg_cls/samepkg_ok.vbp`、`ve_list/VeList.vbp`）**逐行多重集完全相同**、只差 `#include` 那一段的模块顺序 —— 那不是本刀的行为差，是**另一格缺陷**，立成 §B97。
+
+**判据**：夹具 `tests/test_intrinsic_consts.bas`（40 枚名字 + 三条赋值那形 + `Const`/变量/直读三条 `vbUseSystem`），`Add-BasTest` 钉 16 条期望（BASE 上 `IC-ASSIGN=0,0,0`、`IC-RTL-PT=,,,,`、`IC-RTL-CONST=0`、`IC-VS-CONST=-1` 四条当场红，NEW 全绿；而 `IC-FOLD-*` 那 6 条**两台同数** —— 那是「只改数从哪来、不改数」的半边证据）；`Test-EmitcShape ic_emitc_reads_are_literals` 钉 5 行发码；`Test-EmitcAbsent ic_emitc_no_implicit_var` 钉 4 条自救形状不许在场；**第 39 道哨兵** `scripts/check_builtin_const_authority.ps1`（C1 RTL 里 `#define vb*` 必须为 0、C2 折叠里不许有表不认识的名字、C3 棘轮、C4 两份表片段不许重名/不同值、C5 三枚手册值、C6 表达式档棘轮）—— 六档假改动**各自红并点名自己的规则**（`.build/b761_neg.txt`），植完按 md5 还原、还原后复跑绿。
+
+**下一格**：① 那 54 枚「表里已有、发码仍折叠」可以按棘轮一批批撤（每撤一批就改 C3 的数）；② `isConstIdent`（`src/backend/cgen_base_naming.cpp:219`）里那 11 枚 RTL 名的硬编码名单，在本刀之后只对「typelib 先注册的 EnumMember」那一档还有用 —— 真正的修法是让 `lookupConstSym` 也认 EnumMember，那会牵动 `wrapConstArgForByRef` 一串形状，单独量过再动；③ §B97 那条排列。
+
+### B97 发码里那段 `#include` 的模块顺序是**二进制的函数**（新账，未开工）
+
+读数：账 #218 那刀的 A/B 里，4 份输入的清单 sha 变了，但**逐行多重集一字不差** —— 变的只有聚合 `.c` 头部那两行 `#include`（`cc_id/Id.vbp` 的 426/427 行 `CircleImpl.h` 与 `VbpImpl.h` 互换）。这 4 份输入压根没用到那 40 枚名字，它们身上唯一的变量是**语义层那张常量表长了 34 个名字**。
+
+为什么值得记：`emit-manifest.expected.txt` 是本项目「零行为改动」的字节护栏，而它现在对**无关的表增长**敏感 —— 以后每动一次常量表都会重刷这几行，而顺序由编译器的内存布局决定，这与账 #245 那一族「同一枚二进制自洽、换一次构建就换答案」是同一个形状（那一次的结论是：不能拿这个当判据）。更要紧的是这些工程的 C 是**真编译**的，⇒ 今天的顺序是随机的，而 include 顺序在 C 里不是无害的（前向声明、宏覆盖都会咬）。
+
+要查的点（都还没做）：谁在决定这段 include 的顺序（`Get-ChildItem`？`unordered_set<模块名>`？符号表桶序？），发点在哪一处，收口是不是排一次序（按名字），x86+x64 两条真编译过一遍才算绿。修之前先复现「同一份源码、两台不同构建给出两种顺序」，否则不能确定它就是布局的函数而不是别的东西。
+
+
 ## C. 仍在生效的口径与工具事实（与本文档等长的一半价值在这里；完整版见记忆库）
 
 - **VB.Timer 的节拍口径 = Win32 SetTimer 那一档（系统计时 tick，实测 ~15.6 ms；`Interval` 不足一个 tick 就往上取整，另有一条 `USER_TIMER_MINIMUM=10 ms` 钳位），判据一律不钉绝对拍号**（门 #407 之后定，2026-10-08）：winmm `timeSetEvent` 那条路（`Interval=20` 实得 ~50 拍/秒、`Interval=5` ~199）曾把精度提到 ms 级，代价是它自发出去的 WM_TIMER 是一条**真实待处理消息**、长期占住线程队列 ⇒ 硬件输入被饿死（3DMenu 实测点一下就不动、标题不再随点击变换，而 VB6 编译的同一份代码正常 —— VB6 内部就是 SetTimer）。现在 winmm 只作派发窗无效时的兜底，且带 `posted` 合并。**两头都要活的后果**：`tests/c29timer` 那六条判据从「秒级窗口里的绝对拍数」改成机制（开了要跑 / 改 Interval 两向都重排 / 关掉要停 / 各槽周期互不串 / 小 Interval 到地板为止），名义间隔取 100/200/500 ms 这一档 —— 系统 tick 是 15.6 ms 还是被别的进程 `timeBeginPeriod` 提到 1 ms，读数都落在同一条带里（取整误差 ≤7%）；带里那道上界（T6 `<=150`）是**退回 winmm 的哨兵**（旧口径的 199 会当场红）。**同族提醒**：凡是"在秒级窗口里数拍"的判据都吃这台机器的全局时间精度，写之前先问一句这条读数在 1 ms tick 的机器上是否还成立。
