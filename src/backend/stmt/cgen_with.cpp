@@ -433,8 +433,8 @@ void CCodeGen::visit(WithStmt& node) {
                     memExpr.object->kind == ASTNodeKind::IdentifierExpr) {
                     auto& objId133w = static_cast<IdentifierExpr&>(*memExpr.object);
                     std::string objLower133w = Symbol::toLower(objId133w.name);
-                    if (objLower133w == "usercontrol" || objLower133w == "ambient" ||
-                        objLower133w == "extender" || objLower133w == "propertypage") {
+                    // 账 #278 §B120: 这一问由那张表答。
+                    if (hostPseudoIsObject(objLower133w)) {
                         withInfo.kind = WithObjKind::COMObject;
                     }
                 }
@@ -667,15 +667,14 @@ auto& idExpr = static_cast<IdentifierExpr&>(*callExpr.callee);
         //   n = PropertyPage.hWnd ->  n = vb6_PropertyPage_hWnd
         // 今天两枚都还是 NULL (§B118: .pag 的宿主全局全仓 0 个写者) ⇒ 差别的现价是 0；
         // 但一旦有人给 hWnd 那枚接上写者，With 块读的还是没人写的那一枚 ⇒ 静默错宿主。
-        // 成员名规范化本来就有唯一出口 (canonicalHostPseudoMember 读 kHostPseudoRows 的 rtl
-        // 列，裸名与赋值那两条路一直问它)，这里改问同一个出口 ⇒ 一张表答两头，第八刀扣着的
-        // .pag 自身对象名放行才有地方放。
+        // 装配本来就有唯一出口 (hostPseudoRtlSymbol 读 kHostPseudoRows 的 obj + rtl 两列，与
+        // 裸名/赋值那两条路同一个函数，账 #278 §B120) ⇒ 一张表答两头，第八刀扣着的 .pag 自身
+        // 对象名放行才有地方放。
         if (tempType == "void*" && node.object->kind == ASTNodeKind::IdentifierExpr) {
             auto& hid160w = static_cast<IdentifierExpr&>(*node.object);
             const std::string hpObj160w = Symbol::toLower(hid160w.name);
             if (hpObj160w == "usercontrol" || hpObj160w == "propertypage") {
-                lastExpr_ = "vb6_" + cIdent(hid160w.name) + "_"
-                          + cIdent(canonicalHostPseudoMember(hid160w.name, "hwnd"));
+                lastExpr_ = hostPseudoRtlSymbol(hid160w.name, "hwnd");
             }
         }
         // Fix 038: C2440 修复 — UDT 同类型转换和 UDT/VARIANT → void* 转换

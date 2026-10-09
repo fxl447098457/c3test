@@ -711,6 +711,11 @@
     std::string canonicalHostPseudoMember(const std::string& pseudoObj,
                                            const std::string& memberName) const;
 
+    // 账 #278 §B120: `vb6_<对象>_<成员>` 的装配与"是不是宿主伪对象"这两问的唯一出口。
+    std::string hostPseudoRtlSymbol(const std::string& pseudoObj,
+                                    const std::string& memberName) const;
+    bool hostPseudoIsObject(const std::string& name) const;
+
     // 账 #159 = C29-CH-d: 上面那条规范化与下面三个问题, 全部由 cgen_util_com.cpp
     // 里 kHostPseudoRows 这**一张表**回答 (成员名清单只此一处, 别处再抄就是回归):
     //   hostPseudoBareName   — .ctl/.pag 里裸写的成员要不要接、接成哪个 RTL 符号

@@ -223,10 +223,10 @@
             return;
         }
         std::string rtlHp;
-        if (hostPseudoBareName(isPropertyPageDesigner_ ? "PropertyPage" : "UserControl",
-                               lower, rtlHp)) {
-            lastExpr_ = (isPropertyPageDesigner_ ? "vb6_PropertyPage_" : "vb6_UserControl_")
-                        + rtlHp;
+        const std::string hostObjHp = isPropertyPageDesigner_ ? "PropertyPage" : "UserControl";
+        if (hostPseudoBareName(hostObjHp, lower, rtlHp)) {
+            // 账 #278 §B120: 装配交回唯一出口 (对象那一段与成员那一段都出自那张表)。
+            lastExpr_ = hostPseudoRtlSymbol(hostObjHp, lower);
             return;
         }
     }

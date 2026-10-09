@@ -22,8 +22,9 @@
 #   2) 标量行的类型必须与那一行的 extern 声明对上 (Long↔int32_t, Integer/Boolean↔
 #      int16_t, LongPtr↔void*, String↔BSTR) —— 表说错类型就是下一个装箱误读;
 #   3) 那五份旧清单不许再被抄回来 (被禁的旧形状见 $deny)。
-#   4) 账 #278 §B115: With 块那枚宿主句柄的拼法必须**问表**，而产物里同一个事实只许有
-#      一个答复。这一段跑一次 --emit-c (只走前端, 不起 cl, 0.4 秒)。
+#   4) 账 #278 §B115/§B120: 宿主符号的拼法必须**问表**，而产物里同一个事实只许有
+#      一个答复；§B120 再把「装配」与「是不是宿主伪对象」这两问各收成一处 (从前分别是 4 份与 5 份)。
+#      这一段跑两次 --emit-c (只走前端, 不起 cl)。
 #
 # 为什么 4) 值得单独钉 (实测): cgen_with.cpp 以前把 `vb6_<对象>_<成员>` 手抄成两枚字面量,
 # 而 RTL 把 UserControl / PropertyPage 两种大小写拼写**都声明且定义了** (vb6rtl_com.c:
@@ -57,10 +58,15 @@ $hdrRaw = Get-Content $hdrPath -Raw
 if (-not $hdrRaw) { Write-Host "FAIL rtl header empty: $hdrPath"; exit 1 }
 
 # ---------- 1) 读表 ----------
-$rowRe = '\{"(usercontrol|propertypage|extender|ambient)",\s*"([a-z]+)",\s*"([A-Za-z]+)",\s*Vb6Type::(\w+),\s*(HPF_[A-Z| ]+)\}'
-$rows = @(Select-String -Path $tblPath -Pattern $rowRe)
-if ($rows.Count -lt 40) {
-    $viol += ("TABLE-SHRUNK: parsed only {0} rows (a deleted or reformatted table would make checks below spin)" -f $rows.Count)
+$rowRe = '\{"(UserControl|PropertyPage|Extender|Ambient)",\s*"([a-z]+)",\s*"([A-Za-z]+)",\s*Vb6Type::(\w+),\s*(HPF_[A-Z| ]+)\}'
+# Select-String 默认**不区分大小写** (§B120 实测: 把表里一行 obj 列改回小写, 这条不加就还是 54 行,
+# 于是那行躲过的是"逐行对 RTL 声明"这道检查, 报出来的却是 ROW-SYMBOL-MISSING —— 红是红了, 说的不是这件事)
+$rows = @(Select-String -Path $tblPath -Pattern $rowRe -CaseSensitive)
+# 恰好 54 行: 从前的 "< 40" 会让"某一行从正则里掉出去"静默通过 —— 而每行都要逐条对 RTL 声明,
+# 少认一行 = 那一行没人查 (账 #278 §B120 把 obj 列改成 PascalCase 时正是这个形状)。
+# 改这张表要同批改这道针 (加一行 -> 55, 删一行 -> 53)。
+if ($rows.Count -ne 54) {
+    $viol += ("TABLE-ROWS: parsed {0} rows (want exactly 54 - a deleted or reformatted row makes the per-row RTL checks spin)" -f $rows.Count)
 }
 
 # ---------- 2) 读 RTL 声明 (指针全局 / struct 全局 / 值全局 / 函数) ----------
@@ -81,8 +87,9 @@ foreach ($m in [regex]::Matches($hdrRaw, '(?:static\s+inline\s+)?[A-Za-z_][\w\*]
 
 $expect = @{ Long = "int32_t"; Integer = "int16_t"; Boolean = "int16_t"; Byte = "uint8_t";
              String = "BSTR"; LongPtr = "void*"; Single = "float"; Double = "double" }
-$objPascal = @{ usercontrol = "UserControl"; propertypage = "PropertyPage";
-               extender = "Extender"; ambient = "Ambient" }
+# 账 #278 §B120: 从前这里有一份 usercontrol->UserControl 的小映射 —— 那正是"对象那一段没有
+# 权威"的样子。表的 obj 列现在就存 RTL 那一拼，下面直接用 $obj 装配，于是"逐行对 RTL"这道检查
+# 变成对**权威自己**的检查。
 
 $scalarRows = 0
 $chanRows = 0
@@ -112,7 +119,7 @@ foreach ($r in $rows) {
         }
         continue
     }
-    $sym = "vb6_" + $objPascal[$obj] + "_" + $rtl
+    $sym = "vb6_" + $obj + "_" + $rtl
     if ($type -ne "Unknown") { $scalarRows++ }
     # 2a) 符号必须在场 (全局或函数) —— 收了没人声明的就是发一个 C2065
     if (-not ($symType.ContainsKey($sym) -or $fn.ContainsKey($sym))) {
@@ -186,10 +193,8 @@ $withPath = Join-Path $Root $withRel
 if (-not (Test-Path $withPath)) {
     $viol += ("MISSING " + $withRel)
 } else {
-    $withTxt = $lat2.GetString([System.IO.File]::ReadAllBytes($withPath))
-    $askWith = @([regex]::Matches($withTxt, 'canonicalHostPseudoMember\(')).Count
-    $askMsg = "WITH-ASK: cgen_with.cpp asks the table {0} times (want exactly 1: 0 = spelling hand-copied again, 2 = two answers for one line)"
-    if ($askWith -ne 1) { $viol += ($askMsg -f $askWith) }
+    # §B120: 这一处的"问表"由第 7) 段的 ASSEMBLY-SITE 钉 (hostPseudoRtlSymbol)，不再钉旧出口
+    # canonicalHostPseudoMember —— 装配上收之后那一问已经不在这里做了，留着就是把判据钉在历史上。
 }
 # 旧的小写拼写只是 RTL 的兼容别名: src/ (RTL 那一头除外) 再引用它 = 第二份答案
 $oldHits = @(Get-ChildItem -Path (Join-Path $Root "src") -Recurse -Include *.cpp, *.inc, *.hpp, *.h |
@@ -229,6 +234,66 @@ if (-not (Test-Path $c3x)) {
     $n3001 = @([regex]::Matches($errt, 'VB3001')).Count
     $bareMsg = "NEEDLE-BARE: VB3001 count {0} on the fixture (want exactly 1 - the VBA value-position head)"
     if ($n3001 -ne 1) { $viol += ($bareMsg -f $n3001) }
+}
+
+# ---------- 7) 账 #278 §B120: 命名契约与"是不是宿主伪对象"各只有一个住所 ----------
+$hp = Join-Path $Root "src\common\host_pseudo.hpp"
+$com = Join-Path $Root "src\backend\cgen_util_com.cpp"
+$hlp = Join-Path $Root "src\backend\detail\util\cgen_helpers.inc"
+function Count-InFile([string]$path, [string]$pat) {
+    if (-not (Test-Path $path)) { return -1 }
+    return @([regex]::Matches($lat2.GetString([System.IO.File]::ReadAllBytes($path)), $pat)).Count
+}
+$cKnown = Count-InFile $hp 'inline bool hostPseudoObjectKnown'
+$cSymDef = Count-InFile $hp 'inline bool hostPseudoObjectSymbol'
+$cAsmDef = Count-InFile $com 'std::string CCodeGen::hostPseudoRtlSymbol'
+$cAsmDecl = Count-InFile $hlp 'std::string hostPseudoRtlSymbol'
+if ($cKnown -ne 1) { $viol += ("OBJECT-KNOWN-DEF " + $cKnown + " (want exactly 1)") }
+if ($cSymDef -ne 1) { $viol += ("OBJECT-SYMBOL-DEF " + $cSymDef + " (want exactly 1)") }
+if ($cAsmDef -ne 1) { $viol += ("ASSEMBLY-DEF " + $cAsmDef + " (want exactly 1)") }
+if ($cAsmDecl -ne 1) { $viol += ("ASSEMBLY-DECL " + $cAsmDecl + " (want exactly 1)") }
+# "是不是宿主伪对象"从前在发码侧抄了五份名单：再出现手抄的四档并列 = 又一份权威
+$listHits = @(Get-ChildItem -Path (Join-Path $Root "src\backend") -Recurse -Include *.cpp, *.inc |
+              Select-String -Pattern 'objLower\w* == "usercontrol"' -CaseSensitive)
+foreach ($l in $listHits) {
+    $viol += ("MEMBER-LIST: " + $l.Path.Substring($Root.Length + 1) + ":" + $l.LineNumber)
+}
+# 四条发码路各自问那一个装配出口 (少一路 = 那一路退回现拼；多一路 = 一句两个答案)
+$asmSites = @(
+    @{ F = "src\backend\stmt\cgen_with.cpp"; N = 1 },
+    @{ F = "src\backend\detail\stmt\cgen_assign_host_pseudo.inc"; N = 1 },
+    @{ F = "src\backend\detail\expr\cgen_expr_ident_builtin.inc"; N = 1 },
+    @{ F = "src\backend\detail\expr\cgen_expr_member_m22_module.inc"; N = 1 }
+)
+foreach ($s in $asmSites) {
+    $sp = Join-Path $Root $s.F
+    $c = Count-InFile $sp 'hostPseudoRtlSymbol\('
+    if ($c -ne $s.N) {
+        $viol += ("ASSEMBLY-SITE: " + $s.F + " asks the assembly exit " + $c + " times (want " + $s.N + ")")
+    }
+}
+# 大小写那枚发码针 (§B120 的另一头)：VB 不区分大小写，源码把宿主对象写成小写也必须落在 RTL 符号上。
+# 从前这里是把**源码拼写**抄进 C 标识符 ⇒ `usercontrol.hDC` 发成 vb6_usercontrol_hDC (没人声明它)。
+$ctlCase = Join-Path $Root "tests\dochost\dhWithCase.ctl"
+if (Test-Path $c3x) {
+    if (-not (Test-Path $ctlCase)) {
+        $viol += "NEEDLE-CASE: missing fixture tests/dochost/dhWithCase.ctl"
+    } else {
+        $tmp2 = Join-Path ([System.IO.Path]::GetTempPath()) ("hp11_" + [guid]::NewGuid().ToString("N") + ".c")
+        $pr2 = Start-Process -FilePath $c3x -ArgumentList @('"' + $ctlCase + '"', '--emit-c') -WorkingDirectory $Root -RedirectStandardOutput $tmp2 -RedirectStandardError ([System.IO.Path]::ChangeExtension($tmp2, ".err")) -NoNewWindow -Wait -PassThru
+        $emit2 = $lat2.GetString([System.IO.File]::ReadAllBytes($tmp2))
+        Remove-Item $tmp2, ([System.IO.Path]::ChangeExtension($tmp2, ".err")) -Force -ErrorAction SilentlyContinue
+        if ($pr2.ExitCode -ne 0) { $viol += ("NEEDLE-CASE: fixture exits " + $pr2.ExitCode) }
+        $wantCase = @('\(void\*\)vb6_UserControl_hWnd', 'n = vb6_UserControl_hDC')
+        foreach ($w in $wantCase) {
+            if (@([regex]::Matches($emit2, $w)).Count -lt 1) {
+                $viol += ("NEEDLE-CASE: emit has no " + $w + " (the object segment came from the source spelling)")
+            }
+        }
+        if (@([regex]::Matches($emit2, '\x22?vb6_usercontrol_')).Count -ne 0) {
+            $viol += "NEEDLE-CASE: emit still carries vb6_usercontrol_* (nobody declares that)"
+        }
+    }
 }
 
 # ---------- 5) 普查读数 (不判红, 给下一轮留证据) ----------

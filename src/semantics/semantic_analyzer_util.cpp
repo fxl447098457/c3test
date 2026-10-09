@@ -747,8 +747,9 @@ bool SemanticAnalyzer::isDocumentHostObject(const std::string& name, bool qualif
     // 第八刀只放了 .ctl，当时记的理由是「.pag 值位一发码就 C2065」—— 本刀实测**推翻**：
     // RTL 把 vb6_PropertyPage_hwnd 与 vb6_PropertyPage_hWnd 两种拼写都声明且定义了，
     // 旧那句编得过，只是编向另一枚全局 ⇒ 同一份产物里一个事实两个答复（读数与后果
-    // 写在 cgen_with.cpp 那一处，缺口本身另立 §B118）。
-    // 那句拼法现在来自那张表（与裸名/赋值同一个 canonicalHostPseudoMember 出口）⇒
+    // 写在 cgen_with.cpp 那一处；那一族读数全是缺省值这件事另立 §B119）。
+    // 那句拼法现在来自那张表（装配在 hostPseudoRtlSymbol 一处，与裸名/赋值/限定符那四条路同一个出口，
+    // 账 #278 §B120）⇒
     // 两档同形，这一格没有理由再扣着。
     if (lk == "usercontrol") return k == DocumentKind::UserControl;
     if (lk == "propertypage") return k == DocumentKind::PropertyPage;
