@@ -86,6 +86,12 @@ jobs:
     needs: build
     runs-on: windows-latest
     timeout-minutes: 30
+    # 2026-10-09（用户拍口径②）：对 **PR 只报不挡**，推 dev 仍硬判红。
+    # 为什么这一格天生容易红：它拿「全语料发码形状」对一张 checked-in 清单比，任何一次合法的 codegen
+    # 改动都会让几十行哈希动 —— 那正是要看的读数，但对提 PR 的人来说它只是"我的 PR 挂了"。
+    # 现在红话里带着三种成因与一条命令（scripts/rebless_emit_manifest.ps1，台账 §B100），PR 上仍然报、
+    # 但不再挡合并；dev 是集成线，红由它挡（门红会顺 dev 传染，见 §B99/§B100 那两格）。
+    continue-on-error: ${{ github.event_name == 'pull_request' }}
     permissions:
       contents: write   # 只给最后那一步：把清单用 git 推回 ci/emit-manifest
     defaults:

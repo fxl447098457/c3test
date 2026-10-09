@@ -1968,7 +1968,37 @@ marker、重编，之后 `check_rtl_embedded` 报 **125/125 逐字节相同**。
 **欠着**：门跑起来才算收线。另一档没动、要拍口径 —— 要不要让这道门**对 PR 只报不挡**（`continue-on-error`），
 只在推 dev 时才硬判红。现在它是硬的：新加的自救面已经把「处理它」压成一条命令，本线倾向保持硬判。
 
-### B101 `Option Explicit` 在场时只发 warning、发码却把裸名直接发出去 ⇒ 产物必然 C2065（账 #278，2026-10-09，**未开工**）
+### B102 ①②两件的落地：门对 PR 只报不挡已发货；「判死」被 census 判死（不能整条升 error）（2026-10-09）
+
+**② 已出**：`emit-manifest` 那一格加 `continue-on-error: ${{ github.event_name == 'pull_request' }}` ——
+**PR 上报而不挡、推 dev 仍硬判红**（注释里写了为什么这格天生会红：任何一次合法的 codegen 改动都会让几十行哈希动，
+而那正是要看的读数；红话里现在带着三种成因与一条命令 = §B100）。
+
+**① 影响面前置 census（`.build/b892_census3001.py`，单台 x64 全语料 398 份，读 stderr）**：
+`inputs_with_VB3001=16 / total_VB3001=25 / 其中所在文件写了 Option Explicit = 25（一枚不差）/ 没写 = 0`。
+25 处按成因分格（这才是关键，不是总数）：
+
+| 族 | 实物 | 该不该判死 |
+|---|---|---|
+| **真源码 bug** | `ucProgressCircular.ctl:931 'Count'`（×2 份输入各一次） | 该（VB6 也编不过） |
+| 宿主伪成员 / 文档隐式对象 | `ScaleWidth`×3、`ScaleHeight`、`WindowState`、`Printers`、`Controls`×2、`UserControl` | **不该** —— VB6 合法，是我们那张表还缺项（#159 / #174 / #217 第二刀 / #252 同族） |
+| 应有而未登记的常量 | `VK_UP`、`CTRLINFO_EATS_RETURN` | **不该**（#218 内在常量同族） |
+| 跨模块 Public 过程裸调 | `InitVisualStylesFixes`、`MainForm`、`TmForm2`、`Form2` | **不该** —— VB6 里标准模块 Public 成员本来就能裸调；而窗体名会自动实例化 |
+| 故意的负例 / 包可见性夹具 | `nopeHere`、`alsoNope`、`nopeHereIsNotAName`、`Hidden1`、`OpenSecret`×2 | **不该** —— 这些夹具今天的期望就是「warning 一条、其余照跑」 |
+
+⇒ **整条把 `VB3001` 升成 error 会红掉 25 位里至少 19 位合法或故意的用法**，这一刀按这个形状**不能做**。
+反向那条也一样死：**整条补隐式声明**（把 no-OE 那支的落地搬到 OE 分支）会把 `InitVisualStylesFixes(...)` / `MainForm` 这种
+跨模块**调用**声明成一枚同名 Variant 局部 ⇒ 遮蔽真符号 ⇒ 换一种编不过。
+**所以 ① 剩下的唯一活路是先把「语句位」分开**：同一个裸标识符，站在**调用位**（`Foo` / `Foo 1,2` / `Foo(…)` 作语句）与
+站在**变量位**（赋值左值、表达式操作数）是两个不同的问题，而今天这两支都从同一个 fallthrough 出去、只在 `optionExplicit_` 上分岔
+（`semantic_analyzer_expr.cpp:159-175`）。下一步就是给这一支带上「它在语句里是什么位置」这个信息 —— 那是 #150/#143/#239
+那一族（语句路 vs 表达式路）的第四次同问，**该在语义层带上下文，不该在发码侧猜**。
+量到的现成家底：登记点 `symbol_table.hpp:546-564`（`implicitVars_`，键 `<mod>`+模块小写+`$`+过程小写）；
+发射点三处同形（`cgen_decl_func.cpp:441` / `cgen_decl_proc.cpp:355` / `cgen_decl_prop.cpp:322`）。
+另：census 顺带证实 `Count` 那两处只在 Charts 的两份输入里（`Proyecto1.vbp` 与 `ucProgressCircular/Proyecto1.vbp`），
+不是全仓蔓延 —— 所以最后那 2 处若要"改源码笔误"也是可控的小改（要用户点头才动别人的 `.ctl`）。
+
+### B101 `Option Explicit` 在场时只发 warning、发码却把裸名直接发出去 ⇒ 产物必然 C2065（账 #278，2026-10-09，**未开工；① 的严重级那一刀见上一节，已被 census 否掉**）
 
 **⚠ 自纠（同一轮内两次改口，第二次是实测定的）**：本节最初写成「隐式未声明标识符在 `.bas` 落地、在 `.ctl` 不落地 = 两份答案」——
 **那是探针自己的混淆**：我把 `Option Explicit` 只写进了 `.ctl` 那份。补跑干净的 2×2（同一枚 C3.exe，`.build/b888_probe/`）：
