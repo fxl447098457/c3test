@@ -1294,7 +1294,7 @@ S9.4 打标记那一路的 PictureBox 判据必须问表、且不许把成员名
 
 要收的形状（照 §B70 的 ①-c 那张表的做法，别再单开第四份名单）：控件方法的"名字 → RTL 出口 + 实参形状"本来就该只有一处答案。现在 `controlZeroArgMethod` / `controlOneArgMethod` / `controlCanvasMethod` 三张表里**没有"这一档递几枚实参"这一格** —— 那个信息住在调用点（各码头自己拼参数串）。所以第一步是把实参个数写成表里的一个取值，第二步才是同一条针两面都问：拿表里的出口名去 RTL 头里查参数个数，与表里的形状对。第一步与 §B70 工单的第 (1) 步是同一件活（画布动词那张 `src/common/canvas_drawing.hpp`），所以这一格**排在 ① 之后做**，不要为它先立一张只有旗标没有形状的表。
 
-### B73 同一笔提交，CI 编出来的 C3.exe 与本机编的那枚，发码不一样（账 #232③ 撞见，**已结案（2026-10-09）：真凶 = `ComMemberInfo::returnType` 没有默认初值，账 #245 已修；本轮两台工具链 × 两架构 × 全语料 796 份捕获逐字节相同；第 44 道哨兵把它钉住 = 门 待回填**）
+### B73 同一笔提交，CI 编出来的 C3.exe 与本机编的那枚，发码不一样（账 #232③ 撞见，**已结案（2026-10-09）：真凶 = `ComMemberInfo::returnType` 没有默认初值，账 #245 已修；本轮两台工具链 × 两架构 × 全语料 796 份捕获逐字节相同；第 44 道哨兵把它钉住 = **门 #439**（run 数 439、head `faa37573`、branch dev、attempt 1）= 12 条 check-run 全 completed/success、非绿 0，含新的 `[STATIC] com_sig_field_defaults` 所在的 `Tests (compile)` 片**）
 
 **读数（三方对跑 `--emit-c`，同一份工作树文件、同一个 cwd）**：① 本机冷编的 HEAD（`2ef2ee71`）与本机当前树（多 ③ 那一刀）⇒ `inputs=90 changed=0`。② 拿门 #374 的工件当 BASE（`gh run download 37533797244 -n c3-exe`，CI 的 Build job 用 vswhere -latest = VS2022）对同一台本机 HEAD 树 ⇒ **`changed=14`，1068 行差异里 1060 行是同一族**：`vb6_ComGetIntProp(oFont, L"Name")` ↔ `vb6_VariantToString(vb6_VariantFromComResult(vb6_ComGetProp(...)))`、`vb6_ComCallInt(...)` ↔ `vb6_ComVarFree((void*)vb6_ComCall(...))`，另有 `ComGetDouble` / `ComGetObject` / `ComGetBool` 同形；落在 Charts 2020 六份子工程（`IAFPService` / `ITilterAccess` / `IMyCompany` 那几枚晚绑定对象）与 VBFlexGridDemo 的 `PropFont` 读面上。**画布动词一行都没有** ⇒ 与 ③ 那刀无关（逐条 grep 过）。③ 再钉一颗反向钉子：本机 `847ee9f4` 那台（更早两笔提交）与本机 `2ef2ee71` 那台在这一族上**逐字相同**（`vb6_VariantFromComResult` 各 70 处），CI 那台是 66 处 —— 所以这不是"少一笔提交"，是**同一份源码在两台构建机上做出不同决定**。
 
@@ -1967,6 +1967,33 @@ marker、重编，之后 `check_rtl_embedded` 报 **125/125 逐字节相同**。
 
 **欠着**：门跑起来才算收线。另一档没动、要拍口径 —— 要不要让这道门**对 PR 只报不挡**（`continue-on-error`），
 只在推 dev 时才硬判红。现在它是硬的：新加的自救面已经把「处理它」压成一条命令，本线倾向保持硬判。
+
+### B101 隐式未声明标识符「落地不落地」有两份答案 —— 标准模块会 materialize，UserControl 把裸名直接发进 C ⇒ C2065（账 #278，2026-10-09 最小复现到手，**未开工，缺一个口径**）
+
+**现象**：Charts 2020 的 `ucProgressCircular` 今天真编译 x86 **只剩一条错**（`b886_out_x86/c3-error.log` = 482 行日志里 `error C` 恰 1 条）：
+`ucProgressCircular.c(1504): error C2065: 'Count': 未声明的标识符`。源码那一行是原作者的笔误 —— `ucProgressCircular.ctl:949`
+`If hBrush = 0 Or Count = 0 Then Exit Function`（全文件 `Count` 只出现这一次，上两行刚 `GdipGetPointCount mPath, lCount`，想写的显然是 `lCount`）。
+
+**最小复现（`.build/b888_probe/`，同一枚 C3.exe，`--emit-c`）**：同样一段「裸 `Count` 赋值 + 比较 + `Exit Function`」——
+- `g_exitfn.bas`（标准模块）⇒ 发码**对**：`vb6_VARIANT Count = vb6_VariantEmpty(); /* 隐式变量 */` + `vb6_VarCmpLongEq(&Count, 0)`，rc=0；
+- `ctlimpl/ucBare.ctl`（UserControl）⇒ 发码**错**：`Count = 7;` 与 `vb6_VariantFromValue(Count)`，**根本没有那枚声明**，两边都只发同一条 `VB3001 未声明的标识符 'Count'`。
+⇒ 「隐式未声明标识符怎么处理」这个问题在仓里有**两份答案**：`.bas` 那条会补声明，类模块/.ctl 那条只警告就把名字发出去，产物必然编不过。
+
+**⚠ 这里有个口径要拍（本线不自己决定）**：那枚 `.ctl` **带着 `Option Explicit`**（真工程 `ucProgressCircular.ctl:24` 也带）——
+按 VB6 本人，`Option Explicit` 在场时这行是**编译错误**，那份源码根本编不出 exe。于是两条路：
+- **口径 A（维持本仓已选的宽容）**：`VB3001` 继续只作 warning，但**两上下文必须同一个答案** —— 把类模块/.ctl 那条也接到
+  标准模块那套隐式变量落地上（一处权威 + census + 哨兵，钉「凡发 VB3001 未声明标识符，发码侧必须要么补声明、要么判死」）。
+  代价：`Option Explicit` 在场时我们比 VB6 宽（VB6 拒、我们过）。收益：`ucProgressCircular` 立刻编得过，能升进门禁
+  （照 #187/#201 那句口径「这个工程从此不许退回编不过」）。
+- **口径 B（向 VB6 对齐）**：`Option Explicit` 在场时把 `VB3001` 升成 **error** ⇒ `ucProgressCircular` 在语义层就报不出来，
+  那枚工程**永久编不过**（除非源码修那行笔误 —— 而按老规矩「绝不为绕开工具 bug 去改夹具」，这里不是工具 bug，是语料自己的 bug，
+  所以改源码是可以谈的，但要用户点头才动别人的 .ctl）。
+
+**本线倾向**：先按 A 把「两份答案合一」做掉（这一格与 #159/#216/#218 同族，本来就该收成一处），B 那句「Option Explicit 在场判死」
+是**第二件事**（会改变一批存量工程的可编译性，要单独一轮 + 全语料逐行归因）。等用户拍。
+
+**开工前先读的两条现成家底**：隐式变量的落地在 `#pragma push_macro` + `vb6_VariantEmpty()` 那一段（`.bas` 路的实物见
+`.build/b888_probe/g_exitfn.c:61-65`）；类模块那条要问的是「隐式名字是在哪一层登记的、UC 那条路有没有走到同一个登记点」。
 
 ## C. 仍在生效的口径与工具事实（与本文档等长的一半价值在这里；完整版见记忆库）
 
