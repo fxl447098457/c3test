@@ -50,14 +50,17 @@ if ($rows.Count -lt 40) {
 }
 
 # ---------- 2) 读 RTL 声明 (指针全局 / struct 全局 / 值全局 / 函数) ----------
+# Fix 214: 拼写段放宽到 [A-Za-z_]+ —— VB6 关键字成员经 cIdent 转义后 RTL 名里会带下划线
+# (Extender.Default → vb6_Extender_**vb6_**Default)。原来的 [A-Za-z]+ 匹配不到它,
+# 表里那一行会被误判成 ROW-SYMBOL-MISSING。放宽只影响"能不能认出名字", 不放松类型比对。
 $symType = @{}
-foreach ($m in [regex]::Matches($hdrRaw, 'extern\s+([A-Za-z_][\w]*\s*\*)\s*(vb6_(?:UserControl|PropertyPage|Extender|Ambient)_[A-Za-z]+)\s*;')) {
+foreach ($m in [regex]::Matches($hdrRaw, 'extern\s+([A-Za-z_][\w]*\s*\*)\s*(vb6_(?:UserControl|PropertyPage|Extender|Ambient)_[A-Za-z_]+)\s*;')) {
     $symType[$m.Groups[2].Value] = ($m.Groups[1].Value -replace '\s+', '')
 }
-foreach ($m in [regex]::Matches($hdrRaw, 'extern\s+(struct\s+[A-Za-z_]\w*)\s+(vb6_(?:UserControl|PropertyPage|Extender|Ambient)_[A-Za-z]+)\s*;')) {
+foreach ($m in [regex]::Matches($hdrRaw, 'extern\s+(struct\s+[A-Za-z_]\w*)\s+(vb6_(?:UserControl|PropertyPage|Extender|Ambient)_[A-Za-z_]+)\s*;')) {
     $symType[$m.Groups[2].Value] = "struct"
 }
-foreach ($m in [regex]::Matches($hdrRaw, 'extern\s+([A-Za-z_][\w]*)\s+(vb6_(?:UserControl|PropertyPage|Extender|Ambient)_[A-Za-z]+)\s*;')) {
+foreach ($m in [regex]::Matches($hdrRaw, 'extern\s+([A-Za-z_][\w]*)\s+(vb6_(?:UserControl|PropertyPage|Extender|Ambient)_[A-Za-z_]+)\s*;')) {
     if (-not $symType.ContainsKey($m.Groups[2].Value)) { $symType[$m.Groups[2].Value] = $m.Groups[1].Value }
 }
 $fn = @{}

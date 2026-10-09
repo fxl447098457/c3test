@@ -46,8 +46,22 @@ DeclPtr Parser::parseDeclaration() {
             if (d) d->virt = virt;
             return d;
         }
-        case TokenKind::Type:     return parseTypeDecl(AccessLevel::Default);
-        case TokenKind::Enum:     return parseEnumDecl(AccessLevel::Default);
+        case TokenKind::Type: {
+            auto d = parseTypeDecl(AccessLevel::Default);
+            if (d) {
+                d->packingAlignment = pendingPackingAlign_;
+                pendingPackingAlign_ = 0;
+            }
+            return d;
+        }
+        case TokenKind::Enum: {
+            auto d = parseEnumDecl(AccessLevel::Default);
+            if (d) {
+                d->packingAlignment = pendingPackingAlign_;
+                pendingPackingAlign_ = 0;
+            }
+            return d;
+        }
         case TokenKind::Declare:  return parseDeclareDecl(AccessLevel::Default);
         case TokenKind::Event:    return parseEventDecl(AccessLevel::Default);
         case TokenKind::Delegate: return parseDelegateDecl(AccessLevel::Default);
@@ -92,8 +106,22 @@ DeclPtr Parser::parseDeclaration() {
                     if (d) d->virt = virt;
                     return d;
                 }
-                case TokenKind::Type:     return parseTypeDecl(access);
-                case TokenKind::Enum:     return parseEnumDecl(access);
+                case TokenKind::Type: {
+                    auto d = parseTypeDecl(access);
+                    if (d) {
+                        d->packingAlignment = pendingPackingAlign_;
+                        pendingPackingAlign_ = 0;
+                    }
+                    return d;
+                }
+                case TokenKind::Enum: {
+                    auto d = parseEnumDecl(access);
+                    if (d) {
+                        d->packingAlignment = pendingPackingAlign_;
+                        pendingPackingAlign_ = 0;
+                    }
+                    return d;
+                }
                 case TokenKind::Declare:  return parseDeclareDecl(access);
                 case TokenKind::Identifier:
                     // `Public DeclareWide Sub ...` (ai/024)
@@ -391,6 +419,10 @@ std::unique_ptr<PropertyDecl> Parser::parsePropertyDecl(AccessLevel access) {
 
 std::unique_ptr<TypeDecl> Parser::parseTypeDecl(AccessLevel access) {
     auto loc = currentLoc();
+    // bracket attrs 可能已由调用方收集，这里不重复收集
+    if (cur_.kind != TokenKind::Type) {
+        // try to skip bracket attrs if any (should be handled by caller)
+    }
     advance(); // consume 'Type'
     auto nameTok = expectName("expected Type name");
     auto typeParams = parseTypeParams();   // 泛型 (tB): Type Foo(Of T)
@@ -479,7 +511,10 @@ std::unique_ptr<TypeDecl> Parser::parseTypeDecl(AccessLevel access) {
 
     auto d = std::make_unique<TypeDecl>(loc, access, nameTok.text, std::move(members));
     d->typeParams = std::move(typeParams);
-    curTypeParams_.clear();  // G3 护栏窗口只覆盖本模板成员类型
+    // packingAlign from parser state (if set before)
+    d->packingAlignment = pendingPackingAlign_;
+    pendingPackingAlign_ = 0;
+    curTypeParams_.clear();
     return d;
 }
 
@@ -516,7 +551,8 @@ std::unique_ptr<EnumDecl> Parser::parseEnumDecl(AccessLevel access) {
     expect(TokenKind::Enum, DiagnosticID::ParseMismatchedBlock,
            "expected 'End Enum'");
 
-    return std::make_unique<EnumDecl>(loc, access, nameTok.text, std::move(members));
+    auto d = std::make_unique<EnumDecl>(loc, access, nameTok.text, std::move(members));
+    return d;
 }
 
 } // namespace vb6c3

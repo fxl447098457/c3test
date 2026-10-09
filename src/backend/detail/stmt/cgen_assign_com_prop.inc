@@ -455,6 +455,34 @@
                          || elemC == "LONG") unpackHint = "Long";
             }
         }
+        // Fix 222: 目标是 **UDT 字段** (`VB6_SA_AT(vb6_type_<Udt>, arr, i).Field` 或
+        // With 块内的 `<UdtWith>.Field`) 时, 上面那条按"元素 C 类型"的判据帮不上忙 ——
+        // 它看到的是 `vb6_type_ShadowBandStruct` 这个**结构体**名, 不是标量 C 类型,
+        // 于是 unpackHint 留空 → resolveComValue 取默认 BSTR → 整族字段一律发成
+        // `vb6_ComGetStringProp` (BSTR), 赋给 Single/Boolean/enum-Long/Variant 字段
+        // 全是 C2440。
+        // 实测 ComCtlsDemo PPCoolBarBands.pag:585-604 (属性页 ApplyChanges 把
+        // `PropertyPage.SelectedControls(0).Bands(i)` 的每个成员抄进
+        // `PropShadowBands(i)`, 24 个字段 × 两条循环分支 = 48 处 C2440;
+        // CoolBar/StatusBar/PPToolBar* /PPTabStrip* 各页同一形状, 合计 120 处)。
+        // 字段的声明类型问 inferUdtFieldVb6Type —— 那是 UDT 字段类型的既有唯一出口
+        // (cgen_util_type.cpp 的 inferExprType 也问它), 不另抄一份成员类型表。
+        if (unpackHint.empty()) {
+            switch (inferUdtFieldVb6Type(node.target.get(), nullptr)) {
+                case Vb6Type::String:                       unpackHint = "BSTR";    break;
+                case Vb6Type::Long:
+                case Vb6Type::Byte:
+                case Vb6Type::Error:                        unpackHint = "Long";    break;
+                case Vb6Type::Integer:
+                case Vb6Type::Boolean:                      unpackHint = "Int";     break;
+                case Vb6Type::Single:                       unpackHint = "Single";  break;
+                case Vb6Type::Double:                       unpackHint = "Double";  break;
+                case Vb6Type::LongPtr:                      unpackHint = "LongPtr"; break;
+                case Vb6Type::Object:                       unpackHint = "Object";  break;
+                case Vb6Type::Variant:                      unpackHint = "Variant"; break;
+                default: break;   // 其余 (Empty/Null/Date/Currency/…/Unknown) 维持原默认
+            }
+        }
         resolveComValue(unpackHint);
     }
     std::string value = std::move(lastExpr_);

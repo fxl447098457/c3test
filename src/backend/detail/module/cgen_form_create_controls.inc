@@ -266,11 +266,27 @@
                 hwndExpr = "vb6_CtrlArr_GetAt(&vb6_arr_" + cIdent(ctrl.controlName) + ", "
                          + std::to_string(idx) + ")";
             } else {
-                c_.emitLine("vb6_hwnd_" + cIdent(ctrl.controlName) + " = vb6_UC_HostCreate(\""
+                // Fix 220: 槽变量名必须与 emitControlHandleDecls 的**声明同一判据**。
+                // 全工程只有 ImageList 一类"声明写 vb6_com_、创建写 vb6_hwnd_":
+                //   emitControlHandleDecls (cgen_form.cpp:165) 按 P20-39 把 ImageList
+                //   的槽定为原生复刻实例指针 vb6_com_<X>; 而这条 C29 的宿主创建路径
+                //   对一切工程内 UserControl 一律写 vb6_hwnd_<X>。
+                // 于是 MainForm.c 出现:
+                //   :321,497,570   vb6_hwnd_ImageList1/2/3 = vb6_UC_HostCreate(...)
+                //   :72,94,95      static void* vb6_com_ImageList1/2/3 = NULL;   ← 从未赋值
+                // 前者没有声明 (C2065×13: ImageList1/2/3 各 + UC_Enter/InstanceOf/
+                // 各 prop_let_ 的连锁), 后者声明了却恒 NULL。
+                // 权威在**声明侧**: 槽名的消费者有 6 处 (cgen_util_com 的 ListImages
+                // ×2、com_bind 的 ListImages ×4) 加 makeCtrlHwndArg, 全写 vb6_com_,
+                // 只有这一处创建点写错。改这一处 → 声明/赋值/读取三者一致。
+                std::string slot220 = (ctrl.controlType == FrmControlType::ImageList
+                                       ? "vb6_com_" : "vb6_hwnd_")
+                                    + cIdent(ctrl.controlName);
+                c_.emitLine(slot220 + " = vb6_UC_HostCreate(\""
                     + ctlClass + "\", " + std::to_string(ucL) + ", " + std::to_string(ucT) + ", "
                     + std::to_string(ucW) + ", " + std::to_string(ucH)
                     + ", hwnd, hInstance, \"" + ctrl.controlName + "\", -1);");
-                hwndExpr = "vb6_hwnd_" + cIdent(ctrl.controlName);
+                hwndExpr = slot220;
             }
 
             // Fix 112/114: 设计期持久化的 UserControl 公共属性

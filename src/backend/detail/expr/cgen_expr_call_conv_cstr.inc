@@ -118,6 +118,22 @@
                     callee = "vb6_CStrDbl";
                 }
             }
+
+            // Fix 225: 实参在 C 层已经是 **VARIANT 值** (后期绑定属性读 / COM 调用结果, 形如
+            // `vb6_VariantFromComResult(vb6_ComGetProp(_vb6_with_7, L"Width"))`) 时, 上面
+            // "按推断类型选 vb6_CStrSingle / CStrLong / CStrDbl" 全部作废 —— 那几个函数吃的
+            // 是**已拆箱**的 C 标量, 把 vb6_VARIANT 结构体直接交给 float 形参 ⇒ C2440
+            // "无法从 vb6_VARIANT 转换为 float" (ComCtlsDemo PPCoolBarBands.c:321-…
+            //  `TextCX.Text = CStr(.Width)` / CStr(.MinWidth) / CStr(.IdealWidth) 等 ×61)。
+            // VB6 里 CStr(<Variant>) 的答案本就是 Variant 那一档 ⇒ 回到默认 vb6_CStr
+            // (形参即 vb6_VARIANT, 见 vb6rtl_builtin.h), 由下方 Fix 056b 那条路收尾:
+            //   vb6_CStr(vb6_VariantFromValue(a0)) —— _Generic 对 vb6_VARIANT 是 identity
+            //   (vb6_VariantIdentity), 故实际就是 vb6_CStr(<VARIANT>), 正确。
+            // 口径与上方 54 行"参数是 Variant 变量 → 保留 vb6_CStr(VARIANT)"一致, 只是那条
+            // 分支只对 IdentifierExpr 生效; 这里补的是 MemberAccess / WithMember 等非标识符形态。
+            if (!args.empty() && cExprIsVariant(args[0])) {
+                callee = "vb6_CStr";
+            }
         }
         // Fix 056b: callee 仍为 vb6_CStr 且实参非Variant → 用 vb6_VariantFromValue 包装
         // (如 CStr((int32_t)GetCurrentThreadId()) / CStr(模块级Long变量) →

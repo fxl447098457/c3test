@@ -211,18 +211,31 @@
     // `Controls` → C2065 (ucTabStrip.c For Each l_Ctrl In Controls)。
     // 成员访问形态 (Controls.Item/Add/Remove) 由 cgen_expr_member_precheck.inc 在
     // 符号解析前拦截, 不受影响。
-    const bool reservedHostObj = (lower == "controls");
-    if (isDesignerModule_ && !knownLocalVars_.count(lower)
-        && (!sym || reservedHostObj)) {
-        // Fix <vbeclipse> rev14: 裸 `Controls` 是 UserControl.Controls 集合, 必须发射
-        // 真实的集合单例 vb6_UC_Controls() (RTL 已按当前 UC 实例回落 formHwnd), 而不是
-        // 宿主伪对象前缀 vb6_UserControl_Controls (恒 NULL 的空桩)。ucTabStrip.ctl 的
-        // `For Each l_Ctrl In Controls` 走的正是这条裸标识符通路 —— 用 NULL 会让枚举
-        // 得到空集, 而 Add/Item 返回 NULL → 后续解引用崩溃。
-        if (lower == "controls") {
-            lastExpr_ = "vb6_UC_Controls()";
-            return;
-        }
+        // Fix 221: 裸 `Extender` 也是**对象引用** —— VB6 里 .ctl 内的裸 `Extender`
+        // 就是 `UserControl.Extender`。Pager.ctl:481 的
+        //   `Public Property Get ControlsExtender() As Object: Set ControlsExtender = Extender`
+        // 与 FontCombo.ctl 的 `ControlEnum == Extender` 都走这里。RTL 侧的实体是
+        // Fix 133u 那枚结构体 vb6_UserControl_Extender (DataChanged 刚在 Fix 221 里
+        // 补上第三个字段), 取地址即对象指针。
+        // 与 `controls` 同档列为保留宿主对象名: 本表里 `usercontrol/extender` 那一行
+        // 只管**限定**形态 (`UserControl.Extender.X` → vb6_UserControl_Extender.X),
+        // 裸名此前落到末尾的"发射裸标识符"兜底 ⇒ 产物里一个未声明的 `Extender` (C2065)。
+        const bool reservedHostObj = (lower == "controls" || lower == "extender");
+        if (isDesignerModule_ && !knownLocalVars_.count(lower)
+            && (!sym || reservedHostObj)) {
+            // Fix <vbeclipse> rev14: 裸 `Controls` 是 UserControl.Controls 集合, 必须发射
+            // 真实的集合单例 vb6_UC_Controls() (RTL 已按当前 UC 实例回落 formHwnd), 而不是
+            // 宿主伪对象前缀 vb6_UserControl_Controls (恒 NULL 的空桩)。ucTabStrip.ctl 的
+            // `For Each l_Ctrl In Controls` 走的正是这条裸标识符通路 —— 用 NULL 会让枚举
+            // 得到空集, 而 Add/Item 返回 NULL → 后续解引用崩溃。
+            if (lower == "controls") {
+                lastExpr_ = "vb6_UC_Controls()";
+                return;
+            }
+            if (lower == "extender") {
+                lastExpr_ = "(&vb6_UserControl_Extender)";
+                return;
+            }
         std::string rtlHp;
         if (hostPseudoBareName(isPropertyPageDesigner_ ? "PropertyPage" : "UserControl",
                                lower, rtlHp)) {

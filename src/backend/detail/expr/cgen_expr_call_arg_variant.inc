@@ -202,8 +202,26 @@
                         argVal = "vb6_VariantToString(" + argVal + ")";
                     }
                 } else if (paramBase == Vb6Type::Object) {
-                    // 右值兼容: 避免对函数返回值取址
-                    argVal = "vb6_VariantToObjectVal(" + argVal + ")";
+                    // Fix 227: 形参 Type=Object 但实参**本身已是对象指针**时, 不能再包
+                    // vb6_VariantToObjectVal —— 那个 helper 按值收 vb6_VARIANT, 把类指针塞进去
+                    // ⇒ C2440 "无法从 vb6_cls_CoolBar * 转换为 vb6_VARIANT"
+                    // (ComCtlsDemo CbrBand.c:201 / CbrBands.c:73 / ImcComboItem.c:109 等 ×33)。
+                    // VB6 源码 ComCtlsBase.bas:881
+                    //   Public Sub ComCtlsImlListImageIndex(ByVal Control As Object, …)
+                    // 生成的 C 形参是 void* Control —— 指针直接传就是 VB6 的语义 (Object 形参收对象引用):
+                    //   ComCtlsImlListImageIndex(Control:=ShadowCoolBar, …) 的 ShadowCoolBar 是
+                    //   `Private Function ShadowCoolBar() As CoolBar`, C 型 vb6_cls_CoolBar*。
+                    // 只有实参确实是 VARIANT **值** (后期绑定读 / Variant 变量) 才需要那层解盒。
+                    // 判据刻意保守: 只把"能确证是项目类实例"的那一档摘出来直传, 其余形状维持原行为,
+                    // 以免引入新的 directions 错误。
+                    bool argIsVariantVal227 = cExprIsVariant(argVal);
+                    bool argIsClassInst227 =
+                        !argIsVariantVal227 && !inferClassTypeOfExpr(*node.positional[i]).empty();
+                    if (argIsClassInst227) {
+                        argVal = "(void*)(" + argVal + ")";
+                    } else {
+                        argVal = "vb6_VariantToObjectVal(" + argVal + ")";
+                    }
                 }
             }
         }

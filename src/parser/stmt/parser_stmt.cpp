@@ -312,7 +312,7 @@ StmtPtr Parser::parseForOrForEach() {
 
 StmtList Parser::parseBlock(TokenKind endKind1, TokenKind endKind2) {
     StmtList stmts;
-    skipNewLines();
+    skipStatementSeparators();
 
     while (cur_.kind != TokenKind::EndOfFile &&
            cur_.kind != endKind1 &&
@@ -330,7 +330,7 @@ StmtList Parser::parseBlock(TokenKind endKind1, TokenKind endKind2) {
 // --- parseBlockUntil replacement content ---
 StmtList Parser::parseBlockUntil(std::initializer_list<TokenKind> endKinds) {
     StmtList stmts;
-    skipNewLines();
+    skipStatementSeparators();
 
     while (cur_.kind != TokenKind::EndOfFile) {
         bool isEndOfBlock = false;

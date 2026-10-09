@@ -55,6 +55,19 @@ void CCodeGen::visit(RaiseEventStmt& node) {
             if (pCType == "vb6_VARIANT") {
                 argVal = "vb6_VariantFromValue(" + argVal + ")";
             }
+            // Fix 228: 事件形参声明为**项目类** (Fix 084k 的口径: mapTypeRef → vb6_cls_X*,
+            // 回调 typedef 用真实类指针) 而实参在 C 层是 **VARIANT 值** (后期绑定属性读 /
+            // 集合 .Item(i) 的结果, 形如 vb6_VariantFromComResult(vb6_ComCall(…, L"Item", …)))
+            // 时, VB6 的语义是把 VARIANT 里装的那个对象取出来传给形参。
+            // 修复前这里**什么都不做** ⇒ VARIANT 结构体直接塞给 vb6_cls_X* 形参 ⇒
+            // C2440 "无法从 vb6_VARIANT 转换为 vb6_cls_LlbLink *"
+            // (ComCtlsDemo LinkLabel.c:2997/3076/3091 `RaiseEvent LinkGetTipText(Links.Item(…))`
+            //  及其余同形处, 共约 47 条)。
+            // 判据刻意收窄到"必然编译报错"的那一格 (形参类指针 ∧ 实参 VARIANT 值),
+            // 故不会改变任何当前能编过的组合。
+            else if (pCType.rfind("vb6_cls_", 0) == 0 && cExprIsVariant(argVal)) {
+                argVal = "(" + pCType + ")vb6_VariantToObjectVal(" + argVal + ")";
+            }
         }
         call += ", " + argVal;
     }

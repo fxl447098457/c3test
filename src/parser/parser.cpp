@@ -329,6 +329,15 @@ void Parser::skipNewLines() {
     }
 }
 
+void Parser::skipStatementSeparators() {
+    // 冒号与换行在 VB6 里都是语句分隔符。块语句 header 之后调用本函数即可
+    // 无差别接受 `Header: body: Terminator` 单行形式, 无需每个块语句各写一份分支。
+    while (cur_.kind == TokenKind::NewLine || cur_.kind == TokenKind::Comment ||
+           cur_.kind == TokenKind::LineContinuation || cur_.kind == TokenKind::Colon) {
+        advance();
+    }
+}
+
 bool Parser::expectEndOfStatement() {
     // 接受 NewLine 或冒号
     if (cur_.kind == TokenKind::NewLine) {

@@ -452,6 +452,22 @@ Vb6Type CCodeGen::inferExprType(Expr& expr) const {
                     }
                 }
             }
+            // Fix 220: 对象是 **Variant 载体** (集合 .Item(i) 返回 Variant / Variant 局部变量
+            // 持有对象 / ComCall 结果 …) 时, 成员访问是后期绑定属性读, 结果**本身也是
+            // Variant** —— 必须与 codegen 侧 Fix 219 (cgen_expr_member_class_fallback.inc /
+            // cgen_expr_member_voidptr_com.inc) 发出的
+            //   `vb6_VariantFromComResult(vb6_ComGetProp(vb6_VariantToObjectVal(obj), L"member"))`
+            // (返回 vb6_VARIANT 值) 严格一致。
+            // 若这里落到下方 `lookupModule(memberName)` 用成员的**声明类型** (如 Long) 答, 两条路
+            // 就错位: comPackExpr 据此选 vb6_ComPackInt, 生成
+            //   `vb6_ComPackInt(vb6_VariantFromComResult(...))`
+            // → C2440 "vb6_VARIANT 无法转换为 int32_t" (CoolBar.c:1230/1235 等, 共约 170 处
+            // VARIANT→int32_t/float/double)。本修复与早期绑定互不干扰: 早期绑定只在 codegen 侧
+            // 已知对象类时触发, 那时 inferExprType(object) 会答出该类而非 Variant, 不会进此分支。
+            {
+                Vb6Type objT = inferExprType(*ma.object);
+                if (objT == Vb6Type::Variant) return Vb6Type::Variant;
+            }
             // 查找成员函数/属性的返回类型
             auto* memSym = symTab_.lookupModule(ma.memberName);
             if (memSym) return memSym->type;

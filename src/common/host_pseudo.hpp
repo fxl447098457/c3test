@@ -66,13 +66,31 @@ struct HostPseudoRow {
 
 inline const HostPseudoRow kHostPseudoRows[] = {
     // ---- UserControl (.ctl) ----
+    // Fix 214: accesskeys / appearance / drawstyle 三枚 —— 上面那段"刻意不收"的名单里
+    // 点名的就是 Appearance; 那份账现在落地了 (RTL 侧在 vb6rtl_userctl.h + vb6rtl_com.c
+    // 里真发了可读写槽位, 不是只写不读的样板, 见那边的注释)。全部 HPF_NONE: 控件的属性
+    // 过程写的是**限定**形态 `UserControl.Appearance`, 而裸名 `Appearance` 在 .ctl 里
+    // 是控件自己那个同名属性 (CheckBoxW/FrameW 都自己 Public Property Get Appearance),
+    // 标 HPF_BARE 会把裸写抢到宿主伪成员上 —— 与 backcolor/forecolor 同一处置。
+    {"usercontrol", "accesskeys",      "AccessKeys",      Vb6Type::String,   HPF_NONE},
+    {"usercontrol", "appearance",      "Appearance",      Vb6Type::Long,     HPF_NONE},
     {"usercontrol", "asyncread",       "AsyncRead",       Vb6Type::Unknown,  HPF_BARE | HPF_METHOD},
     {"usercontrol", "autoredraw",      "AutoRedraw",      Vb6Type::Boolean,  HPF_NONE},
     {"usercontrol", "backcolor",       "BackColor",       Vb6Type::Long,     HPF_NONE},
     {"usercontrol", "cancelasyncread", "CancelAsyncRead", Vb6Type::Unknown,  HPF_METHOD},
     {"usercontrol", "cls",             "Cls",             Vb6Type::Unknown,  HPF_METHOD},
+    // Fix 221: ComCtlsDemo 的两个 UC 成员 —— 名字此前既不在本表也不在 RTL 里 ⇒
+    // C2065 (EventsFrozen 9 处 / ContainedControls 3 处)。RTL 侧的真身在
+    // vb6rtl_userctl.h + vb6rtl_com.c / uc_controls.c, 类型与那里的用法定齐。
+    // 两行都**不标 HPF_BARE**: 裸名 `ContainedControls` 在 .ctl 里是控件自己那个
+    // `Public Property Get ContainedControls() As VBRUN.ContainedControls`
+    // (CoolBar/FrameW/StatusBar 都有), 标了会把裸写抢到宿主伪成员上 —— 与
+    // backcolor/appearance 同一处置。
+    {"usercontrol", "containedcontrols", "ContainedControls", Vb6Type::Unknown, HPF_NONE},
+    {"usercontrol", "eventsfrozen",    "EventsFrozen",    Vb6Type::Boolean,  HPF_NONE},
     {"usercontrol", "containerhwnd",   "ContainerHwnd",   Vb6Type::LongPtr,  HPF_BARE},
     {"usercontrol", "controls",        "Controls",        Vb6Type::Unknown,  HPF_BARE},
+    {"usercontrol", "drawstyle",       "DrawStyle",       Vb6Type::Long,     HPF_NONE},
     {"usercontrol", "enabled",         "Enabled",         Vb6Type::Boolean,  HPF_BARE},
     {"usercontrol", "extender",        "Extender",        Vb6Type::Unknown,  HPF_NONE},
     {"usercontrol", "forecolor",       "ForeColor",       Vb6Type::Long,     HPF_NONE},
@@ -112,7 +130,13 @@ inline const HostPseudoRow kHostPseudoRows[] = {
 
     // ---- Extender (容器提供的扩展对象) ----
     {"extender", "align",           "Align",           Vb6Type::Long,    HPF_NONE},
+    // Fix 214: CommandButton 的 Default / Cancel 由容器经 Extender 提供 (ComCtlsDemo 的
+    // CommandButtonW/CommandLink 各有一对 `Public Property Get/Let Default|Cancel`,
+    // 体内就是 `Extender.Default` 的转发样板)。`Default` 是 VB6 关键字 ⇒ 发码端 cIdent
+    // 加 vb6_ 前缀 ⇒ RTL 名是 vb6_Extender_**vb6_**Default, 表里的 rtl 拼写要照着写。
+    {"extender", "cancel",          "Cancel",          Vb6Type::Boolean, HPF_NONE},
     {"extender", "container",       "Container",       Vb6Type::Unknown, HPF_NONE},
+    {"extender", "default",         "vb6_Default",     Vb6Type::Boolean, HPF_NONE},
     {"extender", "drag",            "Drag",            Vb6Type::Unknown, HPF_METHOD},
     {"extender", "dragicon",        "DragIcon",        Vb6Type::Unknown, HPF_NONE},
     {"extender", "dragmode",        "DragMode",        Vb6Type::Long,    HPF_NONE},
@@ -129,12 +153,15 @@ inline const HostPseudoRow kHostPseudoRows[] = {
     {"extender", "zorder",          "ZOrder",          Vb6Type::Unknown, HPF_METHOD},
 
     // ---- Ambient (宿主环境) ----
-    {"ambient", "backcolor",   "BackColor",   Vb6Type::Long,     HPF_NONE},
-    {"ambient", "displayname", "DisplayName", Vb6Type::String,   HPF_NONE},
-    {"ambient", "forecolor",   "ForeColor",   Vb6Type::Long,     HPF_NONE},
-    {"ambient", "font",        "Font",        Vb6Type::Unknown,  HPF_NONE},
-    {"ambient", "righttoleft", "RightToLeft", Vb6Type::Integer,  HPF_NONE},
-    {"ambient", "usermode",    "UserMode",    Vb6Type::Boolean,  HPF_NONE},
+    {"ambient", "backcolor",        "BackColor",        Vb6Type::Long,     HPF_NONE},
+    // Fix 214: Ambient.DisplayAsDefault (CommandButtonW.ctl:767 `If
+    // CommandButtonDisplayAsDefault Xor Ambient.DisplayAsDefault`)。
+    {"ambient", "displayasdefault", "DisplayAsDefault", Vb6Type::Boolean,  HPF_NONE},
+    {"ambient", "displayname",      "DisplayName",      Vb6Type::String,   HPF_NONE},
+    {"ambient", "forecolor",        "ForeColor",        Vb6Type::Long,     HPF_NONE},
+    {"ambient", "font",             "Font",             Vb6Type::Unknown,  HPF_NONE},
+    {"ambient", "righttoleft",      "RightToLeft",      Vb6Type::Integer,  HPF_NONE},
+    {"ambient", "usermode",         "UserMode",         Vb6Type::Boolean,  HPF_NONE},
 };
 
 inline const HostPseudoRow* hostPseudoFind(const std::string& pseudoObj,
