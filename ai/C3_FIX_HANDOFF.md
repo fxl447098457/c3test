@@ -1288,7 +1288,7 @@ S9.4 打标记那一路的 PictureBox 判据必须问表、且不许把成员名
 
 
 
-### B72 控件方法的"发码实参个数"与 RTL 原型之间没有对账 —— 头/体那一半已钉住，这半只欠"多递"那一侧（账 #240 记下；**三张控件方法表 = 第十二刀 §B122，Winsock 那一族 = 第十三刀 §B123，都已出**；集合 Clear 两枚与 CommonDialog Show* 六枚 = 第十四刀 §B125；剩下的 Data 一族经查整户是死码，撤掉 = 第十五刀 §B126（§B124 记着当时的探针与那份清单））
+### B72 控件方法的"发码实参个数"与 RTL 原型之间没有对账 —— 头/体那一半已钉住，这半只欠"多递"那一侧（账 #240 记下；**三张控件方法表 = 第十二刀 §B122，Winsock 那一族 = 第十三刀 §B123，都已出**；集合 Clear 两枚与 CommonDialog Show* 六枚 = 第十四刀 §B125；剩下的 Data 一族经查整户是死码：发码侧 = 第十五刀 §B126，RTL 那两枚 0 调用者的出口 = 第十六刀 §B127，§B124 记着当时的探针与那份闭合清单）
 
 账 #240 那一刀把"头追不上体"钉死了（`check_rtl_proto_arity.ps1`：RTL 里两头都有的名字，声明侧参数个数集合必须等于定义侧）。**没钉住的是第三头**：cgen 递出去的实参个数。本轮三者恰好同源（体 10 = 发码 10 = 补完的头 10），所以新 cl 的诊断只落在头那一份上。反过来的形状照样要命：若有人给某枚 `vb6_Ctrl_*` 加形参、只改头与体，而**发码仍递旧的个数**，那么多递这一侧在本机只是 `warning C4020`（见 §B71 那条不对称测量），到新 cl 才升成 `error C2197` —— 也就是说它会以**"门红、本地全绿"的形状再来一次，而这次红在别人刚登记的用例上**。
 
@@ -2002,6 +2002,17 @@ marker、重编，之后 `check_rtl_embedded` 报 **125/125 逐字节相同**。
 `w = ScaleWidth` 与 `Debug.Print …` 合成一行，于是行号与诊断全对不上（报在 `(6,35)` 那种文件里根本不存在的列上）。
 把生成的夹具**原样 dump 出来看一眼**才发现。⇒ 夹具是脚本拼的时候，「先核夹具本身」是第 0 步，不是最后一步。
 
+### B127 账 #278 第十六刀已出 = RTL 那头两枚 0 调用者的 recordset 出口一起撤掉：§B124 那份清单到此清完（哨兵长出 RTL 那一头，2026-10-10，**待门**）
+
+- **为什么这一格能单独走、不必等口径**：第十五刀撤的是**读者**（发码侧那五格 `vb6_Data_Self(` 前缀判据），留下 RTL 的两枚**被读者** —— `vb6_Data_Self`（把 Recordset 求值透传成控件自己）与 `vb6_Data_FieldValueStr`（把 `Fields("x").Value` 折成静态缓冲的宽串）。当场逐枚数过：全仓只剩「声明 + 定义 + 别人的注释」，调用者 **0**。留着一枚没人叫的导出，下一轮就有人把它当成"这里有个能用的入口"再补一格直译 —— §B124 那份清单的成因正是这一对读者/被读者。recordset 成员面的答案已经唯一，撤它不再需要拍什么。
+- **动了什么**：`src/rtl/core/vb6forms/vb6forms_data.c` 撤两枚定义（−13 / +4 —— 留下的四行写清"为什么没了、唯一的路在哪"），`vb6forms_prop_ctrl.h` 撤两行声明（−2 / +2）。仍活的：`vb6_Data_FieldValue`（它是 `vb6_Data_Bind` 与 memberobj 字段那档的后端，不是那两枚的别名）、`vb6_Data_RecordsetObj`、`vb6_Data_Init`。
+- **RTL 一刀的老规矩（本轮实测两条，其中一条是自己撞的坑）**：改 `src/rtl` 必须 touch `src/driver/c3rtl.rc` 再重编 C3.exe —— 账 #156 那条：只改 RTL 不 touch，本机增量重编会拿**旧 RTL** 测出一堆看着正常的读数，而 CI 从零重编什么都看不见。读数一：`check_rtl_embedded.ps1` 报 **125 份 RCDATA 逐字节相同、无孤儿 id**（新 exe sha `64345f3f4479`）⇒ 新 RTL 确实进了资源。读数二（**教训**）：那台 touch 一开始**静默没执行** —— 临时 `.ps1` 里留了一行中文注释而那份文件没 BOM ⇒ PS 5.1 按 ANSI 读，中文行尾吃掉换行、把下一行 `$rc = …` 一起并进注释 ⇒ `Get-Item` 拿到 null，打印出来的是一行光秃秃的 `TOUCHED `。⇒ 三条都记着：临时脚本**一律 ASCII**（写完数一遍非 ASCII 字节）、`Write-Output` 的变量要在**打印里也验一次**（空值就是没跑）、事后用 `touch` 补上再让内容级哨兵复核。
+- **判据**：`check_data_recordset_shape.ps1` 长出一整头新的（原防空转那格改号 R4）—— 那两枚名字在 `src/rtl` 的**去注释后**代码里各恰好 **0** 次；`//` 与 `/* … */` 都切，且专门钉住"同一行尾部带块注释"那种**从前的真实写法**（负控 N11）。
+- **负控 6/6**（全在 `-Root` 副本树上，还原后两份 RTL 文件 md5 逐字节对上）：假定义回来 ⇒ 点名 `vb6forms_data.c:201`；带回尾注的声明回来 ⇒ 仍红；同样的名字只写在 `//` 行里 ⇒ **不许误红**；整户 `src/rtl` 挪走 ⇒ 路径不存在 + `RTL-FILES=0` 两头红；还原 ⇒ 绿。**另把第十五刀那八档在新哨兵上重跑一遍 ⇒ 仍 8/8**：改了判据不许悄悄废掉旧面。
+- **证人（真编 = RTL 这一刀唯一会坏的那一环）**：`tests/c29data/DataApp.vbp` 用新编的 C3.exe 真编（先灌 vcvars 进进程环境）⇒ rc=0、`DataApp.exe` 469504 B、日志里 `error C` **0** 条 / `unresolved external` **0** 条 / `fatal error` **0** 条。真跑两架构由门上的 `Test-VbpBuild "c29data"` / `c29data_x86` 负责。
+- **护栏（各管各的工件，别拿一个替另一个）**：发码那一头 = 对**现有** `emit-manifest.expected.txt` 复算全语料 ⇒ **期望 398 行 / 实得 398 行 / 相同 398 / 哈希不同 0 / 缺席 0 / 多出 0**，未重钉；这一条只证「cgen 一字未动」（RTL 不写进 emit 文本）。RTL 那一头由两件工件管：`check_rtl_embedded.ps1` （125 份 RCDATA 逐字节相同 ⇒ 新 RTL 真进了 exe）+ 上面那枚真编证人（链接阶段才看得见未定义符号）。
+- **§B124 到此收口**：那条「下一刀的形状」四条全清 —— ① 撤 cgen 侧死码 = 第十五刀；② RTL 导出去留 = 本刀（选「去」）；③ 判据 = 一整道哨兵而不是一条结构针（针只钉得住产物那头，而这一族的两份答案住在源码里）；④ 证人 = 门上那套装在 `tests/c29data` 的断言 + 两头 A/B。
+
 ### B126 账 #278 第十五刀已出 = C29-Data 的发码侧死码整户撤干净，`Data1.Recordset.<成员>` 从此只有一条路（第 50 道哨兵 `check_data_recordset_shape.ps1`，2026-10-10，门 #459 attempt 1 全绿（run 37999228928、head `fe5f2689`、12/12 全 completed/success、非绿 0、created→updated 10m29s；**新哨兵所在的 Tests (compile) 片绿** ⇒ 那三面判据在 CI 上真跑过，而 **Emit manifest (shape gate) 那一跑同绿** ⇒ 「398 份逐字节相同」被 CI 那台独立复算证实））
 
 - **动了什么**（六份 `src/backend` 文件，−163 / +19 行）：照 §B124 那份**闭合**清单划 —— 五处 `find("vb6_Data_Self(") == 0` 判据（`cgen_expr_call_callee_withm.inc`、`cgen_expr_call_com_bind.inc` 的 `axSlotObj` 并项与那一格直译、`cgen_util_com.cpp`、`stmt/cgen_call.cpp`）、抠句柄的助手 `dataSelfHwndExpr`（`detail/util/cgen_state.inc`）、三处 `vb6_Data_FieldValueStr(` 发射、两处反过来认那枚发射当前缀的识别器（`cgen_util_com.cpp` 与 `cgen_expr_member_generic_access.inc` 两处）、标量四枚直译分支（`BOF`/`EOF`/`RecordCount`/`FieldCount`）。顺带带走那台把日志路径写死在**某个本机用户目录**上的 `getenv("C3_CG_TRACE")` 探针 —— 它只住在被撤的那一格里，留着就是下一台往仓库里写绝对路径的机器。**留着的**：`dataVars_` 与 `dataNameOfExpr` —— `Data1.DatabaseName` / `Data1.BOF` 那一档（控件自身的属性表）还在用，撤了就断活路。
@@ -2025,7 +2036,7 @@ marker、重编，之后 `check_rtl_embedded` 报 **125/125 逐字节相同**。
 - **A/B**：BASE = 本机冷编的 `wt_base_k15 @ d2caf7c0`；全语料 **398 份输入逐字节相同** ⇒ 零行为改动、零登记，`emit-manifest.expected.txt` 未动。本地 49 道静态哨兵全绿；6/6 负控按预期红（抹掉 ShowAbout 一行、把 ClearImages 的个数说成 2、在 `cgen_call.cpp` 里再拼一遍 `"vb6_CdShowOpen"`、拆掉夹具那六条 Show*、四份源码加夹具退回 HEAD、骨架原样=绿）。
 - **§B72 到今天**：三刀收完 —— 第十二刀（三张表长出「个数」那一格 + 四面判据）、第十三刀（Winsock 八枚）、第十四刀（本节）；Data 那一族经查是死码，另立 §B124，撤干净 = 第十五刀 §B126（口径按 §B124 的推荐 (a) 落地）。`src/backend` 里剩下的手抄出口名从此都要过 R5 那道名单，加档不改名单就会红。
 
-### B124 新账 = C29-Data 那一族的**发码侧直译**全是死码：三条码头认的前缀 `vb6_Data_Self(` 早已没人再发，而今天活的是 memberobj 那枚真 IDispatch（2026-10-10 量；**撤 cgen 侧死码那一半已由第十五刀 §B126 出掉**，剩下「RTL 导出 `vb6_Data_Self` 的去留」那一半仍挂着 —— 它要动 `src/rtl`，按控件线规矩必须 touch `c3rtl.rc` 再重编 C3.exe）
+### B124 新账 = C29-Data 那一族的**发码侧直译**全是死码：三条码头认的前缀 `vb6_Data_Self(` 早已没人再发，而今天活的是 memberobj 那枚真 IDispatch（2026-10-10 量；两半都出完 —— cgen 侧死码 = 第十五刀 §B126，RTL 那两枚 0 调用者的导出 = 第十六刀 §B127（改 `src/rtl` 按控件线规矩 touch `c3rtl.rc` 重编，那一条也记在 §B127）)
 
 - **怎么撞上的**：把 §B123 末条列的 Data 那一族（`refresh` + 四枚 `Move*`，5 枚 × 三条码头 = 15 处手抄出口名）照 Winsock 那一刀的样收成一张表，写完跑 R4 —— **EMIT-CENSUS 当场红：夹具里那五条 `DataZ.Recordset.Refresh/Move*` 一枚也没走到那三条码头**，产物是 `vb6_ComCall(vb6_Data_RecordsetObj(vb6_hwnd_DataZ), L"Refresh", NULL, 0)`。⇒ 那张表收的是**没人再读的答案**，不是「同一个事实的两份答案」，方向错 ⇒ 这一刀整个撤回（改动存在 stash `k14-superseded-by-B124`，工作树回到 `d2caf7c0`）。**这条 census 正是第十二刀立的那一头** —— 没有它，这次会留下一张钉死 20 行的表和一段永不执行的分支。
 - **读数（两个方向都查了，不是推断）**：
@@ -2041,7 +2052,7 @@ marker、重编，之后 `check_rtl_embedded` 报 **125/125 逐字节相同**。
   - 标量四枚分支（`BOF`/`EOF`/`RecordCount`/`FieldCount` 直译）在 `cgen_util_com.cpp:127-133` 同一格死判据里；
   - RTL 导出 `vb6_Data_Self`（`vb6forms_data.c:452` + `vb6forms_prop_ctrl.h:328`）全仓**含 RTL 自己**都 0 个调用者。
 - **顺手订正 §B123 末条 ① 的定性**：那 15 处（`refresh` + 四枚 `Move*` × 三条码头）不是"等着收进表的手抄"，而是**死码里的手抄** —— 收进表就是给没人读的答案立新权威（本轮真做过一次，R4 的 census 当场把它抓回来，改动已撤回未提交状态）。同一条末条里的 ② 两处集合 Clear 与 ③ Show* 六枚经探针是**活的**，已由第十四刀收掉（见 §B125）。
-- **下一刀的形状**（当时写的四条，跑之前谁也没料到 census 会先把方向否掉；现状：① 与 ③ 已由第十五刀 §B126 出掉 —— ③ 没有落成「一条结构针」而是整道哨兵 `check_data_recordset_shape.ps1`，因为针只钉得住产物那一头，而这一族的两份答案是**源码里那五格判据**；④ 两头都取了（全语料 398 份 + `.frm` 家族同夹具两台并排）。② 仍在挂）：要动 RTL，与控件线同一批规矩：改 `src/rtl` 必 touch `c3rtl.rc` 再重编 C3.exe，账 #156 那条坑。① 撤五条前缀判据 + 方法侧 15 枚出口名 + 标量侧那四枚 + `dataSelfHwndExpr`；② `vb6_Data_Self` 导出去留（去 ⇒ touch rc）；③ 判据换成一条**结构针**：`Data1.Recordset.<成员>` 的产物必须只有 memberobj 那一形（`vb6_Com*Prop(vb6_Data_RecordsetObj(…))` / `vb6_ComCall(同一枚, L"<成员>"…)`），不许再出现任何 `vb6_Data_<成员>(` 直译 —— 这一条同时把「以后有人再把直译接回来」挡住；④ 证人 = `tests/c29data` 那套装在门上的断言不动，另加一条 A/B：撤完 398 份逐字节相同（死码的撤动本该零差异，若差一行就说明有一条我判成死的其实活着）。
+- **下一刀的形状**（当时写的四条，跑之前谁也没料到 census 会先把方向否掉；现状：① 与 ③ 已由第十五刀 §B126 出掉 —— ③ 没有落成「一条结构针」而是整道哨兵 `check_data_recordset_shape.ps1`，因为针只钉得住产物那一头，而这一族的两份答案是**源码里那五格判据**；④ 两头都取了（全语料 398 份 + `.frm` 家族同夹具两台并排）；② 由第十六刀 §B127 出掉，选的是「去」）：要动 RTL，与控件线同一批规矩：改 `src/rtl` 必 touch `c3rtl.rc` 再重编 C3.exe，账 #156 那条坑。① 撤五条前缀判据 + 方法侧 15 枚出口名 + 标量侧那四枚 + `dataSelfHwndExpr`；② `vb6_Data_Self` 导出去留（去 ⇒ touch rc）；③ 判据换成一条**结构针**：`Data1.Recordset.<成员>` 的产物必须只有 memberobj 那一形（`vb6_Com*Prop(vb6_Data_RecordsetObj(…))` / `vb6_ComCall(同一枚, L"<成员>"…)`），不许再出现任何 `vb6_Data_<成员>(` 直译 —— 这一条同时把「以后有人再把直译接回来」挡住；④ 证人 = `tests/c29data` 那套装在门上的断言不动，另加一条 A/B：撤完 398 份逐字节相同（死码的撤动本该零差异，若差一行就说明有一条我判成死的其实活着）。
 - **口径要先拍的那一格**（拍完才动手，别默认）：发码侧要不要恢复**直译**？两案 ——(a) 只撤死码，口径定为「Recordset 一律走 memberobj 那枚真 IDispatch」（改动小、产物一字不变、RTL 出口的唯一调用者是 memberobj，一处答案）；(b) 恢复直译（#192 当年那条注释的意图：绕开 Invoke 装箱、少一层），代价是**同一个成员两个调用者**（cgen 与 memberobj 各一条），正与本账「一个事实一处答案」相反。⇒ 本线推荐 (a)，(b) 只有在量出 memberobj 那一路有实际代价（每次 Invoke 装箱 + ID 匹配的成本落在热路径上）时才回头。
 
 ### B123 账 #278 第十三刀已出 = Winsock 那一族的「有哪些成员 / 各自叫什么 / 收几枚实参」收成一张表：个数第一次变成**接不接这条形的条件**（arity 哨兵的 R3/R4/R5 三面跟着长，2026-10-10，门 #455 attempt 1 全绿（run 37988792329、head `d2caf7c0`、12/12 全 completed/success、非绿 0、wall 10m53s；含 arity 哨兵所在的 Tests (compile) 片，而 **Emit manifest (shape gate) 那一跑也绿** ⇒ 「398 份逐字节相同」被 CI 那台独立复算证实））
