@@ -791,9 +791,11 @@ function Test-RtlProtoArity {
 # 账 #278 §B124（第十五刀）：Data 控件的 recordset 成员面从前住着两套答案 —— 一整套
 # `vb6_Data_Self(` 前缀直译（Refresh/Move*/Fields/FieldValueStr，五格认前缀 + 三格抠槽 + 三格再认求值结果）
 # 与 memberobj 交出的真 IDispatch。§B124 的九形探针量到前者在产物里 0 处（那条路从没被走过），
-# 第十二刀立起的 census（arity 哨兵 R5）把它点名为"同一个事实的第二份答案"。撤完钉三头：
+# 第十二刀立起的 census（arity 哨兵 R5）把它点名为"同一个事实的第二份答案"。撤完钉四头：
 # 夹具那十形仍只发 vb6_Data_RecordsetObj + vb6_Com*（逐成员名字面量条数钉死）、
-# 撤掉的那七枚出口名不许在 src/backend 的非注释行里再出现成字面量、两张名单与普查自己不许变空。
+# 撤掉的那七枚出口名不许在 src/backend 的非注释行里再出现成字面量、RTL 那头也不许留它们当
+# "没人叫的出口"（§B127：撤了读者就把被读者一起撤，判据去注释后各恰好 0 次）、
+# 两张名单与两头普查（backend 122 份 / rtl 127 份）自己不许变空。
 function Test-RsRecordsetShape {
     $script:total++
     Write-Host -NoNewline "  [STATIC] data_recordset_shape ... "

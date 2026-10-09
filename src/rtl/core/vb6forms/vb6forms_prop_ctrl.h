@@ -325,8 +325,8 @@ void      vb6_Data_MoveNext(void* hwnd);
 void      vb6_Data_MovePrevious(void* hwnd);
 wchar_t*  vb6_Data_FieldName(void* hwnd, int32_t idx);
 void      vb6_Data_FieldValue(void* hwnd, const wchar_t* nameOrIndex, wchar_t* out, int32_t outCap);
-void*     vb6_Data_Self(void* hwnd);                               /* Recordset 链透传 */
-wchar_t*  vb6_Data_FieldValueStr(void* hwnd, const wchar_t* nameOrIndex);  /* 静态缓冲 */
+// 账 #278 §B127: vb6_Data_Self / vb6_Data_FieldValueStr 两枚声明已撤 (0 个调用者)；
+// recordset 成员面只许走 vb6_Data_RecordsetObj 那一档，判据见 check_data_recordset_shape.ps1。
 void      vb6_Data_Bind(void* hwnd, void* ctlHwnd, const wchar_t* fieldName);
 void      vb6_Data_SetRepositionHandler(void* hwnd, void* fn);
 void*     vb6_Data_RecordsetObj(void* hwnd);                       /* Recordset 真 IDispatch */
