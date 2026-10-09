@@ -1763,35 +1763,63 @@ CI 那一枚（`pe-lnk=14.51`）稳定落进 `int16_t` 档 ⇒ 发成 `vb6_ComGe
 
 **判据**：夹具 `tests/test_intrinsic_consts.bas`（40 枚名字 + 三条赋值那形 + `Const`/变量/直读三条 `vbUseSystem`），`Add-BasTest` 钉 16 条期望（BASE 上 `IC-ASSIGN=0,0,0`、`IC-RTL-PT=,,,,`、`IC-RTL-CONST=0`、`IC-VS-CONST=-1` 四条当场红，NEW 全绿；而 `IC-FOLD-*` 那 6 条**两台同数** —— 那是「只改数从哪来、不改数」的半边证据）；`Test-EmitcShape ic_emitc_reads_are_literals` 钉 5 行发码；`Test-EmitcAbsent ic_emitc_no_implicit_var` 钉 4 条自救形状不许在场；**第 39 道哨兵** `scripts/check_builtin_const_authority.ps1`（C1 RTL 里 `#define vb*` 必须为 0、C2 折叠里不许有表不认识的名字、C3 棘轮、C4 两份表片段不许重名/不同值、C5 三枚手册值、C6 表达式档棘轮）—— 六档假改动**各自红并点名自己的规则**（`.build/b761_neg.txt`），植完按 md5 还原、还原后复跑绿。
 
-**下一格**：① 那 54 枚「表里已有、发码仍折叠」可以按棘轮一批批撤（每撤一批就改 C3 的数）；② `isConstIdent`（`src/backend/cgen_base_naming.cpp:219`）里那 11 枚 RTL 名的硬编码名单，在本刀之后只对「typelib 先注册的 EnumMember」那一档还有用 —— 真正的修法是让 `lookupConstSym` 也认 EnumMember，那会牵动 `wrapConstArgForByRef` 一串形状，单独量过再动；③ §B97（include 与模块 init 调用序的无序容器）。
+**下一格**：① 那 54 枚「表里已有、发码仍折叠」可以按棘轮一批批撤（每撤一批就改 C3 的数）；② `isConstIdent`（`src/backend/cgen_base_naming.cpp:219`）里那 11 枚 RTL 名的硬编码名单，在本刀之后只对「typelib 先注册的 EnumMember」那一档还有用 —— 真正的修法是让 `lookupConstSym` 也认 EnumMember，那会牵动 `wrapConstArgForByRef` 一串形状，单独量过再动；③ §B97（include 与模块 init 调用序的无序容器）—— 已出，见下一节。
 
-### B97 多模块工程的 `#include` 段**与入口点里模块 init 的调用序**都来自一枚 `unordered_*`（新账，未开工）
+### B97 多模块工程的 `#include` 段**与入口点里模块 init 的调用序**都来自一枚 `unordered_*`（**已出**，门 待回填）
 
-读数（比立账时那句硬得多，2026-10-09 查到源头）：账 #218 那刀的 A/B 里 4 份输入的清单 sha 变了而**逐行多重集完全相同**；
-这 4 份压根没用到那 40 枚名字，身上唯一的变量是**符号表里多了 34 个名字**。追下去的因果链是：
+**读数**（2026-10-09 查到源头并落地）：
+- 因果链：`src/backend/cgen_base.cpp:207` 收的参数是 `const std::unordered_set<std::string>&`，
+  它由 `SymbolTable::getExternalModuleNames()`（`src/semantics/symbol_table.cpp:462-471`）造出来，
+  那里是**遍历 `moduleScope_->symbols()` = `std::unordered_map`** 捡 `isExternal` 的符号
+  ⇒ 桶布局由「整个模块作用域的名字集合」决定；这枚 set 喂着三处会出顺序的码头：聚合 .c 的
+  `#include` 段（`cgen_base_generate_c_open.inc:53`）、.h 的 crossmod `#include` 段（`…_crossmod.inc:56`）、
+  **入口点里 `vb6_mod_<X>_init()` 的调用序**（`cgen_base_generate_entry.inc` 五处同形循环）。
+  另五处迭代它的是纯 membership 查询（`cgen_base_type.cpp:258`、`cgen_expr_ident_builtin.inc:181`、
+  `cgen_expr_member_class_module.inc:254`、`cgen_expr_member_m22_module.inc:98`、
+  `cgen_assign_stmt_special.inc:532`），换序无后果，但类型一起改了，理由见哨兵 P2。
+- 触发的证据来自账 #218 那刀的 A/B：**4 份输入**清单 sha 变了而**逐行多重集一字不差**，
+  而这 4 份压根没用到那 40 枚名字，身上唯一的变量是「表里多了 34 个名字」。
+- ⚠ **订正上一轮自己写的一句**：当时说「`modules_` 是按工程顺序排的 vector（= `Id.vbp` 的声明序
+  `IdMain, IdIfaces, IdBlocks, CircleImpl, VbpImpl`）」—— 那是读码时的想当然，实测不对。
+  `runParse` 末尾有一步**刻意**的 `std::stable_sort`（`driver_frontend.cpp:327-339`）把**类模块整体前移**
+  （标准模块里 `Dim WithEvents x As 某类` 要那枚类符号先进表，否则晚绑定退化 + 运行期解引用野 vtable），
+  实测 `modules_` = `CircleImpl, VbpImpl, IdMain, IdIfaces, IdBlocks`。所以这一刀的口径是
+  「**要保的是确定性**」，权威 = `modules_` 的下标序（那枚有序 vector 本来就在调用点手里），
+  **不是**「照抄 .vbp 的字面行序」；VB6 的模块级变量惰性到首次引用才建，这条 eager 的 init 块
+  本来就是 C3 的实现选择 ⇒ 这句话别说过头。助手名也跟着改过一次（`extModulesInProjectOrder`
+  → `extModulesInModuleVectorOrder`），名字比注释更不会被后人读错。
 
-- `src/backend/cgen_base.cpp:207` 收的参数是 `const std::unordered_set<std::string>& externalModules`；
-- 它由 `SymbolTable::getExternalModuleNames()`（`src/semantics/symbol_table.cpp:462-471`）造出来，而那里是
-  **遍历 `moduleScope_->symbols()` = `std::unordered_map<std::string, unique_ptr<Symbol>>`**（`symbol_table.hpp:452/462`）
-  捡 `isExternal` 的符号 ⇒ 结果集的内部分桶由**整个模块作用域的名字集合**决定；
-- 同一处 `src/driver/detail/driver_codegen_module_loop.inc:50-62` 手里就握着 `modules_` —— **一个按工程顺序排的 vector**
-  （`Id.vbp` 的声明序 = `IdMain, IdIfaces, IdBlocks, CircleImpl, VbpImpl`），却只拿它往那个 set 里补名字。
+**改**：`getExternalModuleNames()` 改返回**去重升序**的 vector（成员集合一处没变，变的是顺序的来源）；
+driver 用 `extModulesInModuleVectorOrder(i)` 按 `modules_` 下标造名单（泛型模板体照旧排除；符号表若报了
+**工程表里没有**的名字，按字典序追加在末尾 —— 实测语料内是空集，留着只为「成员集合与改动前一致」）；
+`CCodeGen::generate` 的参数与 `externalModules_` 成员类型跟着换成 vector；入口点那 5 份同形的 init 循环
+收成**一处** `emitExtInits()`（调用点仍是 5 处 —— 那是入口点模板的形状数，不是重复实现）。
+**刻意没动**：五份里三份发在「本模块自己的 init」之后、两份发在其**之前**（现 157 / 205 两格）——
+own-vs-others 的相对位置是改动前就有的形状，动它是第二件事（真改运行期初始化序），要另立的口径。
 
-这枚 set 喂着四处会出顺序的码头：`.c` 的 include 段（`cgen_base_generate_c_open.inc:53`）、`.h` 的 crossmod include 段
-（`…_crossmod.inc:56`）、**入口点里 `vb6_mod_<X>_init()` 的调用序**（`cgen_base_generate_entry.inc` 五处）、
-`cgen_expr_ident_builtin.inc:181`。实测（同一份 `tests/cc_id/Id.vbp`，两台编译器）：
-BASE 交 `IdMain,CircleImpl,IdIfaces,VbpImpl,IdBlocks`，NEW 交 `IdMain,VbpImpl,CircleImpl,IdIfaces,IdBlocks`
-—— **两个都不是工程声明序**，所以「启动时哪个模块的全局先初始化」今天随编译器符号表布局漂。
-（另两枚 `ve_list` / `pkg_cls` 这次 init 序没换，只换了 include。）
+**护栏**：
+- 逐行归因（`.build/b795_perm.py`，原始字节 + 与 `emit_manifest.ps1` 同一套归一化）：397 行清单变了
+  **29** 行（= 语料里全部多模块输入的数目），29/29 都满足「HEAD 与新的两份产物**逐行多重集完全相同**」
+  且挪了位置的行**全部**落在 `#include "<X>.h"` 与 `*_init(...)` 两类的形状里（`moved=` 计数：
+  VBFlexGridDemo 181 行、Charts 2020 77 行、cc_id 13 行…），**未解释 0**。登记后 compare 复算 397/397 相同。
+- 顺序针 `Test-EmitcShape ccid_emitc_init_order`：把五行 `vb6_mod_*_init();` **当一枚 needle** 断
+  （行序本身就是读数，那枚助手故意不折叠空白）。两台编译器 A/B 实测：HEAD 那台**不命中**、本刀**命中**。
+- 真编译真跑（这是布局类改动，门只测默认架构）：`Id.vbp` 在 **x64 与 x86** 都 `rc=0` / 零条 `error C` /
+  出 exe / 运行输出同前（`cc_id`）—— 本机 `.build/b794_abrun.ps1`。
+- **第 41 道哨兵** `scripts/check_module_order_authority.ps1`：P1 名单出口必须 `std::vector<std::string>`
+  且不许退回 unordered_set、P2 `externalModules_` 成员同上、P3 driver 必须经那枚排法（定义 1 次 + 调用 1 次）
+  且本地变量不许退回 unordered_set、P4 入口点里发射 init 的循环**只许一枚**而 `emitExtInits();` **必须仍是 5 处**、
+  P5 两处 include 发射循环各恰好 1 次。五种坏法（出口退无序 / 成员退无序 / 不排了直接吃符号表 /
+  把 init 循环内联回第二处 / 复制一枚 include 循环）**各自红并点名自己的规则**，植完按 md5 还原后复跑绿
+  （`.build/b799_neg97.py`）。全 41 道哨兵 `total=41 red=0`。
+- 一条自我打脸：中途我用临时脚本自己算 sha、自己验 needle，报了「与登记不符 + 针没命中」，
+  差点把一次纯注释/改名重构判成行为变化；官方工具（`compare_emit_manifest.ps1`）说 397/397 相同，
+  两份 stdout 逐字节相同。**临时校验脚本自己也是被测对象** —— 与官方读数冲突时先怀疑脚本。
 
-要做的与要先定的口径：① 顺序从**唯一权威**拿（候选 = `modules_` 的工程序，它是现成的有序 vector）；
-② 口径要先答一句「VB6 到底按什么序跑模块级初始化」—— 我的读法是 VB6 惰性到首次引用才建，
-这条 eager 的 init 块本来就是 C3 的实现选择 ⇒ 那么要保的是**确定性**而不是"照抄 VB6"，这句得写清别说过头；
-③ 判据要能钉住顺序本身（光看发码清单不行：它是比字节的，排列换序 = 一行照样不同、而多重集相同，
-上一轮就靠这个才分辨出来）⇒ 针要钉"输出的 init 调用序 == 工程声明序"，今天两台都该红；
-④ 哨兵补一条：那四处码头不许再迭代 `unordered_*`（census 按容器类型问，不按名字问）。
-
-### B98 判据助手重名遮蔽 = `[COMPILE]` 那一格从 2026-09-24 起一条 cl 也没编过（已出，等门 **#433**）
+**下一格**：① own-vs-others 那个相对位置的分歧（两份模板把别人的 init 发在自己的之前）；
+② §B99 那两笔「登记」缺口；③ 若要把口径升成「`.vbp` 的字面先后」，得先决定那步类模块前移还算不算数 ——
+那是语义层的依赖需求，不能只改发码侧。
+### B98 判据助手重名遮蔽 = `[COMPILE]` 那一格从 2026-09-24 起一条 cl 也没编过（**已出：门 #433**（run 数 433、head `de4c340d`、attempt 1）= 12 条 check-run 全 completed/success、非绿 0）
 
 **读数**（先量再动，`tests/run_tests.ps1`）：
 - 80 枚顶格 `function` 里**恰好一枚重名**：`Test-Compile` 在 303（`param([string]$Name, [string]$Source)`，体里
@@ -1825,8 +1853,30 @@ BASE 交 `IdMain,CircleImpl,IdIfaces,VbpImpl,IdBlocks`，NEW 交 `IdMain,VbpImpl
 **下一格**：① 门 **#433** 是这一格**第一次真编译**那 10 份夹具 —— 本机只验过 x64，CI 的 toolset 上报红就是真红不是抖；
 compile 那个 job 的耗时从「发码 ~0.4s/份」涨到「编译 23–41s/份」（10 份 ⇒ 约 +5 分钟，job 上限 45 分钟）。
 ② H2 的可达性只管 `Test-*` 前缀；`Invoke-* / Get-*` 那批内部助手重名会被 H1 抓到，但**不可达**抓不到 ——
-要扩就得把前缀名单一起钉成 census，别默默扩出假红。③ §B97 那条还没动，缺的是一个口径。
+要扩就得把前缀名单一起钉成 census，别默默扩出假红。③ §B97 已出（见上一节的读数与订正）。
 
+**门读数**：#433 里 `Tests (compile)` 这一格是**第一次真编译**那 10 份夹具（本机 b777 先量过 10/10 出 exe），整格 completed/success ⇒ 恢复构建没带进假红，也没有把 job 顶到 45 分钟上限。
+
+### B99 门 #434 唯一红 = 别人那一笔改了语料/RTL 而没做两次登记（归因完，登记已补）
+
+57b1f64e（ai/032：VB.NET 风格运算符 + 四档窄/无符号整型，用户点名的那批）之后，门 #434 的 12 条 check-run
+里 11 条绿、唯一红是 `Emit manifest (shape oracle)`。归因走的是 §B92 那条回读通道（CI 每次把
+`emit-manifest.txt` 提交到 `ci/emit-manifest` 分支，本机 `git fetch github ci/emit-manifest` 就拿得到
+**它自己那台二进制**交的清单）：
+
+- 读数为：CI 那份 **398** 行 vs 仓里 `emit-manifest.expected.txt` **397** 行；**共有的 397 行逐行完全相同**，
+  差集只有一条 —— `tests/test_vbnet_ext.bas`（那一笔新加的夹具）。⇒ **红的原因不是发码变了**，
+  是「往语料里加了一份输入而没把它的哈希登记进期望清单」，比较器把「新增 1」判红。
+  顺带钉住一句好读数：那批新语法（lexer/parser/TypeSystem/cgen/RTL 五路都动了）**没有改动任何一份存量发码**。
+- 第二格独立的漏：那一笔改了 `src/rtl/core/vb6rtl/vb6rtl.c` / `vb6rtl_builtin.h` / `vb6rtl_conv.c`
+  三处 RTL，却**没 touch `src/driver/c3rtl.rc`** —— 而 RTL 是嵌在 C3.exe 资源里的（见 memory
+  `rtl-reembed-c3rtl-rc-landmine`）：CI 每次从零重编所以看不出来，本机增量重编时 `rc.exe` 不重跑就会
+  拿到**旧 RTL**，测出来的一切都是假的。本轮补了一行 marker（并把 69 条 `VE-*` 读数在本机真编真跑复核过：
+  x64 `rc=0` / 出 exe / 采样 9 条全命中）。
+- 留着的结构活（未开工）：**「语料输入与期望清单」缺一道哨兵**。现在只有跑一遍清单才知道漏登记；
+  可判红的写法是把两件事分开问 —— ①磁盘上的输入数（`tests/**/*.vbp|.bas`，与 `emit_manifest.ps1` 同一套枚举）
+  ②期望清单的数据行数，两者不等就红并列出差集。另加一条现成形状的哨兵规则：凡 `src/rtl/**` 在本次改动里出现
+  而 `src/driver/c3rtl.rc` 没出现，就红（这一格今天靠人记着，正是本账撞过两次的形状）。
 ## C. 仍在生效的口径与工具事实（与本文档等长的一半价值在这里；完整版见记忆库）
 
 - **VB.Timer 的节拍口径 = Win32 SetTimer 那一档（系统计时 tick，实测 ~15.6 ms；`Interval` 不足一个 tick 就往上取整，另有一条 `USER_TIMER_MINIMUM=10 ms` 钳位），判据一律不钉绝对拍号**（门 #407 之后定，2026-10-08）：winmm `timeSetEvent` 那条路（`Interval=20` 实得 ~50 拍/秒、`Interval=5` ~199）曾把精度提到 ms 级，代价是它自发出去的 WM_TIMER 是一条**真实待处理消息**、长期占住线程队列 ⇒ 硬件输入被饿死（3DMenu 实测点一下就不动、标题不再随点击变换，而 VB6 编译的同一份代码正常 —— VB6 内部就是 SetTimer）。现在 winmm 只作派发窗无效时的兜底，且带 `posted` 合并。**两头都要活的后果**：`tests/c29timer` 那六条判据从「秒级窗口里的绝对拍数」改成机制（开了要跑 / 改 Interval 两向都重排 / 关掉要停 / 各槽周期互不串 / 小 Interval 到地板为止），名义间隔取 100/200/500 ms 这一档 —— 系统 tick 是 15.6 ms 还是被别的进程 `timeBeginPeriod` 提到 1 ms，读数都落在同一条带里（取整误差 ≤7%）；带里那道上界（T6 `<=150`）是**退回 winmm 的哨兵**（旧口径的 199 会当场红）。**同族提醒**：凡是"在秒级窗口里数拍"的判据都吃这台机器的全局时间精度，写之前先问一句这条读数在 1 ms tick 的机器上是否还成立。

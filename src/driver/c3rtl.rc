@@ -496,3 +496,4 @@
 
 
 /* 账 #218 第三刀: vbPicType/vbHitResult/vbAsync* 14 枚 RTL #define 撤掉 —— 值改由 src/semantics/builtin/builtin_consts.inc 单一权威交出, vb6rtl_userctl.h 因此变动; re-embed 1791500270 */
+/* 57b1f64e (ai/032) 给 RTL 加了 VB.NET 那一批 (vb6rtl.c / vb6rtl_builtin.h / vb6rtl_conv.c 的窄与无符号档), 但那一笔没 touch 本文件 ⇒ rc.exe 可能不重跑、C3.exe 里嵌的还是旧 RTL (见 memory rtl-reembed-c3rtl-rc-landmine)。本行就是那次 touch; §B97 那刀自己也重编了一次。 */
