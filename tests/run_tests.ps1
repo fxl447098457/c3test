@@ -999,6 +999,21 @@ function Test-ManifestCoverage {
         $out | Select-Object -First 6 | ForEach-Object { Write-Host "  $_" }
     }
 }
+# 账 §B99: 磁盘上的 src/rtl 与 C3.exe 里内嵌的那 125 份 RCDATA 是否逐字节同步（#225 那类对调/漏 touch）。
+function Test-RtlEmbedded {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] rtl_embedded ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$PSScriptRoot\..\scripts\check_rtl_embedded.ps1" 2>&1
+    $rc = $LASTEXITCODE
+    if ($rc -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        $out | Select-Object -First 6 | ForEach-Object { Write-Host "  $_" }
+    }
+}
 function Test-ComSigCollisionPolicy {
     $script:total++
     Write-Host -NoNewline "  [STATIC] com_sig_collision_policy ... "
@@ -5338,6 +5353,7 @@ if ($Category -in @("all", "compile")) {
     Test-TestHelperIntegrity
     Test-ModuleOrderAuthority
     Test-ManifestCoverage
+    Test-RtlEmbedded
 
     Test-EmitcArtifactCaliber
     Test-CtrlGeomCache
