@@ -2073,6 +2073,11 @@ marker、重编，之后 `check_rtl_embedded` 报 **125/125 逐字节相同**。
   两边都挂着同一条 VB3001 ⇒ census 里那两行 `Count` 其实是**这一格的两个脸**。
 - **为什么必须单开（它是 §B101 那刀的前置，不是尾巴）**：升级的判据正是「未声明名 + `Option Explicit` ⇒ error」。  这一格说明发码侧对同一个输入**今天就有两个答案** ⇒ 升级之前得先定位那条分岔（哪条分支把裸名折成 Empty、哪条把  裸名直接交出去、分岔的输入条件是什么），否则升级只是给「两个答案」再加一句诊断，而真编那一头照旧一半能过一半不能。
 - **与 §B115/§B118/§B120 同族**：一个事实两个答复。只是这一族不在宿主表那一路，在「未声明标识符」的发码那一路。
+- **排除面（第十五刀等门期间的合成探针，`.build/k16probe/`，两形都不复现 —— 这条负读数把搜索面收窄了）**：拿两枚**手写**模块做最小复现（一枚兄弟类 `ModA.cls` 交 `Public Property Get Count() As Long`，另一枚接收者裸用 `Count`），各跑「ModA 在工程里 / 不在」两台并排：
+  - 接收者是标准模块（`ModB.bas`，`s = CStr(Count)`）：两趟都发 `vb6_VARIANT Count = vb6_VariantEmpty(); /* 隐式变量 */` ⇒ **同形**；
+  - 接收者是类模块（`ModB.cls`，`If x = 0 Or Count = 0 Then …`，与 §B121 那句同形）：两趟同样都发隐式 Variant 局部 ⇒ **同形**。
+  ⇒ 那条分岔**不是**「兄弟类成员污染裸名」这一件事本身，它还要 Charts 那两个 UC 独有的某样东西（候选：`.ctl` 的宿主/设计器那一层给本模块留下的名字、`Friend`/过程同名、或 driver 给 UC 单独走的那条跨模块登记路 —— 账 #219/#222 记过它）。下一刀别再用合成夹具试这条路，直接拿 Charts 的副本做**减法**：一次撤一样，看哪一样撤掉就翻成裸名。
+  （顺带一条独立读数，与本账无关但值得记：同一份 `ModB.bas`，工程里有第二枚模块时发 `vb6_ModB_Probe`，只有它自己时发 `vb6_Probe` —— 过程名的模块前缀按「工程里模块数」决定，这是既有设计，不是本轮要动的。）
 - **分岔已定位到一格（2026-10-10，同一轮接着量的）**：把 `UserControl=ucPieChart\ucPieChart.ctl` 那一行从**工程副本**里删掉（`ucPieChart.ctl:342` 有 `Public Property Get Count() As Long`），同一枚 `ucProgressCircular.ctl` 的同一句就从 `vb6_VariantFromValue(vb6_VariantEmpty())` 翻成 `vb6_VariantFromValue(Count)`（裸名）⇒ **兄弟类的一个属性名，改变了「另一个类里一个未声明裸名」的发码兜底**，而两趟的诊断一字不差（都只有一条 VB3001）。⇒ 两个答案里没有一个是对 VB6 的（VB6 有 `Option Explicit` 时这一句根本编译不过）；这一格归 §B121，下一刀先查「兄弟类成员在哪一步被当作本工程已知名字接住」（账 #222/#219 记过 driver 的跨模块 CoClass 登记会在本模块作用域留下符号，同一族的另一张脸），再定未声明名的发码口径。
 - **全部 10 行 VB3001 按「发码实际怎么走」分完类（2026-10-10，一枚两文件的最小复现 `Count`：只有 C1 ⇒ 裸名；加上有 `Public Property Get Count` 的 C2 ⇒ Empty）**：
   - **折成 Empty（`leakedClassMember110u` 那一条）**：只有 `tests/Charts 2020/Proyecto1.vbp` 一处 —— 而它恰好是**唯一「靠这条兜底才真编得过」的正例**（`Test-GuiVbp Charts2020` 真编真跑），代价是把夹具里 `Count`（应为 `lCount`）那个笔误 **静默变成 gradient 分支永不执行**（VB6 里这句根本编译不过，因为该 .ctl 第 24 行有 `Option Explicit`）。
