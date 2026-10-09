@@ -276,3 +276,10 @@ Private Sub tmrF_Timer()
     Debug.Print "FD-DONE"
     Unload Me
 End Sub
+
+' 278 B113 (ASCII only, dead code -- never called): in VB6 a form name in an Unload
+' operand is the form object, not its default property (Caption). This pins the emitted
+' shape so a regression that folds it back to a BSTR into the HWND slot goes red.
+Public Sub UsOwnNameProbe()
+    Unload FDForm
+End Sub

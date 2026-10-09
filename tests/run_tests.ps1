@@ -6141,6 +6141,15 @@ if ($Category -in @("all", "syntax")) {
         "vb6_Point((&(int32_t){7}), (&(int32_t){9}));") @(
         "vb6_VariantEmpty()",
         "Circle(240, 90")
+    # 账 #278 §B113: `Load/Unload <窗体名>` 的实参站在**对象位**，不许折成默认属性。
+    #   夹具里那枚没人调的 UsOwnNameProbe 写 `Unload FDForm`（VB6 里与 `Unload Me` 同义）。
+    #   改前那一台在这一形里交的是 `vb6_GetControlText(vb6_hwnd_FDForm)`（Caption 的 BSTR）
+    #   塞进 `vb6_UnloadForm` 的 void* 槽 ⇒ 两头钉：对象位的答案必须在、默认属性那一形不许回来。
+    #   只认工程内窗体名（`Unload Picture1` 那种控件名不在本账范围，今天交什么继续交什么）。
+    Test-CodegenNote "form_unload_ownname" @("$Tests\fdraw\FDemo.vbp") @(
+        "vb6_UnloadForm(vb6_hwnd_FDForm);") @(
+        "vb6_UnloadForm(vb6_GetControlText(vb6_hwnd_FDForm)")
+
 
     Test-CodegenNote "alias_type_spelling_same_ctype" @("$Tests\test_alias_spellings.bas") @(
         "void vb6_BareColor(int32_t c);",
