@@ -1,4 +1,5 @@
 #include "backend/cgen.hpp"
+#include "common/host_pseudo.hpp"
 #include <algorithm>
 #include <cctype>
 #include <iostream>

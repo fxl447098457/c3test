@@ -2,6 +2,7 @@
 #include "common/float_literal.hpp"  // 账 #188: 浮点字面量的单一出口
 #include "common/int_literal.hpp"   // 账 #194: 整数字面量的单一出口
 #include "common/canvas_drawing.hpp"  // 账 #232①: 画布动词的单一出口 (名字 / 接收者 / 实参形状)
+#include "common/form_pseudo.hpp"     // 账 #278 §B109: 属性名→读函数的单一出口 (两层都问它)
 #include <algorithm>
 #include <cctype>
 #include <iostream>
@@ -287,59 +288,36 @@ Vb6Type CCodeGen::controlPropType(FrmControlType ctrlType, const std::string& pr
     return Vb6Type::Unknown;
 }
 
+// 账 #278 §B109: common 那张表不许认识 FrmControlType（它在 project/，common 不得向上依赖），
+// 所以这里把接收者类别折成表用的类别位。**只折表里要用到的那四类**：其余类型一律 0,
+// 等价于原来"通用段对所有类型都答"的行为。
+static uint32_t formPseudoKindBits(FrmControlType ctrlType) {
+    uint32_t bits = vb6c3::FPQ_NONE;
+    switch (ctrlType) {
+        case FrmControlType::Form:          bits |= vb6c3::FPQ_FORM;          break;
+        case FrmControlType::CommonDialog:  bits |= vb6c3::FPQ_COMMON_DIALOG; break;
+        case FrmControlType::Shape:         bits |= vb6c3::FPQ_SHAPE;         break;
+        case FrmControlType::Line:          bits |= vb6c3::FPQ_LINE;          break;
+        default: break;
+    }
+    return bits;
+}
+
 std::string CCodeGen::getControlPropReadFn(FrmControlType ctrlType, const std::string& propName) const {
     std::string propLower = propName;
     std::transform(propLower.begin(), propLower.end(), propLower.begin(), ::tolower);
 
-        // P11.8: Common properties for all visible controls (checked before switch)
-    if (propLower == "left") return "vb6_GetControlLeft";
-    if (propLower == "top") return "vb6_GetControlTop";
-    if (propLower == "width") return "vb6_GetControlWidth";
-    if (propLower == "height") return "vb6_GetControlHeight";
-    if (propLower == "hwnd") return "vb6_GetControlHwnd";
-    // P13.1: Font properties (all visible controls with text)
-    // D6 / C29-9: CommonDialog 的 FontName / FontSize 是**对话框字段**（ChooseFont 的 LOGFONT），
-    // 不是控件字体 —— 这枚控件没有外观。通用那一组查在类型 switch **之前**，不挡就把
-    // `CD1.FontName = "Consolas"` 静默落到字体属性上（C29-1a 那条 borderstyle 被抢走同一类碰撞）。
-    if (propLower == "fontname" && ctrlType != FrmControlType::CommonDialog) return "vb6_GetControlFontName";
-    if (propLower == "fontsize" && ctrlType != FrmControlType::CommonDialog) return "vb6_GetControlFontSize";
-    // C29-SL-p 的判据证人（**不是 VB6 属性**，只给读侧、不给写口）：窗口真在用的字体像素高度。
-    // 需要它是因为自存把"存什么读什么"做对了之后，读回来那个数已经问不出窗口了 ——
-    // 与 TickPresent / TravelIsVert / ToolTipRegistered 同族（#148 那条"证人问不出东西"的教训）。
-    if (propLower == "fontpixelheight" && ctrlType != FrmControlType::CommonDialog)
-        return "vb6_ControlFontPixelHeight";
-    if (propLower == "fontbold") return "vb6_GetControlFontBold";
-    if (propLower == "fontitalic") return "vb6_GetControlFontItalic";
-    if (propLower == "fontunderline") return "vb6_GetControlFontUnderline";
-    if (propLower == "fontstrikethrough") return "vb6_GetControlFontStrikethrough";
-    // P13.2: Color properties (all visible controls)
-    if (propLower == "forecolor") return "vb6_GetControlForeColor";
-    if (propLower == "backcolor") return "vb6_GetControlBackColor";
-    // P13.5: Alignment (all text controls)
-    if (propLower == "alignment") return "vb6_GetAlignment";
-    // P13.6: TabIndex/TabStop (all visible controls)
-    if (propLower == "tabindex") return "vb6_GetTabIndex";
-    if (propLower == "tabstop") return "vb6_GetTabStop";
-    if (propLower == "causesvalidation") return "vb6_GetCausesValidation";
-    // P13.8: ToolTipText (all visible controls)
-    if (propLower == "tooltiptext") return "vb6_GetToolTipText";
-    // P13.9: Tag (all controls)
-    if (propLower == "tag") return "vb6_GetControlTag";
-    // P13.7: MousePointer/MouseIcon (all visible controls)
-    if (propLower == "mousepointer") return "vb6_GetMousePointer";
-    if (propLower == "mouseicon") return "vb6_GetMouseIcon";
-    // P13.10: BorderStyle (all visible controls)
-    // C29-1a: Shape/Line 的 BorderStyle 是"画笔线型"(0..6), 与窗口边框样式(0/1)同名
-    // 不同物 —— 让这两个类型走下面各自的 case, 否则读回来的永远是窗口那套。
-    if (propLower == "borderstyle" && ctrlType != FrmControlType::Shape
-        && ctrlType != FrmControlType::Line) return "vb6_GetBorderStyle";
-    // Fix <vbeclipse>: ScaleWidth/ScaleHeight 是**所有**控件的通用属性 (不只 Form) —
-    // ucTabStrip.ctl 的 `With picButtons` 里读 ScaleWidth/ScaleHeight 落到 HWND 结构体
-    // 字段上 → C2039: "ScaleWidth" 不是 "HWND__" 的成员 (×3, 同式还带出 vb6_ControlMove
-    // 的 C2198). 放在 switch 之前, 与 Tag/MousePointer 同口径 (RTL: vb6forms_widget.c
-    // 的 vb6_GetScaleWidth/Height, 声明在 vb6forms_prop_form.h, 由 vb6forms.h 传递可见).
-    if (propLower == "scalewidth") return "vb6_GetScaleWidth";
-    if (propLower == "scaleheight") return "vb6_GetScaleHeight";
+    // P11.8 / P13.x / D6 / C29-9 / C29-SL-p / C29-1a / Fix 056: 属性名 → 读函数**只有一处登记**,
+    // 在 src/common/form_pseudo.hpp 的 kFormPseudoRows（账 #278 §B109）。原通用段与窗体臂的
+    // 每一行都搬进了那张表, 顺序未改（通用行在前、formOnly 行在后）；三条类型例外
+    // （CommonDialog 的 Font* / Shape·Line 的 BorderStyle）由行的 excl 位带出。
+    // 为什么搬：语义层判"这名字是不是未声明的标识符"必须问同一个事实, 拷两份就会
+    // "产物对、诊断错"（VB3001 噪声 5 条）—— 与 host_pseudo.hpp（账 #159/#219）同族。
+    // 表里没登记的仍走下面各类型的 switch 臂（那些是"只有这枚控件答"的成员, 与本表不同一格）。
+    {
+        std::string tableFn = formPseudoReadFn(propLower, formPseudoKindBits(ctrlType));
+        if (!tableFn.empty()) return tableFn;
+    }
 
     switch (ctrlType) {
     case FrmControlType::TextBox:
@@ -398,24 +376,8 @@ std::string CCodeGen::getControlPropReadFn(FrmControlType ctrlType, const std::s
         if (propLower == "enabled") return "vb6_GetControlEnabled";
         break;
     case FrmControlType::Form:
-        if (propLower == "caption") return "vb6_GetControlText";
-        if (propLower == "visible") return "vb6_GetControlVisible";
-        if (propLower == "enabled") return "vb6_GetControlEnabled";
-        // Fix 056: Form-specific properties
-        if (propLower == "windowstate") return "vb6_GetWindowState";
-        if (propLower == "scalewidth") return "vb6_GetScaleWidth";
-        if (propLower == "scaleheight") return "vb6_GetScaleHeight";
-        if (propLower == "scalemode") return "vb6_WindowScaleModeSelf";  // 账 #197: 与写侧成对
-        // 账 #233: Form 的**笔位与画笔粗细**。此前这四条住在 cgen_expr_member_form_builtin.inc
-        // 的一份侧表里 —— 那份表只有读侧, 于是 `Me.DrawWidth = 3` 退化成
-        // `vb6_Form_DrawGetWidth(vb6_hwnd_X) = 3;` (C2106, 实测两架构都编不过)。
-        // 收进这两张表之后读写成对, 侧表删掉。forecolor **不在这里** —— 它早已由上面
-        // 那条通用行答给 vb6_GetControlForeColor (侧表那一条从没命中过), 与绘图家族
-        // 自带的 VB6_DrawForeColor 是两份存储, 那一问另开账。
-        if (propLower == "currentx") return "vb6_GetCurrentX";   // 笔位只有一份存储 (float)
-        if (propLower == "currenty") return "vb6_GetCurrentY";
-        if (propLower == "drawwidth") return "vb6_Form_DrawGetWidth";
-        if (propLower == "hdc") return "vb6_GetControlHDC";  // 账 #196: Form.hDC 同一处出口
+        // 账 #278 §B109: 窗体臂那 11 行已整张搬进 kFormPseudoRows（formOnly 那批），
+        // 上面表里查过就轮不到这里 —— 本臂刻意留空。
         break;
     case FrmControlType::WebBrowser:
         if (propLower == "url" || propLower == "locationurl") return "vb6_WebViewGetUrl";
@@ -1525,12 +1487,23 @@ bool CCodeGen::formCtrlSlot(const std::string& objExpr, FrmControlType& outType,
     return true;
 }
 
+// 账 #278 §B72: 表交名字，也交「这条出口在 C 里收几枚实参」—— 两者必须同一行回答。
+// 以前只有名字，个数住在各条码头的参数串里，于是 RTL 与发码点之间只剩「头 vs 体」这一头
+// 有人对账 (账 #240 的 check_rtl_proto_arity.ps1)：谁给某枚出口加一枚形参、只改头与体，
+// 发码仍递旧的个数，本机只是 warning C4020、新 cl 才升成 error C2197 —— 门红在别人刚登记
+// 的用例上。有了这一行，同一道哨兵可以三面一起问：表 ↔ RTL 原型 ↔ 产物里实际的调用。
+static std::string controlExit(const char* rtlName, int argc, int* outArgc) {
+    if (outArgc) *outArgc = argc;
+    return rtlName;
+}
+
 // C29-SL-l（账 #143）: 控件的**零实参方法**名表（命中回 C 里的函数名，否则空串）。
 // 焦点面只给"真能拿焦点"的那批窗口型控件 —— Label / Image / Shape / Line / Timer / Menu /
 // Data / OLE / CommonDialog / Winsock / ImageList / StatusBar / ProgressBar 刻意不接：
 // 真 VB6 在那里是 raise 一个错误号，而本项目还没有运行期错误面，"什么都不做"比伪造成功诚实。
 std::string CCodeGen::controlZeroArgMethod(FrmControlType ctrlType,
-                                          const std::string& memberLower) const {
+                                          const std::string& memberLower,
+                                          int* outArgc) const {
     if (memberLower == "setfocus") {
         switch (ctrlType) {
             case FrmControlType::CommandButton:
@@ -1553,18 +1526,18 @@ std::string CCodeGen::controlZeroArgMethod(FrmControlType ctrlType,
             case FrmControlType::DTPicker:
             case FrmControlType::MonthView:
             case FrmControlType::RichTextBox:
-                return "vb6_SetControlFocus";
+                return controlExit("vb6_SetControlFocus", 1, outArgc);
             default:
                 return "";
         }
     }
     if (memberLower == "clearsel" && ctrlType == FrmControlType::Slider)
-        return "vb6_Slider_ClearSel";
+        return controlExit("vb6_Slider_ClearSel", 1, outArgc);
     // 账 #192: ListBox / ComboBox 的 Clear。VB6 里它是方法而不是属性，且只有这两枚
     // 有清空语义（TreeView/ListView 的清是各自那一族，另有出口）。
     if (memberLower == "clear"
         && (ctrlType == FrmControlType::ListBox || ctrlType == FrmControlType::ComboBox))
-        return "vb6_ClearList";
+        return controlExit("vb6_ClearList", 1, outArgc);
     return "";
 }
 
@@ -1576,13 +1549,15 @@ std::string CCodeGen::controlZeroArgMethod(FrmControlType ctrlType,
 // UserControl 那一档早就有（#177/#178 按实例那对），Printer 有 vb6_Printer_*，这里补的是
 // 窗体与 PictureBox —— 语料物证 ucTreeMaps 的 PropPagFMR.pag:265 `With Picture1 : .TextHeight(Text)`。
 std::string CCodeGen::controlOneArgMethod(FrmControlType ctrlType,
-                                          const std::string& memberLower) const {
+                                          const std::string& memberLower,
+                                          int* outArgc) const {
     if (memberLower != "textheight" && memberLower != "textwidth") return "";
     switch (ctrlType) {
         case FrmControlType::Form:
         case FrmControlType::PictureBox:
-            return memberLower == "textheight" ? "vb6_ControlTextHeight"
-                                               : "vb6_ControlTextWidth";
+            return memberLower == "textheight"
+                 ? controlExit("vb6_ControlTextHeight", 2, outArgc)
+                 : controlExit("vb6_ControlTextWidth", 2, outArgc);
         default:
             return "";
     }
@@ -1596,15 +1571,39 @@ std::string CCodeGen::controlOneArgMethod(FrmControlType ctrlType,
 // 只吃那两个显式的 from/to，实现只有一份 `vb6_ScaleUnitX/Y`（UC 那一档另有一层同名转手，
 // 因为宿主伪成员表的命名契约是 `vb6_<Host>_<Member>`）。
 std::string CCodeGen::controlScaleMethod(FrmControlType ctrlType,
-                                         const std::string& memberLower) const {
+                                         const std::string& memberLower,
+                                         int* outArgc) const {
     if (memberLower != "scalex" && memberLower != "scaley") return "";
     switch (ctrlType) {
         case FrmControlType::Form:
         case FrmControlType::PictureBox:
-            return memberLower == "scalex" ? "vb6_ScaleUnitX" : "vb6_ScaleUnitY";
+            return memberLower == "scalex"
+                 ? controlExit("vb6_ScaleUnitX", 3, outArgc)
+                 : controlExit("vb6_ScaleUnitY", 3, outArgc);
         default:
             return "";
     }
+}
+
+// 账 #278 §B72 第十三刀: Winsock 那一族的名字表（八枚成员 → RTL 出口 + 那条出口收几枚实参）。
+// 这一族从前把「有哪些成员」与「各自叫什么」抄在两处 —— 表达式码头 (withm) 里一张 kWsKnown
+// 名单外加八条分支里的字面量，语句码头 (cgen_call) 里又手写三枚。名单与名字分家的下场就是
+// 本账反复量到的那一味：加一档要改三处，漏一处的症状是编得过、跑起来一声不响。
+// 个数取自 RTL 原型（vb6forms_prop_ctrl.h:821-828，第一枚一律是 void* hwnd）：
+//   close / listen / connect 1、accept 2、bind 3、senddata 2、getdata / peekdata 4。
+// 与前几张表同一套规矩：**表交名字与个数，实参由码头拼** —— 出参取址（&变量）、(int32_t)
+// 强制、L"" 兜底那些形状是调用点的知识，不搬进表里。
+std::string CCodeGen::controlWinsockMethod(const std::string& memberLower,
+                                           int* outArgc) const {
+    if (memberLower == "close")    return controlExit("vb6_Ws_Close", 1, outArgc);
+    if (memberLower == "listen")   return controlExit("vb6_Ws_Listen", 1, outArgc);
+    if (memberLower == "connect")  return controlExit("vb6_Ws_Connect", 1, outArgc);
+    if (memberLower == "accept")   return controlExit("vb6_Ws_Accept", 2, outArgc);
+    if (memberLower == "bind")     return controlExit("vb6_Ws_Bind", 3, outArgc);
+    if (memberLower == "senddata") return controlExit("vb6_Ws_SendData", 2, outArgc);
+    if (memberLower == "getdata")  return controlExit("vb6_Ws_GetData", 4, outArgc);
+    if (memberLower == "peekdata") return controlExit("vb6_Ws_PeekData", 4, outArgc);
+    return "";
 }
 // 账 #221 = C29-PL-a（语料物证 Charts 2020/ucProgressCircular 的 ppProgressCircular.pag
 // 那 8 条 `Picture1.Line` / `Picture2.Line`）: 画表面方法的名字表。

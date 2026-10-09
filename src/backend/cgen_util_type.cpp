@@ -373,8 +373,7 @@ Vb6Type CCodeGen::inferExprType(Expr& expr) const {
             if (ma.object && ma.object->kind == ASTNodeKind::IdentifierExpr) {
                 const IdentifierExpr& objIdHp = static_cast<const IdentifierExpr&>(*ma.object);
                 const std::string objLowerHp = Symbol::toLower(objIdHp.name);
-                if (objLowerHp == "usercontrol" || objLowerHp == "propertypage"
-                    || objLowerHp == "extender" || objLowerHp == "ambient") {
+                if (hostPseudoIsObject(objLowerHp)) {  // 账 #278 §B120: 这一问由那张表答
                     Vb6Type hpT = Vb6Type::Unknown;
                     if (hostPseudoValueType(objLowerHp, ma.memberName, hpT, false)) {
                         return hpT;

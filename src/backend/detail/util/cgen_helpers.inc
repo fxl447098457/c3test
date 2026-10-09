@@ -355,16 +355,24 @@
     bool formCtrlSlot(const std::string& objExpr, FrmControlType& outType,
                       std::string& outHwndExpr) const;
     std::string controlZeroArgMethod(FrmControlType ctrlType,
-                                     const std::string& memberLower) const;
+                                     const std::string& memberLower,
+                                     int* outArgc = nullptr) const;  // 账 #278 §B72: 名字 + 实参个数
     // 账 #196: **一个实参**的控件方法表（TextHeight / TextWidth）。只交名字，实参由码头拼 ——
     // 与上面那张表同一套规矩，With 形与带括号裸形两条码头都要接。
     std::string controlOneArgMethod(FrmControlType ctrlType,
-                                    const std::string& memberLower) const;
+                                    const std::string& memberLower,
+                                    int* outArgc = nullptr) const;
 
     // 账 #196 第三条: 控件的单位换算方法（ScaleX/ScaleY，三个实参）名字表 —— 同一套
     // 「表只交名字、实参由码头拼」的规矩，且刻意不给通用行（理由见定义处）。
     std::string controlScaleMethod(FrmControlType ctrlType,
-                                   const std::string& memberLower) const;
+                                   const std::string& memberLower,
+                                   int* outArgc = nullptr) const;
+
+    // 账 #278 §B72 第十三刀: Winsock 那一族八枚成员的名字 + 各自的实参个数（一条答案）。
+    // 与上面几张表同一套规矩: 表交名字与个数，实参由码头拼。
+    std::string controlWinsockMethod(const std::string& memberLower,
+                                     int* outArgc = nullptr) const;
 
     // 账 #221 = C29-PL-a: 控件的**画表面方法**名表（目前只有 Line，六个实参）。
     // 与上面三张表同一套规矩: 表只交名字、实参由码头拼，且**刻意不给通用行** ——
@@ -710,6 +718,11 @@
     // 非宿主伪对象 / 表中无此项时原样返回.
     std::string canonicalHostPseudoMember(const std::string& pseudoObj,
                                            const std::string& memberName) const;
+
+    // 账 #278 §B120: `vb6_<对象>_<成员>` 的装配与"是不是宿主伪对象"这两问的唯一出口。
+    std::string hostPseudoRtlSymbol(const std::string& pseudoObj,
+                                    const std::string& memberName) const;
+    bool hostPseudoIsObject(const std::string& name) const;
 
     // 账 #159 = C29-CH-d: 上面那条规范化与下面三个问题, 全部由 cgen_util_com.cpp
     // 里 kHostPseudoRows 这**一张表**回答 (成员名清单只此一处, 别处再抄就是回归):

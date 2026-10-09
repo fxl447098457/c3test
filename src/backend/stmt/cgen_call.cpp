@@ -351,37 +351,30 @@ void CCodeGen::visit(CallStmt& node) {
             {
                 auto itWs = knownFormControls_.find(comObjExpr_);
                 std::string mWs = Symbol::toLower(comMemberName_);
-                const char* fnWs = nullptr;
+                // 账 #278 §B72 第十三刀: 名字改问那张表。这一形**手里一枚实参都没有**，所以只许
+                // 拿表里「个数 == 1」的那几档（close / listen / connect）；其余成员照旧落到下面
+                // 那条通用兜底，由带实参的那条码头 (withm) 收尾。从前这件事靠手写名单维持,
+                // 现在靠表交出的个数 —— 谁给某枚出口加一枚形参, 这一头会自动不再接它。
+                std::string fnWs;
                 if (itWs != knownFormControls_.end() && itWs->second == FrmControlType::Winsock) {
-                    if (mWs == "close")        fnWs = "vb6_Ws_Close";
-                    else if (mWs == "listen")  fnWs = "vb6_Ws_Listen";
-                    else if (mWs == "connect") fnWs = "vb6_Ws_Connect";
+                    int argcWs = 0;
+                    fnWs = controlWinsockMethod(mWs, &argcWs);
+                    if (argcWs != 1) fnWs.clear();
                 }
-                if (fnWs) {
+                if (!fnWs.empty()) {
                     std::string hwndWs = cIdent(knownFormControlOriginalNames_.count(comObjExpr_)
                         ? knownFormControlOriginalNames_[comObjExpr_] : comObjExpr_);
                     comObjExpr_.clear();
                     comMemberName_.clear();
-                    c_.emitLine(std::string(fnWs) + "((void*)vb6_hwnd_" + hwndWs + ");"
+                    c_.emitLine(fnWs + "((void*)vb6_hwnd_" + hwndWs + ");"
                                 "  /* Winsock." + mWs + " (原生 Winsock2) */");
                     return;
                 }
             }
-            // Fix 086: 无括号的控件方法调用 (List1.Clear) — 与 IndexOrCallExpr
-            // 的 P13.3 处理一致, 生成 vb6_ClearList(vb6_hwnd_Listx), 而非
-            // vb6_ComCall(list1,...) 裸控制名 (C2065).
-            auto itCtrlCS = knownFormControls_.find(comObjExpr_);
-            if (itCtrlCS != knownFormControls_.end()
-                && (itCtrlCS->second == FrmControlType::ListBox
-                    || itCtrlCS->second == FrmControlType::ComboBox)
-                && Symbol::toLower(comMemberName_) == "clear") {
-                std::string ctrlNameCS = cIdent(knownFormControlOriginalNames_.count(comObjExpr_)
-                    ? knownFormControlOriginalNames_[comObjExpr_] : comObjExpr_);
-                comObjExpr_.clear();
-                comMemberName_.clear();
-                c_.emitLine("vb6_ClearList((void*)vb6_hwnd_" + ctrlNameCS + ");  /* ListBox.Clear */");
-                return;
-            }
+            // 账 #278 §B72: 这一族从前在 Fix 086 里又硬编码了一遍 (类型判据 +
+            // `vb6_ClearList` 字面量)。表 controlZeroArgMethod 今天照样答 ListBox/ComboBox 的
+            // clear 这一行, 而语句码头在下方 C29-SL-l 那一格已经问它 —— 两份答案住两处,
+            // 改名字或改实参个数时必有一份落后。所以这里删掉, 由表答。
             // 账 #185 / 账 #232②: 画布家族的**语句码头**（不写括号那一形）。
             // 接收者问 `formCtrlSlot`（裸小写名与 `vb6_hwnd_X` 都认，窗体自己那枚也认），
             // 名字与出口问 `controlCanvasMethod`（cls / print 两档）—— 与表达式码头

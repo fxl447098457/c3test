@@ -492,6 +492,25 @@ std::string CCodeGen::canonicalHostPseudoMember(const std::string& pseudoObj,
     return r ? std::string(r->rtl) : memberName;
 }
 
+// 账 #278 §B120: 宿主伪成员的 RTL 全局符号 `vb6_<对象>_<成员>` **只在这里装配一次**。
+// 从前这句在三处各拼一遍 (With 块 / 赋值 / 裸名)，每抄一次就多一个权威：第十刀修掉的
+// `vb6_PropertyPage_hwnd` 就是其中一份抄错大小写的 (RTL 两枚都定义了，所以它编得过，只是编向
+// 另一枚全局)。对象那一段与成员那一段现在都出自那张表；表里没有这一行时按源码成员名发
+// (与改前逐字节一致，不新增也不撤销任何 C2065)。名字不是宿主伪对象时交回空串 —— 三个调用点
+// 都先过了 hostPseudoIsObject 那道闸，空串意味着接线错了，不是运行期会遇到的输入。
+std::string CCodeGen::hostPseudoRtlSymbol(const std::string& pseudoObj,
+                                          const std::string& memberName) const {
+    std::string objSym;
+    if (!hostPseudoObjectSymbol(pseudoObj, objSym)) return std::string();
+    const HostPseudoRow* r = hostPseudoFind(pseudoObj, memberName);
+    return "vb6_" + objSym + "_" + cIdent(r ? r->rtl : memberName);
+}
+
+// "这个名字是不是宿主伪对象"由那张表答 (这一句从前在发码侧抄了五份)。
+bool CCodeGen::hostPseudoIsObject(const std::string& name) const {
+    return hostPseudoObjectKnown(name);
+}
+
 // 裸名能不能解析成宿主伪成员 (.ctl/.pag 里直接写 hDC / ScaleWidth / Changed …)。
 bool CCodeGen::hostPseudoBareName(const std::string& pseudoObj,
                                   const std::string& memberName,

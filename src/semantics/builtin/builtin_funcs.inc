@@ -16,6 +16,10 @@
     addObj("Screen");
     addObj("App");
     addObj("Printer");
+    // 账 #278 (§B108): 复数那一格原本没登记。发码侧一直在答 `vb6_Printers_Collection()`
+    // (cgen_expr_ident_dispatch.inc 的内置对象段)，语义层认不得这个名字 ⇒ Option Explicit 下
+    // 每条合法引用多配一条 VB3001，宽松模式下更实 —— 落进"隐式 Variant 局部"那格，把对象本体挤掉。
+    addObj("Printers");
     addObj("Forms");
     addObj("Clipboard");
     addObj("Console");  // Fix 161: Console 对象 (对齐 twinBASIC) —— 控制台 I/O

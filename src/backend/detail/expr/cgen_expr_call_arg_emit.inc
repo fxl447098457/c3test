@@ -44,6 +44,19 @@
         // 实参生成默认属性 (BSTR) 指针, 被调方 *objControl 读到 VARIANT.vt
         // (如 VT_BSTR=8) → 运行期崩溃 (BalloonTooltips cTT.CreateToolTip).
         bool savedSuppressProp = suppressDefaultProp_;
+        // 账 #278 §B113: `Load/Unload <窗体名>` 的实参站在**对象位**，VB6 不取默认属性。
+        // 下面那一支只在"被调方形参声明为 Object"时抑制，而内置的 load/unload 没有
+        // calleeParams ⇒ 走不到；实测窗体模块里 `Unload 自己那枚窗体名` 交出的是
+        // `vb6_GetControlText(vb6_hwnd_X)`（Caption 的 BSTR）塞进 `vb6_UnloadForm` 的 void* 槽，
+        // 而同一句写成 `Unload Me` 一直是 `vb6_hwnd_X` —— 这一支把两者并成同一条答案
+        // （抑制后走唯一出口 ctrlObjectRefExpr，与 Set 的右值同闸，账 #258）。
+        // 只认工程内窗体名：控件名（`Unload Picture1`）今天交什么继续交什么，不在本账范围。
+        if ((callee == "vb6_LoadForm" || callee == "vb6_UnloadForm")
+            && node.positional[i] && node.positional[i]->kind == ASTNodeKind::IdentifierExpr) {
+            std::string formArg2113 = Symbol::toLower(
+                static_cast<IdentifierExpr&>(*node.positional[i]).name);
+            if (knownFormModuleNames_.count(formArg2113)) suppressDefaultProp_ = true;
+        }
         if (i < calleeParams.size()
             && static_cast<Vb6Type>(static_cast<uint16_t>(calleeParams[i].type)
                  & ~static_cast<uint16_t>(Vb6Type::Array)) == Vb6Type::Object

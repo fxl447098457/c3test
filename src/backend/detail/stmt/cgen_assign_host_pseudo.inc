@@ -43,9 +43,8 @@
                 static_cast<const IdentifierExpr&>(*maHp->object).name;
             const std::string objLowerHp = Symbol::toLower(objNameHp);
             const bool isParentHp = (objLowerHp == "parent");
-            const bool isHostPseudoHp =
-                (objLowerHp == "usercontrol" || objLowerHp == "ambient"
-                 || objLowerHp == "extender" || objLowerHp == "propertypage");
+            // 账 #278 §B120: 这一问由那张表答 (抄了五份的那一份就在这)。
+            const bool isHostPseudoHp = hostPseudoIsObject(objLowerHp);
             if ((isParentHp || isHostPseudoHp) && !knownLocalVars_.count(objLowerHp)) {
                 emitExpr(*node.value);
                 std::string valHp = std::move(lastExpr_);
@@ -64,9 +63,8 @@
                     return;
                 }
                 // 宿主伪对象成员 = RTL 全局变量（vb6rtl_userctl.h），直接赋值。
-                // 成员名按 RTL 约定规范化（源码 hDc → RTL hDC，见 canonicalHostPseudoMember）。
-                const std::string tgtHp = "vb6_" + cIdent(objNameHp) + "_"
-                    + cIdent(canonicalHostPseudoMember(objNameHp, maHp->memberName));
+                // 成员名按 RTL 约定规范化、对象名取表里那一列，装配只经 hostPseudoRtlSymbol（§B120）。
+                const std::string tgtHp = hostPseudoRtlSymbol(objNameHp, maHp->memberName);
                 // 账 #159: 要不要拆数值由那张表答 (目标槽是整数才拆; 句柄/对象/字符串
                 // 成员按原样直传)。此前这里是又一份成员名清单 kNumericHostMembers。
                 if (cExprIsVariant(valHp) && hostPseudoIsNumeric(objLowerHp, maHp->memberName)) {

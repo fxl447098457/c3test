@@ -10,7 +10,8 @@
 #   S1  笔位那份存储唯一: `VB6_CurrentX` / `VB6_CurrentY` 这两个窗口属性名的 GetPropW/SetPropW
 #       在 src/rtl 里只许出现在 vb6forms_widget_prop.c (float 那一户) —— 再开第二处 = 又一份编码
 #   S2  cgen 侧表不回潮: 四个笔位导出名 (vb6_Form_DrawGet/SetCurrentX/Y) 在 src/backend 里 0 次
-#   S3  读写成对: currentx / currenty / drawwidth 三个名在 getControlPropReadFn 的 Form 档与
+#   S3  读写成对: currentx / currenty / drawwidth 三个名在窗体那一档读表(账 #278 §B109 起在
+#       src\common\form_pseudo.hpp)与写表里都各有一行
 #       getControlPropWriteFn 的 Form 档**都要**有 (少一边就是这一刀回归)
 #   S4  编码对称: vb6_DrawSetI 那条 SetPropW 必须写裸值 (只看写行 —— 注释里提到 "v+1" 是在讲历史)
 #   S5  画笔色也只有一份存储 (账 #235): 属性名 VB6_DrawForeColor 在 src/rtl 里不许出现在任何
@@ -33,6 +34,16 @@
 # 退出码: 0 = 全绿; 1 = 红
 
 $ErrorActionPreference = "Stop"
+# 只认非注释部分（§B108 那条负控实测过一次：纯文本正则会连 `// addObj("X")` 一起算进名单）。
+function Strip-RowComments([string]$text) {
+    $kept = @()
+    foreach ($line in ($text -split "`r?`n")) {
+        $cut = $line.IndexOf('//')
+        $kept += $(if ($cut -ge 0) { $line.Substring(0, $cut) } else { $line })
+    }
+    return ($kept -join "`n")
+}
+
 $root = Split-Path -Parent $PSScriptRoot
 $bad = @()
 
@@ -91,6 +102,12 @@ function Get-FormCase([string]$text, [string]$fnPat, [string]$tag) {
     return $mCase.Value
 }
 $rd = Get-FormCase $u 'std::string\s+CCodeGen::getControlPropReadFn' 'read'
+# 账 #278 §B109: Form 那一臂整张搬进了 common 的表 ⇒ 读侧的名字在那里；两处合起来算，
+# 两边都查不到才算没登记（写表仍住 cgen_util_ctrl.cpp，没搬）。
+if ($null -ne $rd) {
+    $fpRawC = [System.IO.File]::ReadAllText((Join-Path $root "src\common\form_pseudo.hpp"))
+    $rd = $rd + (Strip-RowComments $fpRawC)
+}
 $wr = Get-FormCase $u 'std::string\s+CCodeGen::getControlPropWriteFn' 'write'
 if ($null -eq $rd) { $bad += "S3 getControlPropReadFn Form case not found" }
 if ($null -eq $wr) { $bad += "S3 getControlPropWriteFn Form case not found" }

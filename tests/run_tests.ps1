@@ -765,6 +765,14 @@ function Test-RtlResourceIds {
 }
 # 账 #240: RTL 的头与体必须同一张签名（参数个数）。本机那台 cl 在 C 模式下不诊断「实参过多」，
 # 头追不上体的缺陷只有 runner 上新 cl 才报 error C2197 ⇒ 判据不能靠真编，只能对着源码比。
+# 账 #278 §B72 把同一把针往外接两头：发码那几张控件方法表（名字 + 实参个数, 恰好 15 行 =
+# 第十二刀那 7 行 + 第十三刀 Winsock 那一族 8 行）要与 RTL 头、与 cgen_util_type.cpp 那张
+# 运行时参数表对上，且与**产物里实际递出的实参数**对上（跑一次 --emit-c 数
+# tests/ctrlzero/ZeroForm.frm 里那 14 枚调用, 只走前端不起 cl）。反过来的形状
+# —— RTL 加形参、发码仍递旧个数 —— 本机只 warning C4020, 到新 cl 才升 error C2197,
+# 所以两头都必须钉在源码与产物上, 不能等编译红。另钉 R5: 表里那些出口名不许在别处再拼一遍;
+# 而「没括号那一形」的 Winsock 码头拿的是表里「个数 == 1」那一档 —— 个数在这里不只是判据,
+# 还是接不接这条形的条件。
 function Test-RtlProtoArity {
     $script:total++
     Write-Host -NoNewline "  [STATIC] rtl_proto_arity ... "
@@ -991,6 +999,106 @@ function Test-ManifestCoverage {
     Write-Host -NoNewline "  [STATIC] manifest_coverage ... "
     $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$PSScriptRoot\..\scripts\check_manifest_coverage.ps1" 2>&1
     if ($LASTEXITCODE -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        $out | Select-Object -First 6 | ForEach-Object { Write-Host "  $_" }
+    }
+}
+# 账 §B99: 磁盘上的 src/rtl 与 C3.exe 里内嵌的那 125 份 RCDATA 是否逐字节同步（#225 那类对调/漏 touch）。
+# 账 §B73/§B94: 跨阶段递信息的签名载体结构体，字段没默认初值 = 拿栈上残值答题（两台工具链会稳定答不同档）。
+function Test-ComSigFieldDefaults {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] com_sig_field_defaults ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$PSScriptRoot\..\scripts\check_com_sig_field_defaults.ps1" 2>&1
+    $rc = $LASTEXITCODE
+    if ($rc -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        $out | Select-Object -First 6 | ForEach-Object { Write-Host "  $_" }
+    }
+}
+function Test-DiagIdExclusivity {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] diag_id_exclusivity ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$PSScriptRoot\..\scripts\check_diag_id_exclusivity.ps1" 2>&1
+    $rc = $LASTEXITCODE
+    if ($rc -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        $out | Select-Object -First 6 | ForEach-Object { Write-Host "  $_" }
+    }
+}
+function Test-ProjectConstVisibility {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] project_const_visibility ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$PSScriptRoot\..\scripts\check_project_const_visibility.ps1" 2>&1
+    $rc = $LASTEXITCODE
+    if ($rc -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        $out | Select-Object -First 6 | ForEach-Object { Write-Host "  $_" }
+    }
+}
+function Test-BuiltinGlobalObjects {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] builtin_global_objects ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$PSScriptRoot\..\scripts\check_builtin_global_objects.ps1" 2>&1
+    $rc = $LASTEXITCODE
+    if ($rc -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        $out | Select-Object -First 6 | ForEach-Object { Write-Host "  $_" }
+    }
+}
+function Test-FormPseudoTable {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] form_pseudo_table ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$PSScriptRoot\..\scripts\check_form_pseudo_table.ps1" 2>&1
+    $rc = $LASTEXITCODE
+    if ($rc -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        $out | Select-Object -First 6 | ForEach-Object { Write-Host "  $_" }
+    }
+}
+function Test-ProjectFormNames {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] project_form_names ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$PSScriptRoot\..\scripts\check_project_form_names.ps1" 2>&1
+    $rc = $LASTEXITCODE
+    if ($rc -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        $out | Select-Object -First 6 | ForEach-Object { Write-Host "  $_" }
+    }
+}
+function Test-RtlEmbedded {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] rtl_embedded ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$PSScriptRoot\..\scripts\check_rtl_embedded.ps1" 2>&1
+    $rc = $LASTEXITCODE
+    if ($rc -eq 0) {
         $script:pass++
         Write-Host "PASS" -ForegroundColor Green
     } else {
@@ -2959,6 +3067,12 @@ if ($Category -in @("all", "run", "vbp")) {
                     "AK-pre=optA/down=optB/wrap=optA/up=optB/optA=N/optB=Y/clicks=3")
     Test-Vbp "tabwalk" "$Tests\tabwalk\TabWalkApp.vbp" $twNeedles
     Test-Vbp "tabwalk_x86" "$Tests\tabwalk\TabWalkApp.vbp" $twNeedles -Arch "x86"
+    # 账 #278 §B112: 夹具以前只声明了 WM_KEYDOWN / WM_KEYUP / VK_TAB / VK_DOWN，`AK-*` 那一路用的
+    #   VK_UP 没声明。发码把裸名交出去，<windows.h> 里同名宏（winuser.h: VK_UP 0x26）**恰好**接着了
+    #   —— 值一样所以两条架构真跑都绿，而 VB6 会直接拒源（Option Explicit + 未声明标识符）。
+    #   补 `Private Const VK_UP As Long = &H26` 之后两头钉：折成的字面量必须在、裸名不许回来。
+    Test-EmitcShape "tw_emitc_vkup_folded" @("$Tests\tabwalk\TabWalkApp.vbp") @(', 38, 40));')
+    Test-EmitcAbsent "tw_emitc_vkup_bare" @("$Tests\tabwalk\TabWalkApp.vbp") @(', VK_UP, 40)')
     Test-EmitcShape "tw_emitc_cparent" @("$Tests\tabwalk\TabWalkApp.vbp") @(
         '1409286151L, 65536L,',           # 顶层 Frame（Frame1 与 optFrame 两处）
         '1417675278L, 65536L,',           # 顶层 PictureBox（账 #164：这一串已不含 WS_TABSTOP）
@@ -5338,6 +5452,13 @@ if ($Category -in @("all", "compile")) {
     Test-TestHelperIntegrity
     Test-ModuleOrderAuthority
     Test-ManifestCoverage
+    Test-RtlEmbedded
+    Test-ComSigFieldDefaults
+    Test-DiagIdExclusivity
+    Test-ProjectConstVisibility
+    Test-BuiltinGlobalObjects
+    Test-FormPseudoTable
+    Test-ProjectFormNames
 
     Test-EmitcArtifactCaliber
     Test-CtrlGeomCache
@@ -6028,6 +6149,15 @@ if ($Category -in @("all", "syntax")) {
         "vb6_Point((&(int32_t){7}), (&(int32_t){9}));") @(
         "vb6_VariantEmpty()",
         "Circle(240, 90")
+    # 账 #278 §B113: `Load/Unload <窗体名>` 的实参站在**对象位**，不许折成默认属性。
+    #   夹具里那枚没人调的 UsOwnNameProbe 写 `Unload FDForm`（VB6 里与 `Unload Me` 同义）。
+    #   改前那一台在这一形里交的是 `vb6_GetControlText(vb6_hwnd_FDForm)`（Caption 的 BSTR）
+    #   塞进 `vb6_UnloadForm` 的 void* 槽 ⇒ 两头钉：对象位的答案必须在、默认属性那一形不许回来。
+    #   只认工程内窗体名（`Unload Picture1` 那种控件名不在本账范围，今天交什么继续交什么）。
+    Test-CodegenNote "form_unload_ownname" @("$Tests\fdraw\FDemo.vbp") @(
+        "vb6_UnloadForm(vb6_hwnd_FDForm);") @(
+        "vb6_UnloadForm(vb6_GetControlText(vb6_hwnd_FDForm)")
+
 
     Test-CodegenNote "alias_type_spelling_same_ctype" @("$Tests\test_alias_spellings.bas") @(
         "void vb6_BareColor(int32_t c);",

@@ -103,6 +103,14 @@
             // Fix <vbeclipse>: 宿主伪对象 (UserControl/Ambient/...) 的成员名按 RTL 约定
             // 规范化 (源码 `UserControl.hDc` → RTL 只有 vb6_UserControl_hDC), 否则
             // 生成未声明的 vb6_UserControl_hDc (C2065 ×3: ucButton/ucCaption/ucTab).
+            // 账 #278 §B120: 第四处装配点。宿主伪对象那一段交回唯一出口 (对象名与成员名都出自
+            // 那张表) —— 从前这里把**源码拼写**直接抄进 C 标识符, 于是 `usercontrol.hDC` 发成
+            // vb6_usercontrol_hDC (没人声明它) ⇒ C2065, 而同一份文档写 `UserControl.hDC` 是通的。
+            // 其余限定符是工程内模块名, 那条路一字不动。
+            if (!isIncluded2 && hostPseudoIsObject(modName2)) {
+                lastExpr_ = hostPseudoRtlSymbol(modName2, varName2);
+                return;
+            }
             varName2 = cIdent(canonicalHostPseudoMember(modName2, varName2));
             lastExpr_ = isIncluded2 ? varName2 : ("vb6_" + cIdent(modName2) + "_" + varName2);
             return;

@@ -497,5 +497,6 @@
 
 /* 账 #218 第三刀: vbPicType/vbHitResult/vbAsync* 14 枚 RTL #define 撤掉 —— 值改由 src/semantics/builtin/builtin_consts.inc 单一权威交出, vb6rtl_userctl.h 因此变动; re-embed 1791500270 */
 /* 57b1f64e (ai/032) 给 RTL 加了 VB.NET 那一批 (vb6rtl.c / vb6rtl_builtin.h / vb6rtl_conv.c 的窄与无符号档), 但那一笔没 touch 本文件 ⇒ rc.exe 可能不重跑、C3.exe 里嵌的还是旧 RTL (见 memory rtl-reembed-c3rtl-rc-landmine)。本行就是那次 touch; §B97 那刀自己也重编了一次。 */
+/* 15e119f3 (ai/032 rev2) 又改了 src/rtl/core/vb6rtl/vb6rtl.c (id 101) 与 vb6rtl_builtin.h (id 135) 而没 touch 这个 .rc —— 补一行 marker 让 rc.exe 重跑。第 43 道哨兵 scripts/check_rtl_embedded.ps1 现在会把这种情形自己报红，不再靠人记（同一形状已撞过两次：#225 与 57b1f64e）。 */
 
 /* Fix 224: vb6rtl_userctl.h / vb6rtl_com.c 的 vb6_UserControl_ScaleX/Y 改 _Generic 分派 (真函数挂 _Raw) —— RTL 源变动, 本行是那次 touch, 让 rc.exe 重跑并把新 RTL 嵌进 C3.exe (见上一条 marker 的同款地雷)。 */

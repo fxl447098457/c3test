@@ -433,8 +433,8 @@ void CCodeGen::visit(WithStmt& node) {
                     memExpr.object->kind == ASTNodeKind::IdentifierExpr) {
                     auto& objId133w = static_cast<IdentifierExpr&>(*memExpr.object);
                     std::string objLower133w = Symbol::toLower(objId133w.name);
-                    if (objLower133w == "usercontrol" || objLower133w == "ambient" ||
-                        objLower133w == "extender" || objLower133w == "propertypage") {
+                    // 账 #278 §B120: 这一问由那张表答。
+                    if (hostPseudoIsObject(objLower133w)) {
                         withInfo.kind = WithObjKind::COMObject;
                     }
                 }
@@ -657,17 +657,24 @@ auto& idExpr = static_cast<IdentifierExpr&>(*callExpr.callee);
     if (!withObjectInfoStack_.empty() && withObjectInfoStack_.back().kind == WithObjKind::FormControl && withObjectInfoStack_.back().ctrlType == FrmControlType::Menu) {  // P20-36
         c_.emitLine("int " + tempVar + " = 0;  /* Menu: no HWND, props use (hmenu,menuId) */");
     } else {
-        // Fix 160w: 宿主伪对象 `With UserControl` / `With PropertyPage` (UserControl
-        // 类模块内) — emitExpr(<IdentifierExpr "UserControl">) 生成裸 `UserControl`,
-        // C 无该声明 → C2065 (VBFlexGrid.c:1552). UserControl 伪对象在此作用域即当前
-        // 控件的宿主窗口 (vb6_UserControl_hWnd, extern HWND), 直接替换表达式.
-        // PropertyPage 同理用 vb6_PropertyPage_hwnd.
+        // Fix 160w: 宿主伪对象 `With UserControl` / `With PropertyPage` —— 裸名在 C 里
+        // 没有声明 (C2065, VBFlexGrid.c:1552), 这两档的答复是「当前文档的宿主句柄」。
+        // 账 #278 §B115: **那句拼法不再在这里现抄**。原来两枚字面量是手抄的，`.ctl` 那枚恰好
+        // 抄对 (vb6_UserControl_hWnd)，`.pag` 那枚抄成 `vb6_PropertyPage_hwnd`(小写 h)。
+        // 后果不是编不过 —— RTL 把**两种拼写都声明并定义了** (vb6rtl_com.c:1072/1073 各一行,
+        // vb6rtl_userctl.h:181/182 各一条 extern)，实测同一份产物里一个事实两个答复：
+        //   With PropertyPage     ->  void* _vb6_with_0 = (void*)vb6_PropertyPage_hwnd
+        //   n = PropertyPage.hWnd ->  n = vb6_PropertyPage_hWnd
+        // 今天两枚都还是 NULL (§B118: .pag 的宿主全局全仓 0 个写者) ⇒ 差别的现价是 0；
+        // 但一旦有人给 hWnd 那枚接上写者，With 块读的还是没人写的那一枚 ⇒ 静默错宿主。
+        // 装配本来就有唯一出口 (hostPseudoRtlSymbol 读 kHostPseudoRows 的 obj + rtl 两列，与
+        // 裸名/赋值那两条路同一个函数，账 #278 §B120) ⇒ 一张表答两头，第八刀扣着的 .pag 自身
+        // 对象名放行才有地方放。
         if (tempType == "void*" && node.object->kind == ASTNodeKind::IdentifierExpr) {
             auto& hid160w = static_cast<IdentifierExpr&>(*node.object);
-            if (hid160w.name == "UserControl") {
-                lastExpr_ = "vb6_UserControl_hWnd";
-            } else if (hid160w.name.compare(0, 12, "PropertyPage") == 0) {
-                lastExpr_ = "vb6_PropertyPage_hwnd";
+            const std::string hpObj160w = Symbol::toLower(hid160w.name);
+            if (hpObj160w == "usercontrol" || hpObj160w == "propertypage") {
+                lastExpr_ = hostPseudoRtlSymbol(hid160w.name, "hwnd");
             }
         }
         // Fix 038: C2440 修复 — UDT 同类型转换和 UDT/VARIANT → void* 转换
