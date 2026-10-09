@@ -2002,6 +2002,38 @@ marker、重编，之后 `check_rtl_embedded` 报 **125/125 逐字节相同**。
 
 
 
+### B106 跨模块 `Public Const`：工程级名字表**只收过程、不收常量** —— 第 10 处"发码有路、语义没放行"，而且连标准模块之间都报（2026-10-09 量完，**下一刀**）
+
+探针 `.build/b909_probe`（`KConstants.bas` 两枚 `Public Const` + `KThing.cls` 用两枚 + `KMain.bas` 用一枚）：
+
+- 诊断 **3 条 VB3001**：`.cls` 里两枚，以及 **`.bas` 用另一枚 `.bas` 的 Public Const 也报**（`KMain.bas` 的 `K_SIMPLE`）。
+  这不是"类模块才有的麻烦"，是最普通的工程级常量进不了表。
+- 产物**对**：发码是 `v = (1 + 42);` —— 语义层早把两枚常量折成字面量了，`KMain` 那侧同样折好。
+  ⇒ 与 §B104/§B105 同形：**缺的是放行，不是能力**。
+
+**根因范围就一处**：`driver_semantics.cpp:96-117` 那张工程级表逐条 `switch (d->kind)` 只收 `SubDecl / FunctionDecl / PropertyDecl`
+（注释写明"只有标准模块的 Public 过程能被裸名点到"），**模块级 `Public Const` 从来没进表**；
+而 `namesProjectLevel`（`semantic_analyzer_util.cpp:722-727`）是语义层唯一的"这名字工程里有"闸门，闸门后面紧跟的就是
+`optionExplicit_` 那条 3001（`semantic_analyzer_expr.cpp:159-161`）。
+⇒ 落点：同一趟建表里把标准模块的模块级 `Public Const` 收进第三份名单（**要一起考虑 `Public Enum` 成员** —— 问表的时候别只问一半），
+`namesProjectLevel` 多问一句。发码不碰：常量折叠那条路今天就在跑。
+
+**于是账 #278 那 12 处里的"常量"那一格就此定位，两枚走两条完全不同的路**：
+
+- `CTRLINFO_EATS_RETURN`（`VBFlexGrid.ctl` 用 `VTableHandle.bas:42` 的 `Public Const`）= **就是这一格**，
+  不是"内在常量表缺项"，别去动 #217/#218 那三格机制。⚠ 语料里这一处的**产物看不见**：用它的那个
+  `IOleControlVB_GetControlInfo` 属于 `Implements OLEGuids.IOleControlVB`，而那枚接口找不到（VB3044），
+  整个子程序没进发码 —— 所以别拿这条 census 当"产物坏了"的证据，也别拿它当"产物好了"的证据。
+- `VK_UP`（`tests/tabwalk/WalkForm.frm:345`）= **夹具自己的源码 bug**：同文件 202-205 行手写了
+  `WM_KEYDOWN / WM_KEYUP / VK_TAB / VK_DOWN` 四枚 `Private Const`，**独独漏了 `VK_UP`**；
+  今天能编过是因为发码里留下的是**裸 `VK_UP`**，撞上了 `winuser.h` 的真宏（emit 里只有 `#define VK_TAB (9)`、
+  `#define VK_DOWN (40)` 两枚）。**VB6 本人在这里报 Variable not defined** ⇒ 修法 = 给夹具补
+  `Private Const VK_UP As Long = &H26`，与 `Count` 同族：改测试源码，不改编译器。
+
+**⚠ 一条本轮又用了两遍的读法**（§B105 末尾那条的续用）：诊断行号对 `.frm/.pag/.ctl` 是**代码段相对行号，列号才是物理的**。
+本轮标定：`.pag` 偏移 234、`TmForm.frm` 偏移 23、`VBFlexGrid.ctl` 偏移 21。三处都是靠列号一比对就对上的；
+按行号直接读文件会读到设计期属性块，看起来像"census 是假的"。
+
 ### B105 另外 3 处也是「产物对、诊断错」，但这一族的放行撞在表的 `rtl` 契约上（2026-10-09 量完，**要拍一个口径**）
 
 接 §B104 的同一把尺子（先看产物再看诊断）量剩下的裸写文档成员，**三处全是噪声**：
