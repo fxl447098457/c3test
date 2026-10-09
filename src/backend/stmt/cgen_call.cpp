@@ -230,6 +230,12 @@ void CCodeGen::visit(CallStmt& node) {
                                 } else if (inferExprType(*call.positional[j]) == Vb6Type::ULongLong) {
                                     // ai/032: 同上, 64 位无符号 (2^32 不能在 32 位处截成 0)。
                                     c_.emitLine("vb6_DebugWriteBSTR(vb6_CStrULongLong(" + val + "));");
+                                } else if (inferExprType(*call.positional[j]) == Vb6Type::LongLong) {
+                                    // ai/032 rev2: Debug.Print x (x As LongLong) —— 落到下面的
+                                    // DebugWriteLong((int32_t)(x)) 会把 64 位值截成 32 位。
+                                    // 改前 LongLong 局部不在任何 known 表里 (类型答 Variant),
+                                    // 于是这条路也走不到; 登记之后必须补上这一档。
+                                    c_.emitLine("vb6_DebugWriteBSTR(vb6_CStrLongLong(" + val + "));");
                                 } else {
                                     // 整数/布尔值, 用DebugWriteLong输出
                                     c_.emitLine("vb6_DebugWriteLong((int32_t)(" + val + "));");

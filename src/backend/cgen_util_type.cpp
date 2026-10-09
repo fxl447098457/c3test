@@ -101,6 +101,23 @@ std::string CCodeGen::asUnsignedOperand(const std::string& cExpr, const Expr& as
     return "(" + std::string(ctype) + ")(" + cExpr + ")";
 }
 
+Vb6Type CCodeGen::intDivResultType(Vb6Type lt, Vb6Type rt) const {
+    // MSDN "Data Types of Operator Results" 的 \ 表: 两个窄整型 (Boolean/SByte/Byte/
+    // Short/UShort/Integer/UInteger) 的结果一律是 Long(64) —— 映射到 C3 的阶梯就是
+    // "窄档一律落 Long(32)"。再宽的档按 promote 走, 与 `+ - *` 同一份有符号/无符号
+    // 提升规则, 免得同一个表达式里"商"与"和"两个口径。
+    Vb6Type p = TypeSystem::promote(lt, rt);
+    switch (p) {
+        case Vb6Type::Long:      return Vb6Type::Long;       // 窄档统一落这里
+        case Vb6Type::LongLong:  return Vb6Type::LongLong;
+        case Vb6Type::ULong:     return Vb6Type::ULong;
+        case Vb6Type::ULongLong: return Vb6Type::ULongLong;  // 含 64 位混符号的兜底
+        // SByte/Byte/Integer/UInteger/Boolean → Long; 浮点/Currency/Decimal/Variant →
+        // Long (VB: `\` 的操作数先转整型, 结果类型是 Long)。
+        default:                 return Vb6Type::Long;
+    }
+}
+
 // ============================================================
 // 表达式类型推断 (简化版, 用于Select Case等场景)
 // ============================================================
@@ -221,6 +238,25 @@ Vb6Type CCodeGen::inferExprType(Expr& expr) const {
             // 浮点除法 → Double
             if (bin.op == BinaryOp::Div) return Vb6Type::Double;
 
+            // 移位 Shl/Shr: 结果类型 = **左操作数**类型, 窄整型抬到 32 位。
+            // MSDN 的移位表就是"把移位当一元运算作用在左操作数上" —— 右操作数只是
+            // 计数, 不参与结果类型; 改前这里走 promote(左, 右) 会把 `u >> 4`
+            // (u As ULong) 按"混符号"提升成 LongLong, 与发码层投回的 uint32_t 两个口径。
+            // 口径与 cgen_expr_binary.cpp 的 castBack 同一份 (那边也只看左操作数)。
+            if (bin.op == BinaryOp::Shl || bin.op == BinaryOp::Shr) {
+                Vb6Type lS = inferExprType(*bin.left);
+                switch (lS) {
+                    case Vb6Type::SByte: case Vb6Type::Byte:
+                    case Vb6Type::UInteger: case Vb6Type::Integer:
+                    case Vb6Type::Boolean: case Vb6Type::Long:
+                        return Vb6Type::Long;          // 窄档抬到 32 位
+                    case Vb6Type::ULong: case Vb6Type::LongLong:
+                    case Vb6Type::ULongLong: case Vb6Type::LongPtr:
+                        return lS;
+                    default: return Vb6Type::LongLong; // 浮点/Variant/Unknown: C 侧是 int64 中间量
+                }
+            }
+
             // 算术运算符: 提升左右类型
             {
                 Vb6Type lt = inferExprType(*bin.left);
@@ -235,17 +271,12 @@ Vb6Type CCodeGen::inferExprType(Expr& expr) const {
                                    ? Vb6Type::Double : Vb6Type::Date;
                     return Vb6Type::Double;
                 }
-                // ai/032: `\` / `Mod` 只要任一侧是无符号档, cgen 就改发无符号版
-                // helper (vb6_IntDivULong / Num_ModULongLong, 见 cgen_expr_binary.cpp),
-                // 结果类型必须跟着答无符号 —— 否则 promote 在同档时按"第一个操作数"
-                // 胜出 (`2 \ u` → Long), downstream (CStr/装箱) 会把同一个 uint32_t
-                // 按有符号 32 位读。两处必须是同一份判据。
-                if (bin.op == BinaryOp::IntDiv || bin.op == BinaryOp::Mod) {
-                    if (lt == Vb6Type::ULongLong || rt == Vb6Type::ULongLong)
-                        return Vb6Type::ULongLong;
-                    if (lt == Vb6Type::ULong || rt == Vb6Type::ULong)
-                        return Vb6Type::ULong;
-                }
+                // ai/032: `\` / `Mod` 的结果类型与"发哪一条 helper"必须是**同一份判据**
+                // (intDivResultType, 定义在 cgen_util_type.cpp 的 asUnsignedOperand 旁)。
+                // 改前这里自带一套"任一侧 ULong/ULongLong 就答无符号", 与 promote 的
+                // 有符号/无符号提升规则各写一遍 —— `2 \ u` 这类换边写法就会漂移。
+                if (bin.op == BinaryOp::IntDiv || bin.op == BinaryOp::Mod)
+                    return intDivResultType(lt, rt);
                 return TypeSystem::promote(lt, rt);
             }
         }

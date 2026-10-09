@@ -583,6 +583,19 @@ uint64_t vb6_Num_ModULongLong(uint64_t a, uint64_t b) {
     if (b == 0) { vb6_ErrRaiseNumber(11); return 0; }
     return a % b;
 }
+// ai/032 rev2: 有符号 64 位整除/取余。补这两条是为了让 `\` / `Mod` 的分档完整:
+// 有符号/无符号混算按 VB.NET 的规则会提升到"更宽的有符号型", 32 位异符号的提升结果
+// 正是 64 位有符号 (`&HFFFFFFFF As ULong \ 2` 在 VB.NET 里先升到 Long(64) 再除),
+// 而 vb6_IntDiv 的形参只有 int32_t —— 少了这两条就只能退回 32 位截断。
+// 除零语义与上面一致 (运行期错误 11)。
+int64_t vb6_IntDivLongLong(int64_t a, int64_t b) {
+    if (b == 0) { vb6_ErrRaiseNumber(11); return 0; }
+    return a / b;
+}
+int64_t vb6_Num_ModLongLong(int64_t a, int64_t b) {
+    if (b == 0) { vb6_ErrRaiseNumber(11); return 0; }
+    return a % b;
+}
 // ============================================================
 // P24-Bug2: Variant比较函数
 // 简化VB6语义: 两端都是字符串→字符串比较, 否则→Double数值比较

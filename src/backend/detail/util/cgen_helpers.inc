@@ -765,10 +765,17 @@
     static bool isNarrowIntVbType(Vb6Type t);
     static Vb6Type narrowIntTypeOfCType(const std::string& cType);
 
-    // ai/032: 把操作数按无符号口径交给 helper (形参 uint32_t/uint64_t), Variant
-    // 操作数先 vb6_VariantToLongPtr 解包。`\` / `Mod` 在有无符号操作数时用它。
+    // ai/032: 把操作数按指定 C 整型交给 helper (形参 uint32_t/uint64_t/int64_t),
+    // Variant 操作数先 vb6_VariantToLongPtr 解包。`\` / `Mod` 在需要加宽时用它。
     std::string asUnsignedOperand(const std::string& cExpr, const Expr& astExpr,
                                   const char* ctype) const;
+
+    // ai/032 rev2: 整除 `\` / 取余 `Mod` 的**唯一**判据 —— 结果 VB 类型, 发码层按它
+    // 分派 helper (Long→vb6_IntDiv(int32) / LongLong→vb6_IntDivLongLong /
+    // ULong→vb6_IntDivULong / ULongLong→vb6_IntDivULongLong, Mod 同理)。
+    // inferExprType 与 cgen_expr_binary 都调它, 免得"类型答 A、helper 发 B"。
+    // 与 + - * 共用 promote 的有符号/无符号提升规则, 只是窄结果一律落 Long (VB 表)。
+    Vb6Type intDivResultType(Vb6Type lt, Vb6Type rt) const;
 
     // Fix 090ae: 链式 COM 默认属性索引赋值 (P25b 提取为可复用 helper)
     // VB: dic(a)(b) = v / Set dic(a)(b) = v — 多层默认属性/Item 索引写.

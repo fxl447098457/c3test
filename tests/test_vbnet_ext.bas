@@ -189,6 +189,91 @@ AfterIIf:
     Debug.Print "VE-mod-ulonglong=" & CStr(gU3)           ' 1099511627776
     Debug.Print "VE-dbg-ulonglong="; gU3                  ' 1099511627776
 
+    ' ---- 有符号/无符号混算: VB.NET 的二进制数值提升 (ai/032 rev2) ----
+    ' 规则 (MSDN "Data Types of Operator Results" 的三条策略, 按位宽映射到 C3 的阶梯):
+    '   ① 同符号 → 更宽的那个
+    '   ② 异符号, 有符号侧更宽 → 有符号侧 (它完整容纳无符号侧)
+    '   ③ 异符号, 无符号侧不窄于有符号侧 → 取"比无符号侧再宽一档的有符号型"
+    '   ④ 无符号侧已是 64 位 → 没有更宽的有符号整型 (VB.NET 此处是 Decimal)
+    '
+    ' **这一节拦的是"C 的通常算术转换方向相反"**: C 对同宽异符号取**无符号**
+    ' (uint32_t + int32_t → uint32_t), 于是负的有符号侧被当成大正数 —— 而这不是
+    ' "类型被问错", 是**值真会错** (见下面 VE-mix-u32-plus-long / u32-gt-neg)。
+    ' 发码层按 promote 的结果插显式加宽 (cgen_expr_binary.cpp mixedSignWidenCType),
+    ' 只在"提升结果严格宽于两个操作数"那一档插; 同符号与包含关系不插 (C 本来就对)。
+    Dim n32 As Long
+    Dim u64 As ULongLong
+    Dim i64 As LongLong
+    Dim b8 As Byte
+    Dim s8 As SByte
+    Dim w16 As UInteger
+    Dim i16 As Integer
+
+    ' ③ ULong(32u) ⊕ Long(32s) → LongLong(64s): C 里 `uint32 + int32` 是 uint32,
+    '    所以旧实现 (及裸 C) 会把 &HFFFFFFFF + 1 回绕成 0。
+    u = &HFFFFFFFF
+    Debug.Print "VE-mix-u32-plus-long=" & CStr(u + 1)        ' 4294967296
+    Debug.Print "VE-mix-long-plus-u32=" & CStr(1 + u)        ' 4294967296 (换边同值)
+    ' 比较同样要在提升后的类型里做: 裸 C 的 `4294967295 > (uint32)-1` 是 False
+    n32 = -1
+    If u > n32 Then
+        Debug.Print "VE-mix-u32-gt-neg=T"                     ' 期望 T
+    Else
+        Debug.Print "VE-mix-u32-gt-neg=F"
+    End If
+    If n32 < u Then
+        Debug.Print "VE-mix-neg-lt-u32=T"                     ' 期望 T
+    Else
+        Debug.Print "VE-mix-neg-lt-u32=F"
+    End If
+    ' `\` / `Mod` 同一档: 32 位异符号要升到 64 位有符号再算 (vb6_IntDivLongLong)。
+    ' 旧实现把两侧都按 uint32 收口: 4294967295 \ -2 得 1 (按 uint32 是 /4294967294),
+    ' 提升后是 -2147483647 (VB.NET 的 UInteger \ Integer = Long(64) 就是这个值)。
+    n32 = -2
+    Debug.Print "VE-mix-u32-intdiv-neg=" & CStr(u \ n32)     ' -2147483647
+    ' 4294967295 Mod -3: 按 uint32 是 % 4294967293 → 2; 提升后 4294967295 - (-1431655765 * -3) = 0
+    n32 = -3
+    Debug.Print "VE-mix-u32-mod-neg=" & CStr(u Mod n32)      ' 0
+
+    ' ④ 64 位异符号 —— 没有更宽的有符号整型, VB.NET 是 Decimal; C3 取 ULongLong。
+    '    加减乘的位模式在补码下与有符号解读完全一致, 所以这里锁的是"按无符号印出来"。
+    u64 = 4294967296
+    i64 = -1
+    Debug.Print "VE-mix-u64-plus-i64=" & CStr(u64 + i64)     ' 4294967295
+    Debug.Print "VE-mix-u64-sub-i64=" & CStr(u64 - i64)      ' 4294967297
+    ' ① 同符号取更宽
+    u = 1
+    Debug.Print "VE-mix-u64-plus-u32=" & CStr(u64 + u)       ' 4294967297
+    ' ② 包含关系: LongLong 完整容纳 ULong ⇒ 取 LongLong (两侧都不必加宽)
+    u = &HFFFFFFFF
+    Debug.Print "VE-mix-i64-plus-u32=" & CStr(i64 + u)       ' 4294967294
+    ' ③ 8 位异符号 → 16 位有符号: Byte 255 + SByte -128 = 127
+    b8 = 255
+    s8 = -128
+    Debug.Print "VE-mix-byte-plus-sbyte=" & CStr(b8 + s8)    ' 127
+    ' ③ 16 位异符号 → 32 位有符号: UInteger 65535 + Integer -32768 = 32767
+    w16 = 65535
+    i16 = -32768
+    Debug.Print "VE-mix-uint-plus-int=" & CStr(w16 + i16)    ' 32767
+
+    ' ⑤ 两条操作数**本来就是 64 位**的 \ 与 Mod。③④ 锁的是"混符号提升到哪一档",
+    '    这一组锁的是"64 位本身算得对": 被除数一律取低 32 位为 0 的值 (2^33 / 2^40 /
+    '    2^62), 任何 32 位收口都会把它们算成 0 或丢高位 —— 探针实测过两端架构的期望值。
+    '    有符号侧走 vb6_IntDivLongLong / vb6_Num_ModLongLong (rev2 新增的那两条);
+    '    最后一条是无符号 64 位那条既有档 (vb6_IntDivULongLong) 的回归。
+    i64 = 8589934592                                         ' 2^33, 低 32 位全 0
+    Debug.Print "VE-mix-ll-intdiv=" & CStr(i64 \ 3)          ' 2863311530
+    Debug.Print "VE-mix-ll-mod=" & CStr(i64 Mod 3)           ' 2
+    i64 = -8589934592
+    Debug.Print "VE-mix-ll-intdiv-neg=" & CStr(i64 \ 3)      ' -2863311530 (向零截断)
+    Debug.Print "VE-mix-ll-mod-neg=" & CStr(i64 Mod 3)       ' -2 (取被除数符号)
+    i64 = 1099511627776                                      ' 2^40
+    Debug.Print "VE-mix-ll-intdiv-one=" & CStr(i64 \ 1)      ' 1099511627776
+    i64 = 4611686018427387904                                ' 2^62
+    Debug.Print "VE-mix-ll-intdiv-p62=" & CStr(i64 \ 2)      ' 2305843009213693952
+    u64 = 4294967296                                         ' 2^32 (无符号 64 位档)
+    Debug.Print "VE-mix-ll-u64-intdiv=" & CStr(u64 \ 2)      ' 2147483648
+
     ' ---- promote 负控: 64 位整型/指针与浮点/货币混合, 小数**不能**被截掉 ----
     ' 见文件头注释: rank 按位宽取档会把 64 位整型排到 Double/Currency 之上,
     ' 一旦 promote 答整型, 这几条就会打成 5 / 4 / 7 / 4 而不是 5.5 / 4.5 / 7.5 / 4.5。

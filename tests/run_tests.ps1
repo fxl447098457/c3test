@@ -2231,6 +2231,31 @@ if ($Category -in @("all", "run", "bas")) {
         "VE-conv-culnglng=4294967296", "VE-conv-case=7", "VE-conv-in-expr=4294967295",
         "VE-mod-ulong=4294967295", "VE-dbg-ulong=4294967295", "VE-mod-ulong-intdiv=2000000000",
         "VE-mod-ulonglong=1099511627776", "VE-dbg-ulonglong=1099511627776",
+        # ai/032 rev2: 有符号/无符号混算的 VB.NET 提升规则。前六条是**反向**判据 ——
+        # C 的通常算术转换对同宽异符号取无符号 (uint32+int32→uint32), 于是
+        # &HFFFFFFFF + 1 回绕成 0、4294967295 > -1 判假; 按 VB.NET 的
+        # 异符号取更宽的有符号型 才得 4294967296 / 真。`\` 与 `Mod` 同档
+        # (vb6_IntDivLongLong / Num_ModLongLong: 4294967295 \ -2 = -2147483647)。
+        # 后四条是提升到 8→16 / 16→32 / 32→64 / 64 各档的**锁定值** (含 64 位异符号
+        # 那一档: 没有更宽的有符号整型, VB.NET 给 Decimal, C3 取 ULongLong)。
+        # 注意: 本注释里不要出现双引号 —— 它会被测试登记表的字符串扫描当成一条 needle。
+        "VE-mix-u32-plus-long=4294967296", "VE-mix-long-plus-u32=4294967296",
+        "VE-mix-u32-gt-neg=T", "VE-mix-neg-lt-u32=T",
+        "VE-mix-u32-intdiv-neg=-2147483647", "VE-mix-u32-mod-neg=0",
+        "VE-mix-u64-plus-i64=4294967295", "VE-mix-u64-sub-i64=4294967297",
+        "VE-mix-u64-plus-u32=4294967297", "VE-mix-i64-plus-u32=4294967294",
+        "VE-mix-byte-plus-sbyte=127", "VE-mix-uint-plus-int=32767",
+        # ai/032 rev2: 两组操作数**本来就都是 64 位**的 \ 与 Mod —— 上面那些只覆盖到
+        # 混符号被提升到 64 位那一档, 这一组补的是 64 位档自身的取值。被除数取低 32
+        # 位为 0 的 2^33 / 2^40 / 2^62: 任何 32 位收口都会算成 0 或丢高位。
+        # 前六条走 rev2 新增的 vb6_IntDivLongLong / vb6_Num_ModLongLong, 末条是无符号
+        # 64 位那条既有档的回归。
+        # 本注释不要出现双引号, 也不要有以右括号结尾的行 —— 断言核对脚本用非贪婪正则
+        # 取数组体, 前者会被当成一条 needle, 后者会把数组体截断而漏掉后面的 needle。
+        "VE-mix-ll-intdiv=2863311530", "VE-mix-ll-mod=2",
+        "VE-mix-ll-intdiv-neg=-2863311530", "VE-mix-ll-mod-neg=-2",
+        "VE-mix-ll-intdiv-one=1099511627776", "VE-mix-ll-intdiv-p62=2305843009213693952",
+        "VE-mix-ll-u64-intdiv=2147483648",
         "VE-promote-lp-dbl=4.5", "VE-promote-lp-mul=7.5", "VE-promote-ll-dbl=5.5",
         "VE-promote-ll-cur=5.5", "VE-promote-u3-dbl=5.5", "VE-promote-u3-cur=5.5",
         "VE-promote-dbl-ll=5.5", "VE-promote-ll-wide=4294967300",

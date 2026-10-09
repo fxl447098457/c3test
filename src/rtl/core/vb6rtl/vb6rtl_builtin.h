@@ -203,6 +203,13 @@ uint32_t vb6_Num_ModULong(uint32_t a, uint32_t b);
 uint64_t vb6_IntDivULongLong(uint64_t a, uint64_t b);
 uint64_t vb6_Num_ModULongLong(uint64_t a, uint64_t b);
 
+// ai/032 rev2: 有符号 64 位整除/取余。`\` / `Mod` 的档位由 CCodeGen::intDivResultType
+// 一处给出: 32 位异符号 (如 ULong \ Long) 按 VB.NET 的提升规则要升到 64 位**有符号**
+// 再除, 而 vb6_IntDiv 只有 int32_t 形参 —— 少了这两条就只能退回 32 位截断。
+// 除零同样是运行期错误 11。
+int64_t vb6_IntDivLongLong(int64_t a, int64_t b);
+int64_t vb6_Num_ModLongLong(int64_t a, int64_t b);
+
 // C3 扩展 (ai/032): `<<` / `>>` 移位。cgen 一律包成这三个 inline 之一, 而不是直接
 // 发 C 的 `a << b`, 因为 C 的移位在三处与 VB.NET 语义不同 —— 其中两处是 UB:
 //

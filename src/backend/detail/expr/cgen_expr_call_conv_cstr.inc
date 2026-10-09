@@ -44,6 +44,7 @@
                 switch (itNI->second) {
                     case Vb6Type::ULong:     callee = "vb6_CStrULong";     break;
                     case Vb6Type::ULongLong: callee = "vb6_CStrULongLong"; break;
+                    case Vb6Type::LongLong:  callee = "vb6_CStrLongLong";  break;
                     // 值域 ⊆ int32_t ⇒ 有符号/无符号十进制同字面 ("-128" / "65535")
                     case Vb6Type::SByte:
                     case Vb6Type::UInteger:  callee = "vb6_CStrLong";      break;
