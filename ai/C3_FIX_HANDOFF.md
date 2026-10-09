@@ -1968,7 +1968,7 @@ marker、重编，之后 `check_rtl_embedded` 报 **125/125 逐字节相同**。
 **欠着**：门跑起来才算收线。另一档没动、要拍口径 —— 要不要让这道门**对 PR 只报不挡**（`continue-on-error`），
 只在推 dev 时才硬判红。现在它是硬的：新加的自救面已经把「处理它」压成一条命令，本线倾向保持硬判。
 
-### B103 账 #278 第一刀已出 = Implements 那一族从 VB3001 分家（新号 VB3044，缺槽那条并回既有的 VB3012）+ 第 45 道哨兵（2026-10-09，**待门**）
+### B103 账 #278 第一刀已出 = Implements 那一族从 VB3001 分家（新号 VB3044，缺槽那条并回既有的 VB3012）+ 第 45 道哨兵（2026-10-09，**已出：门 #441**）
 
 - **落地**：`src/common/diagnostics.hpp` 加 `SemImplementsInterfaceNotFound = 3044`；`src/semantics/semantic_analyzer.cpp:270` 改 3044、`:295` 改 **3012**（`SemInterfaceNotImplemented` 早就在用，两条报的是同一件事）。
   **严重级一条都没动**（两条都还是 warning）—— 这一刀只买「一个号只表示一件事」。为什么必须买：严重级是在**调用点**选的（`diag_.warn` / `diag_.error`），
@@ -1984,6 +1984,8 @@ marker、重编，之后 `check_rtl_embedded` 报 **125/125 逐字节相同**。
   `check_static_sentinel_registration` 报 **45 道盘上 / 45 道登记**。
 - **负控**（先证它能红）：往 `semantic_analyzer.cpp` 追加一行假借用 ⇒ **S1 报 8 处、S2 点名 `semantic_analyzer.cpp:387`，两条一起红（rc=1）**；
   删回原位（md5 `108bcf13c7404cb4fc79919a5815a0c2` 对上）⇒ 绿。
+- **门 #441**（run 37900602129、head `acd6e666`、branch dev、attempt 1）= 12 条 check-run 全 completed/success、非绿 0，
+  其中 **`Emit manifest (shape oracle)` 也在内** ⇒ 本机那 41 份「产物逐字节相同」在 CI 那台上同样成立，分家这一刀没动发码一根线。
 - **顺带一条工具坑**（写 census 时自己栽的）：A/B 第一版按 `r[2]` 比 ID，而那个五元组是 `(文件, 行, **级别**, 号, 文案)` ⇒ BASE/NEW 两边永远相等，
   41 行全报「没差异」，真差异一条都没显示。**计数器取错列报出来的"绿"比不跑更坏 —— 它把 A/B 变成背书。** 第二版按 `r[3]` 比号、
   再单独用 `(文件,行,文案)` 当键报「同一行换了号」，那 11 行才现形。
