@@ -412,8 +412,10 @@
     // 只有启动对象所在模块可以生成进程入口点.
     std::string startupObject_;
 
-    // M22: 外部模块名称集合 (用于跨模块变量解析时判断模块是否已#include)
-    std::unordered_set<std::string> externalModules_;
+    // M22: 外部模块名称 (用于跨模块变量解析时判断模块是否已#include)。
+    // 账 §B97: vector 不是 unordered_set —— 三处会出顺序的码头（.c/.h 的 #include 段、
+    // 入口点里的模块 init 调用序）直接迭代它，顺序必须是 driver 定下来的工程声明序。
+    std::vector<std::string> externalModules_;
 
     // M22: 当前IdentifierExpr是否在IndexOrCallExpr的callee位置
     // VB6语义: 同名函数引用 — callee上下文返回函数名(供调用), 其他上下文返回返回值变量

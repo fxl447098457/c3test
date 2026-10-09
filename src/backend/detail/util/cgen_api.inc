@@ -10,12 +10,14 @@
               bool verbose = false);
 
     // 主入口: 生成C代码，返回是否成功
-    // externalModules: 当前模块引用的外部模块基名列表 (用于生成 #include)
+    // externalModules: 当前模块引用的外部模块基名列表 (用于生成 #include)。
+    // 账 §B97: 类型是有序 vector —— 这份名单的**顺序**就是发码里 #include 段与入口点
+    // init 调用段的行序，权威在 driver 那一头（modules_ 的下标序），后端只按它逐行发。
     // isDll: P6.6 ActiveX DLL模式, 生成COM服务端代码
     // dllProgId: P6.6 DLL的ProgID前缀
     // frmDesc: P7 窗体描述 (仅.frm有效, nullptr=非窗体模块)
     bool generate(Module& module, const std::string& baseName,
-                  const std::unordered_set<std::string>& externalModules = {},
+                  const std::vector<std::string>& externalModules = {},
                   bool isDll = false, const std::string& dllProgId = "",
                   const FrmFormDesc* frmDesc = nullptr);
 

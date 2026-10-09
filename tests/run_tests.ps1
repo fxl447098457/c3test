@@ -971,6 +971,20 @@ function Test-TestHelperIntegrity {
         $out | Select-Object -First 6 | ForEach-Object { Write-Host "  $_" }
     }
 }
+# 账 §B97: 多模块名单的**顺序权威**（发码头上的 #include 段与 init 调用段都吃它）。
+function Test-ModuleOrderAuthority {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] module_order_authority ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$PSScriptRoot\..\scripts\check_module_order_authority.ps1" 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        $out | Select-Object -First 6 | ForEach-Object { Write-Host "  $_" }
+    }
+}
 function Test-ComSigCollisionPolicy {
     $script:total++
     Write-Host -NoNewline "  [STATIC] com_sig_collision_policy ... "
@@ -5283,6 +5297,7 @@ if ($Category -in @("all", "compile")) {
     Test-ComSigCollisionPolicy
     Test-BuiltinConstAuthority
     Test-TestHelperIntegrity
+    Test-ModuleOrderAuthority
 
     Test-EmitcArtifactCaliber
     Test-CtrlGeomCache
@@ -5496,6 +5511,17 @@ if ($Category -in @("all", "syntax")) {
         "CoClass 'CCVbp' identity: CLSID={33333333-4444-5555-6666-777777777777} (vbp) IID={28519764-65C8-D639-C831-604BAD706603} (minted) ProgID=OtherApp.CCVbp (minted) impl='VbpImpl' comCreatable=False",
         "CoClass 'CCMint' identity: CLSID={CE88DE91-E77D-563D-D74F-5CA0DF3902D2} (minted) IID={28519764-65C8-D639-C831-604BAD706603} (minted) ProgID=OtherApp.CCMint (minted)")
     Test-IdentityStable "cc_id_repeatable" $ccShapes
+    # 账 §B97: 模块级 init 的**调用序**以前是哈希桶的函数 —— 同一份 .vbp 换一台编译器就换一种
+    # 序（HEAD 交 IdMain,VbpImpl,CircleImpl,IdIfaces,IdBlocks）。现在名单由 driver 按 modules_ 的
+    # 下标序交出（那是 runParse 末尾「类模块前移」之后的序，理由见 driver_frontend.cpp:327-339；
+    # 要点是**确定**，不是照抄 .vbp 的字面行序），发码只照它逐行发。判据把五行当**一枚 needle**：
+    # 行与行之间的顺序本身就是读数（Test-EmitcShape 故意不折叠空白）。
+    Test-EmitcShape "ccid_emitc_init_order" $ccShapes @(
+        ((@("    vb6_mod_IdMain_init();",
+             "    vb6_mod_CircleImpl_init();",
+             "    vb6_mod_VbpImpl_init();",
+             "    vb6_mod_IdIfaces_init();",
+             "    vb6_mod_IdBlocks_init();") -join "`r`n")))
     # ai/022 B11/C04: a class that writes NO block but is listed in the .vbp the VB6 way
     # (Class=Name; file.cls; {CLSID}). Folding has to hand that entry to the same resolver,
     # so the vbp tier lights up for legacy projects too -- the proof that there is still only

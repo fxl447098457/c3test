@@ -536,8 +536,12 @@ public:
     std::vector<const Symbol*> getPublicSymbols() const;
 
     // 获取当前模块引用的所有外部模块名集合
-    // 遍历模块级符号, 返回所有 isExternal=true 的 sourceModule
-    std::unordered_set<std::string> getExternalModuleNames() const;
+    // 遍历模块级符号, 返回所有 isExternal=true 的 sourceModule。
+    // 账 §B97: 返回类型是 **有序** vector（去重 + 字典序）而不是 unordered_set ——
+    // 这份名单往下会决定 #include 段与入口点里模块 init 的**调用序**，而 unordered_map
+    // 的遍历序是「编译器二进制的函数」。真正的权威顺序由 driver 按 modules_ 的下标序排（见
+    // driver_codegen_module_loop.inc 的 extModulesInModuleVectorOrder），这里只保证自身确定。
+    std::vector<std::string> getExternalModuleNames() const;
 
     // Fix <vbeclipse>: VB6 隐式变量声明 (工程未写 Option Explicit 时, 首次使用的
     // 裸标识符自动成为 Variant 局部变量)。语义层登记 "<module>$<proc>" → 名字集,
