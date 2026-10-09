@@ -1968,6 +1968,40 @@ marker、重编，之后 `check_rtl_embedded` 报 **125/125 逐字节相同**。
 **欠着**：门跑起来才算收线。另一档没动、要拍口径 —— 要不要让这道门**对 PR 只报不挡**（`continue-on-error`），
 只在推 dev 时才硬判红。现在它是硬的：新加的自救面已经把「处理它」压成一条命令，本线倾向保持硬判。
 
+### B104 那 5 条「窗体伪成员」不是缺项 —— 发码面早就答对了，只有诊断在报噪声（2026-10-09 量完，**未开工**）
+
+探针 `.build/b902_probe`（一枚最小 `.frm` + `Option Explicit`，三种写法并排），实测产物与诊断**各是一半**：
+
+| VB 源码那一行 | 发码实际发出 | 配的语义诊断 |
+|---|---|---|
+| `w = ScaleWidth` | `w = vb6_ChkLong(vb6_GetScaleWidth(vb6_hwnd_Form1));` | **VB3001** |
+| `Debug.Print ScaleWidth, ScaleHeight, WindowState` | 三条都是 `vb6_Get…(vb6_hwnd_Form1)` | **VB3001 ×3** |
+| `Debug.Print Me.ScaleWidth` | `vb6_GetScaleWidth(vb6_hwnd_Form1)  /* Form.ScaleWidth via Me */` | 无 |
+
+⇒ 发码面早就有一条完整通路：`cgen_expr_ident_symbol.inc:7-34`（Fix 056 —— `isFormModule_` 时问 `getControlPropReadFn(Form, 名)`，命中就发
+`读函数(窗体句柄)`），**缺的只是语义层跟着放行**。这正是 `host_pseudo.hpp` 页头那句症状的**反方向版本**：那边是「表里加一行而发码没跟上」，
+这边是「发码跟上了而语义没跟上」⇒ 产物是对的、配一条噪声。所以 §B102 ④ 记的「真缺项 5 处」要改记「**诊断面**缺项」，
+下一刀动的是语义层一处放行，不是 RTL、不是发码。
+
+**为什么这一刀不是「加三行放行」**：那条通路的权威 `getControlPropReadFn` 是 `CCodeGen` 的成员函数（`src/backend/cgen_util_ctrl.cpp`，实测函数体 **496 行**），
+而语义层只许 include `common/` 与 `semantics/`（证据 = `semantic_analyzer_util.cpp:1-6` 那六行家规）。要「跟着问同一张表」，先得让那张表**到得了 common**：
+
+- 函数体本身干净 —— 实测零 `this` 依赖（`cIdent` / `moduleName_` / `symTab_` / `isFormModule_` 各 0 次命中），只吃 `(FrmControlType, propLower)` ⇒ **可整段搬成自由函数**；
+- `FrmControlType` 现在住在 `src/project/frm_parser.hpp:78`，common 不许向上依赖 project ⇒ 要么把那个枚举一起下到 `common/`，要么给 common 那份出口换一个不带枚举的小签名；
+- 19 处调用点全在 backend，留 `CCodeGen::getControlPropReadFn` 一行转发即可零改动。
+- **形状上的真决定（这格的关键）**：`getControlPropReadFn` 的答案 =「`switch` 之前那批通用行」∪「`case Form:` 那批专有行」，而裸写通路今天拿的是**并集**
+  ⇒ 放行也必须拿并集。**只在 common 立一份 Form 专有名单 = 又造一个权威**（与 §B103 分家那条同一个病）。所以这一刀 = 把那张表**整个**挪到两层都问得到的地方，不是补名单。
+
+**下一条要先量的**（别照抄本节的结论）：剩下 7 处（`TmForm2` 1 / `Printers` 1 / 裸 `Controls` 2 / 裸 `UserControl` 1 / 常量 2）里，
+裸 `Controls` 与裸 `UserControl` 很可能是**同一种形状**（发码有路、语义没放行 —— `cgen_expr_ident_builtin.inc:214-233` 那条 designer 分支就在那儿）。
+每一处先跑一次「产物 vs 诊断」并排读数再定性，别把「census 里有这条」当成「产物是坏的」。
+
+**⚠ 自纠（探针把自己骗了一次）**：第一版探针用 Python 列表拼 VB 源码，相邻两条字符串**漏了逗号** ⇒ Python 做相邻字面量拼接，
+`w = ScaleWidth` 与 `Debug.Print …` 合成一行，于是行号与诊断全对不上（报在 `(6,35)` 那种文件里根本不存在的列上）。
+把生成的夹具**原样 dump 出来看一眼**才发现。⇒ 夹具是脚本拼的时候，「先核夹具本身」是第 0 步，不是最后一步。
+
+
+
 ### B103 账 #278 第一刀已出 = Implements 那一族从 VB3001 分家（新号 VB3044，缺槽那条并回既有的 VB3012）+ 第 45 道哨兵（2026-10-09，**已出：门 #441**）
 
 - **落地**：`src/common/diagnostics.hpp` 加 `SemImplementsInterfaceNotFound = 3044`；`src/semantics/semantic_analyzer.cpp:270` 改 3044、`:295` 改 **3012**（`SemInterfaceNotImplemented` 早就在用，两条报的是同一件事）。
