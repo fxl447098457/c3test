@@ -284,12 +284,16 @@ void CCodeGen::visit(CallStmt& node) {
             // 走不到 visit(IndexOrCallExpr&), 是在这条语句路径上收尾的。这里必须同样拦一道,
             // 否则掉回 vb6_ComCall(vb6_ComGetObjectProp(...), L"Clear", NULL, 0) 的假 IDispatch。
             // (cgen_expr_call_com_bind.inc 那条管带实参的 Add/Remove, 两条并行, 别只挂一头。)
-            if (imageListNameOfExpr(comObjExpr_) != ""
-                && Symbol::toLower(comMemberName_) == "clear") {
+            // 账 #278 §B72 第十四刀: 认不认与叫什么一起问那张表（表里 (ImageList, clear) 那一行）。
+            std::string fnIl = imageListNameOfExpr(comObjExpr_) != ""
+                ? controlZeroArgMethod(FrmControlType::ImageList,
+                                       Symbol::toLower(comMemberName_))
+                : std::string();
+            if (!fnIl.empty()) {
                 std::string ilSlot = "vb6_com_" + imageListNameOfExpr(comObjExpr_);
                 comObjExpr_.clear();
                 comMemberName_.clear();
-                c_.emitLine("vb6_ImageList_ClearImages((void*)" + ilSlot + ");");
+                c_.emitLine(fnIl + "((void*)" + ilSlot + ");");
                 return;
             }
             // C29-Data: `Data1.Recordset.Refresh` 等 —— comObjExpr_ 是 vb6_Data_Self( 透传形态
@@ -314,12 +318,16 @@ void CCodeGen::visit(CallStmt& node) {
                 }
             }
             // P20-40: 同款 —— `StatusBar1.Panels.Clear` 无实参, 也必须在这条语句路径收尾。
-            if (statusBarNameOfExpr(comObjExpr_) != ""
-                && Symbol::toLower(comMemberName_) == "clear") {
+            // 账 #278 §B72 第十四刀: 同上 —— 表里 (StatusBar, clear) 那一行。
+            std::string fnSb = statusBarNameOfExpr(comObjExpr_) != ""
+                ? controlZeroArgMethod(FrmControlType::StatusBar,
+                                       Symbol::toLower(comMemberName_))
+                : std::string();
+            if (!fnSb.empty()) {
                 std::string sbHwnd = "vb6_hwnd_" + statusBarNameOfExpr(comObjExpr_);
                 comObjExpr_.clear();
                 comMemberName_.clear();
-                c_.emitLine("vb6_StatusBar_ClearPanels((void*)" + sbHwnd + ");");
+                c_.emitLine(fnSb + "((void*)" + sbHwnd + ");");
                 return;
             }
             // D6 / C29-9: 无括号的 `CommonDialog1.ShowOpen` —— 与 List1.Clear 同一条
@@ -328,14 +336,13 @@ void CCodeGen::visit(CallStmt& node) {
             {
                 auto itCd = knownFormControls_.find(comObjExpr_);
                 std::string mCd = Symbol::toLower(comMemberName_);
-                if (itCd != knownFormControls_.end()
+                // 账 #278 §B72 第十四刀: 六档名单与六个出口名一起交回表（从前这里既写名单又现拼名字）
+                std::string fnCd = itCd != knownFormControls_.end()
                     && itCd->second == FrmControlType::CommonDialog
-                    && (mCd == "showopen" || mCd == "showsave" || mCd == "showcolor"
-                        || mCd == "showfont" || mCd == "showprinter" || mCd == "showabout")) {
+                    ? controlZeroArgMethod(FrmControlType::CommonDialog, mCd) : std::string();
+                if (!fnCd.empty()) {
                     std::string hwndCd = cIdent(knownFormControlOriginalNames_.count(comObjExpr_)
                         ? knownFormControlOriginalNames_[comObjExpr_] : comObjExpr_);
-                    std::string fnCd = "vb6_CdShow"
-                        + std::string(1, (char)::toupper((unsigned char)mCd[4])) + mCd.substr(5);
                     comObjExpr_.clear();
                     comMemberName_.clear();
                     c_.emitLine(fnCd + "((void*)vb6_hwnd_" + hwndCd + ");"

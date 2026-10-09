@@ -396,8 +396,9 @@
             || (itCtrlCd != knownFormControls_.end() &&
                 itCtrlCd->second == FrmControlType::CommonDialog)) {
             std::string mCd = Symbol::toLower(comMemberName_);
-            if (mCd == "showopen" || mCd == "showsave" || mCd == "showcolor"
-                || mCd == "showfont" || mCd == "showprinter" || mCd == "showabout") {
+            // 账 #278 §B72 第十四刀: 与语句码头问同一张表（名单与拼法都不在这里了）
+            std::string fnCdW = controlZeroArgMethod(FrmControlType::CommonDialog, mCd);
+            if (!fnCdW.empty()) {
                 isComMarker_ = false;
                 isEarlyBoundCom_ = false;
                 earlyBoundSym_ = nullptr;
@@ -407,9 +408,7 @@
                         ? knownFormControlOriginalNames_[comObjExpr_] : comObjExpr_);
                 comObjExpr_.clear();
                 comMemberName_.clear();
-                std::string fnCd = "vb6_CdShow"
-                    + std::string(1, (char)::toupper((unsigned char)mCd[4])) + mCd.substr(5);
-                c_.emitLine("{" + fnCd + "((void*)" + hwndCd + ");}"
+                c_.emitLine("{" + fnCdW + "((void*)" + hwndCd + ");}"
                             "  /* CommonDialog." + mCd + " (原生 comdlg32) */");
                 lastExpr_ = "0";
                 return;

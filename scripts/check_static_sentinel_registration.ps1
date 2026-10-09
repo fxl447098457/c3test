@@ -13,6 +13,10 @@
 #       登记了一个不存在的文件 = 那一格永远看不见失败（与 Test-Compile 重名遮蔽那一族同形）。
 #   R3  两边的**条数**也要报出来（红的时候好定位：是漏登记还是引用打错了名字）。
 #
+#   R4  每一份 check_*.ps1 的**文件头**必须能被 PS 5.1 当注释读: UTF-8 BOM 恰好一次,
+#       去掉 BOM 后首行以 '#' 开头。(本轮实测撞过: 补丁脚本把 BOM 写了两遍 ⇒ 首行成了
+#       "?# …" ⇒ PS 报 CommandNotFound 却**继续跑到底、exit 0** —— 一道绿着的坏哨兵,
+#       比红更难发现; R1/R2/R3 只看"有没有被登记", 看不见"登记了却跑不起来"。)
 # 用法: powershell -File scripts\check_static_sentinel_registration.ps1   (PASS = exit 0)
 
 $ErrorActionPreference = "Stop"
@@ -70,6 +74,25 @@ if ($dangling.Count -gt 0) {
 if ($bad.Count -eq 0 -and $onDisk.Count -ne $referenced.Count) {
     $bad += ("R3 count mismatch: scripts/ has " + $onDisk.Count +
              " check_*.ps1 while the harness references " + $referenced.Count)
+}
+
+# ---- R4: 文件头读不成注释 = 哨兵自己废了还会绿 ----
+$badHdr = @()
+foreach ($f in (Get-ChildItem -Path $scriptsDir -File -Filter "check_*.ps1")) {
+    $b = [System.IO.File]::ReadAllBytes($f.FullName)
+    if ($b.Length -lt 4 -or $b[0] -ne 0xEF -or $b[1] -ne 0xBB -or $b[2] -ne 0xBF) {
+        $badHdr += ($f.Name + " (no UTF-8 BOM)")
+        continue
+    }
+    if ($b[3] -eq 0xEF -and $b[4] -eq 0xBB -and $b[5] -eq 0xBF) {
+        $badHdr += ($f.Name + " (BOM twice - line 1 is not a comment)")
+        continue
+    }
+    if ($b[3] -ne 0x23) { $badHdr += ($f.Name + " (line 1 does not start with #)") }
+}
+if ($badHdr.Count -gt 0) {
+    $bad += ("R4 sentinel file headers unreadable as comments (PS errors, then exits 0 anyway): " +
+             ($badHdr -join ", "))
 }
 
 if ($bad.Count -gt 0) {

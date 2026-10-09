@@ -440,9 +440,11 @@
                     }
                     return;
                 }
-                if (ilMember == "clear") {
+                // 账 #278 §B72 第十四刀: 与语句码头问同一张表
+                std::string fnIlB = controlZeroArgMethod(FrmControlType::ImageList, ilMember);
+                if (!fnIlB.empty()) {
                     std::string ilSlot = "vb6_com_" + imageListNameOfExpr(objExpr);
-                    lastExpr_ = "vb6_ImageList_ClearImages((void*)" + ilSlot + ")";
+                    lastExpr_ = fnIlB + "((void*)" + ilSlot + ")";
                     return;
                 }
             }
@@ -507,8 +509,10 @@
                     }
                     return;
                 }
-                if (sbMember == "clear") {
-                    lastExpr_ = "vb6_StatusBar_ClearPanels((void*)" + sbHwnd + ")";
+                // 账 #278 §B72 第十四刀: 同上（表里 (StatusBar, clear) 那一行）
+                std::string fnSbB = controlZeroArgMethod(FrmControlType::StatusBar, sbMember);
+                if (!fnSbB.empty()) {
+                    lastExpr_ = fnSbB + "((void*)" + sbHwnd + ")";
                     return;
                 }
             }

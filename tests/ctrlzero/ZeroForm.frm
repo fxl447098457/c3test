@@ -43,6 +43,31 @@ Begin VB.Form ZeroForm
       Left            =   3000
       Top             =   120
    End
+   Begin MSComctlLib.ImageList ImageZ 
+      _ExtentX        =   449
+      _ExtentY        =   449
+      _Version        =   49152
+      ImageWidth      =   16
+      ImageHeight     =   16
+   End
+   Begin MSComctlLib.StatusBar StatusBarZ 
+      Align           =   2
+      Height          =   255
+      Width           =   6000
+      _ExtentX        =   10583
+      _ExtentY        =   450
+      Style           =   0
+   End
+   Begin MSComDlg.CommonDialog dlZ 
+      Left            =   3000
+      Top             =   1200
+      CancelError     =   -1
+      DialogTitle     =   "z"
+      Filter          =   "All|*.*"
+      Flags           =   0
+      InitDir         =   "."
+      DefaultExt      =   "txt"
+   End
 End
 Attribute VB_Name = "ZeroForm"
 Attribute VB_GlobalNameSpace = False
@@ -67,6 +92,21 @@ End Function
 Private Function Conv() As Long
     Conv = ScaleX(1440, 1, 3) + ScaleY(1440, 1, 3)
 End Function
+' ledger 278 knife 14 (B72): two collection Clears (different receiver expressions: the ImageList
+' slot is vb6_com_<name>, the StatusBar one is vb6_hwnd_<name>) plus the six CommonDialog Show*
+' exits. The Show* names used to be built by string surgery at both docks.
+Private Sub DoColl()
+    ImageZ.ListImages.Clear
+    StatusBarZ.Panels.Clear
+End Sub
+Private Sub DoDlg()
+    dlZ.ShowOpen
+    dlZ.ShowSave
+    dlZ.ShowColor
+    dlZ.ShowFont
+    dlZ.ShowPrinter
+    dlZ.ShowAbout
+End Sub
 ' ledger 278 knife 13 (B72): the Winsock family table answers the same two questions. The
 ' three argument-less shapes end at the statement dock (that dock may only take rows whose
 ' count is 1); the five shapes with arguments end at the expression dock. The sentinel
