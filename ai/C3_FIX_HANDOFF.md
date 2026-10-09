@@ -1288,7 +1288,7 @@ S9.4 打标记那一路的 PictureBox 判据必须问表、且不许把成员名
 
 
 
-### B72 控件方法的"发码实参个数"与 RTL 原型之间没有对账 —— 头/体那一半已钉住，这半只欠"多递"那一侧（账 #240 记下，**未开工**）
+### B72 控件方法的"发码实参个数"与 RTL 原型之间没有对账 —— 头/体那一半已钉住，这半只欠"多递"那一侧（账 #240 记下；**三张控件方法表那一半已出 = 账 #278 第十二刀，落地与判据见 §B122**，剩下三族见 §B122 末条）
 
 账 #240 那一刀把"头追不上体"钉死了（`check_rtl_proto_arity.ps1`：RTL 里两头都有的名字，声明侧参数个数集合必须等于定义侧）。**没钉住的是第三头**：cgen 递出去的实参个数。本轮三者恰好同源（体 10 = 发码 10 = 补完的头 10），所以新 cl 的诊断只落在头那一份上。反过来的形状照样要命：若有人给某枚 `vb6_Ctrl_*` 加形参、只改头与体，而**发码仍递旧的个数**，那么多递这一侧在本机只是 `warning C4020`（见 §B71 那条不对称测量），到新 cl 才升成 `error C2197` —— 也就是说它会以**"门红、本地全绿"的形状再来一次，而这次红在别人刚登记的用例上**。
 
@@ -2001,6 +2001,14 @@ marker、重编，之后 `check_rtl_embedded` 报 **125/125 逐字节相同**。
 **⚠ 自纠（探针把自己骗了一次）**：第一版探针用 Python 列表拼 VB 源码，相邻两条字符串**漏了逗号** ⇒ Python 做相邻字面量拼接，
 `w = ScaleWidth` 与 `Debug.Print …` 合成一行，于是行号与诊断全对不上（报在 `(6,35)` 那种文件里根本不存在的列上）。
 把生成的夹具**原样 dump 出来看一眼**才发现。⇒ 夹具是脚本拼的时候，「先核夹具本身」是第 0 步，不是最后一步。
+
+### B122 账 #278 第十二刀已出 = 控件方法那张表现在同时答「名字 + 递几枚实参」，§B72 欠的那一头由同一道哨兵四面一起对账（`[STATIC] rtl_proto_arity` 扩三条 + 一枚新夹具，2026-10-10，**待门**）
+
+- **动了什么（三张表各长一格 + 三个调用点把手抄的那份撤掉）**：`controlZeroArgMethod` / `controlOneArgMethod` / `controlScaleMethod` 各多一个 `int* outArgc`，出口名与个数由同一条 `controlExit("vb6_…", N, outArgc)` 交出 —— 表恰好 **7 行**（`vb6_SetControlFocus` 1、`vb6_Slider_ClearSel` 1、`vb6_ClearList` 1、`vb6_ControlTextHeight` 2、`vb6_ControlTextWidth` 2、`vb6_ScaleUnitX` 3、`vb6_ScaleUnitY` 3）。删掉 `cgen_call.cpp` 里 Fix 086 那截把「类型是 ListBox/ComboBox」与 `vb6_ClearList` 又硬编码一遍的分支 —— 语句码头下方 C29-SL-l 那一格早已问同一张表，同一个事实住两处，改名字或改个数必有一份落后。另把两处手写出口名改问表：`cgen_expr_call_callee_withm.inc` 的 `Clear` 一行（注释原样保留），`cgen_expr_ident_builtin.inc` 里窗体/属性页裸写 `ScaleX/ScaleY` 那一格（问的是表里 Form 那一行）。
+- **判据（原来两头的哨兵扩成四面）**：`check_rtl_proto_arity.ps1` 本来的判据面是「RTL 的头 == RTL 的体」（账 #240）。本轮加三条：**R3** 表里的出口名必须能在 RTL 头里查到原型且个数相同（**查不到原型也算红** —— 没有声明就没有担保；只有定义没声明同样算红），`cgen_util_type.cpp` 那张运行时参数表若有同名行也必须同数，行数恰好 7；**R4** 跑一次 `--emit-c`（只走前端，不起 cl）数新夹具 `tests/ctrlzero/ZeroForm.frm` 里**实际递出的实参数**与表对，夹具跑出恰好 6 枚；**R5** 那七枚出口名在 `src/backend` 别处再出现成字符串字面量 = 第二份答案 ⇒ 红（两处例外：表自己那份文件，与那张类型表 —— 后者由 R3 的 TABLE-VS-TYPEORACLE 对账）。`-Root` 形参一并补上，负控全在副本里跑。**9/9 负控按预期红**：抹掉一行（TABLE-ROWS）、把 SetFocus 的个数改成 2（TABLE-VS-RTL）、出口名换成 RTL 里没有的（TABLE-VS-RTL 的另一档）、只动类型表那一行删掉一项（TABLE-VS-TYPEORACLE 且**不许**连带动 TABLE-VS-RTL）、在别的 backend 文件里把名字再拼一遍（NAME-COPIED，注释行不算）、把表里的个数改成与产物不符（EMIT-VS-TABLE + TABLE-VS-RTL 两头齐红）、拆掉夹具三条调用（EMIT-CENSUS）、骨架原样（绿）、**把那五份文件退回 HEAD**（TABLE-ROWS 与 NAME-COPIED 同时红 —— 这一刀撤掉的正是那个形状）。
+- **实测的代价（形状门红 1 行，看过再登记）**：A/B 的 BASE 用**同一台工具链本机冷编**（`git worktree add --detach .build/wt_base_k12 cc950f30` + cmake/Ninja，实测 6 分钟）—— §B73 那条口径：CI 那枚工件只能用来跑测试，不能当发码基线。全语料 **398 份输入 397 份逐字节相同**；唯一变的这一行在 `tests/Charts 2020/ucTreeMaps/Proyecto1.vbp`：`vb6_ClearList((void*)vb6_hwnd_ListSubFonts);  /* ListBox.Clear */` → `… /* clear */`。出处是 `PropPagFMR.pag:593` 的 `ListSubFonts.Clear` —— 从前由 Fix 086 那截答，现在由 C29-SL-l 答，而这一族的语句码头一律用**小写成员名**做随行标记（同一趟里 `SetFocus` 是 `/* setfocus */`，With 块那形仍是 `/* ListBox.Clear */`，因为它在表达式码头、注释归那格自己拼）。**C 代码一字未变，变的只是注释** ⇒ 判定为接受，用 `scripts/rebless_emit_manifest.ps1 -Manifest <本机清单> -Bless` 登记（覆写 1 / 新增 0 / 退出 0，复算 398/398 绿，`check_manifest_coverage` K1..K3 绿）。⇒ 这一格走的是 §B100 那条自救路径，只是 BASE 用的是本机冷编那台（§B73 的口径），登记前先给了**逐行归因**。
+- **剩下没收的同一族（实数已核，下一刀的直接靶子）**：R5 今天只钉这七枚，另有三族仍是手写出口名 —— ① Winsock 零实参三枚（`vb6_Ws_Close` / `vb6_Ws_Listen` / `vb6_Ws_Connect`）**两条码头各抄一遍**（`cgen_call.cpp:356-358` 与 `cgen_expr_call_callee_withm.inc:455-459`，后者还把左括号拼进同一条字面量 ⇒ 按名字 grep 只数得出 1 处，别据此以为没重复）；② ListBox/ComboBox 的成员链（`AddItem` / `RemoveItem` / `List(idx)`）在 withm 里现拼，`RemoveItem` 的实参还在调用点手里；③ `vb6_Data_MoveFirst` / `vb6_Data_MoveLast` 各 1 处。这三族的「个数」一旦进表，R3/R4/R5 是现成的判据面，**不必再开新哨兵**。
+- **§B72 的账怎么算**：那一节要的两步（实参个数写成表里的一个取值 ＋ 同一条针两面都问）对这三张表已做完；它当时要求排在 §B70 的画布表之后 —— §B70 的 ①②③ 都已出（门 #368/#374/#375），前置成立。画布那一族（`src/common/canvas_drawing.hpp`）今天有名字表但**没有「个数」那一格**，也就没进 R3/R5 的面，那是 §B72 剩下的那一半。
 
 ### B121 新账 = 同一个未声明名、同一枚 .ctl，两个工程给出**两种发码**：主 Charts 折成 Empty 编得过，独立 UC 交裸名 C2065（2026-10-10 量，**未开工**）
 
