@@ -1765,7 +1765,7 @@ CI 那一枚（`pe-lnk=14.51`）稳定落进 `int16_t` 档 ⇒ 发成 `vb6_ComGe
 
 **下一格**：① 那 54 枚「表里已有、发码仍折叠」可以按棘轮一批批撤（每撤一批就改 C3 的数）；② `isConstIdent`（`src/backend/cgen_base_naming.cpp:219`）里那 11 枚 RTL 名的硬编码名单，在本刀之后只对「typelib 先注册的 EnumMember」那一档还有用 —— 真正的修法是让 `lookupConstSym` 也认 EnumMember，那会牵动 `wrapConstArgForByRef` 一串形状，单独量过再动；③ §B97（include 与模块 init 调用序的无序容器）—— 已出，见下一节。
 
-### B97 多模块工程的 `#include` 段**与入口点里模块 init 的调用序**都来自一枚 `unordered_*`（**已出**，门 待回填）
+### B97 多模块工程的 `#include` 段**与入口点里模块 init 的调用序**都来自一枚 `unordered_*`（**已出：门 #435**（run 435、head `d1f73e25`、branch dev、attempt 1）= 12 条 check-run 全 completed/success、非绿 0 —— 含 `Emit manifest (shape oracle)` ⇒ 那 29 行纯排列的登记与 `ccid_emitc_init_order` 那枚顺序针在 **CI 那台二进制**上也对齐）
 
 **读数**（2026-10-09 查到源头并落地）：
 - 因果链：`src/backend/cgen_base.cpp:207` 收的参数是 `const std::unordered_set<std::string>&`，
@@ -1819,6 +1819,7 @@ own-vs-others 的相对位置是改动前就有的形状，动它是第二件事
 **下一格**：① own-vs-others 那个相对位置的分歧（两份模板把别人的 init 发在自己的之前）；
 ② §B99 那两笔「登记」缺口；③ 若要把口径升成「`.vbp` 的字面先后」，得先决定那步类模块前移还算不算数 ——
 那是语义层的依赖需求，不能只改发码侧。
+④ 门 #435 之后新加的第 42 道哨兵（见 §B99 末）不在那一轮里，它跟着下一趟门跑。
 ### B98 判据助手重名遮蔽 = `[COMPILE]` 那一格从 2026-09-24 起一条 cl 也没编过（**已出：门 #433**（run 数 433、head `de4c340d`、attempt 1）= 12 条 check-run 全 completed/success、非绿 0）
 
 **读数**（先量再动，`tests/run_tests.ps1`）：
@@ -1873,8 +1874,9 @@ compile 那个 job 的耗时从「发码 ~0.4s/份」涨到「编译 23–41s/�
   `rtl-reembed-c3rtl-rc-landmine`）：CI 每次从零重编所以看不出来，本机增量重编时 `rc.exe` 不重跑就会
   拿到**旧 RTL**，测出来的一切都是假的。本轮补了一行 marker（并把 69 条 `VE-*` 读数在本机真编真跑复核过：
   x64 `rc=0` / 出 exe / 采样 9 条全命中）。
-- 留着的结构活（未开工）：**「语料输入与期望清单」缺一道哨兵**。现在只有跑一遍清单才知道漏登记；
-  可判红的写法是把两件事分开问 —— ①磁盘上的输入数（`tests/**/*.vbp|.bas`，与 `emit_manifest.ps1` 同一套枚举）
+- **§B99① 已出（第 42 道哨兵）**：`scripts/emit_manifest.ps1` 加了 `-ListInputs`（**枚举口径只此一份**，哨兵绝不自己再 glob 一遍 tests/ —— 那是给「谁算语料」开第二份权威），`scripts/check_manifest_coverage.ps1` 拿它问三件事：K1 枚举集合 == 期望清单的路径集合（两个方向的差集都要空，红时直接点名是哪几份）、K2 期望清单仍是 BOM+CRLF 且每行都长成 `sha256=<64hex> ascii256=<64hex> rc= bytes= <relpath>`（手改最容易弄坏的就是这两样）、K3 枚举本身不许退化（>=200 份、`.vbp` 与 `.bas` 两类都在）—— 没有 K3，「两边都空」会在 K1 上假绿。绿读数 `inputs=398 [.vbp=139 .bas=259], registered=398, sets equal`；三条坏法各自红：往 tests/ 丢一份未登记的 .bas ⇒ K1 点名它、往期望清单塞一条不存在的路径 ⇒ K1「no longer exist」、把某行哈希首字符换成 `z` ⇒ K2、把 `-ListInputs` 指向只吐两行的桩 ⇒ K3（`.build/b817_cov.py`，植完按 md5 还原后复跑绿）。**这一道把「少登记」从 CI 的二十分钟挪到了本机的一秒。**
+- 一次自撞（值得记，因为它是 #78 那道的第一个真实猎物）：注册第 42 道的那支脚本**跑了两遍** —— 第一遍在「打印读数」时因 GBK 控制台崩在 UnicodeEncodeError（中文进 print 要走 `sys.stdout.buffer`），**而插入已经落了盘**；第二遍的锚点 `function Test-ComSigCollisionPolicy {` 仍然唯一 ⇒ 又插了一枚同名助手 = 正是 #78 那个形状。**第 40 道哨兵当场报红并点名 989/1003 两行**，否则 compile 那一格会安静地跑两遍、`TOTAL` 只多 1 而没人知道为什么。留下的一般式：**跑崩在中途的补丁脚本 = 半边状态，重跑前必须先核现状**；而且插入型锚点最好在插入后**不再匹配**（把新内容本身写进锚点，或先查同名函数在不在）。
+- 留着的结构活（未开工）：  可判红的写法是把两件事分开问 —— ①磁盘上的输入数（`tests/**/*.vbp|.bas`，与 `emit_manifest.ps1` 同一套枚举）
   ②期望清单的数据行数，两者不等就红并列出差集。另加一条现成形状的哨兵规则：凡 `src/rtl/**` 在本次改动里出现
   而 `src/driver/c3rtl.rc` 没出现，就红（这一格今天靠人记着，正是本账撞过两次的形状）。
 ## C. 仍在生效的口径与工具事实（与本文档等长的一半价值在这里；完整版见记忆库）

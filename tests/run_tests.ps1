@@ -985,6 +985,20 @@ function Test-ModuleOrderAuthority {
         $out | Select-Object -First 6 | ForEach-Object { Write-Host "  $_" }
     }
 }
+# 账 §B99: 语料输入与 emit-manifest.expected.txt 的**登记面**是否对齐（门 #434 那格红的原因）。
+function Test-ManifestCoverage {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] manifest_coverage ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$PSScriptRoot\..\scripts\check_manifest_coverage.ps1" 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        $out | Select-Object -First 6 | ForEach-Object { Write-Host "  $_" }
+    }
+}
 function Test-ComSigCollisionPolicy {
     $script:total++
     Write-Host -NoNewline "  [STATIC] com_sig_collision_policy ... "
@@ -5298,6 +5312,7 @@ if ($Category -in @("all", "compile")) {
     Test-BuiltinConstAuthority
     Test-TestHelperIntegrity
     Test-ModuleOrderAuthority
+    Test-ManifestCoverage
 
     Test-EmitcArtifactCaliber
     Test-CtrlGeomCache

@@ -21,17 +21,33 @@
 #   * text is handled as Latin-1 (codepage 28591) so bytes round-trip 1:1.
 #
 # Usage:  powershell -File scripts/emit_manifest.ps1 [-Root <repo>] [-Out <file>]
+#         powershell -File scripts/emit_manifest.ps1 -ListInputs   # 只打印语料相对路径，不起 cl
+#   -ListInputs 是给 scripts/check_manifest_coverage.ps1 用的**唯一枚举口径**：哨兵不许自己
+#   再 glob 一遍 tests/，否则「谁算语料」就有了两份权威。
 param(
     [string]$Root = "",
     [string]$Out = "",
     [string]$Expect = "",
     [switch]$Bless,
+    [switch]$ListInputs,
     [string]$Samples = "tests/acc/acc_main.bas,tests/asm/AsmTest.bas,tests/Charts 2020/ucChartArea/Proyecto1.vbp,tests/VBFlexGridDemo/VBFlexGridDemo.vbp"
 )
 $ErrorActionPreference = 'Continue'
 if (-not $Root) { $Root = (Split-Path -Parent $PSScriptRoot) }
 $Root = (Resolve-Path $Root).Path
 if (-not $Out) { $Out = Join-Path $Root "emit-manifest.txt" }
+
+# 语料枚举（-ListInputs 的唯一出口；下面出清单也吃这一份）。
+$inputs = Get-ChildItem -Path (Join-Path $Root "tests") -Recurse -File |
+    Where-Object { $_.Extension -match '^\.(vbp|bas)$' } |
+    Where-Object { $_.FullName -notmatch '\\(bin|obj|output)\\' } |
+    Sort-Object FullName
+if ($ListInputs) {
+    foreach ($it in $inputs) {
+        Write-Host ($it.FullName.Substring($Root.Length + 1).Replace('\', '/'))
+    }
+    exit 0
+}
 
 $c3 = Join-Path $Root ".build\C3.exe"
 if (-not (Test-Path $c3)) { Write-Host "MISSING C3.exe: $c3"; exit 2 }
@@ -88,11 +104,6 @@ try {
     # 它的前两字节是 Magic，链接器版本在 +2/+3 ⇒ 绝对偏移 off+26 / off+27。
     $peLnk = ("{0}.{1}" -f $bytes[$off + 26], $bytes[$off + 27])
 } catch { }
-
-$inputs = Get-ChildItem -Path (Join-Path $Root "tests") -Recurse -File |
-    Where-Object { $_.Extension -match '^\.(vbp|bas)$' } |
-    Where-Object { $_.FullName -notmatch '\\(bin|obj|output)\\' } |
-    Sort-Object FullName
 
 $lines = @()
 $lines += "# c3-exe sha256=$exeHash size=$exeSize"
