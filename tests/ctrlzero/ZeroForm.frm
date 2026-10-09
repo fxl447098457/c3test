@@ -39,6 +39,10 @@ Begin VB.Form ZeroForm
       Top             =   600
       Width           =   1200
    End
+   Begin MSWinsockLib.Winsock wsZ 
+      Left            =   3000
+      Top             =   120
+   End
 End
 Attribute VB_Name = "ZeroForm"
 Attribute VB_GlobalNameSpace = False
@@ -63,3 +67,22 @@ End Function
 Private Function Conv() As Long
     Conv = ScaleX(1440, 1, 3) + ScaleY(1440, 1, 3)
 End Function
+' ledger 278 knife 13 (B72): the Winsock family table answers the same two questions. The
+' three argument-less shapes end at the statement dock (that dock may only take rows whose
+' count is 1); the five shapes with arguments end at the expression dock. The sentinel
+' compares each emitted call's argument count with the table and with the RTL prototype.
+Private Sub DoWs()
+    wsZ.Close
+    wsZ.Listen
+    wsZ.Connect
+End Sub
+Private Sub SetWs()
+    wsZ.Accept 5
+    wsZ.Bind 8001, "127.0.0.1"
+    wsZ.SendData "hi"
+End Sub
+Private Sub ReadWs()
+    Dim sZ As String
+    wsZ.GetData sZ, 8, 100
+    wsZ.PeekData sZ, 8, 100
+End Sub

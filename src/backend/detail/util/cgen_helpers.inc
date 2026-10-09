@@ -369,6 +369,11 @@
                                    const std::string& memberLower,
                                    int* outArgc = nullptr) const;
 
+    // 账 #278 §B72 第十三刀: Winsock 那一族八枚成员的名字 + 各自的实参个数（一条答案）。
+    // 与上面几张表同一套规矩: 表交名字与个数，实参由码头拼。
+    std::string controlWinsockMethod(const std::string& memberLower,
+                                     int* outArgc = nullptr) const;
+
     // 账 #221 = C29-PL-a: 控件的**画表面方法**名表（目前只有 Line，六个实参）。
     // 与上面三张表同一套规矩: 表只交名字、实参由码头拼，且**刻意不给通用行** ——
     // VB6 只有画得上去的那几枚（Form / PictureBox）有 Line，给成通用行就等于允许

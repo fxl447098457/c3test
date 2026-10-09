@@ -427,11 +427,12 @@
         if (itWs != knownFormControls_.end() &&
             itWs->second == FrmControlType::Winsock) {
             std::string mWs = comMemberName_;
-            static const char* kWsKnown[] = { "bind", "senddata", "getdata", "peekdata",
-                                              "close", "listen", "connect", "accept" };
-            bool knownWs = false;
-            for (const char* k : kWsKnown) if (mWs == k) { knownWs = true; break; }
-            if (knownWs) {
+            // 账 #278 §B72 第十三刀: 「这一族有哪些成员」与「各自叫什么」从前分抄两处 ——
+            // 这张 kWsKnown 名单只管认不认，出口名住在下面八条分支里。现在一起问那张表:
+            // 表的键就是名单，表的值就是出口，两边再也不会一方长了档另一方没跟。
+            // 实参形状（出参取址 / (int32_t) 强制 / L"" 兜底）照旧由这条码头拼。
+            std::string fnWs = controlWinsockMethod(mWs);
+            if (!fnWs.empty()) {
                 std::string hwndWs = cIdent(knownFormControlOriginalNames_.count(comObjExpr_)
                     ? knownFormControlOriginalNames_[comObjExpr_] : comObjExpr_);
                 isComMarker_ = false;
@@ -452,28 +453,27 @@
                 };
                 std::string preWs = "(void*)vb6_hwnd_" + hwndWs;
                 if (mWs == "close") {
-                    lastExpr_ = "vb6_Ws_Close(" + preWs + ")";
+                    lastExpr_ = fnWs + "(" + preWs + ")";
                 } else if (mWs == "listen") {
-                    lastExpr_ = "vb6_Ws_Listen(" + preWs + ")";
+                    lastExpr_ = fnWs + "(" + preWs + ")";
                 } else if (mWs == "connect") {
-                    lastExpr_ = "vb6_Ws_Connect(" + preWs + ")";
+                    lastExpr_ = fnWs + "(" + preWs + ")";
                 } else if (mWs == "accept") {
-                    lastExpr_ = "vb6_Ws_Accept(" + preWs + ", "
+                    lastExpr_ = fnWs + "(" + preWs + ", "
                               + (argWs.size() > 0 ? ("(int32_t)" + argWs[0]) : std::string("0")) + ")";
                 } else if (mWs == "bind") {
                     std::string port = argWs.size() > 0 ? ("(int32_t)" + argWs[0]) : std::string("0");
                     std::string ip = argWs.size() > 1 ? argWs[1] : std::string("L\"\"");
-                    lastExpr_ = "vb6_Ws_Bind(" + preWs + ", " + port + ", " + ip + ")";
+                    lastExpr_ = fnWs + "(" + preWs + ", " + port + ", " + ip + ")";
                 } else if (mWs == "senddata") {
-                    lastExpr_ = "vb6_Ws_SendData(" + preWs + ", "
+                    lastExpr_ = fnWs + "(" + preWs + ", "
                               + (argWs.size() > 0 ? argWs[0] : std::string("L\"\"")) + ")";
                 } else {
                     std::string out = (!argWs.empty() && isBareIdent(argWs[0]))
                                     ? ("&" + argWs[0]) : std::string("((void*)0)");
                     std::string ty = argWs.size() > 1 ? ("(int32_t)" + argWs[1]) : std::string("0");
                     std::string mx = argWs.size() > 2 ? ("(int32_t)" + argWs[2]) : std::string("(-1)");
-                    lastExpr_ = std::string(mWs == "getdata" ? "vb6_Ws_GetData(" : "vb6_Ws_PeekData(")
-                              + preWs + ", " + out + ", " + ty + ", " + mx + ")";
+                    lastExpr_ = fnWs + "(" + preWs + ", " + out + ", " + ty + ", " + mx + ")";
                 }
                 return;
             }

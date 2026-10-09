@@ -1584,6 +1584,27 @@ std::string CCodeGen::controlScaleMethod(FrmControlType ctrlType,
             return "";
     }
 }
+
+// 账 #278 §B72 第十三刀: Winsock 那一族的名字表（八枚成员 → RTL 出口 + 那条出口收几枚实参）。
+// 这一族从前把「有哪些成员」与「各自叫什么」抄在两处 —— 表达式码头 (withm) 里一张 kWsKnown
+// 名单外加八条分支里的字面量，语句码头 (cgen_call) 里又手写三枚。名单与名字分家的下场就是
+// 本账反复量到的那一味：加一档要改三处，漏一处的症状是编得过、跑起来一声不响。
+// 个数取自 RTL 原型（vb6forms_prop_ctrl.h:821-828，第一枚一律是 void* hwnd）：
+//   close / listen / connect 1、accept 2、bind 3、senddata 2、getdata / peekdata 4。
+// 与前几张表同一套规矩：**表交名字与个数，实参由码头拼** —— 出参取址（&变量）、(int32_t)
+// 强制、L"" 兜底那些形状是调用点的知识，不搬进表里。
+std::string CCodeGen::controlWinsockMethod(const std::string& memberLower,
+                                           int* outArgc) const {
+    if (memberLower == "close")    return controlExit("vb6_Ws_Close", 1, outArgc);
+    if (memberLower == "listen")   return controlExit("vb6_Ws_Listen", 1, outArgc);
+    if (memberLower == "connect")  return controlExit("vb6_Ws_Connect", 1, outArgc);
+    if (memberLower == "accept")   return controlExit("vb6_Ws_Accept", 2, outArgc);
+    if (memberLower == "bind")     return controlExit("vb6_Ws_Bind", 3, outArgc);
+    if (memberLower == "senddata") return controlExit("vb6_Ws_SendData", 2, outArgc);
+    if (memberLower == "getdata")  return controlExit("vb6_Ws_GetData", 4, outArgc);
+    if (memberLower == "peekdata") return controlExit("vb6_Ws_PeekData", 4, outArgc);
+    return "";
+}
 // 账 #221 = C29-PL-a（语料物证 Charts 2020/ucProgressCircular 的 ppProgressCircular.pag
 // 那 8 条 `Picture1.Line` / `Picture2.Line`）: 画表面方法的名字表。
 // 这一族以前**没有表** —— parser 的 Fix 102 把坐标对折进实参表之后，注释写着"由后端按控件

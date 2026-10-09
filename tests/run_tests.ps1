@@ -765,11 +765,14 @@ function Test-RtlResourceIds {
 }
 # 账 #240: RTL 的头与体必须同一张签名（参数个数）。本机那台 cl 在 C 模式下不诊断「实参过多」，
 # 头追不上体的缺陷只有 runner 上新 cl 才报 error C2197 ⇒ 判据不能靠真编，只能对着源码比。
-# 账 #278 §B72 把同一把针往外接两头：发码那张控件方法表（名字 + 实参个数, 恰好 7 行）
-# 要与 RTL 头、与 cgen_util_type.cpp 那张运行时参数表对上，且与**产物里实际递出的实参数**
-# 对上（跑一次 --emit-c 数 tests/ctrlzero/ZeroForm.frm, 只走前端不起 cl）。反过来的形状
+# 账 #278 §B72 把同一把针往外接两头：发码那几张控件方法表（名字 + 实参个数, 恰好 15 行 =
+# 第十二刀那 7 行 + 第十三刀 Winsock 那一族 8 行）要与 RTL 头、与 cgen_util_type.cpp 那张
+# 运行时参数表对上，且与**产物里实际递出的实参数**对上（跑一次 --emit-c 数
+# tests/ctrlzero/ZeroForm.frm 里那 14 枚调用, 只走前端不起 cl）。反过来的形状
 # —— RTL 加形参、发码仍递旧个数 —— 本机只 warning C4020, 到新 cl 才升 error C2197,
-# 所以两头都必须钉在源码与产物上, 不能等编译红。另钉 R5: 那七枚出口名只许住在表里。
+# 所以两头都必须钉在源码与产物上, 不能等编译红。另钉 R5: 表里那些出口名不许在别处再拼一遍;
+# 而「没括号那一形」的 Winsock 码头拿的是表里「个数 == 1」那一档 —— 个数在这里不只是判据,
+# 还是接不接这条形的条件。
 function Test-RtlProtoArity {
     $script:total++
     Write-Host -NoNewline "  [STATIC] rtl_proto_arity ... "

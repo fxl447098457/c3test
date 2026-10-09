@@ -351,18 +351,22 @@ void CCodeGen::visit(CallStmt& node) {
             {
                 auto itWs = knownFormControls_.find(comObjExpr_);
                 std::string mWs = Symbol::toLower(comMemberName_);
-                const char* fnWs = nullptr;
+                // 账 #278 §B72 第十三刀: 名字改问那张表。这一形**手里一枚实参都没有**，所以只许
+                // 拿表里「个数 == 1」的那几档（close / listen / connect）；其余成员照旧落到下面
+                // 那条通用兜底，由带实参的那条码头 (withm) 收尾。从前这件事靠手写名单维持,
+                // 现在靠表交出的个数 —— 谁给某枚出口加一枚形参, 这一头会自动不再接它。
+                std::string fnWs;
                 if (itWs != knownFormControls_.end() && itWs->second == FrmControlType::Winsock) {
-                    if (mWs == "close")        fnWs = "vb6_Ws_Close";
-                    else if (mWs == "listen")  fnWs = "vb6_Ws_Listen";
-                    else if (mWs == "connect") fnWs = "vb6_Ws_Connect";
+                    int argcWs = 0;
+                    fnWs = controlWinsockMethod(mWs, &argcWs);
+                    if (argcWs != 1) fnWs.clear();
                 }
-                if (fnWs) {
+                if (!fnWs.empty()) {
                     std::string hwndWs = cIdent(knownFormControlOriginalNames_.count(comObjExpr_)
                         ? knownFormControlOriginalNames_[comObjExpr_] : comObjExpr_);
                     comObjExpr_.clear();
                     comMemberName_.clear();
-                    c_.emitLine(std::string(fnWs) + "((void*)vb6_hwnd_" + hwndWs + ");"
+                    c_.emitLine(fnWs + "((void*)vb6_hwnd_" + hwndWs + ");"
                                 "  /* Winsock." + mWs + " (原生 Winsock2) */");
                     return;
                 }

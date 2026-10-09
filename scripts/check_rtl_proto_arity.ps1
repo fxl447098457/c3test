@@ -11,13 +11,15 @@
 #   R2 census 地板：扫到的 .h/.c 文件数 >= 100，且「两头都有」的签名对数 >= 900
 #      （实测 112 份文件 / 1108 对）—— 路径写错或正则被改坏时，哨兵不许变成"绿着的空转"
 #
-#   R3（账 #278 §B72）发码那张控件方法表（cgen_util_ctrl.cpp 的 controlExit("vb6_…", 个数, outArgc)）
+#   R3（账 #278 §B72）发码那几张控件方法表（cgen_util_ctrl.cpp 的 controlExit("vb6_…", 个数, outArgc)）
 #      三面都得对上：名字在 RTL 头里真有原型且个数相同（查不到原型也红 —— 没有声明就没有担保）、
-#      cgen_util_type.cpp 里那张运行时参数表若有同名行则个数相同、行数恰好 7；
+#      cgen_util_type.cpp 里那张运行时参数表若有同名行则个数相同、行数恰好 15（第十二刀 7 行 +
+#      第十三刀的 Winsock 那 8 行）；
 #   R4 产物那一头：跑一次 --emit-c（只走前端，不起 cl）数 tests/ctrlzero/ZeroForm.frm 里实际发出
-#      的调用递了几枚实参，与表里的数对 —— 这一面守的正是「RTL 加了形参、发码仍递旧的个数」
+#      的调用递了几枚实参，与表里的数对（夹具跑出 14 枚：零/一/换算三张表 6 枚 + Winsock 8 枚）
+#      —— 这一面守的正是「RTL 加了形参、发码仍递旧的个数」
 #      那条本机只 warning C4020、runner 上新 cl 才升 error C2197 的形状（§B72 立项的理由）；
-#   R5 那七枚出口名在 src/backend 别处再出现成字符串字面量 = 同一个事实两份答案 ⇒ 红
+#   R5 那些出口名在 src/backend 别处再出现成字符串字面量 = 同一个事实两份答案 ⇒ 红
 #      （两处例外：表自己那份文件，与类型 oracle —— 后者由 R3 的 TABLE-VS-TYPEORACLE 对账）。
 # 边界（宁可漏报不误报，故此处只比个数）：
 #   * 只有**第 0 列开始**的行才算签名 —— 调用点都缩进在函数体里，这一条同时把它们排干净；
@@ -140,7 +142,7 @@ if (-not (Test-Path -LiteralPath $tblPath)) {
 } else {
     $tblTxt = [IO.File]::ReadAllText($tblPath)
     $tbl = @([regex]::Matches($tblTxt, 'controlExit\("(vb6_[A-Za-z0-9_]+)",\s*(\d+),\s*outArgc\)'))
-    if ($tbl.Count -ne 7) { $viol += ('TABLE-ROWS: controlExit 答了 ' + $tbl.Count + ' 行 (恰好 7)') }
+    if ($tbl.Count -ne 15) { $viol += ('TABLE-ROWS: controlExit 答了 ' + $tbl.Count + ' 行 (恰好 15)') }
     $typArity = @{}
     if (Test-Path -LiteralPath $typPath) {
         $typTxt = [IO.File]::ReadAllText($typPath)
@@ -175,7 +177,7 @@ if (-not (Test-Path -LiteralPath $tblPath)) {
     $spell = @(Get-ChildItem -Path (Join-Path $Root 'src\backend') -Recurse -Include *.cpp, *.inc, *.hpp |
                 Where-Object { $_.FullName -notmatch 'cgen_util_ctrl\.cpp$' -and
                                $_.FullName -notmatch 'cgen_util_type\.cpp$' } |
-                Select-String -CaseSensitive -Pattern '"(vb6_ClearList|vb6_SetControlFocus|vb6_Slider_ClearSel|vb6_ControlTextHeight|vb6_ControlTextWidth|vb6_ScaleUnitX|vb6_ScaleUnitY)"' |
+                Select-String -CaseSensitive -Pattern '"(vb6_ClearList|vb6_SetControlFocus|vb6_Slider_ClearSel|vb6_ControlTextHeight|vb6_ControlTextWidth|vb6_ScaleUnitX|vb6_ScaleUnitY|vb6_Ws_Close|vb6_Ws_Listen|vb6_Ws_Connect|vb6_Ws_Accept|vb6_Ws_Bind|vb6_Ws_SendData|vb6_Ws_GetData|vb6_Ws_PeekData)"' |
                 Where-Object { $_.Line -notmatch '^\s*(//|\*)' })
     foreach ($s in $spell) {
         $viol += ('NAME-COPIED: ' + $s.Path.Substring($Root.Length + 1) + ':' + $s.LineNumber)
@@ -217,8 +219,8 @@ if (-not (Test-Path -LiteralPath $tblPath)) {
             }
             $exercised += 1
         }
-        if ($exercised -ne 6) {
-            $viol += ('EMIT-CENSUS: 夹具只跑出 ' + $exercised + ' 枚出口 (恰好 6) ⇒ 夹具或发码被改坏')
+        if ($exercised -ne 14) {
+            $viol += ('EMIT-CENSUS: 夹具只跑出 ' + $exercised + ' 枚出口 (恰好 14) ⇒ 夹具或发码被改坏')
         }
         Write-Host ('table_rows=' + $tbl.Count + ' exercised=' + $exercised + ' type_rows=' + $typArity.Count)
     }
