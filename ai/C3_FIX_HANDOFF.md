@@ -2012,6 +2012,11 @@ marker、重编，之后 `check_rtl_embedded` 报 **125/125 逐字节相同**。
 - **为什么必须单开（它是 §B101 那刀的前置，不是尾巴）**：升级的判据正是「未声明名 + `Option Explicit` ⇒ error」。  这一格说明发码侧对同一个输入**今天就有两个答案** ⇒ 升级之前得先定位那条分岔（哪条分支把裸名折成 Empty、哪条把  裸名直接交出去、分岔的输入条件是什么），否则升级只是给「两个答案」再加一句诊断，而真编那一头照旧一半能过一半不能。
 - **与 §B115/§B118/§B120 同族**：一个事实两个答复。只是这一族不在宿主表那一路，在「未声明标识符」的发码那一路。
 - **分岔已定位到一格（2026-10-10，同一轮接着量的）**：把 `UserControl=ucPieChart\ucPieChart.ctl` 那一行从**工程副本**里删掉（`ucPieChart.ctl:342` 有 `Public Property Get Count() As Long`），同一枚 `ucProgressCircular.ctl` 的同一句就从 `vb6_VariantFromValue(vb6_VariantEmpty())` 翻成 `vb6_VariantFromValue(Count)`（裸名）⇒ **兄弟类的一个属性名，改变了「另一个类里一个未声明裸名」的发码兜底**，而两趟的诊断一字不差（都只有一条 VB3001）。⇒ 两个答案里没有一个是对 VB6 的（VB6 有 `Option Explicit` 时这一句根本编译不过）；这一格归 §B121，下一刀先查「兄弟类成员在哪一步被当作本工程已知名字接住」（账 #222/#219 记过 driver 的跨模块 CoClass 登记会在本模块作用域留下符号，同一族的另一张脸），再定未声明名的发码口径。
+- **全部 10 行 VB3001 按「发码实际怎么走」分完类（2026-10-10，一枚两文件的最小复现 `Count`：只有 C1 ⇒ 裸名；加上有 `Public Property Get Count` 的 C2 ⇒ Empty）**：
+  - **折成 Empty（`leakedClassMember110u` 那一条）**：只有 `tests/Charts 2020/Proyecto1.vbp` 一处 —— 而它恰好是**唯一「靠这条兜底才真编得过」的正例**（`Test-GuiVbp Charts2020` 真编真跑），代价是把夹具里 `Count`（应为 `lCount`）那个笔误 **静默变成 gradient 分支永不执行**（VB6 里这句根本编译不过，因为该 .ctl 第 24 行有 `Option Explicit`）。
+  - **交裸名**（`lastExpr_ = cName;` 那一条）：`ucProgressCircular/Proyecto1.vbp`（真编 ⇒ C2065，就是它今天不绿的直接原因之一）、`interp_neg/in_n3`、`in_n4`、`test_caseis_neg.bas`（三枚刻意负例，只吃 `--emit-c`）、`pkg_xmod/friend_host.bas` 与 `friend_open_host.bas`（单文件输入，发成 `Hidden1();` 这种裸调用；它们的项目形态分别由 `friend_bad.vbp`(VB7006) 与 `friend_open_ok.vbp`(0 条) 判)。
+  - **两条都没走**（名字被别的路径吃掉）：`ext_show_test/Module1.bas` 的 `Form2` 与 `VBFlexGridDemo/Common/Startup.bas` 的 `MainForm` / `InitVisualStylesFixes` —— 前两个是 `Load/Unload <窗体名>` 那一路（§B111/§B113 的地盘），产物里根本没有那个名字。
+- **⇒ 结论（这一格不能单独修）**：把两条兜底统一成任何一条都有代价 —— 统一成 Empty 会把「裸名交给 C 判定」那条路（账 #6 那族：`VK_UP` 靠 windows.h 的同名宏被救活）**静默改成另一个值**；统一成交裸名会让今天**唯一那枚正例** （主 Charts）当场编不过。⇒ 正确的批次是**与 §B101 的升级同批**：升级把「`Option Explicit` + 未声明」在 VB 层判死之后，两条兜底都只服务**宽松模块**，那里 Empty 才是 VB6 的正解（隐式 Variant），而夹具笔误由升级当场逼出来（届时主 Charts 要么改那一个词 `lCount`，要么老实红）。
 
 ### B120 账 #278 第十一刀已出 = 宿主符号的**装配**与**四档名单**各收成一处：§B115 那句「拼法只许来自表」到这里才算落完（语料零暴露的一条真洞顺手堵上，2026-10-10，门 #453 attempt 1 全绿（run 37976675602、head `e211bdc5`、12/12 含形状门 ⇒ 本机 A/B 的「语料零暴露」被 CI 那台 398 行复算证实、wall 11m06s））
 
@@ -2091,6 +2096,8 @@ marker、重编，之后 `check_rtl_embedded` 报 **125/125 逐字节相同**。
   ② 五份单文件输入（口径题，任务 #282）＋ ③ `Count` 两行（源码 bug）。
 
 ### B116 §B101 那刀的前置清单（2026-10-09 量完，**未开工**）：升 error 会连带翻 rc，而形状门逐行钉的就是 rc
+
+> **2026-10-10 读到这里先看这条**：下面三件（三条负例针 / 五份单文件输入 / 源码 bug `Count`）经 §B121 的普查之后，**不再是三件独立的小事** —— 它们是同一次发货的三面：升级判死会当场逼出 `Count`（主 Charts 是今天唯一靠「兄弟类泄漏 → Empty」那条兜底才编得过的正例），而单文件那五行的 rc 翻与不翻就是 §B101 的 a/b 两案。统一未声明名的发码兜底（§B121）必须与升级同批，理由与代价都写在那里。
 
 第八刀之后语料 census 剩 **11 行 VB3001**。那 12 处「解析不出」当时**没有清零** —— 这一句写在第九刀
 之前，是本节自己的错（下面 ① 那格把一整条**整工程输入**读成了刻意负例）：**第九刀（§B117）**
