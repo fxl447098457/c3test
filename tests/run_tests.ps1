@@ -957,6 +957,20 @@ function Test-UdtMemberDims {
         $out | Select-Object -First 6 | ForEach-Object { Write-Host "  $_" }
     }
 }
+# 账 #78: 判据助手的名字唯一性 + 可达性 + 身份（重名遮蔽 = 覆盖面安静地消失，见 §B98）。
+function Test-TestHelperIntegrity {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] test_helper_integrity ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$PSScriptRoot\..\scripts\check_test_helper_integrity.ps1" 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        $out | Select-Object -First 6 | ForEach-Object { Write-Host "  $_" }
+    }
+}
 function Test-ComSigCollisionPolicy {
     $script:total++
     Write-Host -NoNewline "  [STATIC] com_sig_collision_policy ... "
@@ -1609,10 +1623,14 @@ function Test-CodegenNote {
     }
 }
 
-function Test-Compile {
+# 账 #78: 这一枚以前叫 Test-Compile —— 与 303 行那枚**真构建**的同名助手撞了。
+# PowerShell 里后定义的赢，于是 compile 组打印着 [COMPILE]、注释写着「编译+运行」，
+# 实际只跑了 --emit-c：那 10 份夹具（test_comprehensive[2].bas + 8 枚 .frm）在门里
+# 一条 cl 也没编过，而且安静得没有红点。名字改成它真正做的事，构建那一枚留回 Test-Compile。
+function Test-CodegenOk {
     param([string]$Name, [array]$Sources)
     $script:total++
-    Write-Host -NoNewline "  [COMPILE] $Name ... "
+    Write-Host -NoNewline "  [CODEGEN-OK] $Name ... "
     $text = Invoke-CodegenProj $Sources
     if ($script:codegenProjExit -eq 0) {
         $script:pass++
@@ -5225,6 +5243,7 @@ if ($Category -in @("all", "compile")) {
     Test-ComPropTypeAuthority
     Test-ComSigCollisionPolicy
     Test-BuiltinConstAuthority
+    Test-TestHelperIntegrity
 
     Test-EmitcArtifactCaliber
     Test-CtrlGeomCache
@@ -5241,7 +5260,10 @@ if ($Category -in @("all", "compile")) {
 
     Write-Host ""
 
-    # --- 综合测试 (编译+运行, 以 Main 为程序入口) ---
+    # --- 综合测试与 P7 窗体夹具: **真构建**（cl + link 出 exe, 不跑）---
+    # 账 #78: 这两趟以前被同名助手遮成了只发码（见 Test-CodegenOk 上面那段）。本轮把它们接回
+    # 构建那枚，并实测这 10 份夹具在今天的编译器上 10/10 都真出 exe（rc=0、零条 error C，
+    # 见 ai/C3_FIX_HANDOFF.md §B98）⇒ 恢复构建不会带进假红。
     Write-Host "--- Compile Tests ---" -ForegroundColor Yellow
     
     Test-Compile "test_comprehensive" "$Tests\test_comprehensive.bas"
@@ -5986,7 +6008,7 @@ if ($Category -in @("all", "syntax")) {
         }
     }
     if (Test-Path "$Tests\cls_neg\ci_pos3_base.cls") {
-        Test-Compile "ci_pos3_retval_receiver" @("$Tests\cls_neg\ci_pos3_base.cls", "$Tests\cls_neg\ci_pos3_derived.cls")
+        Test-CodegenOk "ci_pos3_retval_receiver" @("$Tests\cls_neg\ci_pos3_base.cls", "$Tests\cls_neg\ci_pos3_derived.cls")
     }
     Write-Host ""
     

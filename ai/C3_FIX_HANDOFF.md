@@ -1791,6 +1791,42 @@ BASE 交 `IdMain,CircleImpl,IdIfaces,VbpImpl,IdBlocks`，NEW 交 `IdMain,VbpImpl
 上一轮就靠这个才分辨出来）⇒ 针要钉"输出的 init 调用序 == 工程声明序"，今天两台都该红；
 ④ 哨兵补一条：那四处码头不许再迭代 `unordered_*`（census 按容器类型问，不按名字问）。
 
+### B98 判据助手重名遮蔽 = `[COMPILE]` 那一格从 2026-09-24 起一条 cl 也没编过（已出，等门 **#433**）
+
+**读数**（先量再动，`tests/run_tests.ps1`）：
+- 80 枚顶格 `function` 里**恰好一枚重名**：`Test-Compile` 在 303（`param([string]$Name, [string]$Source)`，体里
+  `& $C3 $Source --output-dir $OutDir @IncArg` ⇒ **真构建**）与在 1612（`param([string]$Name, [array]$Sources)`，体里
+  `Invoke-CodegenProj` ⇒ **只发码**）。PowerShell 里后定义的赢 ⇒ 遮档生效，构建那枚变成死代码。
+- 被遮的那一格打印的仍是 `[COMPILE] $Name`，组注释写的是「综合测试 (编译+运行, 以 Main 为程序入口)」，
+  于是 10 份夹具（`test_comprehensive.bas` / `test_comprehensive2.bas` + `$formTests` 里 8 枚 `.frm`）**不再产出 exe**，
+  而**没有任何地方报红** —— 发码退出码 0 就是绿。这一族比 #166/#231/#245 那几格更阴：被遮掉的半边不产生噪声，它只是安静地不跑。
+- 来源可查：构建那枚自 M5（`9924f3cb`）就在；遮它的那枚是 **`40eea3f1`（2026-09-24，那一笔的本意是给 `Test-CompileFail` 铺助手区）** 种下的，
+  `git log -S'function Test-Compile {'` 只这两笔，HEAD 仍是 2 枚 ⇒ 已经遮了 15 天，其间每一轮门的 `[COMPILE]` 都是空的。
+- 调用点清点：303 那枚的三个调用点（5247 / 5248 / 5269）全在被遮的那一格；syntax 组那一处
+  `Test-Compile "ci_pos3_retval_receiver" @(两枚 .cls)` 传的是**数组形**，它落在遮档里其实是**对的** ⇒ 不能跟着回到构建那枚。
+- 接回构建之前先量这 10 份夹具今天编不编得过（`.build/b777_compile_probe.ps1`，x64、进程内灌 vcvars）：
+  **10/10 `rc=0 clErrLines=0 exe=1`** ⇒ 恢复构建不会带进假红。
+
+**改**：只发码那枚改名成它真正做的事 —— `Test-CodegenOk`，标签跟着换成 `[CODEGEN-OK]`；
+`ci_pos3_retval_receiver` 显式改调 `Test-CodegenOk`（行为逐字不变）；构建那枚留回 `Test-Compile`；
+组注释订正成「综合测试与 P7 窗体夹具: **真构建**（cl + link 出 exe, 不跑）」—— 原那句「编译+运行」本来也不准，那一格从不跑 exe。
+
+**第 40 道哨兵** `scripts/check_test_helper_integrity.ps1`（只扫 `tests/run_tests.ps1`，不起 cl）：
+- H1 `function` 名字**不许重复**（按出现次数数；这一条对**所有**函数名，不限 `Test-*`）；
+- H2 每个 `function Test-*` 必须在自己的定义之外被**代码行**提到至少一次。只数代码行 —— 整行以 `#` 开头的注释不算引用。
+  这条不能松：「把调用点注释掉」是覆盖面安静消失的**第二种写法**，与重名遮蔽同后果，按全文数它永远绿；
+- H3 两枚的身份钉死：唯一那枚 `Test-Compile` 体里必须有 `--output-dir`、且不许出现 `Invoke-CodegenProj`；
+  `Test-CodegenOk` 必须存在且体里有 `Invoke-CodegenProj` ⇒ 谁再把只发码的那枚改回同名，当场红；
+- H4 `Test-CodegenOk` / `Test-EmitcShape` / `Test-EmitcAbsent` 三者标签互不相同且都不是 `[COMPILE]`（日志要读得出这格只发了码）。
+- 绿读数 `functions=81 Test-* helpers=68 no shadowing, all reachable`；五种坏法（植重名 / 注释掉一个调用点 /
+  构建那枚不再构建 / 只发码那枚改回同名 / 标签换成 `[COMPILE]`）**各自红并点名自己的规则**，植完按 md5 还原、还原后复跑绿
+  （`.build/b783_neg78.py`）。全 40 道哨兵重扫 `total=40 red=0`。
+
+**下一格**：① 门 **#433** 是这一格**第一次真编译**那 10 份夹具 —— 本机只验过 x64，CI 的 toolset 上报红就是真红不是抖；
+compile 那个 job 的耗时从「发码 ~0.4s/份」涨到「编译 23–41s/份」（10 份 ⇒ 约 +5 分钟，job 上限 45 分钟）。
+② H2 的可达性只管 `Test-*` 前缀；`Invoke-* / Get-*` 那批内部助手重名会被 H1 抓到，但**不可达**抓不到 ——
+要扩就得把前缀名单一起钉成 census，别默默扩出假红。③ §B97 那条还没动，缺的是一个口径。
+
 ## C. 仍在生效的口径与工具事实（与本文档等长的一半价值在这里；完整版见记忆库）
 
 - **VB.Timer 的节拍口径 = Win32 SetTimer 那一档（系统计时 tick，实测 ~15.6 ms；`Interval` 不足一个 tick 就往上取整，另有一条 `USER_TIMER_MINIMUM=10 ms` 钳位），判据一律不钉绝对拍号**（门 #407 之后定，2026-10-08）：winmm `timeSetEvent` 那条路（`Interval=20` 实得 ~50 拍/秒、`Interval=5` ~199）曾把精度提到 ms 级，代价是它自发出去的 WM_TIMER 是一条**真实待处理消息**、长期占住线程队列 ⇒ 硬件输入被饿死（3DMenu 实测点一下就不动、标题不再随点击变换，而 VB6 编译的同一份代码正常 —— VB6 内部就是 SetTimer）。现在 winmm 只作派发窗无效时的兜底，且带 `posted` 合并。**两头都要活的后果**：`tests/c29timer` 那六条判据从「秒级窗口里的绝对拍数」改成机制（开了要跑 / 改 Interval 两向都重排 / 关掉要停 / 各槽周期互不串 / 小 Interval 到地板为止），名义间隔取 100/200/500 ms 这一档 —— 系统 tick 是 15.6 ms 还是被别的进程 `timeBeginPeriod` 提到 1 ms，读数都落在同一条带里（取整误差 ≤7%）；带里那道上界（T6 `<=150`）是**退回 winmm 的哨兵**（旧口径的 199 会当场红）。**同族提醒**：凡是"在秒级窗口里数拍"的判据都吃这台机器的全局时间精度，写之前先问一句这条读数在 1 ms tick 的机器上是否还成立。
