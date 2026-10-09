@@ -2000,7 +2000,7 @@ marker、重编，之后 `check_rtl_embedded` 报 **125/125 逐字节相同**。
 `w = ScaleWidth` 与 `Debug.Print …` 合成一行，于是行号与诊断全对不上（报在 `(6,35)` 那种文件里根本不存在的列上）。
 把生成的夹具**原样 dump 出来看一眼**才发现。⇒ 夹具是脚本拼的时候，「先核夹具本身」是第 0 步，不是最后一步。
 
-### B118 账 #278 第十刀已出 = With 块那枚宿主句柄的拼法改问那张表：§B115 落地 + 第八刀扣着的 `.pag` 值位一起放开，而**它当时那条理由被实测推翻**（零行为改动、语料 8 份输入逐字节相同，2026-10-10，**待门**）
+### B118 账 #278 第十刀已出 = With 块那枚宿主句柄的拼法改问那张表：§B115 落地 + 第八刀扣着的 `.pag` 值位一起放开，而**它当时那条理由被实测推翻**（零行为改动、语料 8 份输入逐字节相同，2026-10-10，门 #452 attempt 1 全绿（run 37971715373、head `6b94caf5`、12/12 含形状门 ⇒ 本机登记的 398 行哈希与 CI 那台复算对齐、wall 10m01s））
 
 - **开工第一件事把上一账的前提量了一遍，结论是它错了**：拿门 #451 的 `c3-exe` 工件（`.build/b191_base`， 就是第九刀过门那台）在同一枚 `.pag` 探针上 `--emit-c` ⇒ **rc=0**，产物里同时有 `void* _vb6_with_0 = (void*)vb6_PropertyPage_hwnd` 和 `n = vb6_PropertyPage_hWnd;` 两行；再去 RTL 数， 两种拼写**都声明且都定义**（见 §B115 的订正）。⇒ 教训：**一条「所以要扣着某格放行」的理由， 如果来自推断而不是产物读数，就在它拦着放行那一刻去量**；这一格因此多活了 24 小时的 VB3001。
 - **缺陷的真实形状 = 同一个事实两个答复**，而且只差大小写。今天两枚全局都是 NULL（§B119：`.pag` 的宿主 全局全仓 0 个写者）⇒ 现价 0；一旦有人给 `…_hWnd` 接上写者，With 块读到的还是没人写的那一枚 ⇒ **静默错宿主**。所以本刀是**零行为改动的收口**（与账 #234「拿 DC 这个决定实现了两遍」同族）， 不是修一个正在响的症状 —— 别把它记成修复。
@@ -2010,7 +2010,7 @@ marker、重编，之后 `check_rtl_embedded` 报 **125/125 逐字节相同**。
   ② `check_dochost_authority.ps1` 的 D3b **换读法**（不是放宽）：第八刀钉「体内查 `qualifierPos` ≥ 3」， 放开 `.pag` 那一格之后体内只剩 2 次 ⇒ 改成逐条点名守位的两档（`vba` 1 + `extender`+`ambient` 1，各恰好 1）， 并新增 **D3d** 钉文档自身那两行**不带**位置（放开之后不许退回去）。
 - **自己造的一条坑，值得记住**：PowerShell 的 `-ne` **不区分大小写** ⇒ 第一版 `TWO-ANSWERS` 判据在 BASE 那台 上抓不到（差别正好只有 `h` 的大小写），N0 只报出两条。改成 `-cne` 之后才报出三条。**凡是「只差大小写」 的判据，比较符必须写死区分大小写的那一个。**
 - **负控 7/7（全部跑在 `src`+`scripts`+`tests` 的副本上，走哨兵的 `-Root` 形参；共享树未动）**： N0 = 新哨兵吃 **BASE 编译器** ⇒ 三条红（TWO-ANSWERS / NEEDLE-SAME / NEEDLE-BARE）⇒ 这道判据抓的正是本刀； N1 手抄回去 ⇒ WITH-ASK(0) + OLD-SPELLING；N2 那一问写两遍 ⇒ WITH-ASK(2)；N3 再塞一枚成员字面量 ⇒ DENY 红； N4 把 `&& qualifierPos` 加回 `.pag` 那行 ⇒ D3d 红；N5 无关改写 ⇒ 两道都绿。
-- **护栏（8 份产物读出来的，不是推的）**：全语料里含 `With UserControl` / `With PropertyPage` 的那 9 份文件所属的 **8 枚清单输入**逐一对比 BASE vs NEW 的 `--emit-c` ⇒ **8/8 逐字节相同、rc 全 0、VB3001 计数一格未变** （`VBFlexGridDemo.vbp` 5,465,077 / `Charts 2020/Proyecto1.vbp` 2,114,886 / `ucTreeMaps` 525,312 / `ucChartBar` 497,806 / `ucProgressCircular` 381,114 / `ucPieChart` 280,694 / `ucChartArea` 273,411 / `czFormDemo.vbp` 229,736，另 `VBFlexGridBase.bas` 56,622）。⇒ 本刀在语料上是**零暴露**，判据只能靠夹具； §B108 那条提醒反过来也成立：零差异既不证明修好了，也不证明没修。
+- **护栏（8 份产物读出来的，不是推的）**：全语料里含 `With UserControl` / `With PropertyPage` 的那 9 份文件所属的 **8 枚清单输入**逐一对比 BASE vs NEW 的 `--emit-c` ⇒ **8/8 逐字节相同、rc 全 0、VB3001 计数一格未变** （`VBFlexGridDemo.vbp` 5,465,077 / `Charts 2020/Proyecto1.vbp` 2,114,886 / `ucTreeMaps` 525,312 / `ucChartBar` 497,806 / `ucProgressCircular` 381,114 / `ucPieChart` 280,694 / `ucChartArea` 273,411 / `czFormDemo.vbp` 229,736，另 `VBFlexGridBase.bas` 56,622）。⇒ 本刀在语料上是**零暴露**，判据只能靠夹具； §B108 那条提醒反过来也成立：零差异既不证明修好了，也不证明没修。 **判据只住一处**：这条发码针留在 `check_host_pseudo_table.ps1` 里（它跑在门的 [STATIC] 那一趟，CI 同样 enforce），刻意**没有**再往 `tests/run_tests.ps1` 的 `Test-CodegenNote` 家族抄一份 —— 同一件事两个住所正是本刀要修的东西。
 - **census 未动**：语料 VB3001 仍 10 行（`.pag` 里 `With PropertyPage` 在语料是 0 处）。本刀关掉的是 §B115 那一格（它本来不在 §B116 那份前置清单里，是清单上面那一格）—— §B101 之前缺的仍是 §B116 列的三条负例针 / 五份单文件输入（任务 #282 的口径题）/ 源码 bug `Count`，另加下面 §B119 那一格新账；那一格不在 §B101 的路上，别把它算进升级的前置。
 
 ### B119 新账 = `.pag` 的宿主全局全仓 **0 个写者**：属性页里文档自身那一族的读数一律是缺省值（2026-10-10 量，**未开工**）
@@ -2019,6 +2019,9 @@ marker、重编，之后 `check_rtl_embedded` 报 **125/125 逐字节相同**。
 - **后果**：属性页里 `With PropertyPage`、`PropertyPage.hWnd`、裸写 `ScaleMode` 拿到的是 NULL 和缺省， 而不是这一页自己的宿主窗口 —— 与账 #197 同一形状，只是那一族修在 `.ctl`，这一族整个没人接。
 - **兼容别名要一并想清楚**：RTL 同时留着大小写两枚（注释自称 "both spellings denote the same concept"） ⇒ 一个事实两枚存储。接写者时只接一头：另一头要么做成真别名，要么删掉 —— 第十刀之后**发码侧只会交 带大写 H 的那一枚**，所以那头已经没人写了。
 - **语料暴露**：VBFlexGridDemo 三枚 `.pag` 里 `With PropertyPage.SelectedControls(0)` 6 处，那一形走 HPF_METHOD 通道、不读这枚全局 ⇒ 症状今天不现形。排产前先量「有没有真工程读属性页的 `.hWnd`/`ScaleMode`」。
+- **定性已量（2026-10-10 本刀之后顺手做的，结论：这不是「RTL 漏写一枚全局」）**：拿 `tests/VBFlexGridDemo/VBFlexGridDemo.vbp`（`PropertyPage=` 三行都在）出码 —— 三枚页的类**照常发**（`vb6_cls_PPVBFlexGridGeneral_New()` 在、`PropertyPage_Initialize/ApplyChanges/SelectionChanged` 与控件 `_Click` 都在、页内部自调也在），但 **`vb6_cls_PP*_New()` 的调用点 0 处**；且 `src/` 里 `IPropertyPage` / `IPropertyPageSite` / `ShowPropertyPages` / `vb6_PP_` **全仓 0 命中** ⇒ C3 压根没有属性页运行期，没人创建页实例 ⇒ 宿主句柄恒 NULL 是**自洽**的，接上写者也没有写它的人。
+- **排产含义**：清这一格的前提是先拍「C3 要不要有属性页运行期」（VB6 那一套是 IDE 宿主的页容器，编译产物自己从不显示它）⇒ 这是**功能范围决策**，不是缺陷修复，别把它当账 #197/#198 那一族的续刀排。
+
 
 ### B117 账 #278 第九刀已出 = 工程级名单长出第五格：标准模块的 `Friend` 过程（census 11→10，整工程输入归零，哨兵 46 扩三条，2026-10-10，门 #451 attempt 1 全绿（run 37968379735、head `e1c92200`、12/12 含形状门 ⇒ 本机登记的 398 行哈希与 CI 那台复算对齐、wall 10m48s））
 
