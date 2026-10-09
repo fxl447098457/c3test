@@ -1968,32 +1968,37 @@ marker、重编，之后 `check_rtl_embedded` 报 **125/125 逐字节相同**。
 **欠着**：门跑起来才算收线。另一档没动、要拍口径 —— 要不要让这道门**对 PR 只报不挡**（`continue-on-error`），
 只在推 dev 时才硬判红。现在它是硬的：新加的自救面已经把「处理它」压成一条命令，本线倾向保持硬判。
 
-### B101 隐式未声明标识符「落地不落地」有两份答案 —— 标准模块会 materialize，UserControl 把裸名直接发进 C ⇒ C2065（账 #278，2026-10-09 最小复现到手，**未开工，缺一个口径**）
+### B101 `Option Explicit` 在场时只发 warning、发码却把裸名直接发出去 ⇒ 产物必然 C2065（账 #278，2026-10-09，**未开工**）
 
-**现象**：Charts 2020 的 `ucProgressCircular` 今天真编译 x86 **只剩一条错**（`b886_out_x86/c3-error.log` = 482 行日志里 `error C` 恰 1 条）：
-`ucProgressCircular.c(1504): error C2065: 'Count': 未声明的标识符`。源码那一行是原作者的笔误 —— `ucProgressCircular.ctl:949`
-`If hBrush = 0 Or Count = 0 Then Exit Function`（全文件 `Count` 只出现这一次，上两行刚 `GdipGetPointCount mPath, lCount`，想写的显然是 `lCount`）。
+**⚠ 自纠（同一轮内两次改口，第二次是实测定的）**：本节最初写成「隐式未声明标识符在 `.bas` 落地、在 `.ctl` 不落地 = 两份答案」——
+**那是探针自己的混淆**：我把 `Option Explicit` 只写进了 `.ctl` 那份。补跑干净的 2×2（同一枚 C3.exe，`.build/b888_probe/`）：
 
-**最小复现（`.build/b888_probe/`，同一枚 C3.exe，`--emit-c`）**：同样一段「裸 `Count` 赋值 + 比较 + `Exit Function`」——
-- `g_exitfn.bas`（标准模块）⇒ 发码**对**：`vb6_VARIANT Count = vb6_VariantEmpty(); /* 隐式变量 */` + `vb6_VarCmpLongEq(&Count, 0)`，rc=0；
-- `ctlimpl/ucBare.ctl`（UserControl）⇒ 发码**错**：`Count = 7;` 与 `vb6_VariantFromValue(Count)`，**根本没有那枚声明**，两边都只发同一条 `VB3001 未声明的标识符 'Count'`。
-⇒ 「隐式未声明标识符怎么处理」这个问题在仓里有**两份答案**：`.bas` 那条会补声明，类模块/.ctl 那条只警告就把名字发出去，产物必然编不过。
+| 上下文 | 无 `Option Explicit` | 带 `Option Explicit` |
+|---|---|---|
+| `.bas`（`g_exitfn.bas` / `b_opt.bas`） | `vb6_VARIANT Count = vb6_VariantEmpty(); /* 隐式变量 */` ⇒ 编得过 | **`Count = 7;` 裸名发进 C** ⇒ C2065 |
+| `.ctl` UserControl（`ctlimpl/ucBare.ctl` / `ucNoOpt.ctl`） | 同上，补声明 ⇒ 编得过 | 同上，裸名 ⇒ C2065 |
 
-**⚠ 这里有个口径要拍（本线不自己决定）**：那枚 `.ctl` **带着 `Option Explicit`**（真工程 `ucProgressCircular.ctl:24` 也带）——
-按 VB6 本人，`Option Explicit` 在场时这行是**编译错误**，那份源码根本编不出 exe。于是两条路：
-- **口径 A（维持本仓已选的宽容）**：`VB3001` 继续只作 warning，但**两上下文必须同一个答案** —— 把类模块/.ctl 那条也接到
-  标准模块那套隐式变量落地上（一处权威 + census + 哨兵，钉「凡发 VB3001 未声明标识符，发码侧必须要么补声明、要么判死」）。
-  代价：`Option Explicit` 在场时我们比 VB6 宽（VB6 拒、我们过）。收益：`ucProgressCircular` 立刻编得过，能升进门禁
-  （照 #187/#201 那句口径「这个工程从此不许退回编不过」）。
-- **口径 B（向 VB6 对齐）**：`Option Explicit` 在场时把 `VB3001` 升成 **error** ⇒ `ucProgressCircular` 在语义层就报不出来，
-  那枚工程**永久编不过**（除非源码修那行笔误 —— 而按老规矩「绝不为绕开工具 bug 去改夹具」，这里不是工具 bug，是语料自己的 bug，
-  所以改源码是可以谈的，但要用户点头才动别人的 .ctl）。
+⇒ **只有一份答案，而且它是坏的**：落地逻辑在 `cgen_decl_func.cpp:441` / `cgen_decl_proc.cpp:355` / `cgen_decl_prop.cpp:322` 三处同形，
+UC 与标准模块走的是同一批序言发射器（`PushInstance` 就在同一段里）；带 `Option Explicit` 时分析器**不登记**隐式变量（这按 VB6 是对的），
+可诊断只到 `VB3001` **warning** 级（rc 仍是 0、`--emit-c` 照出产物），于是「警告一句、产物编不过」。
 
-**本线倾向**：先按 A 把「两份答案合一」做掉（这一格与 #159/#216/#218 同族，本来就该收成一处），B 那句「Option Explicit 在场判死」
-是**第二件事**（会改变一批存量工程的可编译性，要单独一轮 + 全语料逐行归因）。等用户拍。
+**真实代价（这就是它值得修的原因）**：Charts 的 `ucProgressCircular` 今天真编译 x86 **只剩这一条错** ——
+`ucProgressCircular.c(1504): error C2065: 'Count'`，源码是原作者的笔误（`ucProgressCircular.ctl:949` 的裸 `Count`，全文件仅此一处，
+上两行刚 `GdipGetPointCount mPath, lCount`），而那枚 `.ctl` 第 24 行**写着** `Option Explicit` ⇒ VB6 本人对这行也是编译错误。
 
-**开工前先读的两条现成家底**：隐式变量的落地在 `#pragma push_macro` + `vb6_VariantEmpty()` 那一段（`.bas` 路的实物见
-`.build/b888_probe/g_exitfn.c:61-65`）；类模块那条要问的是「隐式名字是在哪一层登记的、UC 那条路有没有走到同一个登记点」。
+**要拍的口径（比原来的 A/B 更清楚了）**：
+- **判死（与 VB6 一致）**：`Option Explicit` 在场 ⇒ `VB3001 未声明的标识符` 升成 **error**，`--emit-c` 不出产物、`rc!=0`。
+  好处：不再产出必然编不过的 C，且语义层就把源码 bug 报出来（报错位置是 `.ctl:949`，比 C2065 好读得多）。
+  代价：`ucProgressCircular` 这类「原作者笔误 + Option Explicit」的存量工程**从此明确编不过**，要过那道门得先改语料那行（这不算「为绕开工具 bug 改夹具」—— 工具没坏，是语料坏了）。
+- **宽容**：像无 `Option Explicit` 那样补一枚隐式 Variant 局部（今天的行为只在「不带 OE」时成立）⇒ 那工程立刻编得过、可升进门禁；
+  代价是比 VB6 宽，且把源码 bug 变成运行期恒 `Empty` 的静默行为（`Count = 0` 为真，那函数直接 `Exit Function`）。
+- **本线倾向**：**判死**。理由：今天的中间态（只 warning、却发不可编译的 C）是最坏的一种 —— 它把错误推到下游、还留下 482 行的 cl 日志当现场；
+  而「宽容」会让一条真实的源码 bug 在产物里变成静默的错行为。**这条要用户点头才动**（它会给存量语料添红：`--emit-c` 面与 `[VBP]` 门禁都可能新增判死，需全语料逐行归因）。
+- 顺带一条独立的小缺口（与口径无关，可以直接修）：无论判死还是宽容，**都不该出现「warning + 不可编译的 C」这个组合**；
+  即便选宽容路线，也要先有一条哨兵钉「发码侧引用了任何未被声明的裸标识符 ⇒ 语义层必须已经登记它」——那才是这一族的单一权威问法。
+
+**开工家底**：登记点 `semantic_analyzer_expr.cpp:163` + `symbol_table.hpp:546-564`（`implicitVars_`，键是 `<mod>` + 模块名小写 + `$` + 过程名小写）；
+发射点三处同形（`cgen_decl_func.cpp:441` / `cgen_decl_proc.cpp:355` / `cgen_decl_prop.cpp:322`）—— **三处**正是本仓一贯要收成的那一处。
 
 ## C. 仍在生效的口径与工具事实（与本文档等长的一半价值在这里；完整版见记忆库）
 
