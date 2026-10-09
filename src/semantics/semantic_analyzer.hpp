@@ -150,9 +150,12 @@ public:
     // 成员与类型由发码层按 kHostPseudoRows 那张表回答 (账 #159)，语义层在这里唯一要做的
     // 是别把它当未声明的名字 —— 开着 Option Explicit 时那是每条一次的 VB3001，
     // 关着时更实在: 会登记成一枚隐式 Variant 局部并在发码里真发出来 (实测 `VBA` 那枚)。
-    bool isDocumentHostObject(const std::string& name) const;
+    bool isDocumentHostObject(const std::string& name, bool qualifierPos) const;
     // 裸写的文档成员（账 #219）：判据 = 宿主伪成员表的 HPF_BARE 列，定义处写清了。
     bool isDocumentBarePseudoMember(const std::string& name) const;
+    // 账 #278 §B105: 「答案由一条专用码头给出」的那几行（表的 HPF_CHANNEL 列）—— **两个位都合法**，
+    // 因为集合名当限定符用是 VB6 的常规写法（`Controls.Add(...)` / `For Each c In Controls`）。
+    bool isDocumentChannelMember(const std::string& name) const;
     // 上条的两份数据源。driver 在逐模块分析开始前从**已解析的 AST** 算好，各分析器
     // 各持一份 (名字表很小，复制比lifetime 推理便宜)。分开几条而不是一条: 各位要的事实
     // 不同 (裸名位 / 限定符位)，合成一条就把"模块名"和"过程名"混成一锅。

@@ -737,16 +737,39 @@ bool SemanticAnalyzer::namesProjectLevel(const std::string& name) const {
 
 // 判据 = (文档类别, 对象名) 一格一格对，不靠字符串猜 (.ctl 与 .pag 的隐式对象前缀不同:
 // vb6_UserControl_* / vb6_PropertyPage_*)。`extender` / `ambient` 只有 UserControl 有。
-bool SemanticAnalyzer::isDocumentHostObject(const std::string& name) const {
+bool SemanticAnalyzer::isDocumentHostObject(const std::string& name, bool qualifierPos) const {
     if (name.empty() || !currentModule_) return false;
     const std::string lk = ifaceLower(name);
-    if (lk == "vba") return true;   // VBA 全局库前缀, 任何模块都合法
+    if (lk == "vba") return qualifierPos;   // VBA 全局库前缀, 但只有站在限定符位才有意义
     const DocumentKind k = currentModule_->docKind;
+    // 文档对象**自己的名字**在 VB6 两个位都合法：`UserControl.hDC`（限定符位）与
+    // `With UserControl`（值位，等价于 Me）。值位这一格实测过：产物的确有路
+    // （`_vb6_with_2 = (void*)vb6_UserControl_hWnd`），今天只是多配一条 VB3001。
+    // .pag 那一形**刻意不放**：`With PropertyPage` 的发码是 `vb6_PropertyPage_hwnd`（小写 h），
+    // 而 RTL 声明的是 `vb6_PropertyPage_hWnd` ⇒ 放行只是把一条警告换成一次 C2065。
+    // 那是发码侧的拼写缺陷，另立账 (§B114)，不归本刀。
     if (lk == "usercontrol") return k == DocumentKind::UserControl;
-    if (lk == "propertypage") return k == DocumentKind::PropertyPage;
-    if (lk == "extender" || lk == "ambient") return k == DocumentKind::UserControl;
+    if (lk == "propertypage") return k == DocumentKind::PropertyPage && qualifierPos;
+    if (lk == "extender" || lk == "ambient") return k == DocumentKind::UserControl && qualifierPos;
     return false;
 }
+
+// 账 #278 §B105: 表里带 HPF_CHANNEL 的那几行（今天只有 `Controls`）在**两个位**都放行 ——
+// VB6 里 `Controls.Add(...)` / `For Each c In Controls` 都是常规写法，而老的那两条分支
+// 一条只管限定符位的"文档对象名"、一条只管裸位的"文档成员名"，集合名当限定符用正好两头都不接。
+// 名字与码头都来自那张表（common/host_pseudo.hpp），这里不再抄成员名。
+bool SemanticAnalyzer::isDocumentChannelMember(const std::string& name) const {
+    if (!currentModule_ || name.empty()) return false;
+    const char* obj = nullptr;
+    switch (currentModule_->docKind) {
+        case DocumentKind::UserControl:  obj = "UserControl";  break;
+        case DocumentKind::PropertyPage: obj = "PropertyPage"; break;
+        default: return false;
+    }
+    std::string dock;
+    return hostPseudoChannel(obj, name, dock);
+}
+
 // 裸写的文档成员（账 #219）：判据 = 那张宿主伪成员表（common/host_pseudo.hpp）里带 HPF_BARE
 // 的那几行。发码侧从来只问这张表，语义层以前不问 —— 于是同一句 `Changed = True`
 // 一边发成正确的 vb6_PropertyPage_Changed、一边每条配一句 VB3001「未声明的标识符」

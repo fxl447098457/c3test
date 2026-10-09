@@ -140,10 +140,14 @@ void SemanticAnalyzer::visit(IdentifierExpr& node) {
         // 放在最前面：Option Explicit 那条 3001 警告同样不该为这两个位出。
         if (pass_ == 2 && namesProjectLevel(node.name)) {
             // 什么都不做 —— 不是变量，也不是未声明标识符；名字的含义由发码层按工程解析。
-        } else if (pass_ == 2 && memberObjCtx_ && isDocumentHostObject(node.name)) {
+        } else if (pass_ == 2 && isDocumentHostObject(node.name, memberObjCtx_)) {
             // 文档隐式对象 (`UserControl.hDC` / `VBA.Len(x)` 那一族的限定符位) —— 判据与
             // 两种后果都写在 SemanticAnalyzer::isDocumentHostObject 的声明处。类型答案仍然
             // 走下面的 Variant：成员的类型由发码层按 kHostPseudoRows 回答 (账 #159)。
+        } else if (pass_ == 2 && isDocumentChannelMember(node.name)) {
+            // 账 #278 §B105: 表里标了 HPF_CHANNEL 的那几行（`Controls` 一族）**两个位都合法**。
+            // 语料三处（Charts 的 ppProgressCircular.pag 两行 + VBFlexGrid.ctl 一行）产物从来是对的
+            // (`vb6_UC_Controls()`)，只有诊断在报噪声 —— 判据与发码同源：都问那张表。
         } else if (pass_ == 2 && !memberObjCtx_ && isDocumentBarePseudoMember(node.name)) {
             // 文档自带的裸写成员 (.pag 的 Changed、.ctl 的 hDC 一族) 不是未声明的名字 ——
             // 判据写在 SemanticAnalyzer::isDocumentBarePseudoMember 的定义处。发码层把这一批

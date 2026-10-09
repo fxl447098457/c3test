@@ -71,10 +71,33 @@ $objPascal = @{ usercontrol = "UserControl"; propertypage = "PropertyPage";
                extender = "Extender"; ambient = "Ambient" }
 
 $scalarRows = 0
+$chanRows = 0
 foreach ($r in $rows) {
     $g = [regex]::Match($r.Line, $rowRe)
     $obj = $g.Groups[1].Value; $name = $g.Groups[2].Value
     $rtl = $g.Groups[3].Value; $type = $g.Groups[4].Value
+    $flags = $g.Groups[5].Value
+    # 账 #278 §B105: HPF_CHANNEL 行的契约不是 `vb6_<对象>_<rtl>`，而是 channel 字段点名的那条
+    # 码头（`Controls` 走 vb6_UC_Controls()，不是恒 NULL 的 vb6_PropertyPage_Controls 空桩）。
+    # 所以这一档换一条判据：码头符号必须在 RTL 真有人声明，且这类行不许带值类型。
+    if ($flags -match 'HPF_CHANNEL') {
+        $cm = [regex]::Match($r.Line, 'HPF_CHANNEL,\s*"([A-Za-z_]\w*)"')
+        if (-not $cm.Success) {
+            $viol += ("CHANNEL-ROW-NODOCK: {0}.{1} flags HPF_CHANNEL but names no dock symbol" -f $obj, $name)
+            continue
+        }
+        $dock = $cm.Groups[1].Value
+        $chanRows++
+        if ($type -ne "Unknown") {
+            $viol += ("CHANNEL-ROW-TYPE: {0}.{1} is answered by dock {2} yet table claims {3}" -f $obj, $name, $dock, $type)
+        }
+        $decl = @(Get-ChildItem -Path (Join-Path $Root "src\rtl") -Recurse -Include *.h |
+                  Select-String -Pattern ("\b" + [regex]::Escape($dock) + "\s*\("))
+        if ($decl.Count -lt 1) {
+            $viol += ("CHANNEL-DOCK-MISSING: {0}.{1} -> {2}() is not declared in any src/rtl header" -f $obj, $name, $dock)
+        }
+        continue
+    }
     $sym = "vb6_" + $objPascal[$obj] + "_" + $rtl
     if ($type -ne "Unknown") { $scalarRows++ }
     # 2a) 符号必须在场 (全局或函数) —— 收了没人声明的就是发一个 C2065
@@ -103,7 +126,9 @@ $deny = @(
     @{ File = "src\backend\detail\expr\cgen_expr_ident_builtin.inc"; Pat = '"(scalewidth|scaleheight|scalemode|containerhwnd|enabled|autoredraw|hdc|hwnd)"' },
     @{ File = "src\backend\detail\stmt\cgen_assign_host_pseudo.inc"; Pat = '"(scalewidth|scaleheight|scalemode|containerhwnd|enabled|autoredraw|hdc|hwnd)"' },
     # 语义层那一头同样禁用成员名字面量（账 #219 删掉的就是这一份）
-    @{ File = "src\semantics\semantic_analyzer_util.cpp"; Pat = '"(changed|scalewidth|scaleheight|scalemode|containerhwnd|enabled|autoredraw|hdc|hwnd)"' }
+    @{ File = "src\semantics\semantic_analyzer_util.cpp"; Pat = '"(changed|scalewidth|scaleheight|scalemode|containerhwnd|enabled|autoredraw|hdc|hwnd)"' },
+    # 账 #278 §B105: 码头的符号名只许写在表里；发码侧再硬编码一次 vb6_UC_Controls() = 第二份权威
+    @{ File = "src\backend\detail\expr\cgen_expr_ident_builtin.inc"; Pat = '"vb6_UC_Controls\(\)"' }
 )
 foreach ($d in $deny) {
     $p = Join-Path $Root $d.File
@@ -125,7 +150,12 @@ $must = @(
     @{ File = "src\backend\detail\expr\cgen_expr_ident_builtin.inc"; Pat = 'hostPseudoBareName\(' },
     @{ File = "src\backend\detail\stmt\cgen_assign_host_pseudo.inc"; Pat = 'hostPseudoIsNumeric\(' },
     # 第五个消费点 (账 #219): 语义层的裸写放行必须问表，不许把成员名抄回 semantics。
-    @{ File = "src\semantics\semantic_analyzer_util.cpp"; Pat = 'hostPseudoBareEligible\(' }
+    @{ File = "src\semantics\semantic_analyzer_util.cpp"; Pat = 'hostPseudoBareEligible\(' },
+    # 账 #278 §B105: HPF_CHANNEL 那一档只经 hostPseudoChannel 出口流动 —— 语义层放行与发码
+    # 选码头都问它；表里删掉这句 = 两头退回各自硬编码。
+    @{ File = "src\common\host_pseudo.hpp"; Pat = 'inline bool hostPseudoChannel' },
+    @{ File = "src\semantics\semantic_analyzer_util.cpp"; Pat = 'hostPseudoChannel\(' },
+    @{ File = "src\backend\detail\expr\cgen_expr_ident_builtin.inc"; Pat = 'hostPseudoChannel\(' }
 )
 foreach ($m in $must) {
     $p = Join-Path $Root $m.File

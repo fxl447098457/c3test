@@ -53,7 +53,13 @@ inline std::string hostPseudoLower(const std::string& s) {
     return o;
 }
 
-enum : uint8_t { HPF_NONE = 0, HPF_BARE = 1 << 0, HPF_METHOD = 1 << 1 };
+enum : uint8_t { HPF_NONE = 0, HPF_BARE = 1 << 0, HPF_METHOD = 1 << 1,
+                 // HPF_CHANNEL = 这一档的答案**不是** `vb6_<对象>_<rtl>`，而是一条专用码头
+                 // (channel 字段给符号名)。账 #278 §B105 的 b 案：表里必须能说得出"由哪条码头回答"，
+                 // 否则给 .pag 补一行 `Controls` 就是在说谎 —— vb6_PropertyPage_Controls
+                 // 那枚恒 NULL 的空桩从来不该被发码 (真实答复是 vb6_UC_Controls())。
+                 // 与 canvas_drawing.hpp 的 CANVAS_OWNER_METHOD/DRAW 同一形状。
+                 HPF_CHANNEL = 1 << 2 };
 
 struct HostPseudoRow {
     const char* obj;     // 宿主伪对象名 (小写; 发成 vb6_<Obj>_<rtl>)
@@ -62,6 +68,9 @@ struct HostPseudoRow {
     Vb6Type type;        // 值读类型; Unknown = 不由本表回答
     uint32_t flags;      // uint32 而非 uint8: 行里写 HPF_BARE | HPF_METHOD 会整型提升,
                          // 花括号初始化里收窄回 uint8_t 是 narrowing (MSVC 直接报错)
+    // 只在 HPF_CHANNEL 那几行填：码头的 C 符号名（**不带括号**，发码侧自己加 `()`）。
+    // 缺省 nullptr ⇒ 其余行沿用 `vb6_<对象>_<rtl>` 那条契约。
+    const char* channel = nullptr;
 };
 
 inline const HostPseudoRow kHostPseudoRows[] = {
@@ -72,7 +81,7 @@ inline const HostPseudoRow kHostPseudoRows[] = {
     {"usercontrol", "cancelasyncread", "CancelAsyncRead", Vb6Type::Unknown,  HPF_METHOD},
     {"usercontrol", "cls",             "Cls",             Vb6Type::Unknown,  HPF_METHOD},
     {"usercontrol", "containerhwnd",   "ContainerHwnd",   Vb6Type::LongPtr,  HPF_BARE},
-    {"usercontrol", "controls",        "Controls",        Vb6Type::Unknown,  HPF_BARE},
+    {"usercontrol", "controls",        "Controls",        Vb6Type::Unknown,  HPF_BARE | HPF_CHANNEL, "vb6_UC_Controls"},
     {"usercontrol", "enabled",         "Enabled",         Vb6Type::Boolean,  HPF_BARE},
     {"usercontrol", "extender",        "Extender",        Vb6Type::Unknown,  HPF_NONE},
     {"usercontrol", "forecolor",       "ForeColor",       Vb6Type::Long,     HPF_NONE},
@@ -105,6 +114,11 @@ inline const HostPseudoRow kHostPseudoRows[] = {
 
     // ---- PropertyPage (.pag) ----
     {"propertypage", "changed",          "Changed",          Vb6Type::Boolean, HPF_BARE},
+    // 账 #278 §B105: .pag 里裸写 `Controls.Add/Remove/Item` 与 .ctl 同一枚码头 (vb6_UC_Controls
+    // 按当前实例回落 formHwnd)。以前表里没有这一行 ⇒ 语义层问不到就配一条 VB3001，
+    // 而发码那条路一直是对的 (`vb6_ComCallObject((void*)vb6_UC_Controls(), L"Add", …)`)。
+    // 刻意不复用 `vb6_PropertyPage_Controls` —— 那枚是恒 NULL 的空桩，发出去是"枚举得空集"。
+    {"propertypage", "controls",         "Controls",         Vb6Type::Unknown, HPF_BARE | HPF_CHANNEL, "vb6_UC_Controls"},
     {"propertypage", "hwnd",             "hWnd",             Vb6Type::LongPtr, HPF_BARE},
     {"propertypage", "scaleheight",      "ScaleHeight",      Vb6Type::Long,    HPF_BARE},
     {"propertypage", "scalemode",        "ScaleMode",        Vb6Type::Long,    HPF_BARE},
@@ -154,6 +168,17 @@ inline const HostPseudoRow* hostPseudoFind(const std::string& pseudoObj,
 inline bool hostPseudoBareEligible(const std::string& pseudoObj, const std::string& memberName) {
     const HostPseudoRow* r = hostPseudoFind(pseudoObj, memberName);
     return r != nullptr && (r->flags & HPF_BARE) != 0;
+}
+
+// 这一档是不是"由专用码头回答"（HPF_CHANNEL），是的话把符号名交出去。
+// 两个消费点：语义层据此在**两个位**都放行（集合名当限定符用是 VB6 的常规写法），
+// 发码层据此决定发哪个码头 —— 名字到码头的映射只在这里写一次。
+inline bool hostPseudoChannel(const std::string& pseudoObj, const std::string& memberName,
+                              std::string& outChannel) {
+    const HostPseudoRow* r = hostPseudoFind(pseudoObj, memberName);
+    if (!r || (r->flags & HPF_CHANNEL) == 0 || r->channel == nullptr) return false;
+    outChannel = r->channel;
+    return true;
 }
 
 } // namespace vb6c3

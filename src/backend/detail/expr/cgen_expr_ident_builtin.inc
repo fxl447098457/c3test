@@ -211,16 +211,15 @@
     // `Controls` → C2065 (ucTabStrip.c For Each l_Ctrl In Controls)。
     // 成员访问形态 (Controls.Item/Add/Remove) 由 cgen_expr_member_precheck.inc 在
     // 符号解析前拦截, 不受影响。
-    const bool reservedHostObj = (lower == "controls");
+    // 账 #278 §B105: "哪个名字是保留的宿主集合 / 它由哪条码头回答"不再写在这里 ——
+    // 问那张表 (kHostPseudoRows 的 HPF_CHANNEL 行)，语义层的放行问的也是同一句。
+    std::string hostDock;
+    const bool reservedHostObj =
+        hostPseudoChannel(isPropertyPageDesigner_ ? "PropertyPage" : "UserControl", lower, hostDock);
     if (isDesignerModule_ && !knownLocalVars_.count(lower)
         && (!sym || reservedHostObj)) {
-        // Fix <vbeclipse> rev14: 裸 `Controls` 是 UserControl.Controls 集合, 必须发射
-        // 真实的集合单例 vb6_UC_Controls() (RTL 已按当前 UC 实例回落 formHwnd), 而不是
-        // 宿主伪对象前缀 vb6_UserControl_Controls (恒 NULL 的空桩)。ucTabStrip.ctl 的
-        // `For Each l_Ctrl In Controls` 走的正是这条裸标识符通路 —— 用 NULL 会让枚举
-        // 得到空集, 而 Add/Item 返回 NULL → 后续解引用崩溃。
-        if (lower == "controls") {
-            lastExpr_ = "vb6_UC_Controls()";
+        if (reservedHostObj) {
+            lastExpr_ = hostDock + "()";
             return;
         }
         std::string rtlHp;
