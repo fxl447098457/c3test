@@ -726,6 +726,12 @@ bool SemanticAnalyzer::namesProjectLevel(const std::string& name) const {
     // 模块级 Public Const / Public Enum 成员: **裸名位就是它的合法位置** (VB6 工程级常量),
     // 所以不像模块名那样要挑位置。账 #278 §B106。
     if (projPublicConsts_.count(lk)) return true;
+    // 工程内**窗体名**: VB6 里它就是默认实例，两个位都合法（`Unload TmForm2` 站在裸名位、
+    // `TmForm2.Visible` 站在限定符位）。唯一的例外与发码侧同一处口径：窗体模块里指着**自己**
+    // 那个名字不走那条路（`cgen_expr_ident_symbol.inc` 的 `lower != knownFormName_`），
+    // 放行它等于把一条 C2065 判成合法。账 #278 §B110。
+    if (projFormNames_.count(lk) &&
+        !(currentModule_ && ifaceLower(currentModule_->moduleName) == lk)) return true;
     return memberObjCtx_ && projModuleNames_.count(lk);
 }
 

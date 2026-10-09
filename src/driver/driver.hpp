@@ -187,6 +187,11 @@ private:
     // runSemanticAnalysis 入口处从 AST 声明建表, 之后只读, 经 setMemberAccessTable 下发。
     // 不 visit 期查符号表的理由见 symbol_table.hpp MemberAccessTable 注释。
     MemberAccessTable memberAccessTable_;
+    // 账 #278 §B110: 工程内**窗体模块名**（小写）的唯一建造点。VB6 里窗体名在裸名位就是它的
+    // 默认实例（`Unload frmMain` / `Set f = frmMain`），发码侧那份名单（knownFormModuleNames_，
+    // 经 setFormModuleNames 下发给每台 cgen）与语义层的"这名字工程里有"必须是同一个答案 ——
+    // 两边各扫一遍 modules_ 就是两份权威，将来谁改判据谁漏改另一边。
+    std::unordered_set<std::string> collectFormModuleNames() const;
     void buildMemberAccessTable();
     // ai/084c: 类名(小写) → Class_Initialize 形参个数 (buildMemberAccessTable 顺带扫描,
     // 经 setCtorParamCounts 下发; 表内缺席 = 非本工程类, New 带实参在语义层报错)。

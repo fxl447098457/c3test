@@ -168,11 +168,19 @@ public:
     void setProjectPublicConstNames(std::unordered_set<std::string> s) {
         projPublicConsts_ = std::move(s);
     }
+    // 账 #278 (§B110): 工程内**窗体模块名**。窗体名在裸名位就是 VB6 的默认实例
+    // （`Unload TmForm2` / `Set f = TmForm2`），发码侧 `cgen_expr_ident_symbol.inc` 那条支路答
+    // `vb6_form_hwnd_<名>()`，两边同源 = Driver::collectFormModuleNames()（唯一建造点）。
+    // 与模块名那份的分别：模块名只在**限定符位**合法（`Mod.成员`），窗体名两个位都合法。
+    void setProjectFormNames(std::unordered_set<std::string> s) {
+        projFormNames_ = std::move(s);
+    }
     // 当前正在分析的标识符是否站在 `Mod.成员` 的限定符位上 (visit(MemberAccessExpr) 置位)。
     bool memberObjCtx_ = false;
     std::unordered_set<std::string> projModuleNames_;
     std::unordered_set<std::string> projPublicProcs_;
     std::unordered_set<std::string> projPublicConsts_;
+    std::unordered_set<std::string> projFormNames_;   // 账 #278 §B110: 窗体模块名 (默认实例)
 
     // 类继承 (tB, B08c): `obj.<成员>` 的 Protected 越权判定, 命中即报错并返回 true。
     // 只在"接收者解析得出工程类 + 链上最近的声明者把它声明成 Protected + 当前模块不在那条

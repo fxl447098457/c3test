@@ -75,6 +75,18 @@ void insertComMethod(Symbol& sym, const std::string& key, Symbol::ComMethodSig s
 
 } // namespace
 
+// 账 #278 §B110: 工程内窗体模块名（小写）的**唯一**建造点。语义层的"裸名位放行"与发码侧那台
+// cgen 的 knownFormModuleNames_ 都从这里拿 —— 两边各扫一遍 modules_ 就是两份权威。
+std::unordered_set<std::string> Driver::collectFormModuleNames() const {
+    std::unordered_set<std::string> names;
+    for (const auto& module : modules_) {
+        if (module && module->isFormModule && !module->moduleName.empty()) {
+            names.insert(Symbol::toLower(module->moduleName));
+        }
+    }
+    return names;
+}
+
 bool Driver::runSemanticAnalysis(const CompileOptions& options) {
     // ai/084a M1: 类成员访问级别预计算表 (只读, 随后随各分析器下发)
     buildMemberAccessTable();
@@ -87,6 +99,11 @@ bool Driver::runSemanticAnalysis(const CompileOptions& options) {
     std::unordered_set<std::string> projModNames;
     std::unordered_set<std::string> projPubProcs;
     std::unordered_set<std::string> projPubConsts;
+    // 账 #278 §B110: 第四份 = 工程内**窗体模块名**。VB6 里窗体名在裸名位就是它的默认实例
+    // （`Unload TmForm2` / `Set f = TmForm2`），发码侧 `cgen_expr_ident_symbol.inc` 一直在答
+    // `vb6_form_hwnd_TmForm2()`；语义层认不得 ⇒ 那条合法写法多配一条 VB3001（宽松模块里还会
+    // 落成一枚隐式 Variant 局部）。名单与发码侧同源：都走 collectFormModuleNames()。
+    std::unordered_set<std::string> projFormNames = collectFormModuleNames();
     for (auto& module : modules_) {
         if (!module) continue;
         projModNames.insert(Symbol::toLower(module->moduleName));
@@ -143,6 +160,8 @@ bool Driver::runSemanticAnalysis(const CompileOptions& options) {
         analyzer->setProjectModuleNames(projModNames);
         analyzer->setProjectPublicProcNames(projPubProcs);
         analyzer->setProjectPublicConstNames(projPubConsts);
+        // 账 #278 §B110: 第四份 = 工程内窗体模块名（裸名位 = VB6 的默认实例引用）
+        analyzer->setProjectFormNames(projFormNames);
         // 泛型 (tB, G3): 调用点推断需要模板只读视图 (runGenericsPrepass 已构建)
         analyzer->setGenericRegistry(&genView_);
         // Interface 契约 (tB, B02): stage 2.7 建好的只读登记表
