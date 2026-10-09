@@ -2027,7 +2027,7 @@ marker、重编，之后 `check_rtl_embedded` 报 **125/125 逐字节相同**。
   不许多也不许少）。④ 最后把 `--suppress-warning 3001` 那条抑制通道复核一遍：按号抑制在分家（§B102）之后才是干净的。
 
 
-### B114 账 #278 第八刀已出 = 宿主表长出 HPF_CHANNEL：`Controls` 两个位放行 + `.ctl` 自身对象名放行（census 16→11，第 48 道哨兵扩三条，2026-10-09，门 #449 红在哨兵自己身上 ⇒ 已改形状，等下一轮）
+### B114 账 #278 第八刀已出 = 宿主表长出 HPF_CHANNEL：`Controls` 两个位放行 + `.ctl` 自身对象名放行（census 16→11，第 48 道哨兵扩三条，2026-10-09，门 #449 红在哨兵自己身上、改完由门 #450 收线）
 
 - **§B105 那格 a/b 按 b 走**（台账当时就写着"倾向 b"，形状也是现成的：`canvas_drawing.hpp` 的
   `CANVAS_OWNER_METHOD/DRAW` 早就是"一行标由哪条码头回答"）。a 案的代价量过了：往 RTL 再放一枚
@@ -2071,6 +2071,11 @@ marker、重编，之后 `check_rtl_embedded` 报 **125/125 逐字节相同**。
   B 留着形参但体内不用 ⇒ D3b 0；
   C 声明里去掉那个形参 ⇒ D3 声明 0。
   还原原始副本 ⇒ `PASS … predicate 1+1+1 pos 3 outer 0`。
+- **收线的那一轮 = 门 #450**（run 37962617927、head `7858c69e` = 4dd9ff27 哨兵改形 + 7858c69e 台账、
+  attempt 1，16:55:48Z→17:05:14Z ≈ wall 9m26s）：
+  **12 条 check-run 全 completed/success、非绿 0**，
+  含 `Tests (compile)`（上一轮红的那一格）与 `Emit manifest (shape oracle)` ⇒ 第八刀连同它的哨兵改形一起过了。
+  #449 那一轮因此有了第二种用途：它是**本线第一次把「门红 → 归因到哨兵自己 → 改判据形状 → 三条负控自证 → 复跑绿」走完整条**，以后 STATIC 那一格红了先按这条走，别默认是产品回归。
   顺带跑的邻居：`check_static_sentinel_registration`
   （49 道全登记）、`check_host_pseudo_table`（54 rows / 35 scalar）都绿，PSParser 0 错。
 
