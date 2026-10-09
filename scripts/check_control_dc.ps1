@@ -17,7 +17,8 @@
 #   D3  vb6_GetControlHDC 恰好定义一次, 体内必须同时有: 调权威 / 缓存槽位写 / 白拿那张的 ReleaseDC;
 #       并且**不许**自己 GetDC( —— 那就是第二处口径
 #   D4  缓存槽位 VB6_ObjectDC: 写者(SetPropW) = 恰好 1, 归还(ReleaseDC) >= 1, 撤名(RemovePropW) >= 1
-#   D5  后端: 表里 `return "vb6_GetControlHDC";` = 恰好 2 (PictureBox 与 Form 各一条, 不给通用行),
+#   D5  后端: 读表里 `vb6_GetControlHDC` 的行 = 恰好 2 (PictureBox 在 cgen_util_ctrl.cpp、
+#       Form 自账 #278 §B109 起住 src\common\form_pseudo.hpp; 都不给通用行),
 #       且 src/backend 里手拼发码 `"vb6_GetControlHDC(` = 0 (表交的是名字, 别处不许再拼一遍)
 #   D13 vb6forms_draw.c 不许自己开 DC (账 #234: 那份重复的"先问 VB6_PaintDC 否则 GetDC"撤掉了,
 #       它现在只许问权威 D1 那一处; D2 的调用点数因此从 5 涨到 6)
@@ -26,6 +27,16 @@
 # 退出码: 0 = 全绿; 1 = 红
 
 $ErrorActionPreference = "Stop"
+# 只认非注释部分（§B108 那条负控实测过一次：纯文本正则会连 `// addObj("X")` 一起算进名单）。
+function Strip-RowComments([string]$text) {
+    $kept = @()
+    foreach ($line in ($text -split "`r?`n")) {
+        $cut = $line.IndexOf('//')
+        $kept += $(if ($cut -ge 0) { $line.Substring(0, $cut) } else { $line })
+    }
+    return ($kept -join "`n")
+}
+
 $root = Split-Path -Parent $PSScriptRoot
 $bad = @()
 
@@ -159,8 +170,12 @@ foreach ($f in (Get-ChildItem -LiteralPath $be -Recurse -File | Where-Object { $
         }
     }
 }
-if ($rows -ne 2) {
-    $bad += ("D5 read-table rows for hdc = " + $rows + " (want exactly 2: PictureBox 与 Form; 给成通用行 = List1.hDC 也答一个数)")
+# 账 #278 §B109: Form 那一行搬进了 common 的表 ⇒ 两处合起来数。
+$fpRawB = [System.IO.File]::ReadAllText((Join-Path $root "src\common\form_pseudo.hpp"))
+$fpTxtB = Strip-RowComments $fpRawB
+$fpRowsB = @([regex]::Matches($fpTxtB, '\{\s*"hdc"\s*,\s*"vb6_GetControlHDC"')).Count
+if (($rows + $fpRowsB) -ne 2) {
+    $bad += ("D5 read-table rows for hdc = " + ($rows + $fpRowsB) + " (want exactly 2: PictureBox 与 Form; 给成通用行 = List1.hDC 也答一个数)")
 }
 
 # ---- D6~D9: 文字量那一半 (账 #196 的第二条: TextHeight / TextWidth) ----

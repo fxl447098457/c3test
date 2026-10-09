@@ -2036,6 +2036,23 @@ marker、重编，之后 `check_rtl_embedded` 报 **125/125 逐字节相同**。
   **`TmForm2` 1**（窗体名自动实例化，已量成同形、放行点还没找）、**`VK_UP` 1**（夹具漏写 `Private Const`，§B106）。
   这 12 处清完（或明确记账不收）才轮到 §B101 那一刀：解析不出 + `Option Explicit` ⇒ error。
 
+- **门 #444（head `5b238770`）的红是自己带出来的，不是抖**：`Tests (compile)` 三条 [STATIC] 红 ——
+  `scalemode_writers` W4 / `control_dc` D5 / `form_draw_state` S3。三条数的是**旧位置**里的
+  `return "vb6_WindowScaleModeSelf";` / `return "vb6_GetControlHDC";` / 读表 Form 那一臂内的名字，
+  窗体那一行搬进表之后各自少一行 ⇒ 报红。**处置不是放宽阈值**，是把它们改成问新权威
+  （读侧 = backend 剩那条 + common 表里那条，合起来数；写表没搬 ⇒ 不动），
+  三条都拿"把表里那一行注释掉"证过会红（W4=1 / D5=1 / S3 currentx read=0）。
+  读数规矩：**搬走一张表之前先 `grep -l` 谁在数它的位置** —— 这类"钉死位置"的判据是**跟着权威搬家**的。
+- **同一轮第二次踩到两条 PS 坑**（都写进过 memory，这次是补丁自己中招）：
+  ① 新加的计数**没跳注释行** ⇒ 那三条改完后第一版负控"注释掉一行"仍然绿（§B108 那条规矩的第三格）；
+  ② 把 `Strip-RowComments(...)` **嵌进表达式里**（`$x = @([regex]::Matches(Strip-RowComments(...), 'p'))`、
+     `$rd = $rd + Strip-RowComments(...)`）在 PS 里是 ParserError —— 三条哨兵 `PARSE-ERRORS=2/3`，
+     而跑起来只表现为"判据好像变了"。规矩：**命令行调用要自成一条语句**（`$raw = …` 然后 `$txt = Strip-RowComments $raw`），
+     改完任何 .ps1 先 `[System.Management.Automation.PSParser]::Tokenize` 数 `$e.Count` 再谈读数。
+
+- **搬表的完整性用机械对表证，不靠眼看**：从父提交 `git show` 里抠出旧的通用段与窗体臂两份 `if (propLower == …) return …"`，与 `kFormPseudoRows` 按 (名字, 读函数, 三条类型例外) 逐条对 ⇒ **MISSING = 0**；多出来的两条 (`fontpixelheight` / `borderstyle`) 是旧代码那两条**跨行写**的条件被我的按行正则漏抓，不是表里多了东西；旧的两条重复 (`scalewidth` / `scaleheight` 通用段与窗体臂各写一次、答案相同) 在表里合成一条 —— 这三点都要读数对上才算搬完。
+- 复跑读数：本地 `-Category compile -Jobs 20 -Incremental`（CI 同一口径）从 **PASS=55 FAIL=3** 回到 **PASS=58 FAIL=0**。
+
 ### B108 账 #278 第三刀已出 = 内置全局对象那张名单少一格（`Printers`，第 47 道哨兵，2026-10-09，门 #443 attempt 1 全绿（12/12，含形状门，head 5ebc8ee2））
 
 - **定性（先量后动，`.build/b110_printers.py`）**：语料里唯一那条 `Printers` = `tests/dbgdlg/cDlg.cls:2456` 的
