@@ -2000,7 +2000,43 @@ marker、重编，之后 `check_rtl_embedded` 报 **125/125 逐字节相同**。
 `w = ScaleWidth` 与 `Debug.Print …` 合成一行，于是行号与诊断全对不上（报在 `(6,35)` 那种文件里根本不存在的列上）。
 把生成的夹具**原样 dump 出来看一眼**才发现。⇒ 夹具是脚本拼的时候，「先核夹具本身」是第 0 步，不是最后一步。
 
-### B108 账 #278 第三刀已出 = 内置全局对象那张名单少一格（`Printers`，第 47 道哨兵，2026-10-09，**待门**）
+### B109 账 #278 第四刀已出 = 窗体裸写属性那张表搬到 common，两层都问它（§B104 的堵点接上，第 48 道哨兵，2026-10-09，**待门**）
+
+- **定性（沿用 §B104 的实测）**：语料里那 5 条窗体伪成员（czUI `ScaleWidth`×2、VbQRCodegen `WindowState`/`ScaleWidth`/`ScaleHeight`）
+  是"发码对、诊断错"—— `cgen_expr_ident_symbol.inc` 在窗体模块里拿 `getControlPropReadFn(FrmControlType::Form, name)`
+  查名字表，命中就发 `vb6_Get…(hwnd)`，产物一直是好的；缺的只是语义层问不到那张表。所以本刀是**放行**，不是新能力。
+- **堵点就是 §B104 记下的那一件**：表住在 backend，语义层要问就得把 496 行的 `getControlPropReadFn` 搬到家，
+  而它吃 `FrmControlType`（在 `src/project/frm_parser.hpp`），common 不许向上依赖 project。**本刀的解法不是搬家，是折位**：
+  表里只写 `FPQ_FORM / FPQ_COMMON_DIALOG / FPQ_SHAPE / FPQ_LINE` 四个类别位，backend 一侧用一处
+  `formPseudoKindBits(FrmControlType)` 把枚举折成位（其余类型一律 0 = 原来"通用段对所有类型都答"的行为）。
+  分界写法与 `canvas_drawing.hpp`（账 #234）同族。
+- **落地**：新家 `src/common/form_pseudo.hpp`（`kFormPseudoRows` 34 行 + `formPseudoReadFn` + `formPseudoIsBare`）。
+  backend 的 `getControlPropReadFn` 把**通用段 25 行 + 窗体臂 9 行**整张搬进表（顺序未改：通用行在前、`formOnly` 在后），
+  函数里改成一次表查询，窗体那一臂**刻意留空**；语义层在"未找到标识符"那一串里加一格
+  `!memberObjCtx_ && currentModule_->isFormModule && formPseudoIsBare(name)`，停的是同一批名字上的 3001 与隐式局部。
+- **A/B（全语料 398 输入，BASE = `.build/b114_C3_base.exe` = 未含本刀、另在一台 worktree 编的 exe）**：
+  **`artifacts that changed = 0`**（backend 那一半是纯搬迁，逐字节对上）、`diagnostics ADDED = 0`、
+  **VB3001 23 → 18**，消失的 5 行恰好是 czUI 2 + VbQRCodegen 3；per-id delta 只有 `VB3001` ⇒ 形状门不该动一行。
+- **第 48 道哨兵** `scripts/check_form_pseudo_table.ps1`：V1 四个真名字（Option Explicit 的窗体）不许报；
+  **V2 反面证人**（同一枚窗体里放一枚真不存在的名）必须继续报；**V3 宽松窗体**两头钉 —— 产物不许出现
+  `vb6_VARIANT ScaleWidth` 那枚隐式局部，且必须有 `vb6_GetScaleWidth(` / `vb6_GetScaleHeight(` / `vb6_GetWindowState(`
+  三条真出口（只钉诊断的哨兵会把"什么都不发"判成绿）；**S1** 消费点唯一 + 老硬编码行不许回来 +
+  **窗体那一臂里 `propLower ==` 必须 0 处**；**S2** 表 34 行不重名、语义层消费点恰好 1 处。
+- **三条负控各自红过**：A `-Exe …\b114_C3_base.exe` ⇒ V1 四条 + V3 一条红；B 把语义层那行的
+  `formPseudoIsBare(node.name)` 注释掉 ⇒ S2 报"0 个消费点"；C 往窗体臂植一枚
+  `if (propLower == "bogusrow")` ⇒ S1 单独红。三处植入都按 md5 原样还原。
+- **两条工具读数（本轮当场踩到，都写进哨兵的注释里）**：
+  ① PS 里用 `LastIndexOf("`n")` 从匹配点反推"行首"来判注释，会把**上一整行**当成前缀算进来 ⇒
+  一条好行被误判成注释、表计数 34 变 33；改成"逐行先切掉 `//` 之后再匹配"。（§B108 那条"跳过注释行"的
+  规矩本身没错，错在反推行首的手法。）
+  ② 用脚本往 **BOM + CRLF** 的文件里插函数，写回必须带 BOM 且统一 CRLF —— 本刀一次插完
+  `PARSE-ERRORS=2`、`lone_lf=14`，补回 BOM 后双双归零。哨兵计数那条也跟着被带偏过一次。
+- **12 处到现在**：累计清 **7** 处（§B107 常量 1 + §B108 `Printers` 1 + 本刀窗体伪成员 5）。
+  剩下 4 处：**裸 `Controls` 2 + 裸 `UserControl` 1**（§B105，撞在宿主表对 `rtl` 字段的契约上，口径 a/b 待拍）、
+  **`TmForm2` 1**（窗体名自动实例化，已量成同形、放行点还没找）、**`VK_UP` 1**（夹具漏写 `Private Const`，§B106）。
+  这 12 处清完（或明确记账不收）才轮到 §B101 那一刀：解析不出 + `Option Explicit` ⇒ error。
+
+### B108 账 #278 第三刀已出 = 内置全局对象那张名单少一格（`Printers`，第 47 道哨兵，2026-10-09，门 #443 attempt 1 全绿（12/12，含形状门，head 5ebc8ee2））
 
 - **定性（先量后动，`.build/b110_printers.py`）**：语料里唯一那条 `Printers` = `tests/dbgdlg/cDlg.cls:2456` 的
   `For Each iPrn In Printers`。产物是 `void* _fe_enum_0 = vb6_ForEach_Init(vb6_Printers_Collection());`、
