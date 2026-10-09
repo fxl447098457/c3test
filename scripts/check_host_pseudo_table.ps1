@@ -22,6 +22,18 @@
 #   2) 标量行的类型必须与那一行的 extern 声明对上 (Long↔int32_t, Integer/Boolean↔
 #      int16_t, LongPtr↔void*, String↔BSTR) —— 表说错类型就是下一个装箱误读;
 #   3) 那五份旧清单不许再被抄回来 (被禁的旧形状见 $deny)。
+#   4) 账 #278 §B115: With 块那枚宿主句柄的拼法必须**问表**，而产物里同一个事实只许有
+#      一个答复。这一段跑一次 --emit-c (只走前端, 不起 cl, 0.4 秒)。
+#
+# 为什么 4) 值得单独钉 (实测): cgen_with.cpp 以前把 `vb6_<对象>_<成员>` 手抄成两枚字面量,
+# 而 RTL 把 UserControl / PropertyPage 两种大小写拼写**都声明且定义了** (vb6rtl_com.c:
+# 1072/1073, vb6rtl_userctl.h:181/182) ⇒ 抄错的那一枚不是编不过，是编向**另一枚全局**。
+# 改前同一份产物里一个事实两个答复:
+#   With PropertyPage      ->  void* _vb6_with_0 = (void*)vb6_PropertyPage_hwnd
+#   n = PropertyPage.hWnd  ->  n = vb6_PropertyPage_hWnd
+# 判据两头: 那两行必须落在同一个符号上，且旧的小写拼写在 src/ (RTL 除外) 不许再有人引用。
+# 今天两枚都还是 NULL (§B118: .pag 的宿主全局全仓 0 个写者) ⇒ 这一条钉的是将来接写者时
+# 不许只接一头。
 # 输出一律 ASCII (控制台是 GBK, 中文读数在重定向文件里不可 grep)。文件必须带
 # UTF-8 BOM: PS 5.1 无 BOM 时按 ANSI 读, 行尾中文字节会吃掉换行 ⇒ param() 被并进
 # 注释、参数全空、ParserError。
@@ -36,6 +48,8 @@ $ErrorActionPreference = "Continue"
 $tblPath = if ($TableFile) { $TableFile } else { Join-Path $Root "src\common\host_pseudo.hpp" }
 $hdrPath = Join-Path $Root "src\rtl\core\vb6rtl\vb6rtl_userctl.h"
 $viol = @()
+# Latin-1: 产物/诊断按字节 1:1 取，ASCII 片段(符号名、VB3001)不受 GBK 中文影响 (同 emit_manifest.ps1)
+$lat2 = [System.Text.Encoding]::GetEncoding(28591)
 $hdrRaw = ""
 if (-not (Test-Path $tblPath)) { Write-Host "FAIL table file missing: $tblPath"; exit 1 }
 if (-not (Test-Path $hdrPath)) { Write-Host "FAIL rtl header missing: $hdrPath"; exit 1 }
@@ -129,6 +143,7 @@ $deny = @(
     @{ File = "src\semantics\semantic_analyzer_util.cpp"; Pat = '"(changed|scalewidth|scaleheight|scalemode|containerhwnd|enabled|autoredraw|hdc|hwnd)"' },
     # 账 #278 §B105: 码头的符号名只许写在表里；发码侧再硬编码一次 vb6_UC_Controls() = 第二份权威
     @{ File = "src\backend\detail\expr\cgen_expr_ident_builtin.inc"; Pat = '"vb6_UC_Controls\(\)"' }
+    ,@{ File = "src\backend\stmt\cgen_with.cpp"; Pat = '"vb6_(UserControl|PropertyPage)_h[A-Za-z]*"' }  # 账 #278 §B115
 )
 foreach ($d in $deny) {
     $p = Join-Path $Root $d.File
@@ -163,6 +178,57 @@ foreach ($m in $must) {
     if (-not (Select-String -Quiet -Path $p -Pattern $m.Pat)) {
         $viol += ("AUTHORITY-ABSENT: {0} has no {1}" -f $m.File, $m.Pat)
     }
+}
+
+# ---------- 6) 账 #278 §B115: 一个事实一个答复 (发码针, 只走前端) ----------
+$withRel = "src\backend\stmt\cgen_with.cpp"
+$withPath = Join-Path $Root $withRel
+if (-not (Test-Path $withPath)) {
+    $viol += ("MISSING " + $withRel)
+} else {
+    $withTxt = $lat2.GetString([System.IO.File]::ReadAllBytes($withPath))
+    $askWith = @([regex]::Matches($withTxt, 'canonicalHostPseudoMember\(')).Count
+    $askMsg = "WITH-ASK: cgen_with.cpp asks the table {0} times (want exactly 1: 0 = spelling hand-copied again, 2 = two answers for one line)"
+    if ($askWith -ne 1) { $viol += ($askMsg -f $askWith) }
+}
+# 旧的小写拼写只是 RTL 的兼容别名: src/ (RTL 那一头除外) 再引用它 = 第二份答案
+$oldHits = @(Get-ChildItem -Path (Join-Path $Root "src") -Recurse -Include *.cpp, *.inc, *.hpp, *.h |
+             Where-Object { $_.FullName -notmatch '\\rtl\\' } |
+             Select-String -Pattern 'vb6_PropertyPage_hwnd\b' |
+             Where-Object { $_.Line -notmatch '^\s*(//|\*)' })
+foreach ($o in $oldHits) {
+    $viol += ("OLD-SPELLING: " + $o.Path.Substring($Root.Length + 1) + ":" + $o.LineNumber)
+}
+$c3x = Join-Path $Root ".build\C3.exe"
+$pagRel = "tests\dochost\dhWithHost.pag"
+if (-not (Test-Path $c3x)) {
+    $viol += ("NEEDLE: no compiler at " + $c3x + " (this check reads the emitted C)")
+} elseif (-not (Test-Path (Join-Path $Root $pagRel))) {
+    $viol += ("NEEDLE: missing fixture " + $pagRel)
+} else {
+    $tmpC = Join-Path ([System.IO.Path]::GetTempPath()) ("hostpseudo_" + [guid]::NewGuid().ToString("N") + ".c")
+    $tmpE = [System.IO.Path]::ChangeExtension($tmpC, ".err")
+    $proc = Start-Process -FilePath $c3x -ArgumentList @('"' + (Join-Path $Root $pagRel) + '"', '--emit-c') -WorkingDirectory $Root -RedirectStandardOutput $tmpC -RedirectStandardError $tmpE -NoNewWindow -Wait -PassThru
+    $emit = $lat2.GetString([System.IO.File]::ReadAllBytes($tmpC))
+    $errt = $lat2.GetString([System.IO.File]::ReadAllBytes($tmpE))
+    Remove-Item $tmpC, $tmpE -Force -ErrorAction SilentlyContinue
+    if ($proc.ExitCode -ne 0) { $viol += ("NEEDLE: fixture exits " + $proc.ExitCode) }
+    $mWith = [regex]::Match($emit, '(?m)^\s*void\* _vb6_with_\d+ = \(void\*\)(vb6_PropertyPage_h\w+)')
+    $mRead = [regex]::Match($emit, '(?m)^\s*n = (vb6_PropertyPage_h\w+);')
+    if (-not $mWith.Success) { $viol += 'NEEDLE-WITH: the With-object head is not in the emit' }
+    if (-not $mRead.Success) { $viol += 'NEEDLE-READ: the qualified PropertyPage.hWnd head is not in the emit' }
+    $twoMsg = "TWO-ANSWERS: With head says {0} but the qualified head says {1}"
+    # -cne: 这条钉的就是**只差大小写**的两枚全局，-ne (PowerShell 默认不区分大小写) 看不见它
+    if ($mWith.Success -and $mRead.Success -and $mWith.Groups[1].Value -cne $mRead.Groups[1].Value) {
+        $viol += ($twoMsg -f $mWith.Groups[1].Value, $mRead.Groups[1].Value)
+    }
+    if (@([regex]::Matches($emit, 'vb6_PropertyPage_hWnd')).Count -lt 2) {
+        $viol += 'NEEDLE-SAME: fewer than two heads land on vb6_PropertyPage_hWnd'
+    }
+    # 反面证人: 放开的是那张表里那两个位，不是「凡是文档名都合法」—— 裸位的 VBA 还得响
+    $n3001 = @([regex]::Matches($errt, 'VB3001')).Count
+    $bareMsg = "NEEDLE-BARE: VB3001 count {0} on the fixture (want exactly 1 - the VBA value-position head)"
+    if ($n3001 -ne 1) { $viol += ($bareMsg -f $n3001) }
 }
 
 # ---------- 5) 普查读数 (不判红, 给下一轮留证据) ----------

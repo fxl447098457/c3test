@@ -743,13 +743,15 @@ bool SemanticAnalyzer::isDocumentHostObject(const std::string& name, bool qualif
     if (lk == "vba") return qualifierPos;   // VBA 全局库前缀, 但只有站在限定符位才有意义
     const DocumentKind k = currentModule_->docKind;
     // 文档对象**自己的名字**在 VB6 两个位都合法：`UserControl.hDC`（限定符位）与
-    // `With UserControl`（值位，等价于 Me）。值位这一格实测过：产物的确有路
-    // （`_vb6_with_2 = (void*)vb6_UserControl_hWnd`），今天只是多配一条 VB3001。
-    // .pag 那一形**刻意不放**：`With PropertyPage` 的发码是 `vb6_PropertyPage_hwnd`（小写 h），
-    // 而 RTL 声明的是 `vb6_PropertyPage_hWnd` ⇒ 放行只是把一条警告换成一次 C2065。
-    // 那是发码侧的拼写缺陷，另立账 (§B114)，不归本刀。
+    // `With UserControl`（值位，等价于 Me）。两档现在一起放（账 #278 §B115 的第二半）。
+    // 第八刀只放了 .ctl，当时记的理由是「.pag 值位一发码就 C2065」—— 本刀实测**推翻**：
+    // RTL 把 vb6_PropertyPage_hwnd 与 vb6_PropertyPage_hWnd 两种拼写都声明且定义了，
+    // 旧那句编得过，只是编向另一枚全局 ⇒ 同一份产物里一个事实两个答复（读数与后果
+    // 写在 cgen_with.cpp 那一处，缺口本身另立 §B118）。
+    // 那句拼法现在来自那张表（与裸名/赋值同一个 canonicalHostPseudoMember 出口）⇒
+    // 两档同形，这一格没有理由再扣着。
     if (lk == "usercontrol") return k == DocumentKind::UserControl;
-    if (lk == "propertypage") return k == DocumentKind::PropertyPage && qualifierPos;
+    if (lk == "propertypage") return k == DocumentKind::PropertyPage;
     if (lk == "extender" || lk == "ambient") return k == DocumentKind::UserControl && qualifierPos;
     return false;
 }
