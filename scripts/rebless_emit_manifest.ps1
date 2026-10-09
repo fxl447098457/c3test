@@ -37,8 +37,12 @@ function RunCompare([string]$m, [switch]$asBless, [switch]$allowVanish) {
     $argv = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $cmp, '-Manifest', $m, '-Expect', $expect)
     if ($asBless) { $argv += '-Bless' }
     if ($allowVanish) { $argv += '-AllowVanish' }
-    & powershell @argv
-    return $LASTEXITCODE
+    # 子进程的输出**必须马上转发给宿主**：函数里不转发就会被当成函数的返回值一起塞进 $rc，
+    # 于是 $rc 变成「一整串分类读数 + 末尾一个退出码」的数组 —— `if ($rc -ne 0)` 对数组恒为真，
+    # 登记明明成功却被报成「被挡住」，而那些处置文字本来正是给人看的（实测栽过一次）。
+    & powershell @argv | ForEach-Object { Write-Host $_ }
+    $rc = $LASTEXITCODE
+    return $rc
 }
 
 # ---- 1) 拿到一份「判据用的清单」 ----
