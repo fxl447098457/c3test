@@ -2000,7 +2000,27 @@ marker、重编，之后 `check_rtl_embedded` 报 **125/125 逐字节相同**。
 `w = ScaleWidth` 与 `Debug.Print …` 合成一行，于是行号与诊断全对不上（报在 `(6,35)` 那种文件里根本不存在的列上）。
 把生成的夹具**原样 dump 出来看一眼**才发现。⇒ 夹具是脚本拼的时候，「先核夹具本身」是第 0 步，不是最后一步。
 
-### B117 账 #278 第九刀已出 = 工程级名单长出第五格：标准模块的 `Friend` 过程（census 11→10，整工程输入归零，哨兵 46 扩三条，2026-10-10，**待门**）
+### B118 账 #278 第十刀已出 = With 块那枚宿主句柄的拼法改问那张表：§B115 落地 + 第八刀扣着的 `.pag` 值位一起放开，而**它当时那条理由被实测推翻**（零行为改动、语料 8 份输入逐字节相同，2026-10-10，**待门**）
+
+- **开工第一件事把上一账的前提量了一遍，结论是它错了**：拿门 #451 的 `c3-exe` 工件（`.build/b191_base`， 就是第九刀过门那台）在同一枚 `.pag` 探针上 `--emit-c` ⇒ **rc=0**，产物里同时有 `void* _vb6_with_0 = (void*)vb6_PropertyPage_hwnd` 和 `n = vb6_PropertyPage_hWnd;` 两行；再去 RTL 数， 两种拼写**都声明且都定义**（见 §B115 的订正）。⇒ 教训：**一条「所以要扣着某格放行」的理由， 如果来自推断而不是产物读数，就在它拦着放行那一刻去量**；这一格因此多活了 24 小时的 VB3001。
+- **缺陷的真实形状 = 同一个事实两个答复**，而且只差大小写。今天两枚全局都是 NULL（§B119：`.pag` 的宿主 全局全仓 0 个写者）⇒ 现价 0；一旦有人给 `…_hWnd` 接上写者，With 块读到的还是没人写的那一枚 ⇒ **静默错宿主**。所以本刀是**零行为改动的收口**（与账 #234「拿 DC 这个决定实现了两遍」同族）， 不是修一个正在响的症状 —— 别把它记成修复。
+- **落点一格，不开新权威**：`src/backend/stmt/cgen_with.cpp` 那句改成问 `canonicalHostPseudoMember` （读 `kHostPseudoRows` 的 `rtl` 列，与赋值 `cgen_assign_host_pseudo.inc`、裸名 `cgen_expr_ident_builtin.inc` 同一条出口）；匹配也从「`== "UserControl"` / `compare(0, 12, "PropertyPage")` 前缀」改成表里那两个对象名 的精确匹配（旧前缀那支会把 `PropertyPageFoo` 一起接走）。语义层跟着放开 `propertypage` 的值位 —— 扣着的理由没了，两档就同形了。
+- **判据（两道已有哨兵各扩一条，没新开道）**：
+  ① `check_host_pseudo_table.ps1` 加 4)/6)：结构侧钉「那一处问表**恰好 1 次**」(0=手抄回来、2=一行两个答复) +「`vb6_PropertyPage_hwnd` 在 `src/`（RTL 除外、注释除外）出现 **0 次**」；行为侧跑一次 `--emit-c`（只走前端， 不起 cl）钉「With 头与限定读落在**同一个符号**上（区分大小写）」「`vb6_PropertyPage_hWnd` 出现 ≥2」 「夹具上 VB3001 **恰好 1 条**，且是裸位的 `VBA` 那一头」—— 最后一句是反面证人：放开的是那张表与那两个位， 不是「凡是文档名都合法」。夹具 `tests/dochost/dhWithHost.pag` 是**新增文件而不是语料输入**（清单只枚举 `.vbp/.bas`）⇒ 形状门那 398 行不必重登记。
+  ② `check_dochost_authority.ps1` 的 D3b **换读法**（不是放宽）：第八刀钉「体内查 `qualifierPos` ≥ 3」， 放开 `.pag` 那一格之后体内只剩 2 次 ⇒ 改成逐条点名守位的两档（`vba` 1 + `extender`+`ambient` 1，各恰好 1）， 并新增 **D3d** 钉文档自身那两行**不带**位置（放开之后不许退回去）。
+- **自己造的一条坑，值得记住**：PowerShell 的 `-ne` **不区分大小写** ⇒ 第一版 `TWO-ANSWERS` 判据在 BASE 那台 上抓不到（差别正好只有 `h` 的大小写），N0 只报出两条。改成 `-cne` 之后才报出三条。**凡是「只差大小写」 的判据，比较符必须写死区分大小写的那一个。**
+- **负控 7/7（全部跑在 `src`+`scripts`+`tests` 的副本上，走哨兵的 `-Root` 形参；共享树未动）**： N0 = 新哨兵吃 **BASE 编译器** ⇒ 三条红（TWO-ANSWERS / NEEDLE-SAME / NEEDLE-BARE）⇒ 这道判据抓的正是本刀； N1 手抄回去 ⇒ WITH-ASK(0) + OLD-SPELLING；N2 那一问写两遍 ⇒ WITH-ASK(2)；N3 再塞一枚成员字面量 ⇒ DENY 红； N4 把 `&& qualifierPos` 加回 `.pag` 那行 ⇒ D3d 红；N5 无关改写 ⇒ 两道都绿。
+- **护栏（8 份产物读出来的，不是推的）**：全语料里含 `With UserControl` / `With PropertyPage` 的那 9 份文件所属的 **8 枚清单输入**逐一对比 BASE vs NEW 的 `--emit-c` ⇒ **8/8 逐字节相同、rc 全 0、VB3001 计数一格未变** （`VBFlexGridDemo.vbp` 5,465,077 / `Charts 2020/Proyecto1.vbp` 2,114,886 / `ucTreeMaps` 525,312 / `ucChartBar` 497,806 / `ucProgressCircular` 381,114 / `ucPieChart` 280,694 / `ucChartArea` 273,411 / `czFormDemo.vbp` 229,736，另 `VBFlexGridBase.bas` 56,622）。⇒ 本刀在语料上是**零暴露**，判据只能靠夹具； §B108 那条提醒反过来也成立：零差异既不证明修好了，也不证明没修。
+- **census 未动**：语料 VB3001 仍 10 行（`.pag` 里 `With PropertyPage` 在语料是 0 处）。本刀关掉的是 §B115 那一格（它本来不在 §B116 那份前置清单里，是清单上面那一格）—— §B101 之前缺的仍是 §B116 列的三条负例针 / 五份单文件输入（任务 #282 的口径题）/ 源码 bug `Count`，另加下面 §B119 那一格新账；那一格不在 §B101 的路上，别把它算进升级的前置。
+
+### B119 新账 = `.pag` 的宿主全局全仓 **0 个写者**：属性页里文档自身那一族的读数一律是缺省值（2026-10-10 量，**未开工**）
+
+- **读数**：`vb6_PropertyPage_hwnd` / `_hWnd` / `_ScaleMode` / `_ScaleHeight` / `_Changed` 只在 `src/rtl/core/vb6rtl/vb6rtl_com.c:1072-1077` 各定义一次（初值 NULL / NULL / 1 / 0 / 0），全 `src/` grep **没有任何一处赋值**；对照 `.ctl` 那一族是有写者的（`vb6_UserControl_hWnd` 由 `uc_host.c:192/223` 换入换出，ScaleMode 那一条由账 #197/#198 接上了两条创建路）。
+- **后果**：属性页里 `With PropertyPage`、`PropertyPage.hWnd`、裸写 `ScaleMode` 拿到的是 NULL 和缺省， 而不是这一页自己的宿主窗口 —— 与账 #197 同一形状，只是那一族修在 `.ctl`，这一族整个没人接。
+- **兼容别名要一并想清楚**：RTL 同时留着大小写两枚（注释自称 "both spellings denote the same concept"） ⇒ 一个事实两枚存储。接写者时只接一头：另一头要么做成真别名，要么删掉 —— 第十刀之后**发码侧只会交 带大写 H 的那一枚**，所以那头已经没人写了。
+- **语料暴露**：VBFlexGridDemo 三枚 `.pag` 里 `With PropertyPage.SelectedControls(0)` 6 处，那一形走 HPF_METHOD 通道、不读这枚全局 ⇒ 症状今天不现形。排产前先量「有没有真工程读属性页的 `.hWnd`/`ScaleMode`」。
+
+### B117 账 #278 第九刀已出 = 工程级名单长出第五格：标准模块的 `Friend` 过程（census 11→10，整工程输入归零，哨兵 46 扩三条，2026-10-10，门 #451 attempt 1 全绿（run 37968379735、head `e1c92200`、12/12 含形状门 ⇒ 本机登记的 398 行哈希与 CI 那台复算对齐、wall 10m48s））
 
 - **怎么撞上的**：给 §B101 数前置清单时逐行读 census，发现第 8 行 `friend_open_ok.vbp → OpenSecret`
   的**输入是整工程**，而 `pkg_s03_friend_open` 是一枚 `Test-Vbp` **正例**（真跑出 `PKG-FRIEND-OK`），
@@ -2095,7 +2115,7 @@ marker、重编，之后 `check_rtl_embedded` 报 **125/125 逐字节相同**。
   哨兵换判据。
 - **`isDocumentHostObject` 加了一个位置形参而不是新开一条**：`.ctl` 里自身对象名在值位也合法
   （`With UserControl` ⇐ VB6 等价于 `Me`），实测产物本来就有路（`_vb6_with_2 = (void*)vb6_UserControl_hWnd`），
-  今天只是多配一条 VB3001。**同一句写在 `.pag` 里刻意不放** ⇒ 见 §B115。
+  今天只是多配一条 VB3001。**同一句写在 `.pag` 里刻意不放** ⇒ 见 §B115。  **第十刀订正**：那一格现已放开，而当时扣着它的那条理由（小写 h 一发码就 C2065）实测是假的 —— RTL 两种拼写都声明且定义了 ⇒ 读数与后果见 §B118。
 - **读数（改前那台 exe = `.build/b136_C3_new.exe` 与改后同一批输入）**：`.ctl` 探针 3→0、
   `.pag` 探针 2→**1**（留下的那条就是反面证人）、Charts 两份输入各 3→1（剩的是源码 bug `Count`）、
   `VBFlexGridDemo.vbp` 1→0；四份输入的 `--emit-c` 产物**逐字节相同** ⇒ 这一刀只改"谁能答"，
@@ -2117,7 +2137,7 @@ marker、重编，之后 `check_rtl_embedded` 报 **125/125 逐字节相同**。
   —— 两条正则同时失配（调用点 0 次、外面那道 `&&` 也 0 次）。
   本机复现同一对 FAIL，所以门那条红没有第二种解释。
 - **修法是把不变量搬到它现在住的地方，不是把 D3 放宽**：D3 三处（定义 / 声明 / 调用点）都改成「带着那个位置形参」；
-  新增 **D3b** 钉那个出口**真的**按位置分档（体内查 `qualifierPos` ≥ 3 —— `vba` / `propertypage` / `extender`+`ambient` 各拒一次裸位），
+  新增 **D3b** 钉那个出口**真的**按位置分档（体内查 `qualifierPos` ≥ 3 —— `vba` / `propertypage` / `extender`+`ambient` 各拒一次裸位），  **第十刀换读法**：放开 `.pag` 那一格之后体内只剩 2 次，D3b 没有放宽成 ≥2，改成逐条点名守位的那两档（`vba` / `extender`+`ambient` 各恰好 1）并加 D3d 钉放开的那两行不许退回按位置扣。
   这条接手了老 D3 守的那件事（**裸位的真缺项必须还在响**）；
   新增 **D3c** 钉调用点不许在外面再 `&&` 一次（两份答案 = 老形状）。
   哨兵另外长了 `-Root` 形参，为的是能在**做过的副本**上跑负控而不碰共享树。
@@ -2134,15 +2154,16 @@ marker、重编，之后 `check_rtl_embedded` 报 **125/125 逐字节相同**。
   顺带跑的邻居：`check_static_sentinel_registration`
   （49 道全登记）、`check_host_pseudo_table`（54 rows / 35 scalar）都绿，PSParser 0 错。
 
-### B115 新账 = `With PropertyPage` 发的是 `vb6_PropertyPage_hwnd`，而 RTL 声明的是 `…_hWnd` ⇒ C2065（2026-10-09 量，**未开工；语料暴露 0 处**）
+### B115 账 #278 第十刀已出（落地与判据见 §B118）= `With PropertyPage` 那句拼法改问那张表（2026-10-09 量、2026-10-10 **订正本账当时那条 C2065 的判断**）
 
-- 第八刀顺手量的：同一形在 `.ctl` 里通（`vb6_UserControl_hWnd`），在 `.pag` 里发码把 `hwnd` 的
-  **小写 h** 直接拼出来 ⇒ 与 RTL 的 `extern … vb6_PropertyPage_hWnd` 对不上 ⇒ 真编译是 C2065。
-  所以那一格的语义放行**刻意没做**：做了只是把一条 VB3001 换成一次编不过（探针
-  `.build/b148_pag`，`.pag` + Option Explicit，`With PropertyPage / Debug.Print .ScaleWidth`）。
-- 判据方向（先记不动手）：`vb6_<对象>_<成员>` 的拼写只许来自表（`rtl` 字段就是源码拼写），
-  发码侧任何"obj + 成员名"的现拼都是第二份权威 —— 与本刀把 `Controls` 的码头收回表里同一条规矩。
-  语料 `With PropertyPage` = 0 处 ⇒ 潜伏项，别当编译阻塞排产。
+- **本账留下的唯一一条订正**：当时写的是「`.pag` 里发码把 `hwnd` 的小写 h 直接拼出来 ⇒ 与 RTL 的
+  `extern … vb6_PropertyPage_hWnd` 对不上 ⇒ 真编译是 C2065」。这个「真编译」从未真编过 —— RTL 把
+  **两种拼写都声明且定义了**（`vb6rtl_com.c:1072/1073` 两行、`vb6rtl_userctl.h:181/182` 两条 extern，
+  中间那句注释是 `// both spellings denote the same concept`），BASE 那台编这枚探针 rc=0。
+  缺陷的真实形状不是「编不过」而是「**一个事实两个答复**」：同一份产物里 With 头取 `…_hwnd`、
+  限定读取 `…_hWnd`，两枚各自独立的全局。⇒ 那条被用来**拦着一次放行**的推断，代价是一格合法语义
+  多配一条 VB3001，一直配到第十刀。教训写在 §B118 第一条。
+- **判据方向那句是对的**（`vb6_<对象>_<成员>` 的拼法只许来自表），第十刀照它落的。
 
 
 ### B113 账 #278 第七刀已出 = `Load/Unload <窗体名>` 的实参是**对象位**：§B111 那一格收掉（接已有的闸，不是新加判定，2026-10-09，门 #448 attempt 1 全绿（run 37947447538、head `028f7342`、12/12 含形状门 ⇒ 本机登记的哈希与 CI 那台复算对齐、wall 10m11s））
