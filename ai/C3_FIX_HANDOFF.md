@@ -2002,6 +2002,44 @@ marker、重编，之后 `check_rtl_embedded` 报 **125/125 逐字节相同**。
 
 
 
+### B105 另外 3 处也是「产物对、诊断错」，但这一族的放行撞在表的 `rtl` 契约上（2026-10-09 量完，**要拍一个口径**）
+
+接 §B104 的同一把尺子（先看产物再看诊断）量剩下的裸写文档成员，**三处全是噪声**：
+
+- `.pag` 裸 `Controls` 两条 —— `ppProgressCircular.pag` 的 `Set oPC = Controls.Add(…)` 与 `Controls.Remove "ProgCirc"`，
+  发码已经是 `vb6_ComCallObject((void*)vb6_UC_Controls(), L"Add", …)`（产物 b904_charts.c 第 4716 / 4780 行），rc=0。
+  ⇒ 语义层那两条 VB3001 与 §B104 同形：**名字归文档对象模型管，发码有路，语义没放行**。
+
+**放行为什么不是「加一行表 + 去掉一个 `!memberObjCtx_`」**（我按这个思路走到第三步就撞上）：
+
+1. 语义层的链在 `semantic_analyzer_expr.cpp:142/146` 按**位置**分了两条：文档隐式**对象名**只在限定符位放行（`memberObjCtx_ &&`），
+   文档**裸成员**只在裸位放行（`!memberObjCtx_ &&`）。而 `Controls.Add(…)` 里的 `Controls` 正是站在**限定符位**的裸成员 ⇒ 两条都不接，落到 159 报 VB3001。
+2. 表里只有 `{"usercontrol","controls",…HPF_BARE}`，没有 propertypage 那一行 ⇒ 就算放开位置，`.pag` 还是问不到。
+3. **给 `.pag` 补那一行 = 在表里说谎**：`HostPseudoRow::rtl` 的含义写死在页头 ——「发成 `vb6_<对象>_<rtl>`」，
+   而 `check_host_pseudo_table.ps1` 的 R1 就是拿这条钉每一行（`vb6_PropertyPage_Controls` 在 `vb6rtl_userctl.h` 里没人）。
+   真实的答复是一条**专用码头** `vb6_UC_Controls()`（`.ctl`/`.pag` 共用，RTL 内部按当前实例回落 formHwnd），
+   不是 `vb6_PropertyPage_Controls` —— 那边 `vb6_UserControl_Controls` 虽然存在却是**恒 NULL 的空桩**，
+   `cgen_expr_ident_builtin.inc:217-221` 注释里已经写明"用 NULL 会让枚举得到空集"，所以那条路刻意绕开它。
+   ⇒ 再补一枚同名 NULL 全局 = 往 RTL 里放第二个陷阱。**这一族缺的不是行，是表里没有"这一档由专用码头回答"这个概念。**
+
+**要拍的口径（两形，我倾向 b）**：
+- **a**：给 RTL 补 `extern void* vb6_PropertyPage_Controls;`（照 `vb6_UserControl_Controls` 那枚空桩的样子）+ 表加一行 + 语义层放开位置。
+  便宜，但表里从此有两个恒 NULL 的陷阱名，而它们**永远不该被发码**（发码走 `vb6_UC_Controls()`）。
+- **b**：给表加一枚 `HPF_CHANNEL` 旗标 = 「这行的答案是专用码头，`rtl` 字段不代表 `vb6_<对象>_<rtl>`」，
+  哨兵的 R1 对带这枚旗标的行**换成另一条判据**（码头的符号名在册、且表里不许出现第三种拼写），语义层按表放行。
+  这正是 `canvas_drawing.hpp` 的 `CANVAS_OWNER_METHOD/DRAW` 已经在用的形状 —— 一行标"由哪条码头回答"，两层都只问表。
+
+**⚠ 顺带一条会骗人的读数规矩（本轮自己差点被骗）**：诊断里的行号对 `.frm`/`.pag`（`.ctl` 待核）是**代码段相对行号，不是文件物理行号** ——
+`ppProgressCircular.pag(226,15)` 与 `(250,5)` 的实体是物理第 **460** 与 **484** 行（偏移 234；列号是物理列，`Controls` 分别落在第 15 与第 5 列，一比对就对上了）。
+我按 226 去读文件时读到的是设计期属性 `Top = 120`，差点据此判"这条 census 是假的"。
+⇒ **拿 census 的行号回文件对现场之前，先用列号把偏移标定出来**（列号可信，行号不可信）。这一条与 [[gbk-diagnostic-census-hazard]] 同族。
+
+**于是 12 处的分格又移走 3 处**：诊断面噪声累计 8 处（窗体伪成员 5 + 裸 `Controls` 2 + 裸 `UserControl` 1，后两处待按同一把尺子复量），
+剩下**可能真要动产品**的是 `TmForm2`（窗体名自动实例化）1 / `Printers` 1 / 常量 2（`VK_UP`、`CTRLINFO_EATS_RETURN`）——
+其中常量那两枚先要问一句 VB6 到底从哪里拿到它们（工程引用里的类型库？还是模块内 `Const`？），别默认"补内在常量表"。
+
+
+
 ### B103 账 #278 第一刀已出 = Implements 那一族从 VB3001 分家（新号 VB3044，缺槽那条并回既有的 VB3012）+ 第 45 道哨兵（2026-10-09，**已出：门 #441**）
 
 - **落地**：`src/common/diagnostics.hpp` 加 `SemImplementsInterfaceNotFound = 3044`；`src/semantics/semantic_analyzer.cpp:270` 改 3044、`:295` 改 **3012**（`SemInterfaceNotImplemented` 早就在用，两条报的是同一件事）。
