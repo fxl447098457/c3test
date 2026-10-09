@@ -283,39 +283,10 @@
         }
     }
 
-    // --- C29-Data: Data1.Recordset 的语句方法调用 (Refresh/Move*) ---
-    // comObjExpr_ = vb6_Data_Self(...) (recordset 透传形态)。语句路不走 com bind,
-    // 必须在这里拦, 否则落 vb6_ComCall(vb6_Data_Self(...), L"Refresh") —— 对
-    // ODBC 状态当 IDispatch 用。
-    if (isComMarker_ && comObjExpr_.find("vb6_Data_Self(") == 0) {
-        isComMarker_ = false;
-        std::string method = std::move(comMemberName_);
-        comObjExpr_.clear();
-        comMemberName_.clear();
-        std::string dh = dataSelfHwndExpr(comObjExpr_);
-        if (!dh.empty()) {
-            if (method == "refresh")      { lastExpr_ = "vb6_Data_Refresh((void*)" + dh + ")"; return; }
-            if (method == "movenext")     { lastExpr_ = "vb6_Data_MoveNext((void*)" + dh + ")"; return; }
-            if (method == "moveprevious") { lastExpr_ = "vb6_Data_MovePrevious((void*)" + dh + ")"; return; }
-            if (method == "movefirst")    { lastExpr_ = "vb6_Data_MoveFirst((void*)" + dh + ")"; return; }
-            if (method == "movelast")     { lastExpr_ = "vb6_Data_MoveLast((void*)" + dh + ")"; return; }
-            if (method == "fields") {
-                // Fields("name") / Fields(1) —— 取值即 FieldValueStr (数字下标转宽串)
-                std::string a0 = "L\"\"";
-                if (!node.positional.empty()) {
-                    emitExpr(*node.positional[0]);
-                    a0 = lastExpr_;
-                    bool allNum = !a0.empty() && a0.find_first_not_of("0123456789") == std::string::npos;
-                    if (allNum) a0 = "L\"" + a0 + "\"";
-                }
-                lastExpr_ = "vb6_Data_FieldValueStr((void*)" + dh + ", " + a0 + ")";
-                return;
-            }
-        }
-        // 未识别: 不恢复 marker —— 恢复成脏标记会污染后续语句
-        // (实测: Fields("id") 拿到 "vb6_Data_Self((" 残缺 comObjExpr_ → ComCallObject 空成员)。
-        // 落默认 COM 路即可 (marker 已在上面消费清掉)。
-    }
+    // 账 #278 §B124: 这里原来有一格 `vb6_Data_Self(` 透传形态的直译 (Refresh/Move*/Fields)，
+    // 与 cgen_expr_call_com_bind.inc / cgen_util_com.cpp / cgen_call.cpp 里那三格同属一代：
+    // 那个前缀今天没有任何发射者 ⇒ 恒假，已随九形探针量过并撤掉。recordset 一律走
+    // memberobj 的真 IDispatch (`vb6_Data_RecordsetObj` + vb6_Com*)。
 
     // P13.3: ListBox/ComboBox methods (AddItem/RemoveItem/Clear/List) via isComMarker_ flag
     if (isComMarker_) {

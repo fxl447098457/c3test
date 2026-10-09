@@ -138,9 +138,7 @@
                           || comObjExpr_.find("vb6_hwnd_") == 0
                           || isListViewHostExpr(comObjExpr_)
                           || !treeViewNameOfExpr(comObjExpr_).empty()
-                          || !toolbarNameOfExpr(comObjExpr_).empty()
-                          // C29-Data: Data1.Recordset 的透传形态 (Fields/Item 走 Step1+Item 路)。
-                          || comObjExpr_.find("vb6_Data_Self(") == 0);
+                          || !toolbarNameOfExpr(comObjExpr_).empty());
         // Fix <VBFlexGridDemo>: 窗体 (Me) 的 ScaleX/ScaleY(x, fromScale, toScale) 是
         // **方法**, 不是"集合属性 + Item 下标"。axSlotObj 只按 vb6_hwnd_ 前缀认宿主槽,
         // 窗体 hwnd 同样命中 ⇒ Me.ScaleX(8, 3, Me.ScaleMode) 被编成
@@ -196,19 +194,6 @@
                 if (collectionExpr.empty())
                     collectionExpr = "vb6_ComGetObjectProp(" + axObjExpr + ", L\"" + axMember + "\")";
             }
-            // C29-Data: `Recordset.Fields("name")` —— 取值即 FieldValueStr (不是集合 Item)。
-            // memberName 在 axSlotObj 路径上是 axMember (如 "Fields"), 实参 0 是字段名/下标。
-            if (Symbol::toLower(axMember) == "fields") {
-                std::string dhD = dataSelfHwndExpr(axObjExpr);
-                if (!dhD.empty()) {
-                    emitExpr(*node.positional[0]);
-                    std::string a0 = lastExpr_;
-                    bool allNum = !a0.empty() && a0.find_first_not_of("0123456789") == std::string::npos;
-                    if (allNum) a0 = "L\"" + a0 + "\"";
-                    lastExpr_ = "vb6_Data_FieldValueStr((void*)" + dhD + ", " + a0 + ")";
-                    return;
-                }
-            }
             // Step 2: 调用 Item(idx) 获取集合中的元素
             std::vector<std::string> packedArgs;
             for (size_t i = 0; i < node.positional.size(); i++) {
@@ -232,34 +217,8 @@
         std::string objExpr = std::move(comObjExpr_);
         std::string memberName = std::move(comMemberName_);
 
-        // C29-Data: Data1.Recordset 的调用面 —— Fields("name")(→FieldValueStr) 与
-        // MoveFirst/Last/Next/Previous/Refresh。objExpr 是 vb6_Data_Self( 透传形态。
-        if (objExpr.find("vb6_Data_Self(") == 0) {
-            if (getenv("C3_CG_TRACE")) {
-                FILE* tf = fopen("C:/Users/Administrator/Documents/c3.vb6.pro/.temp/cg3.log", "a");
-                if (tf) { fprintf(tf, "[COMBIND-DATA] member=[%s]\n", memberName.c_str()); fclose(tf); }
-            }
-            std::string dtM = Symbol::toLower(memberName);
-            std::vector<std::string> da;
-            for (size_t i = 0; i < node.positional.size(); i++) {
-                emitExpr(*node.positional[i]);
-                da.push_back(lastExpr_);
-            }
-            if (dtM == "fields") {
-                // VB6: Fields("name") / Fields(1) —— 取值即 FieldValueStr
-                std::string a0 = da.empty() ? std::string("L\"\"") : da[0];
-                // 数字下标转宽字面量 (FieldValueStr 的参数是 nameOrIndex 统一收宽串)
-                if (!a0.empty() && a0.find_first_not_of("0123456789") == std::string::npos)
-                    a0 = "L\"" + a0 + "\"";
-                lastExpr_ = "vb6_Data_FieldValueStr(" + objExpr + ", " + a0 + ")";
-                return;
-            }
-            if (dtM == "movenext")     { lastExpr_ = "vb6_Data_MoveNext(" + objExpr + ")"; return; }
-            if (dtM == "moveprevious") { lastExpr_ = "vb6_Data_MovePrevious(" + objExpr + ")"; return; }
-            if (dtM == "movefirst")    { lastExpr_ = "vb6_Data_MoveFirst(" + objExpr + ")"; return; }
-            if (dtM == "movelast")     { lastExpr_ = "vb6_Data_MoveLast(" + objExpr + ")"; return; }
-            if (dtM == "refresh")      { lastExpr_ = "vb6_Data_Refresh(" + objExpr + ")"; return; }
-        }
+        // 账 #278 §B124: 这一格 (`vb6_Data_Self(` 透传形态的直译) 与 §B124 列的那几格同代、
+        // 同样恒假，撤掉；顺带带走里面那台把日志路径写死在本机用户目录上的 getenv 探针。
         // 账 #196 第三条: 窗体型接收者的 `ScaleX`/`ScaleY` (`picA.ScaleX(…)`、`Me.ScaleX(…)`)。
         // 不拦就落到下面那条通用 COM 方法调用 —— `vb6_ComCallDouble(vb6_hwnd_X, L"ScaleX", …)`：
         // 对一枚假 IDispatch 发 Invoke ⇒ 编得过、链接过、跑起来回 0（#143 那一族在方法面上的第三味；

@@ -589,29 +589,13 @@
         return listViewHwndExprOf(objExpr);
     }
     // C29-Data: Data 控件 (不可见类 VB6_DATA 属性宿主, 登记裸控件名如 "Data1")。
-    // Recordset 链 (Data1.Recordset.Fields("x").Value / .MoveNext / .BOF) 全直译 RTL。
+    // 账 #278 §B124: Recordset 链今天**只有一条路** —— cgen_util_ctrl.cpp 在 recordset
+    // 那一档交出 `vb6_Data_RecordsetObj`，RTL 那边是 memberobj 的真 IDispatch（成员名表
+    // vb6forms_memberobj.c:136-137）。从前那套"透传形态直译"认的是 `vb6_Data_Self(` 前缀，
+    // 而这个前缀今天没有任何发射者 ⇒ 判据恒假，直译分支一条都进不去（九形探针量过，
+    // 见台账 §B124）。⇒ 撤掉，别再给死码立表。dataVars_ 留着：控件自己那一档
+    // (dataNameOfExpr) 还在用。
     std::unordered_set<std::string> dataVars_;
-    // 从 vb6_Data_Self(vb6_hwnd_X) / vb6_Data_Self((void*)vb6_hwnd_X) 抠出裸槽名。
-    // ⚠ 控件属性分支发的形态**不带** (void*) 强转, 两种都要认。
-    std::string dataSelfHwndExpr(const std::string& objExpr) const {
-        const char* kHeads[] = { "vb6_Data_Self((void*)", "vb6_Data_Self(" };
-        for (const char* kHead : kHeads) {
-            size_t p = objExpr.find(kHead);
-            if (p == std::string::npos) continue;
-            size_t s = p + strlen(kHead);
-            if (s > 0 && objExpr.compare(s, 9, "vb6_hwnd_") != 0 && s > 0) {
-                // 允许中间有空白
-                while (s < objExpr.size() && objExpr[s] == ' ') s++;
-            }
-            size_t e = s;
-            while (e < objExpr.size() && (isalnum((unsigned char)objExpr[e]) || objExpr[e] == '_')) e++;
-            std::string n = objExpr.substr(s, e - s);
-            // ⚠ 扫出来的是完整槽名 "vb6_hwnd_Data1" —— 剥掉前缀再查表
-            if (n.size() > 9 && n.compare(0, 9, "vb6_hwnd_") == 0) n = n.substr(9);
-            if (dataVars_.count(n)) return "vb6_hwnd_" + n;
-        }
-        return "";
-    }
     std::string dataNameOfExpr(const std::string& objExpr) const {
         if (objExpr.size() > 9 && objExpr.compare(0, 9, "vb6_hwnd_") == 0) {
             std::string n = objExpr.substr(9);

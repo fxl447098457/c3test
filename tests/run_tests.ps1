@@ -788,6 +788,26 @@ function Test-RtlProtoArity {
     }
 }
 
+# 账 #278 §B124（第十五刀）：Data 控件的 recordset 成员面从前住着两套答案 —— 一整套
+# `vb6_Data_Self(` 前缀直译（Refresh/Move*/Fields/FieldValueStr，五格认前缀 + 三格抠槽 + 三格再认求值结果）
+# 与 memberobj 交出的真 IDispatch。§B124 的九形探针量到前者在产物里 0 处（那条路从没被走过），
+# 第十二刀立起的 census（arity 哨兵 R5）把它点名为"同一个事实的第二份答案"。撤完钉三头：
+# 夹具那十形仍只发 vb6_Data_RecordsetObj + vb6_Com*（逐成员名字面量条数钉死）、
+# 撤掉的那七枚出口名不许在 src/backend 的非注释行里再出现成字面量、两张名单与普查自己不许变空。
+function Test-RsRecordsetShape {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] data_recordset_shape ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\check_data_recordset_shape.ps1" 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        $out | Select-Object -First 8 | ForEach-Object { Write-Host "  $_" }
+    }
+}
+
 # §B93（从 origin/ferock/0.10.7 的 5735aff6 捞回）：Join-Path 在 Windows PowerShell 5.1 只有两个位置参数，
 # 第三段写成位置参数会抛 ParameterBindingException，而它常待在 "$(...)" 内插里 —— 报错只剩一行噪声、那一段**静默变空**。
 # 本机实测改前 Get-MsvcToolset：5.1 下 IncludeSegs 6→1、LibSegs 3→0、空段 8（SDK 五段全丢）⇒ cl C1083 找不到 stddef.h，
@@ -5441,6 +5461,7 @@ if ($Category -in @("all", "compile")) {
     Test-RtlNakedNames
     Test-RtlResourceIds
     Test-RtlProtoArity
+    Test-RsRecordsetShape
     Test-Ps51JoinPath
     Test-UcArrayEventSites
     Test-SubclassSlotSites

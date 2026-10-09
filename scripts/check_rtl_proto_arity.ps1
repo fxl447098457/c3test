@@ -13,7 +13,7 @@
 #
 #   R3（账 #278 §B72）发码那几张控件方法表（cgen_util_ctrl.cpp 的 controlExit("vb6_…", 个数, outArgc)）
 #      三面都得对上：名字在 RTL 头里真有原型且个数相同（查不到原型也红 —— 没有声明就没有担保）、
-#      cgen_util_type.cpp 里那张运行时参数表若有同名行则个数相同、行数恰好 15（第十二刀 7 行 +
+#      cgen_util_type.cpp 里那张运行时参数表若有同名行则个数相同、行数恰好 23（第十二刀 7 行 +
 #      第十三刀的 Winsock 那 8 行 + 第十四刀并进零实参那张表的 8 行（两枚集合 Clear +
 #      CommonDialog 那六枚 Show*）；
 #   R4 产物那一头：跑一次 --emit-c（只走前端，不起 cl）数 tests/ctrlzero/ZeroForm.frm 里实际发出

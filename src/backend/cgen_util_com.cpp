@@ -117,24 +117,10 @@ std::string CCodeGen::resolveComValue(const std::string& unpackType) {
         }
     }
 
-    // C29-Data: `Data1.Recordset.<标量成员>` 直译 —— objExpr 是 vb6_Data_Self( 透传形态。
-    // (Fields("x")/Move* 是调用不是属性, 在 cgen_expr_call_com_bind.inc 拦。)
-    if (objExpr.find("vb6_Data_FieldValueStr(") == 0) {
-        // Fields("x").Value: 值就是 FieldValueStr 本身
-        std::string dtLower = Symbol::toLower(memberName);
-        if (dtLower == "value") { lastExpr_ = objExpr; isComMarker_ = false; return lastExpr_; }
-    }
-    if (objExpr.find("vb6_Data_Self(") == 0) {
-        std::string dtLower = Symbol::toLower(memberName);
-        if (dtLower == "bof")         { lastExpr_ = "vb6_Data_BOF(" + objExpr + ")"; isComMarker_ = false; return lastExpr_; }
-        if (dtLower == "eof")         { lastExpr_ = "vb6_Data_EOF(" + objExpr + ")"; isComMarker_ = false; return lastExpr_; }
-        if (dtLower == "recordcount") { lastExpr_ = "vb6_Data_RecordCount(" + objExpr + ")"; isComMarker_ = false; return lastExpr_; }
-        if (dtLower == "fieldcount")  { lastExpr_ = "vb6_Data_FieldCount(" + objExpr + ")"; isComMarker_ = false; return lastExpr_; }
-        if (dtLower == "value" || dtLower == "recordset") {
-            // Fields("x").Value 的 .Value: FieldValueStr 就是值本身, 透传不包装
-            lastExpr_ = objExpr; isComMarker_ = false; return lastExpr_;
-        }
-    }
+    // 账 #278 §B124: recordset 那两格直译 (认 `vb6_Data_FieldValueStr(` / `vb6_Data_Self(`
+    // 前缀) 撤掉 —— 发射者先没了，前缀判据恒假。`.RecordCount` / `.BOF` 这些标量成员
+    // 今天由 memberobj 的真 IDispatch 应答，成员类型走既有的 COM 型别表
+    // (`vb6_ComGetIntProp` / `vb6_ComGetStringProp`，九形探针量过)。
 
     // C29-7: `ListView1.ListItems` / `.ColumnHeaders` → **真集合对象** (与 C29-3 的
     // ImageList.ListImages 同一口径)。ListView 是**真窗口**, 宿主槽是 vb6_hwnd_X,
