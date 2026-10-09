@@ -1973,6 +1973,12 @@ marker、重编，之后 `check_rtl_embedded` 报 **125/125 逐字节相同**。
 **② 已出**：`emit-manifest` 那一格加 `continue-on-error: ${{ github.event_name == 'pull_request' }}` ——
 **PR 上报而不挡、推 dev 仍硬判红**（注释里写了为什么这格天生会红：任何一次合法的 codegen 改动都会让几十行哈希动，
 而那正是要看的读数；红话里现在带着三种成因与一条命令 = §B100）。
+**门 #440**（run 数 440、head `0ed4b51c`、branch dev、attempt 1）= 12 条 check-run 全 completed/success、非绿 0
+⇒ 改完 workflow 后 dev 这条路照旧产出真判据（`Emit manifest (shape oracle)` 自己也是 success）。
+⚠ 一条诚实的边界：#440 是**绿**的一轮，所以它只证明「push 路上这格仍是真判据的一部分」，**没有**证明
+「PR 上红会被吞成 success」与「dev 上红会真红」这两半 —— 那两句要等第一次真红才拿得到读数（PR 红 ⇒ 该 job 显示 success
+而注解里有 `::error::shape-oracle:`；dev 红 ⇒ 该 job 显示 failure）。若哪天发现 dev 上也把它吞了，就是把
+`continue-on-error` 的表达式条件写错了，届时按 §B100 那套自证补一条「push 事件下这格失败必须让 run 红」的读数。
 
 **① 影响面前置 census（`.build/b892_census3001.py`，单台 x64 全语料 398 份，读 stderr）**：
 `inputs_with_VB3001=16 / total_VB3001=25 / 其中所在文件写了 Option Explicit = 25（一枚不差）/ 没写 = 0`。
