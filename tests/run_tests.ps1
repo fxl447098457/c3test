@@ -3059,6 +3059,12 @@ if ($Category -in @("all", "run", "vbp")) {
                     "AK-pre=optA/down=optB/wrap=optA/up=optB/optA=N/optB=Y/clicks=3")
     Test-Vbp "tabwalk" "$Tests\tabwalk\TabWalkApp.vbp" $twNeedles
     Test-Vbp "tabwalk_x86" "$Tests\tabwalk\TabWalkApp.vbp" $twNeedles -Arch "x86"
+    # 账 #278 §B112: 夹具以前只声明了 WM_KEYDOWN / WM_KEYUP / VK_TAB / VK_DOWN，`AK-*` 那一路用的
+    #   VK_UP 没声明。发码把裸名交出去，<windows.h> 里同名宏（winuser.h: VK_UP 0x26）**恰好**接着了
+    #   —— 值一样所以两条架构真跑都绿，而 VB6 会直接拒源（Option Explicit + 未声明标识符）。
+    #   补 `Private Const VK_UP As Long = &H26` 之后两头钉：折成的字面量必须在、裸名不许回来。
+    Test-EmitcShape "tw_emitc_vkup_folded" @("$Tests\tabwalk\TabWalkApp.vbp") @(', 38, 40));')
+    Test-EmitcAbsent "tw_emitc_vkup_bare" @("$Tests\tabwalk\TabWalkApp.vbp") @(', VK_UP, 40)')
     Test-EmitcShape "tw_emitc_cparent" @("$Tests\tabwalk\TabWalkApp.vbp") @(
         '1409286151L, 65536L,',           # 顶层 Frame（Frame1 与 optFrame 两处）
         '1417675278L, 65536L,',           # 顶层 PictureBox（账 #164：这一串已不含 WS_TABSTOP）

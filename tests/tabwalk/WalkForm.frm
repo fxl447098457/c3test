@@ -203,6 +203,7 @@ Private Const WM_KEYDOWN As Long = &H100
 Private Const WM_KEYUP As Long = &H101
 Private Const VK_TAB As Long = &H9
 Private Const VK_DOWN As Long = &H28
+Private Const VK_UP As Long = &H26
 
 Private Function TF(ByVal ok As Boolean) As String
     If ok Then TF = "Y" Else TF = "N"
