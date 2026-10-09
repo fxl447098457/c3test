@@ -14,15 +14,22 @@
 # 规则 (改坏了会红, 不是装饰):
 #   D1  DocumentKind 定义 1 份, 四个档位齐
 #   D2  docKind 的**写入点全仓 1 处** (driver_frontend) —— 多一处就是第二个权威
-#   D3  isDocumentHostObject 定义 1 / 声明 1 / 调用 1, 且调用点带 memberObjCtx_ (限定符位)
+#   D3  isDocumentHostObject 定义 1 / 声明 1 / 调用 1, 三处都带着那个位置形参 —— 账 #278
+#       第八刀把「哪个位合法」收进了唯一出口 (qualifierPos), 调用点只负责交出手里的
+#       memberObjCtx_; 老形状 (调用点自己在外面 && 一次) 现在反过来钉它为 0
+#   D3b 那个出口必须真的按位置分档 (体内查 qualifierPos >= 3) —— 裸位的真缺项还得响,
+#       这条守的就是老 D3 守的那件事, 只是搬到判据自己那一头
 #   D4  旧的字符串猜测不许回来: controlTypeName 里找 "PropertyPage" 必须为 0
 #   D5  那张名字表要五枚齐全 (usercontrol / propertypage / extender / ambient / vba)
 #
 # 用法:  pwsh -File scripts\check_dochost_authority.ps1
 # 退出码: 0 = 全绿; 1 = 红
 
+param(
+    [string]$Root = ""      # 负控用: 把整棵树指到副本上跑 (哨兵只读源码, 不起 cl)
+)
 $ErrorActionPreference = "Stop"
-$root = Split-Path -Parent $PSScriptRoot
+$root = if ($Root) { $Root } else { Split-Path -Parent $PSScriptRoot }
 $bad = @()
 
 function ReadSrc([string]$rel) {
@@ -68,14 +75,26 @@ foreach ($t in $allSrc) { $writes += @([regex]::Matches($t, '->docKind\s*=')).Co
 if ($writes -ne 1) { $bad += ('D2 docKind writers ' + $writes + ' times (want exactly 1 - the single authority)') }
 
 # D3
-$d3def = @([regex]::Matches($files[$semUtilRel], 'bool SemanticAnalyzer::isDocumentHostObject')).Count
-$d3dec = @([regex]::Matches($files[$hdrRel], 'bool isDocumentHostObject')).Count
-$d3use = @([regex]::Matches($files[$semExprRel], 'isDocumentHostObject\(node\.name\)')).Count
-if ($d3def -ne 1) { $bad += ('D3 isDocumentHostObject defined ' + $d3def + ' times (want 1)') }
-if ($d3dec -ne 1) { $bad += ('D3 isDocumentHostObject declared ' + $d3dec + ' times in the header (want 1)') }
-if ($d3use -ne 1) { $bad += ('D3 call sites in visit(IdentifierExpr) ' + $d3use + ' times (want 1)') }
-$gated = @([regex]::Matches($files[$semExprRel], 'memberObjCtx_\s*&&\s*isDocumentHostObject')).Count
-if ($gated -ne 1) { $bad += ('D3 the exemption is not gated by memberObjCtx_ (found ' + $gated + ', want 1) - bare uses must still warn') }
+$d3def = @([regex]::Matches($files[$semUtilRel], 'bool SemanticAnalyzer::isDocumentHostObject\(const std::string& name, bool qualifierPos\) const')).Count
+$d3dec = @([regex]::Matches($files[$hdrRel], 'bool isDocumentHostObject\(const std::string& name, bool qualifierPos\) const')).Count
+$d3use = @([regex]::Matches($files[$semExprRel], 'isDocumentHostObject\(node\.name, memberObjCtx_\)')).Count
+if ($d3def -ne 1) { $bad += ('D3 isDocumentHostObject defined ' + $d3def + ' times taking the position (want 1)') }
+if ($d3dec -ne 1) { $bad += ('D3 isDocumentHostObject declared ' + $d3dec + ' times taking the position (want 1)') }
+if ($d3use -ne 1) { $bad += ('D3 call sites handing memberObjCtx_ to the authority ' + $d3use + ' times (want 1)') }
+# D3c: 调用点再自己 && 一次 = 同一个决定两份答案 (第八刀之前那正是唯一形状, 现在禁掉)
+$d3outer = @([regex]::Matches($files[$semExprRel], 'memberObjCtx_\s*(&&|\|\|)\s*isDocumentHostObject')).Count
+if ($d3outer -ne 0) { $bad += ('D3 the caller re-gates the exemption ' + $d3outer + ' times (want 0 - two answers for one decision)') }
+# D3b: 形参不是摆设 —— 体内拒裸位的那几档必须各查一次 qualifierPos
+$b3 = $files[$semUtilRel].IndexOf('SemanticAnalyzer::isDocumentHostObject')
+$d3pos = -1
+if ($b3 -lt 0) {
+    $bad += 'D3b predicate body not found'
+} else {
+    $n3 = $files[$semUtilRel].IndexOf('SemanticAnalyzer::', $b3 + 10)
+    if ($n3 -lt 0) { $t3 = $files[$semUtilRel].Substring($b3) } else { $t3 = $files[$semUtilRel].Substring($b3, $n3 - $b3) }
+    $d3pos = @([regex]::Matches($t3, 'return\s+qualifierPos|&&\s*qualifierPos')).Count
+    if ($d3pos -lt 3) { $bad += ('D3b position consulted ' + $d3pos + ' times in the predicate (want >= 3) - bare uses must still warn') }
+}
 
 # D4
 $sniff = 0
@@ -103,6 +122,6 @@ if ($bad.Count -gt 0) {
     exit 1
 }
 Write-Host ('PASS doc-host authority: kind def 1 (4 档), writers ' + $writes +
-    ', predicate ' + $d3def + '+' + $d3dec + '+' + $d3use + ' gated ' + $gated +
+    ', predicate ' + $d3def + '+' + $d3dec + '+' + $d3use + ' pos ' + $d3pos + ' outer ' + $d3outer +
     ', old sniffs ' + $sniff)
 exit 0
