@@ -2039,6 +2039,22 @@ marker、重编，之后 `check_rtl_embedded` 报 **125/125 逐字节相同**。
 **最可疑的是那枚 Sub 落在 `#If VBA7 / #Else` 条件编译块里**（`VisualStyles.bas` 是典型的双分支文件），
 即工程级名字表在建表时有没有把条件编译的分支剪掉，决定了这条名字在不在表上。这一格查清之前，23 条里的"跨模块调用"那 4 条没法定案。
 
+**③ 那条线索查清了，并且推翻 census 的一半读法（同一轮，接在上面那条"最可疑是条件编译"之后 —— 那个猜测是错的）**：
+- `VisualStyles.bas:204` 的 `Public Sub InitVisualStylesFixes()` **不在任何 `#If` 块里**（该文件的 `#If` 全部在 168 行之前闭合），
+  而 `namesProjectLevel`（`semantic_analyzer_util.cpp:722-727`）读的就是 `projPublicProcs_` 那张小写表 ⇒ 条件编译这条**排除**。
+- 真相在**输入种类**：那两条报点出自 census 把 `tests/VBFlexGridDemo/Common/Startup.bas` 当**独立输入**跑了一遍
+  （`emit_manifest.ps1` 的语料同时收 `.vbp` 与 `.bas`）。单文件编译时工程里没有 `VisualStyles.bas` ⇒
+  "未声明的标识符（可能来自其他模块）"**是对的描述**。按整工程重跑 `VBFlexGridDemo.vbp` 实测：`Startup.bas:36/37` 那两条**不见了**，
+  只剩 `CTRLINFO_EATS_RETURN`、裸 `UserControl`，以及两条 `Implements: interface ... not found`（那是**另一个语义复用同一个 DiagnosticID**，
+  报点在 `semantic_analyzer.cpp:270`）。
+- ⇒ **census 那 25 条要按输入种类重读**：standalone `.bas` 那 7 份贡献的 **9 条不该算进"解析缺项"**（把工程拆成单文件编译的自然结果 ——
+  `InitVisualStylesFixes`/`MainForm`/`Form2`/`Hidden1`/`OpenSecret`/三条负例夹具都在里面）；**整工程级只剩 16 条**，
+  其中源码 bug 仍只有 `Count`×2，其余 14 条才是真缺项，按表分：窗体名自动实例化 1（`TmForm2`）、
+  窗体伪成员 5（`ScaleWidth`×3 / `ScaleHeight` / `WindowState`）、全局对象 1（`Printers`）、PropertyPage 裸 `Controls` 2、
+  裸 `UserControl` 1、常量 2（`VK_UP` / `CTRLINFO_EATS_RETURN`）、`Implements` 接口找不到 2、包成员 1（`OpenSecret`，那是 pkg_xmod 的**故意**用例）。
+- 下一轮因此收窄成两句：**先把 `Implements` 那一族从 `SemUndeclaredIdentifier` 里分家出独立 ID**（否则任何"翻面"都会把接口警告一起判死），
+  再逐张补上面那 6 张表；两条都做完、census 只剩 `Count`×2 时，才轮到把"解析不出 + Option Explicit"升 error。
+
 ### B101 `Option Explicit` 在场时只发 warning、发码却把裸名直接发出去 ⇒ 产物必然 C2065（账 #278，2026-10-09，**未开工；① 的严重级那一刀见上一节，已被 census 否掉**）
 
 **⚠ 自纠（同一轮内两次改口，第二次是实测定的）**：本节最初写成「隐式未声明标识符在 `.bas` 落地、在 `.ctl` 不落地 = 两份答案」——
