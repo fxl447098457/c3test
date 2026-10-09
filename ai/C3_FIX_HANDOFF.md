@@ -1746,7 +1746,7 @@ CI 那一枚（`pe-lnk=14.51`）稳定落进 `int16_t` 档 ⇒ 发成 `vb6_ComGe
 - 五档对照（`.build/b663_neg.txt`，在一份 `scripts/` + `tests/run_tests.ps1` 的拷贝里跑，不碰工作树）：绿控两档 rc=0（发货态 / 还原后）； N1 只删调用行 ⇒ **R1b** 点名 `Test-StaticSentinelRegistration`；N2 盘上多一道没登记的 ⇒ **R1**（`onDisk=38 referenced=37`）； N3 引用一个盘上没有的名字 ⇒ **R2**（`onDisk=37 referenced=38`）；N4 整段登记（函数 + 调用）删掉 ⇒ **R1**。 顺带一条自证：**这一道第一次跑就是因为自己没登记而红** —— R1 在那一刻被真实地验活了一次，之后才把它自己补进 harness。
 - 全道复跑（含这一道）：**37 道绿、0 红**（`scripts/check_*.ps1` 逐道 powershell 跑，读数 `.build/b666_sweep.txt`）。  **CI 侧也数到同一件事**：门 #429 的 `Tests (syntax)` 那格里这 37 道全 PASS（含新登记的四加一道）， 而这一道自己被登记这件事由它自己守着 —— 它第一次跑就是因为没登记而红。
 
-### B96 内在常量其实有三处答案 —— RTL 的 `#define`、发码的逐名折叠、语义层那张表（账 #218 第三刀，**已出：门待回填**）
+### B96 内在常量其实有三处答案 —— RTL 的 `#define`、发码的逐名折叠、语义层那张表（账 #218 第三刀，**已出：门 **#432**（run 37864959948、head `18821555`、branch dev、attempt 1）= 12 条 check-run 全 completed/success、非绿 0，其中 `Emit manifest (shape oracle)` 也在内**）
 
 **先订正自己的量法**：那张常量表住的是**两份**片段 —— `src/semantics/builtin/builtin_consts.inc` + `builtin_consts_ext.inc`（后者在 `registerBuiltins` 里排在后面，两段共用同一个 SymbolTable）。上一轮只读了第一份，于是报出「表 292 / 只在折叠里 26」，实际是 **表 485 名 / 折叠 56 处（54 个不同名字，`vbObject` 与 `vbUseSystemDayOfWeek` 各被折了两次）/ RTL 宏 14**。这一格不是小数点问题：「谁不知道谁」的判断一旦建立在漏了一份的名单上，改法就整条歪（下面第二条是它的账单）。
 
@@ -1763,16 +1763,33 @@ CI 那一枚（`pe-lnk=14.51`）稳定落进 `int16_t` 档 ⇒ 发成 `vb6_ComGe
 
 **判据**：夹具 `tests/test_intrinsic_consts.bas`（40 枚名字 + 三条赋值那形 + `Const`/变量/直读三条 `vbUseSystem`），`Add-BasTest` 钉 16 条期望（BASE 上 `IC-ASSIGN=0,0,0`、`IC-RTL-PT=,,,,`、`IC-RTL-CONST=0`、`IC-VS-CONST=-1` 四条当场红，NEW 全绿；而 `IC-FOLD-*` 那 6 条**两台同数** —— 那是「只改数从哪来、不改数」的半边证据）；`Test-EmitcShape ic_emitc_reads_are_literals` 钉 5 行发码；`Test-EmitcAbsent ic_emitc_no_implicit_var` 钉 4 条自救形状不许在场；**第 39 道哨兵** `scripts/check_builtin_const_authority.ps1`（C1 RTL 里 `#define vb*` 必须为 0、C2 折叠里不许有表不认识的名字、C3 棘轮、C4 两份表片段不许重名/不同值、C5 三枚手册值、C6 表达式档棘轮）—— 六档假改动**各自红并点名自己的规则**（`.build/b761_neg.txt`），植完按 md5 还原、还原后复跑绿。
 
-**下一格**：① 那 54 枚「表里已有、发码仍折叠」可以按棘轮一批批撤（每撤一批就改 C3 的数）；② `isConstIdent`（`src/backend/cgen_base_naming.cpp:219`）里那 11 枚 RTL 名的硬编码名单，在本刀之后只对「typelib 先注册的 EnumMember」那一档还有用 —— 真正的修法是让 `lookupConstSym` 也认 EnumMember，那会牵动 `wrapConstArgForByRef` 一串形状，单独量过再动；③ §B97 那条排列。
+**下一格**：① 那 54 枚「表里已有、发码仍折叠」可以按棘轮一批批撤（每撤一批就改 C3 的数）；② `isConstIdent`（`src/backend/cgen_base_naming.cpp:219`）里那 11 枚 RTL 名的硬编码名单，在本刀之后只对「typelib 先注册的 EnumMember」那一档还有用 —— 真正的修法是让 `lookupConstSym` 也认 EnumMember，那会牵动 `wrapConstArgForByRef` 一串形状，单独量过再动；③ §B97（include 与模块 init 调用序的无序容器）。
 
-### B97 发码里那段 `#include` 的模块顺序是**二进制的函数**（新账，未开工）
+### B97 多模块工程的 `#include` 段**与入口点里模块 init 的调用序**都来自一枚 `unordered_*`（新账，未开工）
 
-读数：账 #218 那刀的 A/B 里，4 份输入的清单 sha 变了，但**逐行多重集一字不差** —— 变的只有聚合 `.c` 头部那两行 `#include`（`cc_id/Id.vbp` 的 426/427 行 `CircleImpl.h` 与 `VbpImpl.h` 互换）。这 4 份输入压根没用到那 40 枚名字，它们身上唯一的变量是**语义层那张常量表长了 34 个名字**。
+读数（比立账时那句硬得多，2026-10-09 查到源头）：账 #218 那刀的 A/B 里 4 份输入的清单 sha 变了而**逐行多重集完全相同**；
+这 4 份压根没用到那 40 枚名字，身上唯一的变量是**符号表里多了 34 个名字**。追下去的因果链是：
 
-为什么值得记：`emit-manifest.expected.txt` 是本项目「零行为改动」的字节护栏，而它现在对**无关的表增长**敏感 —— 以后每动一次常量表都会重刷这几行，而顺序由编译器的内存布局决定，这与账 #245 那一族「同一枚二进制自洽、换一次构建就换答案」是同一个形状（那一次的结论是：不能拿这个当判据）。更要紧的是这些工程的 C 是**真编译**的，⇒ 今天的顺序是随机的，而 include 顺序在 C 里不是无害的（前向声明、宏覆盖都会咬）。
+- `src/backend/cgen_base.cpp:207` 收的参数是 `const std::unordered_set<std::string>& externalModules`；
+- 它由 `SymbolTable::getExternalModuleNames()`（`src/semantics/symbol_table.cpp:462-471`）造出来，而那里是
+  **遍历 `moduleScope_->symbols()` = `std::unordered_map<std::string, unique_ptr<Symbol>>`**（`symbol_table.hpp:452/462`）
+  捡 `isExternal` 的符号 ⇒ 结果集的内部分桶由**整个模块作用域的名字集合**决定；
+- 同一处 `src/driver/detail/driver_codegen_module_loop.inc:50-62` 手里就握着 `modules_` —— **一个按工程顺序排的 vector**
+  （`Id.vbp` 的声明序 = `IdMain, IdIfaces, IdBlocks, CircleImpl, VbpImpl`），却只拿它往那个 set 里补名字。
 
-要查的点（都还没做）：谁在决定这段 include 的顺序（`Get-ChildItem`？`unordered_set<模块名>`？符号表桶序？），发点在哪一处，收口是不是排一次序（按名字），x86+x64 两条真编译过一遍才算绿。修之前先复现「同一份源码、两台不同构建给出两种顺序」，否则不能确定它就是布局的函数而不是别的东西。
+这枚 set 喂着四处会出顺序的码头：`.c` 的 include 段（`cgen_base_generate_c_open.inc:53`）、`.h` 的 crossmod include 段
+（`…_crossmod.inc:56`）、**入口点里 `vb6_mod_<X>_init()` 的调用序**（`cgen_base_generate_entry.inc` 五处）、
+`cgen_expr_ident_builtin.inc:181`。实测（同一份 `tests/cc_id/Id.vbp`，两台编译器）：
+BASE 交 `IdMain,CircleImpl,IdIfaces,VbpImpl,IdBlocks`，NEW 交 `IdMain,VbpImpl,CircleImpl,IdIfaces,IdBlocks`
+—— **两个都不是工程声明序**，所以「启动时哪个模块的全局先初始化」今天随编译器符号表布局漂。
+（另两枚 `ve_list` / `pkg_cls` 这次 init 序没换，只换了 include。）
 
+要做的与要先定的口径：① 顺序从**唯一权威**拿（候选 = `modules_` 的工程序，它是现成的有序 vector）；
+② 口径要先答一句「VB6 到底按什么序跑模块级初始化」—— 我的读法是 VB6 惰性到首次引用才建，
+这条 eager 的 init 块本来就是 C3 的实现选择 ⇒ 那么要保的是**确定性**而不是"照抄 VB6"，这句得写清别说过头；
+③ 判据要能钉住顺序本身（光看发码清单不行：它是比字节的，排列换序 = 一行照样不同、而多重集相同，
+上一轮就靠这个才分辨出来）⇒ 针要钉"输出的 init 调用序 == 工程声明序"，今天两台都该红；
+④ 哨兵补一条：那四处码头不许再迭代 `unordered_*`（census 按容器类型问，不按名字问）。
 
 ## C. 仍在生效的口径与工具事实（与本文档等长的一半价值在这里；完整版见记忆库）
 
