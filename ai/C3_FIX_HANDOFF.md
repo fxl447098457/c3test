@@ -1288,7 +1288,7 @@ S9.4 打标记那一路的 PictureBox 判据必须问表、且不许把成员名
 
 
 
-### B72 控件方法的"发码实参个数"与 RTL 原型之间没有对账 —— 头/体那一半已钉住，这半只欠"多递"那一侧（账 #240 记下；**三张控件方法表 = 第十二刀 §B122，Winsock 那一族 = 第十三刀 §B123，都已出**；剩下的 Data 一族与两处集合 Clear 见 §B123 末条，CommonDialog 那一味另归 §B115）
+### B72 控件方法的"发码实参个数"与 RTL 原型之间没有对账 —— 头/体那一半已钉住，这半只欠"多递"那一侧（账 #240 记下；**三张控件方法表 = 第十二刀 §B122，Winsock 那一族 = 第十三刀 §B123，都已出**；集合 Clear 两枚与 CommonDialog Show* 六枚 = 第十四刀 §B125；剩下的 Data 一族经查是死码，另立 §B124（那一刀要先拍一个口径））
 
 账 #240 那一刀把"头追不上体"钉死了（`check_rtl_proto_arity.ps1`：RTL 里两头都有的名字，声明侧参数个数集合必须等于定义侧）。**没钉住的是第三头**：cgen 递出去的实参个数。本轮三者恰好同源（体 10 = 发码 10 = 补完的头 10），所以新 cl 的诊断只落在头那一份上。反过来的形状照样要命：若有人给某枚 `vb6_Ctrl_*` 加形参、只改头与体，而**发码仍递旧的个数**，那么多递这一侧在本机只是 `warning C4020`（见 §B71 那条不对称测量），到新 cl 才升成 `error C2197` —— 也就是说它会以**"门红、本地全绿"的形状再来一次，而这次红在别人刚登记的用例上**。
 
@@ -2002,6 +2002,16 @@ marker、重编，之后 `check_rtl_embedded` 报 **125/125 逐字节相同**。
 `w = ScaleWidth` 与 `Debug.Print …` 合成一行，于是行号与诊断全对不上（报在 `(6,35)` 那种文件里根本不存在的列上）。
 把生成的夹具**原样 dump 出来看一眼**才发现。⇒ 夹具是脚本拼的时候，「先核夹具本身」是第 0 步，不是最后一步。
 
+### B125 账 #278 第十四刀已出 = 两枚集合 Clear 与 CommonDialog 那六枚 Show* 进零实参那张表：「拼法只许来自表」在 Show* 这一族落地（另立一条新判据：哨兵的文件头读不成注释就会绿着空转，2026-10-10，**待门**）
+
+- **动了什么**：`controlZeroArgMethod` 长出八行 —— `(ImageList, clear)` → `vb6_ImageList_ClearImages`、`(StatusBar, clear)` → `vb6_StatusBar_ClearPanels`、`(CommonDialog, show*)` → `vb6_CdShowOpen/Save/Color/Font/Printer/About`，八条都是 `controlExit("vb6_…", 1, outArgc)`（一枚实参 `void* hwnd`）。六个调用点改问它：语句码头三处（`cgen_call.cpp` 的 ImageList / StatusBar / CommonDialog 三块）、COM 绑定码头两处（`cgen_expr_call_com_bind.inc:443/510`）、表达式码头一处（`cgen_expr_call_callee_withm.inc:399`）。
+- **这一族特有的那一味**：CommonDialog 的出口名从前不是写死的，是**现拼**的 —— `"vb6_CdShow" + toupper(mCd[4]) + mCd.substr(5)`，两条码头各拼一遍。那不是"名字抄两遍"，是**命名规则住在调用点**（§B115 的口径），后果比抄名字更阴：名单加一枚就默认拼法对它成立。现在表逐条给出六个名字，拼法归零。
+- **两枚 Clear 为什么不并成一枚**：接收者表达式不一样 —— ImageList 是宿主对象，槽位是 `vb6_com_<名>`；StatusBar 是窗口，槽位是 `vb6_hwnd_<名>`。表管「叫什么 / 递几枚」，「递给谁」留在码头（第十三刀的 Winsock 同样口径）。
+- **判据三面 + R5 收严**：`check_rtl_proto_arity.ps1` 的 R3 行数 `15 → 23`、R5 名单加这八枚、R4 夹具补三枚控件与八条调用，覆盖面 `恰好 14 枚 → 恰好 22 枚`。**R5 的口径这一刀收严了**：从前只比「整条字面量等于名字」，而码头习惯把左括号拼进同一条串（`"vb6_Ws_Close(" + preWs`），于是**漏掉一半站点** —— 现在比 `"名字"` 与 `"名字("` 两种开头（第十三刀因此少报过；N5 那档"退回 HEAD 的老形状"要等这次收严才三面齐红）。
+- **顺手立的新判据（本轮撞出来的一课）**：`check_static_sentinel_registration.ps1` 加 R4 —— 每一份 `check_*.ps1` 的字节头必须是 **UTF-8 BOM 恰好一次**、去掉 BOM 后**首行以 `#` 开头**。起因是这一批的补丁脚本把 BOM 写了两遍 ⇒ 首行变成 `"?# …"` ⇒ PS 5.1 报两行 CommandNotFound **却继续跑到底、exit 0** —— 一道坏掉的哨兵在门上是绿的，比红难发现得多（R1/R2/R3 只查"有没有被登记"，看不见"登记了却跑不起来"）。负控：把双 BOM 复现一遍 ⇒ R4 当场红，还原后 md5 逐字节对上。
+- **A/B**：BASE = 本机冷编的 `wt_base_k15 @ d2caf7c0`；全语料 **398 份输入逐字节相同** ⇒ 零行为改动、零登记，`emit-manifest.expected.txt` 未动。本地 49 道静态哨兵全绿；6/6 负控按预期红（抹掉 ShowAbout 一行、把 ClearImages 的个数说成 2、在 `cgen_call.cpp` 里再拼一遍 `"vb6_CdShowOpen"`、拆掉夹具那六条 Show*、四份源码加夹具退回 HEAD、骨架原样=绿）。
+- **§B72 到今天**：三刀收完 —— 第十二刀（三张表长出「个数」那一格 + 四面判据）、第十三刀（Winsock 八枚）、第十四刀（本节）；Data 那一族经查是死码，另立 §B124（撤死码那一刀，含一个待拍的口径）。`src/backend` 里剩下的手抄出口名从此都要过 R5 那道名单，加档不改名单就会红。
+
 ### B124 新账 = C29-Data 那一族的**发码侧直译**全是死码：三条码头认的前缀 `vb6_Data_Self(` 早已没人再发，今天活的是 memberobj 那枚真 IDispatch（2026-10-10 量，**未开工**）
 
 - **怎么撞上的**：把 §B123 末条列的 Data 那一族（`refresh` + 四枚 `Move*`，5 枚 × 三条码头 = 15 处手抄出口名）照 Winsock 那一刀的样收成一张表，写完跑 R4 —— **EMIT-CENSUS 当场红：夹具里那五条 `DataZ.Recordset.Refresh/Move*` 一枚也没走到那三条码头**，产物是 `vb6_ComCall(vb6_Data_RecordsetObj(vb6_hwnd_DataZ), L"Refresh", NULL, 0)`。⇒ 那张表收的是**没人再读的答案**，不是「同一个事实的两份答案」，方向错 ⇒ 这一刀整个撤回（改动存在 stash `k14-superseded-by-B124`，工作树回到 `d2caf7c0`）。**这条 census 正是第十二刀立的那一头** —— 没有它，这次会留下一张钉死 20 行的表和一段永不执行的分支。
@@ -2021,7 +2031,7 @@ marker、重编，之后 `check_rtl_embedded` 报 **125/125 逐字节相同**。
 - **判据**：`check_rtl_proto_arity.ps1` 的 R3 行数 `7 → 15`（第十二刀 7 + 这一族 8）、R5 名单加那八枚、R4 夹具 `tests/ctrlzero/ZeroForm.frm` 补一枚 `MSWinsockLib.Winsock wsZ` 与八条调用（无括号三形走语句码头、带实参五形走表达式码头），覆盖面 `恰好 6 枚 → 恰好 14 枚`。**7/7 负控按预期红**：抹一行（TABLE-ROWS + EMIT-CENSUS）、表里把 bind 说成 2 枚（TABLE-VS-RTL 与 EMIT-VS-TABLE 两头齐红）、把名字换成 RTL 查无此名（TABLE-VS-RTL + EMIT-CENSUS）、在 `cgen_call.cpp` 里再拼一遍 `"vb6_Ws_SendData"`（NAME-COPIED）、拆掉夹具那五条带实参的调用（EMIT-CENSUS）、四份文件加夹具退回 HEAD（TABLE-ROWS + NAME-COPIED + EMIT-CENSUS 三面红）、骨架原样（绿）。
 - **一条读数订正（负控把自己教了一遍）**：本以为「表里的名字换成 RTL 没有的出口」会红在 `EMIT-VS-TABLE`，实测红的是 `EMIT-CENSUS` —— R4 是**按表里的名字去产物里找**，名字一换，旧名字在产物里整个消失，于是覆盖面先掉下来。⇒ 「改名」与「改个数」是两种红，前者只能被 census 抓到，这一格写进判据面（要盯住 census 掉下来，不能只盯住数目不符）。
 - **A/B：全语料 398 份输入逐字节相同**（BASE = 本机冷编的 `wt_base_k13 @ 86ff9be1`，同一台工具链，§B73 口径）⇒ 这一刀**零行为改动、零登记**，与第十二刀那次「一行注释变了、看过再登记」不同；`emit-manifest.expected.txt` 未动。本地 50 道静态哨兵全绿。
-- **§B72 剩下的（实数已核，下一刀的靶子；顺带订正 §B122 末条 ② ③ 两格的数）**：① Data 那一族比先前记的多 —— `refresh` + 四枚 `Move*` = **5 枚 × 三条码头 = 15 处**（`cgen_expr_call_callee_withm.inc:297-301` / `cgen_expr_call_com_bind.inc:257-261` / `cgen_call.cpp:303-307`），另 `vb6_Data_FieldValueStr` 两处（那两处的实参整形逻辑也是抄的两遍：数字下标折成宽字面量）；② `vb6_ImageList_ClearImages`、`vb6_StatusBar_ClearPanels` 各 1 处（都是"无括号那一形"在语句码头收尾）；③ CommonDialog 那六枚 `Show*` 与这几族**不是同一味** —— 它的出口名是按拼写现拼的（`"vb6_CdShow" + toupper(mCd[4]) + mCd.substr(5)`，`cgen_call.cpp:404-406`），那是**命名规则住在调用点**，归 §B115 那句「拼法只许来自表」管，收法也不同（要一张「成员名 → 拼好的出口名」的表，而不是「成员名 → 名字 + 个数」）。
+- **§B72 剩下的（实数已核；顺带订正 §B122 末条 ② ③ 两格的数。这一条里的 ①② 两格已由第十四刀 §B125 收掉，Data 那一格订正见 §B124）**：① Data 那一族比先前记的多 —— `refresh` + 四枚 `Move*` = **5 枚 × 三条码头 = 15 处**（`cgen_expr_call_callee_withm.inc:297-301` / `cgen_expr_call_com_bind.inc:257-261` / `cgen_call.cpp:303-307`），另 `vb6_Data_FieldValueStr` 两处（那两处的实参整形逻辑也是抄的两遍：数字下标折成宽字面量）；② `vb6_ImageList_ClearImages`、`vb6_StatusBar_ClearPanels` 各 1 处（都是"无括号那一形"在语句码头收尾）；③ CommonDialog 那六枚 `Show*` 与这几族**不是同一味** —— 它的出口名是按拼写现拼的（`"vb6_CdShow" + toupper(mCd[4]) + mCd.substr(5)`，`cgen_call.cpp:404-406`），那是**命名规则住在调用点**，归 §B115 那句「拼法只许来自表」管，收法也不同（要一张「成员名 → 拼好的出口名」的表，而不是「成员名 → 名字 + 个数」）。
 - **一处被实测推翻的猜想（本线第四次撞在同一课上）**：看见语句码头只写了 close/listen/connect 三枚，我推断「不带括号的 `wsX.Bind` 因此没有出口 ⇒ 落 COM 兜底、编得过而不做事」。跑一发 `--emit-c` 就否掉了：`tests/ctrlwinsock/WsForm.frm:189` 的 `wsB.Bind 0` 发的是 `vb6_Ws_Bind((void*)vb6_hwnd_wsB, (int32_t)0, L"")` —— **带实参那一形走的是另一条形**（表达式码头），两边都通。⇒ 结论：扣住修法不动的理由必须量过，「代码里只写了三枚」不等于「只有三条路」（§B115 那一课在这里再记一遍）。
 
 ### B122 账 #278 第十二刀已出 = 控件方法那张表现在同时答「名字 + 递几枚实参」，§B72 欠的那一头由同一道哨兵四面一起对账（`[STATIC] rtl_proto_arity` 扩三条 + 一枚新夹具，2026-10-10，门 #454 attempt 1 全绿（run 37984714811、head `b281c79a`、12/12 全 completed/success、非绿 0、wall 10m53s；含 [STATIC] rtl_proto_arity 所在的 Tests (compile) 片，而 **Emit manifest (shape gate) 那一跑也绿** ⇒ 本机冷编登记的那一行覆写被 CI 那台复算证实）
