@@ -2000,6 +2000,19 @@ marker、重编，之后 `check_rtl_embedded` 报 **125/125 逐字节相同**。
 `w = ScaleWidth` 与 `Debug.Print …` 合成一行，于是行号与诊断全对不上（报在 `(6,35)` 那种文件里根本不存在的列上）。
 把生成的夹具**原样 dump 出来看一眼**才发现。⇒ 夹具是脚本拼的时候，「先核夹具本身」是第 0 步，不是最后一步。
 
+### B121 新账 = 同一个未声明名、同一枚 .ctl，两个工程给出**两种发码**：主 Charts 折成 Empty 编得过，独立 UC 交裸名 C2065（2026-10-10 量，**未开工**）
+
+- **读数（同一枚 exe，各出一趟 --emit-c，再各真编一遍）**：`tests/Charts 2020/ucProgressCircular/ucProgressCircular.ctl` 里那句
+  `If hBrush = 0 Or Count = 0`（文件有 `Option Explicit`，全工程 grep 无 `Public Count`，RTL 也没有裸名 `Count`）——
+  - 吃 `tests/Charts 2020/Proyecto1.vbp`（harness 里 `Test-GuiVbp Charts2020` 真编真跑那枚）⇒
+    `vb6_VARIANT _vcmp_0 = vb6_VariantFromValue(vb6_VariantEmpty());` ⇒ **BUILD-RC=0，出得了 Proyecto1.exe（1,195,008 字节）**；
+  - 吃 `tests/Charts 2020/ucProgressCircular/Proyecto1.vbp`（harness 里**刻意不列**那枚，见 `run_tests.ps1` 的账 #187 注）⇒
+    `vb6_VariantFromValue(Count)` 裸名 ⇒ `ucProgressCircular.c(1503): error C2065: “Count”: 未声明的标识符` ⇒ C3 exit 2。
+  两边都挂着同一条 VB3001 ⇒ census 里那两行 `Count` 其实是**这一格的两个脸**。
+- **为什么必须单开（它是 §B101 那刀的前置，不是尾巴）**：升级的判据正是「未声明名 + `Option Explicit` ⇒ error」。  这一格说明发码侧对同一个输入**今天就有两个答案** ⇒ 升级之前得先定位那条分岔（哪条分支把裸名折成 Empty、哪条把  裸名直接交出去、分岔的输入条件是什么），否则升级只是给「两个答案」再加一句诊断，而真编那一头照旧一半能过一半不能。
+- **与 §B115/§B118/§B120 同族**：一个事实两个答复。只是这一族不在宿主表那一路，在「未声明标识符」的发码那一路。
+- **下一步（修法之前先量的）**：拿同一枚 exe 对两枚工程各出一次码，把 `DrawGradientArc` 那一段 diff 出来定位分支；  然后定「未声明名到底该怎么发」（交裸名 = 让 C 报 C2065，还是折 Empty = 承认 VB 的隐式声明）—— 那是**口径**，不是 bug。
+
 ### B120 账 #278 第十一刀已出 = 宿主符号的**装配**与**四档名单**各收成一处：§B115 那句「拼法只许来自表」到这里才算落完（语料零暴露的一条真洞顺手堵上，2026-10-10，**待门**）
 
 - **撞上的方式**：第十刀把 With 那一处改问 `canonicalHostPseudoMember` 之后，给自己留了一句「对象那一段仍按源码拼写抄」。开工先把这条契约的全仓读数取了一遍 —— `vb6_<对象>_<成员>` 的**装配**在发码侧有**四份**（With 块 / 赋值 `cgen_assign_host_pseudo.inc` / 裸名 `cgen_expr_ident_builtin.inc` / 限定符 `cgen_expr_member_m22_module.inc`），而「是不是宿主伪对象」这四档名单抄了**五份**（cgen_with 两处、assign、util_type、obj_dispatch）。⇒ §B115 只修了四份装配里的一份。
@@ -2103,7 +2116,7 @@ marker、重编，之后 `check_rtl_embedded` 报 **125/125 逐字节相同**。
   还是把这五份夹具补上兄弟模块（`Form2` 那份补一枚 .frm、`Startup.bas` 那份补它引的模块、
   `friend_*.bas` 那两份补上包 —— 注意后两份一补就变成「整工程输入」，与 §B117 那一格同形）。**这一格没定之前不能动 §B101。**
 - **③ 源码 bug `Count` 2 行**（`ucProgressCircular.ctl:931`，两份 Charts 输入各报一次）：那工程本来就不出 exe，
-  但它是**形状门的输入** ⇒ 见下面那条 rc。
+  但它是**形状门的输入** ⇒ 见下面那条 rc。**2026-10-10 订正 + 补读数**：「那工程本来就不出 exe」只对`ucProgressCircular/Proyecto1.vbp` 那枚独立工程成立（它今天确实出不了：裸名 `Count` ⇒ C2065）；而同一枚 .ctl 在 `tests/Charts 2020/Proyecto1.vbp`（harness 里真编真跑的正例）那一趟发码把同一个裸名折成了 `vb6_VariantEmpty()` ⇒ **出得了 Proyecto1.exe（1,195,008 字节、BUILD-RC=0）**。⇒ 一个未声明名两个答案（§B121）。对升级的后果也因此要说准：rc 会从 0 翻掉的不是那枚本就不建的独立工程，而是**主 Charts 正例** ⇒ 「升级」与「改夹具源码」在同一批里耦合，先拍 §B121 那条分岔，再谈 §B101。
 - **⚠ 谁都没写下来的一格（本轮量的真正收获）**：`emit-manifest.expected.txt` 每行的格式是
   `sha256=… ascii256=… rc=<退出码> bytes=… <relpath>` —— **rc 是判据的一部分**。
   今天交 warning 的输入 rc=0；升级后凡是"带 `Option Explicit` 且报了 3001"的输入 rc 变 ≠0 ⇒
