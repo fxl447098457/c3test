@@ -31,6 +31,13 @@ TypeSystem::TypeSystem() {
         {"variant", Vb6Type::Variant},
         {"var", Vb6Type::Variant},
         {"any", Vb6Type::Unknown},       // Declare中的Any
+        // C3 扩展 (ai/032): 无符号/小整型族。位宽对照 Integer/Long/LongLong,
+        // 见 common/types.hpp 的 Vb6Type 注释。等宽于既有类型, 所以走同一套
+        // isIntegral / typeSize / promote 阶梯即可, 不需要第二套数值口径。
+        {"sbyte", Vb6Type::SByte},       // 8-bit signed
+        {"uinteger", Vb6Type::UInteger}, // 16-bit unsigned
+        {"ulong", Vb6Type::ULong},       // 32-bit unsigned
+        {"ulonglong", Vb6Type::ULongLong},// 64-bit unsigned
     };
 }
 
@@ -155,7 +162,12 @@ bool TypeSystem::isNumeric(Vb6Type t) {
 bool TypeSystem::isIntegral(Vb6Type t) {
     return t == Vb6Type::Byte || t == Vb6Type::Integer ||
            t == Vb6Type::Long || t == Vb6Type::Boolean ||
-           t == Vb6Type::LongLong || t == Vb6Type::LongPtr;   // Fix 084m
+           t == Vb6Type::LongLong || t == Vb6Type::LongPtr ||    // Fix 084m
+           // C3 扩展 (ai/032): 4 个新整型。ULong **必须在这里** —— 它此前只在
+           // mapType/typeSize 有映射而没进 isIntegral, 于是 `ULong + Long` 这类
+           // 算不出来 (promote 拿 isNumeric 卡住 → 一路退化成 Variant)。
+           t == Vb6Type::SByte || t == Vb6Type::UInteger ||
+           t == Vb6Type::ULong || t == Vb6Type::ULongLong;
 }
 
 bool TypeSystem::isFloat(Vb6Type t) {
@@ -221,20 +233,61 @@ Vb6Type TypeSystem::promote(Vb6Type a, Vb6Type b) {
     // 简化: 使用类型大小决定
     auto rank = [](Vb6Type t) -> int {
         switch (t) {
+            // C3 扩展 (ai/032): 新增整型按位宽取与既有同宽类型相同的档位, 有符号/无符号
+            // 不另分档 —— VB6 的算术结果本来就只看宽度 (VB6 无无符号类型, 也就没有
+            // "有符号+无符号怎么提升"的先例可循, 取等宽即最高位宽胜出的最简口径)。
             case Vb6Type::Byte:    return 1;
+            case Vb6Type::SByte:   return 1;
             case Vb6Type::Integer: return 2;
+            case Vb6Type::UInteger:return 2;
             case Vb6Type::Boolean: return 2;
             case Vb6Type::Long:    return 3;
+            case Vb6Type::ULong:   return 3;
             case Vb6Type::Single:  return 4;
             case Vb6Type::Double:  return 5;
             case Vb6Type::Currency:return 6;
             case Vb6Type::Decimal:  return 7;  // P20-07: Decimal wider than Currency
             case Vb6Type::Date:    return 5;  // Date内部是Double
+            // 64 位整数档 (C3 扩展 ai/032 顺带补齐): LongLong 以前不在本表里, 于是
+            // 落到 default 的 0 档 —— `LongLong + Long` 会被判成 Long (32 位), 高位
+            // 静默丢失。ULongLong 与之同档。这是本次的既有行为改动, 由
+            // tests/run_tests.ps1 全量门禁背书。
+            case Vb6Type::LongLong:return 6;
+            case Vb6Type::ULongLong: return 6;
+            // LongPtr **刻意不登记**: 它的宽度是目标相关的 (x86 4 字节 / x64 8 字节),
+            // 而 TypeSystem 这一层拿不到目标架构 (只有后端的 targetArch_, 且
+            // typeSize(LongPtr) 本身也还在用宿主 sizeof(void*), 属既有隐患 Fix 081e)。
+            // 给它写死任何一档都会错: 写 6 会让 `LongPtr + Double` 被判成 LongPtr,
+            // CStr 走整型入口把小数截掉 —— 负控实测 (登记 6 档后编
+            // tests/test_vbnet_ext.bas): CStr(p + 1.5) 出 4、CStr(p * 2.5) 出 7,
+            // 且 x86 与 x64 两个目标**都是** 4/7 (档位是宿主侧算的, 与目标无关)。
+            // 不登记则落 default 0 档 = 由对侧胜出, 与改动前完全一致 —— 目标相关的
+            // 修法 (按 targetArch_ 取档) 需要先把架构信息贯通到语义层, 不在本次范围。
             default:               return 0;
         }
     };
 
     if (isNumeric(a) && isNumeric(b)) {
+        // 浮点/货币/Decimal 压过整型 —— 与位宽无关。
+        // 光靠下面那句 rank 比较表达不出这条: 64 位整型按位宽排在 Single(4) /
+        // Double(5) 之上, 于是 `x + 1.5` 会被判成整型, 上层 CStr 若按整型入口发码
+        // 就会把小数截掉。负控实测 (把 LongLong/ULongLong/LongPtr 一律登记 6 档、
+        // 且去掉本规则后编 tests/test_vbnet_ext.bas):
+        //     CStr(u3 + 1.5)  = 5      ← 截断 (vb6_CStrULongLong)
+        //     CStr(u3 + CCur(1.5)) = 5 ← 截断
+        //     CStr(p + 1.5)  = 4      ← 截断 (p As LongPtr, 登记 6 档)
+        //     CStr(ll + 1.5) = 5.5    ← **没**截断: LongLong 在 CStr 那侧没有
+        //                              整型分支, 走的是 Variant 路 (这条正好说明
+        //                              "rank 答错" 会不会真丢值取决于下游发码,
+        //                              所以判据必须落在真算出来的值上)
+        // VB6/VB.NET 里 `Long + Double` 是 Double, 64 位整型不该例外。
+        // 对改动前的类型表这是**恒等变换**: 浮点/货币/Decimal 档 (4~7) 本来就
+        // 高于所有整型档 (1~3), 走到下面那句也同样是它们胜 —— 只对本次新加的
+        // 64 位整型 (LongLong/ULongLong) 生效; LongPtr 根本没登记档位 (见上),
+        // 它靠本规则与 rank 的 0 档一起维持改动前行为。
+        const bool aWide = isFloat(a) || a == Vb6Type::Currency || a == Vb6Type::Decimal;
+        const bool bWide = isFloat(b) || b == Vb6Type::Currency || b == Vb6Type::Decimal;
+        if (aWide != bWide) return aWide ? a : b;
         return rank(a) >= rank(b) ? a : b;
     }
 
@@ -262,8 +315,12 @@ Vb6Type TypeSystem::logicalNotResult(Vb6Type t) {
     // `b = Not b2` 绕过溢出检查、把 -1 静默 wrap 成 255。
     if (t == Vb6Type::Boolean || t == Vb6Type::Variant) return t;
     if (t == Vb6Type::Byte || t == Vb6Type::Integer) return Vb6Type::Integer;
+    // C3 扩展 (ai/032): 8/16 位新整型与 Byte/Integer 同口径收进 Integer (同上面的
+    // 理由: 窄类型的按位取反结果可能超出原宽度, 答宽一档才不绕过溢出检查);
+    // 32/64 位各自保留。
+    if (t == Vb6Type::SByte || t == Vb6Type::UInteger) return Vb6Type::Integer;
     if (t == Vb6Type::Long || t == Vb6Type::LongPtr || t == Vb6Type::LongLong ||
-        t == Vb6Type::ULong) return t;
+        t == Vb6Type::ULong || t == Vb6Type::ULongLong) return t;
     if (isFloat(t) || t == Vb6Type::Currency || t == Vb6Type::Decimal) return Vb6Type::Long;
     return Vb6Type::Variant;
 }
@@ -271,8 +328,10 @@ Vb6Type TypeSystem::logicalNotResult(Vb6Type t) {
 int TypeSystem::typeSize(Vb6Type t) {
     switch (t) {
         case Vb6Type::Byte:     return 1;
+        case Vb6Type::SByte:    return 1;  // C3 扩展 (ai/032)
         case Vb6Type::Boolean:  return 2;
         case Vb6Type::Integer:  return 2;
+        case Vb6Type::UInteger: return 2;  // C3 扩展 (ai/032)
         case Vb6Type::Long:     return 4;
         case Vb6Type::Single:   return 4;
         case Vb6Type::Double:   return 8;
@@ -285,6 +344,7 @@ int TypeSystem::typeSize(Vb6Type t) {
         case Vb6Type::ULong:    return 4;
         case Vb6Type::LongPtr:  return static_cast<int>(sizeof(void*));  // Fix 081e: 架构宽度
         case Vb6Type::LongLong: return 8;   // Fix 084m: 恒 64 位有符号
+        case Vb6Type::ULongLong: return 8;  // C3 扩展 (ai/032): 恒 64 位无符号
         default:                return 0;
     }
 }

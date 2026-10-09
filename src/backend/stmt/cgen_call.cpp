@@ -222,6 +222,14 @@ void CCodeGen::visit(CallStmt& node) {
                                     // 与 CStr / `&` 拼接同一口径 (同一个值两条路读数不同,
                                     // 正是 ai/022 待拍板 5 的那处不一致)。
                                     c_.emitLine("vb6_DebugWriteBSTR(vb6_CStrBool(" + val + "));");
+                                } else if (inferExprType(*call.positional[j]) == Vb6Type::ULong) {
+                                    // ai/032: Debug.Print u (u As ULong) —— 落到下面的
+                                    // DebugWriteLong((int32_t)(u)) 会把 &HFFFFFFFF 打成 -1。
+                                    // 与 CStr(u) 走同一条无符号格式化, 一个值两条路读数一致。
+                                    c_.emitLine("vb6_DebugWriteBSTR(vb6_CStrULong(" + val + "));");
+                                } else if (inferExprType(*call.positional[j]) == Vb6Type::ULongLong) {
+                                    // ai/032: 同上, 64 位无符号 (2^32 不能在 32 位处截成 0)。
+                                    c_.emitLine("vb6_DebugWriteBSTR(vb6_CStrULongLong(" + val + "));");
                                 } else {
                                     // 整数/布尔值, 用DebugWriteLong输出
                                     c_.emitLine("vb6_DebugWriteLong((int32_t)(" + val + "));");

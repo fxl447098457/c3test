@@ -84,7 +84,11 @@ void CCodeGen::visit(BinaryExpr& node) {
                 || t == Vb6Type::Byte || t == Vb6Type::Boolean
                 || t == Vb6Type::Double || t == Vb6Type::Single
                 || t == Vb6Type::Currency || t == Vb6Type::LongPtr
-                || t == Vb6Type::ULong;
+                || t == Vb6Type::ULong
+                // C3 扩展 (ai/032): 4 个新整型同样是"数值侧", 漏掉它们会让
+                // `"2000" + u` (u 是 ULong) 掉进指针算术那条坑。
+                || t == Vb6Type::SByte || t == Vb6Type::UInteger
+                || t == Vb6Type::ULongLong || t == Vb6Type::LongLong;
         };
         bool leftStr113g = (inferExprType(*node.left) == Vb6Type::String
                             || isBstrCExpr113g(left));
@@ -147,7 +151,25 @@ void CCodeGen::visit(BinaryExpr& node) {
     // 整除: VB6 \ → vb6_IntDiv (确保整数截断)
     // Fix 084o: 操作数为 Variant 时需显式转 Long (vb6_IntDiv 形参是 int32_t),
     // 否则 cToolsHttp 等文件中 "nAsc \ 2^6" (nAsc As Variant) 产生 C2440.
+    // ai/032: 任一侧是 ULong/ULongLong 时改发无符号版 —— vb6_IntDiv 的形参是
+    // int32_t, `&H80000000 As ULong \ 2` 会先被按有符号解释: (-2147483648)/2 =
+    // -1073741824, 回存 uint32_t 得 3221225472 (实测)。两档按"取更宽的那一档"选
+    // helper, 结果类型由 inferExprType 同一判据答出 (两处口径必须一致)。
     if (node.op == BinaryOp::IntDiv) {
+        Vb6Type ltD = inferExprType(*node.left);
+        Vb6Type rtD = inferExprType(*node.right);
+        if (ltD == Vb6Type::ULongLong || rtD == Vb6Type::ULongLong) {
+            lastExpr_ = "vb6_IntDivULongLong("
+                      + asUnsignedOperand(left,  *node.left,  "uint64_t") + ", "
+                      + asUnsignedOperand(right, *node.right, "uint64_t") + ")";
+            return;
+        }
+        if (ltD == Vb6Type::ULong || rtD == Vb6Type::ULong) {
+            lastExpr_ = "vb6_IntDivULong("
+                      + asUnsignedOperand(left,  *node.left,  "uint32_t") + ", "
+                      + asUnsignedOperand(right, *node.right, "uint32_t") + ")";
+            return;
+        }
         lastExpr_ = "vb6_IntDiv(" + toLongIfVariant(left, node.left.get())
                   + ", " + toLongIfVariant(right, node.right.get()) + ")";
         return;
@@ -170,7 +192,17 @@ void CCodeGen::visit(BinaryExpr& node) {
     // (double from vb6_Pow, pointer from BSTR/void*/SafeArray*)
     // Fix 039b: For Variant operands, use vb6_VariantToLong() instead of (int32_t)() cast.
     if (node.op == BinaryOp::Eqv) {
+        // ai/032: 无符号档按位宽收口 (同下面 And/Or/Xor 那条; Eqv/Imp 是 VB6 遗留
+        // 位运算, 但 ULongLong 被 (int32_t) 拦腰截断同样是错的)。
+        const Vb6Type ltE = inferExprType(*node.left);
+        const Vb6Type rtE = inferExprType(*node.right);
+        const bool wideUE = (ltE == Vb6Type::ULongLong || rtE == Vb6Type::ULongLong);
+        const bool wideUE32 = !wideUE && (ltE == Vb6Type::ULong || rtE == Vb6Type::ULong);
         auto castBitwise = [&](const std::string& cExpr, const Expr* astExpr) -> std::string {
+            if (wideUE || wideUE32) {
+                const char* ctE = wideUE ? "uint64_t" : "uint32_t";
+                return "((" + std::string(ctE) + ")(" + cExpr + "))";
+            }
             if (cExprIsVariant(cExpr)) return "vb6_VariantToLong(" + cExpr + ")";
             if (astExpr && astExpr->kind == ASTNodeKind::IdentifierExpr) {
                 auto& ident = static_cast<IdentifierExpr&>(const_cast<Expr&>(*astExpr));
@@ -186,7 +218,16 @@ void CCodeGen::visit(BinaryExpr& node) {
 
     // Fix 039: VB6 Imp → (~a | b), cast to int32_t for non-integer operands
     if (node.op == BinaryOp::Imp) {
+        // ai/032: 无符号档按位宽收口 (同上面 Eqv / 下面 And/Or/Xor)
+        const Vb6Type ltI = inferExprType(*node.left);
+        const Vb6Type rtI = inferExprType(*node.right);
+        const bool wideUI = (ltI == Vb6Type::ULongLong || rtI == Vb6Type::ULongLong);
+        const bool wideUI32 = !wideUI && (ltI == Vb6Type::ULong || rtI == Vb6Type::ULong);
         auto castBitwise = [&](const std::string& cExpr, const Expr* astExpr) -> std::string {
+            if (wideUI || wideUI32) {
+                const char* ctI = wideUI ? "uint64_t" : "uint32_t";
+                return "((" + std::string(ctI) + ")(" + cExpr + "))";
+            }
             if (cExprIsVariant(cExpr)) return "vb6_VariantToLong(" + cExpr + ")";
             if (astExpr && astExpr->kind == ASTNodeKind::IdentifierExpr) {
                 auto& ident = static_cast<IdentifierExpr&>(const_cast<Expr&>(*astExpr));
@@ -593,7 +634,27 @@ void CCodeGen::visit(BinaryExpr& node) {
                 break;
             }
         }
+        // ai/032: 无符号档 (ULong/ULongLong) 参与 & | ^ —— 一律 (int32_t) 会截断,
+        // ULongLong 的高 32 位整段丢掉 (实测 `u3 = (1 << 40) Or 255` 得 255),
+        // ULong 的 bit31 会被当符号位。按档改用 uint32_t / uint64_t。
+        // 两档的判据与 TypeSystem::bitwiseResult / inferExprType 一致 (结果类型那边
+        // 由 promote 提高位宽, 这里是同一件事的"发码侧"一半)。
+        const Vb6Type ltB = inferExprType(*node.left);
+        const Vb6Type rtB = inferExprType(*node.right);
+        const bool wideU64 = (ltB == Vb6Type::ULongLong || rtB == Vb6Type::ULongLong);
+        const bool wideU32 = !wideU64 && (ltB == Vb6Type::ULong || rtB == Vb6Type::ULong);
         auto castBitwise = [&](const std::string& cExpr, const Expr* astExpr) -> std::string {
+            if (wideU64 || wideU32) {
+                const char* ctU = wideU64 ? "uint64_t" : "uint32_t";
+                bool isVarU = cExprIsVariant(cExpr);
+                if (!isVarU && astExpr && astExpr->kind == ASTNodeKind::IdentifierExpr) {
+                    auto& idU = static_cast<IdentifierExpr&>(const_cast<Expr&>(*astExpr));
+                    if (knownVariantVars_.count(Symbol::toLower(idU.name))) isVarU = true;
+                }
+                // Variant 提取走 LongPtr 版 (64 位档用 ToLong 会先截成 int32_t)
+                if (isVarU) return "(" + std::string(ctU) + ")vb6_VariantToLongPtr(" + cExpr + ")";
+                return "((" + std::string(ctU) + ")(" + cExpr + "))";
+            }
             if (wide82) {
                 // Variant 提取用 vb6_VariantToLongPtr (返回 intptr_t) 而非
                 // vb6_VariantToLong (int32_t), 否则会先截断再拓宽.
@@ -685,6 +746,73 @@ void CCodeGen::visit(BinaryExpr& node) {
         right = unwrapBareComCall108(right);
     }
 
+    // C3 扩展 (ai/032): 移位 `<<` / `>>`。
+    //
+    // 为什么不能直接发 C 的 `(a << b)`: 三处语义都与 VB.NET 不同, 且两处是 UB。
+    //   1) 移位计数。VB.NET 把计数**屏蔽到左操作数位宽内** (Long 上 `1 << 32` 得 1),
+    //      C 则对 计数 >= 位宽 是未定义行为 —— 变量计数时这是真会咬人的 (编译期
+    //      优化可以把 UB 变成任意结果)。RTL 的 vb6_Shl/vb6_Shr* 在 64 位中间量上
+    //      按 63 取模, 再经下面的"投回左操作数类型"截断, 对 8/16/32 位操作数得到的
+    //      低位与"按自身位宽取模"完全一致。
+    //   2) 有符号左移溢出。`&H80000000 << 1` 在 C 里是 int32 有符号溢出 UB, 在
+    //      RTL 里按 uint64 位模式做完再截断, 结果是确定的。
+    //   3) `>>` 的有符号性。VB.NET 对有符号整型的 >> 是**算术**右移 (符号扩展),
+    //      对无符号整型 (Byte/UInteger/ULong/ULongLong) 是**逻辑**右移。C 的 >> 对
+    //      有符号数是实现定义, 所以按左操作数的有符号性分别发 vb6_Shr / vb6_ShrU。
+    // 结果类型 = 两操作数提升后的类型, 但窄整型抬到 32 位 (理由见下面 castBack 处);
+    // 这样 inferExprType (走 promote) 与生成的 C 类型自洽, 上层 CStr/装箱/收窄检查
+    // 不会看到意料外的宽度。
+    if (node.op == BinaryOp::Shl || node.op == BinaryOp::Shr) {
+        Vb6Type ltShift = inferExprType(*node.left);
+        // Variant 操作数不能直接进 (int64_t) 强转 —— 先取数值面。VB6 字面/变量混进
+        // Variant 的写法太常见, 漏这一步就是 C 编译错而不是运行期错。
+        auto shiftOperand = [&](std::string cExpr, const Expr* astExpr) -> std::string {
+            bool isVar = cExprIsVariant(cExpr);
+            if (!isVar && astExpr && astExpr->kind == ASTNodeKind::IdentifierExpr) {
+                auto& id = static_cast<IdentifierExpr&>(const_cast<Expr&>(*astExpr));
+                if (knownVariantVars_.count(Symbol::toLower(id.name))) isVar = true;
+            }
+            // 用 LongPtr 版提取器 (它认得 VT_I8/VT_UI8), 别用 ToLong 把 64 位砍成 32
+            if (isVar) return "vb6_VariantToLongPtr(" + cExpr + ")";
+            return cExpr;
+        };
+        std::string lhsShift = shiftOperand(left, node.left.get());
+        std::string rhsShift = shiftOperand(right, node.right.get());
+
+        bool lhsUnsigned = (ltShift == Vb6Type::Byte || ltShift == Vb6Type::UInteger
+                            || ltShift == Vb6Type::ULong || ltShift == Vb6Type::ULongLong);
+        std::string core;
+        if (node.op == BinaryOp::Shl) {
+            core = "vb6_Shl((int64_t)(" + lhsShift + "), (int64_t)(" + rhsShift + "))";
+        } else if (lhsUnsigned) {
+            core = "vb6_ShrU((uint64_t)(" + lhsShift + "), (int64_t)(" + rhsShift + "))";
+        } else {
+            core = "vb6_Shr((int64_t)(" + lhsShift + "), (int64_t)(" + rhsShift + "))";
+        }
+        // 结果类型: 取两操作数提升后的类型, 但**窄整型一律抬到 32 位**。
+        // 为什么不照抄 VB.NET 的"结果 = 左操作数类型": C3 的 Integer 是 **16 位**
+        // (VB6 口径), 而 VB.NET 的是 32 位。照搬的话 `1 << 20` 会被截成 0
+        // (1<<20 = 0x100000, 低 16 位全 0), 而任何人的直觉与 VB.NET 实测都是
+        // 1048576 —— 因为 VB.NET 里字面量 1 是 32 位。抬到 32 位既符合 C 的整型
+        // 提升方向, 又让 C 实际类型与 inferExprType (走 promote) 自洽。
+        // 认不出类型 (Unknown/Variant/浮点/字符串) 时不投, 让 C 自己按 int64 走。
+        Vb6Type resShift = TypeSystem::promote(ltShift, inferExprType(*node.right));
+        const char* castBack = nullptr;
+        switch (resShift) {
+            case Vb6Type::SByte: case Vb6Type::Byte:
+            case Vb6Type::UInteger: case Vb6Type::Integer:
+            case Vb6Type::Boolean: case Vb6Type::Long:
+                castBack = "int32_t";   break;
+            case Vb6Type::ULong:     castBack = "uint32_t"; break;
+            case Vb6Type::LongLong:  castBack = "int64_t";  break;
+            case Vb6Type::ULongLong: castBack = "uint64_t"; break;
+            case Vb6Type::LongPtr:   castBack = "intptr_t"; break;
+            default:                 break;
+        }
+        lastExpr_ = castBack ? ("(" + std::string(castBack) + ")(" + core + ")") : core;
+        return;
+    }
+
     // Fix 126 (rev2): Currency 现在与 Date 一样按**值语义**映射为 double
     // (见 cgen_base_type.cpp), 因此混合运算无需任何缩放 —— 两侧已经是数值。
     // 早前的"Currency 一侧 /10000.0"补丁必须移除, 否则会二次缩放 (图形坐标/颜色
@@ -696,6 +824,22 @@ void CCodeGen::visit(BinaryExpr& node) {
     // 操作数 (C2296). 这里显式取整, 与 VB6 一致.
     if (node.op == BinaryOp::Mod) {
         // Task #44 → 变量除数也补上: 同 Div, 统一走 vb6_Num_Mod (错误 11 语义)。
+        // ai/032: 任一侧是 ULong/ULongLong 时改发无符号版 (同上面 IntDiv 的理由:
+        // vb6_Num_Mod 的形参是 int32_t, 无符号操作数会被先按有符号解释)。
+        Vb6Type ltM = inferExprType(*node.left);
+        Vb6Type rtM = inferExprType(*node.right);
+        if (ltM == Vb6Type::ULongLong || rtM == Vb6Type::ULongLong) {
+            lastExpr_ = "vb6_Num_ModULongLong("
+                      + asUnsignedOperand(left,  *node.left,  "uint64_t") + ", "
+                      + asUnsignedOperand(right, *node.right, "uint64_t") + ")";
+            return;
+        }
+        if (ltM == Vb6Type::ULong || rtM == Vb6Type::ULong) {
+            lastExpr_ = "vb6_Num_ModULong("
+                      + asUnsignedOperand(left,  *node.left,  "uint32_t") + ", "
+                      + asUnsignedOperand(right, *node.right, "uint32_t") + ")";
+            return;
+        }
         lastExpr_ = "vb6_Num_Mod((int32_t)(" + left + "), (int32_t)(" + right + "))";
         return;
     }

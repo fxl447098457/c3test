@@ -70,6 +70,38 @@ void CCodeGen::visit(FixedStringTypeRef& node) {}
 void CCodeGen::visit(Module& node) {}
 
 // ============================================================
+// ai/032: 四档无符号/窄整型 (SByte/UInteger/ULong/ULongLong) 的映射唯一入口。
+// 位宽口径: 阶梯对齐 8/16/32/64 —— U<x> 恒等于「<x> 的无符号版」,
+// 与既有 Vb6Type::ULong=19 → uint32_t 完全吻合 (LongLong=64 位 ⇒ ULongLong=64 位无符号)。
+// C 型这一侧与 mapType (cgen_base_type.cpp) 是同一份答案, 两处必须同步。
+// ============================================================
+bool CCodeGen::isNarrowIntVbType(Vb6Type t) {
+    return t == Vb6Type::SByte || t == Vb6Type::UInteger
+        || t == Vb6Type::ULong || t == Vb6Type::ULongLong;
+}
+
+Vb6Type CCodeGen::narrowIntTypeOfCType(const std::string& cType) {
+    if (cType == "int8_t")   return Vb6Type::SByte;
+    if (cType == "uint16_t") return Vb6Type::UInteger;
+    if (cType == "uint32_t") return Vb6Type::ULong;
+    if (cType == "uint64_t") return Vb6Type::ULongLong;
+    return Vb6Type::Unknown;
+}
+
+// ai/032: 把操作数按**无符号**口径交给 helper (形参是 uint32_t / uint64_t)。
+// Variant 操作数先 vb6_VariantToLongPtr 解包 —— 不用 vb6_VariantToLong: 后者只认
+// VT_I4 家族, 对 VT_I8/VT_UI8 会答 0 (vb6_Shl 那一族同理, 见 cgen_expr_binary.cpp)。
+std::string CCodeGen::asUnsignedOperand(const std::string& cExpr, const Expr& astExpr,
+                                        const char* ctype) const {
+    bool isVar = isDefinitelyVariantExpr(const_cast<Expr&>(astExpr));
+    if (!isVar) isVar = cExprIsVariant(cExpr);
+    if (isVar) {
+        return "(" + std::string(ctype) + ")vb6_VariantToLongPtr(" + cExpr + ")";
+    }
+    return "(" + std::string(ctype) + ")(" + cExpr + ")";
+}
+
+// ============================================================
 // 表达式类型推断 (简化版, 用于Select Case等场景)
 // ============================================================
 
@@ -98,6 +130,12 @@ Vb6Type CCodeGen::inferExprType(Expr& expr) const {
             // 账 #123: 口径同 Fix 175 的 Date / W1 的 Boolean —— 登记过就必须由这张表答 Byte,
             // 让局部/形参 Byte 与模块级 Byte (走符号表那条支路) 给出同一份答案。
             if (knownByteVars_.count(lower)) return Vb6Type::Byte;
+            // ai/032: SByte/UInteger/ULong/ULongLong 的局部/形参/返回槽。C 型
+            // (int8_t/uint16_t/uint32_t/uint64_t) 不在上面任何一支, 且局部变量在
+            // symTab_ 里不可达 ⇒ 以前落到 default 答 Variant (CStr/Debug.Print 就
+            // 因此按有符号 32 位打, &HFFFFFFFF 变 -1)。必须由专属表先答。
+            if (auto itNI = knownNarrowIntVars_.find(lower); itNI != knownNarrowIntVars_.end())
+                return itNI->second;
             if (knownLongVars_.count(lower)) return Vb6Type::Long;
             if (knownLongPtrVars_.count(lower)) return Vb6Type::LongPtr;
             // Fix <vbeclipse> rev20 → 账 #159: 设计器 (.ctl/.pag) 模块内裸写的宿主
@@ -197,6 +235,17 @@ Vb6Type CCodeGen::inferExprType(Expr& expr) const {
                                    ? Vb6Type::Double : Vb6Type::Date;
                     return Vb6Type::Double;
                 }
+                // ai/032: `\` / `Mod` 只要任一侧是无符号档, cgen 就改发无符号版
+                // helper (vb6_IntDivULong / Num_ModULongLong, 见 cgen_expr_binary.cpp),
+                // 结果类型必须跟着答无符号 —— 否则 promote 在同档时按"第一个操作数"
+                // 胜出 (`2 \ u` → Long), downstream (CStr/装箱) 会把同一个 uint32_t
+                // 按有符号 32 位读。两处必须是同一份判据。
+                if (bin.op == BinaryOp::IntDiv || bin.op == BinaryOp::Mod) {
+                    if (lt == Vb6Type::ULongLong || rt == Vb6Type::ULongLong)
+                        return Vb6Type::ULongLong;
+                    if (lt == Vb6Type::ULong || rt == Vb6Type::ULong)
+                        return Vb6Type::ULong;
+                }
                 return TypeSystem::promote(lt, rt);
             }
         }
@@ -211,6 +260,29 @@ Vb6Type CCodeGen::inferExprType(Expr& expr) const {
         case ASTNodeKind::IndexOrCallExpr: {
             // 函数调用: 返回函数返回类型
             auto& call = static_cast<IndexOrCallExpr&>(expr);
+
+            // C3 扩展 (ai/032): `If(cond, a, b)` 三元的结果类型必须**自己算**, 不能
+            // 沿用 addBuiltinFunc 登记的 Variant 兜底 —— 那个登记只是让语义层知道
+            // "这个名字存在"。发码层发的是 C 的 `?:`, 真实 C 类型由两个分支按通常
+            // 算术转换决定; 判成 Variant 会让下游套 vb6_VariantToString(<BSTR>) →
+            // C2440 (实测: `P If(0 > 0, "p", "n")` 传给 String 形参时炸)。
+            // 口径与 C 对齐: 同型取该型; 都数值取提升; 任一支 String 取 String;
+            // 其余 (对象/UDT/混不入) 回 Variant, 由调用点自己想办法。
+            if (call.callee && call.callee->kind == ASTNodeKind::IdentifierExpr
+                && call.positional.size() == 3) {
+                auto& idIf = static_cast<IdentifierExpr&>(*call.callee);
+                if (Symbol::toLower(idIf.name) == "if") {
+                    Vb6Type tTrue = inferExprType(*call.positional[1]);
+                    Vb6Type tFalse = inferExprType(*call.positional[2]);
+                    if (tTrue == tFalse) return tTrue;
+                    if (TypeSystem::isNumeric(tTrue) && TypeSystem::isNumeric(tFalse))
+                        return TypeSystem::promote(tTrue, tFalse);
+                    if (tTrue == Vb6Type::String || tFalse == Vb6Type::String)
+                        return Vb6Type::String;
+                    return Vb6Type::Variant;
+                }
+            }
+
             if (call.callee && call.callee->kind == ASTNodeKind::IdentifierExpr) {
                 auto& id = static_cast<IdentifierExpr&>(*call.callee);
                 auto* sym = symTab_.lookup(id.name);
@@ -402,10 +474,20 @@ bool CCodeGen::isDefinitelyVariantExpr(Expr& expr, bool* isArrOut) const {
     // 多态内置函数 denylist: symTab 注册为 Variant, 但 codegen 按上下文
     // 发出类型化版本 (vb6_IIfBSTR/Long/Double, Choose 嵌套三元, Switch 嵌套三元),
     // 实际 C 返回类型不是 vb6_VARIANT. 视为非 Variant 以避免错误包装.
+    //
+    // "if"(VB.NET 三元 If(c,t,f), 账 #256 新增): 与 iif 同族 —— 同样在
+    // builtin_funcs.inc 注册为 Variant (仅为"名字存在"以便表达式解析放行), 实际
+    // 由 cgen 发**裸 C 三目** ((cond) ? a : b), 真 C 类型由两支共同决定
+    // (两 String 支 → BSTR, 两数值支 → 提升后的数值). 若不在此处否认, 会落到
+    // symTab_.lookup("If") 命中 Variant → 对 BSTR 结果套 vb6_VariantToString
+    // → C2440 "无法从 BSTR 转换为 vb6_VARIANT" (FeatSem.bas if_nested 实测).
+    // 注: 真结果类型由 inferExprType 的 IndexOrCallExpr 分支同一份 denylist 语义
+    // 配套算出, 两处口径必须一致.
     auto isPolymorphicBuiltin = [](const std::string& name) -> bool {
         std::string lower = name;
         std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
-        return lower == "iif" || lower == "choose" || lower == "switch";
+        return lower == "iif" || lower == "choose" || lower == "switch"
+            || lower == "if";
     };
 
     auto checkSym = [&](Symbol* sym) -> bool {
@@ -446,7 +528,11 @@ bool CCodeGen::isDefinitelyVariantExpr(Expr& expr, bool* isArrOut) const {
             // vb6_VARIANT* 传) ⇒ 实测 `(bt = 65)` 返回 False。
             if (knownBstrVars_.count(lower) || knownLongVars_.count(lower)
                 || knownDoubleVars_.count(lower) || knownSingleVars_.count(lower)
-                || knownByteVars_.count(lower)) {
+                || knownByteVars_.count(lower)
+                // ai/032: SByte/UInteger/ULong/ULongLong 的局部/形参/返回槽同样是
+                // 具体标量, 不是 Variant —— 不显式挡一道的话会落到下面的符号表回退,
+                // 命中不住时虽然仍答 false, 但命中同名 Variant 符号时就会误包装。
+                || knownNarrowIntVars_.count(lower)) {
                 return false;
             }
             // 符号表查询
@@ -734,6 +820,12 @@ std::string CCodeGen::getRuntimeParamCType(const std::string& funcName, size_t p
         {"vb6_CByte",           {"vb6_VARIANT"}},
         {"vb6_CDate",           {"vb6_VARIANT"}},
         {"vb6_CCur",            {"vb6_VARIANT"}},
+        // ai/032: 四档无符号/窄整型转换函数 —— 与 vb6_CLng 同口径 (形参是 double,
+        // Variant 实参由 cgen_expr_call_conv_numeric.inc 改写为 *V 版本)。
+        {"vb6_CSByte",          {"double"}},
+        {"vb6_CUInt",           {"double"}},
+        {"vb6_CULng",           {"double"}},
+        {"vb6_CULngLng",        {"double"}},
         // 数组操作
         {"vb6_UBound",          {"vb6_SafeArray1D*", "int32_t"}},
         {"vb6_LBound",          {"vb6_SafeArray1D*", "int32_t"}},
@@ -981,6 +1073,11 @@ static int cgenIntBits(Vb6Type t) {
     // Currency/Date 在 C 侧是 double, LongLong/LongPtr 是 64 位整数, 都可能越界
     case Vb6Type::Double: case Vb6Type::Currency: case Vb6Type::Date:
     case Vb6Type::LongLong: return 64;
+    // C3 扩展 (ai/032): 新整型按实际位宽入档。注意 SByte 与 Byte 同为 8 位 ——
+    // 这里问的是"值可能越出目标范围吗", 只看宽度, 不看符号。
+    case Vb6Type::SByte: return 8;
+    case Vb6Type::UInteger: return 16;
+    case Vb6Type::ULongLong: return 64;
     default: return 0;   // Unknown / Variant / String / Object ... 由调用点决定
     }
 }

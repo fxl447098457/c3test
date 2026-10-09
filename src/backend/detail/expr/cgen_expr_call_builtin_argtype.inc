@@ -86,7 +86,11 @@
                 if (at108c != Vb6Type::Single && at108c != Vb6Type::Double &&
                     at108c != Vb6Type::Long && at108c != Vb6Type::Integer &&
                     at108c != Vb6Type::Currency && at108c != Vb6Type::Decimal &&
-                    at108c != Vb6Type::Boolean && at108c != Vb6Type::Date) {
+                    at108c != Vb6Type::Boolean && at108c != Vb6Type::Date &&
+                    // ai/032: 四档无符号/窄整型 —— 不纳入清单就是裸 uint32_t/uint64_t
+                    // 喂给 BSTR 形参 ⇒ C2440。
+                    at108c != Vb6Type::SByte && at108c != Vb6Type::UInteger &&
+                    at108c != Vb6Type::ULong && at108c != Vb6Type::ULongLong) {
                     continue;  // 已是字符串/对象等, 不介入
                 }
                 if (args[pos].find("vb6_CStr") != std::string::npos) continue;
@@ -95,6 +99,12 @@
                     wrapped108c = "vb6_CStrDate((double)(" + args[pos] + "))";
                 } else if (at108c == Vb6Type::Long || at108c == Vb6Type::Integer ||
                            at108c == Vb6Type::Boolean) {
+                    wrapped108c = "vb6_CStrLong((int32_t)(" + args[pos] + "))";
+                } else if (at108c == Vb6Type::ULong) {
+                    wrapped108c = "vb6_CStrULong(" + args[pos] + ")";
+                } else if (at108c == Vb6Type::ULongLong) {
+                    wrapped108c = "vb6_CStrULongLong(" + args[pos] + ")";
+                } else if (at108c == Vb6Type::SByte || at108c == Vb6Type::UInteger) {
                     wrapped108c = "vb6_CStrLong((int32_t)(" + args[pos] + "))";
                 } else {
                     wrapped108c = "vb6_CStrDbl((double)(" + args[pos] + "))";

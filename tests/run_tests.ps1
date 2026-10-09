@@ -2170,6 +2170,45 @@ if ($Category -in @("all", "run", "bas")) {
         "BF-cond=hit", "BF-boolcond=miss", "BF-sum=85", "BF-DONE")
     Add-BasTest "test_bitops" "$Tests\test_bitops.bas" $bitsNeedles
     Add-BasTest "test_bitops_x86" "$Tests\test_bitops.bas" $bitsNeedles -Arch "x86"
+    # <vbeclipse> ai/032: VB.NET 那批运算符与整型扩展 —— 位移 Shl/Shr、复合赋值
+    # (+= -= *= /= \= ^= &= <<= >>= Mod=)、IsNot、If 三元运算符 (等价于 C 的 ?:,
+    # **短路**; 与 IIf 那个"两支都先算好"的函数是两条不同的路, 由 VE-iif-eager=ERROR11
+    # 反向钉住), 以及 SByte/UInteger/ULong/ULongLong 与 CSByte/CUInt/CULng/CULngLng。
+    # VE-promote-* 八条是本用例的重点负控 —— 给这 4 个类型补 TypeSystem::promote 的
+    # rank 档位时踩过的坑: 64 位整型按位宽排在 Single(4)/Double(5)/Currency(6) 之上,
+    # 而 promote 是"取 rank 大者", 于是 `u3 + 1.5` 被判成整型、上层 CStr 选整型入口
+    # 把小数截掉 (修前实测 u3_plus_dbl=5 / lp_plus_dbl=4 / lp_mul_dbl=7)。
+    # 修法是 promote 里加"浮点/货币/Decimal 侧必胜, 与位宽无关"(对改动前的类型表是
+    # 恒等变换), 并让 LongPtr **刻意不登记档位** —— 它的宽度目标相关 (x86 4 / x64 8),
+    # 而 TypeSystem 拿不到目标架构, 写死 6 会让 x86 目标下 CStr(p + 1.5) 出 4。
+    # VE-promote-ll-wide 同时钉住 "LongLong + Long 保住高 32 位"(改前 rank 落 0 档退化成 Long)。
+    $vbnetExtNeedles = @(
+        "VE-shl-1-4=16", "VE-shl-256-4=16", "VE-shl-prec-arith=32", "VE-shl-prec-cmp=T",
+        "VE-shl-prec-intdiv=16", "VE-shr-signed=-4", "VE-shl-wrap=0", "VE-shl-mask=1048576",
+        "VE-add-eq=15", "VE-sub-eq=5", "VE-mul-eq=50", "VE-intdiv-eq=3", "VE-pow-eq=100",
+        "VE-mod-eq=1", "VE-shleq=8", "VE-shreq=4", "VE-div-eq=2.5", "VE-amp-eq=ab",
+        "VE-isnot-nothing=F", "VE-isnot-negated=T",
+        "VE-if-basic=5", "VE-if-neg=5", "VE-if-nested=z", "VE-if-in-cond=7",
+        "VE-if-short-circuit=42", "VE-iif-eager=ERROR11",
+        "VE-ulong-max=4294967295", "VE-ulong-wrap=0", "VE-ulong-shr-logical=134217728",
+        "VE-ulonglong-mul=4294967296", "VE-uinteger-max=65535", "VE-sbyte-min=-128",
+        "VE-uinteger-wrap=0", "VE-sbyte-wrap=-128",
+        "VE-op-u-add=4000000000", "VE-op-u-sub=3000000000", "VE-op-u-mul=1410065408",
+        "VE-op-u-intdiv=1073741824", "VE-op-u-mod=1", "VE-op-u-and=251662080",
+        "VE-op-u-or=4278255615", "VE-op-u-xor=16711935",
+        "VE-op-u-cmp-gt=T", "VE-op-u-cmp-lt1=F",
+        "VE-op-u3-sub=1099511627775", "VE-op-u3-intdiv=549755813888", "VE-op-u3-mod=1",
+        "VE-op-u3-or=1099511628031", "VE-op-u3-and=0",
+        "VE-conv-csbyte=100", "VE-conv-cuint=65535", "VE-conv-culng=4294967295",
+        "VE-conv-culnglng=4294967296", "VE-conv-case=7", "VE-conv-in-expr=4294967295",
+        "VE-mod-ulong=4294967295", "VE-dbg-ulong=4294967295", "VE-mod-ulong-intdiv=2000000000",
+        "VE-mod-ulonglong=1099511627776", "VE-dbg-ulonglong=1099511627776",
+        "VE-promote-lp-dbl=4.5", "VE-promote-lp-mul=7.5", "VE-promote-ll-dbl=5.5",
+        "VE-promote-ll-cur=5.5", "VE-promote-u3-dbl=5.5", "VE-promote-u3-cur=5.5",
+        "VE-promote-dbl-ll=5.5", "VE-promote-ll-wide=4294967300",
+        "VE-DONE")
+    Add-BasTest "test_vbnet_ext" "$Tests\test_vbnet_ext.bas" $vbnetExtNeedles
+    Add-BasTest "test_vbnet_ext_x86" "$Tests\test_vbnet_ext.bas" $vbnetExtNeedles -Arch "x86"
     # <vbeclipse> 账 #215: 体级声明收成「一条声明符一条 LocalDeclStmt」。改前四条体级路两种形状 ——
     # Dim 自己手写一遍展开(那份副本漏了 WithEvents 与「后缀即类型」)，Const/Static/体级 Public 把
     # MultiDecl 原样交给语义层(switch 不认) ⇒ 一枚名字都不登记、每条使用一条 VB3001(真工程一片 276 条)，

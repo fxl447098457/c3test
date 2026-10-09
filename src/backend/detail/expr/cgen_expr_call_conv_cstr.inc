@@ -36,7 +36,32 @@
             else if (knownDoubleVars_.count(argLower)) {
                 callee = "vb6_CStrDbl";
             }
+            // ai/032: SByte/UInteger/ULong/ULongLong 变量 —— 专属表按档分诊。
+            // ULong/ULongLong 必须走无符号版, 否则落到下面 vb6_CStr(vb6_VariantFromValue(x))
+            // 时 _Generic 的 `unsigned int: vb6_VariantLong` 会把 &HFFFFFFFF 打成 "-1"。
+            else if (auto itNI = knownNarrowIntVars_.find(argLower);
+                     itNI != knownNarrowIntVars_.end()) {
+                switch (itNI->second) {
+                    case Vb6Type::ULong:     callee = "vb6_CStrULong";     break;
+                    case Vb6Type::ULongLong: callee = "vb6_CStrULongLong"; break;
+                    // 值域 ⊆ int32_t ⇒ 有符号/无符号十进制同字面 ("-128" / "65535")
+                    case Vb6Type::SByte:
+                    case Vb6Type::UInteger:  callee = "vb6_CStrLong";      break;
+                    default: break;
+                }
+            }
             // 参数是Variant变量 → 保留vb6_CStr(VARIANT)
+            //
+            // ai/032 兜底: 标识符不在任何 known 表里时 (模块级 ULong/ULongLong —— 它们
+            // 的登记点是声明期那一张, 而专属表随过程入口 clear()), 用语义类型再分诊
+            // 无符号两档。不做这一步就只能落 vb6_CStr(vb6_VariantFromValue(x))。
+            if (callee == "vb6_CStr" && !args.empty()) {
+                Vb6Type itNI2 = inferExprType(*firstArg);
+                if (itNI2 == Vb6Type::ULong)          callee = "vb6_CStrULong";
+                else if (itNI2 == Vb6Type::ULongLong) callee = "vb6_CStrULongLong";
+                else if (itNI2 == Vb6Type::SByte
+                         || itNI2 == Vb6Type::UInteger) callee = "vb6_CStrLong";
+            }
         } else {
 
 
@@ -72,6 +97,13 @@
             } else if (argType == Vb6Type::Double) {
                 callee = "vb6_CStrDbl";
             }
+            // ai/032: 无符号/窄整型表达式 (函数返回 ULong/ULongLong、位移结果等)。
+            // ULong/ULongLong 必须走无符号版 —— 落 vb6_CStr(vb6_VariantFromValue(x))
+            // 会被 _Generic 的有符号档打成负数。
+            else if (argType == Vb6Type::ULong)     callee = "vb6_CStrULong";
+            else if (argType == Vb6Type::ULongLong) callee = "vb6_CStrULongLong";
+            else if (argType == Vb6Type::SByte
+                     || argType == Vb6Type::UInteger) callee = "vb6_CStrLong";
             // P25: COM属性取值已在args[0]中, 根据取值函数选择CStr变体或跳过
             if (!args.empty()) {
                 const std::string& a0 = args[0];

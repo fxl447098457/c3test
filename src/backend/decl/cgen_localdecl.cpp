@@ -178,6 +178,13 @@ void CCodeGen::emitLocalDeclCode(LocalDeclStmt& node) {
                 std::string lower = var.name;
                 std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
                 knownByteVars_.insert(lower);
+            } else if (Vb6Type ni032 = narrowIntTypeOfCType(cType); ni032 != Vb6Type::Unknown) {
+                // ai/032: SByte/UInteger/ULong/ULongLong 的局部 Dim —— C 型
+                // (int8_t/uint16_t/uint32_t/uint64_t) 不在上面任何一支, 不登记就
+                // 看不见 (局部变量在 symTab_ 里不可达)。
+                std::string lower = var.name;
+                std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+                knownNarrowIntVars_[lower] = ni032;
             } else if (cType == "int32_t" || cType == "int16_t" || cType == "VBABOOL") {
                 std::string lower = var.name;
                 std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
@@ -570,6 +577,9 @@ void CCodeGen::emitLocalDeclCode(LocalDeclStmt& node) {
             } else if (cType == "uint8_t") {
                     // 账 #123: 局部 Const As Byte 同 Dim 分支
                     knownByteVars_.insert(lower);
+            } else if (Vb6Type ni032c = narrowIntTypeOfCType(cType); ni032c != Vb6Type::Unknown) {
+                    // ai/032: 局部 Const 的四档无符号/窄整型, 同 Dim 分支
+                    knownNarrowIntVars_[lower] = ni032c;
             } else if (cType == "int32_t" || cType == "int16_t" || cType == "VBABOOL") {
                     knownLongVars_.insert(lower);
                     // ai/022 W1: 同 Dim 分支 (Const 也吃这个读数)

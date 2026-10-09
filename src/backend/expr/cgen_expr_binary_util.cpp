@@ -146,6 +146,11 @@ std::string CCodeGen::wrapToBSTR(const std::string& expr, Expr& node) {
             fn == "vb6_VarType") {
             return "vb6_CStrLong(" + expr + ")";
         }
+        // ai/032: VB.NET 四档转换函数 —— 返回类型就是那四档, 这里直接按档选格式化,
+        // 不去绕 inferExprType 查符号表 (那个名字不在 symTab 就等于白查)。
+        if (fn == "vb6_CULng")    return "vb6_CStrULong(" + expr + ")";
+        if (fn == "vb6_CULngLng") return "vb6_CStrULongLong(" + expr + ")";
+        if (fn == "vb6_CSByte" || fn == "vb6_CUInt") return "vb6_CStrLong(" + expr + ")";
         // Fix 091i: 项目内返回 Variant 的函数 (driver 预扫描 variantReturnFuncs_,
         // 含 vb6_<cls>_prop_get_<name>) 不能按"其他 vb6_ 函数假定为 BSTR"直通 —
         // 需 vb6_VariantToString 提取. 此前字符串拼接 / BSTR 形参处生成
@@ -182,6 +187,13 @@ std::string CCodeGen::wrapToBSTR(const std::string& expr, Expr& node) {
         // Fix 084m: LongLong 走 64 位格式化 —— 落到 default 的 vb6_CStrLong 会先截成
         // int32_t (实测 4000000000 → -294967296)。
         case Vb6Type::LongLong: return "vb6_CStrLongLong(" + expr + ")";
+        // ai/032: 无符号两档 —— 落到 default 的 vb6_CStrLong 会把 2^31 以上打成负数
+        // (与 Fix 084m 另开 LongLong 同一条处理由)。SByte/UInteger 的值域 ⊆ int32_t,
+        // 有符号与无符号十进制同字面 ("-128" / "65535"), 故复用 vb6_CStrLong。
+        case Vb6Type::ULong:     return "vb6_CStrULong(" + expr + ")";
+        case Vb6Type::ULongLong: return "vb6_CStrULongLong(" + expr + ")";
+        case Vb6Type::SByte:
+        case Vb6Type::UInteger:  return "vb6_CStrLong(" + expr + ")";
         // LongPtr 复用 LongLong 的 64 位格式化: x64 下 intptr_t 就是 int64_t; x86 下
         // intptr_t 为 32 位, 但该分支只在 LongPtr 变量作字符串拼接时命中, 传 intptr_t
         // 给 int64_t 形参是合法提升, 无截断风险 (x86 值本来就只有 32 位)。
@@ -266,6 +278,11 @@ std::string CCodeGen::mapBinaryOp(BinaryOp op) const {
         case BinaryOp::Mul:    return "*";
         case BinaryOp::Div:    return "/";
         case BinaryOp::Is:     return "==";   // 对象引用比较
+        // C3 扩展 (ai/032): 移位。正常路径在 visit(BinaryExpr&) 里被 RTL helper 接管
+        // (计数屏蔽 + 有符号性), 这里只是给 Select Case/其它按 op 取字符串的调用点
+        // 一个正确答案, 免得它们拿到 "/* unhandled BinaryOp */"。
+        case BinaryOp::Shl:    return "<<";
+        case BinaryOp::Shr:    return ">>";
         // 以下运算符在visit(BinaryExpr&)中已特殊处理, 此处不应到达
         case BinaryOp::Concat: return "/* CONCAT */";
         case BinaryOp::IntDiv: return "/* INTDIV */";

@@ -118,6 +118,13 @@
     addBuiltinFuncWithParams("CBool", Vb6Type::Boolean, {{"v", Vb6Type::Double, true, false}});
     addBuiltinFuncWithParams("CDate", Vb6Type::Date, {{"v", Vb6Type::Variant, true, false}});
     addBuiltinFuncWithParams("CByte", Vb6Type::Byte, {{"v", Vb6Type::Double, true, false}});
+    // ai/032: VB.NET 的无符号/窄整型转换函数 (阶梯对齐 8/16/32/64)。
+    // 同上面 CStr/CInt/CLng/CByte 一样**不加 calleeParams** —— 让 cgen 那侧的
+    // callee-rewrite (V 后缀 / BSTR→NumVal / 实参类型分派) 独立工作 (见本段开头注释)。
+    addBuiltinFunc("CSByte",   Vb6Type::SByte);
+    addBuiltinFunc("CUInt",    Vb6Type::UInteger);
+    addBuiltinFunc("CULng",    Vb6Type::ULong);
+    addBuiltinFunc("CULngLng", Vb6Type::ULongLong);
     addBuiltinFuncWithParams("CCur", Vb6Type::Currency, {{"v", Vb6Type::Double, true, false}});
     addBuiltinFuncWithParams("CDec", Vb6Type::Variant, {{"v", Vb6Type::Variant, true, false}});
     addBuiltinFunc("CVar", Vb6Type::Variant);
@@ -252,6 +259,12 @@
     addBuiltinFunc("AppActivate", Vb6Type::Void);
     addBuiltinFunc("IsMissing", Vb6Type::Boolean);
     addBuiltinFunc("IIf", Vb6Type::Variant);
+    // C3 扩展 (ai/032): `If(cond, truePart, falsePart)` 三元运算符。
+    // 语义层这里只做"这个名字存在、返回类型按 Variant 处理"的最低登记 —— 三元分支的
+    // 具体类型由两侧分支在发码时各自决定 (C 的三目自己按通常算术转换收口)。
+    // 命名是关键字 `If` 而非标识符, parser 在表达式位置单独识别 (见 parser_expr.cpp
+    // parseNullDenotation 的 TokenKind::If 分支), 语义层拿到的是 IdentifierExpr("If")。
+    addBuiltinFunc("If", Vb6Type::Variant);
     addBuiltinFunc("Beep", Vb6Type::Void);
 // P14.3.5: CallByName(obj, procName$, callType, [args...])
 addBuiltinFunc("CallByName", Vb6Type::Variant);

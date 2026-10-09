@@ -172,6 +172,19 @@
     // **并存**, 消费点先判它, 以免既有整数路径失去变量。
     std::unordered_set<std::string> knownIntVars_;
 
+    // ai/032: 无符号/窄整型 (SByte/UInteger/ULong/ULongLong) 的局部/形参/返回槽专属登记表
+    // (小写名 → 真 Vb6Type)。口径同上面 knownByteVars_ / knownBoolVars_:
+    // 这四档的 C 型 (int8_t / uint16_t / uint32_t / uint64_t) 都不在既有的
+    // `int32_t | int16_t | VBABOOL` 那一支里, 而**局部变量在 symTab_ 里不可达**
+    // (symTab_ 只有模块作用域) ⇒ 以前 inferExprType 一律答 Variant。后果:
+    //   · `CStr(u)` (u As ULong) 走 vb6_CStr(vb6_VariantFromValue(u)), _Generic 的
+    //     `unsigned int: vb6_VariantLong` 把 &HFFFFFFFF 打成 "-1";
+    //   · `Debug.Print u` 落到 vb6_DebugWriteLong((int32_t)(u)) → 同样 -1。
+    // 用一张 name→Vb6Type 的表 (而不是四个 set) 是因为消费点需要知道**哪一档**,
+    // 才能选 vb6_CStrULong / vb6_CStrULongLong。模块级变量不进此表 —— 它们在
+    // symTab_ 里可达, inferExprType 已能答出, 且本表随过程入口 clear()。
+    std::unordered_map<std::string, Vb6Type> knownNarrowIntVars_;
+
     // 已知Long/Integer/Boolean变量名集合 (小写) - 用于COM值解封类型推断
     std::unordered_set<std::string> knownLongVars_;
 

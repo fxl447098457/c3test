@@ -754,6 +754,22 @@
     // String/Variant/Object/未知 返回 false (不介入, 维持既有发射).
     static bool isScalarImplicitStr159(Vb6Type t);
 
+    // ai/032: SByte/UInteger/ULong/ULongLong 四档的**唯一一份**类型映射。
+    //   isNarrowIntVbType   : 是不是这四档之一 (登记点与消费点共用的判据)。
+    //   narrowIntTypeOfCType: C 型名 → 这四档的 VB 类型 ("int8_t"→SByte /
+    //                         "uint16_t"→UInteger / "uint32_t"→ULong /
+    //                         "uint64_t"→ULongLong), 不是这四档答 Vb6Type::Unknown。
+    // 为什么集中成一处: 登记点 (localdecl / 形参 / 返回槽) 与消费点 (inferExprType /
+    // CStr 分派 / Debug.Print 分派) 必须答同一份, 否则又是"同一个决定抄了两遍"
+    // (本仓反复量到的那一族: #234 拿 DC / #235 画笔色 / #247 几何宿主路)。
+    static bool isNarrowIntVbType(Vb6Type t);
+    static Vb6Type narrowIntTypeOfCType(const std::string& cType);
+
+    // ai/032: 把操作数按无符号口径交给 helper (形参 uint32_t/uint64_t), Variant
+    // 操作数先 vb6_VariantToLongPtr 解包。`\` / `Mod` 在有无符号操作数时用它。
+    std::string asUnsignedOperand(const std::string& cExpr, const Expr& astExpr,
+                                  const char* ctype) const;
+
     // Fix 090ae: 链式 COM 默认属性索引赋值 (P25b 提取为可复用 helper)
     // VB: dic(a)(b) = v / Set dic(a)(b) = v — 多层默认属性/Item 索引写.
     // AST 形态: 多层 IndexOrCallExpr 嵌套, 最内层 callee 为 COM 变量/类 void*

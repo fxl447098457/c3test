@@ -47,6 +47,7 @@ void CCodeGen::visit(FunctionDecl& node) {
     knownBoolVars_.clear();     // ai/022 W1
     knownByteVars_.clear();     // 账 #123
     knownIntVars_.clear();       // ai/009 5.10
+    knownNarrowIntVars_.clear(); // ai/032: SByte/UInteger/ULong/ULongLong 专属表
     knownLongVars_.clear();
     knownLongPtrVars_.clear();  // Bug #2 fix: 也清空LongPtr集合
     knownVariantVars_.clear();
@@ -207,6 +208,9 @@ void CCodeGen::visit(FunctionDecl& node) {
                 // inferExprType 先判 Byte 那张表, 所以这里进 knownLongVars_ 不会把它读成 Long。
                 if (paramType == Vb6Type::Byte) knownByteVars_.insert(pLower);
             }
+            // ai/032: SByte/UInteger/ULong/ULongLong 形参走专属表 (口径同账 #123 的 Byte
+            // —— C 型不同串就永远看不见; 局部/形参在 symTab_ 里不可达, 只能靠登记)。
+            else if (isNarrowIntVbType(paramType)) knownNarrowIntVars_[pLower] = paramType;
             // Bug #2 fix: LongPtr 参数注册到独立集合
             // Fix 084m: LongLong 同路 —— 二者都是标量整数 (intptr_t / int64_t), 表达式侧
             // 需要绕开 Variant 分派走直接 C 运算, 复用同一集合即可 (宽度由 C 整型提升决定)。
@@ -329,6 +333,9 @@ void CCodeGen::visit(FunctionDecl& node) {
     }
     // Bug #2 fix: LongPtr 返回值变量注册到独立集合
     // Fix 084m: LongLong 同路 (见参数处注释)
+    // ai/032: 四档无符号/窄整型同路 —— 返回槽 `vb6_ret_X` 不在 symTab_ 里, 不登记则
+    // `CStr(F())` / `Debug.Print F()` 看不见返回类型 (Half() As ULong 实测)。
+    else if (isNarrowIntVbType(funcRetVb6Type)) knownNarrowIntVars_[funcRetLower] = funcRetVb6Type;
     else if (funcRetVb6Type == Vb6Type::LongPtr || funcRetVb6Type == Vb6Type::LongLong) knownLongPtrVars_.insert(funcRetLower);
     // Fix 035: Variant 返回值变量也要注册, 否则 `Foo = concrete_expr` 赋值不会触发
     // wrapVariantValue 包装, 导致 C2440 (BSTR/int32_t → vb6_VARIANT).

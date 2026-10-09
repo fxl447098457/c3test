@@ -71,6 +71,7 @@ void CCodeGen::visit(SubDecl& node) {
     knownBoolVars_.clear();     // ai/022 W1
     knownByteVars_.clear();     // 账 #123
     knownIntVars_.clear();       // ai/009 5.10
+    knownNarrowIntVars_.clear(); // ai/032: SByte/UInteger/ULong/ULongLong 专属表
     knownLongVars_.clear();
     knownLongPtrVars_.clear();  // Bug #2 fix: 也清空LongPtr集合
     knownVariantVars_.clear();
@@ -216,6 +217,8 @@ void CCodeGen::visit(SubDecl& node) {
                 // inferExprType 先判 Byte 那张表, 所以这里进 knownLongVars_ 不会把它读成 Long。
                 if (paramType == Vb6Type::Byte) knownByteVars_.insert(pLower);
             }
+            // ai/032: SByte/UInteger/ULong/ULongLong 形参走专属表 (口径同账 #123 的 Byte)
+            else if (isNarrowIntVbType(paramType)) knownNarrowIntVars_[pLower] = paramType;
             // Bug #2 fix: LongPtr 参数注册到独立集合
             else if (paramType == Vb6Type::LongPtr || paramType == Vb6Type::LongLong) knownLongPtrVars_.insert(pLower);   // Fix 084m
             // Fix 035: Variant 参数也要注册, 否则 `(*X) = concrete` 赋值不会触发

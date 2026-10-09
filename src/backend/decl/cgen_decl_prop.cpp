@@ -54,6 +54,7 @@ void CCodeGen::visit(PropertyDecl& node) {
     knownBoolVars_.clear();     // ai/022 W1
     knownByteVars_.clear();     // 账 #123
     knownIntVars_.clear();       // ai/009 5.10
+    knownNarrowIntVars_.clear(); // ai/032: SByte/UInteger/ULong/ULongLong 专属表
     knownLongVars_.clear();
     knownLongPtrVars_.clear();  // Bug #2 fix: 也清空LongPtr集合
     knownVariantVars_.clear();
@@ -174,6 +175,8 @@ void CCodeGen::visit(PropertyDecl& node) {
                 // inferExprType 先判 Byte 那张表, 所以这里进 knownLongVars_ 不会把它读成 Long。
                 if (paramType == Vb6Type::Byte) knownByteVars_.insert(pLower);
             }
+            // ai/032: SByte/UInteger/ULong/ULongLong 形参走专属表 (口径同账 #123 的 Byte)
+            else if (isNarrowIntVbType(paramType)) knownNarrowIntVars_[pLower] = paramType;
             // Bug #2 fix: LongPtr 参数注册到独立集合
             else if (paramType == Vb6Type::LongPtr || paramType == Vb6Type::LongLong) knownLongPtrVars_.insert(pLower);   // Fix 084m
             // Fix 035: Variant 参数也要注册, 否则 `(*X) = concrete` 赋值不会触发
@@ -284,6 +287,8 @@ void CCodeGen::visit(PropertyDecl& node) {
             if (retVb6Type == Vb6Type::String) knownBstrVars_.insert(retLower);
             else if (retVb6Type == Vb6Type::Double) knownDoubleVars_.insert(retLower);
             else if (retVb6Type == Vb6Type::Long || retVb6Type == Vb6Type::Integer || retVb6Type == Vb6Type::Boolean) knownLongVars_.insert(retLower);
+            // ai/032: 四档无符号/窄整型返回槽 (口径同 cgen_decl_func.cpp 那处)
+            else if (isNarrowIntVbType(retVb6Type)) knownNarrowIntVars_[retLower] = retVb6Type;
             else if (retVb6Type == Vb6Type::Variant) knownVariantVars_.insert(retLower);
             // 账 #118 ①: 定长串返回类型 (`Property Get P() As String * 5`) —— 与
             // cgen_decl_func.cpp 那处同款同口径 (两处都得记, 漏一处就少一种落点)。

@@ -393,6 +393,8 @@ TypeRefPtr Parser::parseTypeRef() {
     auto loc = currentLoc();
 
     // 简单类型名: Long, String, MyClass 等
+    // (C3 扩展 ai/032: SByte/UInteger/ULong/ULongLong 追加在同一条接受集里 —— 它们
+    //  在语义层按类型名解析, 在词法层是软关键字, 与 LongLong/LongPtr 完全同构)
     if (cur_.kind == TokenKind::Identifier || cur_.kind == TokenKind::Boolean ||
         cur_.kind == TokenKind::Byte || cur_.kind == TokenKind::Integer ||
         cur_.kind == TokenKind::Long || cur_.kind == TokenKind::LongLong ||
@@ -400,7 +402,9 @@ TypeRefPtr Parser::parseTypeRef() {
         cur_.kind == TokenKind::Double || cur_.kind == TokenKind::Currency ||
         cur_.kind == TokenKind::Decimal || cur_.kind == TokenKind::Date ||
         cur_.kind == TokenKind::Object || cur_.kind == TokenKind::String ||
-        cur_.kind == TokenKind::Variant) {
+        cur_.kind == TokenKind::Variant ||
+        cur_.kind == TokenKind::SByte || cur_.kind == TokenKind::UInteger ||
+        cur_.kind == TokenKind::ULong || cur_.kind == TokenKind::ULongLong) {
         auto tok = advance();
         auto typeRef = std::make_unique<SimpleTypeRef>(loc, tok.text);
 
@@ -528,7 +532,10 @@ std::string Parser::parseGenericArgFlat() {
           cur_.kind == TokenKind::Double || cur_.kind == TokenKind::Currency ||
           cur_.kind == TokenKind::Decimal || cur_.kind == TokenKind::Date ||
           cur_.kind == TokenKind::Object || cur_.kind == TokenKind::String ||
-          cur_.kind == TokenKind::Variant)) {
+          cur_.kind == TokenKind::Variant ||
+          // C3 扩展 (ai/032): 与 parseTypeRef 保持同一接受集
+          cur_.kind == TokenKind::SByte || cur_.kind == TokenKind::UInteger ||
+          cur_.kind == TokenKind::ULong || cur_.kind == TokenKind::ULongLong)) {
         diag_.error(DiagnosticID::ParseExpectedToken, currentLoc(),
             "expected type name in generic type argument list");
         return "";

@@ -562,6 +562,27 @@ int32_t vb6_Num_Mod(int32_t a, int32_t b) {
     if (b == 0) { vb6_ErrRaiseNumber(11); return 0; }
     return a % b;
 }
+
+// ai/032: 无符号整除/取余 (ULong=32 位 · ULongLong=64 位)。
+//   为什么另开四条: vb6_IntDiv / vb6_Num_Mod 的形参都是 int32_t, 无符号操作数先被
+//   按有符号解释 —— 实测 `&H80000000 As ULong \ 2` 得 3221225472 (应为 1073741824),
+//   因为 (int32_t)&H80000000 = -2147483648。除零语义与上面一致 (运行期错误 11)。
+uint32_t vb6_IntDivULong(uint32_t a, uint32_t b) {
+    if (b == 0) { vb6_ErrRaiseNumber(11); return 0; }
+    return a / b;
+}
+uint32_t vb6_Num_ModULong(uint32_t a, uint32_t b) {
+    if (b == 0) { vb6_ErrRaiseNumber(11); return 0; }
+    return a % b;
+}
+uint64_t vb6_IntDivULongLong(uint64_t a, uint64_t b) {
+    if (b == 0) { vb6_ErrRaiseNumber(11); return 0; }
+    return a / b;
+}
+uint64_t vb6_Num_ModULongLong(uint64_t a, uint64_t b) {
+    if (b == 0) { vb6_ErrRaiseNumber(11); return 0; }
+    return a % b;
+}
 // ============================================================
 // P24-Bug2: Variant比较函数
 // 简化VB6语义: 两端都是字符串→字符串比较, 否则→Double数值比较
