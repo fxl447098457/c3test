@@ -2004,6 +2004,15 @@ marker、重编，之后 `check_rtl_embedded` 报 **125/125 逐字节相同**。
 另：census 顺带证实 `Count` 那两处只在 Charts 的两份输入里（`Proyecto1.vbp` 与 `ucProgressCircular/Proyecto1.vbp`），
 不是全仓蔓延 —— 所以最后那 2 处若要"改源码笔误"也是可控的小改（要用户点头才动别人的 `.ctl`）。
 
+**① 的开工家底（同一轮量到，下一轮不必重新找）**：「把位置信息手递进表达式分析」这手段**仓里已有实物** ——
+`semantic_analyzer.hpp:166` 的 `bool memberObjCtx_ = false`，由 `visit(MemberAccessExpr)` 在 `:182-185` save/set/restore，
+而 `visit(IdentifierExpr)` 里两处判据正在吃它（`:142` 限定符位 / `:146` 裸写位，两处给不同答案）—— #159 那张表能收成一处靠的就是它。
+要加的只是第二枚同族旗标（暂名 `assignTargetCtx_`），置位点已数清：`semantic_analyzer_stmt.cpp:45 / 55 / 67`
+（三条语句路各一次 `analyzeExpr(*node.target)`）与 `:192`（另一条带 target 的语句）；而 `:37-38` 已经有
+`node.target->kind == ASTNodeKind::IdentifierExpr` 的特判 ⇒ 「左值是裸标识符」在那个位置可判。
+⇒ 改动面 = 一枚旗标 + 三到四处 save/restore + `semantic_analyzer_expr.cpp:159` 那支 fallthrough 多问一句「站在赋值目标位吗」；
+**只有答「是」的那批升 error**（census 里就是 `Count` 那 2 条），其余（调用位 / 读值位）留 warning。
+
 ### B101 `Option Explicit` 在场时只发 warning、发码却把裸名直接发出去 ⇒ 产物必然 C2065（账 #278，2026-10-09，**未开工；① 的严重级那一刀见上一节，已被 census 否掉**）
 
 **⚠ 自纠（同一轮内两次改口，第二次是实测定的）**：本节最初写成「隐式未声明标识符在 `.bas` 落地、在 `.ctl` 不落地 = 两份答案」——
