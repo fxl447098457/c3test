@@ -14,6 +14,13 @@
 #   S1 单一建造点：三份工程级名单（模块名 / Public 过程 / Public Const+Enum 成员）各自只在
 #      `driver_semantics.cpp` 里被 insert；语义层只有一个消费点 `namesProjectLevel`。
 #   S2 建造点与消费点不许换家：`setProject*Names` 三个 setter 各恰好 1 处声明 + 1 处调用。
+#   V3 (账 #278 §B117) 宽松模块裸调 `Friend Sub`：那个名字以前不进工程级名单，于是它落成一枚
+#      隐式 Variant 局部，调用发成 `SecretSub();` ⇒ error C2063，整个工程编不出 exe。
+#      两头钉：隐式局部不许出现 + 真出口 `vb6_<模块>_<过程>()` 必须在（§B106 那一课）。
+#   V4 反面证人：放行不许吃掉包边界 —— 仓里 tests/pkg_xmod/friend_bad.vbp（那枚包 manifest 写
+#      Friend=False）必须继续报 VB7006「is not exported by package」并退非零。
+#   S3 名单建造点认两档 (Public 与 Friend)，且那一问全仓只许有一处：问现成的权威
+#      packageBlockedNames_，不许在 driver 这一头再抄一遍 manifest 规则。
 #
 # 输出 ASCII（控制台是 GBK，中文读数重定向后不可 grep）。文件必须 UTF-8 BOM + CRLF：
 # PS 5.1 读无 BOM 的 .ps1 按 ANSI，行尾中文字节会吃掉换行 ⇒ ParserError 而退出码仍 0。
@@ -123,6 +130,70 @@ try {
         $bad += "V2 NEGATIVE CONTROL FAILED: pcvNoSuchNameAnywhere no longer reports VB3001 - the gate would be blanket-off"
     }
 
+    # ---------- V3 (账 #278 §B117): 宽松模块裸调 Friend 过程 ----------
+    # 两档都要钉：§B106 那一格教过，只钉 Option Explicit 档会漏掉「宽松档把名字吃成局部
+    # 变量」这条更实的坏法 —— 那一条不是噪声，是产物坏了 (error C2063，编不出 exe)。
+    $frA = @(
+        'Attribute VB_Name = "PcvFriend"',
+        '',
+        'Friend Sub SecretSub()',
+        '    Debug.Print "FRIEND-SUB-OK"',
+        'End Sub',
+        ''
+    )
+    $frB = @(
+        'Attribute VB_Name = "PcvFrHost"',
+        '',
+        'Sub Main()',
+        '    SecretSub',
+        'End Sub',
+        ''
+    )
+    $frVbp = @(
+        'Type=Exe',
+        'Name=PcvFriendProbe',
+        'Module=PcvFriend; PcvFriend.bas',
+        'Module=PcvFrHost; PcvFrHost.bas',
+        'Startup="Sub Main"',
+        'ExeName32="pcvfr.exe"',
+        ''
+    )
+    Set-Content -LiteralPath (Join-Path $work "PcvFriend.bas") -Value $frA -Encoding ASCII
+    Set-Content -LiteralPath (Join-Path $work "PcvFrHost.bas") -Value $frB -Encoding ASCII
+    $frProj = Join-Path $work "pcvfr.vbp"
+    Set-Content -LiteralPath $frProj -Value $frVbp -Encoding ASCII
+    $frOut = Join-Path $work "pcvfr.c"
+    $frErr = Join-Path $work "pcvfr.err"
+    $pf = Start-Process -FilePath $exe -ArgumentList @("`"$frProj`"", "--emit-c") `
+                       -NoNewWindow -Wait -PassThru `
+                       -RedirectStandardOutput $frOut -RedirectStandardError $frErr
+    if ($pf.ExitCode -ne 0) { $bad += ("V3 compiler exited " + $pf.ExitCode + " on the loose Friend probe") }
+    $frEmit = ""
+    if (Test-Path -LiteralPath $frOut) { $frEmit = Get-Content -LiteralPath $frOut -Raw }
+    if ($frEmit -match 'vb6_VARIANT\s+SecretSub\s*=') {
+        $bad += "V3 the Friend proc was eaten by an implicit Variant local (the C2063 shape)"
+    }
+    if ($frEmit -notmatch 'vb6_PcvFriend_SecretSub\(\);') {
+        $bad += "V3 emitted C does not call the real cross-module entry point vb6_PcvFriend_SecretSub()"
+    }
+
+    # ---------- V4: 包边界那一声必须还在 (反面证人, 用仓里现成的夹具) ----------
+    $badProj = Join-Path (Join-Path (Join-Path $root "tests") "pkg_xmod") "friend_bad.vbp"
+    if (-not (Test-Path -LiteralPath $badProj)) {
+        $bad += "V4 fixture missing: tests/pkg_xmod/friend_bad.vbp"
+    } else {
+        $badOut = Join-Path $work "fbad.c"
+        $badErr = Join-Path $work "fbad.err"
+        $pb = Start-Process -FilePath $exe -ArgumentList @("`"$badProj`"", "--emit-c") `
+                           -NoNewWindow -Wait -PassThru `
+                           -RedirectStandardOutput $badOut -RedirectStandardError $badErr
+        $badTxt = ""
+        if (Test-Path -LiteralPath $badErr) { $badTxt = Get-Content -LiteralPath $badErr -Raw }
+        if ($pb.ExitCode -eq 0) { $bad += "V4 friend_bad.vbp now exits 0 - the boundary was swallowed" }
+        if ($badTxt -notmatch 'VB7006') { $bad += "V4 friend_bad.vbp no longer reports VB7006" }
+        if ($badTxt -notmatch 'Hidden1') { $bad += "V4 VB7006 no longer names Hidden1" }
+    }
+
     # ---------- S1/S2: 单一建造点与单一消费点 ----------
     function Count-Matches([string]$path, [string]$pattern) {
         if (-not (Test-Path -LiteralPath $path)) { $bad += ("S missing file " + $path); return 0 }
@@ -146,6 +217,14 @@ try {
         if ($decl -ne 1) { $bad += ("S2 " + $s + " declared " + $decl + " times in the header (want 1)") }
         if ($call -ne 1) { $bad += ("S2 " + $s + " called " + $call + " times in the driver (want 1)") }
     }
+    # S3 (账 #278 §B117): 建造点认两档, 且那一问全仓只许有一处
+    $accFriend = Count-Matches $drv 'acc == AccessLevel::Friend'
+    $askBlocked = Count-Matches $drv 'packageBlockedNames_\.find'
+    $askAtSite = Count-Matches $drv 'packageBlockedNames_\.find\(Symbol::toLower\(module->packageName\)\)'
+    if ($accFriend -ne 1) { $bad += ("S3 the proc list must take exactly one Friend branch (found " + $accFriend + ")") }
+    if ($askBlocked -ne 1) { $bad += ("S3 the release must ask packageBlockedNames_ in exactly one place (found " + $askBlocked + ")") }
+    if ($askAtSite -ne 1) { $bad += "S3 that ask must be the one at the name-list build site" }
+
     $consConst = Count-Matches $util 'projPublicConsts_\.count'
     $consProc  = Count-Matches $util 'projPublicProcs_\.count'
     $consMod   = Count-Matches $util 'projModuleNames_\.count'
@@ -161,5 +240,5 @@ if ($bad.Count -gt 0) {
     foreach ($b in $bad) { Write-Host ("FAIL " + $b) }
     exit 1
 }
-Write-Host "PASS project_const_visibility (V1 folded + no VB3001, V2 bogus name still reported, S1 2/1/1 inserts, S2 3 setters 1+1, one consumer)"
+Write-Host "PASS project_const_visibility (V1 folded + no VB3001, V2 bogus name still reported, V3 loose Friend -> real call and no implicit local, V4 VB7006 still fires, S1 2/1/1 inserts, S2 3 setters 1+1, S3 Friend branch + one boundary ask, one consumer)"
 exit 0

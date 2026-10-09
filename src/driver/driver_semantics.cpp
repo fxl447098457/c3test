@@ -149,8 +149,25 @@ bool Driver::runSemanticAnalysis(const CompileOptions& options) {
                 }
                 default: continue;
             }
-            if (acc == AccessLevel::Public && !nm.empty()) {
-                projPubProcs.insert(Symbol::toLower(nm));
+            // 账 #278 §B117: 这一档以前只认 Public。VB6 里标准模块的 Friend 过程**就是
+            // 工程级可见** (types.hpp 那句 "VB6无此关键字" 是错的: parser 认、发码认,
+            // 兄弟模块按裸名调它一直发得出 `vb6_<模块>_<过程>()`)。缺这一问的两种后果与
+            // §B106 同一对: Option Explicit 下一条假 VB3001 (探针 .build/b176_fr), 而**宽松
+            // 模块里更实** —— 那枚名字落成一枚隐式 Variant 局部, 调用发成 `SecretSub();`
+            // ⇒ error C2063「不是一个函数」, 整个工程编不过 (探针 .build/b182_loose)。
+            // 放行**不许吃掉包边界**: 语料里 friend_bad.vbp 钉的就是 VB7006「is not exported
+            // by package」(那枚包 manifest 写 Friend=False)。所以这一支不去抄一遍 manifest
+            // 规则, 只问那份现成的权威 packageBlockedNames_ —— 它已经按 manifest 算好了
+            // 「哪些名字对本工程消费方屏蔽」, 屏蔽名单里的名字不进工程级名单, 答案只有一处。
+            if (!nm.empty() &&
+                (acc == AccessLevel::Public || acc == AccessLevel::Friend)) {
+                const std::string lk = Symbol::toLower(nm);
+                bool blockedByPkg = false;
+                if (!module->packageName.empty()) {
+                    auto pit = packageBlockedNames_.find(Symbol::toLower(module->packageName));
+                    if (pit != packageBlockedNames_.end()) blockedByPkg = pit->second.count(lk) > 0;
+                }
+                if (!blockedByPkg) projPubProcs.insert(lk);
             }
         }
     }
