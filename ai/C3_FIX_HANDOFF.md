@@ -2000,7 +2000,43 @@ marker、重编，之后 `check_rtl_embedded` 报 **125/125 逐字节相同**。
 `w = ScaleWidth` 与 `Debug.Print …` 合成一行，于是行号与诊断全对不上（报在 `(6,35)` 那种文件里根本不存在的列上）。
 把生成的夹具**原样 dump 出来看一眼**才发现。⇒ 夹具是脚本拼的时候，「先核夹具本身」是第 0 步，不是最后一步。
 
-### B107 账 #278 第二刀已出 = 跨模块 `Public Const` / `Public Enum` 成员进工程级名字表（第 46 道哨兵，2026-10-09，**待门**）
+### B108 账 #278 第三刀已出 = 内置全局对象那张名单少一格（`Printers`，第 47 道哨兵，2026-10-09，**待门**）
+
+- **定性（先量后动，`.build/b110_printers.py`）**：语料里唯一那条 `Printers` = `tests/dbgdlg/cDlg.cls:2456` 的
+  `For Each iPrn In Printers`。产物是 `void* _fe_enum_0 = vb6_ForEach_Init(vb6_Printers_Collection());`、
+  裸名残留 0 处、rc=0 ⇒ **与 §B104 同形**：发码面对、只有诊断报噪声。所以这一格要的是"语义层放行"，不是新能力。
+- **根因比 §B106 更窄**：语义层早就有一张"内置全局对象"的名单 —— `src/semantics/builtin/builtin_funcs.inc`
+  里的 `addObj`（Debug/Err/Screen/App/Printer/Forms/Clipboard/Console），发码侧
+  `cgen_expr_ident_dispatch.inc` 的内置对象段各自硬编码拦名。**两份名单不一致的那一格就是 `Printers`**
+  （发码侧有、`addObj` 里没有）。⇒ 修法 = 补 `addObj("Printers")`，四行（含注释），机制一行没动。
+- **但这条不是"只是噪声"**（同一份夹具 `.build/b112_probe` 两台并排跑）：宽松模块里裸 `Printers` 落进
+  "隐式 Variant 局部"那一格，产物实打实变了 ——
+  BASE = `vb6_VARIANT Printers = vb6_VariantEmpty();  /* 隐式变量 */` 加
+  `vb6_ForEach_Init(vb6_VariantToObjectVal(vb6_Printers_Collection()))`；NEW = 两行都没了，ForEach 直接拿集合。
+  **语料里恰好没有宽松用法，所以 A/B 的产物零差异是运气的读数，不是"这条无害"的判据** —— 判据要自己造夹具。
+- **A/B（全语料 398 输入，BASE = `.build/b112_C3_base.exe` = 未含本刀的那枚 exe）**：
+  `artifacts that changed = 0`、`diagnostics ADDED = 0`、**VB3001 24 → 23**，唯一消失的一行是
+  `tests/dbgdlg/dbgdlg.vbp` 的 `Printers`；per-id delta 只有 `VB3001` ⇒ 形状门不该动一行。
+- **第 47 道哨兵** `scripts/check_builtin_global_objects.ps1`：V1 裸 `Printers`（一份 Option Explicit、一份宽松）
+  都不许报；V2 产物两头钉 —— `vb6_Printers_Collection()` 恰好 2 处，且不许出现隐式局部、也不许出现那层
+  `vb6_VariantToObjectVal` 包装；V3 反面证人 `bgoNoSuchNameAnywhere` 必须继续报；
+  **S1 才是这一刀的结构性抓法**：把发码段拦的每个裸名与 `addObj` 名单对表，缺格就红 ——
+  等于把今天这个 bug 的形状改成了一个会自己响的洞。段界用 `vbokonly`（内置常量段的第一个名字）划；
+  `me` / `parent` 两条豁免写死了理由（各走自己的出口，不属于"内置全局对象"那一格）。
+  S2 钉名单只在 `addObj` 一处、恰好 9 枚，且不许重名。
+- **负控三条各自红过**：① `-Exe …\b112_C3_base.exe` ⇒ V1 + 两条 V2 红；② 把 `addObj("Printers")`
+  **注释掉** ⇒ S1 报 `printers` 未登记 + S2 报 8 枚。**②第一次红不起来**：纯文本正则把 `// addObj("Printers")`
+  也算进了名单 ⇒ 那条"护栏"对"有人注释掉一行"完全无感；两处采集都改成跳过注释行才真的会响（读数规矩：
+  静态 census 的正则必须能区分"写着"与"写着但被注释"）。③ 往发码段植一枚假拦截 `if (lower == "bgofakeobj")`
+  ⇒ S1 单独红。两处植入都按 md5 原样还原（`0ce682ba…` / `9ddf4ee2…`）。
+- **12 处到现在**：本刀清掉 `Printers` 1 处 ⇒ 累计清 2 处（§B107 的 `CTRLINFO_EATS_RETURN` + 本刀）。
+  **已量成"发码对、诊断错"的累计 10 处**（窗体伪成员 5 + 裸 `Controls` 2 + 裸 `UserControl` 1 + `TmForm2` 1 + `Printers` 1），
+  它们的放行**各撞在不同处**：`Printers` 撞在 `addObj` 少一格（本刀已清）、窗体伪成员那 5 条撞在 backend 那张
+  496 行的 `getControlPropReadFn`（§B104）、裸 `Controls` / 裸 `UserControl` 撞在宿主表的 `rtl` 契约（§B105）。
+  剩下 `VK_UP` 是夹具漏写 `Private Const`（§B106）。
+- **下一条**：§B104 那张表搬家（放行 5 条）与 §B105 的口径 a/b（放行 3 条）**都还压着**，两条都不是补一格名单；
+  这两件清完才轮到"解析不出 + Option Explicit ⇒ error"那一刀（§B101）。
+### B107 账 #278 第二刀已出 = 跨模块 `Public Const` / `Public Enum` 成员进工程级名字表（第 46 道哨兵，2026-10-09，门 #442 attempt 1 全绿（12/12，含形状门，head b5e94e2d））
 
 - **落地**（三处，全在"名单"这一侧，发码一行没动）：`driver_semantics.cpp` 建表那一趟多认两类 AST
   （`ConstDecl` 取 `Public` 的名字、`EnumDecl` 取 `Public` 的每个 `EnumMember`），存进第三份名单
