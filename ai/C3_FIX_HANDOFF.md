@@ -2021,6 +2021,13 @@ marker、重编，之后 `check_rtl_embedded` 报 **125/125 逐字节相同**。
   - `tests/c29data/DataApp.frm`（装在门上真编真跑那枚）的 `Data1.Recordset.RecordCount` / `.CurrentRow` / `.Refresh` / `.MoveFirst` 全走 memberobj 那一路，DT1/DT2 那些断言今天就是靠它过的 ⇒ 撤死码**不会**动到它，但必须拿它当证人。
   - `vb6_Data_Self` 那枚 RTL 导出（`vb6forms_data.c:452` + `vb6forms_prop_ctrl.h:328`）全仓 0 个调用者 ⇒ 一枚死符号。
 - **排掉的一条嫌疑（量过才写）**：本以为走 COM 那一路会把数值成员按字符串读（#88 那一族的翻版）。实测 `n = DataZ.Recordset.RecordCount` 发的是 `vb6_ComGetIntProp(recordsetObj, L"RecordCount")`、`If … RecordCount > 3` 也是 IntProp ⇒ 成员类型走的是既有的 COM 型别表，这一格没有洞。探针在 `.build/probe_data.frm`（三形：赋值 / 比较 / 布尔）。
+- **读数补全（同日第二轮，九形探针 `.build/probe_rs.frm`：语句 / `Call` / 赋值 / `If` / `With` 成员 / `Fields("name")` / `Fields(1)` / `.BOF` / `.RecordCount`）**：产物里 `vb6_Data_<成员>(` 的直译 **0 处**，九形全走 `vb6_Data_RecordsetObj` + `vb6_Com*Prop` / `vb6_ComCall`（With 那一形把 `_vb6_with_N` 交给 COM）。⇒ 死码清单因此是**闭合**的，不是抽样：
+  - 判据（认那个不再被发出的前缀）5 处：`cgen_expr_call_callee_withm.inc:290`、`cgen_expr_call_com_bind.inc:143` 与 `:237`、`cgen_util_com.cpp:127`、`cgen_call.cpp:302`；加抠句柄的助手 `cgen_state.inc:596-597`（`dataSelfHwndExpr`）；
+  - 直译发射 3 处（都在上述死判据之下）：`withm:311`、`com_bind:208`、`com_bind:254` —— 都是 `vb6_Data_FieldValueStr(`；
+  - 反过来认那枚发射当前缀的识别器 3 处（于是也恒假）：`cgen_util_com.cpp:122`（`Fields(...).Value` 折回值本身）、`cgen_expr_member_generic_access.inc:42` 与 `:118`；
+  - 标量四枚分支（`BOF`/`EOF`/`RecordCount`/`FieldCount` 直译）在 `cgen_util_com.cpp:127-133` 同一格死判据里；
+  - RTL 导出 `vb6_Data_Self`（`vb6forms_data.c:452` + `vb6forms_prop_ctrl.h:328`）全仓**含 RTL 自己**都 0 个调用者。
+- **顺手订正 §B123 末条 ① 的定性**：那 15 处（`refresh` + 四枚 `Move*` × 三条码头）不是"等着收进表的手抄"，而是**死码里的手抄** —— 收进表就是给没人读的答案立新权威（本轮真做过一次，R4 的 census 当场把它抓回来，改动已撤回未提交状态）。同一条末条里的 ② 两处集合 Clear 与 ③ Show* 六枚经探针是**活的**，已由第十四刀收掉（见 §B125）。
 - **下一刀的形状**（要动 RTL，与控件线同一批规矩：改 `src/rtl` 必 touch `c3rtl.rc` 再重编 C3.exe，账 #156 那条坑）：① 撤五条前缀判据 + 方法侧 15 枚出口名 + 标量侧那四枚 + `dataSelfHwndExpr`；② `vb6_Data_Self` 导出去留（去 ⇒ touch rc）；③ 判据换成一条**结构针**：`Data1.Recordset.<成员>` 的产物必须只有 memberobj 那一形（`vb6_Com*Prop(vb6_Data_RecordsetObj(…))` / `vb6_ComCall(同一枚, L"<成员>"…)`），不许再出现任何 `vb6_Data_<成员>(` 直译 —— 这一条同时把「以后有人再把直译接回来」挡住；④ 证人 = `tests/c29data` 那套装在门上的断言不动，另加一条 A/B：撤完 398 份逐字节相同（死码的撤动本该零差异，若差一行就说明有一条我判成死的其实活着）。
 - **口径要先拍的那一格**（拍完才动手，别默认）：发码侧要不要恢复**直译**？两案 ——(a) 只撤死码，口径定为「Recordset 一律走 memberobj 那枚真 IDispatch」（改动小、产物一字不变、RTL 出口的唯一调用者是 memberobj，一处答案）；(b) 恢复直译（#192 当年那条注释的意图：绕开 Invoke 装箱、少一层），代价是**同一个成员两个调用者**（cgen 与 memberobj 各一条），正与本账「一个事实一处答案」相反。⇒ 本线推荐 (a)，(b) 只有在量出 memberobj 那一路有实际代价（每次 Invoke 装箱 + ID 匹配的成本落在热路径上）时才回头。
 
