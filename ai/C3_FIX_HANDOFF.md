@@ -1294,7 +1294,7 @@ S9.4 打标记那一路的 PictureBox 判据必须问表、且不许把成员名
 
 要收的形状（照 §B70 的 ①-c 那张表的做法，别再单开第四份名单）：控件方法的"名字 → RTL 出口 + 实参形状"本来就该只有一处答案。现在 `controlZeroArgMethod` / `controlOneArgMethod` / `controlCanvasMethod` 三张表里**没有"这一档递几枚实参"这一格** —— 那个信息住在调用点（各码头自己拼参数串）。所以第一步是把实参个数写成表里的一个取值，第二步才是同一条针两面都问：拿表里的出口名去 RTL 头里查参数个数，与表里的形状对。第一步与 §B70 工单的第 (1) 步是同一件活（画布动词那张 `src/common/canvas_drawing.hpp`），所以这一格**排在 ① 之后做**，不要为它先立一张只有旗标没有形状的表。
 
-### B73 同一笔提交，CI 编出来的 C3.exe 与本机编的那枚，发码不一样（账 #232③ 撞见，**未开工**）
+### B73 同一笔提交，CI 编出来的 C3.exe 与本机编的那枚，发码不一样（账 #232③ 撞见，**已结案（2026-10-09）：真凶 = `ComMemberInfo::returnType` 没有默认初值，账 #245 已修；本轮两台工具链 × 两架构 × 全语料 796 份捕获逐字节相同；第 44 道哨兵把它钉住 = 门 待回填**）
 
 **读数（三方对跑 `--emit-c`，同一份工作树文件、同一个 cwd）**：① 本机冷编的 HEAD（`2ef2ee71`）与本机当前树（多 ③ 那一刀）⇒ `inputs=90 changed=0`。② 拿门 #374 的工件当 BASE（`gh run download 37533797244 -n c3-exe`，CI 的 Build job 用 vswhere -latest = VS2022）对同一台本机 HEAD 树 ⇒ **`changed=14`，1068 行差异里 1060 行是同一族**：`vb6_ComGetIntProp(oFont, L"Name")` ↔ `vb6_VariantToString(vb6_VariantFromComResult(vb6_ComGetProp(...)))`、`vb6_ComCallInt(...)` ↔ `vb6_ComVarFree((void*)vb6_ComCall(...))`，另有 `ComGetDouble` / `ComGetObject` / `ComGetBool` 同形；落在 Charts 2020 六份子工程（`IAFPService` / `ITilterAccess` / `IMyCompany` 那几枚晚绑定对象）与 VBFlexGridDemo 的 `PropFont` 读面上。**画布动词一行都没有** ⇒ 与 ③ 那刀无关（逐条 grep 过）。③ 再钉一颗反向钉子：本机 `847ee9f4` 那台（更早两笔提交）与本机 `2ef2ee71` 那台在这一族上**逐字相同**（`vb6_VariantFromComResult` 各 70 处），CI 那台是 66 处 —— 所以这不是"少一笔提交"，是**同一份源码在两台构建机上做出不同决定**。
 
@@ -1445,6 +1445,35 @@ CI 那一枚（`pe-lnk=14.51`）稳定落进 `int16_t` 档 ⇒ 发成 `vb6_ComGe
 - **归因这次不靠推测，靠 A/B 冷编**：在 `.build/wt_b6` 冷编 `9158e7f0` 那枚 C3.exe，与旧头那枚对同一批输入逐行 diff（`.build/b618_ab.txt` / 明细 `.build/b618_diffs/`）。三笔刀各命中自己的那一族，且**方向和条数都反证得回去**：① `92258bab`（frx 图片数组从 .h 里的 `static` 定义改成 .h extern + owning .c 里一份定义）命中 4 份 —— 这 4 份正是语料里**唯一**发得出 frx 数组的工程（`vb6_frx_icon_frmBalloonTooltips` / `vb6_frx_pic_Picture1` / `vb6_frx_imglist_ImageList1_1..2` / `vb6_frx_tabpic_SSTab1_0`）；反向对照组 `tests/frxdata/FrxData.vbp`（.frx 里只有 List 记录，0 枚数组）**逐字节相同**，Charts 那几份 UC 工程也 0 枚数组（UC 侧根本不发这条）。② `3e9c1baf`（卸载重入的 `VB6_Unloading` 标记）命中 1 份 = `tests/frmevents/FrmEvents.vbp`，差异恰好是 4 加 1 删那几条 `SetPropW/RemovePropW(hwnd, L"VB6_Unloading", …)`；语料里写了 `Sub Form_Unload` 的输入只有它一份（另两份 .frm 在 `tests/test_form/`，没有任何 .vbp/.bas 引用它们 ⇒ 进不了清单）。③ `9158e7f0`（LoadPicture 缺文件抛 53）只动 RTL ⇒ 395 行零命中，与「RTL 活在 C3.exe 资源里、不进发码文本」对上。**本机每份的字节增量与 CI 那 5 行逐一相等**（上面那五个数就是两边的共同读数）。
 - 光对上形状不够，还要问 extern 有没有落单的定义（那才会把链接弄断）：结构化读数（`.build/b619_struct.txt`）= 4 份工程 5 枚数组各 **1 条定义 + 1 条 .h extern**，`decl-only-no-def` / `def-not-declared` / `used-but-undefined` 三个集合**全空**；再把 `tests/ctrlsstab` 用新 exe 真编真跑一遍（x64、独立输出目录 `.build/b620_out`，不碰共享 `output/`）：build.log 里 `error C` 0 条、`unresolved external` 0 条，exe 出得来，跑到 `CTRLSSTAB-VISDONE` / `CTRLSSTAB-CLICKDONE` 且 rc=0。⇒ 判「发码确实该变」，不动产品。
 - **重登记**（来源 = CI 那台 14.51 自己交的清单 `0ca2eedc`，`head=9158e7f0`，不是本机复算）：`compare_emit_manifest.ps1 -Bless` ⇒ numstat **5/5**、13 行注脚零动、BOM+CRLF 保持。两头自证：正控 rc=0 / **395 全同**；负控往新表改一个哈希字符 ⇒ rc=1 并点名 `tests/BalloonTooltips/prjBalloonTooltips.vbp`（期望/实得两行列出）。**门 #426 已回 = head `5f8834f2`、attempt 1：12 条 check-run 全 completed/success、非绿 0，含 `Emit manifest (shape oracle)`** ⇒ 新表由 CI 自己复验通过（这是这道闸第二次走完「咬住别人的改动 → A/B 归因 → 重登记 → 复验」）。
+
+**2026-10-09 结案：那 14 份差异不再复现，而且真凶找到了 —— 不是「工具链会换迭代序」，是一枚没写初值的字段**
+
+- **读数（这次是本机同一台机器、同一个 cwd 上的真双臂）**：把门 #437（head `15e119f3`）的 `c3-exe` **工件**下载下来
+  （`gh run download 37881230099 -D .build/b872_ciexe -n c3-exe`，6,120,448 B / sha `6ff5674d2899` / PE 工具链 = **14.51**），
+  对本地那枚（6,278,656 B / sha `cd32f425947b` / 工具链 = **14.29**）；两枚 exe 的 `src/` 只差 `c3rtl.rc` 的一行注释
+  （`git diff 15e119f3..HEAD --stat -- src` = 1 file, 1 insertion）。跑法 = `scripts/emit_manifest.ps1 -ListInputs` 那份**唯一枚举口径**，
+  逐条 `--emit-c --arch <x64|x86>`，字节走 `Start-Process -RedirectStandardOutput`（OS 级重定向，不经控制台代码页），逐文件比 SHA-256：
+  **x86 `same=398 changed=0 rcDiff=0` / x64 `same=398 changed=0 rcDiff=0`**（探针 `.build/b873_ab_pilot.ps1`，读数 `.build/b875_full_x86.log`、`.build/b875_full_x64.log`）。
+  另有一层独立对照：本机全语料清单与 CI 自己那台交的清单（`ci/emit-manifest`，`head=15e119f3`）**398/398 逐行相同**。
+- **机制**：`ComMemberInfo::returnType`（`src/com/typelib_parser.hpp`）曾经没有默认初值，而 `parseVarDesc` 只在 `VAR_PERINSTANCE`
+  那一支给它赋值 ⇒ dual 接口的属性（`VARDESC.kind = VAR_PROPERTY`，如 `stdole.StdFont.Name`）交出去的是**没写过的 16 位字段**。
+  同一枚二进制连跑三次读到 29620/6971/50156（这是 #245 记的读数），而**换一台工具链编出来的二进制会稳定落进另一个档**
+  ⇒ 早期绑定的 COM **出口选择**跟着换（泛型 `vb6_ComGetProp` ⇄ 带类型的 `vb6_ComGetIntProp`，而 `Name` 是 BSTR，后者压根是错的答案）。
+  这条把当年那句「剩下的唯一变量 = C3.exe 自己的工具链」订正到位：**工具链只是把残值固定成了另一个值，变量从来是那个没写的字段**。
+  当年最可疑的「35 处 `symbols()` 迭代吃 unordered 序」不是这一格的因（spike 换 `std::map` 已答否，那句现在也只对它自己那一格成立）。
+- **护栏（第 44 道哨兵）**：`scripts/check_com_sig_field_defaults.ps1`，登记为 `[STATIC] com_sig_field_defaults`。
+  F1 名单里 8 枚签名载体 struct 必须在指定文件里**按 `struct <名字> {` 找得到**；
+  F2 每枚**值类型或裸指针**字段必须带默认初值（`std::string` / `std::vector` / `std::unique_ptr` 这些自己会初始化，跳过）；
+  F3 检查到的字段数不许退化（地板 15，实测 **21**），且 `returnType` 必须在 `ComMemberInfo` 与 `ComMethodSig` **两头都出现**。
+  四条负控各自红并点到自己的工作：A 摘掉 `ComMemberInfo.returnType` 的初值 ⇒ F2；B 把 `struct ComMethodSig` 改名 ⇒ F1；
+  C 往 `ComParamInfo` 插一枚无初值的 `bool` ⇒ F2；D 把 `returnType` 改名（靶子消失）⇒ F3。植完按 md5 逐份还原，还原后复跑绿。
+  ⚠ **F1 第一版只 `IndexOf('struct ' + $nm)`，B 那档假绿** —— `'struct ComMethodSig'` 是 `'struct ComMethodSigRenamed'` 的**前缀**，
+  改名照样命中。改成 `[regex]('struct\s+' + 名 + '\s*\{')`（要求紧跟 `{`）才咬得住。一般式：**"这枚符号还在不在"这类判据，
+  锚点必须带边界**，子串匹配对"改名"这种坏法是瞎的 —— 与本线「哨兵能红才算护栏」同调。
+- **口径落定**：① 发码形状的证据必须来自**与产物同一工具链**的那台，这条从今天起有了一条便宜的执行方式 ——
+  CI 的 `c3-exe` 工件可以直接 `gh run download`（不必 `api.github.com`），拿到本机与本地那枚并排跑；
+  ② 登记发码清单时**吃 CI 那台的数**（`scripts/rebless_emit_manifest.ps1`，§B100），本机复算只当交叉验；
+  ③ 跨工具链的发码分家从此有了哨兵 + 门禁两道网，剩下的同类风险只在「新加签名载体字段没写初值」这一形，已由 F2 挡住。
 
 ### B74 控件几何写进去的数与读出来的数天生差一格 —— VB 侧读数从没被存过（账 #230，**已出：门 #376（run 37547498187、head `a9c47c82`、branch dev、attempt 1）= 11 job 全 completed/success、非绿 0**）
 
@@ -1858,7 +1887,14 @@ compile 那个 job 的耗时从「发码 ~0.4s/份」涨到「编译 23–41s/�
 
 **门读数**：#433 里 `Tests (compile)` 这一格是**第一次真编译**那 10 份夹具（本机 b777 先量过 10/10 出 exe），整格 completed/success ⇒ 恢复构建没带进假红，也没有把 job 顶到 45 分钟上限。
 
-### B99 门 #434 唯一红 = 别人那一笔改了语料/RTL 而没做两次登记（归因完，登记已补；①②两道哨兵都已出 = 门 待回填）
+### B99 门 #434 唯一红 = 别人那一笔改了语料/RTL 而没做两次登记（归因完，登记已补；①②两道哨兵都已出 = 门 #436 / 门 #438）
+
+**门读数回填**：门 **#436**（head `52df9e99` = §B99① 那一刀）= 12 条 check-run 全 completed/success、非绿 0；
+门 **#437**（head `15e119f3` = 用户的 ai/032 rev2 整型提升）= 11 绿、**唯一红正是 `Emit manifest (shape oracle)`**，
+逐 job 结论走 `commits/<sha>/check-runs`（本机新探针 `.build/b871_checkruns.py`，只认完整 sha）；
+门 **#438**（head `19ba4241`，含 §B99② 与 §B100 两格 + 把那 7 行登记落账）= 12 条全绿 ⇒ **#437 那格红已由这一笔洗白**。
+⚠ 一条值得留下的形状：**门红会顺着 dev 往下传染** —— `15e119f3` 那 7 行不登记，下一个推 dev 的人（我）门里同一格照样红，
+红得与他自己的改动无关。这正是「自救面必须便宜」的理由：登记现在是一条命令，不登记才是给下游添堵。
 
 57b1f64e（ai/032：VB.NET 风格运算符 + 四档窄/无符号整型，用户点名的那批）之后，门 #434 的 12 条 check-run
 里 11 条绿、唯一红是 `Emit manifest (shape oracle)`。归因走的是 §B92 那条回读通道（CI 每次把
@@ -1883,7 +1919,7 @@ compile 那个 job 的耗时从「发码 ~0.4s/份」涨到「编译 23–41s/�
   - ⚠ 工具坑（PowerShell 里手写 PE 解析会连撞四样，全部由实测翻出，不是猜的）：①命令调用会把逗号分隔的实参**贪吃**成数组（`@(U32 $e, U32 ($e+4))` 被当一枚三参调用 ⇒ Object[]→Int32 转换报错）；②返回「数组的数组」会被**摊平**（一枚两字段条目读成两枚条目 ⇒ 语言级目录算错偏移，`rva 0x0 not mapped`），要用 `[pscustomobject]@{…}`；③切片要 `[Array]::Copy`，别拿字节数组的 `-join`；④资源目录里所有存的都是**相对资源节基址**的偏移，而叶子给的是 RVA，两套换算混用一次就读出 0 字节。
 - **§B99 那条「留着的结构活」两格都已落地**：① = 第 42 道（登记面，见上），② = 第 43 道（内嵌面，见本条）。本账到这里没有未开工项。
 
-### B100 形状门红了，别人不会处理 —— 现在红话里带着三种成因与一条命令（**已出：门 待回填**）
+### B100 形状门红了，别人不会处理 —— 现在红话里带着三种成因与一条命令（**已出：门 #438**（run 37886205704、head `19ba4241`、branch dev、attempt 1）= 12 条 check-run 全 completed/success、非绿 0，其中 `Emit manifest (shape oracle)` 也在内 ⇒ 新登记的 398 行在 CI 那台上复算对齐）
 
 **现象与读数**（用户报「`Emit manifest (shape oracle)` 在其他分支推送时太容易挂了，人家不太懂怎么处理」，2026-10-09 实测）：
 `15e119f3`（ai/032 rev2 = 整型之间的提升改成 VB.NET 的二进制数值提升）推上 dev 之后，那一格红。走 §B92 那条

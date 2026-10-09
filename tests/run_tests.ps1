@@ -1000,6 +1000,21 @@ function Test-ManifestCoverage {
     }
 }
 # 账 §B99: 磁盘上的 src/rtl 与 C3.exe 里内嵌的那 125 份 RCDATA 是否逐字节同步（#225 那类对调/漏 touch）。
+# 账 §B73/§B94: 跨阶段递信息的签名载体结构体，字段没默认初值 = 拿栈上残值答题（两台工具链会稳定答不同档）。
+function Test-ComSigFieldDefaults {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] com_sig_field_defaults ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$PSScriptRoot\..\scripts\check_com_sig_field_defaults.ps1" 2>&1
+    $rc = $LASTEXITCODE
+    if ($rc -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        $out | Select-Object -First 6 | ForEach-Object { Write-Host "  $_" }
+    }
+}
 function Test-RtlEmbedded {
     $script:total++
     Write-Host -NoNewline "  [STATIC] rtl_embedded ... "
@@ -5354,6 +5369,7 @@ if ($Category -in @("all", "compile")) {
     Test-ModuleOrderAuthority
     Test-ManifestCoverage
     Test-RtlEmbedded
+    Test-ComSigFieldDefaults
 
     Test-EmitcArtifactCaliber
     Test-CtrlGeomCache
