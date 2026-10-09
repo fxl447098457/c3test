@@ -1015,6 +1015,20 @@ function Test-ComSigFieldDefaults {
         $out | Select-Object -First 6 | ForEach-Object { Write-Host "  $_" }
     }
 }
+function Test-DiagIdExclusivity {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] diag_id_exclusivity ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$PSScriptRoot\..\scripts\check_diag_id_exclusivity.ps1" 2>&1
+    $rc = $LASTEXITCODE
+    if ($rc -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        $out | Select-Object -First 6 | ForEach-Object { Write-Host "  $_" }
+    }
+}
 function Test-RtlEmbedded {
     $script:total++
     Write-Host -NoNewline "  [STATIC] rtl_embedded ... "
@@ -5370,6 +5384,7 @@ if ($Category -in @("all", "compile")) {
     Test-ManifestCoverage
     Test-RtlEmbedded
     Test-ComSigFieldDefaults
+    Test-DiagIdExclusivity
 
     Test-EmitcArtifactCaliber
     Test-CtrlGeomCache

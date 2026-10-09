@@ -1968,6 +1968,26 @@ marker、重编，之后 `check_rtl_embedded` 报 **125/125 逐字节相同**。
 **欠着**：门跑起来才算收线。另一档没动、要拍口径 —— 要不要让这道门**对 PR 只报不挡**（`continue-on-error`），
 只在推 dev 时才硬判红。现在它是硬的：新加的自救面已经把「处理它」压成一条命令，本线倾向保持硬判。
 
+### B103 账 #278 第一刀已出 = Implements 那一族从 VB3001 分家（新号 VB3044，缺槽那条并回既有的 VB3012）+ 第 45 道哨兵（2026-10-09，**待门**）
+
+- **落地**：`src/common/diagnostics.hpp` 加 `SemImplementsInterfaceNotFound = 3044`；`src/semantics/semantic_analyzer.cpp:270` 改 3044、`:295` 改 **3012**（`SemInterfaceNotImplemented` 早就在用，两条报的是同一件事）。
+  **严重级一条都没动**（两条都还是 warning）—— 这一刀只买「一个号只表示一件事」。为什么必须买：严重级是在**调用点**选的（`diag_.warn` / `diag_.error`），
+  而往后按**号**能做的动作有两处会连坐 —— ①「解析不出 + Option Explicit 升 error」若按号翻面，会把 `Implements` 的两条一起判死；
+  ② `--suppress-warning <id>` 那条抑制通道（`driver_compile.cpp:46`）按号抑制，今天抑制 3001 就是把接口检查一起闭嘴。
+- **A/B**（BASE = `.build/wt_base278` @ `be95c866` 冷编；41 个输入 = 报 VB3001 的 16 个 + 写了 `Implements` 的 25 个）：
+  **11 行 `VB3001 → VB3044`、文案一字未动**；`GONE=0` / `ADDED=0`；**41 份 `--emit-c` 产物逐字节相同**；rc 一台不差。⇒ 发码零影响，形状门（398 行清单）不该动一行。
+- **⚠ 诚实的覆盖缺口**：`:295` 那条（legacy 缺槽 → VB3012）**在语料里 0 条读数**（`VB3012_total=0`；语料的 `Implements` 全落在「接口找不到」那一档，
+  `itf_neg/n08_missing_slot.cls` 走的是新式那条路）。那一格只有静态哨兵的 S4 钉着，**没有行为判据** —— 补行为要新写一枚 legacy 夹具
+  （`.cls` 当宿主接口 + 少写一个 `Iface_Member`），本批没做，记在这里当欠账。
+- **第 45 道哨兵** `scripts/check_diag_id_exclusivity.ps1`：S1 使用点恰好 **7** 处（逐处点文件名+行号）/ S2 `semantic_analyzer.cpp` 里 **0** 处 /
+  S3 新号 **1 声明 + 1 使用** / S4 legacy 缺槽那处用 3012。登记在 `tests/run_tests.ps1` 的 `[STATIC]` 那一趟（`Test-DiagIdExclusivity`），
+  `check_static_sentinel_registration` 报 **45 道盘上 / 45 道登记**。
+- **负控**（先证它能红）：往 `semantic_analyzer.cpp` 追加一行假借用 ⇒ **S1 报 8 处、S2 点名 `semantic_analyzer.cpp:387`，两条一起红（rc=1）**；
+  删回原位（md5 `108bcf13c7404cb4fc79919a5815a0c2` 对上）⇒ 绿。
+- **顺带一条工具坑**（写 census 时自己栽的）：A/B 第一版按 `r[2]` 比 ID，而那个五元组是 `(文件, 行, **级别**, 号, 文案)` ⇒ BASE/NEW 两边永远相等，
+  41 行全报「没差异」，真差异一条都没显示。**计数器取错列报出来的"绿"比不跑更坏 —— 它把 A/B 变成背书。** 第二版按 `r[3]` 比号、
+  再单独用 `(文件,行,文案)` 当键报「同一行换了号」，那 11 行才现形。
+
 ### B102 ①②两件的落地：门对 PR 只报不挡已发货；「判死」被 census 判死（不能整条升 error）（2026-10-09）
 
 **② 已出**：`emit-manifest` 那一格加 `continue-on-error: ${{ github.event_name == 'pull_request' }}` ——
@@ -2054,6 +2074,18 @@ marker、重编，之后 `check_rtl_embedded` 报 **125/125 逐字节相同**。
   裸 `UserControl` 1、常量 2（`VK_UP` / `CTRLINFO_EATS_RETURN`）、`Implements` 接口找不到 2、包成员 1（`OpenSecret`，那是 pkg_xmod 的**故意**用例）。
 - 下一轮因此收窄成两句：**先把 `Implements` 那一族从 `SemUndeclaredIdentifier` 里分家出独立 ID**（否则任何"翻面"都会把接口警告一起判死），
   再逐张补上面那 6 张表；两条都做完、census 只剩 `Count`×2 时，才轮到把"解析不出 + Option Explicit"升 error。
+
+**④ 重测把 ③ 的两处读法一起订正（同一轮；新的消息无关计数器 `.build/b900_census.py`，输出 `.build/b900_census_out.txt`）**：
+- **老 census 那条正则要求文案长成 `…: '名字' (` 这个形状** ⇒ 英文文案的 `Implements` 行**一条都没匹配上**。
+  所以 ② 表里那 25 条从来**不含** Implements；而 ③ 说「整工程级只剩 16 条」并把 Implements 2 塞进分格 —— **两处都错：16 是「有 VB3001 的输入数」，不是行数**，
+  Implements 那几条本来就在 25 之外。教训：按文案形状匹配的 census，换一种文案就静默少一批；**改成按 `级别 + VB号` 解析、文案只当数据**才算 census。
+- 重算（NEW exe，398 个输入）：**VB3001 = 25 行 / VB3044 = 5 行 / VB3012 = 0 行**；25 行 = 整工程输入 17 行 + standalone `.bas` 8 行。
+  去重（两份 Charts 工程报同一批 `.ctl`/`.pag`、`friend_open_host.bas` 同现两处）后 **21 个唯一源码位置** =
+  刻意负例 5（`nopeHere` / `alsoNope` / `nopeHereIsNotAName` / `Hidden1` / `OpenSecret`）+ 拆成单文件编译的自然结果 3
+  （`Form2` / `InitVisualStylesFixes` / `MainForm`）+ 源码 bug 1（`ucProgressCircular.ctl:931` 的 `Count`）+ **真缺项 12**。
+- 那 12 处按表分（这才是下一刀的对象；③ 写的「6 张表 14 条」里那两个数字都要换掉）：
+  窗体名自动实例化 **1**（`TmForm2`）/ 窗体伪成员 **5**（czUI `ScaleWidth`×2、VbQRCodegen `WindowState`+`ScaleWidth`+`ScaleHeight`）/
+  全局对象 `Printers` **1** / 裸 `Controls` **2**（`ppProgressCircular.pag:226,250`）/ 裸 `UserControl` **1** / 常量 **2**（`VK_UP`、`CTRLINFO_EATS_RETURN`）。
 
 ### B101 `Option Explicit` 在场时只发 warning、发码却把裸名直接发出去 ⇒ 产物必然 C2065（账 #278，2026-10-09，**未开工；① 的严重级那一刀见上一节，已被 census 否掉**）
 
