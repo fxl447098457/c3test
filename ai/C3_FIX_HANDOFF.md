@@ -2027,7 +2027,7 @@ marker、重编，之后 `check_rtl_embedded` 报 **125/125 逐字节相同**。
   不许多也不许少）。④ 最后把 `--suppress-warning 3001` 那条抑制通道复核一遍：按号抑制在分家（§B102）之后才是干净的。
 
 
-### B114 账 #278 第八刀已出 = 宿主表长出 HPF_CHANNEL：`Controls` 两个位放行 + `.ctl` 自身对象名放行（census 16→11，第 48 道哨兵扩三条，2026-10-09，**待门**）
+### B114 账 #278 第八刀已出 = 宿主表长出 HPF_CHANNEL：`Controls` 两个位放行 + `.ctl` 自身对象名放行（census 16→11，第 48 道哨兵扩三条，2026-10-09，门 #449 红在哨兵自己身上 ⇒ 已改形状，等下一轮）
 
 - **§B105 那格 a/b 按 b 走**（台账当时就写着"倾向 b"，形状也是现成的：`canvas_drawing.hpp` 的
   `CANVAS_OWNER_METHOD/DRAW` 早就是"一行标由哪条码头回答"）。a 案的代价量过了：往 RTL 再放一枚
@@ -2055,6 +2055,24 @@ marker、重编，之后 `check_rtl_embedded` 报 **125/125 逐字节相同**。
 - **12 处清到 9 ⇒ 真缺项只剩 §B115 那一格与它后面的东西**：`Controls` 2 + `UserControl` 1 已放行，
   剩下的 census 11 行 = 刻意负例 6 + 单文件自然结果 3（§B110 那条口径题）+ 源码 bug 2（`Count`）。
   ⇒ §B101（解析不出 + `Option Explicit` ⇒ error）前面**只剩那一格口径**了。
+- **门 #449（run 37960257781、head 52ff3502、attempt 1，16:35:50Z→16:45:00Z）唯一红 = `Tests (compile)`，
+  红的不是产品而是这一刀的哨兵**：`[STATIC] dochost_authority ... FAIL`。
+  那条 D3 钉的是**改形之前**的调用点（`memberObjCtx_ && isDocumentHostObject(node.name)`），
+  而这一刀把「哪个位合法」搬进了唯一出口（调用点变成 `isDocumentHostObject(node.name, memberObjCtx_)`）
+  —— 两条正则同时失配（调用点 0 次、外面那道 `&&` 也 0 次）。
+  本机复现同一对 FAIL，所以门那条红没有第二种解释。
+- **修法是把不变量搬到它现在住的地方，不是把 D3 放宽**：D3 三处（定义 / 声明 / 调用点）都改成「带着那个位置形参」；
+  新增 **D3b** 钉那个出口**真的**按位置分档（体内查 `qualifierPos` ≥ 3 —— `vba` / `propertypage` / `extender`+`ambient` 各拒一次裸位），
+  这条接手了老 D3 守的那件事（**裸位的真缺项必须还在响**）；
+  新增 **D3c** 钉调用点不许在外面再 `&&` 一次（两份答案 = 老形状）。
+  哨兵另外长了 `-Root` 形参，为的是能在**做过的副本**上跑负控而不碰共享树。
+- **三条负控各红各的那一条**（`.build/b163_negctl.py`，副本已删）：
+  A 调用点改成外面 `&&` ⇒ D3 调用点 0 + D3c 1；
+  B 留着形参但体内不用 ⇒ D3b 0；
+  C 声明里去掉那个形参 ⇒ D3 声明 0。
+  还原原始副本 ⇒ `PASS … predicate 1+1+1 pos 3 outer 0`。
+  顺带跑的邻居：`check_static_sentinel_registration`
+  （49 道全登记）、`check_host_pseudo_table`（54 rows / 35 scalar）都绿，PSParser 0 错。
 
 ### B115 新账 = `With PropertyPage` 发的是 `vb6_PropertyPage_hwnd`，而 RTL 声明的是 `…_hWnd` ⇒ C2065（2026-10-09 量，**未开工；语料暴露 0 处**）
 
