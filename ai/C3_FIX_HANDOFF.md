@@ -2000,6 +2000,46 @@ marker、重编，之后 `check_rtl_embedded` 报 **125/125 逐字节相同**。
 `w = ScaleWidth` 与 `Debug.Print …` 合成一行，于是行号与诊断全对不上（报在 `(6,35)` 那种文件里根本不存在的列上）。
 把生成的夹具**原样 dump 出来看一眼**才发现。⇒ 夹具是脚本拼的时候，「先核夹具本身」是第 0 步，不是最后一步。
 
+### B114 账 #278 第八刀已出 = 宿主表长出 HPF_CHANNEL：`Controls` 两个位放行 + `.ctl` 自身对象名放行（census 16→11，第 48 道哨兵扩三条，2026-10-09，**待门**）
+
+- **§B105 那格 a/b 按 b 走**（台账当时就写着"倾向 b"，形状也是现成的：`canvas_drawing.hpp` 的
+  `CANVAS_OWNER_METHOD/DRAW` 早就是"一行标由哪条码头回答"）。a 案的代价量过了：往 RTL 再放一枚
+  永远不该被发码的恒 NULL 空桩 = 第二个陷阱，而表里那一行从此说谎。
+- **表长出第二份契约**：`HostPseudoRow` 末尾加 `channel`（只在 `HPF_CHANNEL` 行填），
+  `vb6_<对象>_<rtl>` 那条老契约对它不适用。三处消费同一件事实：语义层 `isDocumentChannelMember`
+  （**两个位**都放行——`Controls.Add(…)` 里 `Controls` 站的正是限定符位，而老的两条分支一条只管
+  限定符位的"文档对象名"、一条只管裸位的"文档成员名"，集合名当限定符用两头都不接）、
+  发码层 `cgen_expr_ident_builtin.inc` 不再硬编码 `lower == "controls"` 与 `"vb6_UC_Controls()"`、
+  哨兵换判据。
+- **`isDocumentHostObject` 加了一个位置形参而不是新开一条**：`.ctl` 里自身对象名在值位也合法
+  （`With UserControl` ⇐ VB6 等价于 `Me`），实测产物本来就有路（`_vb6_with_2 = (void*)vb6_UserControl_hWnd`），
+  今天只是多配一条 VB3001。**同一句写在 `.pag` 里刻意不放** ⇒ 见 §B115。
+- **读数（改前那台 exe = `.build/b136_C3_new.exe` 与改后同一批输入）**：`.ctl` 探针 3→0、
+  `.pag` 探针 2→**1**（留下的那条就是反面证人）、Charts 两份输入各 3→1（剩的是源码 bug `Count`）、
+  `VBFlexGridDemo.vbp` 1→0；四份输入的 `--emit-c` 产物**逐字节相同** ⇒ 这一刀只改"谁能答"，
+  不改"答什么"（与 §B108 那条相反：这次零产物差是真的零行为差）。语料 census 16→**11**。
+- **哨兵（第 48 道，扩而非新增）**：`CHANNEL-ROW-NODOCK`（标了旗标却不点名码头）、
+  `CHANNEL-ROW-TYPE`（码头行还声称有值类型）、`CHANNEL-DOCK-MISSING`（码头符号在 `src/rtl/*.h` 里
+  没人声明）；`$must` 加 `hostPseudoChannel` 的声明 + 两个消费点，`$deny` 加"发码侧再硬编码一次
+  `vb6_UC_Controls()`"。本机绿：`OK: one host-pseudo table (54 rows, 35 scalar)`。
+  ⚠ 一条工具读数：`#include "common/host_pseudo.hpp"` 第一次加在 `cgen_util_ctrl.cpp` /
+  `cgen_util_type.cpp` 上都没用 —— 那个 `.inc` 的真正宿主是 `src/backend/expr/cgen_expr_ident.cpp`；
+  报错只有 C3861「找不到标识符」，不告诉你在哪个 TU。
+- **12 处清到 9 ⇒ 真缺项只剩 §B115 那一格与它后面的东西**：`Controls` 2 + `UserControl` 1 已放行，
+  剩下的 census 11 行 = 刻意负例 6 + 单文件自然结果 3（§B110 那条口径题）+ 源码 bug 2（`Count`）。
+  ⇒ §B101（解析不出 + `Option Explicit` ⇒ error）前面**只剩那一格口径**了。
+
+### B115 新账 = `With PropertyPage` 发的是 `vb6_PropertyPage_hwnd`，而 RTL 声明的是 `…_hWnd` ⇒ C2065（2026-10-09 量，**未开工；语料暴露 0 处**）
+
+- 第八刀顺手量的：同一形在 `.ctl` 里通（`vb6_UserControl_hWnd`），在 `.pag` 里发码把 `hwnd` 的
+  **小写 h** 直接拼出来 ⇒ 与 RTL 的 `extern … vb6_PropertyPage_hWnd` 对不上 ⇒ 真编译是 C2065。
+  所以那一格的语义放行**刻意没做**：做了只是把一条 VB3001 换成一次编不过（探针
+  `.build/b148_pag`，`.pag` + Option Explicit，`With PropertyPage / Debug.Print .ScaleWidth`）。
+- 判据方向（先记不动手）：`vb6_<对象>_<成员>` 的拼写只许来自表（`rtl` 字段就是源码拼写），
+  发码侧任何"obj + 成员名"的现拼都是第二份权威 —— 与本刀把 `Controls` 的码头收回表里同一条规矩。
+  语料 `With PropertyPage` = 0 处 ⇒ 潜伏项，别当编译阻塞排产。
+
+
 ### B113 账 #278 第七刀已出 = `Load/Unload <窗体名>` 的实参是**对象位**：§B111 那一格收掉（接已有的闸，不是新加判定，2026-10-09，门 #448 attempt 1 全绿（run 37947447538、head `028f7342`、12/12 含形状门 ⇒ 本机登记的哈希与 CI 那台复算对齐、wall 10m11s））
 
 - **定性沿用 §B111 的实测**：VB6 里 `Load` / `Unload` 的实参站在对象位，**不取默认属性**。改前窗体模块里指着
