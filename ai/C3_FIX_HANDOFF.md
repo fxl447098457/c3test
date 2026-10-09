@@ -2000,6 +2000,33 @@ marker、重编，之后 `check_rtl_embedded` 报 **125/125 逐字节相同**。
 `w = ScaleWidth` 与 `Debug.Print …` 合成一行，于是行号与诊断全对不上（报在 `(6,35)` 那种文件里根本不存在的列上）。
 把生成的夹具**原样 dump 出来看一眼**才发现。⇒ 夹具是脚本拼的时候，「先核夹具本身」是第 0 步，不是最后一步。
 
+### B113 账 #278 第七刀已出 = `Load/Unload <窗体名>` 的实参是**对象位**：§B111 那一格收掉（接已有的闸，不是新加判定，2026-10-09，**待门**）
+
+- **定性沿用 §B111 的实测**：VB6 里 `Load` / `Unload` 的实参站在对象位，**不取默认属性**。改前窗体模块里指着
+  自己那枚窗体名发的是 `vb6_UnloadForm(vb6_GetControlText(vb6_hwnd_FDForm)  /* default prop: .Caption */)`
+  = **BSTR 进 `void*` 槽**；而同一句写成 `Unload Me` 一直是 `vb6_UnloadForm(vb6_hwnd_FDForm);`
+  ⇒ 同一条 VB 语义两条路两种答案（与 §B104 的"发码对、诊断错"反方向：**发码错、两层都不响**）。
+- **落点 = 把新形接进已有那一条闸，不是再写一份判定**：`cgen_expr_call_arg_emit.inc` 里"被调方形参声明为
+  `Object` ⇒ 抑制默认属性"那一支（Fix 142 时代就有）只对**有 `calleeParams` 的被调方**生效，内置的
+  `load` / `unload` 没有形参表 ⇒ 走不到。新支把"实参是工程内窗体名"也送进同一个 `suppressDefaultProp_`，
+  抑制之后用的是**唯一出口** `ctrlObjectRefExpr`（与 `Set` 的右值同闸，账 #258）⇒ 拼法仍然只有一份。
+- **三形同归的实测**（同一枚 exe 改前 / 改后各出一趟码）：
+  `Unload Me` → `vb6_UnloadForm(vb6_hwnd_FDForm);` **未变**；
+  `Unload FDForm`（自己）→ 改前 fold=1 / 改后 fold=0，且对象位那一形从 1 处变 **2 处**；
+  兄弟名 `Unload PfOther` → 两台都是 `vb6_form_hwnd_PfOther()` **未变**（那条本来就对）。
+- **语料暴露 0 处 ⇒ 判据自己造，但要造在不动别人判据的地方**：`tests/fdraw/FDForm.frm` 末尾加一枚
+  **没人调用**的 `Public Sub UsOwnNameProbe()`（cgen 会发模块里每一个过程 ⇒ 形状被钉住，而夹具真跑那 26 行判据
+  一条不动）。本地真编真跑过：cl 出 exe、`FD-DONE` 在、`=False` **0 条**、耗时 30.9s（构建）+ 一次跑完自然退出。
+- **新判据一条两头钉** `Test-CodegenNote "form_unload_ownname"`（`tests/run_tests.ps1`，紧跟 fdraw 那三条画布针）：
+  needle `"vb6_UnloadForm(vb6_hwnd_FDForm);"` 必须在（拦"把调用整个删掉"这种坏修法）、
+  absent `"vb6_UnloadForm(vb6_GetControlText(vb6_hwnd_FDForm)"` 不许在（拦本次真伤）。
+  负控 = 改前那台 exe 出码：absent 那条当场红（fold=1）⇒ 不是单侧绿灯。
+- **形状门**：本机全语料重算 + `compare_emit_manifest.ps1 -Bless` 登记，差异**只有 `tests/fdraw/FDemo.vbp` 一行**
+  ⇒ 这一行同时是"改动面就这么多"的证据：own-name 的 `Load/Unload` 在全语料 0 处，别家产物本该一字不动。
+- **刻意不收的一形**（写死在注释里，别下次又当本账的尾巴）：`Unload Picture1` 这种**控件名**在 VB6 是
+  error 43（Object required），今天交什么继续交什么 —— 本账只并"窗体名的两条路"，不去替 VB6 的错误行为发码。
+
+
 ### B112 账 #278 第六刀已出 = `VK_UP`：**未声明的裸名被 C 的同名宏救活**，编译器与门都看不见（第 16 行 / 真缺项清到 9，2026-10-09，门 #447 attempt 1 全绿（run 37943664181、head `ca0ee097`、12/12 含形状门；两条新发码针跑在 vbp 四片里，四片全 completed/success））
 
 - **这一格不是编译器的缺陷，是夹具的缺陷，而门一直是绿的**。`tests/tabwalk/WalkForm.frm` 声明了
@@ -2073,7 +2100,7 @@ marker、重编，之后 `check_rtl_embedded` 报 **125/125 逐字节相同**。
   "解析不出 + `Option Explicit` ⇒ error"一旦生效，**这些独立输入会直接编译失败**，而形状门按行钉死清单 ⇒
   要么升级只对整工程输入生效，要么把那三份夹具补上兄弟模块。两种都是口径，要先拍再动。
 
-### B111 新账 = 窗体模块里 `Unload 自己的窗体名` 交出的是 Caption 字符串（2026-10-09 量，**未开工；语料暴露 0 处**）
+### B111 新账 = 窗体模块里 `Unload 自己的窗体名` 交出的是 Caption 字符串（2026-10-09 量；**已由第七刀收掉 ⇒ 落地与判据见 §B113**；当时语料暴露 0 处）
 
 - 同一个探针顺带量到的（`.build/b123_probe/PfSelf.frm`，三行体的窗体，站在**自己**的模块里）：
   `Unload PfSelf` ⇒ `vb6_UnloadForm(vb6_GetControlText(vb6_hwnd_PfSelf)  /* default prop: .Caption */);`
