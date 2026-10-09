@@ -346,10 +346,11 @@ if ($storeCalls.Count -ne 3 -or $storeFiles.Count -ne 3) {
 }
 
 # ---- D12: 单位换算那一处 (账 #196 第三条) ----
-# 规矩与前两张表一样: **表只交名字**, 实参由码头拼。三个码头里只有两处从表来 (With 形 /
-# 显式接收者与 `Me.` 那一形)，第三处是窗体/页模块里**裸写**的名字, 走标识符那一路, 只能就地
-# 写出口名 —— 所以字面量在 src/backend 里恰好两处: 这张表 + 那一路。多一处就是有人又抄了一遍
-# 换算出口 (那是 #177 那条"单位表只剩一份"在本家族的翻版)。
+# 规矩与前两张表一样: **表只交名字**, 实参由码头拼。三个码头从前只有两处从表来 (With 形 /
+# 显式接收者与 `Me.` 那一形)，第三处是窗体/页模块里**裸写**的名字, 走标识符那一路, 就地写出口名
+# ⇒ 字面量两处。账 #278 §B72 把那一头也接到同一张表 (问的是 Form 那一行) ⇒ 字面量在 src/backend
+# 里从此恰好一处: 这张表自己。多一处就是有人又抄了一遍换算出口 (#177 那条"单位表只剩一份"的翻版),
+# 而少一处 = 有人把裸写那一路退回就地拼名字, 所以两头都钉: 数数 + 那一形必须真的在问表。
 $scAuth = 0
 $scSites = @()
 $scHard = @()
@@ -369,7 +370,7 @@ foreach ($f in (Get-ChildItem -LiteralPath $beDir2 -Recurse -File | Where-Object
 }
 if ($scAuth -ne 1) { $bad += ("D12 controlScaleMethod defined " + $scAuth + " times (want exactly 1)") }
 $scFiles = @($scSites | ForEach-Object { ($_ -split ":")[0] } | Sort-Object -Unique)
-foreach ($need in @("cgen_expr_with.cpp", "cgen_expr_call_com_bind.inc")) {
+foreach ($need in @("cgen_expr_with.cpp", "cgen_expr_call_com_bind.inc", "cgen_expr_ident_builtin.inc")) {
     if ($scFiles -notcontains $need) {
         $bad += ("D12 那一形不再问这张表: " + $need + " (少一形就是一形落回假 IDispatch 调用或裸 ScaleX( —— #143/#150 两族)")
     }
@@ -377,12 +378,20 @@ foreach ($need in @("cgen_expr_with.cpp", "cgen_expr_call_com_bind.inc")) {
 # 出口名只许出现在两个地方: 表本身 (交名字的那一处) 与"裸写标识符"那一路的码头 (它没有表可问)。
 # 两处从表来的码头 (With 形 / 显式接收者形) 里再出现一次字面量, 就是有人绕开表自己抄了一遍。
 $scHardFiles = @($scHard | ForEach-Object { ($_ -split ":")[0] } | Sort-Object -Unique)
-if ($scHard.Count -ne 2 -or $scHardFiles.Count -ne 2 -or
-    ($scHardFiles -notcontains "cgen_util_ctrl.cpp") -or
-    ($scHardFiles -notcontains "cgen_expr_ident_builtin.inc")) {
+if ($scHard.Count -ne 1 -or $scHardFiles.Count -ne 1 -or
+    ($scHardFiles -notcontains "cgen_util_ctrl.cpp")) {
     $bad += ("D12 硬编码 vb6_ScaleUnitX 的处数 = " + $scHard.Count + " / 文件 " + ($scHardFiles -join ",") +
-             " (want 2 且只许 cgen_util_ctrl.cpp 这张表 + cgen_expr_ident_builtin.inc 那一路) -> " +
-             ($scHard -join " | "))
+             " (want 1 且只许 cgen_util_ctrl.cpp 这张表) -> " + ($scHard -join " | "))
+}
+# 裸写 ScaleX/ScaleY 那一路不许退回"就地拼名字": 它必须真的问表, 且问的是 Form 那一行
+$scBareRel = "src\backend\detail\expr\cgen_expr_ident_builtin.inc"
+$scBare = 0
+if (Test-Path -LiteralPath (Join-Path $root $scBareRel)) {
+    $scBare = @([regex]::Matches([System.IO.File]::ReadAllText((Join-Path $root $scBareRel)),
+                                 'controlScaleMethod\(FrmControlType::Form')).Count
+}
+if ($scBare -ne 1) {
+    $bad += ("D12 裸写那一路问表的处数 = " + $scBare + " (want exactly 1 - 形参交的是 Form 那一行)")
 }
 $scBlk = [regex]::Match($scBody, 'CCodeGen::controlScaleMethod\s*[\s\S]{0,700}?\r?\n\}')
 if (-not $scBlk.Success) {

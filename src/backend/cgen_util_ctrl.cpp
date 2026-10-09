@@ -1487,12 +1487,23 @@ bool CCodeGen::formCtrlSlot(const std::string& objExpr, FrmControlType& outType,
     return true;
 }
 
+// 账 #278 §B72: 表交名字，也交「这条出口在 C 里收几枚实参」—— 两者必须同一行回答。
+// 以前只有名字，个数住在各条码头的参数串里，于是 RTL 与发码点之间只剩「头 vs 体」这一头
+// 有人对账 (账 #240 的 check_rtl_proto_arity.ps1)：谁给某枚出口加一枚形参、只改头与体，
+// 发码仍递旧的个数，本机只是 warning C4020、新 cl 才升成 error C2197 —— 门红在别人刚登记
+// 的用例上。有了这一行，同一道哨兵可以三面一起问：表 ↔ RTL 原型 ↔ 产物里实际的调用。
+static std::string controlExit(const char* rtlName, int argc, int* outArgc) {
+    if (outArgc) *outArgc = argc;
+    return rtlName;
+}
+
 // C29-SL-l（账 #143）: 控件的**零实参方法**名表（命中回 C 里的函数名，否则空串）。
 // 焦点面只给"真能拿焦点"的那批窗口型控件 —— Label / Image / Shape / Line / Timer / Menu /
 // Data / OLE / CommonDialog / Winsock / ImageList / StatusBar / ProgressBar 刻意不接：
 // 真 VB6 在那里是 raise 一个错误号，而本项目还没有运行期错误面，"什么都不做"比伪造成功诚实。
 std::string CCodeGen::controlZeroArgMethod(FrmControlType ctrlType,
-                                          const std::string& memberLower) const {
+                                          const std::string& memberLower,
+                                          int* outArgc) const {
     if (memberLower == "setfocus") {
         switch (ctrlType) {
             case FrmControlType::CommandButton:
@@ -1515,18 +1526,18 @@ std::string CCodeGen::controlZeroArgMethod(FrmControlType ctrlType,
             case FrmControlType::DTPicker:
             case FrmControlType::MonthView:
             case FrmControlType::RichTextBox:
-                return "vb6_SetControlFocus";
+                return controlExit("vb6_SetControlFocus", 1, outArgc);
             default:
                 return "";
         }
     }
     if (memberLower == "clearsel" && ctrlType == FrmControlType::Slider)
-        return "vb6_Slider_ClearSel";
+        return controlExit("vb6_Slider_ClearSel", 1, outArgc);
     // 账 #192: ListBox / ComboBox 的 Clear。VB6 里它是方法而不是属性，且只有这两枚
     // 有清空语义（TreeView/ListView 的清是各自那一族，另有出口）。
     if (memberLower == "clear"
         && (ctrlType == FrmControlType::ListBox || ctrlType == FrmControlType::ComboBox))
-        return "vb6_ClearList";
+        return controlExit("vb6_ClearList", 1, outArgc);
     return "";
 }
 
@@ -1538,13 +1549,15 @@ std::string CCodeGen::controlZeroArgMethod(FrmControlType ctrlType,
 // UserControl 那一档早就有（#177/#178 按实例那对），Printer 有 vb6_Printer_*，这里补的是
 // 窗体与 PictureBox —— 语料物证 ucTreeMaps 的 PropPagFMR.pag:265 `With Picture1 : .TextHeight(Text)`。
 std::string CCodeGen::controlOneArgMethod(FrmControlType ctrlType,
-                                          const std::string& memberLower) const {
+                                          const std::string& memberLower,
+                                          int* outArgc) const {
     if (memberLower != "textheight" && memberLower != "textwidth") return "";
     switch (ctrlType) {
         case FrmControlType::Form:
         case FrmControlType::PictureBox:
-            return memberLower == "textheight" ? "vb6_ControlTextHeight"
-                                               : "vb6_ControlTextWidth";
+            return memberLower == "textheight"
+                 ? controlExit("vb6_ControlTextHeight", 2, outArgc)
+                 : controlExit("vb6_ControlTextWidth", 2, outArgc);
         default:
             return "";
     }
@@ -1558,12 +1571,15 @@ std::string CCodeGen::controlOneArgMethod(FrmControlType ctrlType,
 // 只吃那两个显式的 from/to，实现只有一份 `vb6_ScaleUnitX/Y`（UC 那一档另有一层同名转手，
 // 因为宿主伪成员表的命名契约是 `vb6_<Host>_<Member>`）。
 std::string CCodeGen::controlScaleMethod(FrmControlType ctrlType,
-                                         const std::string& memberLower) const {
+                                         const std::string& memberLower,
+                                         int* outArgc) const {
     if (memberLower != "scalex" && memberLower != "scaley") return "";
     switch (ctrlType) {
         case FrmControlType::Form:
         case FrmControlType::PictureBox:
-            return memberLower == "scalex" ? "vb6_ScaleUnitX" : "vb6_ScaleUnitY";
+            return memberLower == "scalex"
+                 ? controlExit("vb6_ScaleUnitX", 3, outArgc)
+                 : controlExit("vb6_ScaleUnitY", 3, outArgc);
         default:
             return "";
     }

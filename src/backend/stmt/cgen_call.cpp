@@ -367,21 +367,10 @@ void CCodeGen::visit(CallStmt& node) {
                     return;
                 }
             }
-            // Fix 086: 无括号的控件方法调用 (List1.Clear) — 与 IndexOrCallExpr
-            // 的 P13.3 处理一致, 生成 vb6_ClearList(vb6_hwnd_Listx), 而非
-            // vb6_ComCall(list1,...) 裸控制名 (C2065).
-            auto itCtrlCS = knownFormControls_.find(comObjExpr_);
-            if (itCtrlCS != knownFormControls_.end()
-                && (itCtrlCS->second == FrmControlType::ListBox
-                    || itCtrlCS->second == FrmControlType::ComboBox)
-                && Symbol::toLower(comMemberName_) == "clear") {
-                std::string ctrlNameCS = cIdent(knownFormControlOriginalNames_.count(comObjExpr_)
-                    ? knownFormControlOriginalNames_[comObjExpr_] : comObjExpr_);
-                comObjExpr_.clear();
-                comMemberName_.clear();
-                c_.emitLine("vb6_ClearList((void*)vb6_hwnd_" + ctrlNameCS + ");  /* ListBox.Clear */");
-                return;
-            }
+            // 账 #278 §B72: 这一族从前在 Fix 086 里又硬编码了一遍 (类型判据 +
+            // `vb6_ClearList` 字面量)。表 controlZeroArgMethod 今天照样答 ListBox/ComboBox 的
+            // clear 这一行, 而语句码头在下方 C29-SL-l 那一格已经问它 —— 两份答案住两处,
+            // 改名字或改实参个数时必有一份落后。所以这里删掉, 由表答。
             // 账 #185 / 账 #232②: 画布家族的**语句码头**（不写括号那一形）。
             // 接收者问 `formCtrlSlot`（裸小写名与 `vb6_hwnd_X` 都认，窗体自己那枚也认），
             // 名字与出口问 `controlCanvasMethod`（cls / print 两档）—— 与表达式码头

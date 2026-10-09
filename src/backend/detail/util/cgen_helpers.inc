@@ -355,16 +355,19 @@
     bool formCtrlSlot(const std::string& objExpr, FrmControlType& outType,
                       std::string& outHwndExpr) const;
     std::string controlZeroArgMethod(FrmControlType ctrlType,
-                                     const std::string& memberLower) const;
+                                     const std::string& memberLower,
+                                     int* outArgc = nullptr) const;  // 账 #278 §B72: 名字 + 实参个数
     // 账 #196: **一个实参**的控件方法表（TextHeight / TextWidth）。只交名字，实参由码头拼 ——
     // 与上面那张表同一套规矩，With 形与带括号裸形两条码头都要接。
     std::string controlOneArgMethod(FrmControlType ctrlType,
-                                    const std::string& memberLower) const;
+                                    const std::string& memberLower,
+                                    int* outArgc = nullptr) const;
 
     // 账 #196 第三条: 控件的单位换算方法（ScaleX/ScaleY，三个实参）名字表 —— 同一套
     // 「表只交名字、实参由码头拼」的规矩，且刻意不给通用行（理由见定义处）。
     std::string controlScaleMethod(FrmControlType ctrlType,
-                                   const std::string& memberLower) const;
+                                   const std::string& memberLower,
+                                   int* outArgc = nullptr) const;
 
     // 账 #221 = C29-PL-a: 控件的**画表面方法**名表（目前只有 Line，六个实参）。
     // 与上面三张表同一套规矩: 表只交名字、实参由码头拼，且**刻意不给通用行** ——

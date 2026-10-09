@@ -240,7 +240,9 @@
     // 而这一对不是伪成员；.ctl 里裸写那一形仍由表里 UC 那两行负责，走到上面就 return 了。
     if ((isFormModule_ || isPropertyPageDesigner_)
         && (lower == "scalex" || lower == "scaley")) {
-        lastExpr_ = (lower == "scalex") ? "vb6_ScaleUnitX" : "vb6_ScaleUnitY";
+        // 账 #278 §B72: 名字交回表 —— 这一形站在窗体/属性页自己的接收者上，问 Form 那一行；
+        // 实参由调用点原样递（三形，表里同一行给了个数）。
+        lastExpr_ = controlScaleMethod(FrmControlType::Form, lower);
         return;
     }
 

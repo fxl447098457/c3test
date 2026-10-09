@@ -365,7 +365,10 @@
                 lastExpr_ = "0";
                 return;
             } else if (method == "clear") {
-                c_.emitLine("vb6_ClearList((void*)vb6_hwnd_" + ctrlName + ");  /* ListBox.Clear */");
+                // 账 #278 §B72: 名字交回零实参那张表（上面的类型判据与表里 clear 那一行是同一件事，
+                // 所以这里必然有答；注释原样留着，产物逐字节不变）。
+                std::string fnClr = controlZeroArgMethod(itCtrl->second, "clear");
+                c_.emitLine(fnClr + "((void*)vb6_hwnd_" + ctrlName + ");  /* ListBox.Clear */");
                 lastExpr_ = "0";
                 return;
             } else if (method == "list") {
