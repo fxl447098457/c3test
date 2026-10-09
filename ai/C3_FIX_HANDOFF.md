@@ -2013,6 +2013,32 @@ marker、重编，之后 `check_rtl_embedded` 报 **125/125 逐字节相同**。
 ⇒ 改动面 = 一枚旗标 + 三到四处 save/restore + `semantic_analyzer_expr.cpp:159` 那支 fallthrough 多问一句「站在赋值目标位吗」；
 **只有答「是」的那批升 error**（census 里就是 `Count` 那 2 条），其余（调用位 / 读值位）留 warning。
 
+**⚠ 上面这条图纸自己错了，就地订正（核过源码，不是推测）**：「只把**赋值目标位**升 error」**打不到那 2 条真 bug** ——
+`ucProgressCircular.ctl` 全文里 `Count` 只出现一次，而且是 `If hBrush = 0 Or Count = 0 Then Exit Function`，
+**站在比较的读值位**（`.build/b888_probe` 里那个 `Count = 7` 是我为了让最小复现走赋值路**自己写的**，不是实物形状）。
+⇒ 按「赋值位」切，那枚工程照旧发出不可编译的 C，等于白做一刀。
+**真正的分界不是位置，是「这个名字到底能不能解析」**：VB6 在 `Option Explicit` 下拒绝的是**任何**解析不出来的名字，
+而我们今天解析不出来的 25 条里，23 条是**我们缺项**（宿主伪成员 / 该登记的常量 / 跨模块 Public 过程 / 包成员 /
+自动实例化的窗体名），2 条是**源码自己没有**（`Count`）。所以能做的切法只有一种 ——
+**先把那 23 条的解析补齐，再把剩下的「解析不出 + Option Explicit」升 error**（顺序不能反：先升 error 就是把我们的缺项算成别人的 bug）。
+现成的顺路证据：`Startup.bas:36` 的 `InitVisualStylesFixes` 明明该被 `namesProjectLevel`（标准模块 Public 过程裸名位）挡掉，
+却仍然出了 3001 ⇒ 那枚集合本身漏收，属 #217/#218 那一族的又一格，**它修好之前不要碰严重级**。
+下一轮的动作因此改成：①先量「23 条各自缺在哪张表」（`namesProjectLevel` 的收录条件 / `kHostPseudoRows` 的覆盖面 /
+窗体名自动实例化那一族）；②补一张是一张，每补一张就顺手钉一枚哨兵；③全部清零后再回来把 `warn` 换 `error`，
+那时 census 应该恰好剩 2 条 —— 那才是这一刀的绿照。
+
+**② 的第二个理由（同一轮量到，不是推测）**：`VB3001 未声明` **不是一个报点，是五个**，各自语义还不一样 ——
+`semantic_analyzer_expr.cpp:160`（标识符位，warn）、`semantic_analyzer_stmt.cpp:99`（**For 循环变量**，warn，文案是"未声明的变量"）、
+`semantic_analyzer.cpp:270 / 295`（隐式变量登记那一段的回声，warn）、`semantic_analyzer_decl.cpp:121 / 239 / 405`
+（`Gosub` 到未声明标签，**已经是 error**）、`semantic_analyzer_expr.cpp:632`（error）、`semantic_analyzer_util.cpp:375`（warn）。
+⇒ "把 VB3001 升 error" 这句话本身就含糊：真要做，得**先按报点分格**、逐点定严重级，而不是把一个 DiagnosticID 整个翻面
+（翻了会把 For 循环变量、跨模块调用这些合法用法一起判死，还会与早已是 error 的那两族混在一起，读数没法归因）。
+另记一条没查完的线索（下一轮从这里接）：`Startup.bas:36` 的 `Call InitVisualStylesFixes` 本该被
+`namesProjectLevel` 挡掉（`VisualStyles.bas:204` 有 `Public Sub InitVisualStylesFixes`，而 `projPubProcs` 就是扫标准模块
+顶层 `Sub/Function/Property` 的 Public 名字建的，`driver_semantics.cpp:87-117`）—— 它却仍出 3001，
+**最可疑的是那枚 Sub 落在 `#If VBA7 / #Else` 条件编译块里**（`VisualStyles.bas` 是典型的双分支文件），
+即工程级名字表在建表时有没有把条件编译的分支剪掉，决定了这条名字在不在表上。这一格查清之前，23 条里的"跨模块调用"那 4 条没法定案。
+
 ### B101 `Option Explicit` 在场时只发 warning、发码却把裸名直接发出去 ⇒ 产物必然 C2065（账 #278，2026-10-09，**未开工；① 的严重级那一刀见上一节，已被 census 否掉**）
 
 **⚠ 自纠（同一轮内两次改口，第二次是实测定的）**：本节最初写成「隐式未声明标识符在 `.bas` 落地、在 `.ctl` 不落地 = 两份答案」——
