@@ -723,6 +723,9 @@ bool SemanticAnalyzer::namesProjectLevel(const std::string& name) const {
     if (name.empty()) return false;
     const std::string lk = ifaceLower(name);
     if (projPublicProcs_.count(lk)) return true;
+    // 模块级 Public Const / Public Enum 成员: **裸名位就是它的合法位置** (VB6 工程级常量),
+    // 所以不像模块名那样要挑位置。账 #278 §B106。
+    if (projPublicConsts_.count(lk)) return true;
     return memberObjCtx_ && projModuleNames_.count(lk);
 }
 

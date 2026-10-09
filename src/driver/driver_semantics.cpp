@@ -80,12 +80,13 @@ bool Driver::runSemanticAnalysis(const CompileOptions& options) {
     buildMemberAccessTable();
 
     analyzers_.clear();
-    // <vbeclipse>: 先把"工程级已有的名字"收齐，随各分析器下发。两份都必须从**已解析的
+    // <vbeclipse>: 先把"工程级已有的名字"收齐，随各分析器下发。三份都必须从**已解析的
     // AST** 取，不能取符号表那份 getExternalModuleNames()：跨模块注入跑在逐模块分析之后，
     // 而隐式变量声明发生在分析当刻 —— 晚了就把 Module1.ShowForm2 这种名字挤成局部变量
     // (实测 ext_show_test C2063、test_modulemethod 恒返 0)。见 namesProjectLevel 注释。
     std::unordered_set<std::string> projModNames;
     std::unordered_set<std::string> projPubProcs;
+    std::unordered_set<std::string> projPubConsts;
     for (auto& module : modules_) {
         if (!module) continue;
         projModNames.insert(Symbol::toLower(module->moduleName));
@@ -94,6 +95,29 @@ bool Driver::runSemanticAnalysis(const CompileOptions& options) {
         if (module->isClassModule || module->isFormModule) continue;
         for (auto& d : module->declarations) {
             if (!d) continue;
+            // 账 #278 (§B106): 同一格还漏了**模块级 Public Const / Public Enum 成员**。
+            // VB6 里它们与 Public 过程一样是工程级裸名可见 (类模块/窗体里 VB6 本人不许
+            // Public Const, 所以仍只收标准模块)。发码侧早就把它们折成字面量了 —— 缺的只是
+            // 语义层"这名字工程里有"这一问, 缺了它就要在 Option Explicit 下多配一条 VB3001,
+            // 而在宽松模式下更实: 会被登记成一枚隐式 Variant 局部 (把常量吃掉)。
+            if (d->kind == ASTNodeKind::ConstDecl) {
+                auto& c = static_cast<ConstDecl&>(*d);
+                if (c.access == AccessLevel::Public && !c.name.empty()) {
+                    projPubConsts.insert(Symbol::toLower(c.name));
+                }
+                continue;
+            }
+            if (d->kind == ASTNodeKind::EnumDecl) {
+                auto& e = static_cast<EnumDecl&>(*d);
+                if (e.access == AccessLevel::Public) {
+                    for (auto& m : e.members) {
+                        if (m && !m->name.empty()) {
+                            projPubConsts.insert(Symbol::toLower(m->name));
+                        }
+                    }
+                }
+                continue;
+            }
             std::string nm;
             AccessLevel acc = AccessLevel::Private;
             switch (d->kind) {
@@ -118,6 +142,7 @@ bool Driver::runSemanticAnalysis(const CompileOptions& options) {
         // <vbeclipse>: 工程级名字表 (见上面两份的注释)
         analyzer->setProjectModuleNames(projModNames);
         analyzer->setProjectPublicProcNames(projPubProcs);
+        analyzer->setProjectPublicConstNames(projPubConsts);
         // 泛型 (tB, G3): 调用点推断需要模板只读视图 (runGenericsPrepass 已构建)
         analyzer->setGenericRegistry(&genView_);
         // Interface 契约 (tB, B02): stage 2.7 建好的只读登记表

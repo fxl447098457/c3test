@@ -2000,7 +2000,31 @@ marker、重编，之后 `check_rtl_embedded` 报 **125/125 逐字节相同**。
 `w = ScaleWidth` 与 `Debug.Print …` 合成一行，于是行号与诊断全对不上（报在 `(6,35)` 那种文件里根本不存在的列上）。
 把生成的夹具**原样 dump 出来看一眼**才发现。⇒ 夹具是脚本拼的时候，「先核夹具本身」是第 0 步，不是最后一步。
 
+### B107 账 #278 第二刀已出 = 跨模块 `Public Const` / `Public Enum` 成员进工程级名字表（第 46 道哨兵，2026-10-09，**待门**）
 
+- **落地**（三处，全在"名单"这一侧，发码一行没动）：`driver_semantics.cpp` 建表那一趟多认两类 AST
+  （`ConstDecl` 取 `Public` 的名字、`EnumDecl` 取 `Public` 的每个 `EnumMember`），存进第三份名单
+  `projPubConsts`；`semantic_analyzer.hpp` 一个 setter + 一个成员；`namesProjectLevel` 多问一句
+  （**位置无关** —— 裸名位就是常量的合法位置，不像模块名要挑限定符位）。
+- **A/B（全语料 398 输入，BASE = 未含本刀的那枚 exe）**：`artifacts that changed = 0`、
+  `diagnostics ADDED = 0`、**VB3001 25 → 24**，唯一消失的一行是 `VBFlexGridDemo` 的 `CTRLINFO_EATS_RETURN`；
+  per-id delta 只有 `VB3001`（没有别的号跟着动）。⇒ 形状门不该动一行。
+- **探针读数**：同一份 `.build/b909_probe` 修前 3 条 VB3001、修后 **0 条**，产物
+  `vb6_ret_SumIt = ((42 + 3) - 0);` **逐字节不变** —— 折叠本来就是发码在做的事，本刀只是让语义层别再报错。
+- **第 46 道哨兵** `scripts/check_project_const_visibility.ps1`：自己造一份临时工程（不进语料、不动清单）。
+  **V1** 正例不许报 VB3001 且产物必须出现"字面量相遇"的折叠；**V2 反面证人** = 同一工程里放一枚真不存在的名
+  （`pcvNoSuchNameAnywhere`）**必须继续报 VB3001**（只钉 V1 的哨兵会给"干脆什么都不报"背书 —— 那是同一个洞的另一种坏法）；
+  **S1/S2** 钉建造点与消费点各一处（三份名单的 insert 数 2/1/1、三个 setter 各 1 声明+1 调用、语义层消费点各 1）。
+  `-Exe` 参数是专门为负控加的。
+- **两条负控各自红**：V1 用未含本刀的 exe ⇒ 红在"PCV_ANSWER 仍报 VB3001"；S1 植一枚假 insert ⇒
+  红在"3 sites (want exactly 2)"；按 md5 删回原位后双双绿。
+- **顺带两条读数**：① `Public Enum` 成员的产物形状 = `typedef enum vb6_enum_X { vb6_enum_X_A = 0, … }` + 用点折成字面量；
+  ② 那枚 bogus 名在产物里仍是**裸标识符**（`bogus = vb6_ChkLong(pcvNoSuchNameAnywhere);`）⇒ §B101 那一格没被本刀动过，
+  它正是"解析不出 + Option Explicit 将来升 error"的靶子。
+- **12 处的现状**：本刀清掉 1 处（`CTRLINFO_EATS_RETURN`）；**已量成"发码对、诊断错"的累计 9 处**
+  （窗体伪成员 5 + 裸 `Controls` 2 + 裸 `UserControl` 1 + `TmForm2` 1 —— 最后这枚本轮补量：
+  `Unload TmForm2` 发的是 `vb6_UnloadForm(vb6_form_hwnd_TmForm2())`，rc=0，与 §B104 同形）；
+  剩下 `VK_UP` = 夹具漏写 `Private Const`（§B106），`Printers` = **还没量**，按 §B104/§B105 那把尺子先定性再动。
 
 ### B106 跨模块 `Public Const`：工程级名字表**只收过程、不收常量** —— 第 10 处"发码有路、语义没放行"，而且连标准模块之间都报（2026-10-09 量完，**下一刀**）
 

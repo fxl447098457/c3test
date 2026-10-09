@@ -154,18 +154,25 @@ public:
     // 裸写的文档成员（账 #219）：判据 = 宿主伪成员表的 HPF_BARE 列，定义处写清了。
     bool isDocumentBarePseudoMember(const std::string& name) const;
     // 上条的两份数据源。driver 在逐模块分析开始前从**已解析的 AST** 算好，各分析器
-    // 各持一份 (名字表很小，复制比lifetime 推理便宜)。分开两条而不是一条: 两个位
-    // 要的事实不同 (裸名位 / 限定符位)，合成一条就把"模块名"和"过程名"混成一锅。
+    // 各持一份 (名字表很小，复制比lifetime 推理便宜)。分开几条而不是一条: 各位要的事实
+    // 不同 (裸名位 / 限定符位)，合成一条就把"模块名"和"过程名"混成一锅。
+    // 第三份 (Public Const / Public Enum 成员) 是**位置无关**的: 裸名位就是它的合法位置。
     void setProjectModuleNames(std::unordered_set<std::string> s) {
         projModuleNames_ = std::move(s);
     }
     void setProjectPublicProcNames(std::unordered_set<std::string> s) {
         projPublicProcs_ = std::move(s);
     }
+    // 账 #278 (§B106): 标准模块的模块级 Public Const / Public Enum 成员 —— VB6 里与 Public
+    // 过程同格 (工程级裸名可见)。这份名单只由 driver 从 AST 算一次; 语义层只问, 不自己扫声明。
+    void setProjectPublicConstNames(std::unordered_set<std::string> s) {
+        projPublicConsts_ = std::move(s);
+    }
     // 当前正在分析的标识符是否站在 `Mod.成员` 的限定符位上 (visit(MemberAccessExpr) 置位)。
     bool memberObjCtx_ = false;
     std::unordered_set<std::string> projModuleNames_;
     std::unordered_set<std::string> projPublicProcs_;
+    std::unordered_set<std::string> projPublicConsts_;
 
     // 类继承 (tB, B08c): `obj.<成员>` 的 Protected 越权判定, 命中即报错并返回 true。
     // 只在"接收者解析得出工程类 + 链上最近的声明者把它声明成 Protected + 当前模块不在那条

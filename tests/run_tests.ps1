@@ -1029,6 +1029,20 @@ function Test-DiagIdExclusivity {
         $out | Select-Object -First 6 | ForEach-Object { Write-Host "  $_" }
     }
 }
+function Test-ProjectConstVisibility {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] project_const_visibility ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$PSScriptRoot\..\scripts\check_project_const_visibility.ps1" 2>&1
+    $rc = $LASTEXITCODE
+    if ($rc -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        $out | Select-Object -First 6 | ForEach-Object { Write-Host "  $_" }
+    }
+}
 function Test-RtlEmbedded {
     $script:total++
     Write-Host -NoNewline "  [STATIC] rtl_embedded ... "
@@ -5385,6 +5399,7 @@ if ($Category -in @("all", "compile")) {
     Test-RtlEmbedded
     Test-ComSigFieldDefaults
     Test-DiagIdExclusivity
+    Test-ProjectConstVisibility
 
     Test-EmitcArtifactCaliber
     Test-CtrlGeomCache
