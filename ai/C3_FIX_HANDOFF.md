@@ -2000,7 +2000,66 @@ marker、重编，之后 `check_rtl_embedded` 报 **125/125 逐字节相同**。
 `w = ScaleWidth` 与 `Debug.Print …` 合成一行，于是行号与诊断全对不上（报在 `(6,35)` 那种文件里根本不存在的列上）。
 把生成的夹具**原样 dump 出来看一眼**才发现。⇒ 夹具是脚本拼的时候，「先核夹具本身」是第 0 步，不是最后一步。
 
-### B109 账 #278 第四刀已出 = 窗体裸写属性那张表搬到 common，两层都问它（§B104 的堵点接上，第 48 道哨兵，2026-10-09，**待门**）
+### B110 账 #278 第五刀已出 = 工程级**窗体名**进第四份名字表（`TmForm2` 那一处清掉，第 49 道哨兵，2026-10-09，**待门**）
+
+- **缺的是什么**：VB6 里**窗体名**站在裸名位就是它的默认实例（`Unload TmForm2` / `Set f = TmForm2`）。发码侧一直答对 ——
+  `cgen_expr_ident_symbol.inc` 的 Fix 086 支路拿 `knownFormModuleNames_` 查，命中就发 `vb6_form_hwnd_TmForm2()`；
+  语义层那份"工程级已有的名字"只有三格（Public 过程 / Public Const / 模块名），而模块名那格**只认限定符位**
+  ⇒ 同一句里 `TmForm2.Visible` 不报、`Unload TmForm2` 报。census 里那条 `TmForm.frm:131` 就是这么来的。
+- **不能并进模块名那一格**：模块名只许站限定符位（`Module1.ShowForm2` 里认 `Module1`），窗体名**两个位都合法**。
+  合并就把裸写的模块名也一起放行了 —— 那是把一条 VB6 里根本不合法的写法判成合法。
+- **这次 A/B 的"产物零差"该怎么读（与 §B108 那条规矩相反的一面，值得钉）**：自建探针 `.build/b123_probe`
+  （一枚 Option Explicit 的 .frm + 一枚**宽松** .bas，都用裸名指同一枚兄弟窗体 `PfOther`）实测两档：
+  BASE = `vb6_UnloadForm(vb6_VariantToObjectVal(PfOther));` 配一行 `vb6_VARIANT PfOther = vb6_VariantEmpty();  /* 隐式变量 */`
+  ⇒ **卸掉的是那枚空 Variant，不是窗体**；NEW = `vb6_UnloadForm(vb6_form_hwnd_PfOther()  /* form default instance */)`。
+  而全语料 398 输入里"宽松模块裸用兄弟窗体名"= **0 处** ⇒ A/B 的 `artifacts changed = 0` 是**零覆盖**，不是无害。
+  ⇒ 同一条结论再确认一次：**产物差异不能当"这条诊断值不值得修"的判据**，红只能自己造（本刀 V3 就是为它写的）。
+- **落地 = 第四份工程级名单，且与发码侧同一个建造点**：新增 `Driver::collectFormModuleNames()`（定义在
+  `driver_semantics.cpp`，声明在 `driver.hpp`）；两处消费 —— 语义侧 `setProjectFormNames(...)` 下发，
+  发码侧 `driver_codegen_typedfield_scan.inc` 里那份**就地扫描 `modules_` 撤掉**换成调用它。
+  判据落在 `namesProjectLevel` 第四格。留两份扫描 = 同一事实两份权威，将来谁改判据谁漏改另一边（§B97/§B107 同族）。
+- **那条自我排除不是装饰**：`projFormNames_.count(lk) && !(currentModule_ 与它同名)` —— 抄的是发码侧
+  `lower != knownFormName_` 那半句，两层必须同一个答案。放行"窗体模块里指着自己那个名字"= 把一条发码侧走**另一条支路**的
+  写法判成合法；而实测那条支路的答案本身是坏的 ⇒ 见 §B111（先把口径对齐，别把坏答案钉成规范）。
+- **A/B（全语料 398 输入，BASE = `.build/b123_C3_base.exe` = 不含本刀那台 exe）**：`VB3001 18 → 17`、
+  `artifacts that changed = 0`、`diagnostics ADDED = 0`、per-id delta 只有 `VB3001` ⇒ 形状门不该动一行。
+- **第 49 道哨兵** `scripts/check_project_form_names.ps1`：**V1** 裸写的兄弟窗体名不许报 VB3001；
+  **V2 反面证人**（同一枚窗体里另放一枚真不存在的名 `pfNoSuchNameAnywhere`）必须**仍然**报 —— 只钉放行不钉反面 = 把闸门整个关掉；
+  **V3** 产物三头：`vb6_form_hwnd_PfSibling(` ≥ 2 处（严格 .frm + 宽松 .bas 各一次）、不许出现 `vb6_VARIANT PfSibling`、
+  不许出现 `vb6_VariantToObjectVal(PfSibling`；**S1** 建造点唯一（定义 1 / 声明 1 / 语义侧同串 2 / 发码侧 1）+
+  旧那份 `formModuleNames.insert` 不许回来 + 语义层问 `projFormNames_` 恰好 1 处 + setter 1 声明 1 调用。
+  **两条负控各自红过**：A `-Exe …\b123_C3_base.exe` ⇒ V1 + V3 三条红；B 把 `namesProjectLevel` 里那一格注释掉 ⇒
+  S1 单独报"semantics asks projFormNames_ 0 times"。植入都按 md5 原样还原。
+- **12 处到现在**：本刀清 `TmForm2` ⇒ 累计 **8**（§B107 常量 1 + §B108 `Printers` 1 + §B109 窗体伪成员 5 + 本刀窗体名 1），
+  剩 **4 处** = 裸 `Controls` 2 + 裸 `UserControl` 1（§B105，撞在宿主表对 `rtl` 字段的契约上，口径 a/b 待拍）、
+  `VK_UP` 1（夹具补一枚 `Private Const`，值回 `winuser.h` 对，别抄记忆里的数 —— §B165/#165 那轮三次栽在抄错常量上）。
+- **重算 17 行（同一枚 NEW exe，`.build/b125_census.py` → `b125_census_out.txt`）**：**13 个唯一源码位置 = 17 行**，
+  按成因分格：刻意负例 5 位置 / 6 行（`nopeHere`、`alsoNope`、`nopeHereIsNotAName`、`Hidden1`、`OpenSecret` 两输入）、
+  拆成单文件编译的自然结果 3（`Form2` / `InitVisualStylesFixes` / `MainForm`）、源码 bug 1 位置 / 2 行
+  （`ucProgressCircular.ctl:931` 的 `Count`，两份 Charts 输入各报一次）、真缺项 4 位置 / 6 行（`Controls` 2 名 × 2 输入 + `UserControl` + `VK_UP`）。
+- **⇒ §B101 前面又冒出一格口径题（本刀顺流量出来的，不是代码题）**：那 3 条"自然结果"出自 `emit_manifest.ps1`
+  把 `.bas` 当**独立输入**跑（工程里没有兄弟模块，"未声明的标识符（可能来自其他模块）**是对的描述**）。
+  "解析不出 + `Option Explicit` ⇒ error"一旦生效，**这些独立输入会直接编译失败**，而形状门按行钉死清单 ⇒
+  要么升级只对整工程输入生效，要么把那三份夹具补上兄弟模块。两种都是口径，要先拍再动。
+
+### B111 新账 = 窗体模块里 `Unload 自己的窗体名` 交出的是 Caption 字符串（2026-10-09 量，**未开工；语料暴露 0 处**）
+
+- 同一个探针顺带量到的（`.build/b123_probe/PfSelf.frm`，三行体的窗体，站在**自己**的模块里）：
+  `Unload PfSelf` ⇒ `vb6_UnloadForm(vb6_GetControlText(vb6_hwnd_PfSelf)  /* default prop: .Caption */);`
+  = **BSTR 进 HWND 槽**，账 #229 那条"裸 int 进 BSTR 槽"的反方向同族；而同一句换成兄弟名（`Unload PfOther`）
+  发的是 `vb6_form_hwnd_PfOther()` ⇒ **同一句 VB 两种答案**，差别只在接收者是不是自己。
+- **对象位那一格是对的**：同一模块里 `Set ff = PfSelf` ⇒ `ff = vb6_hwnd_PfSelf;  /* Set */`
+  （`cgen_form_ctrl_registry.inc:10` 把窗体自己的名字也登记进 `knownFormControls_`，类型 Form）
+  ⇒ 坏的只有"取默认属性交给按 HWND 定型的出口"这一步，不是整条 own-name 通路。
+- **两层都沉默**：语义层不报 VB3001（BASE/NEW 都不报 —— 模块自己的名字本来就解析得出），发码照发，链接照过
+  ⇒ 只有真按 VB6 语义该卸的那枚窗体没卸。与 §B104 的"发码对、诊断错"正好相反，这一格是**发码错、两层都不响**。
+- **语料暴露 = 0 处**（扫全部 `.frm` 的 `^\s*Unload\s+<名>`：own-name **0** / 兄弟名 1 / 其余一律 `Unload Me`）
+  ⇒ 潜伏项，与 #244 同形，别当编译阻塞排产。
+- **修法方向（先记不动手）**：语句位/HWND 位的 own-name 应与对象位**同源** —— 折成 `vb6_form_hwnd_<自己>()`，
+  不是退到控件默认属性那条支路。判据两头钉：`Unload <自己>` 发 hwnd 出口 + `Unload Me` 的发码不回潮；
+  再补一枚"VB3001 不许因为这条改动而新增"的护栏（本刀那条自我排除正是靠它对齐口径，两处必须一起想）。
+
+### B109 账 #278 第四刀已出 = 窗体裸写属性那张表搬到 common，两层都问它（§B104 的堵点接上，第 48 道哨兵，2026-10-09，门 #445 attempt 1 全绿（12/12，含形状门；第一趟 #444 红在本刀自己带出的三处旧哨兵，head 9194b997））
 
 - **定性（沿用 §B104 的实测）**：语料里那 5 条窗体伪成员（czUI `ScaleWidth`×2、VbQRCodegen `WindowState`/`ScaleWidth`/`ScaleHeight`）
   是"发码对、诊断错"—— `cgen_expr_ident_symbol.inc` 在窗体模块里拿 `getControlPropReadFn(FrmControlType::Form, name)`
