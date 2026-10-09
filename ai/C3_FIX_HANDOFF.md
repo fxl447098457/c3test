@@ -2000,20 +2000,75 @@ marker、重编，之后 `check_rtl_embedded` 报 **125/125 逐字节相同**。
 `w = ScaleWidth` 与 `Debug.Print …` 合成一行，于是行号与诊断全对不上（报在 `(6,35)` 那种文件里根本不存在的列上）。
 把生成的夹具**原样 dump 出来看一眼**才发现。⇒ 夹具是脚本拼的时候，「先核夹具本身」是第 0 步，不是最后一步。
 
+### B117 账 #278 第九刀已出 = 工程级名单长出第五格：标准模块的 `Friend` 过程（census 11→10，整工程输入归零，哨兵 46 扩三条，2026-10-10，**待门**）
+
+- **怎么撞上的**：给 §B101 数前置清单时逐行读 census，发现第 8 行 `friend_open_ok.vbp → OpenSecret`
+  的**输入是整工程**，而 `pkg_s03_friend_open` 是一枚 `Test-Vbp` **正例**（真跑出 `PKG-FRIEND-OK`），
+  产物里那句一直是 `vb6_FrOpenPkg_OpenSecret();` ⇒ 语义层那条 VB3001 是**假话**，而 §B116 把它记成了
+  「刻意负例」。**教训：census 的行要按「这枚输入是谁的夹具、正例还是反例」分类，不能按名字像不像噪声分类。**
+- **根因一格**：`driver_semantics.cpp` 那份工程级名单（`projPubProcs`）的条件是 `acc == Public`，
+  而 VB6 里标准模块的 `Friend` 过程**就是工程级裸名**（`src/common/types.hpp` 那句
+  `Friend = 2, // VB6无此关键字，保留` 是错的：parser 认、发码认、兄弟模块一直调得动）。
+  §B116 从 ① 那格挪进 ②/新增的这条订正见上。
+- **两种后果与 §B106 同一对，而这第二种不是噪声**（两台同一枚 exe 各跑一遍，探针在
+  `.build/b176_fr`（`Option Explicit`）与 `.build/b182_loose`（宽松））：
+  ① 严格模块：`Friend Sub SecretSub` 被兄弟模块裸调 ⇒ 产物对（`vb6_Provider_SecretSub();`）而多配一条
+     VB3001 ⇒ 改后 **1→0**；
+  ② 宽松模块：**那枚名字落成一枚隐式 Variant 局部**，调用发成
+     `vb6_VARIANT SecretSub = vb6_VariantEmpty();  /* 隐式变量 */` + `SecretSub();`
+     ⇒ 真编译 `error C2063「不是一个函数」`、**BUILD-RC=1 零产物** ⇒ 改后出 exe 且真跑出
+     `FRIEND-SUB-OK / PUB-SUB-OK` 两行。⇒ 又一格「**门绿 + 有 VB3001** 必须逐条读」的实物
+     （§B106 那一族的第一格编不过样本：前面几格都只是产物对而诊断错）。
+- **落点一格，且不新开权威**：放行只认「工程里有没有这个名字」，而**包边界**那一份答案早就在
+  `driver_compile.cpp` 按 manifest 算好了（`packageBlockedNames_`：`modExported && (public || friend && friendVisible)`）
+  ⇒ 新分支**去问那张现成的表**，不在名单建造点抄一遍 manifest 规则。这一条是硬的：`XmodPkg` 写
+  `Friend=False`，它的 `Hidden1` 若被放行，`friend_bad.vbp` 那声 **VB7006**（`Test-VbpBuildFail
+  pkg_s03_friend_blocked` 钉的「is not exported by package」）会被吞掉 ⇒ 放行吃掉边界 = 把一个缺陷
+  换成另一个缺陷。
+- **判据（扩哨兵 46，不新开一道 —— 同一条决定的家在这里）**：`V3` 宽松档两头钉（隐式局部不许出现 +
+  真出口 `vb6_PcvFriend_SecretSub();` 必须在）、`V4` 反面证人（现成夹具必须仍报 VB7006 且退非零）、
+  `S3` 结构（建造点认两档 `acc == AccessLevel::Friend` 恰好 1 处；那一问 `packageBlockedNames_.find`
+  全仓**恰好 1 处**）。**四条负控 + 一台旧 exe**：N1 摘掉 Friend 档 ⇒ S3 红；N2 摘掉那一问 ⇒ S3 红；
+  N3 把那一问写两遍 ⇒ S3 红（`found 2`）；N4 把夹具 manifest 翻成 `Friend=True` ⇒ V4 红
+  （`now exits 0`，边界真被吞）；N5 无关改写 ⇒ 仍绿。**行为负控用门 #450 的 `c3-exe` 工件**
+  （`.build/b191_base`，第八刀那台）跑同一份哨兵 ⇒ **只有 V3 两条红**，其余全绿 ⇒ 这条判据抓的正是本刀。
+  全部跑在 `src`+`tests` 的**副本**上（哨兵的 `-Root` 形参），共享工作树一格未动。
+- **护栏与读数（三件都是工件读出来的，不是推的）**：
+  ① `friend_open_ok.vbp` 的 `--emit-c` 产物**改前/改后逐字节相同**（3318 vs 3318）⇒ 严格档那一头只改「谁能答」；
+  ② 语料 census **11 → 10**，且少的那一行正是整工程输入那一行 ⇒ **整工程输入首次 0 行**；
+  ③ 全语料形状门重算（`scripts/emit_manifest.ps1 -Out` + `compare_emit_manifest.ps1`，不 -Bless）：
+     **期望 398 行 / 实际 398 行 / 相同 398 / 哈希不同 0 / 缺席 0 / 多余 0，rc=0** ⇒ 这一刀在整份语料上
+     **一行发码都没动、一个退出码都没翻**。语料里那五枚 `Friend` 过程只有两枚在标准模块（都在包里），
+     而它们的两个消费者都写着 `Option Explicit` ⇒ 宽松档那一格在本刀是**零暴露**（§B108 的反向提醒：
+     「零差异」不能反过来证明「以前只是噪声」—— 那一条是靠真编真跑定的，见上面 ②）。
+- **§B101 的形状因此收紧**：升级要动的只剩 ① 三条负例针（必须与翻严重级同批挪进 `Test-CompileFail`）＋
+  ② 五份单文件输入（口径题，任务 #282）＋ ③ `Count` 两行（源码 bug）。
+
 ### B116 §B101 那刀的前置清单（2026-10-09 量完，**未开工**）：升 error 会连带翻 rc，而形状门逐行钉的就是 rc
 
-第八刀之后语料 census 剩 **11 行 VB3001**，账上那 12 处「解析不出」的真缺项**已清零**。所以 §B101
-（解析不出 + `Option Explicit` ⇒ error）现在缺的不是修法，是**这三格后果各落在谁身上**：
+第八刀之后语料 census 剩 **11 行 VB3001**。那 12 处「解析不出」当时**没有清零** —— 这一句写在第九刀
+之前，是本节自己的错（下面 ① 那格把一整条**整工程输入**读成了刻意负例）：**第九刀（§B117）**
+清掉的那一行 `friend_open_ok.vbp → OpenSecret` 出自一枚 `Test-Vbp` 的**正例**夹具
+（`pkg_s03_friend_open`，跑起来真打印 `PKG-FRIEND-OK`），而它的调用在发码里一直是**对的**
+（`vb6_FrOpenPkg_OpenSecret();`）⇒ 那是真缺项，不是噪声。清完之后 census 剩 **10 行**，
+整工程输入那一档**首次归零**。所以 §B101（解析不出 + `Option Explicit` ⇒ error）现在缺的
+不是修法，是**这三格后果各落在谁身上**：
 
-- **① 刻意负例 5 个位置 / 6 行**（`nopeHere`、`alsoNope`、`nopeHereIsNotAName`、`Hidden1`、`OpenSecret`）：
-  判据在 `tests/run_tests.ps1` 里以 `Test-CodegenNote ... @("VB3001", "nopeHere")` 的形状**钉那条诊断在场**
-  （5782 / 5783 / 5793 / 6128 四处）。升级后号不变（`error VB3001` 仍含 "VB3001" 子串）⇒ 子串判据照过，
-  **但 `Test-CodegenNote` / `Invoke-CodegenProj` 那批助手先要求 exit code == 0** ⇒ 这四条会当场红在退出码上。
-  正解不是放宽助手，而是把这四枚挪进 `Test-CompileFail` 那一族（B08e-6 就是为" Expect 诊断 + 非零退出"建的）。
-- **② 单文件输入的自然结果 3 行**（`Form2` / `InitVisualStylesFixes` / `MainForm`）：出自
+- **① 刻意负例 3 行**（`nopeHere` / `alsoNope` / `nopeHereIsNotAName`）：
+  判据在 `tests/run_tests.ps1` 里以 `Test-CodegenNote ... @("VB3001", "nopeHere")` 的形状**钉那条诊断在场**，
+  实数是三处：**5782 / 5783 / 5793**。（`grep -c '"VB3001"'` 全文件有 8 处，另外五处 5788 / 5815 / 5824 /
+  5826 / 6128 都在 **Absent 名单**里 —— 那种针要求「这条诊断不许出现」，升级动不到它。上一版把 6128 算进来
+  写成「四处」就是把两类针混了。）
+  升级后号不变（`error VB3001` 仍含 "VB3001" 子串）⇒ 子串判据照过，**但 `Test-CodegenNote` /
+  `Invoke-CodegenProj` 那批助手先要求 exit code == 0** ⇒ 这三条会当场红在退出码上。正解不是放宽助手，
+  而是把这**三枚**挪进 `Test-CompileFail` 那一族（B08e-6 就是为「Expect 诊断 + 非零退出」建的）——
+  而那一步做在改动之前会当场红，见下面「动手顺序」那条订正。
+- **② 单文件输入的自然结果 5 行**（`Form2` / `Hidden1` / `OpenSecret` / `InitVisualStylesFixes` /
+  `MainForm`）：出自
   `emit_manifest.ps1` 把 `.bas` 当**独立输入**跑（工程里没有兄弟模块，"未声明的标识符（可能来自其他模块）"
-  **是对的描述**）。升级后这三份独立输入**直接编译失败**（退出码 ≠ 0）⇒ 要拍：升级只对整工程输入生效，
-  还是把这三份夹具补上兄弟模块。**这一格没定之前不能动 §B101。**
+  **是对的描述**）。升级后这五份独立输入**直接编译失败**（退出码 ≠ 0）⇒ 要拍：升级只对整工程输入生效，
+  还是把这五份夹具补上兄弟模块（`Form2` 那份补一枚 .frm、`Startup.bas` 那份补它引的模块、
+  `friend_*.bas` 那两份补上包 —— 注意后两份一补就变成「整工程输入」，与 §B117 那一格同形）。**这一格没定之前不能动 §B101。**
 - **③ 源码 bug `Count` 2 行**（`ucProgressCircular.ctl:931`，两份 Charts 输入各报一次）：那工程本来就不出 exe，
   但它是**形状门的输入** ⇒ 见下面那条 rc。
 - **⚠ 谁都没写下来的一格（本轮量的真正收获）**：`emit-manifest.expected.txt` 每行的格式是
