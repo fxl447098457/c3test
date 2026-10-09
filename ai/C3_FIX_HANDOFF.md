@@ -2002,7 +2002,19 @@ marker、重编，之后 `check_rtl_embedded` 报 **125/125 逐字节相同**。
 `w = ScaleWidth` 与 `Debug.Print …` 合成一行，于是行号与诊断全对不上（报在 `(6,35)` 那种文件里根本不存在的列上）。
 把生成的夹具**原样 dump 出来看一眼**才发现。⇒ 夹具是脚本拼的时候，「先核夹具本身」是第 0 步，不是最后一步。
 
-### B123 账 #278 第十三刀已出 = Winsock 那一族的「有哪些成员 / 各自叫什么 / 收几枚实参」收成一张表：个数第一次变成**接不接这条形的条件**（arity 哨兵的 R3/R4/R5 三面跟着长，2026-10-10，**待门**）
+### B124 新账 = C29-Data 那一族的**发码侧直译**全是死码：三条码头认的前缀 `vb6_Data_Self(` 早已没人再发，今天活的是 memberobj 那枚真 IDispatch（2026-10-10 量，**未开工**）
+
+- **怎么撞上的**：把 §B123 末条列的 Data 那一族（`refresh` + 四枚 `Move*`，5 枚 × 三条码头 = 15 处手抄出口名）照 Winsock 那一刀的样收成一张表，写完跑 R4 —— **EMIT-CENSUS 当场红：夹具里那五条 `DataZ.Recordset.Refresh/Move*` 一枚也没走到那三条码头**，产物是 `vb6_ComCall(vb6_Data_RecordsetObj(vb6_hwnd_DataZ), L"Refresh", NULL, 0)`。⇒ 那张表收的是**没人再读的答案**，不是「同一个事实的两份答案」，方向错 ⇒ 这一刀整个撤回（改动存在 stash `k14-superseded-by-B124`，工作树回到 `d2caf7c0`）。**这条 census 正是第十二刀立的那一头** —— 没有它，这次会留下一张钉死 20 行的表和一段永不执行的分支。
+- **读数（两个方向都查了，不是推断）**：
+  - 后端**没有任何地方再发出** `vb6_Data_Self(`：`grep -rn "vb6_Data_Self" src/backend` 只有 6 处，全是**读**它 —— `cgen_expr_call_callee_withm.inc:290`、`cgen_expr_call_com_bind.inc:143` 与 `:237`、`cgen_util_com.cpp:127`、`stmt/cgen_call.cpp:298`，加上 `detail/util/cgen_state.inc:594-597` 那枚 `dataSelfHwndExpr`（从前缀里抠 hwnd）。⇒ 五处 `find("vb6_Data_Self(") == 0` 恒假，其下的直译分支（方法 15 处 + 标量那四枚 `BOF/EOF/RecordCount/FieldCount`）一条都进不去。
+  - 活的出口是 `vb6_Data_RecordsetObj`（`cgen_util_ctrl.cpp:517` 在 `recordset` 那一档交的名字）→ RTL `vb6forms_data.c:473` 转给 `vb6_MemberObj_NewRs` ⇒ **真 IDispatch**（成员名表 `vb6forms_memberobj.c:136-137` 里 `BOF/EOF/RecordCount/FieldCount/Fields/MoveFirst/MoveLast/MoveNext/MovePrevious/Refresh` 十一枚齐，应答侧 `:630` 用 `vb6_Data_RecordCount(p->owner)`、`:664` 用 `vb6_Data_MoveFirst(p->owner)`）。⇒ **RTL 那批 `vb6_Data_*` 出口本身是活的**，只是调用者从 cgen 变成了 memberobj。
+  - `tests/c29data/DataApp.frm`（装在门上真编真跑那枚）的 `Data1.Recordset.RecordCount` / `.CurrentRow` / `.Refresh` / `.MoveFirst` 全走 memberobj 那一路，DT1/DT2 那些断言今天就是靠它过的 ⇒ 撤死码**不会**动到它，但必须拿它当证人。
+  - `vb6_Data_Self` 那枚 RTL 导出（`vb6forms_data.c:452` + `vb6forms_prop_ctrl.h:328`）全仓 0 个调用者 ⇒ 一枚死符号。
+- **排掉的一条嫌疑（量过才写）**：本以为走 COM 那一路会把数值成员按字符串读（#88 那一族的翻版）。实测 `n = DataZ.Recordset.RecordCount` 发的是 `vb6_ComGetIntProp(recordsetObj, L"RecordCount")`、`If … RecordCount > 3` 也是 IntProp ⇒ 成员类型走的是既有的 COM 型别表，这一格没有洞。探针在 `.build/probe_data.frm`（三形：赋值 / 比较 / 布尔）。
+- **下一刀的形状**（要动 RTL，与控件线同一批规矩：改 `src/rtl` 必 touch `c3rtl.rc` 再重编 C3.exe，账 #156 那条坑）：① 撤五条前缀判据 + 方法侧 15 枚出口名 + 标量侧那四枚 + `dataSelfHwndExpr`；② `vb6_Data_Self` 导出去留（去 ⇒ touch rc）；③ 判据换成一条**结构针**：`Data1.Recordset.<成员>` 的产物必须只有 memberobj 那一形（`vb6_Com*Prop(vb6_Data_RecordsetObj(…))` / `vb6_ComCall(同一枚, L"<成员>"…)`），不许再出现任何 `vb6_Data_<成员>(` 直译 —— 这一条同时把「以后有人再把直译接回来」挡住；④ 证人 = `tests/c29data` 那套装在门上的断言不动，另加一条 A/B：撤完 398 份逐字节相同（死码的撤动本该零差异，若差一行就说明有一条我判成死的其实活着）。
+- **口径要先拍的那一格**（拍完才动手，别默认）：发码侧要不要恢复**直译**？两案 ——(a) 只撤死码，口径定为「Recordset 一律走 memberobj 那枚真 IDispatch」（改动小、产物一字不变、RTL 出口的唯一调用者是 memberobj，一处答案）；(b) 恢复直译（#192 当年那条注释的意图：绕开 Invoke 装箱、少一层），代价是**同一个成员两个调用者**（cgen 与 memberobj 各一条），正与本账「一个事实一处答案」相反。⇒ 本线推荐 (a)，(b) 只有在量出 memberobj 那一路有实际代价（每次 Invoke 装箱 + ID 匹配的成本落在热路径上）时才回头。
+
+### B123 账 #278 第十三刀已出 = Winsock 那一族的「有哪些成员 / 各自叫什么 / 收几枚实参」收成一张表：个数第一次变成**接不接这条形的条件**（arity 哨兵的 R3/R4/R5 三面跟着长，2026-10-10，门 #455 attempt 1 全绿（run 37988792329、head `d2caf7c0`、12/12 全 completed/success、非绿 0、wall 10m53s；含 arity 哨兵所在的 Tests (compile) 片，而 **Emit manifest (shape gate) 那一跑也绿** ⇒ 「398 份逐字节相同」被 CI 那台独立复算证实））
 
 - **动了什么**：`cgen_util_ctrl.cpp` 长出 `controlWinsockMethod(memberLower, outArgc)` —— 八枚成员一行一条（`close`/`listen`/`connect` 1、`accept` 2、`bind` 3、`senddata` 2、`getdata`/`peekdata` 4，个数取自 RTL 原型 `vb6forms_prop_ctrl.h:821-828`）。两条码头改问它：表达式码头（`cgen_expr_call_callee_withm.inc`）里那张 `kWsKnown` 名单 + 八条分支的字面量一起撤掉（**表的键就是名单**，认不认与叫什么从此一处分家不了），语句码头（`cgen_call.cpp:356-358`）那三枚手写的也不留。实参形状（出参取址 `&变量`、`(int32_t)` 强制、空串兜底）照旧留在调用点 —— 与前几张表同一套规矩。
 - **这一刀的增量不止是"少抄一遍"**：语句码头那一形手里一枚实参都没有，所以它现在拿的是**表里「个数 == 1」的那几档**（`if (argcWs != 1) fnWs.clear();`），其余成员自动不接、落回带实参那条码头。也就是说个数不只是被对账的数，它成了发码侧的判据 —— 将来谁给 `vb6_Ws_Close` 加一枚形参，这一头会自动停止接它，而不是编出一条递少一枚的调用。
