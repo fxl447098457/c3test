@@ -609,34 +609,19 @@
             const Symbol* comSym = earlyBoundSym_;
             earlyBoundSym_ = nullptr;
 
-            // 查找方法签名以确定返回类型
-            std::string memLower = memberName;
-            std::transform(memLower.begin(), memLower.end(), memLower.begin(), ::tolower);
-            auto it = comSym->comMethods.find(memLower);
+            // 账 #245/§B94: 这张表只从 comSigViewOf 读一次，下面两处共用同一份视图。
+            ComSigView sv = comSigViewOf(comSym, memberName);
             bool hasArgs = (!node.positional.empty() || !node.named.empty());
 
 
             // 无参属性Get: 用后期绑定属性读取，根据返回类型选函数
-            if (it != comSym->comMethods.end() && it->second.isPropertyGet && !hasArgs) {
-                const auto& sig = it->second;
-                std::string returnType = mapType(sig.returnType);
-                if (returnType == "BSTR") {
-                    lastExpr_ = "vb6_ComGetStringProp(" + objExpr + ", L\"" + memberName + "\")";
-                } else if (returnType == "int32_t" || returnType == "int16_t") {
-                    lastExpr_ = "vb6_ComGetIntProp(" + objExpr + ", L\"" + memberName + "\")";
-                } else if (returnType == "double" || returnType == "float") {
-                    lastExpr_ = "vb6_ComGetDoubleProp(" + objExpr + ", L\"" + memberName + "\")";
-                } else if (returnType == "void*") {
-                    lastExpr_ = "vb6_ComGetObjectProp(" + objExpr + ", L\"" + memberName + "\")";
-                } else {
-                    lastExpr_ = "vb6_ComGetStringProp(" + objExpr + ", L\"" + memberName + "\")";
-                }
+            if (sv.found && sv.isGet && !hasArgs) {
+                lastExpr_ = comGetterExpr(sv, objExpr, memberName);
                 return;
             }
             // P24-07: 有参数的前期绑定方法 → 利用签名选择类型化COM调用函数
-            if (it != comSym->comMethods.end() && hasArgs) {
-                const auto& sig = it->second;
-                std::string returnType = mapType(sig.returnType);
+            if (sv.found && hasArgs) {
+                const Symbol::ComMethodSig& sig = *sv.sig;
                 std::vector<std::string> packedArgs;
                 // Fix 160-com-byref: ByRef 对象出参 (Chilkat ObjectOf2/ArrayOf2 的 obj/arr 形参)。
                 // 这类形参 type=Object 且 !isByVal; 调用方必须以 void** 形式把变量地址传出,
@@ -697,17 +682,7 @@
                 }
                 argsArray += "}";
                 std::string callArgs = objExpr + ", L\"" + memberName + "\", " + argsArray + ", " + std::to_string(argc);
-                if (returnType == "BSTR") {
-                    lastExpr_ = "vb6_ComCallBSTR(" + callArgs + ")";
-                } else if (returnType == "int32_t" || returnType == "int16_t") {
-                    lastExpr_ = "vb6_ComCallInt(" + callArgs + ")";
-                } else if (returnType == "double" || returnType == "float") {
-                    lastExpr_ = "vb6_ComCallDouble(" + callArgs + ")";
-                } else if (returnType == "void*") {
-                    lastExpr_ = "vb6_ComCallObject(" + callArgs + ")";
-                } else {
-                    lastExpr_ = "vb6_ComCall(" + callArgs + ")";  // 未知返回类型: 返回void*
-                }
+                lastExpr_ = comTypedCallExpr(sv, callArgs);
                 isComMarker_ = false;
                 return;
             }
@@ -738,6 +713,7 @@
                        lastExpr_.compare(0, 15, "vb6_ComGetProp(") == 0
                     || lastExpr_.compare(0, 17, "vb6_ComGetPropArg(") == 0
                     || lastExpr_.compare(0, 12, "vb6_ComCall(") == 0
+                    || lastExpr_.compare(0, 20, "vb6_ComCallByDispid(") == 0
                     || lastExpr_.compare(0, 18, "vb6_ComCallObject(") == 0
                     || lastExpr_.compare(0, 18, "vb6_ComGetObjectProp(") == 0
                     || lastExpr_.compare(0, 23, "vb6_ComGetPropertyObject(") == 0

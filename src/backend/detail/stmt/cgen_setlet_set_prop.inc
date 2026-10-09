@@ -1,4 +1,4 @@
-// cgen_setlet_set_prop.inc - visit(SetStmt&) 函数体片段：目标侧分派（Nothing / 属性 / COM / 接口引用）
+﻿// cgen_setlet_set_prop.inc - visit(SetStmt&) 函数体片段：目标侧分派（Nothing / 属性 / COM / 接口引用）
 // 由 src/backend/stmt/cgen_setlet.cpp 拆出（2026-09-17），在函数体内被 #include，非独立编译单元。
 // 内容 = 原文件第 12~321 行，逐行未改。
 
@@ -12,7 +12,7 @@
         auto& ma09c = static_cast<MemberAccessExpr&>(*node.target);
         if (ma09c.object && ma09c.object->kind == ASTNodeKind::IdentifierExpr
             && Symbol::toLower(static_cast<IdentifierExpr&>(*ma09c.object).name) == "mybase") {
-            emitExpr(*node.value);
+            emitSetObjectRhs(node.value);
             std::string rhs09c = std::move(lastExpr_);
             if (tryEmitMyBaseAssign(ma09c, rhs09c, /*forSet=*/true)) return;
         }
@@ -188,7 +188,7 @@
                         && !_rhsRawName.empty()) {
                         _rhsRhsIsComPicture = true;
                     }
-                    emitExpr(*node.value);
+                    emitSetObjectRhs(node.value);
                     // Resolve COM marker on RHS
                     // Bug #3 fix: also detect vb6_ComIface_Picture* function return
                     bool _rhsIsComPicture = _rhsRhsIsComPicture;
@@ -216,6 +216,14 @@
                     }
                     // Fix 194: 字符串型控件属性的值必须转 BSTR (数值 RHS → 指针解引用 / 静默无效)
                     _setValExpr = controlPropValueExpr(_setWriteFn, _setValExpr, *node.value);
+                    // Fix <vbeclipse> 2026-10-06: Picture 属性的 RHS 是 Variant 载体
+                    // (LoadResPicture 等, controlPropValueExpr 已包 vb6_VariantToObjectVal)
+                    // 时是 COM 对象, 必须走 FromCom (QI IPicture) 而不是裸句柄 setter,
+                    // 否则 IPicture 指针被当 HBITMAP 挂上去 → 画面错乱。
+                    if (_setWriteFn == "vb6_SetControlPicture"
+                        && _setValExpr.compare(0, 23, "vb6_VariantToObjectVal(") == 0) {
+                        _setWriteFn = "vb6_SetControlPictureFromCom";
+                    }
                     c_.emitLine(_setWriteFn + "(" + makeCtrlHwndArg(_setObjLower, _setItCtrl->second) + ", " + _setValExpr + ");  /* Set Control Property */");
                     return;
                 }
@@ -289,7 +297,7 @@
                               + "*)vb6_UC_InstanceOf(" + hwnd160 + ")";
                     }
                 }
-                emitExpr(*node.value);
+                emitSetObjectRhs(node.value);
                 std::string _valE = std::move(lastExpr_);
                 // Task #43: RHS 是窗体控件属性读 (Set iDlg.Font = SSTabEx1.Font)
                 // 时, Fix 023e/089d 兜底只留下裸 hwnd + isComMarker_ — 不消费则
@@ -326,7 +334,7 @@
                 //   VBFlexGrid.c:2082 prop_let_Font → prop_set_Font(me, &(void*){NewFont})
                 //   → me->PropFont = 复合字面量地址(栈) → 2099 CreateGDIFontFromOLEFont
                 //   → Common.c:1068 vb6_ComGetObjectProp(Font, L"hFont") 的 disp 是栈地址、
-                //   其首 8 字节恰为 &g_vb6_UserControl_FontObj → 当成 vtable 调用 →
+                //   其首 8 字节恰为 &vb6_UserControl_FontObj → 当成 vtable 调用 →
                 //   RIP 落进 .data。**C 里 void** 传成 vb6_ComIface_Font* 只是指针不匹配
                 //   警告, 所以编译期全绿、错误数为 0 也照样崩。**别再加回无条件包装。**
                 bool _psValByVal166 = !_psSym->params.empty()
@@ -367,7 +375,7 @@
         isComMarker_ = false;
         std::string objExpr = std::move(comObjExpr_);
         std::string memberName = std::move(comMemberName_);
-    emitExpr(*node.value);
+    emitSetObjectRhs(node.value);
     // COM属性值: 如果右侧是COM属性, 解析为值
     if (isComMarker_) resolveComValue();
     std::string value = std::move(lastExpr_);
@@ -390,7 +398,7 @@
         return;
     }
 
-    emitExpr(*node.value);
+    emitSetObjectRhs(node.value);
     // Set语句: 如果右侧是COM调用返回的VARIANT*, 需要解封为对象
     if (isComMarker_) {
         // COM属性值作为对象引用: vb6_ComUnpackObject(vb6_ComGetProp(...))
@@ -398,28 +406,16 @@
     }
     std::string value = std::move(lastExpr_);
 
-    // P16: Set cmd = Command1 → value应为vb6_hwnd_Command1而非默认属性值
-    {
-        std::string targetLower = target;
-        std::transform(targetLower.begin(), targetLower.end(), targetLower.begin(), ::tolower);
-        if (knownWithEventsCtrlVars_.count(targetLower)) {
-            // value可能是vb6_GetControlXxx(vb6_hwnd_Name)形式, 需提取为vb6_hwnd_Name
-            size_t hwndPos = value.find("vb6_hwnd_");
-            if (hwndPos != std::string::npos) {
-                size_t endPos = value.find(")", hwndPos);
-                if (endPos != std::string::npos) {
-                    value = value.substr(hwndPos, endPos - hwndPos);
-                }
-            }
-        }
-    }
+    // 账 #258 (§B87) 撤掉了这里那截 P16 事后手术（在发好的 value 文本里 find("vb6_hwnd_") 再截取，
+    // 只认 knownWithEventsCtrlVars_ 的目标）—— 那是「Set 的右值该不该折默认属性」这一问的第二份答案。
+    // 现在右值发码走 emitSetObjectRhs，`Set cmd = Command1` 直接交出 vb6_hwnd_Command1。
 
     // 如果ComCall/ComGetProp返回VARIANT*含对象, 需要UnpackObject
     // 使用一体化函数: vb6_ComCallObject 内部完成 UnpackObject+VarFree
-    if (value.find("vb6_ComCall(") == 0) {
-        // vb6_ComCall(obj, L"Method", args, argc) → vb6_ComCallObject(obj, L"Method", args, argc)
-        value = "vb6_ComCallObject" + value.substr(strlen("vb6_ComCall"));
-    }
+    // 账 #255: 这一段原本是就地手改字符串前缀 = 「COM 调用的结果当对象引用用」这一问的第二份
+    // 抄本 (With 那一路漏了 VARIANT* 这一档, 于是 Charts 的 `With CtrlNames(i)` 全丢)。
+    // 现在两路共用 comObjectRefFromCallExpr；对 vb6_ComCall( 的结果一字不变。
+    value = comObjectRefFromCallExpr(value);
 
     // Fix 037b: 项目类 typed 字段的 Item 属性调用返回 VARIANT, Set 语句需要提取 void* 对象引用.
     // 检测: value 以 "vb6_" 开头且第一个 '(' 恰在 "_prop_get_Item" 之后 → 顶层 Item 调用.

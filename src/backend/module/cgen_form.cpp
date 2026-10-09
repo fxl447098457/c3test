@@ -12,10 +12,22 @@
 
 namespace vb6c3 {
 
-// P24: Convert binary data to C hex array string
+// P24: Convert binary data to C hex array **definition** (file-scope, emitted into the
+// owning module's .c via the deferred frxArrayDefs_ queue) + the header-side declaration
+// helper bytesToHexArrayDecl() right below.
+//
+// C3 bloat fix (exe 13.4MB → ~3MB): 这两个 frx 数组 (窗体 Icon/Picture、控件 Picture、
+// ImageList、SSTab 页图) 原先以 `static const` 直接发在 **.h** 里, 而 .h 被工程内**每个**
+// .c include (menu3d: FrmMain/BitMapBas/Globali_Image/Grafica01/Remote_Globali 共 5 个) ——
+// `static` 是内链接, 所以每个 TU 各自物化一份完整的 2.6MB 只读数据。它们又不是 COMDAT,
+// /OPT:REF /OPT:ICF 一律删不动 → 链接期 5 份共存 → .rdata 12.6MB、exe 虚胖到 13.4MB
+// (VB6 原生仅 2.5MB)。修法: .h 只留 extern 声明, 定义集中到 owning 模块的 .c 里发一次
+// → 全程序仅一份 → 体积回落到数据本身大小。
 static std::string bytesToHexArray(const uint8_t* data, size_t size, const std::string& varName) {
     std::ostringstream ss;
-    ss << "static const unsigned char " << varName << "[] = {\n";
+    // 显式 extern: 生成物是 .c (MSVC 按 C 编译, 文件作用域 const 本就外链接), 但写明 extern
+    // 让 C / C++ 两种编译模式下都稳定拿到外链接 —— 与 .h 里的 extern 声明一一对应。
+    ss << "extern const unsigned char " << varName << "[] = {\n";
     for (size_t i = 0; i < size; i++) {
         if (i % 16 == 0) ss << "    ";
         ss << "0x" << std::setfill('0') << std::setw(2) << std::hex << (int)data[i];
@@ -24,7 +36,16 @@ static std::string bytesToHexArray(const uint8_t* data, size_t size, const std::
         else ss << " ";
     }
     ss << "};\n";
-    ss << "static const int " << varName << "_size = " << std::dec << size << ";";
+    ss << "extern const int " << varName << "_size = " << std::dec << size << ";";
+    return ss.str();
+}
+
+// Header-side declaration for a frx byte array whose definition lives in the owning
+// module's .c (see bytesToHexArray above). 让每个 include 本头的 TU 都能看见符号, 而不复制存储。
+static std::string bytesToHexArrayDecl(const std::string& varName) {
+    std::ostringstream ss;
+    ss << "extern const unsigned char " << varName << "[];\n";
+    ss << "extern const int " << varName << "_size;";
     return ss.str();
 }
 
@@ -203,7 +224,7 @@ void CCodeGen::emitDesignerControlDecls(const FrmFormDesc& frmDesc, DocumentKind
     // czUI fix: 设计器子控件句柄改为按实例槽位 — 全局句柄被最后创建的实例覆盖,
     // 导致 11 个实例只有最后一个的 timer/textbox 生效 (开关动画死、文本框错乱)。
     // Fix VbEclipse: 必须传 `me` — UC 实例方法多由外部模块直接 C 调用发起,
-    // 此时全局 g_uc_current 已 pop 成 NULL, 只按上下文的旧签名会退化成共享
+    // 此时全局 vb6_ucCurrent 已 pop 成 NULL, 只按上下文的旧签名会退化成共享
     // orphan 槽 (恒 NULL), 面板 SetParent/Move 全部落空。
     c_.emitLine("extern void** vb6_UC_DesignSlotOf(void* inst, const char* name);");
     for (const auto& child : frmDesc.formControl.children) {
@@ -424,6 +445,16 @@ void CCodeGen::emitDesignerControlDecls(const FrmFormDesc& frmDesc, DocumentKind
             c_.emitLine("static void vb6_" + ctl + "_ucHostDblClick(void* me) { (void)me; }");
         }
 
+        // 账 #226: UserControl_Click 的封装 (与 DblClick 同形, 零参)。
+        const bool hasUcClick = hasProc("UserControl_Click");
+        if (hasUcClick) {
+            c_.emitLine("static void vb6_" + ctl + "_ucHostClick(void* me) {");
+            c_.emitLine("    vb6_" + ctl + "_UserControl_Click((" + clsShort + "*)me);");
+            c_.emitLine("}");
+        } else {
+            c_.emitLine("static void vb6_" + ctl + "_ucHostClick(void* me) { (void)me; }");
+        }
+
         // Fix <vbeclipse> rev18: 自有属性按名桥 (表 + thunk) —— 必须在本 desc 之前发。
         // (.ctl 不走 emitFormFramework, 所以只能落在这个函数里; 见该 .inc 头部说明.)
 #include "backend/detail/module/cgen_form_uc_props.inc"
@@ -457,7 +488,10 @@ void CCodeGen::emitDesignerControlDecls(const FrmFormDesc& frmDesc, DocumentKind
         c_.emitLine("    " + (designResizeCtrls.empty()
                            ? std::string("NULL")
                            : ("vb6_" + ctl + "_ucHostDesignResize"))
-                    + "  /* Fix <vbeclipse> rev22: 子控件 Resize 事件 */");
+                    + ",  /* Fix <vbeclipse> rev22: 子控件 Resize 事件 */");
+        // 账 #226: UC 自身 Click 的末槽 —— 顺序必须与 vb6_UserControlDesc 逐字一致
+        // (布局式初始化, 错位一个指针宽就是运行期 AV, 见结构体 rev22 那段教训)。
+        c_.emitLine("    vb6_" + ctl + "_ucHostClick  /* 账 #226: UserControl_Click */");
         c_.emitLine("};");
         c_.emitLine("void vb6_" + ctl + "_RegisterHost(void) { vb6_UC_Register(&vb6_" + ctl + "_ucHostDesc); }");
         // Fix <vbeclipse> rev14: 让每个 .ctl 在**本模块的 init 函数**里自注册宿主描述。

@@ -162,16 +162,25 @@ int32_t vb6_ChkLong(int64_t v) {
     return (int32_t)vb6_OvfChk(v, -2147483647LL - 1, 2147483647LL);
 }
 
+/* 账 #248: 浮点→整数目标的取整**只有这一处**答案。
+   为什么单开一条：发码把浮点表达式直接递进 vb6_ChkLong(int64_t) —— C 在调用边界上按
+   截断转换，于是 `l = 6.73` 交 6、`l = 7 / 2` 交 3；而**同一句**写成 `l = CLng(7 / 2)`
+   走 round() 交 4。同一件事两个答案，正是本仓反复量出来的"同一个决定抄了两遍"那一族
+   (#234 拿 DC / #235 画笔色 / #239 笔位 / #247 几何宿主路) 的最新一例。
+   半值远离零（不是银行家舍入）是 rev37 那段注释里**写明保留**的取舍 —— 这一处只解决
+   "别再截断"，顺带把 CLng/CInt 与隐式赋值并到同一个答案上。 */
+int64_t vb6_FltToLng(double x) { return (int64_t)round(x); }
+
 #ifdef vb6_CInt
 #undef vb6_CInt      // vb6rtl_builtin.h 的 _Generic 宏在定义处必须关闭
 #endif
 // CInt/CLng/CByte 在 VB6 里同样查表 (`CByte(300)` = Error 6), 不是截断。
-int16_t vb6_CInt(double x) { return (int16_t)vb6_OvfChk((int64_t)round(x), -32768, 32767); }
+int16_t vb6_CInt(double x) { return (int16_t)vb6_OvfChk(vb6_FltToLng(x), -32768, 32767); }
 #ifdef vb6_CLng
 #undef vb6_CLng
 #endif
 int32_t vb6_CLng(double x) {
-    return (int32_t)vb6_OvfChk((int64_t)round(x), -2147483647LL - 1, 2147483647LL);
+    return (int32_t)vb6_OvfChk(vb6_FltToLng(x), -2147483647LL - 1, 2147483647LL);
 }
 #ifdef vb6_CDbl
 #undef vb6_CDbl
@@ -185,6 +194,41 @@ int32_t vb6_CLngBSTR(BSTR s) { return (int32_t)round(vb6_Val(s)); }
 double  vb6_CDblBSTR(BSTR s) { return vb6_Val(s); }
 int16_t vb6_CIntBSTR(BSTR s) { return (int16_t)round(vb6_Val(s)); }
 double  vb6_CCurBSTR(BSTR s) { double d = vb6_Val(s); return round(d * 10000.0) / 10000.0; }
+
+// ai/032: 无符号/窄整型转换函数 (CSByte/CUInt/CULng/CULngLng)。
+// 口径与上面 CInt/CLng/CByte 一致:
+//   · 取值先走 vb6_FltToLng (半值远离零的 round, 与既有三档同一个答案);
+//   · 越界按 VB6 语义报 Error 6 (vb6_OvfChk), 不是静默截断 —— `CByte(300)` 那条先例。
+// CULngLng 的上界 (2^64-1) 装得下 double 的整数域, 故只挡负数。
+#ifdef vb6_CSByte
+#undef vb6_CSByte      // vb6rtl_builtin.h 的 _Generic 宏在定义处必须关闭
+#endif
+int8_t vb6_CSByte(double x) { return (int8_t)vb6_OvfChk(vb6_FltToLng(x), -128, 127); }
+#ifdef vb6_CUInt
+#undef vb6_CUInt
+#endif
+uint16_t vb6_CUInt(double x) { return (uint16_t)vb6_OvfChk(vb6_FltToLng(x), 0, 65535); }
+#ifdef vb6_CULng
+#undef vb6_CULng
+#endif
+uint32_t vb6_CULng(double x) {
+    int64_t t = vb6_FltToLng(x);
+    (void)vb6_OvfChk(t, 0, 4294967295LL);
+    return (uint32_t)t;
+}
+#ifdef vb6_CULngLng
+#undef vb6_CULngLng
+#endif
+uint64_t vb6_CULngLng(double x) {
+    if (x < 0) (void)vb6_OvfChk(-1, 0, 0);   // 负数 → 走既有溢出通道报 Error 6
+    return (uint64_t)vb6_FltToLng(x);
+}
+// ai/032: 字符串实参入口 (口径同 Fix 158r 的 vb6_CLngBSTR)。十进制走 vb6_Val;
+// "&H"/"&O" 前缀式由 cgen 那侧改发 vb6_NumVal, 到不了这里。
+int8_t   vb6_CSByteBSTR(BSTR s)   { return vb6_CSByte(vb6_Val(s)); }
+uint16_t vb6_CUIntBSTR(BSTR s)    { return vb6_CUInt(vb6_Val(s)); }
+uint32_t vb6_CULngBSTR(BSTR s)    { return vb6_CULng(vb6_Val(s)); }
+uint64_t vb6_CULngLngBSTR(BSTR s) { return vb6_CULngLng(vb6_Val(s)); }
 
 BSTR vb6_CStr(vb6_VARIANT x) {
     return vb6_Format(x, NULL, 1, 1);
@@ -234,6 +278,34 @@ BSTR vb6_CStrLongLong(int64_t x) {
     wchar_t buf[32];
     _snwprintf_s(buf, 32, _TRUNCATE, L"%lld", (long long)x);
     return vb6_BSTR_FromStr(buf);
+}
+// ai/032: ULong / ULongLong → String, **无符号十进制**。
+//   为什么不经 vb6_Format: 那族只覆盖 vtInteger/vtLong/vtDouble 这一组有符号口径,
+//   2^31 以上会被打成负数 (%d) —— 与 Fix 084m 另开 vb6_CStrLongLong 同一处理由。
+//   VB6/VB.NET 的 CStr 对整数就是十进制短形式, 与 %u/%llu 一致。
+#ifdef vb6_CStrULong
+#undef vb6_CStrULong   // _Generic 宏必须关闭, 否则函数定义被宏改写
+#endif
+BSTR vb6_CStrULong(uint32_t x) {
+    wchar_t buf[16];
+    _snwprintf_s(buf, 16, _TRUNCATE, L"%u", (unsigned)x);
+    return vb6_BSTR_FromStr(buf);
+}
+#ifdef vb6_CStrULongLong
+#undef vb6_CStrULongLong
+#endif
+BSTR vb6_CStrULongLong(uint64_t x) {
+    wchar_t buf[32];
+    _snwprintf_s(buf, 32, _TRUNCATE, L"%llu", (unsigned long long)x);
+    return vb6_BSTR_FromStr(buf);
+}
+// ai/032: Variant 解包入口 (同 Fix 158q 的 vb6_CStrLongFromVariant)。用 LongPtr
+// 那一档取数 —— vb6_VariantToLong 只接 VT_I4 家族, 对 VT_UI8/VT_I8 会答 0。
+BSTR vb6_CStrULongFromVariant(vb6_VARIANT v) {
+    return vb6_CStrULong((uint32_t)vb6_VariantToLongPtr(v));
+}
+BSTR vb6_CStrULongLongFromVariant(vb6_VARIANT v) {
+    return vb6_CStrULongLong((uint64_t)vb6_VariantToLongPtr(v));
 }
 // Fix 117c: Single → String 必须保留 VT_R4 (7 位有效数字 + 最短往返), 否则
 // CSng(21.1) 会像 Double 一样打印成 "21.1000003814697"。

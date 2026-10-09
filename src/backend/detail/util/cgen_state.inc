@@ -21,6 +21,12 @@
     // 代码输出
     CodeEmitter h_;   // .h 文件内容
     CodeEmitter c_;   // .c 文件内容
+    // C3 bloat fix: 窗体 frx 字节数组 (Icon/Picture/控件 Picture/ImageList/SSTab) 的**定义**。
+    // 这些定义在 emitFormFramework 期间从多个调用点产生, 但那些调用点大多落在生成代码的
+    // **函数体**里 (CreateControls 等) —— `extern ... = {...}` 在块作用域非法, 故统一攒到
+    // 这里, 等 emitFormFramework 返回、c_ 回到文件作用域时一次性发射 (见
+    // cgen_base_generate_decl_pass.inc)。.h 侧只发 extern 声明 (bytesToHexArrayDecl)。
+    std::vector<std::string> frxArrayDefs_;
     std::string header_;
     std::string source_;
     std::string baseName_;        // 输出文件基名 (如 "hello")
@@ -166,6 +172,19 @@
     // **并存**, 消费点先判它, 以免既有整数路径失去变量。
     std::unordered_set<std::string> knownIntVars_;
 
+    // ai/032: 无符号/窄整型 (SByte/UInteger/ULong/ULongLong) 的局部/形参/返回槽专属登记表
+    // (小写名 → 真 Vb6Type)。口径同上面 knownByteVars_ / knownBoolVars_:
+    // 这四档的 C 型 (int8_t / uint16_t / uint32_t / uint64_t) 都不在既有的
+    // `int32_t | int16_t | VBABOOL` 那一支里, 而**局部变量在 symTab_ 里不可达**
+    // (symTab_ 只有模块作用域) ⇒ 以前 inferExprType 一律答 Variant。后果:
+    //   · `CStr(u)` (u As ULong) 走 vb6_CStr(vb6_VariantFromValue(u)), _Generic 的
+    //     `unsigned int: vb6_VariantLong` 把 &HFFFFFFFF 打成 "-1";
+    //   · `Debug.Print u` 落到 vb6_DebugWriteLong((int32_t)(u)) → 同样 -1。
+    // 用一张 name→Vb6Type 的表 (而不是四个 set) 是因为消费点需要知道**哪一档**,
+    // 才能选 vb6_CStrULong / vb6_CStrULongLong。模块级变量不进此表 —— 它们在
+    // symTab_ 里可达, inferExprType 已能答出, 且本表随过程入口 clear()。
+    std::unordered_map<std::string, Vb6Type> knownNarrowIntVars_;
+
     // 已知Long/Integer/Boolean变量名集合 (小写) - 用于COM值解封类型推断
     std::unordered_set<std::string> knownLongVars_;
 
@@ -296,6 +315,21 @@
     // 用于LSet/RSet使用固定长度而非SysStringLen
     std::unordered_map<std::string, std::string> knownFixedStringLen_;
 
+    // 账 #118: 定长字符串 **UDT 字段** 的长度表 (UDT 的 C 类型名 → 成员小写名 → 长度表达式)。
+    // `Type Rec: f As String * 8` 的 `r.f = ...` / `Len(r.f)` 靠它收口到 8。
+    // 在 visit(TypeDecl&) 里按声明填 (那一步的 C 类型名就是 key), 全模块有效 —— **不随
+    // 过程入口 clear** (与 knownFixedStringLen_ 不同), 所以别把它加进任何一个 clear 列表。
+    // 跨模块 UDT 查不到 (符号表按模块隔离, 同 udtFieldObjCType 的既有边界)。
+    std::unordered_map<std::string, std::unordered_map<std::string, std::string>> udtFixedStrFieldLen_;
+
+    // 账 #118: **模块级**定长串的持久副本 (小写变量名 → 长度表达式)。knownFixedStringLen_
+    // 在每个过程入口 clear (cgen_decl_func.cpp / cgen_decl_proc.cpp / cgen_decl_prop.cpp),
+    // 而模块级 `Private gT As String * 5` 是在 declaration 阶段登记的 —— 于是第一个过程
+    // 一入口那条登记就没了, `gT = "ab"` 与 `Len(gT)` 双双退回"普通动态串"口径 (实测
+    // A-len=2 / A=[ab])。与 classBstrMembers_ / moduleUdtMembers_ 同一套办法:
+    // 在 cgen_base_generate_state_scan.inc 里扫一遍留底, 每个过程入口再插回来。
+    std::unordered_map<std::string, std::string> moduleFixedStringLen_;
+
     // M22: Declare A版API函数名集合 (小写) - 需要BSTR->ANSI转换的ByVal String参数
     // 判断: 函数名或Alias以'A'结尾 (如 GetWindowTextA, Alias "WritePrivateProfileStringA")
     std::unordered_set<std::string> knownDeclareAnsi_;
@@ -378,8 +412,10 @@
     // 只有启动对象所在模块可以生成进程入口点.
     std::string startupObject_;
 
-    // M22: 外部模块名称集合 (用于跨模块变量解析时判断模块是否已#include)
-    std::unordered_set<std::string> externalModules_;
+    // M22: 外部模块名称 (用于跨模块变量解析时判断模块是否已#include)。
+    // 账 §B97: vector 不是 unordered_set —— 三处会出顺序的码头（.c/.h 的 #include 段、
+    // 入口点里的模块 init 调用序）直接迭代它，顺序必须是 driver 定下来的工程声明序。
+    std::vector<std::string> externalModules_;
 
     // M22: 当前IdentifierExpr是否在IndexOrCallExpr的callee位置
     // VB6语义: 同名函数引用 — callee上下文返回函数名(供调用), 其他上下文返回返回值变量
@@ -927,7 +963,18 @@
 
     // Fix 112: in-project UserControl (.ctl) designer spec table (lowercase module -> FrmFile)
     // czUI fix: UC 事件 attach 行 (文件作用域 thunk/sink 在 prelude 生成)
-    std::map<std::string, std::vector<std::string>> ucEventAttach_;
+    // 账 #222: 键从"控件名"改成"控件名 + 元素号" —— 控件数组的 24 枚元素共用一枚处理器,
+    // 但每枚要自己的 thunk 与自己的 sink (元素号得交得回去), 按名字存就只剩最后一枚。
+    // sink 变量名一起存: 挂接那侧以前把 "_sink_" + 名字**再拼一遍**, 那是第二处拼名。
+    struct UcEventAttach {
+        std::vector<std::string> lines;
+        std::string sinkVar;
+    };
+    std::map<std::string, UcEventAttach> ucEventAttach_;
+    // 账 #222: 同一趟登记顺手记下"sink 供了哪一枚事件" (键 = ctrlElemKey + "." + 事件小写名)。
+    // UC 的 Click 走 RaiseEvent 到 sink 到 thunk, 子类化那条 WM_LBUTTONUP 臂再发一遍就是
+    // 一次点击两声 (实测 ucProgressCircular 的 Form1.c 两路都有)。
+    std::set<std::string> ucSinkEvents_;
 
     // Fix <vbeclipse> rev17: 本窗体里**充当 WithEvents 事件处理器**的过程名 (小写)。
     // 由 cgen_form_prelude 在扫 <ctrl>_<Event> 命中时登记。用途: 事件处理器是"跨对象
@@ -960,6 +1007,9 @@
 
     // Fix 160: vbp ComLib= 免注册 COM 组件表 {ProgID, CLSID, coclass名, 相对exe路径}
     const std::vector<std::array<std::string, 4>>* comLibRefs_ = nullptr;
+
+    // Fix <vbeclipse> 2026-10-06: vbp Object= OCX 免注册表 {ProgID, CLSID, coclass名, 相对exe路径}
+    const std::vector<std::array<std::string, 4>>* ocxLibRefs_ = nullptr;
 
     // Fix 112: sub-controls on a form whose type is an in-project UserControl
     std::unordered_map<std::string, std::string> knownUserControlCtrlVars_;

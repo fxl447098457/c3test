@@ -222,6 +222,20 @@ void CCodeGen::visit(CallStmt& node) {
                                     // 与 CStr / `&` 拼接同一口径 (同一个值两条路读数不同,
                                     // 正是 ai/022 待拍板 5 的那处不一致)。
                                     c_.emitLine("vb6_DebugWriteBSTR(vb6_CStrBool(" + val + "));");
+                                } else if (inferExprType(*call.positional[j]) == Vb6Type::ULong) {
+                                    // ai/032: Debug.Print u (u As ULong) —— 落到下面的
+                                    // DebugWriteLong((int32_t)(u)) 会把 &HFFFFFFFF 打成 -1。
+                                    // 与 CStr(u) 走同一条无符号格式化, 一个值两条路读数一致。
+                                    c_.emitLine("vb6_DebugWriteBSTR(vb6_CStrULong(" + val + "));");
+                                } else if (inferExprType(*call.positional[j]) == Vb6Type::ULongLong) {
+                                    // ai/032: 同上, 64 位无符号 (2^32 不能在 32 位处截成 0)。
+                                    c_.emitLine("vb6_DebugWriteBSTR(vb6_CStrULongLong(" + val + "));");
+                                } else if (inferExprType(*call.positional[j]) == Vb6Type::LongLong) {
+                                    // ai/032 rev2: Debug.Print x (x As LongLong) —— 落到下面的
+                                    // DebugWriteLong((int32_t)(x)) 会把 64 位值截成 32 位。
+                                    // 改前 LongLong 局部不在任何 known 表里 (类型答 Variant),
+                                    // 于是这条路也走不到; 登记之后必须补上这一档。
+                                    c_.emitLine("vb6_DebugWriteBSTR(vb6_CStrLongLong(" + val + "));");
                                 } else {
                                     // 整数/布尔值, 用DebugWriteLong输出
                                     c_.emitLine("vb6_DebugWriteLong((int32_t)(" + val + "));");
@@ -337,53 +351,51 @@ void CCodeGen::visit(CallStmt& node) {
             {
                 auto itWs = knownFormControls_.find(comObjExpr_);
                 std::string mWs = Symbol::toLower(comMemberName_);
-                const char* fnWs = nullptr;
+                // 账 #278 §B72 第十三刀: 名字改问那张表。这一形**手里一枚实参都没有**，所以只许
+                // 拿表里「个数 == 1」的那几档（close / listen / connect）；其余成员照旧落到下面
+                // 那条通用兜底，由带实参的那条码头 (withm) 收尾。从前这件事靠手写名单维持,
+                // 现在靠表交出的个数 —— 谁给某枚出口加一枚形参, 这一头会自动不再接它。
+                std::string fnWs;
                 if (itWs != knownFormControls_.end() && itWs->second == FrmControlType::Winsock) {
-                    if (mWs == "close")        fnWs = "vb6_Ws_Close";
-                    else if (mWs == "listen")  fnWs = "vb6_Ws_Listen";
-                    else if (mWs == "connect") fnWs = "vb6_Ws_Connect";
+                    int argcWs = 0;
+                    fnWs = controlWinsockMethod(mWs, &argcWs);
+                    if (argcWs != 1) fnWs.clear();
                 }
-                if (fnWs) {
+                if (!fnWs.empty()) {
                     std::string hwndWs = cIdent(knownFormControlOriginalNames_.count(comObjExpr_)
                         ? knownFormControlOriginalNames_[comObjExpr_] : comObjExpr_);
                     comObjExpr_.clear();
                     comMemberName_.clear();
-                    c_.emitLine(std::string(fnWs) + "((void*)vb6_hwnd_" + hwndWs + ");"
+                    c_.emitLine(fnWs + "((void*)vb6_hwnd_" + hwndWs + ");"
                                 "  /* Winsock." + mWs + " (原生 Winsock2) */");
                     return;
                 }
             }
-            // Fix 086: 无括号的控件方法调用 (List1.Clear) — 与 IndexOrCallExpr
-            // 的 P13.3 处理一致, 生成 vb6_ClearList(vb6_hwnd_Listx), 而非
-            // vb6_ComCall(list1,...) 裸控制名 (C2065).
-            auto itCtrlCS = knownFormControls_.find(comObjExpr_);
-            if (itCtrlCS != knownFormControls_.end()
-                && (itCtrlCS->second == FrmControlType::ListBox
-                    || itCtrlCS->second == FrmControlType::ComboBox)
-                && Symbol::toLower(comMemberName_) == "clear") {
-                std::string ctrlNameCS = cIdent(knownFormControlOriginalNames_.count(comObjExpr_)
-                    ? knownFormControlOriginalNames_[comObjExpr_] : comObjExpr_);
-                comObjExpr_.clear();
-                comMemberName_.clear();
-                c_.emitLine("vb6_ClearList((void*)vb6_hwnd_" + ctrlNameCS + ");  /* ListBox.Clear */");
-                return;
-            }
-            // Fix 185: 同族处理 —— 无括号的 PictureBox 绘制方法 (Picture2.Cls)。
-            // 带实参的那条走 cgen_expr_call_callee_withm.inc，两条路径都得覆盖，
-            // 否则留下 vb6_ComCall(vb6_hwnd_x, L"Cls", NULL, 0) 这种运行期 no-op。
-            if (itCtrlCS != knownFormControls_.end()
-                && itCtrlCS->second == FrmControlType::PictureBox) {
-                std::string memLowerCS = Symbol::toLower(comMemberName_);
-                if (memLowerCS == "cls" || memLowerCS == "print") {
-                    std::string ctrlNamePic = cIdent(knownFormControlOriginalNames_.count(comObjExpr_)
-                        ? knownFormControlOriginalNames_[comObjExpr_] : comObjExpr_);
+            // 账 #278 §B72: 这一族从前在 Fix 086 里又硬编码了一遍 (类型判据 +
+            // `vb6_ClearList` 字面量)。表 controlZeroArgMethod 今天照样答 ListBox/ComboBox 的
+            // clear 这一行, 而语句码头在下方 C29-SL-l 那一格已经问它 —— 两份答案住两处,
+            // 改名字或改实参个数时必有一份落后。所以这里删掉, 由表答。
+            // 账 #185 / 账 #232②: 画布家族的**语句码头**（不写括号那一形）。
+            // 接收者问 `formCtrlSlot`（裸小写名与 `vb6_hwnd_X` 都认，窗体自己那枚也认），
+            // 名字与出口问 `controlCanvasMethod`（cls / print 两档）—— 与表达式码头
+            // (`cgen_expr_call_callee_withm.inc`) 共用同一张表。以前这一处把类型和名字
+            // 都硬编码成 `PictureBox` + `cls|print`，于是 `Me.Cls` 留下
+            // `vb6_ComCall(vb6_hwnd_<窗体>, L"Cls", NULL, 0)` 这种运行期 no-op。
+            {
+                FrmControlType cvTypeS = FrmControlType::Unknown;
+                std::string cvHwndS;
+                std::string cvMemS = Symbol::toLower(comMemberName_);
+                std::string cvFnS = (cvMemS == "cls" || cvMemS == "print")
+                    && formCtrlSlot(comObjExpr_, cvTypeS, cvHwndS)
+                    ? controlCanvasMethod(cvTypeS, cvMemS) : std::string();
+                if (!cvFnS.empty()) {
+                    std::string cvLabelS = cvTypeS == FrmControlType::Form
+                        ? "Form" : "PictureBox";
                     comObjExpr_.clear();
                     comMemberName_.clear();
-                    if (memLowerCS == "cls") {
-                        c_.emitLine("vb6_ControlCls((void*)vb6_hwnd_" + ctrlNamePic + ");  /* PictureBox.Cls */");
-                    } else {
-                        c_.emitLine("vb6_ControlPrint((void*)vb6_hwnd_" + ctrlNamePic + ", 0);  /* PictureBox.Print */");
-                    }
+                    c_.emitLine(cvMemS == "cls"
+                        ? (cvFnS + "((void*)" + cvHwndS + ");  /* " + cvLabelS + ".Cls */")
+                        : (cvFnS + "((void*)" + cvHwndS + ", 0);  /* " + cvLabelS + ".Print */"));
                     return;
                 }
             }
@@ -666,7 +678,8 @@ void CCodeGen::visit(CallStmt& node) {
             }
         }
 
-        if (callExpr.find("vb6_ComCall(") == 0) {
+        if (callExpr.find("vb6_ComCall(") == 0
+            || callExpr.find("vb6_ComCallByDispid(") == 0) {
             // ComCall返回可能含对象的VARIANT*, 用VarFree避免Release对象
             c_.emitLine("vb6_ComVarFree((void*)" + callExpr + ");  /* COM call, discard result */");
         } else if (callExpr.find("vb6_ComGetProp(") == 0) {

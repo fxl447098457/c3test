@@ -47,11 +47,11 @@ static LRESULT CALLBACK vb6_uc_wndproc(HWND hwnd, UINT msg, WPARAM wParam, LPARA
              *   上下颠倒 + 文字镜像** —— 递归 Move 把各层控件反复推挤, 坐标系翻转。
              *   两害相权: 宁可尺寸停在中间值 (rev21 状态) 也不能递归。
              *
-             * 为什么放在 pop **之后** 是安全的: 此时 g_uc_current 已还原成外层值
+             * 为什么放在 pop **之后** 是安全的: 此时 vb6_ucCurrent 已还原成外层值
              * (通常 NULL), 所以 vb6_UC_RunDesignResize 里 "上下文内就不跑" 的
              * 判据不会误挡本调用 —— 它是唯一允许在上下文外触发的入口。
              * 且它内部有同控件重入短路, 事件体里 Move 别的控件再发 WM_SIZE 也不会
-             * 无限展开 (那一层 g_uc_current 非空, 直接被挡)。*/
+             * 无限展开 (那一层 vb6_ucCurrent 非空, 直接被挡)。*/
             /* Fix <vbeclipse> rev23: 这里**只排队**, 不直接跑 —— WM_SIZE 是
              * SetWindowPos/MoveWindow 的**同步** SendMessage, 一整串嵌套 Move 全在
              * 同一个调用栈里跑完才返回, 那时 ucFolder 的 ViewArea 还没拿到最终尺寸
@@ -112,10 +112,32 @@ static LRESULT CALLBACK vb6_uc_wndproc(HWND hwnd, UINT msg, WPARAM wParam, LPARA
             vb6_UserControl_hDC = NULL;
             hook(r->me, button, 0, sx, sy);
             vb6_uc_pop(&saved);
+            // 账 #226: VB6 的 Click 是"按下并抬起"之后发的, 落点就在这条 WM_LBUTTONUP;
+            // 必须在 MouseUp 转调**之后**, 顺序才与 VB6 一致。旧 cgen 不发这一槽 ⇒
+            // 初始化式补 0 ⇒ 这里不转调, 行为与改动前逐字节一致。
+            if (msg == WM_LBUTTONUP && r->desc->click) r->desc->click(r->me);
             InvalidateRect(hwnd, NULL, FALSE);
             UpdateWindow(hwnd);
             return 0;
         }
+        case WM_LBUTTONDBLCLK: {
+            // 账 #227: 这一槽 cgen 一直在填 (UC 里写 UserControl_DblClick 才有真身, 否则是空
+            // stub), 但宿主从没有转调过它 —— 语料里六枚 UC 的 `RaiseEvent DblClick` 于是永远
+            // 发不出去。类样式上 CS_DBLCLKS 早就立了 (下面那句 czUI fix), 消息收得到,
+            // 缺的就是这一跳。
+            // MouseDown/MouseUp 的转调**不**挂在这条消息上: 物理双击 Windows 发的是
+            // DOWN/UP/DBLCLK/UP, Click 那一路已经由两条 UP 供过, 再挂就变三发。
+            if (!r || !r->ready || !r->desc || !r->me || !r->desc->dblClick) break;
+            vb6_UCSaved saved227;
+            vb6_uc_push(r, &saved227);
+            vb6_UserControl_hDC = NULL;
+            r->desc->dblClick(r->me);
+            vb6_uc_pop(&saved227);
+            InvalidateRect(hwnd, NULL, FALSE);
+            UpdateWindow(hwnd);
+            return 0;
+        }
+
         case WM_CAPTURECHANGED:
             break;
         case WM_PAINT: {
@@ -160,7 +182,7 @@ static LRESULT CALLBACK vb6_uc_wndproc(HWND hwnd, UINT msg, WPARAM wParam, LPARA
                 const int doDump = (dumpDir113h && *dumpDir113h);
                 (void)doDump;
                 _snprintf(path113h, sizeof(path113h), "%s\\%s_%d_%p.bmp", dumpDir113h,
-                          r->desc->typeName, (int)++g_uc_dumpSeq, hwnd);
+                          r->desc->typeName, (int)++vb6_ucDumpSeq, hwnd);
                 path113h[sizeof(path113h) - 1] = '\0';
                 if (doDump) {
                     vb6_uc_dibSaveBmp(&dib113h, path113h);
@@ -247,8 +269,8 @@ void vb6_uc_gdiplusInit(void) {
     done = 1;
     // czUI fix: 环境字体默认名 — Bag 重放 ReadProperty("Font", Ambient.Font)
     // 会把此对象设为控件字体; Name=NULL 时所有 GDI+ 文字静默消失
-    if (!g_vb6_UserControl_FontObj.Name)
-        g_vb6_UserControl_FontObj.Name = SysAllocString(L"Segoe UI");
+    if (!vb6_UserControl_FontObj.Name)
+        vb6_UserControl_FontObj.Name = SysAllocString(L"Segoe UI");
     HMODULE mod = LoadLibraryA("gdiplus.dll");
     if (!mod) return;
     long (__stdcall *pStartup)(ULONG_PTR*, const void*, void*) =

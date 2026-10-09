@@ -60,15 +60,7 @@
                     // comPackExpr 必须在 emitExpr 之前求 (它会消费/依赖部分状态),
                     // 故先算 packer 再解封。
                     const std::string packFnVal = comPackExpr(*node.value);
-                    if (isComMarker_) {
-                        std::string hintVal = "BSTR";
-                        if (packFnVal == "vb6_ComPackDouble") hintVal = "Double";
-                        else if (packFnVal == "vb6_ComPackInt") hintVal = "Long";
-                        else if (packFnVal == "vb6_ComPackObject") hintVal = "Object";
-                        else if (packFnVal == "vb6_ComPackValue") hintVal = "Variant";
-                        resolveComValue(hintVal);
-                    }
-                    std::string valExpr = std::move(lastExpr_);
+                    std::string valExpr = comMarkerValueForWrite(packFnVal, std::move(lastExpr_));
                     c_.emitLine("vb6_ComSetPropArg(" + objExpr + ", L\"" + memberName + "\", " +
                                  idxArgsArray + ", " + std::to_string(idxArgc) + ", " +
                                  packFnVal + "(" + valExpr + "));  /* COM SetPropArg */");
@@ -419,19 +411,10 @@
         std::string packFn = comPackExpr(*node.value);
         // Fix 110i: 右侧本身也是 COM 属性读 (obj.Prop = other.Prop) 时, emitExpr 只
         // 留下对象表达式, 成员名还挂在 comMemberName_ 上 — 不消费就整体丢失
-        // (Value = oPC.Min → vb6_ComPackDouble(me->oPC)). 按 packer 反推解封类型后
-        // 调用 resolveComValue 生成 vb6_ComGetXxxProp (Charts 2020
-        // ppProgressCircular.Timer1_Timer: oPC.Value = oPC.Max / oPC.Min).
-        if (isComMarker_) {
-            std::string hint = "BSTR";
-            if (packFn == "vb6_ComPackDouble") hint = "Double";
-            else if (packFn == "vb6_ComPackInt") hint = "Long";
-            else if (packFn == "vb6_ComPackBSTR") hint = "BSTR";
-            else if (packFn == "vb6_ComPackObject") hint = "Object";
-            else if (packFn == "vb6_ComPackValue") hint = "Variant";
-            resolveComValue(hint);
-            valExpr = std::move(lastExpr_);
-        }
+        // (Value = oPC.Min → vb6_ComPackDouble(me->oPC))。账 #260: 那张「packer →
+        // 解封类型」的表收进 comMarkerValueForWrite 一处 (With 那一支以前没问它,
+        // 就是同一格只接了一半)。
+        valExpr = comMarkerValueForWrite(packFn, valExpr);
         c_.emitLine("vb6_ComSetProp(" + objExpr + ", L\"" + memberName + "\", " +
                      packFn + "(" + valExpr + "));  /* COM SetProp */");
         return;

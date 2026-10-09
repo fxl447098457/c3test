@@ -444,6 +444,58 @@ bool Driver::runTypeLibImport(const CompileOptions& options) {
         }
     }
 
+    // 2.6 Fix <vbeclipse> 2026-10-06: Object= 免注册 OCX 表收集
+    // 只有 vbp 里 Object= 显式声明过的 OCX 进表 — 普通 Reference= / auto-typelib 加载的
+    // typelib 一律不进。与 ComLib= 同构: 表为空时产物不调 vb6_OcxRefRegister,
+    // 运行期 vb6_Form_ControlsAdd 走原注册表路径, 一字不改.
+    if (!ocxCanonMap_.empty()) {
+        auto canonKey = [](const std::string& p) {
+            std::string c = p;
+            for (char& x : c) {
+                if (x >= 'A' && x <= 'Z') x = (char)(x - 'A' + 'a');
+                else if (x == '\\') x = '/';
+            }
+            return c;
+        };
+        std::unordered_map<std::string, std::string> seenProgId;
+        bool capWarned = false;
+        for (auto& tl : typelibParser_->cachedResults()) {
+            auto it = ocxCanonMap_.find(canonKey(tl->tlbPath));
+            if (it == ocxCanonMap_.end())
+                it = ocxCanonMap_.find(tl->canonPath);  // loadByPath 的 GetLongPathNameW 展开结果
+            if (it == ocxCanonMap_.end()) continue;
+            const std::string& relPath = it->second;
+            for (auto& cc : tl->coclasses) {
+                if (cc->progId.empty() || cc->clsidStr.empty()) continue;
+                if (ocxLibRefs_.size() >= 256) {
+                    if (!capWarned) {
+                        diag_->warn(DiagnosticID::CodeGenUnsupportedFeature, SourceLocation{},
+                                    "OCX reg-free table full (256 entries); further controls "
+                                    "must be registry-registered");
+                        capWarned = true;
+                    }
+                    continue;
+                }
+                std::string key = canonKey(cc->progId);
+                auto ins = seenProgId.insert({key, relPath});
+                if (!ins.second) {
+                    diag_->warn(DiagnosticID::CodeGenUnsupportedFeature, SourceLocation{},
+                                "Duplicate ProgID in OCX components: " + cc->progId +
+                                " in both " + ins.first->second + " and " + relPath +
+                                "; first wins");
+                }
+                ocxLibRefs_.push_back({cc->progId, cc->clsidStr, cc->name, relPath});
+            }
+        }
+    }
+
+    if (options.verbose && !ocxLibRefs_.empty()) {
+        std::cerr << "C3: Object= reg-free OCX controls: " << ocxLibRefs_.size() << "\n";
+        for (const auto& e : ocxLibRefs_) {
+            std::cerr << "  " << e[0] << "  " << e[1] << "  <- " << e[3] << "\n";
+        }
+    }
+
     // 3. 输出加载结果 (verbose模式)
     if (options.verbose) {
         std::cerr << "C3: TypeLib import: ";

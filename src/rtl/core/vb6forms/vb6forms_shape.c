@@ -390,7 +390,11 @@ static LRESULT CALLBACK vb6_GraphicalBtnSubclassProc(HWND hwnd, UINT msg, WPARAM
             HDC memDC = CreateCompatibleDC(hdc);
             HBITMAP oldBmp = (HBITMAP)SelectObject(memDC, (HBITMAP)hBmp);
             if (isEnabled) {
-                BitBlt(hdc, imgX, imgY, bm.bmWidth, bm.bmHeight, memDC, 0, 0, SRCCOPY);
+                /* Fix <vbeclipse> 2026-10-06: 32bpp 带 alpha 的先走 AlphaBlend
+                   (PNG 按钮的圆角/透明区露按钮底色, 不再是黑块); 不透明回落 BitBlt。 */
+                if (!vb6_DrawBitmapAlpha(hdc, (void*)hBmp, imgX, imgY, bm.bmWidth, bm.bmHeight)) {
+                    BitBlt(hdc, imgX, imgY, bm.bmWidth, bm.bmHeight, memDC, 0, 0, SRCCOPY);
+                }
             } else {
                 /* Disabled: draw grayed image using PATCOPY with halftone brush */
                 BitBlt(hdc, imgX, imgY, bm.bmWidth, bm.bmHeight, memDC, 0, 0, SRCCOPY);

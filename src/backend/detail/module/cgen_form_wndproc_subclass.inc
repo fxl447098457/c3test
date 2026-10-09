@@ -99,7 +99,9 @@
             info.hasDblClick = symTab_.lookup(ctrl.controlName + "_DblClick") != nullptr;
             // C29-SL-d: 只有**没有原生 Click 来源**的类型才由这一档补上（排除表与逐条来源
             // 见 controlClickFromNativeNotify 的定义处），否则同一次点击会双发。
+            // 账 #222: UC 的 Click 由事件 sink 供 (那张表由 prelude 登记), 这里不再补一条臂。
             info.hasClick = !controlClickFromNativeNotify(ctrl.controlType) &&
+                            !ucSinkEvents_.count(ctrlElemKey(ctrl.controlName, ctrl.index) + ".click") &&
                             symTab_.lookup(ctrl.controlName + "_Click") != nullptr;
             info.hasMouseHover = symTab_.lookup(ctrl.controlName + "_MouseHover") != nullptr;
             // Fix 185: 控件级 _Paint。原先整个控件家族都没有 WM_PAINT 转发，
@@ -155,7 +157,9 @@
                 info.hasKeyUp = symTab_.lookup(child.controlName + "_KeyUp") != nullptr;
                 info.hasDblClick = symTab_.lookup(child.controlName + "_DblClick") != nullptr;
                 // C29-SL-d: 同顶层那一趟的口径（排除表见 controlClickFromNativeNotify）。
+                // 账 #222: 与顶层那一趟同一条判据 (sink 已供的不再补)。
                 info.hasClick = !controlClickFromNativeNotify(child.controlType) &&
+                                !ucSinkEvents_.count(ctrlElemKey(child.controlName, child.index) + ".click") &&
                                 symTab_.lookup(child.controlName + "_Click") != nullptr;
                 info.hasMouseHover = symTab_.lookup(child.controlName + "_MouseHover") != nullptr;
                 info.hasPaint = (child.controlType == FrmControlType::PictureBox) &&

@@ -141,6 +141,12 @@
                               + ", (void*)" + childHwndRead(child)
                               + ", " + std::to_string(tsPage) + ");");
                 }
+                // 账 #252: 第二条创建路同样要记这一次 VB 身份（容器里的控件以前一条也没有）。
+                // 句柄表达式走既有出口 ctrlHwndExprForInit —— 与下面几档设计期属性同一个口径，
+                // 控件数组的元素句柄在 vb6_arr_<名> 里，拼 vb6_hwnd_<名>_0 会 C2065。
+                c_.emitLine("vb6_HostObj_Register((void*)" + ctrlHwndExprForInit(child) + ", \""
+                            + child.controlName + "\", \"" + child.controlTypeName + "\", 0, "
+                            + std::to_string(child.index) + ");  /* VB identity */");
                 // C29-1a: 设计期外观属性 —— Frame / PictureBox 里的 Shape/Line 以前一条都不发
                 emitShapeLineProps(child, ctrlHwndExprForInit(child));
                 // 设计期 BorderStyle / Alignment (容器子控件)
@@ -161,6 +167,16 @@
                         asIt162d->second.intValue != 0 &&
                         child.controlType == FrmControlType::Label) {
                         c_.emitLine("vb6_SetLabelAutoSize((void*)" + childHwndRead(child)
+                                  + ", -1);  /* design AutoSize */");
+                    }
+                    // Fix <c3-menu3d>: 与顶层路径同口径 —— 容器里的 PictureBox/Image
+                    // 设计期 AutoSize=True 同样要发 (RT 的 FromCom AutoSize 块读它)。
+                    if (asIt162d != child.properties.end() &&
+                        asIt162d->second.type == FrmValueType::Integer &&
+                        asIt162d->second.intValue != 0 &&
+                        (child.controlType == FrmControlType::PictureBox ||
+                         child.controlType == FrmControlType::Image)) {
+                        c_.emitLine("vb6_SetPictureAutoSize((void*)" + childHwndRead(child)
                                   + ", -1);  /* design AutoSize */");
                     }
                 }

@@ -89,6 +89,18 @@ void Parser::initBindingPowers() {
         { TokenKind::Like,     22, 23 },
         { TokenKind::Is,       22, 23 },
         { TokenKind::IsKeyword,22, 23 },
+        // C3 扩展 (ai/032): 移位 (9,10) —— VB.NET 的优先级位置。
+        // 取 (9,10) 的依据是两侧夹逼, 不是拍脑袋:
+        //   l_bp=9  > 比较的 l_bp=8  ⇒ `a << b = c` 分组为 `(a << b) = c` (VB.NET 同)
+        //   l_bp=9  < `&` 的 l_bp=10 ⇒ `a & b << c` 分组为 `(a & b) << c`
+        //   r_bp=10 > 加减的 l_bp=12? 否 —— 12>10, 所以 `a << b + c` 的右操作数会
+        //             继续吃掉 `+ c` ⇒ `a << (b + c)`, 与 VB.NET 的「算术高于移位」
+        //             一致 (C 里也是 `a << b + c` == `a << (b + c)`)。
+        { TokenKind::Shl,      9, 10 },
+        { TokenKind::Shr,      9, 10 },
+        // C3 扩展 (ai/032): IsNot 与 Is 同优先级 —— 它就是 Is 的否定形, 绑定范围
+        // 必须完全一致, 否则 `Not obj IsNot x` 这类嵌套会分组不同。
+        { TokenKind::IsNot,   22, 23 },
     };
 
     for (auto& op : ops) {

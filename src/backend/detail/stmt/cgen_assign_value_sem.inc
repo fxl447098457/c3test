@@ -1,4 +1,4 @@
-// cgen_assign_value_sem.inc - visit(AssignmentStmt&) 函数体片段：值语义（返回值变量 / BSTR / Variant 赋值）
+﻿// cgen_assign_value_sem.inc - visit(AssignmentStmt&) 函数体片段：值语义（返回值变量 / BSTR / Variant 赋值）
 // 由 src/backend/stmt/cgen_assign.cpp 拆出（2026-09-17），在函数体内被 #include，非独立编译单元。
 // 内容 = 原文件第 1056~1362 行，逐行未改。
 
@@ -13,6 +13,9 @@
 
     // BSTR赋值检测: 如果目标是BSTR变量, 使用vb6_BSTR_Assign防止悬垂指针和双重释放
     bool targetIsBstr = false;
+    // 账 #118: "这个目标是不是定长串, 定长多少" —— 在下面 targetIsBstr 块内算一次,
+    // 发码处(本文件 240 行那一支)还要用它把值收口到 N, 故提到块外。
+    std::string fixedLenTarget;
     {
         // 检查目标是否是已知BSTR变量 (me->field 或 模块级变量)
         std::string checkName = target;
@@ -38,6 +41,19 @@
         // 里 148/148 行读到同一个 "149"/列头, 写 "ZZZ" 后读回是指针数值。
         // 交给下方 targetIsBstr 分支 → vb6_BSTR_Assign (释放旧值 + 深拷贝)。
         if (!targetIsBstr && udtFieldIsBstrInCTarget(target)) targetIsBstr = true;
+        // Fix <vbeclipse> 2026-10-06: **裸 UDT 变量**的 String 字段 (`r.name = ...` /
+        // With 块 `.name = ...`, 含嵌套链 `a.b.name`)。账 #118 当时只修了定长串字段
+        // (fixedStrLenOfExpr), 动态 String 字段刻意留下 (注释"那是另一笔账") ——
+        // udtFieldIsBstrInCTarget 只认 SA_AT 宏形状, 裸 UDT 变量捡不到 ⇒ 落最底下
+        // 裸赋值 `r.name = r.num;`: 整型 RHS 静默把数字当 BSTR 指针存进字段
+        // (第一次读/释放就崩), 浮点 RHS 才是 C2440。udtFieldCTypeOfTarget 对
+        // MemberAccessExpr/WithMemberExpr 返回成员 C 类型, == "BSTR" 即 String
+        // 字段 (数组成员被 == 判等天然排除), 交上方 targetIsBstr 分支走
+        // vb6_BSTR_Assign + 账 #122 的隐式 CStr。
+        if (!targetIsBstr) {
+            std::string fieldCType206 = udtFieldCTypeOfTarget(node.target.get());
+            if (fieldCType206 == "BSTR") targetIsBstr = true;
+        }
         // Fix <vbeclipse> rev11: **String 数组元素赋值** (`m_Keys(Position) = Key`,
         // `arr(i) = s`) 的目标 C 串是 `VB6_SA_AT(BSTR, me->m_Keys, Position)` ——
         // 一个**表达式**, 上面四道按名字/符号表的判据全都捡不到它, 于是落到最底下的
@@ -74,6 +90,14 @@
             && inferExprType(*node.target) == Vb6Type::String) {
             targetIsBstr = true;
         }
+        // 账 #118 ①: 定长串 UDT 字段 (`Type Rec: f As String * 8` 的 `r.f = ...`)。
+        // 上面 udtFieldIsBstrInCTarget 那条只认 **SA_AT 宏**形状 (它要求对象部分以 ')' 收尾),
+        // 对象是裸 UDT 变量时捡不到 ⇒ 此前连 BSTR 分支都进不来, 落最底下的裸赋值
+        // (`r.f = vb6_BSTR_FromStr(L"ef")`), 既不收口到 8, 重赋也不释放旧值。
+        // 判据刻意**只认定长**字段 (宽度可静态得知): 动态 String 字段维持既有口径,
+        // 免得顺手改了 UDT 字段赋值的深拷贝/借用语义 (那是另一笔账)。
+        fixedLenTarget = fixedStrLenOfExpr(*node.target);
+        if (!targetIsBstr && !fixedLenTarget.empty()) targetIsBstr = true;
     }
     // P8.4: Variant赋值检测 - 如果目标是Variant变量, 用Variant构造函数包装值
     bool targetIsVariant = false;
@@ -128,6 +152,22 @@
         }
         if (valueIsVariant) {
             value = "vb6_VariantToString(" + value + ")";
+        }
+        // Fix P24-10b: RHS 是裸晚绑定调用结果 (vb6_ComCallByDispid → void* 指向
+        // VARIANT) 且目标是 BSTR — Fix 113 已把 ComCall 无类型结果从前缀表回退,
+        // valueIsVariant 不命中, 原样交给 vb6_BSTR_Assign 会把它当 BSTR 指针
+        // → 运行期 0xC0000005 (test_com_latebound `s1 = o("name")` 实测)。
+        // 先 VariantFromComResult 包回 vb6_VARIANT 再提取 BSTR, 与下方 else
+        // 分支的 Fix 124 valueIsBareComResult 同口径 (只认返回 void* VARIANT*
+        // 的四兄弟; ComCallBSTR/Int/Double/Object 返回类型化值, 不在此列)。
+        if (!valueIsVariant) {
+            bool comResBstr = value.compare(0, 12, "vb6_ComCall(") == 0
+                || value.compare(0, 20, "vb6_ComCallByDispid(") == 0
+                || value.compare(0, 15, "vb6_ComGetProp(") == 0
+                || value.compare(0, 21, "vb6_ComGetObjectProp(") == 0;
+            if (comResBstr) {
+                value = "vb6_VariantToString(vb6_VariantFromComResult(" + value + "))";
+            }
         }
         // Fix 140: RHS 是 Byte() 数组 (类成员 m_Caption 或已知字节数组变量) 且目标是
         // BSTR → 按 UTF-16LE 字节还原为字符串. 不能把数组指针当 BSTR 交给
@@ -220,7 +260,17 @@
             }
         }
         // #122 折出来的 `vb6_CStrXxx(...)` 是刚 alloc 的新块, 与字面量/拼接同属"自有"。
-        if (valueOwned113 || wrapped122) {
+        if (!fixedLenTarget.empty()) {
+            // 账 #118 ①: 定长串赋值的收口 —— 短则右侧补空格、长则截右 (VB6 手册 + 真机
+            // CopyMemory 实测一致, 与 LSet 同口径)。必须先 fit 成一只**新** BSTR 再 move
+            // 进目标: 先 Assign 再回头改长度会多留一只临时, 而裸赋值连长度都不对。
+            // RHS 是自有临时串那一侧用 vb6_LSetFree 顺手把它释放 —— 尺与下面
+            // AssignMove/Assign 的选择同一把, 否则每次赋值都漏一块 (账 #118 ②)。
+            const std::string fitFn118 =
+                (valueOwned113 || wrapped122) ? "vb6_LSetFree" : "vb6_LSet";
+            c_.emitLine("vb6_BSTR_AssignMove(&" + target + ", " + fitFn118 + "(" + value
+                        + ", " + fixedLenTarget + "));");
+        } else if (valueOwned113 || wrapped122) {
             c_.emitLine("vb6_BSTR_AssignMove(&" + target + ", " + value + ");");
         } else {
             c_.emitLine("vb6_BSTR_Assign(&" + target + ", " + value + ");");
@@ -355,6 +405,7 @@
         // vb6_ret_pvVfsSeek = vb6_ComCall(...) 2630). 按目标 C 类型解封:
         // VariantFromComResult 把 void* 包回 vb6_VARIANT, 再 VariantToXxx 提取.
         bool valueIsBareComResult = (value.compare(0, 12, "vb6_ComCall(") == 0
+            || value.compare(0, 20, "vb6_ComCallByDispid(") == 0
             || value.compare(0, 17, "vb6_ComCallObject(") == 0
             || value.compare(0, 15, "vb6_ComCallBSTR(") == 0
             || value.compare(0, 14, "vb6_ComCallInt(") == 0
@@ -403,6 +454,56 @@
                     default: break;
                     }
                 }
+            }
+            // Fix P24-10b(2): 目标是标量**数组元素**时 knownXxxVars_ 与
+            // IdentifierExpr 兜底都捡不到 —— 目标串是 `VB6_SA_AT(float, arr, i)`
+            // / `VB6_SA_ND_AT2(int32_t, ...)` 下标宏, 裸 COM 结果(RHS 为
+            // vb6_ComCallByDispid 等返回值 void* 承载 VARIANT*)原样赋给元素
+            // → C2440 "无法从 void* 转换为 float" (Charts2020 ucTreeMaps
+            // `Values(i) = cValues(i)` 实测, Values As Single())。
+            // 元素 C 类型按宏第一实参解析, 与下方 valueIsVariant 分支
+            // (账 038b-6/086 的 VB6_SA_AT(...) 判定) 同口径。
+            if (tgtCt124.empty()) {
+                static const std::string kSaAt   = "VB6_SA_AT(";
+                static const std::string kSaNdAt = "VB6_SA_ND_AT2(";
+                size_t elemPos = std::string::npos;
+                if (target.compare(0, kSaAt.size(), kSaAt) == 0) {
+                    elemPos = kSaAt.size();
+                } else if (target.compare(0, kSaNdAt.size(), kSaNdAt) == 0) {
+                    elemPos = kSaNdAt.size();
+                }
+                if (elemPos != std::string::npos) {
+                    size_t comma = target.find(',', elemPos);
+                    if (comma != std::string::npos) {
+                        std::string elemCt = target.substr(elemPos, comma - elemPos);
+                        size_t tb = elemCt.find_first_not_of(" \t");
+                        size_t te = elemCt.find_last_not_of(" \t");
+                        if (tb != std::string::npos)
+                            elemCt = elemCt.substr(tb, te - tb + 1);
+                        if (elemCt == "float" || elemCt == "double")
+                            tgtCt124 = "double";
+                        else if (elemCt == "BSTR")
+                            tgtCt124 = "BSTR";
+                        else if (elemCt == "int32_t" || elemCt == "int16_t"
+                                 || elemCt == "uint8_t" || elemCt == "LONG")
+                            tgtCt124 = "int32_t";
+                    }
+                }
+            }
+            // Fix P24-10b(2b): UDT 成员目标 (`me->mData.fValue = ...` 折算后
+            // 目标串带 `->` 点链) 同样不在 known 集合/裸标识符/SA_AT 三类里——
+            // 按 Fix 084n 同款 inferUdtFieldVb6Type 补问一次声明类型, 否则
+            // 裸 COM 结果原样赋给 float/double 字段 → C2440。
+            if (tgtCt124.empty()) {
+                Vb6Type udtT124 = inferUdtFieldVb6Type(node.target.get());
+                if (udtT124 == Vb6Type::String) tgtCt124 = "BSTR";
+                else if (udtT124 == Vb6Type::Long || udtT124 == Vb6Type::Integer
+                         || udtT124 == Vb6Type::Byte || udtT124 == Vb6Type::Boolean
+                         || udtT124 == Vb6Type::ULong || udtT124 == Vb6Type::LongPtr)
+                    tgtCt124 = "int32_t";
+                else if (udtT124 == Vb6Type::Double || udtT124 == Vb6Type::Single
+                         || udtT124 == Vb6Type::Currency || udtT124 == Vb6Type::Date)
+                    tgtCt124 = "double";
             }
             if (tgtCt124 == "double" || tgtCt124 == "float") {
                 c_.emitLine(target + " = vb6_VariantToDouble(" + unwrapped + ");");

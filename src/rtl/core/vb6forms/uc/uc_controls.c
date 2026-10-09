@@ -29,9 +29,9 @@ static void* vb6_uc_controlsForm(const void* coll) {
     if (!coll) return NULL;
     void* f = ((const vb6_UCControls*)coll)->formHwnd;
     // formHwnd==0 = 单例 (UserControl.Controls): 回落到当前 UC 实例宿主窗口。
-    // g_uc_current 由 vb6_uc_push 维护 (最近进入的实例), 在 .ctl 方法执行期间
+    // vb6_ucCurrent 由 vb6_uc_push 维护 (最近进入的实例), 在 .ctl 方法执行期间
     // 恒指向发起调用的那个控件实例, 与 VB6 "UserControl.Controls" 语义一致。
-    if (!f && g_uc_current) f = (void*)g_uc_current->hwnd;
+    if (!f && vb6_ucCurrent) f = (void*)vb6_ucCurrent->hwnd;
     return f;
 }
 
@@ -49,10 +49,10 @@ static int32_t vb6_uc_collectChildren(void* formHwnd, void** out, int32_t max) {
     // 顶层窗口 (那会返回与本集合无关的窗口)。
     if (!formHwnd) return 0;
     int32_t n = 0;
-    for (int32_t i = 0; i < g_hoCount && n < max; i++) {
-        if (!g_ho[i].isForm && g_ho[i].hwnd &&
-            GetParent((HWND)g_ho[i].hwnd) == (HWND)formHwnd) {
-            out[n++] = g_ho[i].hwnd;
+    for (int32_t i = 0; i < vb6_ucHoCount && n < max; i++) {
+        if (!vb6_ucHo[i].isForm && vb6_ucHo[i].hwnd &&
+            GetParent((HWND)vb6_ucHo[i].hwnd) == (HWND)formHwnd) {
+            out[n++] = vb6_ucHo[i].hwnd;
         }
     }
     // 兜底: 枚举真实子窗口 (vb6_CreateControl 创建的标准控件未必逐个登记)
@@ -78,6 +78,15 @@ int32_t vb6_UC_ControlsCount(void* coll) {
     if (!vb6_uc_isControls(coll)) return 0;
     void* kids[VB6_UC_MAX_OBJ];
     return vb6_uc_collectChildren(vb6_uc_controlsForm(coll), kids, VB6_UC_MAX_OBJ);
+}
+
+/* 账 #254: 「这枚容器上有多少枚子控件」的第二个问法 —— 接收者是**窗体/UC 自己**
+   (VB6 的 `Form.Count`)，手上没有集合对象。数法转调上面同一条收集，不开第二份：
+   Charts 的 ClsResizer 用 `ReDim Rects(oForm.Count - 1)` 给 `For Each oCtrl In
+   oForm.Controls` 铺格子，这两个数一旦不等，循环第一格就写下标越界。 */
+int32_t vb6_UC_ControlsCountOf(void* formHwnd) {
+    void* kids[VB6_UC_MAX_OBJ];
+    return vb6_uc_collectChildren(formHwnd, kids, VB6_UC_MAX_OBJ);
 }
 
 void* vb6_UC_ControlsItem(void* coll, int32_t index) {
@@ -110,8 +119,8 @@ void* vb6_UC_ControlsItemByName(void* coll, const wchar_t* name, int32_t tabIdx)
     }
     HWND formHwnd = (coll && vb6_uc_isControls(coll)) ? (HWND)vb6_uc_controlsForm(coll) : NULL;
     /* 优先在已注册宿主对象表里找 (名字精确, 不受父窗口层级影响) */
-    for (int32_t i = 0; i < g_hoCount; i++) {
-        vb6_HostObjRec* r = &g_ho[i];
+    for (int32_t i = 0; i < vb6_ucHoCount; i++) {
+        vb6_HostObjRec* r = &vb6_ucHo[i];
         if (r->isForm || !r->hwnd) continue;
         if (formHwnd && GetAncestor((HWND)r->hwnd, GA_ROOT) != formHwnd
             && !IsChild(formHwnd, (HWND)r->hwnd)) {
@@ -149,18 +158,18 @@ void* vb6_UC_ControlsItemObjByName(void* coll, const wchar_t* name) {
     return inst ? inst : hw;
 }
 
-// 把宿主窗口从 g_ho / g_uc_recs 摘除 (Remove 时调用)。
-// 采用"末位填补"压缩数组; g_uc_current 若正好是被摘除项, 置 NULL (调用方
+// 把宿主窗口从 vb6_ucHo / vb6_ucRecs 摘除 (Remove 时调用)。
+// 采用"末位填补"压缩数组; vb6_ucCurrent 若正好是被摘除项, 置 NULL (调用方
 // Remove 的必然是别的控件, 不会摘到自身, 故正常情况下不发生)。
 static void vb6_uc_releaseHost(void* hwnd) {
     if (!hwnd) return;
-    for (int32_t i = 0; i < g_hoCount; i++) {
-        if (g_ho[i].hwnd == hwnd) { g_ho[i] = g_ho[--g_hoCount]; break; }
+    for (int32_t i = 0; i < vb6_ucHoCount; i++) {
+        if (vb6_ucHo[i].hwnd == hwnd) { vb6_ucHo[i] = vb6_ucHo[--vb6_ucHoCount]; break; }
     }
-    for (int32_t i = 0; i < g_uc_recCount; i++) {
-        if ((void*)g_uc_recs[i].hwnd == hwnd) {
-            if (g_uc_current == &g_uc_recs[i]) g_uc_current = NULL;
-            g_uc_recs[i] = g_uc_recs[--g_uc_recCount];
+    for (int32_t i = 0; i < vb6_ucRecCount; i++) {
+        if ((void*)vb6_ucRecs[i].hwnd == hwnd) {
+            if (vb6_ucCurrent == &vb6_ucRecs[i]) vb6_ucCurrent = NULL;
+            vb6_ucRecs[i] = vb6_ucRecs[--vb6_ucRecCount];
             break;
         }
     }
@@ -195,7 +204,7 @@ int32_t vb6_UC_ControlsRemove(void* coll, void* obj, const wchar_t* name) {
         if (!hw && IsWindow((HWND)obj)) hw = obj;   // 直接给的 HWND
         if (!hw) {
             /* 可能是本语境的宿主实例: 用 vb6_uc_findByInstance 的逆 →
-               实例若即 g_uc_recs[i].me, 取其 hwnd */
+               实例若即 vb6_ucRecs[i].me, 取其 hwnd */
             vb6_UCRec* r = vb6_uc_findByInstance(obj);
             if (r) hw = (void*)r->hwnd;
         }
@@ -251,14 +260,14 @@ void* vb6_UC_NewFont(void) {
     f->Weight = 400;
     fr->tag = VB6_UC_FONT_TAG;
     fr->font = f;
-    fr->next = g_uc_fonts;
-    g_uc_fonts = fr;
+    fr->next = vb6_ucFonts;
+    vb6_ucFonts = fr;
     return f; // 与 cgen 的 vb6_ComIface_Font* 直接字段访问保持一致
 }
 
 vb6_ComIface_Font* vb6_uc_fontOf(void* p) {
-    if (p == &g_vb6_UserControl_FontObj) return &g_vb6_UserControl_FontObj;
-    for (vb6_UCFontRec* f = g_uc_fonts; f; f = f->next)
+    if (p == &vb6_UserControl_FontObj) return &vb6_UserControl_FontObj;
+    for (vb6_UCFontRec* f = vb6_ucFonts; f; f = f->next)
         if (p == f || p == f->font) return (vb6_ComIface_Font*)f->font;
     return NULL;
 }

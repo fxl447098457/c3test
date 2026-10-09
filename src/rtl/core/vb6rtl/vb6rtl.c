@@ -162,14 +162,20 @@ void vb6_Init(void) {
         AddVectoredExceptionHandler(1, vb6_CrashTraceVEH);
     }
 #endif
-    // P20-44: OLE 拖放 RTL 自测 —— 环境变量 C3_OLEDDB_TEST=1 时, 把
-    // IDataObject/IDropTarget 的 DragEnter/DragOver/Drop 走一遍并写结果文件。
+    // P20-44: OLE 拖放 RTL 自测 —— **显式** C3_OLEDDB_SELFTEST=1 才跑
+    // (C3_OLEDDB_TEST=1 只负责"无头驱动"链路, 不让自测混进应用启动热路径)。
+    // 自测内容: 把 IDataObject/IDropTarget 的 DragEnter/DragOver/Drop 走一遍并写结果文件。
     // 无头环境没法真拖 (DoDragDrop 是模态循环), 直接调 IDropTarget 的方法才测得动。
+    // 历史: 自测曾是 C3_OLEDDB_TEST=1 的隐式前置步骤, 在 frmevents GA 上偶发
+    // 0xC0000005 (memmove ← do_GetData ← vb6_oleDD_SelfTest ← vb6_Init), 空输出红。
+    // 拆成独立开关: 需要验 RTL 自测时手动开, 用例/应用启动不受影响。
     {
         // 用 W 版取环境变量: 输出路径可能含非 ASCII (fwprintf/_wfopen 全宽链路)
-        wchar_t oleOut43[MAX_PATH] = { 0 };
+        wchar_t oleSelf43[8] = { 0 };
         wchar_t oleFlag43[8] = { 0 };
-        if (GetEnvironmentVariableW(L"C3_OLEDDB_TEST", oleFlag43, 8) > 0) {
+        if (GetEnvironmentVariableW(L"C3_OLEDDB_SELFTEST", oleSelf43, 8) > 0
+            && GetEnvironmentVariableW(L"C3_OLEDDB_TEST", oleFlag43, 8) > 0) {
+            wchar_t oleOut43[MAX_PATH] = { 0 };
             if (!GetEnvironmentVariableW(L"C3_OLEDDB_TEST_OUT", oleOut43, MAX_PATH))
                 lstrcpyW(oleOut43, L"oledd_test.txt");
             extern int32_t vb6_oleDD_SelfTest(const wchar_t* outPath);
@@ -423,9 +429,13 @@ typedef struct vb6_ErrObject {
     int32_t number;
     BSTR description;
     BSTR source;
+    // Fix <vbeclipse> 2026-10-06: Err.LastDllError 快照 —— DLL 调用返回那一刻的
+    // GetLastError(), 由 vb6_ErrSetLastDllError 在调用点捕获; 访问 Err.LastDllError
+    // 返回此快照, 而非访问那一刻的 GetLastError() (中间 RTL/打印会重置 last-error)。
+    int32_t lastDllError;
 } vb6_ErrObject;
 
-static vb6_ErrObject vb6_err = {0, NULL, NULL};
+static vb6_ErrObject vb6_err = {0};
 
 // 全局错误处理状态 (由cgen生成的代码直接使用)
 int32_t vb6_err_resume_next = 0;
@@ -485,7 +495,16 @@ void vb6_RestoreErrState(void) {
 
 int32_t vb6_ErrNumber(void) { return vb6_err.number; }
 BSTR vb6_ErrDescription(void) { return vb6_err.description; }
-void vb6_ErrClear(void) { vb6_err.number = 0; vb6_err.description = NULL; vb6_err.source = NULL; }
+// Fix <vbeclipse> 2026-10-06: Err.Clear 清空 **全部** 属性 —— 含 LastDllError。
+// VB6/VBA 文档 "Clear Method (Err Object)" 的属性表逐项列出 Clear 后的取值:
+//   Description ""  HelpContext 0  HelpFile ""  LastDLLError 0  Number 0  Source ""
+// 且 Clear 会被 Resume / Exit Sub|Function|Property / On Error 语句**自动**调用
+// (本 RTL 里 Resume 已走 vb6_ErrClear, 见 cgen_jumps.cpp)。漏掉 lastDllError 会让
+// 快照跨过一次 Clear 存活, 与 VB6 不符。
+void vb6_ErrClear(void) {
+    vb6_err.number = 0; vb6_err.description = NULL; vb6_err.source = NULL;
+    vb6_err.lastDllError = 0;
+}
 
 // P21-27: Erl — 出错行号 (声明见 vb6rtl_class_com.h)
 // 行号嵌入机制未实现 (cgen 不生成 VB 行号标签), 按 VB6 语义返回 0 —— VB6 中源码
@@ -494,6 +513,10 @@ void vb6_ErrClear(void) { vb6_err.number = 0; vb6_err.description = NULL; vb6_er
 int32_t vb6_Erl(void) { return 0; }
 
 BSTR vb6_ErrSource(void) { return vb6_err.source; }
+
+// Fix <vbeclipse> 2026-10-06: Err.LastDllError 快照存取 (见 vb6_ErrObject.lastDllError)
+int32_t vb6_ErrLastDllError(void) { return vb6_err.lastDllError; }
+void vb6_ErrSetLastDllError(int32_t code) { vb6_err.lastDllError = code; }
 
 void vb6_ErrRaise(int32_t errNum, BSTR source, BSTR description) {
     vb6_err.number = errNum;
@@ -536,6 +559,40 @@ double vb6_Num_Div(double a, double b) {
 }
 
 int32_t vb6_Num_Mod(int32_t a, int32_t b) {
+    if (b == 0) { vb6_ErrRaiseNumber(11); return 0; }
+    return a % b;
+}
+
+// ai/032: 无符号整除/取余 (ULong=32 位 · ULongLong=64 位)。
+//   为什么另开四条: vb6_IntDiv / vb6_Num_Mod 的形参都是 int32_t, 无符号操作数先被
+//   按有符号解释 —— 实测 `&H80000000 As ULong \ 2` 得 3221225472 (应为 1073741824),
+//   因为 (int32_t)&H80000000 = -2147483648。除零语义与上面一致 (运行期错误 11)。
+uint32_t vb6_IntDivULong(uint32_t a, uint32_t b) {
+    if (b == 0) { vb6_ErrRaiseNumber(11); return 0; }
+    return a / b;
+}
+uint32_t vb6_Num_ModULong(uint32_t a, uint32_t b) {
+    if (b == 0) { vb6_ErrRaiseNumber(11); return 0; }
+    return a % b;
+}
+uint64_t vb6_IntDivULongLong(uint64_t a, uint64_t b) {
+    if (b == 0) { vb6_ErrRaiseNumber(11); return 0; }
+    return a / b;
+}
+uint64_t vb6_Num_ModULongLong(uint64_t a, uint64_t b) {
+    if (b == 0) { vb6_ErrRaiseNumber(11); return 0; }
+    return a % b;
+}
+// ai/032 rev2: 有符号 64 位整除/取余。补这两条是为了让 `\` / `Mod` 的分档完整:
+// 有符号/无符号混算按 VB.NET 的规则会提升到"更宽的有符号型", 32 位异符号的提升结果
+// 正是 64 位有符号 (`&HFFFFFFFF As ULong \ 2` 在 VB.NET 里先升到 Long(64) 再除),
+// 而 vb6_IntDiv 的形参只有 int32_t —— 少了这两条就只能退回 32 位截断。
+// 除零语义与上面一致 (运行期错误 11)。
+int64_t vb6_IntDivLongLong(int64_t a, int64_t b) {
+    if (b == 0) { vb6_ErrRaiseNumber(11); return 0; }
+    return a / b;
+}
+int64_t vb6_Num_ModLongLong(int64_t a, int64_t b) {
     if (b == 0) { vb6_ErrRaiseNumber(11); return 0; }
     return a % b;
 }
@@ -649,6 +706,27 @@ void vb6_RaiseError(int32_t errNum, BSTR description) {
             int n = swprintf(line, 600, L"Unhandled VB6 Error #%d: %ls\n", errNum,
                              description ? description : L"(no description)");
             if (n > 0) vb6_ConWriteErrW(line, n);
+#ifdef _WIN32
+            /* 3DMenu P-BMP-3D 排查: 把抛错时 C 栈帧按 RVA 打到 stderr,
+             * 便于对回生成 .c 定位 (无 PDB 就用模块名+偏移猜函数)。 */
+            {
+                void* fr[24];
+                USHORT fn = CaptureStackBackTrace(0, 24, fr, NULL);
+                HMODULE hSelf = GetModuleHandleA(NULL);
+                for (USHORT i = 0; i < fn; i++) {
+                    wchar_t bl[160];
+                    if ((char*)fr[i] >= (char*)hSelf &&
+                        (char*)fr[i] < (char*)hSelf + 0x1000000) {
+                        swprintf(bl, 160, L"  #%u rva=0x%lX\n", (unsigned)i,
+                                 (unsigned long)((char*)fr[i] - (char*)hSelf));
+                    } else {
+                        swprintf(bl, 160, L"  #%u 0x%p (outside exe)\n",
+                                 (unsigned)i, fr[i]);
+                    }
+                    { int bn = (int)wcslen(bl); if (bn > 0) vb6_ConWriteErrW(bl, bn); }
+                }
+            }
+#endif
         } else {
             // 无处可写 (双击启动的 GUI 程序): 弹 VB6 风格错误对话框
             wchar_t msg[512];

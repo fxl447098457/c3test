@@ -156,7 +156,8 @@
                     if (!pic.data.empty()) {
                         std::string varName = "vb6_frx_pic_" + cIdent(ctrl.controlName);
                         if (ctrl.index >= 0) varName += "_" + std::to_string(ctrl.index);
-                        h_.emitLine(bytesToHexArray(pic.data.data(), pic.data.size(), varName));
+                        frxArrayDefs_.push_back(bytesToHexArray(pic.data.data(), pic.data.size(), varName));
+                        h_.emitLine(bytesToHexArrayDecl(varName));
                         bool isGraphicalBtn = (ctrl.controlType == FrmControlType::CommandButton ||
                                                ctrl.controlType == FrmControlType::OptionButton ||
                                                ctrl.controlType == FrmControlType::CheckBox) &&
@@ -397,14 +398,15 @@
                 // czUI fix: UC 事件接线 — thunk/sink 已在文件作用域 (prelude) 生成,
                 // 这里按实例挂接 (attach 行由 prelude 存入 ucEventAttach_)。
                 {
-                    auto itAtt114 = ucEventAttach_.find(Symbol::toLower(ctrl.controlName));
+                    // 账 #222: 键与 sink 名都由 prelude 那一处算/拼, 这里只查表。
+                    auto itAtt114 = ucEventAttach_.find(ctrlElemKey(ctrl.controlName, ctrl.index));
                     if (itAtt114 != ucEventAttach_.end() && !getenv("C3_NO_EVENTS")) {
                         std::string shortCls114 = ctlClass;
                         size_t dotCls114 = shortCls114.rfind('.');
                         if (dotCls114 != std::string::npos) shortCls114 = shortCls114.substr(dotCls114 + 1);
                         c_.emitLine("{ /* UC events */");
-                        for (const auto& al : itAtt114->second) c_.emitLine("  " + al);
-                        c_.emitLine("  ((vb6_cls_" + cIdent(shortCls114) + "*)vb6_UC_InstanceOf(" + hwndExpr + "))->events = &_sink_" + cIdent(ctrl.controlName) + ";");
+                        for (const auto& al : itAtt114->second.lines) c_.emitLine("  " + al);
+                        c_.emitLine("  ((vb6_cls_" + cIdent(shortCls114) + "*)vb6_UC_InstanceOf(" + hwndExpr + "))->events = &" + itAtt114->second.sinkVar + ";");
                         c_.emitLine("}");
                     }
                 }
@@ -531,7 +533,8 @@
                         imgIdx++;
                         std::string varName = "vb6_frx_imglist_" + cIdent(ctrl.controlName)
                                             + "_" + std::to_string(imgIdx);
-                        h_.emitLine(bytesToHexArray(pic.data.data(), pic.data.size(), varName));
+                        frxArrayDefs_.push_back(bytesToHexArray(pic.data.data(), pic.data.size(), varName));
+                        h_.emitLine(bytesToHexArrayDecl(varName));
                         std::string keyLit = "NULL";
                         auto keyIt = listImg.properties.find("Key");
                         if (keyIt != listImg.properties.end()
@@ -644,7 +647,8 @@
                                 // Generate byte array in .h file
                                 imgIdx++;
                                 std::string varName = "vb6_frx_imglist_" + cIdent(ctrl.controlName) + "_" + std::to_string(imgIdx);
-                                h_.emitLine(bytesToHexArray(pic.data.data(), pic.data.size(), varName));
+                                frxArrayDefs_.push_back(bytesToHexArray(pic.data.data(), pic.data.size(), varName));
+                                h_.emitLine(bytesToHexArrayDecl(varName));
 
                                 // Get Key property (may be empty string)
                                 std::string keyStr;
@@ -723,7 +727,7 @@
                             // 旧实现只给路径加了 size()==1 守卫, altClsid143 却对任意
                             // 条目数都取 front() —— 多 OCX 工程下正在生成 B 控件时拿到
                             // A.ocx 的 CLSID, 而此时 ocxPath143 为空 (下方 ocxFiles_
-                            // 按 tlKey143 也查不到), ocxCreateAny 会退到 CoCreateInstance
+                            // 按 tlKey143 也查不到), vb6_ocxCreateAny 会退到 CoCreateInstance
                             // 用 A 的 CLSID 激活出 A 的控件, 代码生成侧却按 B 处理,
                             // 静默用错控件。单 OCX 工程 front() 就是自己, 回退语义不变。
                             // Fix 148: front() 前必须判空 — ocxRefs_ 为空时是 UB, 实测段错误.

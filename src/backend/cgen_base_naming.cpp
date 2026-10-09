@@ -330,6 +330,19 @@ std::string CCodeGen::wrapByRefVariantParamArg(const std::string& paramName,
         case Vb6Type::LongPtr:
         case Vb6Type::ULong:
             return "(&(vb6_VARIANT){.vt=VT_I8, .llVal=(int64_t)(" + src + ")})";
+        // C3 扩展 (ai/032): 新整型装箱 —— 一律挑**能无损装下该值域的最小既有 VT**,
+        // 而不是新造 VT_I1/VT_UI2/VT_UI4 那几档:
+        //   · 值不丢 (SByte ⊂ I2, UInteger ⊂ I4, ULong/ULongLong ⊂ I8);
+        //   · 转换/格式化/COM 打包全部走已有并测过的既有分支, RTL 一行不用改;
+        //   · 与上面 ULong → VT_I8 的既有写法保持同一口径 (那条本来就这么做)。
+        // 代价只有 VarType() 会答成有符号档 —— 一个可接受的保真度损失, 换来的是
+        // 不把 4 条新的 VT 通道铺进 vb6_VariantToLong/Double/Bool/Format 全部 switch。
+        case Vb6Type::SByte:
+            return "(&(vb6_VARIANT){.vt=VT_I2, .iVal=(int16_t)(" + src + ")})";
+        case Vb6Type::UInteger:
+            return "(&(vb6_VARIANT){.vt=VT_I4, .lVal=(int32_t)(" + src + ")})";
+        case Vb6Type::ULongLong:
+            return "(&(vb6_VARIANT){.vt=VT_I8, .llVal=(int64_t)(" + src + ")})";
         default:
             return std::string();
     }

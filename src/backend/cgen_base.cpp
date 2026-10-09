@@ -204,7 +204,7 @@ CCodeGen::CCodeGen(Diagnostics& diag, const SymbolTable& symTab,
 // ============================================================
 
 bool CCodeGen::generate(Module& module, const std::string& baseName,
-                         const std::unordered_set<std::string>& externalModules,
+                         const std::vector<std::string>& externalModules,
                          bool isDll, const std::string& dllProgId,
                          const FrmFormDesc* frmDesc) {
 #include "backend/detail/base/cgen_base_generate_prologue.inc"

@@ -187,6 +187,11 @@ private:
     // runSemanticAnalysis 入口处从 AST 声明建表, 之后只读, 经 setMemberAccessTable 下发。
     // 不 visit 期查符号表的理由见 symbol_table.hpp MemberAccessTable 注释。
     MemberAccessTable memberAccessTable_;
+    // 账 #278 §B110: 工程内**窗体模块名**（小写）的唯一建造点。VB6 里窗体名在裸名位就是它的
+    // 默认实例（`Unload frmMain` / `Set f = frmMain`），发码侧那份名单（knownFormModuleNames_，
+    // 经 setFormModuleNames 下发给每台 cgen）与语义层的"这名字工程里有"必须是同一个答案 ——
+    // 两边各扫一遍 modules_ 就是两份权威，将来谁改判据谁漏改另一边。
+    std::unordered_set<std::string> collectFormModuleNames() const;
     void buildMemberAccessTable();
     // ai/084c: 类名(小写) → Class_Initialize 形参个数 (buildMemberAccessTable 顺带扫描,
     // 经 setCtorParamCounts 下发; 表内缺席 = 非本工程类, New 带实参在语义层报错)。
@@ -253,6 +258,17 @@ private:
     // Fix 143b: vbp Object= 原始引用列表 (CLSID 小写去花括号, ocx 绝对路径).
     // 控件实例化 CLSID 以此为准 (typelib coclass GUID ≠ 实例 CLSID).
     std::vector<std::pair<std::string, std::string>> ocxRefs_;
+
+    // Fix <vbeclipse> 2026-10-06: vbp Object= 免注册 OCX 表 (canonical 小写绝对路径 → 相对 exe 路径).
+    // driver_compile 填, runTypeLibImport 按 TypeLibResult 路径反查:
+    // 命中者其全部 coclass 进免注册表, 未命中者 (普通 Reference= / auto-typelib) 不进,
+    // 运行期对未声明 OCX 零变化. 路径语义与 ComLib= 一致.
+    std::unordered_map<std::string, std::string> ocxCanonMap_;
+
+    // Fix <vbeclipse> 2026-10-06: Object= OCX 组件表 {ProgID, CLSID, coclass名, 相对exe路径},
+    // runTypeLibImport 收集, cgen 烘焙进产物入口点 (vb6_OcxRefRegister). 运行期
+    // Me.Controls.Add 按 ProgID 命中后走 vb6_ocxCreateAny 免注册.
+    std::vector<std::array<std::string, 4>> ocxLibRefs_;
 
     // Fix 160: vbp ComLib= 声明的组件 DLL (canonical 小写绝对路径 → 相对 exe 路径).
     // driver_compile 填, runTypeLibImport 按 TypeLibResult 路径反查:

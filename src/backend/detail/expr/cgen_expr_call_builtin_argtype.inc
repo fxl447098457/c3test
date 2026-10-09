@@ -47,7 +47,8 @@
         };
         if (numericBuiltins108c.count(callee)) {
             for (auto& a : args) {
-                if (a.compare(0, 12, "vb6_ComCall(") == 0) {
+                if (a.compare(0, 12, "vb6_ComCall(") == 0
+                            || a.compare(0, 20, "vb6_ComCallByDispid(") == 0) {
                     std::string wrapped =
                         "vb6_VariantToDouble(vb6_VariantFromComResult(" + a + "))";
                     replaceInArgList108c(a, wrapped);
@@ -63,6 +64,7 @@
         if (callee == "vb6_Val") {
             for (auto& a : args) {
                 bool isComResult = (a.compare(0, 12, "vb6_ComCall(") == 0
+                                    || a.compare(0, 20, "vb6_ComCallByDispid(") == 0
                                     || a.compare(0, 12, "vb6_ComGetProp(") == 0);
                 if (isComResult) {
                     std::string wrapped =
@@ -84,7 +86,11 @@
                 if (at108c != Vb6Type::Single && at108c != Vb6Type::Double &&
                     at108c != Vb6Type::Long && at108c != Vb6Type::Integer &&
                     at108c != Vb6Type::Currency && at108c != Vb6Type::Decimal &&
-                    at108c != Vb6Type::Boolean && at108c != Vb6Type::Date) {
+                    at108c != Vb6Type::Boolean && at108c != Vb6Type::Date &&
+                    // ai/032: 四档无符号/窄整型 —— 不纳入清单就是裸 uint32_t/uint64_t
+                    // 喂给 BSTR 形参 ⇒ C2440。
+                    at108c != Vb6Type::SByte && at108c != Vb6Type::UInteger &&
+                    at108c != Vb6Type::ULong && at108c != Vb6Type::ULongLong) {
                     continue;  // 已是字符串/对象等, 不介入
                 }
                 if (args[pos].find("vb6_CStr") != std::string::npos) continue;
@@ -93,6 +99,12 @@
                     wrapped108c = "vb6_CStrDate((double)(" + args[pos] + "))";
                 } else if (at108c == Vb6Type::Long || at108c == Vb6Type::Integer ||
                            at108c == Vb6Type::Boolean) {
+                    wrapped108c = "vb6_CStrLong((int32_t)(" + args[pos] + "))";
+                } else if (at108c == Vb6Type::ULong) {
+                    wrapped108c = "vb6_CStrULong(" + args[pos] + ")";
+                } else if (at108c == Vb6Type::ULongLong) {
+                    wrapped108c = "vb6_CStrULongLong(" + args[pos] + ")";
+                } else if (at108c == Vb6Type::SByte || at108c == Vb6Type::UInteger) {
                     wrapped108c = "vb6_CStrLong((int32_t)(" + args[pos] + "))";
                 } else {
                     wrapped108c = "vb6_CStrDbl((double)(" + args[pos] + "))";
@@ -121,4 +133,9 @@
         (void)argsFixed108c;
     }
 
+    // Fix <vbeclipse> 2026-10-06: Declare 的 Err.LastDllError 快照**不在这里**做 ——
+    // 调用点注入语句会把 `While Api() <> 0` / `IIf(Api(), ...)` 这类表达式位置的
+    // 调用撕成 `(Api(); vb6_ErrSetLastDllError(...) != 0)` 这种非法 C。快照改由
+    // cgen_decl_api.cpp 为每个 Declare 生成的 static __inline 包装函数承担
+    // (调用点经 #define / declareAliasMap_ 已被重定向到该包装), 这里保持原样。
     lastExpr_ = callee + "(" + argList + ")";

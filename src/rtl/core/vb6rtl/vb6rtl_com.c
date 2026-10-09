@@ -18,6 +18,7 @@
 #include <oleauto.h>
 #include <olectl.h>
 #include <windows.h>
+#include <wincodec.h>   /* Fix <vbeclipse> 2026-10-06: WIC — WebP/SVG 等扩展解码 */
 #endif
 
 // P24-08: MessageBoxW (user32) + GetConsoleWindow (kernel32)
@@ -132,12 +133,14 @@ void vb6_EnumRelease(void* penum) {
 static int vb6_OleEnsureInit(void) {
     static int oleInited = 0;
     if (oleInited) return oleInited;
-    if (SUCCEEDED(OleInitialize(NULL))) {
+    HRESULT hrO = OleInitialize(NULL);
+    if (SUCCEEDED(hrO)) {
         oleInited = 1;
     } else {
         CoInitialize(NULL);
         oleInited = 2;
     }
+    
     return oleInited;
 }
 
@@ -145,11 +148,127 @@ static int vb6_OleEnsureInit(void) {
 // 返回活着的 IPicture* (带一次引用); 失败返回 NULL。用完请 vb6_ReleasePicture。
 void* vb6_LoadPictureEx(BSTR pathname) {
     if (!pathname) return NULL;
-    vb6_OleEnsureInit();
+    int oinit = vb6_OleEnsureInit();
     IPicture* pPicture = NULL;
     HRESULT hr = OleLoadPicturePath(pathname, NULL, 0, 0, &IID_IPicture, (void**)&pPicture);
-    if (FAILED(hr) || !pPicture) return NULL;
+    if (FAILED(hr) || !pPicture) {
+        /* DETERMINISTIC GDI FALLBACK — oleaut32's own picture parser is
+         * process-fragile under the C3 runtime (observed: OleLoadPicturePath /
+         * OleLoadPicture / StdPicture::IPersistStream all E_FAIL in-app on valid
+         * files, then S_OK in a plain exe; even the tiny in-memory BMP case flips
+         * between runs). GDI file decode (LoadImageW) has been stable every run.
+         * Missing files must still yield NULL (the app's CaricaIcone loop relies on
+         * LoadPicture failing to stop at the first absent file), so only attempt
+         * the fallback when the file actually exists. */
+        DWORD fa = GetFileAttributesW(pathname);
+        if (fa != INVALID_FILE_ATTRIBUTES) {
+            HBITMAP hBmp = (HBITMAP)LoadImageW(GetModuleHandleW(NULL), pathname,
+                                               IMAGE_BITMAP, 0, 0, LR_LOADFROMFILE);
+            if (hBmp) {
+                PICTDESC pd;
+                memset(&pd, 0, sizeof(pd));
+                pd.cbSizeofstruct = sizeof(pd);
+                pd.picType = PICTYPE_BITMAP;
+                pd.bmp.hbitmap = hBmp;
+                pd.bmp.hpal = NULL;
+                IPicture* pWrap = NULL;
+                if (SUCCEEDED(OleCreatePictureIndirect(&pd, &IID_IPicture, TRUE, (void**)&pWrap))) {
+                    
+                    vb6_PictureRegister(pWrap);
+                    return (void*)pWrap;
+                }
+                /* OleCreatePictureIndirect is crippled too: hand the raw HBITMAP
+                 * over instead. vb6_SetControlPicture's registered==0 path stores
+                 * it as a plain GDI handle and paints it (STATIC + STM_SETIMAGE).
+                 * Only reachable when oleaut32's COM picture layer is dead. */
+                
+                return (void*)hBmp;
+            }
+            /* Last resort: same file via an IStream + OleLoadPicture. GDI's
+             * LoadImageW only decodes BMP/ICO/CUR, so for an existing file that
+             * reached here (e.g. a JPEG/PNG that LoadImageW cannot read) this is
+             * the only remaining decode path. */
+            IPicture* pAlt = NULL;
+            DWORD rd = 0, sizeF = 0;
+            HANDLE hf = CreateFileW(pathname, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
+            if (hf != INVALID_HANDLE_VALUE) {
+                sizeF = GetFileSize(hf, NULL);
+                HANDLE hg = GlobalAlloc(GMEM_MOVEABLE, sizeF);
+                void* pv = GlobalLock(hg);
+                if (pv) { ReadFile(hf, pv, sizeF, &rd, NULL); GlobalUnlock(hg); }
+                CloseHandle(hf);
+                IStream* st = NULL;
+                if (pv && SUCCEEDED(CreateStreamOnHGlobal(hg, TRUE, &st))) {
+                    OleLoadPicture(st, (LONG)rd, FALSE, &IID_IPicture, (void**)&pAlt);
+                    st->lpVtbl->Release(st);
+                } else if (pv) {
+                    GlobalFree(hg);
+                }
+            }
+            if (pAlt) pAlt->lpVtbl->Release(pAlt);
+        }
+        /* VB6 语义: LoadPicture 指到**不存在**的文件要抛运行时错误 53 (File not found),
+         * 而不是静默返回 Nothing。3DMenu 的 CaricaIcone 循环正是靠
+         *   For i = 0 To 40 : On Error GoTo Err: Set Img(Num,i)=LoadPicture(Nfile) : ... : Next
+         * 里"第一个缺帧 ⇒ 抛错 ⇒ 跳 Err ⇒ 退出循环"来定 Totale(Num) 的。
+         * 早先这里只 return NULL: 循环跑满 40 次, Totale(Num) 被写成 40 (真实只有 18 帧),
+         * Timer_Shift 于是把 22 个空帧喂给 ImgMenu(sel) → Picture 被清空 → AutoRedraw 位图
+         * 回到 BackColor → `TrspCol = GetPixel(hdc,0,0)` 读到 0xE0E0E0 而不是图标角上的
+         * 透明色 0xFAE4E4 → TransBltNow 的 XOR/AND/XOR 掩码合成只能整片糊掉 ⇒
+         * 环顶那枚"中间的图标"消失/被背景色方块盖住。
+         * 空 pathname 不抛 (VB6 用 LoadPicture("") 清空 Picture, 合法且无错)。
+         * On Error Resume Next 下 vb6_RaiseError 会提前返回 —— CaricaIconeSub/CaricaTitoli/
+         * CaricaFondi 那些 Resume Next 站点行为不变。 */
+        if (pathname && pathname[0] && GetFileAttributesW(pathname) == INVALID_FILE_ATTRIBUTES) {
+            extern void vb6_RaiseError(int32_t errNum, BSTR description);
+            vb6_RaiseError(53, vb6_BSTR_FromStr(L"File not found"));
+        }
+        return NULL;
+    }
+    
+    vb6_PictureRegister(pPicture);
     return (void*)pPicture;
+}
+
+// ============================================================
+// Picture 双支持注册表 (Fix P-BMP-3D):
+//   vb6_LoadPictureEx 返回的是 COM IPicture* (VB6 的 StdPicture), 而设计期/资源
+//   图片走的是原始 GDI 句柄 (HBITMAP/HICON)。cgen 对 `.Picture =` 一律发
+//   vb6_SetControlPicture(句柄语义), 导致 IPicture* 被当 HBITMAP 用 → 图标画不出。
+//   这里维护一张"本管线活 IPicture 对象"的开放寻址哈希表, vb6_SetControlPicture
+//   据此安全区分 COM 对象与 GDI 句柄。IPicture* 是用户态指针, 绝不与 GDI
+//   句柄 (内核句柄表索引, 值很小) 重叠, 因此无歧义无探测。不主动注销:
+//   残留条目顶多把某个解放后的地址误判为 COM(概率可忽略, 且不影响正确性)。
+// ============================================================
+#define VB6_PICREG_SIZE 4096
+static uintptr_t g_vb6_picReg[VB6_PICREG_SIZE];
+
+static uint32_t vb6_picRegHash(uintptr_t p) {
+    uintptr_t h = (uintptr_t)(p >> 4);
+    h ^= h >> 16;
+    h *= 0x9E3779B97F4A7C15ull;
+    return (uint32_t)(h & (VB6_PICREG_SIZE - 1));
+}
+
+void vb6_PictureRegister(void* picture) {
+    if (!picture) return;
+    uintptr_t p = (uintptr_t)picture;
+    uint32_t i = vb6_picRegHash(p);
+    for (uint32_t n = 0; n < VB6_PICREG_SIZE; n++, i = (i + 1) & (VB6_PICREG_SIZE - 1)) {
+        if (g_vb6_picReg[i] == p) return;
+        if (g_vb6_picReg[i] == 0) { g_vb6_picReg[i] = p; return; }
+    }
+}
+
+int vb6_PictureIsRegistered(const void* picture) {
+    if (!picture) return 0;
+    uintptr_t p = (uintptr_t)picture;
+    uint32_t i = vb6_picRegHash(p);
+    for (uint32_t n = 0; n < VB6_PICREG_SIZE; n++, i = (i + 1) & (VB6_PICREG_SIZE - 1)) {
+        if (g_vb6_picReg[i] == p) return 1;
+        if (g_vb6_picReg[i] == 0) return 0;
+    }
+    return 0;
 }
 
 // 从活着的 IPicture 里取图形句柄 (不销毁 picture 本身)。
@@ -542,22 +661,309 @@ void vb6_VariantArraySet(vb6_VARIANT* v, int32_t index, vb6_VARIANT val) {
     /* 对于非Variant数组, 赋值时需要按目标类型转换(简化: 仅Variant数组支持赋值) */
 }
 
-// Fix 048: LoadResData — stub (resource loading not supported in C3 runtime)
-vb6_VARIANT vb6_LoadResData(int32_t resourceId, int32_t resourceType) {
-    (void)resourceId; (void)resourceType;
-    vb6_VARIANT v; memset(&v, 0, sizeof(v)); return v;  /* empty Variant */
+// ============================================================
+// Fix <vbeclipse> (2026-10-06): LoadRes* 实装 — .res 资源段加载。
+// 此前三个都是空桩返 empty Variant; 实际上用户 .res (VBP 的 ResFile32) 早在
+// P23-03 就随链接进了 exe (driver_link.cpp "Pass user .res file to linker"),
+// 运行期 FindResource/LoadResource 直读即可, 一直缺的只是这一层。
+// 形参口径: VB6 里三个函数的实参本就是 Variant —— LoadResString(101) 数字 id、
+// LoadResData("BIN1","CUSTOM") 字符串名都合法, 故形参统一 vb6_VARIANT, 调用侧
+// 由 cgen 的 vb6_VariantFromValue 包装。资源找不到按 VB6 抛错误 326。
+// ============================================================
+
+// 实参解包: VT_BSTR → 资源名 (按名查找); 其余数值 → MAKEINTRESOURCEW。
+static const wchar_t* vb6_ResNameOf(const vb6_VARIANT* v) {
+    if (v && (vb6_vartype)v->vt == VT_BSTR && v->bstrVal) return v->bstrVal;
+    return NULL;
 }
 
-// Fix <vbeclipse>: LoadResPicture / LoadResString — stub (同 LoadResData 口径:
-// 资源段加载暂不支持, 返回 empty Variant; 调用侧拿到 Nothing/空串不崩)
-vb6_VARIANT vb6_LoadResPicture(int32_t resourceId, int32_t resourceType) {
-    (void)resourceId; (void)resourceType;
-    vb6_VARIANT v; memset(&v, 0, sizeof(v)); return v;
+// 实参解包: 数值档 (I2/I4/UI1/BYTE); BSTR 走 _wtoi 兜底 ("101" 形的字符串 id)。
+static int32_t vb6_ResIdOf(const vb6_VARIANT* v) {
+    if (!v) return 0;
+    switch ((vb6_vartype)v->vt) {
+        case (vb6_vartype)VT_I2:  return v->iVal;
+        case (vb6_vartype)VT_I4:  return v->lVal;
+        case (vb6_vartype)VT_INT: return v->lVal;
+        case (vb6_vartype)VT_UI1: return v->bVal;
+        case (vb6_vartype)VT_BSTR: return v->bstrVal ? _wtoi(v->bstrVal) : 0;
+        default: return (int32_t)v->lVal;
+    }
 }
 
-vb6_VARIANT vb6_LoadResString(int32_t resourceId) {
-    (void)resourceId;
-    vb6_VARIANT v; memset(&v, 0, sizeof(v)); return v;
+// 找到并锁定资源; 返回数据指针, *outSize 收字节数。找不到返回 NULL (调用侧抛 326)。
+static const void* vb6_ResLoad(const vb6_VARIANT* id, const wchar_t* typeName,
+                               int32_t typeId, uint32_t* outSize) {
+    *outSize = 0;
+    const wchar_t* name = vb6_ResNameOf(id);
+    LPCWSTR rName = name ? name : MAKEINTRESOURCEW(vb6_ResIdOf(id));
+    LPCWSTR rType = typeName ? typeName : MAKEINTRESOURCEW(typeId);
+    HRSRC hr = FindResourceW(NULL, rName, rType);
+    if (!hr) return NULL;
+    HGLOBAL h = LoadResource(NULL, hr);
+    if (!h) return NULL;
+    const void* p = LockResource(h);
+    if (!p) return NULL;
+    *outSize = SizeofResource(NULL, hr);
+    return p;
+}
+
+// rc.exe 会把 .ico 展开成 RT_GROUP_ICON(用户写的那个 id) + 若干重编号的 RT_ICON;
+// LoadResPicture 的 id 指的是**组**。读组里首枚 entry 的 nID, 再取对应裸图。
+// (RT_GROUP_CURSOR/RT_CURSOR 同构。)
+static const void* vb6_ResResolveGroup(const vb6_VARIANT* id, int isCursor, uint32_t* outSize) {
+    *outSize = 0;
+    const wchar_t* name = vb6_ResNameOf(id);
+    LPCWSTR rName = name ? name : MAKEINTRESOURCEW(vb6_ResIdOf(id));
+    LPCWSTR grpType = isCursor ? RT_GROUP_CURSOR : RT_GROUP_ICON;
+    LPCWSTR imgType = isCursor ? RT_CURSOR : RT_ICON;
+    HRSRC hr = FindResourceW(NULL, rName, grpType);
+    if (!hr) return NULL;
+    HGLOBAL h = LoadResource(NULL, hr);
+    const uint8_t* g = h ? (const uint8_t*)LockResource(h) : NULL;
+    if (!g) return NULL;
+    int32_t count = g[4] | (g[5] << 8);          /* idCount */
+    if (count < 1) return NULL;
+    const uint8_t* e = g + 6;                     /* 首枚 GRPICONDIRENTRY, 末 2 字节 nID */
+    int32_t nID = e[12] | (e[13] << 8);
+    HRSRC hr2 = FindResourceW(NULL, MAKEINTRESOURCEW(nID), imgType);
+    if (!hr2) return NULL;
+    HGLOBAL h2 = LoadResource(NULL, hr2);
+    const void* p = h2 ? LockResource(h2) : NULL;
+    if (!p) return NULL;
+    *outSize = SizeofResource(NULL, hr2);
+    return p;
+}
+
+vb6_VARIANT vb6_LoadResString(vb6_VARIANT resourceId) {
+    vb6_VARIANT ret; memset(&ret, 0, sizeof(ret));
+    // Win32 字符串表: 16 条一档 — 资源块 id = id/16 + 1, 档内下标 = id%16
+    // (101 → block 7 slot 5, 2026-10-06 probe 实测)。
+    // 条目格式 = **WORD 长度前缀 + 该长度的字符** (不是零结尾!) — 本机 rc.exe 产物
+    // 逐字节实测: block 7 = 5×[0000](空条目) + [0C 00]"ResString-OK" + 10×[0000],
+    // 长度恰好 56 字节。旧的 wcslen 游走把长度词当首字符, 读出 CHR$(12)&s。
+    int32_t id = vb6_ResIdOf(&resourceId);
+    if (id >= 1) {
+        int32_t block = id / 16 + 1;
+        int32_t slot = id % 16;
+        HRSRC hr = FindResourceW(NULL, MAKEINTRESOURCEW(block), RT_STRING);
+        if (hr) {
+            HGLOBAL h = LoadResource(NULL, hr);
+            const wchar_t* tab = h ? (const wchar_t*)LockResource(h) : NULL;
+            if (tab) {
+                for (int32_t i = 0; i < slot; i++) tab += 1 + (int32_t)*tab;
+                int32_t len = (int32_t)*tab;
+                if (len > 0) {
+                    wchar_t* buf = (wchar_t*)malloc(((size_t)len + 1) * sizeof(wchar_t));
+                    if (buf) {
+                        memcpy(buf, tab + 1, (size_t)len * sizeof(wchar_t));
+                        buf[len] = L'\0';
+                        BSTR b = vb6_BSTR_FromStr(buf);
+                        free(buf);
+                        return vb6_VariantString(b);
+                    }
+                }
+                return vb6_VariantString(vb6_BSTR_Empty());
+            }
+        }
+    }
+    vb6_ErrRaiseNumber(326);   /* Resource with identifier not found */
+    return ret;
+}
+
+// 常见图片文件的字节签名 (vb6_ResSigKind 用)
+static int vb6_ResSigIsOleStreamable(const void* data, uint32_t size) {
+    const uint8_t* d = (const uint8_t*)data;
+    if (size < 8 || !d) return 0;
+    if (d[0] == 0x42 && d[1] == 0x4D) return 1;                          /* 'BM' */
+    if (d[0] == 0xFF && d[1] == 0xD8 && d[2] == 0xFF) return 1;          /* JPEG */
+    if (d[0] == 0x89 && d[1] == 0x50 && d[2] == 0x4E && d[3] == 0x47) return 1;  /* PNG */
+    if (d[0] == 0x47 && d[1] == 0x49 && d[2] == 0x46 && d[3] == 0x38) return 1;  /* GIF8 */
+    if (d[0] == 0x00 && d[1] == 0x00 && d[2] == 0x01 && d[3] == 0x00) return 1;  /* ICO */
+    return 0;
+}
+
+// OleLoadPicture 流路径 — PNG/JPEG/GIF/BMP/ICO 全套 (OLE 内建 GDI+ 解码)。
+static IPicture* vb6_ResPicViaOle(const void* data, uint32_t size) {
+    IPicture* pic = NULL;
+    HGLOBAL hg = GlobalAlloc(GMEM_MOVEABLE, size);
+    if (!hg) return NULL;
+    void* pv = GlobalLock(hg);
+    if (!pv) { GlobalFree(hg); return NULL; }
+    memcpy(pv, data, size);
+    GlobalUnlock(hg);
+    IStream* st = NULL;
+    if (SUCCEEDED(CreateStreamOnHGlobal(hg, TRUE, &st)) && st) {
+        OleLoadPicture(st, 0, FALSE, &IID_IPicture, (void**)&pic);
+        st->lpVtbl->Release(st);
+    } else {
+        GlobalFree(hg);
+    }
+    return pic;
+}
+
+// WIC 路径 — OleLoadPicture 不认的格式 (WebP; SVG 在装了 SVG 解码扩展的机器上)。
+// CreateDecoderFromStream 是厂商无关入口, 系统装了什么 WIC 解码器就能吃什么。
+static IPicture* vb6_ResPicViaWic(const void* data, uint32_t size) {
+    static const GUID kWICFactory   = {0xcacaf262,0x9370,0x4615,{0xa1,0x3b,0x9f,0x55,0x39,0xda,0x4c,0x0a}};
+    static const GUID kWICFactoryI  = {0xec5ec8a9,0xc395,0x4314,{0x9c,0x77,0x54,0xd7,0xa9,0x35,0xff,0x70}};
+    static const GUID kPixFmtBGRA   = {0x6fddc324,0x4e03,0x4bfe,{0xb1,0x85,0x3d,0x77,0x76,0x8d,0xc9,0x10}};
+    IPicture* pic = NULL;
+    IWICImagingFactory* fac = NULL;
+    IStream* st = NULL;
+    HGLOBAL hg = NULL;
+    IWICBitmapDecoder* dec = NULL;
+    IWICBitmapFrameDecode* frame = NULL;
+    IWICFormatConverter* conv = NULL;
+    HRESULT wicHr = CoCreateInstance(&kWICFactory, NULL, CLSCTX_INPROC_SERVER,
+                                &kWICFactoryI, (void**)&fac);
+    hg = GlobalAlloc(GMEM_MOVEABLE, size);
+    if (hg) {
+        void* pv = GlobalLock(hg);
+        if (pv) { memcpy(pv, data, size); GlobalUnlock(hg); }
+        if (SUCCEEDED(CreateStreamOnHGlobal(hg, TRUE, &st)) && st) {
+            HRESULT hrDec = fac->lpVtbl->CreateDecoderFromStream(fac, st, NULL,
+                              WICDecodeMetadataCacheOnDemand, &dec);
+            HRESULT hrFrame = dec ? dec->lpVtbl->GetFrame(dec, 0, &frame) : -1;
+            HRESULT hrConv = (!dec || SUCCEEDED(hrFrame)) ? fac->lpVtbl->CreateFormatConverter(fac, &conv) : -1;
+            HRESULT hrInit = conv ? conv->lpVtbl->Initialize(conv, (IWICBitmapSource*)frame,
+                              &kPixFmtBGRA, WICBitmapDitherTypeNone, NULL, 0.0,
+                              WICBitmapPaletteTypeCustom) : -1;
+            if (SUCCEEDED(hrDec) && dec && SUCCEEDED(hrFrame) && frame
+                && SUCCEEDED(hrConv) && conv && SUCCEEDED(hrInit)) {
+                UINT w = 0, hgt = 0;
+                conv->lpVtbl->GetSize(conv, &w, &hgt);
+                if (w && hgt) {
+                    BITMAPINFO bmi; memset(&bmi, 0, sizeof(bmi));
+                    bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+                    bmi.bmiHeader.biWidth = (LONG)w;
+                    bmi.bmiHeader.biHeight = -(LONG)hgt;   /* top-down */
+                    bmi.bmiHeader.biPlanes = 1;
+                    bmi.bmiHeader.biBitCount = 32;
+                    bmi.bmiHeader.biCompression = BI_RGB;
+                    void* bits = NULL;
+                    HBITMAP hb = CreateDIBSection(NULL, &bmi, DIB_RGB_COLORS, &bits, NULL, 0);
+                    /* CopyPixels(prc, cbStride, cbBufferSize, buf) — 第三参是**总缓冲**
+                       (stride*height), 此前误传单行步长 → INSUFFICIENTBUFFER。 */
+                    HRESULT hrCopy = hb ? conv->lpVtbl->CopyPixels(conv, NULL, w * 4, w * 4 * hgt, (BYTE*)bits) : -1;
+                    if (hb && bits && SUCCEEDED(hrCopy)) {
+                        PICTDESC pd; memset(&pd, 0, sizeof(pd));
+                        pd.cbSizeofstruct = sizeof(pd);
+                        pd.picType = PICTYPE_BITMAP;
+                        pd.bmp.hbitmap = hb;
+                        if (FAILED(OleCreatePictureIndirect(&pd, &IID_IPicture, TRUE, (void**)&pic)))
+                            pic = NULL;
+                        if (!pic) DeleteObject(hb);   /* fOwn=TRUE 失败时句柄归我们收尾 */
+                    } else if (hb) {
+                        DeleteObject(hb);
+                    }
+                }
+            }
+        } else {
+            GlobalFree(hg);
+        }
+    }
+    if (conv) conv->lpVtbl->Release(conv);
+    if (frame) frame->lpVtbl->Release(frame);
+    if (dec) dec->lpVtbl->Release(dec);
+    if (st) st->lpVtbl->Release(st);
+    if (fac) fac->lpVtbl->Release(fac);
+    return pic;
+}
+
+vb6_VARIANT vb6_LoadResPicture(vb6_VARIANT resourceId, vb6_VARIANT resourceType) {
+    vb6_VARIANT ret; memset(&ret, 0, sizeof(ret));
+    // VB6 的 format: 0=vbResBitmap, 1=vbResIcon, 2=vbResCursor; 字符串格式名也收
+    // ("BITMAP"/"ICON"/"CURSOR" 及自定义类型名 —— 语料常见把 PNG/JPEG/WebP 整个
+    // 文件挂成 "PNG" 之类的自定义资源类型, 这里按**字节签名**分流解码, 不认类型名)。
+    const wchar_t* typeName = vb6_ResNameOf(&resourceType);
+    int32_t fmt = typeName ? -1 : vb6_ResIdOf(&resourceType);
+    LPCWSTR rType;
+    if      (typeName)                      rType = typeName;
+    else if (fmt == 0 /*vbResBitmap*/)      rType = RT_BITMAP;
+    else if (fmt == 1 /*vbResIcon*/)        rType = RT_ICON;
+    else if (fmt == 2 /*vbResCursor*/)      rType = RT_CURSOR;
+    else                                    rType = RT_BITMAP;  /* 越界值落 bitmap, 比静默空值可排查 */
+    int32_t fmtIsIcon = (fmt == 1) || (typeName && wcsicmp(typeName, L"ICON") == 0);
+    int32_t fmtIsCur  = (fmt == 2) || (typeName && wcsicmp(typeName, L"CURSOR") == 0);
+    int32_t fmtIsBmp  = (fmt == 0) || (typeName && wcsicmp(typeName, L"BITMAP") == 0)
+                        || (!typeName && fmt != 0 && fmt != 1 && fmt != 2);
+
+    uint32_t size = 0;
+    const void* data = vb6_ResLoad(&resourceId, rType, fmt, &size);
+    if ((!data || !size) && (fmtIsIcon || fmtIsCur)) {
+        /* rc.exe 展开的图标: id 落在组 (RT_GROUP_ICON/CURSOR), 按组解析出裸图 */
+        data = vb6_ResResolveGroup(&resourceId, fmtIsCur, &size);
+    }
+    if (!data || !size) { vb6_ErrRaiseNumber(326); return ret; }
+
+    vb6_OleEnsureInit();
+    IPicture* pic = NULL;
+    const uint8_t* d8 = (const uint8_t*)data;
+    if (fmtIsCur) {
+        // RT_CURSOR 裸图标图 (BITMAPINFOHEADER+XOR/AND), CreateIconFromResourceEx 直接吃。
+        HICON hc = CreateIconFromResourceEx((PBYTE)data, size, FALSE, 0x00030000,
+                                            0, 0, LR_DEFAULTCOLOR);
+        if (hc) {
+            PICTDESC pd; memset(&pd, 0, sizeof(pd));
+            pd.cbSizeofstruct = sizeof(pd);
+            pd.picType = PICTYPE_ICON;   /* OLE PICTDESC 没有 cursor 档、本 SDK 也没有 PICTYPE_CURSOR —— HCURSOR 经 icon 槽传 HANDLE, 取句柄侧不分这两类 */
+            pd.icon.hicon = (HICON)hc;
+            if (FAILED(OleCreatePictureIndirect(&pd, &IID_IPicture, TRUE, (void**)&pic))) pic = NULL;
+        }
+    } else if (fmtIsIcon && !(size >= 4 && d8[0] == 0 && d8[1] == 0 && d8[2] == 1)) {
+        // RT_ICON 裸图标图 (无 .ico 文件头); 若实际存的是整枚 .ico 文件则落通用流路径。
+        HICON hi = CreateIconFromResourceEx((PBYTE)data, size, TRUE, 0x00030000,
+                                            0, 0, LR_DEFAULTCOLOR);
+        if (hi) {
+            PICTDESC pd; memset(&pd, 0, sizeof(pd));
+            pd.cbSizeofstruct = sizeof(pd);
+            pd.picType = PICTYPE_ICON;
+            pd.icon.hicon = hi;
+            if (FAILED(OleCreatePictureIndirect(&pd, &IID_IPicture, TRUE, (void**)&pic))) pic = NULL;
+        }
+    } else if (fmtIsBmp && !(size >= 2 && d8[0] == 0x42 && d8[1] == 0x4D)) {
+        // RT_BITMAP 数据 = 打包 DIB (BITMAPINFOHEADER + 调色板 + 位数据, 无文件头)。
+        // 补一个 BITMAPFILEHEADER 走 OleLoadPicture 流, 与 vb6_LoadPictureEx 同出口。
+        const BITMAPINFOHEADER* bi = (const BITMAPINFOHEADER*)data;
+        DWORD colors = bi->biClrUsed ? bi->biClrUsed
+                     : (bi->biBitCount <= 8 ? (1u << bi->biBitCount) : 0u);
+        uint32_t total = 14 + size;
+        BYTE* bmp = (BYTE*)malloc(total);
+        if (bmp) {
+            BITMAPFILEHEADER* fh = (BITMAPFILEHEADER*)bmp;
+            fh->bfType = 0x4D42;                       /* 'BM' */
+            fh->bfSize = total;
+            fh->bfReserved1 = fh->bfReserved2 = 0;
+            fh->bfOffBits = 14 + bi->biSize + colors * 4;
+            memcpy(bmp + 14, data, size);
+            pic = vb6_ResPicViaWic(bmp, total);
+            if (!pic) pic = vb6_ResPicViaOle(bmp, total);
+            free(bmp);
+        }
+    } else {
+        // 整张图片文件 (BMP/PNG/JPEG/GIF/ICO/WebP/… 签名): WIC 优先 (新系统上
+        // OleLoadPicture 的流路已返 E_FAIL, 且 WIC 覆盖 WebP/已装扩展的 SVG), OLE 兜底。
+        pic = vb6_ResPicViaWic(data, size);
+        if (!pic) pic = vb6_ResPicViaOle(data, size);
+    }
+    if (!pic) pic = vb6_ResPicViaWic(data, size);   /* WebP / 装了解码扩展的 SVG 等 */
+    if (!pic) { vb6_ErrRaiseNumber(326); return ret; }
+    return vb6_VariantObject((void*)pic);
+}
+
+vb6_VARIANT vb6_LoadResData(vb6_VARIANT resourceId, vb6_VARIANT resourceType) {
+    vb6_VARIANT ret; memset(&ret, 0, sizeof(ret));
+    // format: 字符串 (rc 侧的资源类型名, 如 "CUSTOM"/"JSCRIPT"/"BITMAP") 或
+    // 数字 (直接当 Win32 资源类型码: 1=CURSOR 2=BITMAP 3=ICON 10=RCDATA…)。
+    const wchar_t* typeName = vb6_ResNameOf(&resourceType);
+    int32_t typeId = typeName ? 10 /*RT_RCDATA*/ : vb6_ResIdOf(&resourceType);
+    uint32_t size = 0;
+    const void* data = vb6_ResLoad(&resourceId, typeName, typeId, &size);
+    if (!data || !size) { vb6_ErrRaiseNumber(326); return ret; }
+    struct vb6_SafeArray1D* arr = vb6_SafeArrayCreate1D(vb6_sa_byte, 0, (int32_t)size - 1);
+    if (!arr) return ret;
+    memcpy(arr->data, data, size);
+    return vb6_VariantArray(arr);
 }
 
 // ============================================================
@@ -597,7 +1003,7 @@ void vb6_SavePicture(void* hBitmap, BSTR filename) {
 // czUI fix: 环境字体必须有有效 Name — Bag 重放路径 ReadProperty("Font",
 // Ambient.Font) 会把此对象设为控件字体; Name=NULL 时 GdipCreateFontFamily
 // 失败 → 所有 GDI+ 文字静默消失 (Charts2020 图表标题/百分比实测)
-vb6_ComIface_Font g_vb6_UserControl_FontObj = { NULL, 8.25f, 0, 0, 0, 0, 400, 0 };
+vb6_ComIface_Font vb6_UserControl_FontObj = { NULL, 8.25f, 0, 0, 0, 0, 400, 0 };
 
 // --- UserControl host state ---
 int32_t vb6_UserControl_ScaleWidth  = 0;
@@ -617,11 +1023,11 @@ int16_t vb6_UserControl_RightToLeft = 0;
 void*   vb6_UserControl_ParentControls = NULL;
 void*   vb6_UserControl_Controls = NULL;
 void*   vb6_Screen_MouseIcon = NULL;       // Fix <vbeclipse>: Screen.MouseIcon 槽   // Fix <vbeclipse>: UserControl.Controls (集合未建模, 恒 NULL)
-vb6_ComIface_Font* vb6_UserControl_Font = &g_vb6_UserControl_FontObj;
-struct vb6_UserControl_Ambient_Type vb6_UserControl_Ambient = { &g_vb6_UserControl_FontObj };
+vb6_ComIface_Font* vb6_UserControl_Font = &vb6_UserControl_FontObj;
+struct vb6_UserControl_Ambient_Type vb6_UserControl_Ambient = { &vb6_UserControl_FontObj };
 
 // --- Ambient host environment ---
-vb6_ComIface_Font* vb6_Ambient_Font = &g_vb6_UserControl_FontObj;
+vb6_ComIface_Font* vb6_Ambient_Font = &vb6_UserControl_FontObj;
 int16_t vb6_Ambient_UserMode   = -1;         // compiled output is runtime
 BSTR    vb6_Ambient_DisplayName = NULL;     // set to control instance name at runtime
 int32_t vb6_Ambient_ForeColor  = 0;          // black

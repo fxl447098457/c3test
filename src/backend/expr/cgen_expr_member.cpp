@@ -1,4 +1,5 @@
 #include "backend/cgen.hpp"
+#include "common/canvas_drawing.hpp"  // 账 #232①: 画布动词表 (Printer 成员那一路问它要名字)
 #include <algorithm>
 #include <cctype>
 #include <iostream>

@@ -459,14 +459,22 @@ std::vector<const Symbol*> SymbolTable::getPublicSymbols() const {
     return result;
 }
 
-std::unordered_set<std::string> SymbolTable::getExternalModuleNames() const {
-    std::unordered_set<std::string> result;
+// 账 §B97: 去重 + 升序。集合内容一处没变（仍是 isExternal 符号的 sourceModule 全集），
+// 变的是**顺序的来源**：以前由 unordered_map 的桶布局决定，同一份 .vbp 换一台编译器
+// 就换一种顺序，而下游三处码头（.c 的 include 段 / .h 的 crossmod include 段 / 入口点里
+// vb6_mod_<X>_init() 的调用序）都按这个顺序逐行发码。排序后它至少是确定的；
+// 语义上有意义的顺序（工程声明序）由 driver 用 modules_ 重排。
+std::vector<std::string> SymbolTable::getExternalModuleNames() const {
+    std::vector<std::string> result;
     if (!moduleScope_) return result;
+    std::unordered_set<std::string> seen;
     for (const auto& [key, sym] : moduleScope_->symbols()) {
-        if (sym->isExternal && !sym->sourceModule.empty()) {
-            result.insert(sym->sourceModule);
+        if (sym->isExternal && !sym->sourceModule.empty() &&
+            seen.insert(sym->sourceModule).second) {
+            result.push_back(sym->sourceModule);
         }
     }
+    std::sort(result.begin(), result.end());
     return result;
 }
 

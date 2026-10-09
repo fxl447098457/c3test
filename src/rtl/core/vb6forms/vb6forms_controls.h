@@ -35,6 +35,24 @@ void vb6_Form_SetDispatch(void* hwnd, void* pDispatch);
 void* vb6_Form_ControlsAdd(void* hwnd, const wchar_t* progId, const wchar_t* ctrlName);
 
 // ============================================================
+// Fix <vbeclipse> 2026-10-06: 运行期 Controls.Add 免注册 OCX 表 (vbp Object= 同款机制)
+// ============================================================
+// cgen 在入口点烘焙: 每个 vbp Object= 引用的 OCX, 其 typelib 导入后收集的全部
+// coclass {ProgID, CLSID, coclass名, 相对exe路径} 进此表。vb6_Form_ControlsAdd 按
+// ProgID 命中后改走 vb6_ocxCreateAny (LoadLibrary+DllGetClassObject), 完全绕开注册表 ——
+// 与设计期 vb6_OcxHost_Create 用 ocxFiles_ 免注册同款机制。未命中 → 原有注册表路径.
+#define VB6_MAX_OCXREFS 256
+typedef struct Vb6OcxRef {
+    const wchar_t* progId;       /* "NewTabCtl.NewTab" */
+    const wchar_t* clsidStr;     /* "{XXXXXXXX-...}" coclass CLSID (typelib 真实类) */
+    const wchar_t* coclassName;  /* "NewTab" — progid 缺失时的末段名兜底匹配 */
+    const wchar_t* fileName;     /* "NewTab01.ocx" / "bin\NewTab01.ocx" — 相对 exe, 不依赖 CWD */
+} Vb6OcxRef;
+
+// 注册运行期 OCX 免注册表 (cgen 生成, 入口点调用一次). count 超过 256 截断并打 stderr 警告.
+void vb6_OcxRefRegister(const Vb6OcxRef* libs, int count);
+
+// ============================================================
 // Fix 143: 第三方 OCX 控件真宿主 (设计期 Begin NewTabCtl.NewTab 等)
 // ============================================================
 
@@ -91,6 +109,12 @@ void* vb6_AxContainer_CreateExtender(void* hwndForm, const wchar_t* ctrlName);
 // Fix 143d: 把窗体上所有 OCX 控件画到给定 DC — 在 WM_PAINT 的
 // BeginPaint/EndPaint 之间调用 (IViewObject::Draw).
 void vb6_OcxHost_PaintAll(void* hwndForm, void* hdc);
+
+// Fix <vbeclipse> 2026-10-07: 窗体 AutoRedraw=True 时, 把记忆 DC (VB6_AutoRedrawDC)
+// 整块 BitBlt 到屏幕 DC — VB6 语义: AutoRedraw 窗体的所有 GDI 绘制先落记忆位图,
+// WM_PAINT 再把记忆位图刷上屏 (见 3DMenu: 每 10ms 把环形图标合成进 Me.hdc, 靠窗体
+// WM_PAINT 镜像可见)。无 ARDC 时不动作 (非 AutoRedraw 窗体走原生直绘)。
+void vb6_FormPaintBlitAutoRedraw(void* hwndForm, void* hdc);
 
 // ============================================================
 // Fix 112: in-project UserControl (.ctl) instance host + form/control host object model
@@ -202,6 +226,13 @@ typedef struct vb6_UserControlDesc {
     //   栈 CreateFolder→ComSetProp→Host_SetProp→UC_OwnPropSet。
     //   **加槽一律追加到末尾**, 别按"语义分组"插到中间。
     void      (*designResize)(void* me, const char* ctrlName);
+
+    // ---- 账 #226: UC 自身的 Click (同样**只许追加到末尾**) ----
+    // VB6 的 Click 是"按下并抬起"之后发的, 落点就是宿主窗口的 WM_LBUTTONUP,
+    // 由 uc_host_window.c 在 mouseUp 转调**之后**再转这一槽 (顺序与 VB6 一致)。
+    // 没有这一槽时 .ctl 里的 UserControl_Click 是死码 —— Charts 六枚 UC 的
+    // `RaiseEvent Click` 全写在那里, 于是容器侧的 ucX_Click 一条都收不到。
+    void      (*click)(void* me);
 } vb6_UserControlDesc;
 
 // .ctl module self-registration (type name case-insensitive, duplicate ignored)
@@ -286,6 +317,9 @@ int32_t vb6_Collection_IsCollection(void* p);
 void* vb6_Collection_EnumInit(void* coll);
 int32_t vb6_Collection_EnumNext(void* enumPtr, void* outVariant);
 int32_t vb6_UC_ControlsCount(void* coll);
+// 账 #254: 接收者是窗体/UC 自身时 (VB6 的 `Form.Count`) 的同一个数 —— 两条读法共用
+// 一处收集，见 uc_controls.c。
+int32_t vb6_UC_ControlsCountOf(void* formHwnd);
 void* vb6_UC_ControlsItem(void* coll, int32_t index);
 // Fix <vbeclipse> rev14: 裸 `UserControl.Controls` 的进程级单例 (后端发射点)。
 // 必须在此声明 —— 生成代码经 vb6forms.h 伞头看到它; 缺声明会走 C4013 隐式

@@ -154,6 +154,18 @@ void CCodeGen::emitLocalDeclCode(LocalDeclStmt& node) {
                 break;
             }
 
+            // 账 #118: 局部的名字与**模块级定长串**同名时构成遮蔽 —— 必须先把过程入口
+            // 从 moduleFixedStringLen_ 恢复进来的那条撤掉, 否则 `Private gT As String * 5`
+            // 的模块里写 `Dim gT As String` (普通动态串), 后面每句 `gT = ...` 都会被
+            // 按 5 位收口。定长的那一种在本函数后面 (FixedStringTypeRef 分支) 会重新登记,
+            // 故这里只在"不是定长串"时才撤。
+            {
+                std::string fsShadow = var.name;
+                std::transform(fsShadow.begin(), fsShadow.end(), fsShadow.begin(), ::tolower);
+                if (!(var.asType && var.asType->kind == ASTNodeKind::FixedStringTypeRef))
+                    knownFixedStringLen_.erase(fsShadow);
+            }
+
             std::string cType = mapTypeRef(var.asType.get());
 
             // 记录变量类型集合 (用于Debug.Print和COM解封类型推断)
@@ -166,6 +178,28 @@ void CCodeGen::emitLocalDeclCode(LocalDeclStmt& node) {
                 std::string lower = var.name;
                 std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
                 knownByteVars_.insert(lower);
+            } else if (Vb6Type ni032 = narrowIntTypeOfCType(cType); ni032 != Vb6Type::Unknown) {
+                // ai/032: SByte/UInteger/ULong/ULongLong 的局部 Dim —— C 型
+                // (int8_t/uint16_t/uint32_t/uint64_t) 不在上面任何一支, 不登记就
+                // 看不见 (局部变量在 symTab_ 里不可达)。
+                std::string lower = var.name;
+                std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+                knownNarrowIntVars_[lower] = ni032;
+            } else if (cType == "int64_t") {
+                // ai/032 rev2: `Dim x As LongLong` 的局部变量**以前谁也没登记**
+                // (int64_t 不在上面任何一支, narrowIntTypeOfCType 只认新四档) ——
+                // 于是 inferExprType(x) 答 Variant, 混算的结果类型被问成 Variant,
+                // 再看 C 表达式 `(uint64 + int64)` 经 vb6_VariantFromValue 装箱时撞上
+                // `unsigned long long: vb6_VariantLong` 那个 32 位有符号兜底 ——
+                // 实测 `CStr(u64 + i64)` (u64=2^32, i64=-1) 打成 -1 (应 4294967295),
+                // `u64 - i64` 打成 1。这正是 test_vbnet_ext 的 VE-mix-u64-* 两条。
+                // 归到这张表是"能看见"的最小口子: inferExprType 与
+                // isDefinitelyVariantExpr 都只问这一张, 消费点各按 Vb6Type 分档
+                // (CStr / Debug.Print 的 LongLong 档见 cgen_expr_call_conv_cstr.inc
+                // 与 cgen_call.cpp)。形参/返回槽仍按原样 (不在本次范围)。
+                std::string lower = var.name;
+                std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+                knownNarrowIntVars_[lower] = Vb6Type::LongLong;
             } else if (cType == "int32_t" || cType == "int16_t" || cType == "VBABOOL") {
                 std::string lower = var.name;
                 std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
@@ -558,6 +592,12 @@ void CCodeGen::emitLocalDeclCode(LocalDeclStmt& node) {
             } else if (cType == "uint8_t") {
                     // 账 #123: 局部 Const As Byte 同 Dim 分支
                     knownByteVars_.insert(lower);
+            } else if (Vb6Type ni032c = narrowIntTypeOfCType(cType); ni032c != Vb6Type::Unknown) {
+                    // ai/032: 局部 Const 的四档无符号/窄整型, 同 Dim 分支
+                    knownNarrowIntVars_[lower] = ni032c;
+            } else if (cType == "int64_t") {
+                    // ai/032 rev2: 局部 Const As LongLong —— 同 Dim 分支 (以前谁也没登记)
+                    knownNarrowIntVars_[lower] = Vb6Type::LongLong;
             } else if (cType == "int32_t" || cType == "int16_t" || cType == "VBABOOL") {
                     knownLongVars_.insert(lower);
                     // ai/022 W1: 同 Dim 分支 (Const 也吃这个读数)

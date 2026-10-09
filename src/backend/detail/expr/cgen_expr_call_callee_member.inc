@@ -248,11 +248,13 @@
                             if (Symbol::toLower(mi.name) == memLower) {
                                 if (mi.arraySize > 0) {
                                     // Pattern A: 固定大小数组成员 → obj.member[idx]
+                                    // 账 #262: 括号层数问 mi.arrayRank —— 多维成员的发码形态是
+                                    // C 多维数组 (`float M[5][5]`)，以前只折第一维，于是
+                                    // `.M(3, 3)` 与 `.M(4, 4)` 写进同一格。
                                     emitExpr(*node.callee);  // emits "obj.member"
                                     std::string fieldExpr = std::move(lastExpr_);
-                                    emitExpr(*node.positional[0]);
-                                    std::string idx = std::move(lastExpr_);
-                                    lastExpr_ = fieldExpr + "[" + idx + "]";
+                                    lastExpr_ = udtFixedMemberIndex(fieldExpr, node.positional,
+                                                                    mi.arrayRank);
                                     handled = true;
                                 } else if (mi.isArrayDynamic) {
                                     // Pattern B: 动态数组成员 → VB6_SA_AT(elemType, obj.member, idx)

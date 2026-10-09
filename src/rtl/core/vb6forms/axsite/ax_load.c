@@ -50,7 +50,7 @@ static HRESULT ocxCreateFromPath(const wchar_t* ocxPath, REFCLSID rclsid, void**
  * 顺序保证: 同一 CLSID 已注册时也优先用随 exe 的文件, 与 VB6
  * "注册表指向哪用哪"不同 — 便携部署下注册表常指向不存在/旧版路径.
  * 用环境变量 C3_OCX_PREFER_REG=1 可改为注册表优先. */
-HRESULT ocxCreateAny(const wchar_t* ocxPath, REFCLSID rclsid, void** ppUnk) {
+HRESULT vb6_ocxCreateAny(const wchar_t* ocxPath, REFCLSID rclsid, void** ppUnk) {
     *ppUnk = NULL;
     HRESULT hr;
 
@@ -139,7 +139,7 @@ HRESULT ocxCreateAny(const wchar_t* ocxPath, REFCLSID rclsid, void** ppUnk) {
 }
 
 /* twips → HIMETRIC (VB6: himetric = twips * 2540 / 1440) */
-long twipsToHimetric(long twips) { return (long)((__int64)twips * 2540 / 1440); }
+long vb6_twipsToHimetric(long twips) { return (long)((__int64)twips * 2540 / 1440); }
 
 
 #ifdef __cplusplus

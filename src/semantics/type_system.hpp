@@ -44,7 +44,14 @@ public:
     // 两个类型是否可以隐式转换
     static bool canImplicitConvert(Vb6Type from, Vb6Type to);
 
-    // 两个类型的运算结果类型 (VB6 widened rules)
+    // 整型的"位宽 + 符号" (ai/032 rev2)。返回 false 表示这个类型不是"位宽与符号都
+    // 确定"的整型 —— Boolean (VB 语义上强制升到 Short) 与 LongPtr (宽度随目标架构)
+    // 刻意不收, promote 对它们走原来的档位兜底。
+    // 只此一份: promote 与发码层 (cgen_expr_binary 的混符号加宽) 都问这里,
+    // 免得两侧各写一套 8/16/32/64 的对照表而漂移。
+    static bool intShape(Vb6Type t, int* bitsOut, bool* signedOut);
+
+    // 两个类型的运算结果类型 (VB6 widened rules + VB.NET 二进制数值提升, ai/032 rev2)
     static Vb6Type promote(Vb6Type a, Vb6Type b);
 
     // 位运算 And/Or/Xor/Eqv/Imp 的结果类型 —— 全仓唯一口径 (账 #216)

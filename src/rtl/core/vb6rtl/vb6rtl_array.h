@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 // vb6rtl_array.h - SAFEARRAY（一维 / 多维）与错误状态栈
 // 由 vb6rtl.h 伞头 include；生成代码不要直接 include 本文件
 #include "vb6rtl_base.h"
@@ -76,6 +76,10 @@ vb6_SafeArray1D* vb6_SafeArrayReDimPreserve1D_Udt(int32_t elemSize,
 
 // 销毁数组 (释放内存)
 void vb6_SafeArrayDestroy1D(vb6_SafeArray1D* arr);
+// Fix <vbeclipse> 2026-10-06: Erase 语句的数组变量出口 (VB6 文档口径):
+// 动态数组 → 释放存储并置 NULL; 固定数组 → 保留存储, 元素重置
+// (数值/UDT 置零, BSTR 置零长串, Variant 置 Empty)。
+void vb6_EraseArrayVar(vb6_SafeArray1D** parr);
 
 // Fix 170: 整体数组赋值 `A() = B()` —— 深拷贝 src 为新载体返回, 原 dst 销毁
 vb6_SafeArray1D* vb6_ArrayAssign1D(vb6_SafeArray1D* dst, vb6_SafeArray1D* src);
@@ -283,6 +287,9 @@ BSTR vb6_ErrDescription(void);
 void vb6_ErrClear(void);
 void vb6_RaiseError(int32_t errNum, BSTR description);
 BSTR vb6_ErrSource(void);
+// Fix <vbeclipse> 2026-10-06: Err.LastDllError 快照 (调用点捕获, 访问时返回存储值)
+int32_t vb6_ErrLastDllError(void);
+void vb6_ErrSetLastDllError(int32_t code);
 void vb6_ErrRaise(int32_t errNum, BSTR source, BSTR description);
 void vb6_ErrRaiseNumber(int32_t errNum);
 

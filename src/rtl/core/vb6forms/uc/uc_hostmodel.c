@@ -4,6 +4,7 @@
 // 跨族共享符号见 vb6forms_uc_internal.h
 
 #include "vb6forms_uc_internal.h"
+#include "vb6forms_prop.h"      // 账 #247: 控件几何的唯一出口 (vb6_Get/SetControlLeft|Top|Width|Height)
 #include "vb6forms_prop_ctrl.h"   // Fix 143: vb6_AddItem/RemoveItem/ClearList (原生列表 COM 晚绑定)
 
 #ifdef __cplusplus
@@ -14,27 +15,41 @@ extern "C" {
 // 窗体/控件登记 (供宿主对象分派)
 // ============================================================
 
+static void ho_fillField(wchar_t* dst, const char* src) {
+    if (!src) return;
+    size_t n = strlen(src);
+    if (n >= VB6_UC_NAME_LEN) n = VB6_UC_NAME_LEN - 1;
+    for (size_t i = 0; i < n; i++) dst[i] = (wchar_t)src[i];
+    dst[n] = 0;
+}
+
 void vb6_HostObj_Register(void* hwnd, const char* name, const char* vbTypeName,
                           int32_t isForm, int32_t index) {
     if (!hwnd) return;
-    if (vb6_ho_find(hwnd)) return;
-    if (g_hoCount >= VB6_UC_MAX_OBJ) return;
-    vb6_HostObjRec* h = &g_ho[g_hoCount++];
+    /* 账 #257: 「同 hwnd 已登记」以前整条 return —— 后到的**带名**登记被静默丢掉，
+       于是同一枚窗口第二次说话永远说不出口（窗体先由 vb6_Forms_Register 登记，
+       名字晚一步到就再也进不去）。现在只补还空着的 name / typeName 两格。
+       isForm 与 index 刻意不动：那是存量答案的一部分（非数组控件的 .Index 恒 -1，
+       夹具 GC22 就钉着这个数），不能让后到的登记顺手改。 */
+    vb6_HostObjRec* found = vb6_ho_find(hwnd);
+    if (found) {
+        if (!found->name[0] && name) ho_fillField(found->name, name);
+        if (!found->typeName[0] && vbTypeName) {
+            const char* dot = strrchr(vbTypeName, '.');
+            ho_fillField(found->typeName, dot ? dot + 1 : vbTypeName);
+        }
+        return;
+    }
+    if (vb6_ucHoCount >= VB6_UC_MAX_OBJ) return;
+    vb6_HostObjRec* h = &vb6_ucHo[vb6_ucHoCount++];
     memset(h, 0, sizeof(*h));
     h->hwnd = hwnd;
     h->isForm = isForm;
     h->index = index;
-    if (name) {
-        size_t n = strlen(name);
-        if (n >= VB6_UC_NAME_LEN) n = VB6_UC_NAME_LEN - 1;
-        for (size_t i = 0; i < n; i++) h->name[i] = (wchar_t)name[i];
-    }
+    ho_fillField(h->name, name);
     if (vbTypeName) {
         const char* dot = strrchr(vbTypeName, '.');
-        if (dot) vbTypeName = dot + 1;
-        size_t n = strlen(vbTypeName);
-        if (n >= VB6_UC_NAME_LEN) n = VB6_UC_NAME_LEN - 1;
-        for (size_t i = 0; i < n; i++) h->typeName[i] = (wchar_t)vbTypeName[i];
+        ho_fillField(h->typeName, dot ? dot + 1 : vbTypeName);
     }
 }
 
@@ -51,10 +66,10 @@ const wchar_t* vb6_HostObj_GetName(void* hwnd) {
     vb6_HostObjRec* r = vb6_ho_find(hwnd);
     return r ? r->name : L"";
 }
-int32_t vb6_HostObj_Count(void) { return g_hoCount; }
+int32_t vb6_HostObj_Count(void) { return vb6_ucHoCount; }
 void* vb6_HostObj_At(int32_t i) {
-    if (i < 0 || i >= g_hoCount) return NULL;
-    return g_ho[i].hwnd;
+    if (i < 0 || i >= vb6_ucHoCount) return NULL;
+    return vb6_ucHo[i].hwnd;
 }
 
 vb6_HostObjRec* vb6_ho_findWindow(const void* hwnd) {
@@ -114,11 +129,6 @@ const wchar_t* vb6_Host_TypeNameOf(void* obj) {
 // ============================================================
 // 宿主对象属性/方法分派
 // ============================================================
-
-static int32_t vb6_ho_isForm(const void* hwnd) {
-    vb6_HostObjRec* h = vb6_ho_find(hwnd);
-    return (h && h->isForm) ? 1 : 0;
-}
 
 static int32_t vb6_ho_isControl(const void* hwnd) {
     vb6_HostObjRec* h = vb6_ho_find(hwnd);
@@ -192,18 +202,6 @@ double vb6_ho_variantToDouble(const vb6_VARIANT* v) {
 
 BSTR vb6_ho_variantToBstr(const vb6_VARIANT* v) {
     return (v && v->vt == vb6_vtBSTR) ? v->bstrVal : NULL;
-}
-
-// 控件的几何: 相对父窗口客户区, 缇
-static void vb6_ho_ctrlRect(void* hwnd, int32_t* l, int32_t* t, int32_t* w, int32_t* h) {
-    RECT rc; GetWindowRect((HWND)hwnd, &rc);
-    POINT pt = { rc.left, rc.top };
-    HWND p = GetParent((HWND)hwnd);
-    ScreenToClient(p ? p : hwnd, &pt);
-    if (l) *l = vb6_XToTwipX(pt.x);
-    if (t) *t = vb6_YToTwipY(pt.y);
-    if (w) *w = vb6_XToTwipX(rc.right - rc.left);
-    if (h) *h = vb6_YToTwipY(rc.bottom - rc.top);
 }
 
 static void vb6_ho_clientTwips(void* hwnd, int32_t* w, int32_t* h) {
@@ -342,10 +340,25 @@ static HRESULT STDMETHODCALLTYPE HW_QI(IDispatch* self, REFIID riid, void** out)
 static ULONG STDMETHODCALLTYPE HW_AddRef(IDispatch* self) {
     Vb6HostWrap* w = (Vb6HostWrap*)self; return ++w->refs;
 }
+/* 账 #255: 包装器和它在 (wrap->target) 表里的登记必须同生同死。
+   表只在 vb6_UC_WrapHostObject 里追加、从来没人撤，而 free 掉的块地址会被下一枚
+   包装器原样复用 —— vb6_UC_UnwrapHost 从 i=0 扫表、先撞上那条早已释放的旧登记，
+   于是「每一枚成员」都解回「第一枚被包过的对象」。
+   实测 (probe255 模式 M)：For Each o In Me.Controls 的三枚成员 hWnd 同为 4326406、
+   Left 同为 120（那是 Timer 的设计期值），对它写 .Width 只落在这枚 Timer 的存属性上，
+   txtA/picP 一动不动；Charts 的 ClsResizer 因此把 N 格存成同一枚控件。 */
+static void vb6_UC_DropWrapPair(void* wrap) {
+    for (int i = 0; i < g_uc_wrapCount; i++) {
+        if (g_uc_wraps[i].wrap == wrap) {
+            g_uc_wraps[i] = g_uc_wraps[--g_uc_wrapCount];  /* 末位填补：查表按指针，次序无意义 */
+            return;
+        }
+    }
+}
 static ULONG STDMETHODCALLTYPE HW_Release(IDispatch* self) {
     Vb6HostWrap* w = (Vb6HostWrap*)self;
     ULONG r = --w->refs;
-    if (r == 0) free(w);
+    if (r == 0) { vb6_UC_DropWrapPair(w); free(w); }
     return r;
 }
 static HRESULT STDMETHODCALLTYPE HW_GetTypeInfoCount(IDispatch* self, UINT* n) {

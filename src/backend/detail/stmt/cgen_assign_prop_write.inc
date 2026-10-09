@@ -430,6 +430,12 @@
             emitExpr(*node.value);
             std::string valExpr = std::move(lastExpr_);
             std::string packFn = comPackExpr(*node.value);
+            // 账 #260: 这一支以前是唯一没消费 COM 标记的写侧出口 —— 右值整枚就是
+            // `对象.成员` 时成员名挂在 comMemberName_ 上没人取，发出来的值是**对象本体**
+            // (With w : .Count = d.Count ⇒ vb6_ComPackValue(d))，值永远是错的且不响。
+            // With 外同一句一直是对的 (Fix 110i)，所以这是"同一决定抄了两遍、第三遍漏了"
+            // 那一族 —— 问的是同一个出口 comMarkerValueForWrite。
+            valExpr = comMarkerValueForWrite(packFn, valExpr);
             c_.emitLine("vb6_ComSetProp(" + tempVar + ", L\"" + wmExpr.memberName + "\", " +
                          packFn + "(" + valExpr + "));  /* With COM SetProp */");
             return;

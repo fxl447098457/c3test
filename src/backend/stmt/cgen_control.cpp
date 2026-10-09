@@ -358,6 +358,7 @@ void CCodeGen::visit(ForEachStmt& node) {
         // vb6_ComCall(...)) 曾被 isDefinitelyVariantExpr 判为 Variant →
         // vb6_VariantToObjectVal(vb6_ComCall(...)) C2440 (void* → vb6_VARIANT).
         bool collIsObjPtr091q = collExpr.rfind("vb6_ComCall(", 0) == 0
+                             || collExpr.rfind("vb6_ComCallByDispid(", 0) == 0
                              || collExpr.rfind("vb6_ComCallObject(", 0) == 0;
         // Fix 040c: vb6_ForEach_Init expects void* (IDispatch*). If the collection
         // expression is a Variant (vb6_VARIANT struct), extract the object pointer.

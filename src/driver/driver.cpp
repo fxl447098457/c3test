@@ -61,10 +61,10 @@ Driver::~Driver() = default;
 class ExternalRefCollector : public ASTVisitor {
 public:
     SymbolTable& symTab;
-    const std::unordered_set<std::string>& externalModules;
+    const std::vector<std::string>& externalModules;  // 账 §B97: 有序名单 (工程声明序)
     std::unordered_set<std::string>& refd;  // 输出: 小写模块名
 
-    ExternalRefCollector(SymbolTable& st, const std::unordered_set<std::string>& ext,
+    ExternalRefCollector(SymbolTable& st, const std::vector<std::string>& ext,
                          std::unordered_set<std::string>& out)
         : symTab(st), externalModules(ext), refd(out) {}
 

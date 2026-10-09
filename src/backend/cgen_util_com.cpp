@@ -14,6 +14,69 @@ namespace vb6c3 {
 // COM辅助 (P6.2)
 // ============================================================
 
+// 账 #255: 「一个 COM 调用的结果被当**对象引用**用」这一问的唯一点。
+//
+// 这些调用交回的是 VARIANT 指针 (calloc 出来的包装)，不是对象本身；直接 (void*) 硬转
+// 得到的是 VARIANT 结构体的地址，于是 `With 集合(1) : .Width = …` 的接收者谁都认不出
+// (RTL 侧一路 fall through 到 `vb6_ComSetProp: property "Width" not found`)，写在虚空里。
+// Set 那一路早就做了这件事 (改名成 vb6_ComCallObject，内部 Unpack+Free)；With 那一路
+// 只认「表达式是 VARIANT **值**」那一档 (Fix 090e / 092j)，漏了「VARIANT* 指针」这一档。
+//
+// vb6_ComCallObject / vb6_ComGetObjectProp 交回的已经是对象，不在清单里 (再套一层就错)。
+// ByDispid 那一路没有一体化出口，只能就地 Unpack —— 那条 VARIANT* 的释放缺口与本刀无关，
+// 今天同样在漏 (没有把它交给任何 VarFree)。
+std::string CCodeGen::comObjectRefFromCallExpr(const std::string& expr) {
+    auto top = [&expr](const char* head) {
+        return expr.compare(0, std::char_traits<char>::length(head), head) == 0;
+    };
+    if (top("vb6_ComCall(")) {
+        return "vb6_ComCallObject" + expr.substr(std::char_traits<char>::length("vb6_ComCall"));
+    }
+    if (top("vb6_ComCallByDispid(") || top("vb6_ComGetProp(")) {
+        return "vb6_ComUnpackObject(" + expr + ")";
+    }
+    return expr;
+}
+
+// 账 #245/§B94: comMethods 的唯一读出口 + 两条档位出口（声明见 cgen_helpers.inc）。
+CCodeGen::ComSigView CCodeGen::comSigViewOf(const Symbol* comSym,
+                                            const std::string& memberName) const {
+    ComSigView sv;
+    if (!comSym) return sv;
+    auto it = comSym->comMethods.find(Symbol::toLower(memberName));
+    if (it == comSym->comMethods.end()) return sv;
+    sv.found = true;
+    sv.isGet = it->second.isPropertyGet;
+    sv.retCType = mapType(it->second.returnType);
+    sv.sig = &it->second;
+    return sv;
+}
+
+std::string CCodeGen::comGetterExpr(const ComSigView& sv, const std::string& objExpr,
+                                    const std::string& memberName) const {
+    if (!sv.found || !sv.isGet) return "";   // put/method/未登记 ⇒ 调用方走晚绑定
+    std::string args = objExpr + ", L\"" + memberName + "\"";
+    if (sv.retCType == "BSTR") return "vb6_ComGetStringProp(" + args + ")";
+    if (sv.retCType == "int32_t" || sv.retCType == "int16_t") return "vb6_ComGetIntProp(" + args + ")";
+    if (sv.retCType == "double" || sv.retCType == "float") return "vb6_ComGetDoubleProp(" + args + ")";
+    if (sv.retCType == "void*") return "vb6_ComGetObjectProp(" + args + ")";
+    // 类型未知 (Enum→UserDefinedType / 签名压根没读到) ⇒ **不猜目标档**: 交回原生 VARIANT,
+    // 让运行期按 VARIANT 自己办。这一档以前有两处各自猜 (一处按 unpackType 猜 Long ⇒ BSTR 属性
+    // 发成 vb6_ComGetIntProp，读回是指针宽度当整数用; 一处直接发 StringProp ⇒ 未初始化的
+    // returnType 字段落的垃圾值被当成「这是个字符串」当真值用)。
+    return "vb6_VariantFromComResult(vb6_ComGetProp(" + args + "))";
+}
+
+std::string CCodeGen::comTypedCallExpr(const ComSigView& sv, const std::string& callArgs) const {
+    if (sv.found) {
+        if (sv.retCType == "BSTR") return "vb6_ComCallBSTR(" + callArgs + ")";
+        if (sv.retCType == "int32_t" || sv.retCType == "int16_t") return "vb6_ComCallInt(" + callArgs + ")";
+        if (sv.retCType == "double" || sv.retCType == "float") return "vb6_ComCallDouble(" + callArgs + ")";
+        if (sv.retCType == "void*") return "vb6_ComCallObject(" + callArgs + ")";
+    }
+    return "vb6_ComCall(" + callArgs + ")";   // 未知返回类型 / 表里没有: 返回 void*
+}
+
 std::string CCodeGen::resolveComValue(const std::string& unpackType) {
     // P24-07: 早期绑定 — 利用签名returnType选择正确的解包函数
     if (!isComMarker_) return lastExpr_;
@@ -297,37 +360,11 @@ std::string CCodeGen::resolveComValue(const std::string& unpackType) {
         isEarlyBoundCom_ = false;
         const Symbol* comSym = earlyBoundSym_;
         earlyBoundSym_ = nullptr;
-        std::string memLower = memberName;
-        std::transform(memLower.begin(), memLower.end(), memLower.begin(), ::tolower);
-        auto it = comSym->comMethods.find(memLower);
-        if (it != comSym->comMethods.end()) {
-            const auto& sig = it->second;
-            std::string returnType = mapType(sig.returnType);
-            std::string getPropArgs = objExpr + ", L\"" + memberName + "\"";
-            if (returnType == "BSTR") {
-                lastExpr_ = "vb6_ComGetStringProp(" + getPropArgs + ")";
-            } else if (returnType == "int32_t" || returnType == "int16_t") {
-                lastExpr_ = "vb6_ComGetIntProp(" + getPropArgs + ")";
-            } else if (returnType == "double" || returnType == "float") {
-                lastExpr_ = "vb6_ComGetDoubleProp(" + getPropArgs + ")";
-            } else if (returnType == "void*") {
-                lastExpr_ = "vb6_ComGetObjectProp(" + getPropArgs + ")";
-            } else {
-                // P24-07: 未知返回类型(如Enum→UserDefinedType) → 按目标变量类型选择
-                if (unpackType == "BSTR") {
-                    lastExpr_ = "vb6_ComGetStringProp(" + getPropArgs + ")";
-                } else if (unpackType == "LongPtr") {
-                    lastExpr_ = "vb6_ComGetLongPtrProp(" + getPropArgs + ")";
-                } else if (unpackType == "Int" || unpackType == "Long" || unpackType == "Boolean") {
-                    lastExpr_ = "vb6_ComGetIntProp(" + getPropArgs + ")";
-                } else if (unpackType == "Double" || unpackType == "Single") {
-                    lastExpr_ = "vb6_ComGetDoubleProp(" + getPropArgs + ")";
-                } else if (unpackType == "Object") {
-                    lastExpr_ = "vb6_ComGetObjectProp(" + getPropArgs + ")";
-                } else {
-                    lastExpr_ = "vb6_VariantFromComResult(vb6_ComCall(" + objExpr + ", L\"" + memberName + "\", NULL, 0))";
-                }
-            }
+        // 账 #245/§B94: 读表与档位选择都收在 comSigViewOf/comGetterExpr —— 只有确认的属性
+        // getter 才按签名走带类型出口，put/method 那份签名一律不当属性读来解包。
+        std::string getter = comGetterExpr(comSigViewOf(comSym, memberName), objExpr, memberName);
+        if (!getter.empty()) {
+            lastExpr_ = getter;
             isComMarker_ = false;
             return lastExpr_;
         }
@@ -430,6 +467,25 @@ std::string CCodeGen::canonicalHostPseudoMember(const std::string& pseudoObj,
                                                 const std::string& memberName) const {
     const HostPseudoRow* r = hostPseudoFind(pseudoObj, memberName);
     return r ? std::string(r->rtl) : memberName;
+}
+
+// 账 #278 §B120: 宿主伪成员的 RTL 全局符号 `vb6_<对象>_<成员>` **只在这里装配一次**。
+// 从前这句在三处各拼一遍 (With 块 / 赋值 / 裸名)，每抄一次就多一个权威：第十刀修掉的
+// `vb6_PropertyPage_hwnd` 就是其中一份抄错大小写的 (RTL 两枚都定义了，所以它编得过，只是编向
+// 另一枚全局)。对象那一段与成员那一段现在都出自那张表；表里没有这一行时按源码成员名发
+// (与改前逐字节一致，不新增也不撤销任何 C2065)。名字不是宿主伪对象时交回空串 —— 三个调用点
+// 都先过了 hostPseudoIsObject 那道闸，空串意味着接线错了，不是运行期会遇到的输入。
+std::string CCodeGen::hostPseudoRtlSymbol(const std::string& pseudoObj,
+                                          const std::string& memberName) const {
+    std::string objSym;
+    if (!hostPseudoObjectSymbol(pseudoObj, objSym)) return std::string();
+    const HostPseudoRow* r = hostPseudoFind(pseudoObj, memberName);
+    return "vb6_" + objSym + "_" + cIdent(r ? r->rtl : memberName);
+}
+
+// "这个名字是不是宿主伪对象"由那张表答 (这一句从前在发码侧抄了五份)。
+bool CCodeGen::hostPseudoIsObject(const std::string& name) const {
+    return hostPseudoObjectKnown(name);
 }
 
 // 裸名能不能解析成宿主伪成员 (.ctl/.pag 里直接写 hDC / ScaleWidth / Changed …)。
@@ -537,6 +593,31 @@ std::string CCodeGen::comPackExpr(Expr& expr) {
         auto& id = static_cast<IdentifierExpr&>(expr);
         std::string lower = id.name;
         std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+        // 账 #256: 裸控件名在发码那条路上会被**折成默认属性读数**（一枚标量/BSTR），
+        // 而 inferExprType 与 knownObjectVars_ 对这个名字都答 Object ⇒ 以前一路走到
+        // 下面的 ComPackObject：`vb6_ComPackObject(vb6_GetControlText(...))` 把 BSTR 当
+        // IDispatch 装进 VT_DISPATCH，栈上 VARIANT 收尾无条件 Release ⇒ 按 BSTR 头几字节
+        // 解 vtable = 0xC0000005（实测 `coll.Add txtA, "k1"`，探针 .build/p256 两架构同崩）。
+        // 现在打包与折叠问同一条出口 ctrlDefaultPropOf ⇒ 装箱档跟着**实际交出的值**走。
+        // 这一问必须排在下面那串"已知变量型"之前：控件名同时登记在 knownObjectVars_ 里
+        // （实测：把它放在那串之后，这一格一条都不变）。反过来的担心是"局部变量与控件同名"
+        // —— knownFormControls_ 只由 .frm 的控件清单填，永远不含用户变量；真同名的话
+        // 发码走的是变量那条路，而打包会按默认属性的型装 ⇒ 编译期 C2440 响，不会静默错值。
+        // 刻意只接管能明确映射的那几型：Picture（PictureBox / Image 的默认属性）在 defaultPropType
+        // 里答 Unknown ⇒ 继续走今天那条 ComPackObject 路（那本来就是个对象，装箱成对象是对的），
+        // 本刀不动它。
+        {
+            CtrlDefaultProp fold256 = ctrlDefaultPropOf(lower);
+            if (fold256.folds) {
+                switch (fold256.valueType) {
+                    case Vb6Type::String: case Vb6Type::Integer: case Vb6Type::Long:
+                    case Vb6Type::Boolean: case Vb6Type::Single: case Vb6Type::Double:
+                        return comPackFnForVbType(fold256.valueType);
+                    default:
+                        break;
+                }
+            }
+        }
         // Fix 110v: knownVariantVars_ 先于 knownObjectVars_ 判定. `Dim Value As Variant`
         // 的局部变量在 For Each 语境下同时被登记进 knownObjectVars_ (旧代码把
         // For-Each 元素一律当对象), 使 Variant 变量走 vb6_ComPackObject →
@@ -578,44 +659,50 @@ std::string CCodeGen::comPackExpr(Expr& expr) {
     }
     // 根据表达式类型推断应该用的VARIANT封装函数
     Vb6Type vt = inferExprType(expr);
+    {
+        std::string packForVt = comPackFnForVbType(vt);
+        if (!packForVt.empty()) return packForVt;
+    }
+    // ---- 以下是原 switch 的 default 分支（答不了型时的兜底），一字未改 ----
+    // Variant/未知: 尝试用BSTR封装 (运行时会处理转换)
+    // 更安全的做法: 检查已知变量类型
+    if (expr.kind == ASTNodeKind::IdentifierExpr) {
+        auto& id = static_cast<IdentifierExpr&>(expr);
+        std::string lower = id.name;
+        std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+        if (knownObjectVars_.count(lower)) return "vb6_ComPackObject";
+        if (knownBstrVars_.count(lower)) return "vb6_ComPackBSTR";
+        if (knownDoubleVars_.count(lower)) return "vb6_ComPackDouble";
+        if (knownLongVars_.count(lower)) return "vb6_ComPackInt";
+        if (knownVariantVars_.count(lower)) return "vb6_ComPackVariant";
+    }
+    if (expr.kind == ASTNodeKind::MemberAccessExpr) {
+        auto& ma = static_cast<MemberAccessExpr&>(expr);
+        if (ma.object && ma.object->kind == ASTNodeKind::IdentifierExpr) {
+            auto& objId = static_cast<IdentifierExpr&>(*ma.object);
+            std::string objLower = objId.name;
+            std::transform(objLower.begin(), objLower.end(), objLower.begin(), ::tolower);
+            if (knownVariantVars_.count(objLower)) return "vb6_ComPackVariant";
+        }
+    }
+    return "vb6_ComPackInt";  // 默认整数封装
+}
+
+
+// 账 #256: Vb6Type → 打包函数名，comPackExpr 的类型分支与「裸控件名折成默认属性」那条
+// 折叠共用这一张映射（折叠那边只问 String/Integer/Long/Boolean/Single/Double 六档）。
+// 空串 = 这一型在这里答不了，交回调用方兜底 —— 与改前 switch 的 default 分支同一语义。
+std::string CCodeGen::comPackFnForVbType(Vb6Type vt) {
     switch (vt) {
-        case Vb6Type::String:
-            return "vb6_ComPackBSTR";  // BSTR → VARIANT
+        case Vb6Type::String:  return "vb6_ComPackBSTR";    // BSTR → VARIANT
         case Vb6Type::Integer:
-        case Vb6Type::Long:
-            return "vb6_ComPackInt";   // int32_t → VARIANT
-        case Vb6Type::Boolean:
-            return "vb6_ComPackBool";  // VB6 Boolean → VARIANT VT_BOOL
+        case Vb6Type::Long:    return "vb6_ComPackInt";     // int32_t → VARIANT
+        case Vb6Type::Boolean: return "vb6_ComPackBool";    // VB6 Boolean → VARIANT VT_BOOL
         case Vb6Type::Single:
-        case Vb6Type::Double:
-            return "vb6_ComPackDouble"; // double → VARIANT
-        case Vb6Type::Object:
-            return "vb6_ComPackObject"; // void* → VARIANT
-        case Vb6Type::Variant:
-            return "vb6_ComPackValue";  // Fix 030: 通用打包宏 — 路由任意 C 类型实参 (inferExprType 回退 Variant 时安全)
-        default:
-            // Variant/未知: 尝试用BSTR封装 (运行时会处理转换)
-            // 更安全的做法: 检查已知变量类型
-            if (expr.kind == ASTNodeKind::IdentifierExpr) {
-                auto& id = static_cast<IdentifierExpr&>(expr);
-                std::string lower = id.name;
-                std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
-                if (knownObjectVars_.count(lower)) return "vb6_ComPackObject";
-                if (knownBstrVars_.count(lower)) return "vb6_ComPackBSTR";
-                if (knownDoubleVars_.count(lower)) return "vb6_ComPackDouble";
-                if (knownLongVars_.count(lower)) return "vb6_ComPackInt";
-                if (knownVariantVars_.count(lower)) return "vb6_ComPackVariant";
-            }
-            if (expr.kind == ASTNodeKind::MemberAccessExpr) {
-                auto& ma = static_cast<MemberAccessExpr&>(expr);
-                if (ma.object && ma.object->kind == ASTNodeKind::IdentifierExpr) {
-                    auto& objId = static_cast<IdentifierExpr&>(*ma.object);
-                    std::string objLower = objId.name;
-                    std::transform(objLower.begin(), objLower.end(), objLower.begin(), ::tolower);
-                    if (knownVariantVars_.count(objLower)) return "vb6_ComPackVariant";
-                }
-            }
-            return "vb6_ComPackInt";  // 默认整数封装
+        case Vb6Type::Double:  return "vb6_ComPackDouble";  // double → VARIANT
+        case Vb6Type::Object:  return "vb6_ComPackObject";  // void* → VARIANT
+        case Vb6Type::Variant: return "vb6_ComPackValue";   // Fix 030: _Generic 通用打包宏
+        default:               return std::string();
     }
 }
 
@@ -644,6 +731,20 @@ std::string CCodeGen::comNewExprFor(const Symbol* comSym) {
 // P25: 解析COM标记为类型化属性取值, 用于COM调用参数打包
 // 当isComMarker_为true时, 根据packFnHint选择对应类型的COM属性取值函数
 // 如果isComMarker_为false, 返回空串
+std::string CCodeGen::comMarkerValueForWrite(const std::string& packFn,
+                                             const std::string& valExpr) {
+    if (!isComMarker_) return valExpr;
+    std::string hint = "BSTR";
+    if (packFn == "vb6_ComPackDouble") hint = "Double";
+    else if (packFn == "vb6_ComPackInt") hint = "Long";
+    else if (packFn == "vb6_ComPackBool") hint = "Long";
+    else if (packFn == "vb6_ComPackBSTR") hint = "BSTR";
+    else if (packFn == "vb6_ComPackObject") hint = "Object";
+    else if (packFn == "vb6_ComPackValue") hint = "Variant";
+    resolveComValue(hint);
+    return lastExpr_;
+}
+
 std::string CCodeGen::resolveComMarkerForPack(const std::string& packFnHint) {
     // P26: vb6_ComPackVariant / Fix 030: vb6_ComPackValue 需要把 COM 调用返回的
     // VARIANT* 转成 vb6_VARIANT (即使 isComMarker_ 已被消费, lastExpr_ 仍可能是 COM 调用结果).
@@ -651,6 +752,7 @@ std::string CCodeGen::resolveComMarkerForPack(const std::string& packFnHint) {
     // 等价于 vb6_ComPackVariant(vb6_VariantFromComResult(ComCall)).
     if (packFnHint == "vb6_ComPackVariant" || packFnHint == "vb6_ComPackValue") {
         if (lastExpr_.find("vb6_ComCall(") == 0 ||
+            lastExpr_.find("vb6_ComCallByDispid(") == 0 ||
             lastExpr_.find("vb6_ComGetProp(") == 0 ||
             lastExpr_.find("vb6_ComGetObjectProp(") == 0 ||
             lastExpr_.find("vb6_ComCallObject(") == 0) {
@@ -731,40 +833,27 @@ std::string CCodeGen::resolveComMarkerForPack(const std::string& packFnHint) {
         isEarlyBoundCom_ = false;
         const Symbol* comSym = earlyBoundSym_;
         earlyBoundSym_ = nullptr;
-        std::string memLower = memName;
-        std::transform(memLower.begin(), memLower.end(), memLower.begin(), ::tolower);
-        auto it = comSym->comMethods.find(memLower);
-        if (it != comSym->comMethods.end() && it->second.isPropertyGet) {
-            const auto& sig = it->second;
-            std::string returnType = mapType(sig.returnType);
-            if (returnType == "int32_t" || returnType == "int16_t") {
-                return "vb6_ComGetIntProp(" + objExpr + ", L\"" + memName + "\")";
-            } else if (returnType == "BSTR") {
-                return "vb6_ComGetStringProp(" + objExpr + ", L\"" + memName + "\")";
-            } else if (returnType == "double" || returnType == "float") {
-                return "vb6_ComGetDoubleProp(" + objExpr + ", L\"" + memName + "\")";
-            } else if (returnType == "void*") {
-                return "vb6_ComGetObjectProp(" + objExpr + ", L\"" + memName + "\")";
-            }
-        }
+        std::string getter = comGetterExpr(comSigViewOf(comSym, memName), objExpr, memName);
+        if (!getter.empty()) return getter;
     }
 
-    // 后期绑定: 根据packFnHint推断所需的属性取值函数
-    // packFnHint由comPackExpr根据上下文确定, 代表参数期望的C类型
+    // 后期绑定: 按 packer 反推解封类型 —— 这张表与 comMarkerValueForWrite 同一份口径
+    // （Boolean 走 Int 档是 resolveComMarkerForPack 一直以来的答案）。
     if (packFnHint == "vb6_ComPackObject") {
         return "vb6_ComGetObjectProp(" + objExpr + ", L\"" + memName + "\")";
     } else if (packFnHint == "vb6_ComPackBSTR" || packFnHint.empty()) {
         return "vb6_ComGetStringProp(" + objExpr + ", L\"" + memName + "\")";
     } else if (packFnHint == "vb6_ComPackInt") {
         return "vb6_ComGetIntProp(" + objExpr + ", L\"" + memName + "\")";
-    } else if (packFnHint == "vb6_ComPackDouble") {
-        return "vb6_ComGetDoubleProp(" + objExpr + ", L\"" + memName + "\")";
     } else if (packFnHint == "vb6_ComPackBool") {
         return "vb6_ComGetIntProp(" + objExpr + ", L\"" + memName + "\")";
+    } else if (packFnHint == "vb6_ComPackDouble") {
+        return "vb6_ComGetDoubleProp(" + objExpr + ", L\"" + memName + "\")";
     }
     // vb6_ComPackVariant / Fix 030 vb6_ComPackValue: 需要把 COM 返回的 VARIANT* 转成 vb6_VARIANT
     if (packFnHint == "vb6_ComPackVariant" || packFnHint == "vb6_ComPackValue") {
         if (lastExpr_.find("vb6_ComCall(") == 0 ||
+            lastExpr_.find("vb6_ComCallByDispid(") == 0 ||
             lastExpr_.find("vb6_ComGetProp(") == 0 ||
             lastExpr_.find("vb6_ComGetObjectProp(") == 0 ||
             lastExpr_.find("vb6_ComCallObject(") == 0) {

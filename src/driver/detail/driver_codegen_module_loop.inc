@@ -3,6 +3,33 @@
 // 内容 = 原文件第 371~462 行，逐行未改。
 
 
+    // 账 §B97: 外部模块名单的**唯一排法** = modules_ 的下标序。⚠ 它**不是** .vbp 里
+    // Module=/Class=/Form= 的字面先后 —— runParse 末尾有一步**刻意**的稳定前移（类模块排在
+    // 标准模块之前，理由见 driver_frontend.cpp:327-339：标准模块里 `Dim WithEvents x As 某类`
+    // 要那枚类符号先进表），所以这里的「序」= 前移之后的序（同类之间、窗体与标准模块之间
+    // 仍保持 .vbp 的先后）。要点是它**有序且确定**，而不是照抄文件行序。
+    // 这份名单往下决定三处输出的行序：
+    // 聚合 .c 的 #include 段、.h 的 crossmod #include 段、入口点里 vb6_mod_<X>_init()
+    // 的调用序（= 各模块全局的初始化先后）。以前它是 unordered_set，由符号表那枚
+    // unordered_map 的遍历造出 ⇒ 「启动序」随编译器二进制漂（实测 tests/cc_id/Id.vbp：
+    // HEAD 交 IdMain,VbpImpl,CircleImpl,IdIfaces,IdBlocks，本刀交 IdMain,CircleImpl,VbpImpl,
+    // IdIfaces,IdBlocks）。口径：**要保的是确定性**，不是照抄 VB6 ——
+    // VB6 的模块级变量只在首次引用时才建，本来就没有这条 eager 序，它是 C3 的实现选择。
+    std::unordered_set<std::string> projectModNames;
+    for (size_t j = 0; j < modules_.size(); j++) {
+        if (modules_[j]) projectModNames.insert(modules_[j]->moduleName);
+    }
+    auto extModulesInModuleVectorOrder = [&](size_t self) {
+        std::vector<std::string> out;
+        for (size_t j = 0; j < modules_.size(); j++) {
+            if (!modules_[j] || j == self) continue;
+            // 泛型模板类 (G4): 不发码 → 不进 include 依赖 (否则悬空 #include)
+            if (!modules_[j]->classTypeParams.empty()) continue;
+            out.push_back(modules_[j]->moduleName);
+        }
+        return out;
+    };
+
     // Fix 142: 确定启动对象 (决定哪个模块生成进程入口点).
     // VBP 未写 Startup= 时按 VB6 语义取工程中的第一个窗体模块作为启动窗体;
     // 全无窗体则留空 (此时只有含 Public Sub Main 的模块生成 main).
@@ -22,6 +49,9 @@
 
     // Fix 160: ComLib= 免注册组件表 {ProgID, CLSID, coclass名, 相对exe路径}
     const std::vector<std::array<std::string, 4>>& comLibRefs = comLibRefs_;
+
+    // Fix <vbeclipse> 2026-10-06: Object= OCX 免注册组件表 {ProgID, CLSID, coclass名, 相对exe路径}
+    const std::vector<std::array<std::string, 4>>& ocxLibRefs = ocxLibRefs_;
 
     for (size_t i = 0; i < modules_.size(); i++) {
         auto& module = modules_[i];
@@ -43,20 +73,14 @@
             baseName = module->moduleName;
         }
 
-        // 收集跨模块include需求（从符号表获取外部模块名）
-        auto externalModules = analyzer->symbolTable().getExternalModuleNames();
-
-        // Fix 075: 多模块项目中，所有模块的 isMultiModule_ 必须为 true，
-        // 否则函数定义名不带模块前缀而跨模块调用带模块前缀，导致 LNK2019。
-        // 将项目中所有其他模块名也加入 externalModules，确保 isMultiModule_=true。
-        if (modules_.size() > 1) {
-            for (size_t j = 0; j < modules_.size(); j++) {
-                if (j != i) {
-                    // 泛型模板类 (G4): 不发码 → 不进 include 依赖 (否则悬空 #include)
-                    if (!modules_[j]->classTypeParams.empty()) continue;
-                    externalModules.insert(modules_[j]->moduleName);
-                }
-            }
+        // 收集跨模块include需求（账 §B97: 名单按工程声明序排，见文件头那两条）。
+        // Fix 075 的语义原样保留：多模块工程里「所有其他模块」都必须在名单里，
+        // 否则函数定义名不带模块前缀而跨模块调用带前缀 ⇒ LNK2019。
+        auto externalModules = extModulesInModuleVectorOrder(i);
+        // 兜底：符号表报了**不在工程表里**的名字（实测本项目内是空集）也留着，
+        // 成员集合与改动前一致；getExternalModuleNames() 自身已升序，追加段因此也确定。
+        for (const auto& nm : analyzer->symbolTable().getExternalModuleNames()) {
+            if (!projectModNames.count(nm)) externalModules.push_back(nm);
         }
 
         // 调用C代码生成器
@@ -70,6 +94,7 @@
         cgen.setOcxFiles(&ocxFiles);        // Fix 143: vbp Object= 的 ocx 路径表
         cgen.setOcxRefs(&ocxRefs);          // Fix 143b: 实例化 CLSID 以 vbp Object= 为准
         cgen.setComLibRefs(&comLibRefs);    // Fix 160: ComLib= 免注册组件表 (入口点烘焙)
+        cgen.setOcxLibRefs(&ocxLibRefs);    // Fix <vbeclipse>: Object= OCX 免注册表 (入口点烘焙)
         cgen.setStaticModuleVarNames(&dupModuleVarNames);  // Fix 093b: 撞名模块级变量转 static
         cgen.setInterfaceImplementers(&ifaceImplementersMap);  // P6.4+: 接口唯一实现类映射
         cgen.setInterfaceAllImplementers(&ifaceAllImplementersMap);  // Fix <vbeclipse>: 接口全部实现类 (桩分派用)
@@ -134,8 +159,17 @@
         }
 
         // --emit-c 模式: 输出C代码后结束
+        // 账 #267: 这份产物要和上面那两份 .h/.c **同一口径**（内部 UTF-8 原样），所以绕开 std::cout
+        // 上那层「管道/文件就按控制台代码页转字节」的 streambuf —— 它是为给人看的诊断装的，
+        // 用在产物上就变成「同一个问题两个答案，其中一个随机器变」：本机 936 交 GBK、CI 65001 交 UTF-8。
+        // 先 flush 诊断，再直接 fwrite（stdout 是文本流，'\n' 照旧翻成 CRLF，与 ofstream 写的那两份一致）。
         if (options.emitC) {
-            std::cout << cgen.headerCode() << std::endl;
-            std::cout << cgen.sourceCode() << std::endl;
+            std::cout.flush();
+            std::string dump = cgen.headerCode();
+            dump += "\n";
+            dump += cgen.sourceCode();
+            dump += "\n";
+            writeStdoutRaw(dump);
+            std::fflush(stdout);
         }
     }

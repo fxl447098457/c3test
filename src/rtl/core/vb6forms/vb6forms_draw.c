@@ -7,27 +7,29 @@
 // COM dispatch 桩（cgen_expr_member_form_builtin.inc 末尾那段注释写明"运行时不可靠"），
 // 于是方法既不画也不报错。
 //
-// HDC 来源（关键）：**不新建 DC，沿用窗体自己的**。口径与
-// vb6_ControlDrawDC（vb6forms_ctrl.c:709）完全一致：
+// HDC 来源：**本文件不答这一问**。唯一口径在 vb6forms_ctrl.c 的 vb6_ControlDrawDC
+// （账 #185/#196 收口，账 #234 起这里改成问它，不再自己写第二份）：
 //     1. 先问窗口属性 VB6_PaintDC —— WM_PAINT 派发期宿主已经 BeginPaint 过了
 //        （cgen_form_wndproc_subclass.inc:384 与 create.inc:18 两处都 SetPropW 了），
 //        此时必须用**那一张**，另 GetDC 会画到别处、且 WM_PAINT 里 GetDC 是错用法；
 //     2. 否则 GetDC(hwnd)（Print/Cls 等在 WM_PAINT 之外调用的场景）。
 // 非 WM_PAINT 期拿的 DC 由本文件负责 ReleaseDC，fromPaint 那张不释放。
 //
-// 状态存哪：绘图状态（ForeColor / DrawWidth / DrawStyle / FillStyle / CurrentX/Y）
-// 一律按 HWND 存窗口属性（"VB6_FgColor" / "VB6_DrawWidth" ...），与
-// vb6_ControlPrint 用 "VB6_PrintX/Y" 同一套手法。这样:
-//   * Form 与控件天然隔离（各自 HWND）；
+// 状态存哪：绘图状态（DrawWidth / DrawStyle / FillStyle）按 HWND 存窗口属性；
+// 画笔色与笔位不在这一族 —— 它们各自只有一份存储 (账 #235 / #233)。这样:
+//   * 按 HWND 存 ⇒ Form 与控件天然隔离（各自 HWND），所以本文件这份 Print/Cls
+//     同时是 PictureBox/Image 那两族的全部实现（账 #239: 控件那边以前另存了一套
+//     "VB6_PrintX/Y" 像素光标，现已撤掉，只留转调）；
 //   * 不需要给宿主模型加字段、不需要动 vb6_UserControlDesc 那三张按名桥表
 //     （MEMORY 记着"加槽一律追加末尾"，能不碰就不碰）；
 //   * 缺省值 = 属性不存在 = 0，各方法自己兜底成 VB6 的初始值。
 //
-// 单位：与 Print / TextWidth 同一口径 —— 绘图坐标按**缇(twips)** 收，落到 DC 前用
-// MM_TEXT + 缇→像素换算（1 px = 15 缇 @96dpi）。ScaleMode 系列属另一条线
-// （ScaleX/ScaleY/ScaleWidth/ScaleHeight），本文件只在 ScaleMode==vbPixels(3) 时
-// 直通像素、其余按缇换算，与 vb6_ScaleUserToPx 同款判据。
+// 单位：与 Print / TextWidth / TextHeight 同一口径 —— 坐标按**这枚窗口自己的 ScaleMode**
+// 收，落到 DC 前一律过 vb6_ScaleUserToPx / vb6_ScalePxToUser（账 #237 之后本文件不再
+// 自带任何 DPI 或缇的数，八档都在那一条 vb6_ScaleUnitsPerPx 里答）。
+// ScaleX/ScaleY/ScaleWidth/ScaleHeight 那条线与这里共用同一批出口。
 #include "vb6forms.h"
+#include "vb6forms_internal.h"   // 账 #234: 取 DC 的唯一口径在那儿声明
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -52,17 +54,13 @@ static vb6_draw_dc_t vb6_DrawAcquire(void* hwndOrNull) {
     HWND hw = (HWND)hwndOrNull;
     out.dc = NULL;
     out.fromPaint = FALSE;
-    if (hw) {
-        HDC painting = (HDC)GetPropW(hw, L"VB6_PaintDC");
-        if (painting) {           // 优先用派发期那张 (见文件头口径 1)
-            out.dc = painting;
-            out.fromPaint = TRUE;
-            return out;
-        }
-    }
-    // Printer: 传进来的 hwndOrNull 是 NULL 之外的哨兵时另走 g_printerDC,
-    // 由 vb6_DrawAcquirePrinter 单独处理。
-    out.dc = hw ? GetDC(hw) : NULL;
+    // Printer 那一路传进来的不是 HWND (由 vb6_DrawAcquirePrinter 单独处理)。
+    if (!hw) return out;
+    // 账 #234: 「这枚窗口的绘图 DC 从哪儿来」不在本文件再答一遍 —— 派发期先问
+    // VB6_PaintDC、否则 GetDC、fromPaint 那张不 Release, 这一整条口径的唯一权威是
+    // vb6forms_ctrl.c 的 vb6_ControlDrawDC (账 #185/#196 收口)。以前这里另写了一份,
+    // 而 check_control_dc.ps1 的名单扫不到本文件 ⇒ census 上开了一个洞。
+    out.dc = vb6_ControlDrawDC(hw, &out.fromPaint);
     return out;
 }
 
@@ -87,25 +85,30 @@ static int32_t vb6_DrawGetI(void* hwnd, const wchar_t* name, int32_t dflt) {
 static void vb6_DrawSetI(void* hwnd, const wchar_t* name, int32_t v) {
     HWND hw = (HWND)hwnd;
     if (!hw) return;
-    // SetPropW(hwnd, name, 0) 与"从没设过"不可分辨, 而合法取值域含 0
-    // (ForeColor 黑 = 0、DrawWidth 1 才是默认…)。统一 val+1 存储, 读时 -1。
-    SetPropW(hw, name, (HANDLE)(INT_PTR)(v + 1));
+    // **存裸值**: 读侧 vb6_DrawGetI 也按裸值答, 两边同一套编码。
+    // "0 与从没设过不可分辨"不在编码层解, 由各属性自己的缺省档兜 (账 #233 订正:
+    // 这里原先存 v+1 而读侧不减 => 写 3 读回 4, 且 Step 那一路每画一次多带 1):
+    // DrawWidth 的 setter 先钳到 >=1, VB6_BackColor 的写者本来就存裸值。
+    SetPropW(hw, name, (HANDLE)(INT_PTR)v);
 }
 
-// 前景色: 0 (黑) 是合法值, 但不能表示"没设过" => 用 VB6 语义兜底
-// (BackColor/BackStyle 决定首色; 这里取 vbBlack = 0, 与 Print 同一档)。
+// 笔位 (CurrentX / CurrentY) **只有一份存储** —— vb6forms_widget_prop.c 那对 float
+// 出口。此前本文件在同一个窗口属性名上另开了一套 int32 编码: `vb6_Form_Print` 读 float、
+// PSet/Line/Circle 读 int32, 两边互读必错 (账 #233)。Print 的推进量按像素存回用户单位
+// 那一格由账 #237 收掉；PictureBox/Image 那两族以前在 "VB6_PrintX/Y" 上另存一份像素光标,
+// 由账 #239 撤掉 —— 从此全仓的 Print/Cls 只有本文件这一份实现，笔位也就只有这一份。
+static int32_t vb6_DrawCurX(HWND hw) { return (int32_t)vb6_GetCurrentX((void*)hw); }
+static int32_t vb6_DrawCurY(HWND hw) { return (int32_t)vb6_GetCurrentY((void*)hw); }
+static void vb6_DrawSetCurX(HWND hw, int32_t v) { vb6_SetCurrentX((void*)hw, (float)v); }
+static void vb6_DrawSetCurY(HWND hw, int32_t v) { vb6_SetCurrentY((void*)hw, (float)v); }
+
+// 画笔色**只有一份存储** (账 #235): 控件那两处 (vb6forms_ctrl.c 的 Line / 子控件回显)
+// 一直问 vb6_GetControlForeColor, 而 Form 绘图家族以前自己在 VB6_DrawForeColor 上又存了一枚
+// (还带一套 +1/-1) ⇒ `Me.ForeColor = vbRed` 之后**不带颜色的** PSet 画出来是黑 (实测 0 对 255)。
+// 两边默认档本来就是同一个数 (未设 → 0 → vbBlack), 所以合并不引入 Fix 187 那类"0 与没设过
+// 同构"的误判 —— 那条坑属于 BackColor (它默认是 BTNFACE 而不是黑, 才要 VB6_BackColorSet 哨兵)。
 static COLORREF vb6_DrawForeColor(void* hwnd) {
-    HWND hw = (HWND)hwnd;
-    if (!hw) return RGB(0, 0, 0);
-    intptr_t v = (intptr_t)GetPropW(hw, L"VB6_DrawForeColor");
-    if (v == 0) return RGB(0, 0, 0);
-    return (COLORREF)(int32_t)(v - 1);
-}
-
-static void vb6_DrawSetForeColor(void* hwnd, int32_t c) {
-    HWND hw = (HWND)hwnd;
-    if (!hw) return;
-    SetPropW(hw, L"VB6_DrawForeColor", (HANDLE)(INT_PTR)(c + 1));
+    return (COLORREF)vb6_GetControlForeColor(hwnd);
 }
 
 // ============================================================
@@ -115,14 +118,23 @@ static void vb6_DrawSetForeColor(void* hwnd, int32_t c) {
 //   高 dpi 屏上整幅图缩掉一截 (与 Print 的 TextWidth 同款约束)。
 // ============================================================
 static int vb6_DrawScaleMode(void* hwnd) {
-    return vb6_DrawGetI(hwnd, L"VB6_ScaleMode", 1 /* vbTwips */);
+    // 账 #233: `VB6_ScaleMode` 的唯一写者是 vb6_SetScaleMode (存裸值), 这里以前按
+    // "带 +1 的编码"读 => 同一个属性名两种编码。改问账 #197 那道权威: 读法与几何
+    // 换算必须同一处 (vb6_WindowScaleModeSelf)。
+    return (int)vb6_WindowScaleModeSelf(hwnd);
 }
 
-static double vb6_DrawUserToPx(HDC dc, void* hwnd, double v) {
-    if (vb6_DrawScaleMode(hwnd) == 3 /* vbPixels */) return v;   // 已是像素
-    int dpi = GetDeviceCaps(dc, LOGPIXELSX);
-    if (dpi <= 0) dpi = 96;
-    return v * dpi / 1440.0;
+// 账 #237: 这两条**只是码头**，换算本身在 vb6forms.c 的 vb6_ScaleUserToPx / vb6_ScalePxToUser
+// (Fix 184 已把缇<->像素收成那一对带真实 DPI 的出口，几何 Move/SetPos、控件 Line、TextHeight
+// 全走它)。以前本文件自带一份 `v * dpi / 1440` —— 那是第二套口径，而且**只认缇**:
+// ScaleMode = Point/Inch/Centimeter/Millimeter 时它照缇算，差 20 倍；纵向还拿横向的 dpi。
+// 现在竖/横分开交给权威，与本文件其余三件 (DC / 字体 / 色彩) 同一形状: 只问，不再自己答。
+static double vb6_DrawUserToPx(void* hwnd, double v, int vert) {
+    return (double)vb6_ScaleUserToPx(v, vb6_DrawScaleMode(hwnd), vert);
+}
+
+static double vb6_DrawPxToUser(void* hwnd, double px, int vert) {
+    return vb6_ScalePxToUser(px, vb6_DrawScaleMode(hwnd), vert);
 }
 
 // ============================================================
@@ -133,21 +145,21 @@ static double vb6_DrawUserToPx(HDC dc, void* hwnd, double v) {
 void vb6_Form_PSet(void* hwnd, int32_t step, int32_t hasXY,
                    double x, double y, int32_t hasColor, int32_t color) {
     HWND hw = (HWND)hwnd;
-    int cx = vb6_DrawGetI(hw, L"VB6_CurrentX", 0);
-    int cy = vb6_DrawGetI(hw, L"VB6_CurrentY", 0);
+    int cx = vb6_DrawCurX(hw);
+    int cy = vb6_DrawCurY(hw);
     int px = hasXY ? (int)x : cx;
     int py = hasXY ? (int)y : cy;
     if (step) { px += cx; py += cy; }        // Step: 相对当前笔位
     // PSet 总会移动笔位 (VB6 语义)
     int nx = hasXY ? px : cx;
     int ny = hasXY ? py : cy;
-    vb6_DrawSetI(hw, L"VB6_CurrentX", nx);
-    vb6_DrawSetI(hw, L"VB6_CurrentY", ny);
+    vb6_DrawSetCurX(hw, nx);
+    vb6_DrawSetCurY(hw, ny);
 
     vb6_draw_dc_t d = vb6_DrawAcquire(hwnd);
     if (!d.dc) return;
-    double dx = vb6_DrawUserToPx(d.dc, hwnd, px);
-    double dy = vb6_DrawUserToPx(d.dc, hwnd, py);
+    double dx = vb6_DrawUserToPx(hwnd, px, 0);
+    double dy = vb6_DrawUserToPx(hwnd, py, 1);
     COLORREF c = hasColor ? (COLORREF)color : vb6_DrawForeColor(hwnd);
     SetPixelV(d.dc, (int)dx, (int)dy, c);
     vb6_DrawRelease(&d, hwnd);
@@ -159,8 +171,8 @@ void vb6_Form_PSet(void* hwnd, int32_t step, int32_t hasXY,
 int32_t vb6_Form_Point(void* hwnd, double x, double y) {
     vb6_draw_dc_t d = vb6_DrawAcquire(hwnd);
     if (!d.dc) return -1;
-    double dx = vb6_DrawUserToPx(d.dc, hwnd, x);
-    double dy = vb6_DrawUserToPx(d.dc, hwnd, y);
+    double dx = vb6_DrawUserToPx(hwnd, x, 0);
+    double dy = vb6_DrawUserToPx(hwnd, y, 1);
     COLORREF c = GetPixel(d.dc, (int)dx, (int)dy);
     vb6_DrawRelease(&d, hwnd);
     return (int32_t)c;   // 已经是 0x00BBGGRR, 与 VB6 的 Point 返回同序
@@ -182,8 +194,8 @@ void vb6_Form_Line(void* hwnd,
                    int32_t hasColor, int32_t color,
                    int32_t style) {
     HWND hw = (HWND)hwnd;
-    int cx = vb6_DrawGetI(hw, L"VB6_CurrentX", 0);
-    int cy = vb6_DrawGetI(hw, L"VB6_CurrentY", 0);
+    int cx = vb6_DrawCurX(hw);
+    int cy = vb6_DrawCurY(hw);
 
     int ax, ay, bx, by;
     if (has1) { ax = (int)x1; ay = (int)y1; if (step1) { ax += cx; ay += cy; } }
@@ -197,10 +209,10 @@ void vb6_Form_Line(void* hwnd,
 
     vb6_draw_dc_t d = vb6_DrawAcquire(hwnd);
     if (!d.dc) return;
-    double pax = vb6_DrawUserToPx(d.dc, hwnd, ax);
-    double pay = vb6_DrawUserToPx(d.dc, hwnd, ay);
-    double pbx = vb6_DrawUserToPx(d.dc, hwnd, bx);
-    double pby = vb6_DrawUserToPx(d.dc, hwnd, by);
+    double pax = vb6_DrawUserToPx(hwnd, ax, 0);
+    double pay = vb6_DrawUserToPx(hwnd, ay, 1);
+    double pbx = vb6_DrawUserToPx(hwnd, bx, 0);
+    double pby = vb6_DrawUserToPx(hwnd, by, 1);
 
     COLORREF c = hasColor ? (COLORREF)color : vb6_DrawForeColor(hwnd);
     int w = vb6_DrawGetI(hw, L"VB6_DrawWidth", 1);
@@ -238,8 +250,8 @@ void vb6_Form_Line(void* hwnd,
     if (pen) DeleteObject(pen);
     vb6_DrawRelease(&d, hwnd);
 
-    vb6_DrawSetI(hw, L"VB6_CurrentX", endX);
-    vb6_DrawSetI(hw, L"VB6_CurrentY", endY);
+    vb6_DrawSetCurX(hw, endX);
+    vb6_DrawSetCurY(hw, endY);
 }
 
 // ============================================================
@@ -257,8 +269,8 @@ void vb6_Form_Circle(void* hwnd,
                      int32_t hasEnd, double endAngle,
                      int32_t hasAspect, double aspect) {
     HWND hw = (HWND)hwnd;
-    int cx = vb6_DrawGetI(hw, L"VB6_CurrentX", 0);
-    int cy = vb6_DrawGetI(hw, L"VB6_CurrentY", 0);
+    int cx = vb6_DrawCurX(hw);
+    int cy = vb6_DrawCurY(hw);
     int ccx = hasXY ? (int)x : cx;
     int ccy = hasXY ? (int)y : cy;
     if (step) { ccx += cx; ccy += cy; }
@@ -266,14 +278,14 @@ void vb6_Form_Circle(void* hwnd,
     if (radius < 0) radius = -radius;
 
     // 画完笔位落在圆心 (VB6 语义)
-    vb6_DrawSetI(hw, L"VB6_CurrentX", ccx);
-    vb6_DrawSetI(hw, L"VB6_CurrentY", ccy);
+    vb6_DrawSetCurX(hw, ccx);
+    vb6_DrawSetCurY(hw, ccy);
 
     vb6_draw_dc_t d = vb6_DrawAcquire(hwnd);
     if (!d.dc) return;
-    double dcx = vb6_DrawUserToPx(d.dc, hwnd, ccx);
-    double dcy = vb6_DrawUserToPx(d.dc, hwnd, ccy);
-    double r = vb6_DrawUserToPx(d.dc, hwnd, radius);
+    double dcx = vb6_DrawUserToPx(hwnd, ccx, 0);
+    double dcy = vb6_DrawUserToPx(hwnd, ccy, 1);
+    double r = vb6_DrawUserToPx(hwnd, radius, 0);
     // 半径要按**纵横**两个方向各算一次: VB6 的 Circle 传的是缇单位下的半径,
     // 落在 DC 上是椭圆 (除非 aspect=1 且 hwnd 方正)。
     double ry = r;
@@ -326,36 +338,115 @@ void vb6_Form_Circle(void* hwnd,
 // ============================================================
 // CLS —— 清掉绘图表面。Form 上等价于用 BackColor 填满客户区。
 // ============================================================
+
+// VB6 语义: Cls 清的是**运行期绘图** (PSet/Line/Print...), 不清 Picture 属性 ——
+// 设计期背景图在 Cls 之后依然在。此前 ARDC 分支把记忆位图整幅填成 BackColor,
+// 3DMenu 窗体那张 1024x768 淡紫底图在第一帧 Me.Cls 就被抹掉, 从此只剩 BackColor。
+// 口径与 WM_ERASEBKGND 那条同款: 仅收 OBJ_BITMAP 档, 0,0 起 SRCCOPY。
+static void vb6_Cls_RestoreFormPicture(HDC hdc, HWND hw) {
+    HANDLE hPic = GetPropW(hw, L"VB6_Picture");
+    if (!hPic || GetObjectType((HGDIOBJ)hPic) != OBJ_BITMAP) return;
+    BITMAP bmP;
+    if (!GetObjectW((HGDIOBJ)hPic, sizeof(bmP), &bmP)) return;
+    HDC mcP = CreateCompatibleDC(hdc);
+    if (!mcP) return;
+    HBITMAP obP = (HBITMAP)SelectObject(mcP, (HBITMAP)hPic);
+    BitBlt(hdc, 0, 0, bmP.bmWidth, bmP.bmHeight, mcP, 0, 0, SRCCOPY);
+    SelectObject(mcP, obP);
+    DeleteDC(mcP);
+}
+
 void vb6_Form_Cls(void* hwnd) {
     HWND hw = (HWND)hwnd;
     if (!hw) return;
+    // Fix <c3-menu3d> 2026-10-07: AutoRedraw 窗体/控件的 Cls 必须清**记忆位图**
+    // (VB6 语义: ARDC 是唯一绘图表面), 而不是屏幕 DC。此前 vb6_DrawAcquire 落
+    // GetDC(窗口) → 每 tick 一次全屏 BackColor 刷屏, 下一次 WM_PAINT 又把 ARDC
+    // (带着上一帧残影) 整幅 blit 回来 —— 图标重影 + 剧烈闪烁 (3DMenu 实测)。
+    HDC ar = (HDC)GetPropW(hw, L"VB6_AutoRedrawDC");
+    if (ar) {
+        RECT rcA;
+        GetClientRect(hw, &rcA);
+        HBRUSH brA = CreateSolidBrush((COLORREF)vb6_GetControlBackColor(hwnd));
+        if (brA) { FillRect(ar, &rcA, brA); DeleteObject(brA); }
+        vb6_Cls_RestoreFormPicture(ar, hw);   // Cls 不清 Picture (VB6 语义)
+        InvalidateRect(hw, NULL, FALSE);   // 上屏交给泵 (与 .hDC 那条同口径, 不擦底)
+        vb6_DrawSetCurX(hw, 0);
+        vb6_DrawSetCurY(hw, 0);
+        return;
+    }
     vb6_draw_dc_t d = vb6_DrawAcquire(hwnd);
     if (!d.dc) return;
     RECT rc;
     GetClientRect(hw, &rc);
-    int32_t bg = vb6_DrawGetI(hw, L"VB6_BackColor", -1);
-    COLORREF c = (bg == -1) ? RGB(240, 240, 240)/*vbFormBackColor*/ : (COLORREF)bg;
-    HBRUSH br = CreateSolidBrush(c);
+    // 背景色问唯一那份存储 (vb6_GetControlBackColor)，不在这里再答一遍:
+    // 上面那句"0 与没设过同构"的坑正是 Fix 187 —— 黑色存进窗口属性就是 NULL，
+    // 按值判空会把 BackColor = vbBlack 读成"未设置"而回落成按钮面 (实测控件那户
+    // Cls 之后取像素 0 对 15790320)。账 #239: 控件的 Cls 现在转调这里，所以这一问
+    // 两边共用；Form 自己那一路还到不了 (Me.Cls 落 COM 兜底，见账 #232)。
+    HBRUSH br = CreateSolidBrush((COLORREF)vb6_GetControlBackColor(hwnd));
     if (br) { FillRect(d.dc, &rc, br); DeleteObject(br); }
+    vb6_Cls_RestoreFormPicture(d.dc, hw);     // 同上: Cls 不清 Picture
     vb6_DrawRelease(&d, hwnd);
-    vb6_DrawSetI(hw, L"VB6_CurrentX", 0);
-    vb6_DrawSetI(hw, L"VB6_CurrentY", 0);
+    vb6_DrawSetCurX(hw, 0);
+    vb6_DrawSetCurY(hw, 0);
 }
 
 // ============================================================
-// 绘图状态读侧 (cgen 的 `Me.CurrentX` / `.ForeColor` / `.DrawWidth` 打这里)。
+// PRINT —— 在笔位上落一行文字，再把笔位推到下一行。
+//   VB6 的 Print 没有坐标实参: 落点恒取 CurrentX/CurrentY，行末 CurrentX 归零。
+// 账 #237: 这条以前住在 vb6forms.c，四件都是**自己答**的 —— 自己 GetDC、无条件 ReleaseDC
+// (派发期那张 BeginPaint 的 DC 它从不问，所以在 _Paint 里 Print 落不进那一轮)、
+// 字体不选 (拿 DC 默认字体，不是这枚窗体的 Font)、颜色不 SetTextColor、
+// 落点把「用户单位」当「像素」直接递出去，推进笔位又把一个像素数存回用户单位那份存储里
+// (实测缇档 Print 一行 = CurrentY + 16，而同一枚窗体自己答 TextHeight = 240)。
+// 现在四件都问家族已有的权威: DC = vb6_DrawAcquire (账 #234)、字体 = vb6_ControlFont
+// (账 #200)、色 = vb6_DrawForeColor (账 #235)、单位 = vb6_DrawUserToPx / vb6_DrawPxToUser
+// (本文件账 #237 那两条码头)。
+// 推进量刻意取**刚写那串字的 GetTextExtentPoint32W().cy** —— 那正是 vb6_ControlTextHeight
+// 量的同一个量，所以「Print 之后 CurrentY 的增量 == Me.TextHeight(同一串)」这条判据是两条路
+// 真汇合，不是各写一遍凑出来的相等。空 Print = 一个空行，取字体行高。
+// ============================================================
+void vb6_Form_Print(void* hwnd, void* bstrText) {
+    HWND hw = (HWND)hwnd;
+    BSTR text = (BSTR)bstrText;
+    if (!hw) return;
+    int len = text ? (int)SysStringLen(text) : 0;
+    vb6_draw_dc_t d = vb6_DrawAcquire(hwnd);
+    if (!d.dc) return;
+    HFONT hFont = vb6_ControlFont(hw);
+    HFONT hOld = hFont ? (HFONT)SelectObject(d.dc, hFont) : NULL;
+    SetBkMode(d.dc, TRANSPARENT);
+    SetTextColor(d.dc, vb6_DrawForeColor(hwnd));
+    double xUser = (double)vb6_GetCurrentX(hwnd);
+    double yUser = (double)vb6_GetCurrentY(hwnd);
+    int linePx = 0;
+    if (len > 0) {
+        SIZE sz;
+        TextOutW(d.dc, (int)vb6_DrawUserToPx(hwnd, xUser, 0),
+                         (int)vb6_DrawUserToPx(hwnd, yUser, 1), text, len);
+        if (GetTextExtentPoint32W(d.dc, text, len, &sz)) linePx = sz.cy;
+    } else {
+        TEXTMETRICW tm;
+        if (GetTextMetricsW(d.dc, &tm)) linePx = tm.tmHeight;
+    }
+    if (hOld) SelectObject(d.dc, hOld);
+    vb6_DrawRelease(&d, hwnd);
+    vb6_SetCurrentX(hwnd, 0.0f);
+    vb6_SetCurrentY(hwnd, (float)(yUser + vb6_DrawPxToUser(hwnd, (double)linePx, 1)));
+}
+
+// ============================================================
+// 绘图状态读侧 (cgen 的 `Me.DrawWidth` 打这里；笔位与画笔色都不在这一族 ——
+// 账 #233: 读写两侧都登记在 cgen_util_ctrl.cpp 的那两张表里, 且**成对**；
+// 账 #235: 画笔色改问唯一那份存储, 所以这里**不再有** ForeColor 的读写出入口。
 // 与上面各方法同源: 状态按 HWND 存窗口属性, 缺省兜底成 VB6 初始值。
 // ============================================================
-int32_t vb6_Form_DrawGetCurrentX(void* hwnd)  { return vb6_DrawGetI(hwnd, L"VB6_CurrentX", 0); }
-int32_t vb6_Form_DrawGetCurrentY(void* hwnd)  { return vb6_DrawGetI(hwnd, L"VB6_CurrentY", 0); }
-int32_t vb6_Form_DrawGetForeColor(void* hwnd) { return (int32_t)vb6_DrawForeColor(hwnd); }
 int32_t vb6_Form_DrawGetWidth(void* hwnd)     { return vb6_DrawGetI(hwnd, L"VB6_DrawWidth", 1); }
 
-// 写侧。cgen 的赋值语句走自己的发射路径, 这里备齐 RTL 入口;
-// VB6_DrawSetI 的 val+1 编码让 0 (黑) 也能与"未设过"区分。
-void vb6_Form_DrawSetCurrentX(void* hwnd, int32_t x) { vb6_DrawSetI(hwnd, L"VB6_CurrentX", x); }
-void vb6_Form_DrawSetCurrentY(void* hwnd, int32_t y) { vb6_DrawSetI(hwnd, L"VB6_CurrentY", y); }
-void vb6_Form_DrawSetForeColor(void* hwnd, int32_t c) { vb6_DrawSetForeColor(hwnd, c); }
+// 写侧。**登记进 cgen 的写侧表才是这条通路生效的唯一办法** —— 赋值语句发 C 时先问
+// getControlPropWriteFn(Form, 名), 没登记就退化成"把读函数当左值" (C2106, 实测)。
+// 编码口径与读侧同一套: 存裸值, "没设过"由各自的缺省档 / 钳位负责 (见 vb6_DrawSetI)。
 void vb6_Form_DrawSetWidth(void* hwnd, int32_t w) {
     if (w < 1) w = 1;
     vb6_DrawSetI(hwnd, L"VB6_DrawWidth", w);

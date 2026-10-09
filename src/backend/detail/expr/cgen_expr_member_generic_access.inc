@@ -95,6 +95,7 @@
     if (obj.find("vb6_ComCallObject(") == 0 ||
         obj.find("vb6_ComGetObjectProp(") == 0 ||
         obj.find("vb6_ComCall(") == 0 ||
+        obj.find("vb6_ComCallByDispid(") == 0 ||
         obj.find("vb6_ComGetProp(") == 0 ||
         // Fix <vbeclipse>: 同上 — 外部窗体控件句柄访问器前缀。
         obj.find("vb6_form_ctrl_") == 0 ||
@@ -122,6 +123,11 @@
         if (obj.find("vb6_ComCall(") == 0) {
             // vb6_ComCall → vb6_ComCallObject (同一参数, 返回void*而非VARIANT*)
             resolvedObj = "vb6_ComCallObject" + obj.substr(strlen("vb6_ComCall"));
+        } else if (obj.find("vb6_ComCallByDispid(") == 0) {
+            // vb6_ComCallByDispid → 返回 VARIANT* (void*, 承载 COM VARIANT).
+            // 成员访问要先解出对象指针: VariantFromComResult 解引用 → ToObjectVal 取 IDispatch*.
+            // (与 .member 链式调用的 P24-10 后期绑定默认成员同族)
+            resolvedObj = "vb6_VariantToObjectVal(vb6_VariantFromComResult(" + obj + "))";
         } else if (obj.find("vb6_ComGetProp(") == 0) {
             // vb6_ComGetProp → vb6_ComGetObjectProp
             resolvedObj = "vb6_ComGetObjectProp" + obj.substr(strlen("vb6_ComGetProp"));

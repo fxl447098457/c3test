@@ -37,11 +37,14 @@
     // 下方 IdentifierExpr 分支中无法匹配 (因为 node.object->kind == MeExpr 而非
     // IdentifierExpr), 一直漏到 fallback 处直接 emit "vb6_hwnd_<FormName>.Member"
     // 形成 C2224 (void* 上的 .member 访问). 此处统一处理:
-    //   1. 已知 Form 控件属性 (Height/Width/hwnd/Caption/Visible/Enabled/Font*/...) 
+    //   1. 已知 Form 控件属性 (Height/Width/hwnd/Caption/Visible/Enabled/Font*/...)
     //      走 getControlPropReadFn 返回的 vb6_GetControlXxx(vb6_hwnd_<FormName>).
-    //   2. 未知的 Form 成员 (ScaleHeight/ScaleWidth/Move/Refresh/Show/Print/Cls/...)
-    //      走 COM dispatch (vb6_ComCall/ComGet*Prop).
-    // 注: form HWND 不是真正的 IDispatch*, 这是编译 stub (使 MSVC 接受代码); 真正的
+    //   2. 画布家族 (Print / Cls / PSet / Line / Circle / Point) **不走 COM** —— 下面打
+    //      标记之后由 cgen_expr_call_callee_withm.inc 的两条码头按 controlCanvasMethod
+    //      那张表翻成 RTL 调用 (账 #232②: 这两形以前就落进第 3 档，编得过、一笔不画).
+    //   3. 其余未知的 Form 成员 (ScaleHeight/ScaleWidth/Move/Refresh/Show/...)
+    //      走 COM dispatch (vb6_ComCall/ComGet*Prop)。
+    // 注: form HWND 不是真正的 IDispatch*, 第 3 档是编译 stub (使 MSVC 接受代码); 真正的
     // 运行时正确性需要为 Form 实现专门的 IDispatch 或在 RTL 中添加专用 Form-属性
     // 辅助函数 (vb6_GetFormScaleWidth / vb6_MoveForm 等) — 留待后续 fix.
     if (node.object && node.object->kind == ASTNodeKind::MeExpr && isFormModule_ && !knownFormName_.empty()) {
@@ -59,19 +62,11 @@
             lastExpr_ = readFn + "(" + formHwnd + ")  /* Form." + node.memberName + " via Me */";
             return;
         }
-        // 2026-10-06: Form 的**绘图状态**属性读。此前这些与 ScaleHeight 一起落进
-        // 下方 COM dispatch 桩 —— 编译过了但运行期 no-op, `Print Me.ForeColor`
-        // 在 Form_Paint 里拿到的是 0 (不是真的画笔色)。交 RTL 按 HWND 存取
-        // (vb6forms_draw.c), 与控件 CurrentX 同一套窗口属性手法。
-        // ⚠ 只做**读侧**。写侧 (`Me.ForeColor = x`) 走赋值语句的发射路径, 不经过
-        // 本分支 —— 在这里加写侧是不可达的死代码 (读侧已 return)。
-        {
-            std::string mDr = Symbol::toLower(node.memberName);
-            if (mDr == "currentx")  { lastExpr_ = "vb6_Form_DrawGetCurrentX(" + formHwnd + ")"; return; }
-            if (mDr == "currenty")  { lastExpr_ = "vb6_Form_DrawGetCurrentY(" + formHwnd + ")"; return; }
-            if (mDr == "forecolor") { lastExpr_ = "vb6_Form_DrawGetForeColor(" + formHwnd + ")"; return; }
-            if (mDr == "drawwidth") { lastExpr_ = "vb6_Form_DrawGetWidth(" + formHwnd + ")"; return; }
-        }
+        // Form 的绘图状态属性 (CurrentX / CurrentY / DrawWidth) **不在这里答** ——
+        // 上面那句 getControlPropReadFn(Form, 名) 就是唯一入口, 读写两侧成对登记在
+        // cgen_util_ctrl.cpp 的那两张表里 (账 #233)。这里曾经另摆过四条硬编码:
+        // 它只覆盖读侧, 于是赋值语句找不到写侧出口, 发成
+        // `vb6_Form_DrawGetWidth(vb6_hwnd_X) = 3;` —— C2106, 两架构都编不过。
         // 未知 Form 成员 → COM dispatch (作为编译 stub; 运行时不可靠)
         comObjExpr_ = formHwnd;
         comMemberName_ = node.memberName;
@@ -199,7 +194,11 @@
         // P18-C: Printer 对象
         if (objLower == "printer") {
             if (memLower == "print") { lastExpr_ = "vb6_Printer_Print"; return; }
-            if (memLower == "enddoc") { lastExpr_ = "vb6_Printer_EndDoc"; return; }
+            if (memLower == "enddoc") {
+                // 账 #232①-c: 名字问画布表（Printer.Cls 与 Printer.EndDoc 是同一条出口，表里两行都指向它）
+                const std::string edFn = canvasDrawEntry("enddoc", CR_CANVAS_PRINTER);
+                if (!edFn.empty()) { lastExpr_ = edFn; return; }
+            }
             if (memLower == "newpage") { lastExpr_ = "vb6_Printer_NewPage"; return; }
             if (memLower == "width") { lastExpr_ = "vb6_Printer_Width()"; return; }
             if (memLower == "height") { lastExpr_ = "vb6_Printer_Height()"; return; }
@@ -400,29 +399,23 @@
                         return;
                     }
                 }
-                // Fix 185: PictureBox 的 Print/Cls 是**绘制**方法, 不是 COM 成员。
+                // Fix 185 / 账 #232②: 画布家族（Print / Cls / Line）是**绘制**方法, 不是 COM 成员。
                 // 必须落在下面 Fix 023e/089d 兜底**之前**: 兜底把 comObjExpr_ 设成
-                // HWND 表达式(:296), 调用侧 knownFormControls_.find() 就拿不到控件
-                // 类型了 —— 今天 "Picture2.Print \"Drag/drop me\"" 编成
+                // HWND 表达式(:296), 调用侧的裸名码头就拿不到控件类型了 —— 今天
+                // "Picture2.Print \"Drag/drop me\"" 编成
                 // vb6_ComCall(vb6_hwnd_Picture2, L"Print", …), 而控件 HWND 不是真的
                 // IDispatch*, 运行期静默 no-op, 那个框一直是空白。
-                if (itCtrl->second == FrmControlType::PictureBox) {
-                    std::string memLower = node.memberName;
-                    std::transform(memLower.begin(), memLower.end(), memLower.begin(), ::tolower);
-                    // 账 #221: Line 也是**绘制**方法, 名字由 controlCanvasMethod 那张表回答
-                    // —— 不在这里给标记的话, 兜底会把它当 COM 属性取出来 (`ComGetObjectProp(hwnd,
-                    // L"Line")`) 再对结果取 `Item`, 两跳在 RTL 都登记成"认识但什么都不做"
-                    // ⇒ 编得过、跑得起、一笔不画。
-                    if (memLower == "print" || memLower == "cls" ||
-                        !controlCanvasMethod(itCtrl->second, memLower).empty()) {
-                        comObjExpr_ = objLower;  // 小写控件名, 与 WebBrowser/ListBox 块同构
-                        comMemberName_ = memLower;
-                        isComMarker_ = true;
-                        isEarlyBoundCom_ = false;
-                        earlyBoundSym_ = nullptr;
-                        lastExpr_ = objLower;
-                        return;
-                    }
+                // 账 #221 起名字出自 controlCanvasMethod 这一张表（cls / print / line 三档），
+                // 这里不再各自列名字 —— 表加一档，两条码头与这一处打标记同步长。
+                if (itCtrl->second == FrmControlType::PictureBox
+                    && !controlCanvasMethod(itCtrl->second, memLower).empty()) {
+                    comObjExpr_ = objLower;  // 小写控件名, 与 WebBrowser/ListBox 块同构
+                    comMemberName_ = memLower;
+                    isComMarker_ = true;
+                    isEarlyBoundCom_ = false;
+                    earlyBoundSym_ = nullptr;
+                    lastExpr_ = objLower;
+                    return;
                 }
                 // ActiveX控件 (ImageList等): 属性访问走COM后期绑定
                 // 合并(P20-40 + C29-9): **无窗口控件只剩 ImageList / Toolbar**。

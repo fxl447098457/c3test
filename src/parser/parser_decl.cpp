@@ -425,6 +425,7 @@ std::unique_ptr<TypeDecl> Parser::parseTypeDecl(AccessLevel access) {
         //   memberName(1, 2) As Type  — 多维
         ExprPtr arraySize;
         bool isArrayDynamic = false;  // Fix 037: 标记动态数组 `()` 语法
+        std::vector<TypeMember::MoreDim> moreDims;  // 账 #262: 第 2..N 维
         if (match(TokenKind::LeftParen)) {
             if (cur_.kind != TokenKind::RightParen) {
                 // 解析第一个维度
@@ -436,12 +437,19 @@ std::unique_ptr<TypeDecl> Parser::parseTypeDecl(AccessLevel access) {
                 } else {
                     arraySize = std::move(first);
                 }
-                // 消费后续维度 (多维数组)
+                // 账 #262: 后续维度以前是"解析并丢弃"，于是 `M(0 To 4, 0 To 4)` 的第二维
+                // 整个不见 —— 结构体只发得出第一维的格数，`.M(3, 3)` 与 `.M(4, 4)` 写进
+                // 同一格 (真流量: Charts LabelPlus 的 GDI+ 色彩矩阵)。现在留着折算。
                 while (match(TokenKind::Comma)) {
-                    parseExpression(); // 解析并丢弃后续维度
+                    TypeMember::MoreDim md;
+                    md.lower = parseExpression();
                     if (match(TokenKind::To)) {
-                        parseExpression();
+                        md.upper = parseExpression();
+                    } else {
+                        md.upper = std::move(md.lower);
+                        md.lower = nullptr;
                     }
+                    moreDims.push_back(std::move(md));
                 }
             } else {
                 // 空括号 () = 动态数组, arraySize 保持 nullptr
@@ -460,6 +468,7 @@ std::unique_ptr<TypeDecl> Parser::parseTypeDecl(AccessLevel access) {
         auto memberNode = std::make_unique<TypeMember>(memberLoc,
             memberNameStr, std::move(type), std::move(arraySize));
         memberNode->isArrayDynamic = isArrayDynamic;
+        memberNode->moreDims = std::move(moreDims);
         members.push_back(std::move(memberNode));
     }
 

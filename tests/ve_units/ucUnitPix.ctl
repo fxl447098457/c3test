@@ -68,3 +68,37 @@ Public Function CntStr() As String
     ' void* 落进 _Generic 的 default: vb6_VariantObject 就是空串)。
     CntStr = CStr(UserControl.ContainerHwnd)
 End Function
+
+Public Event Hit()
+
+' ve_units fixture, account 222: when the container calls Fire(), THIS instance
+' raises Hit. The form's single shared handler has to see (1) this element's
+' design-time Index, (2) exactly one notification per raise, (3) no bleed from
+' the other elements.
+Public Function Fire() As Long
+    RaiseEvent Hit
+    Fire = 7
+End Function
+
+' account 226: a UserControl's own Click needs a landing point. When the container
+' sends WM_LBUTTONUP to this element's host window, the runtime must reach
+' UserControl_Click here and route out through THIS instance's event sink.
+Public Event Dbl()
+
+' account 227: the host has to route WM_LBUTTONDBLCLK into UserControl_DblClick too.
+' This is a DIFFERENT event from Hit on purpose: the form's judgement asks both
+' counters, so a click that was really served by the WM_LBUTTONUP path cannot
+' masquerade as a double click (and a missing dblClick slot cannot pass).
+Private Sub UserControl_DblClick()
+    RaiseEvent Dbl
+End Sub
+
+Private Sub UserControl_Click()
+    RaiseEvent Hit
+End Sub
+
+Public Function Hw() As LongPtr
+' the element's own HWND, handed out as a method (account 193: reading an
+' extender property on an array element is still broken, so go through a call).
+    Hw = UserControl.hWnd
+End Function

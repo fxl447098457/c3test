@@ -38,6 +38,10 @@ void vb6_SetControlPictureFromCom(void* hwnd, void* pPictureDisp);
 // AutoSize for PictureBox: resize to fit picture
 int vb6_GetPictureAutoSize(void* hwnd);
 void vb6_SetPictureAutoSize(void* hwnd, int autoSize);
+// Fix <vbeclipse> 2026-10-06: 现代 RGBA 透明绘制 — 32bpp 带 alpha 的位图用
+// AlphaBlend(AC_SRC_ALPHA) 画 (全透明整张跳过/全不透明回落原路径; 直通 alpha
+// 自动预乘)。返回 1 = 已画完, 0 = 走不了 alpha (调用方回落 BitBlt/Render)。
+int vb6_DrawBitmapAlpha(void* hdc, void* hBmp, int dstX, int dstY, int dstW, int dstH);
 
 // P17.2: Image.Stretch property
 

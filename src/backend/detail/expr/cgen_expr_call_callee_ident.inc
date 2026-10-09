@@ -180,7 +180,9 @@
         }
 
         // ---- Pattern F2: 局部 Object 变量 (后期绑定) ----
-        // knownObjectVars_: Dim x As Object → C 中 x 是 void*, x(idx) 应为 vb6_ComCall(x, ...).
+        // knownObjectVars_: Dim x As Object → C 中 x 是 void*, x(idx) 应为
+        // DISPID_VALUE 默认成员调用。正常已被 prelude.inc 的 P24-10 后期绑定分支
+        // 消费 (emit vb6_ComCallByDispid), 此处保留为等价的兜底, 口径一致。
         if (!handled && knownObjectVars_.count(nameLower)) {
             emitExpr(*node.callee);  // emits "name"
             std::string objExpr = std::move(lastExpr_);
@@ -199,7 +201,7 @@
                 argsArray += packedArgs[i];
             }
             argsArray += "}";
-            lastExpr_ = "vb6_ComCall(" + objExpr + ", L\"Item\", "
+            lastExpr_ = "vb6_ComCallByDispid(" + objExpr + ", 0, "
                       + argsArray + ", " + std::to_string(argc) + ")";
             handled = true;
         }

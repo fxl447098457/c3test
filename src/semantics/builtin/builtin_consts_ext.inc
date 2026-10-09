@@ -81,7 +81,7 @@
     addConst("vbPRDPVertical", Vb6Type::Long, 2);        // Duplex: Vertical
 
     // P22-09: Other missing constants
-    addConst("vbUseSystem", Vb6Type::Long, -1);           // Use system setting
+    addConst("vbUseSystem", Vb6Type::Long, 0);            // VB6 = 0（用 NLS API 设置）；原记 -1 是把它和 vbUseCompareOption(-1) 混了
     addConst("vbUseCompareOption", Vb6Type::Long, -1);   // Use Option Compare setting
     addConst("Win16", Vb6Type::Long, 0);                  // Obsolete: always False
     addConst("Win32", Vb6Type::Long, -1);                 // True on 32-bit Windows

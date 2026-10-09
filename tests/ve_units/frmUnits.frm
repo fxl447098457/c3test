@@ -52,6 +52,46 @@ Attribute VB_Creatable = False
 Attribute VB_PredeclaredId = True
 Attribute VB_Exposed = False
 Option Explicit
+Private Declare Function SendMessageW Lib "user32" (ByVal hWnd As LongPtr, ByVal Msg As Long, ByVal wParam As LongPtr, ByVal lParam As LongPtr) As Long
+' account 251 witnesses: the placed window is asked straight from user32, and the
+' expected pixels come from kernel32 MulDiv + the real device DPI. Neither of them
+' is the product's own conversion (the lesson from account 230: a witness that
+' routes through Me.ScaleX can be wrong by itself, because handing a Double back to
+' a VB Long truncates there).
+Private Declare PtrSafe Function GetWindowRect Lib "user32" (ByVal hWnd As LongPtr, ByRef lpRect As RECTAPI) As Long
+Private Declare PtrSafe Function GetDeviceCaps Lib "gdi32" (ByVal hDC As LongPtr, ByVal nIndex As Long) As Long
+Private Declare PtrSafe Function GetDC Lib "user32" (ByVal hWnd As LongPtr) As LongPtr
+Private Declare PtrSafe Function ReleaseDC Lib "user32" (ByVal hWnd As LongPtr, ByVal hDC As LongPtr) As Long
+Private Declare PtrSafe Function MulDiv Lib "kernel32" (ByVal nNumber As Long, ByVal nNumerator As Long, ByVal nDenominator As Long) As Long
+
+Private Type RECTAPI
+    Left As Long
+    Top As Long
+    Right As Long
+    Bottom As Long
+End Type
+
+Private mDpiX As Long
+Private mDpiY As Long
+
+Private Sub ReadDpi()
+    Dim d As LongPtr
+    d = GetDC(0)
+    mDpiX = GetDeviceCaps(d, 88)   ' LOGPIXELSX
+    mDpiY = GetDeviceCaps(d, 90)   ' LOGPIXELSY
+    ReleaseDC 0, d
+End Sub
+
+Private Function ToPx(ByVal twips As Long) As Long
+    ToPx = MulDiv(twips, mDpiX, 1440)
+End Function
+
+Private Function ToPy(ByVal twips As Long) As Long
+    ToPy = MulDiv(twips, mDpiY, 1440)
+End Function
+Private mIdx As Long
+Private mHits As Long
+Private mDbl As Long
 ' 两枚控件同尺寸 (2400 缇 = 160 像素 @96dpi), 只差 .ctl 声明的 ScaleMode。
 ' 判据写成**同一枚字体量出来的两个数之比**, 于是与 DPI 无关:
 '   缇型控件的 TextWidth / ScaleWidth 必须 = 像素型的 x Screen.TwipsPerPixelX
@@ -114,6 +154,104 @@ Private Sub Form_Load()
     Next
     Debug.Print "U-ARRM-methods=" & aok
     Debug.Print "U-ARR=" & CStr(ac = 3 And al = 0 And au = 2 And aok = 3)
+    ' account 222: a UC control array needs one thunk/sink pair PER ELEMENT, and
+    ' the design-time Index has to reach the single shared handler. Three heads,
+    ' all of them required: i1=1 is this element's Index; h1=1 means one raise
+    ' fires exactly once (neighbours stay silent); h2=2 means element 2 used its
+    ' OWN sink instead of overwriting element 1's slot.
+    Dim eIdx1 As Long, eHits1 As Long, eRet As Long
+    mIdx = -1
+    mHits = 0
+    eRet = uArr(1).Fire()
+    eIdx1 = mIdx
+    eHits1 = mHits
+    eRet = uArr(2).Fire()
+    Debug.Print "U-ARREVT-RAW i1=" & eIdx1 & " h1=" & eHits1 & " i2=" & mIdx & " h2=" & mHits & " ret=" & eRet
+    Debug.Print "U-ARREVT=" & CStr(eIdx1 = 1 And eHits1 = 1 And mIdx = 2 And mHits = 2 And eRet = 7)
+    ' account 226: the head above lets the container call Fire() itself; this head
+    ' is a REAL gesture - WM_LBUTTONUP goes to element 2's own host window and
+    ' must travel the desc click slot (after the MouseUp handoff) -> UC_Click ->
+    ' this element's sink -> shared handler with Index=2. Without this head a
+    ' missing click slot (the old shape) would still read green.
+    Dim hElem As LongPtr, mRet As Long, iM As Long, hM As Long
+    hElem = uArr(2).Hw()
+    mIdx = -1
+    mHits = 0
+    mRet = SendMessageW(hElem, &H202, 0, 0)
+    iM = mIdx
+    hM = mHits
+    Debug.Print "U-ARRCLICK-RAW hw=" & (hElem <> 0) & " idx=" & iM & " hits=" & hM & " ret=" & mRet
+    Debug.Print "U-ARRCLICK=" & CStr(hElem <> 0 And iM = 2 And hM = 1 And mRet = 0)
+    ' account 227: third head = a REAL double-click gesture. WM_LBUTTONDBLCLK goes
+    ' to element 2's own host window and must land on the desc dblClick slot.
+    ' Ask BOTH counters: dbl has to move by exactly 1 and hits has to stay 0, so a
+    ' slot fed by the click path (or by the old no-landing shape) cannot pass.
+    Dim dM As Long, hM2 As Long
+    hElem = uArr(2).Hw()
+    mIdx = -1
+    mHits = 0
+    mDbl = 0
+    mRet = SendMessageW(hElem, &H203, 0, 0)
+    dM = mDbl
+    hM2 = mHits
+    Debug.Print "U-ARRDBL-RAW hw=" & (hElem <> 0) & " idx=" & mIdx & " dbl=" & dM & " hits=" & hM2 & " ret=" & mRet
+    Debug.Print "U-ARRDBL=" & CStr(hElem <> 0 And mIdx = 2 And dM = 1 And hM2 = 0 And mRet = 0)
+    ' account 229: read an ARRAY ELEMENT's extender property INSIDE a & concat. Before
+    ' the fix the element form fell through to the bare-member-name symbol lookup, and
+    ' `Left` is also a VB builtin returning String => the concat emitted no numeric->BSTR
+    ' conversion => a raw int went into a BSTR slot = 0xC0000005 on BOTH arches (the
+    ' element's .Top/.Width only boxed wide, so the symptom looked name-dependent).
+    ' Two readings, both required: the RAW line is the inline concat (the crash site) and
+    ' it must carry the design-time geometry; the verdict line asks the four variables.
+    Dim exL As Long, exT As Long, exW As Long, exH As Long, exS As String
+    exL = uArr(1).Left
+    exT = uArr(1).Top
+    exW = uArr(1).Width
+    exH = uArr(1).Height
+    exS = "U-ARREXT-RAW l=" & uArr(1).Left & " t=" & uArr(1).Top & " w=" & uArr(1).Width & " h=" & uArr(1).Height
+    Debug.Print exS
+    Debug.Print "U-ARREXT=" & CStr(exL = 3600 And exT = 1320 And exW = 1200 And exH = 1140)
+    ' account 251: UserControl.Parent.Move. The container here is the top-level form,
+    ' so the four arguments are TWIPS. Two heads, both required:
+    '   A) the window really lands on MulDiv(twips, dpi, 1440) -- asked from user32,
+    '      so "the RTL put the twips straight into MoveWindow" shows up as a delta of
+    '      607-40=567 px instead of 0;
+    '   B) the four VB-side properties read back the four numbers that were written
+    '      (a Move has to fill the same VB-side geometry cache an assignment does --
+    '      account 230).
+    ' The four numbers are deliberately NOT multiples of 15 (607/451/2407/1811), so a
+    ' projection of a misplaced window can never land back on the requested twips and
+    ' head B cannot be faked by head A. Deltas are printed instead of raw pixels: the
+    ' judgement then holds at any DPI instead of pinning this runner's 96.
+    Dim pmH As LongPtr, pmRc As RECTAPI
+    Dim pmL As Long, pmT As Long, pmW As Long, pmHt As Long
+    Dim pmOk As Boolean, pmS As String
+    ReadDpi
+    pmH = Me.hWnd
+    uTw.MoveParent 607, 451, 2407, 1811
+    pmL = Me.Left
+    pmT = Me.Top
+    pmW = Me.Width
+    pmHt = Me.Height
+    GetWindowRect pmH, pmRc
+    pmS = "U-PMOVE-RAW l=" & pmL & " t=" & pmT & " w=" & pmW & " h=" & pmHt
+    pmS = pmS & " dx=" & (pmRc.Left - ToPx(607)) & " dy=" & (pmRc.Top - ToPy(451))
+    pmS = pmS & " dw=" & (pmRc.Right - pmRc.Left - ToPx(2407)) & " dh=" & (pmRc.Bottom - pmRc.Top - ToPy(1811))
+    Debug.Print pmS
+    pmOk = (pmL = 607 And pmT = 451 And pmW = 2407 And pmHt = 1811)
+    pmOk = pmOk And (pmRc.Left = ToPx(607)) And (pmRc.Top = ToPy(451))
+    pmOk = pmOk And (pmRc.Right - pmRc.Left = ToPx(2407)) And (pmRc.Bottom - pmRc.Top = ToPy(1811))
+    Debug.Print "U-PMOVE=" & CStr(pmOk)
     Debug.Print "U-DONE"
     Unload Me
+End Sub
+
+Private Sub uArr_Dbl(Index As Integer)
+    mDbl = mDbl + 1
+    mIdx = Index
+End Sub
+
+Private Sub uArr_Hit(Index As Integer)
+    mHits = mHits + 1
+    mIdx = Index
 End Sub

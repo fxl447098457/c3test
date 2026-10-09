@@ -30,22 +30,10 @@ void CCodeGen::visit(SubDecl& node) {
     //   @ _vb6_frmMain_ucPerspective1_OpenEditor+0x19。
     // 这里直接把 AST 形参的 isByVal 置真, 签名与函数体**一起**跟着变 (两处都读它),
     // 不改符号表也不动事件侧, 与 prelude 只发一次前向声明互相自洽。
-    if (ucEventHandlers_.count(Symbol::toLower(node.name)) > 0) {
-        for (auto& prm : node.params) {
-            if (prm && !prm->isParamArray) prm->isByVal = true;
-        }
-        // 体里的 `(*x)` 不是 AST 说了算: cgen_expr_ident_dispatch.inc 是读
-        // `currentProc_->params[i].isByVal` 来决定要不要解一层引用的。只翻 AST 会
-        // 得到"签名 void* Editor + 体里 (*Editor)" ⇒ C2100 非法的间接寻址
-        // (实测 frmMain.c:938/943/948 三条)。所以 proc 符号的形参表同翻。
-        // 该符号是模块作用域的; 事件处理器恒为 Private ⇒ 不进 getPublicSymbols /
-        // 不被跨模块注入, 改动只影响本模块。
-        if (auto* evtSym = symTab_.lookupModuleOverloadByLoc(node.name, node.loc)) {
-            for (auto& pi : evtSym->params) {
-                if (!pi.isParamArray) pi.isByVal = true;
-            }
-        }
-    }
+    // 账 #222: 这段从 visit 里抽成 applyEventHandlerAbi 一处实现 —— 模块级前置声明那一趟与
+    // 定义这一趟翻的必须是同一份 AST, 否则声明按 ByRef、定义按 ByVal, 中间还冒出一份零形参
+    // 声明 (实测 ucProgressCircular: 一枚函数三种形参表 => 1 条 C2084 + 24 条 C2198)。
+    if (ucEventHandlers_.count(Symbol::toLower(node.name)) > 0) applyEventHandlerAbi(node);
 
     std::string sig = makeProcSignature(node);
 
@@ -83,6 +71,7 @@ void CCodeGen::visit(SubDecl& node) {
     knownBoolVars_.clear();     // ai/022 W1
     knownByteVars_.clear();     // 账 #123
     knownIntVars_.clear();       // ai/009 5.10
+    knownNarrowIntVars_.clear(); // ai/032: SByte/UInteger/ULong/ULongLong 专属表
     knownLongVars_.clear();
     knownLongPtrVars_.clear();  // Bug #2 fix: 也清空LongPtr集合
     knownVariantVars_.clear();
@@ -113,6 +102,8 @@ void CCodeGen::visit(SubDecl& node) {
     if (isClassModule_) knownClassVars_["me"] = moduleName_;
     // P6.11: 恢复类模块成员变量类型 (clear后从持久化集合恢复)
     knownBstrVars_.insert(classBstrMembers_.begin(), classBstrMembers_.end());
+    // 账 #118: 同 cgen_decl_func.cpp —— 模块级定长串跨过程恢复 (窗体/类模块过程走本文件)。
+    knownFixedStringLen_.insert(moduleFixedStringLen_.begin(), moduleFixedStringLen_.end());
     knownDoubleVars_.insert(classDoubleMembers_.begin(), classDoubleMembers_.end());
     knownLongVars_.insert(classLongMembers_.begin(), classLongMembers_.end());
     // Fix 010n: 恢复类模块UDT成员变量 (knownUdtVars_被clear后需要从classUdtMembers_恢复)
@@ -134,6 +125,22 @@ void CCodeGen::visit(SubDecl& node) {
             std::string pLower = p->name;
             std::transform(pLower.begin(), pLower.end(), pLower.begin(), ::tolower);
             knownVariantVars_.insert(pLower);
+        }
+        // 账 #118: 形参同名遮蔽模块级定长串 → 先撤掉过程入口恢复进来的那条
+        // (定长形参下面那一格会重新登记)。与 cgen_decl_func.cpp 同款。
+        {
+            std::string pShadowFs = p->name;
+            std::transform(pShadowFs.begin(), pShadowFs.end(), pShadowFs.begin(), ::tolower);
+            knownFixedStringLen_.erase(pShadowFs);
+        }
+        // 账 #118 ③: 定长串形参 — 与 cgen_decl_func.cpp 那处一字一样 (窗体/类模块的
+        // 过程走本文件, 漏这里就收不到)。理由见那边的长注释。
+        if (p->asType && p->asType->kind == ASTNodeKind::FixedStringTypeRef) {
+            std::string pFsLower = p->name;
+            std::transform(pFsLower.begin(), pFsLower.end(), pFsLower.begin(), ::tolower);
+            knownBstrVars_.insert(pFsLower);
+            emitExpr(*static_cast<FixedStringTypeRef&>(*p->asType).length);
+            if (!lastExpr_.empty()) knownFixedStringLen_[pFsLower] = lastExpr_;
         }
         if (p->asType && p->asType->kind == ASTNodeKind::SimpleTypeRef) {
             auto& simpleP = static_cast<SimpleTypeRef&>(*p->asType);
@@ -210,6 +217,8 @@ void CCodeGen::visit(SubDecl& node) {
                 // inferExprType 先判 Byte 那张表, 所以这里进 knownLongVars_ 不会把它读成 Long。
                 if (paramType == Vb6Type::Byte) knownByteVars_.insert(pLower);
             }
+            // ai/032: SByte/UInteger/ULong/ULongLong 形参走专属表 (口径同账 #123 的 Byte)
+            else if (isNarrowIntVbType(paramType)) knownNarrowIntVars_[pLower] = paramType;
             // Bug #2 fix: LongPtr 参数注册到独立集合
             else if (paramType == Vb6Type::LongPtr || paramType == Vb6Type::LongLong) knownLongPtrVars_.insert(pLower);   // Fix 084m
             // Fix 035: Variant 参数也要注册, 否则 `(*X) = concrete` 赋值不会触发
@@ -421,6 +430,36 @@ void CCodeGen::visit(SubDecl& node) {
     c_.dedent();
     c_.emitLine("}");
     c_.emitBlank();
+}
+
+
+// 事件处理器的 ABI: 形参一律 ByVal (跨对象边界的回调)。AST 与 proc 符号两处都要翻 ——
+// 只翻 AST 会得到"签名 void* Editor + 体里 (*Editor)" (cgen_expr_ident_dispatch.inc 读的是
+// 符号表里的 isByVal), 实测 frmMain.c 三条 C2100。声明侧与定义侧共用这一处 (账 #222)。
+void CCodeGen::applyEventHandlerAbi(SubDecl& node) {
+    for (auto& prm : node.params) {
+        if (prm && !prm->isParamArray) prm->isByVal = true;
+    }
+    if (auto* evtSym = symTab_.lookupModuleOverloadByLoc(node.name, node.loc)) {
+        for (auto& pi : evtSym->params) {
+            if (!pi.isParamArray) pi.isByVal = true;
+        }
+    }
+}
+
+// 按名字在本模块里找那枚 <控件>_<事件> 处理器: 翻 ABI, 并回答"它的第一形参是不是元素号 Index"
+// (VB6 的控件数组处理器就是这么写的, 与非数组的差别只在这一枚形参)。找不到 = false。
+bool CCodeGen::prepareEventHandlerProc(Module& mod, const std::string& loweredName) {
+    for (auto& d : mod.declarations) {
+        if (!d || d->kind != ASTNodeKind::SubDecl) continue;
+        auto& sub = static_cast<SubDecl&>(*d);
+        if (!sub.typeParams.empty()) continue;          // 泛型模板本体不发码
+        if (Symbol::toLower(sub.name) != loweredName) continue;
+        applyEventHandlerAbi(sub);
+        return !sub.params.empty() && sub.params[0] &&
+               Symbol::toLower(sub.params[0]->name) == "index";
+    }
+    return false;
 }
 
 } // namespace vb6c3

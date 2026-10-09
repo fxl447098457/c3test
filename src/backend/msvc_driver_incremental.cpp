@@ -362,6 +362,11 @@ bool MsvcDriver::compileAndLinkIncremental(const MsvcDriverOptions& options) {
     // 独有，x64 不报)。默认路径经 cl /link 链接，cl 会替我们把这条配平 —— 所以只有增量路会翻，
     // 而 --incremental 在 ai/030 T30-B 之前从没进过任何回归，这个洞就一直没被踩过。见 030 §10.7。
     if (options.arch == "x86") linkCmd << " /NODEFAULTLIB:msvcrt.lib";
+    // czUI fix (exe 体积): RTL 与用户码都按 /Gy 编成函数级 COMDAT, 但链接从没发
+    // /OPT:REF —— 未被引用的大片 RTL (winsock/data/ole/uc/...) 全进了 exe,
+    // Menu3D 13MB vs VB6 原生 2.5MB。/OPT:REF 剔除未引用 COMDAT, /OPT:ICF 折叠
+    // 重复段。注意: 不可与增量链接共存, 本路径本就是一次性直调 link.exe, 无碍。
+    linkCmd << " /OPT:REF /OPT:ICF";
     if (options.debugInfo) linkCmd << " /DEBUG /MAP";
 
     std::string linkRsp = objDir + "/_c3_link_args.rsp";
