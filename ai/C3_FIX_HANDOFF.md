@@ -2142,6 +2142,8 @@ BASE（dev 头 `4e9d05ff`，不含本刀）在 `For Each` 那一形 **一次都�
 - **负控**：拿第二十刀**之前**那棵树（`.build/wt_mf @ 4e9d05ff`）整棵跑新哨兵 —— R6 全族红（`R6-ONE-MAP-SITE` 同时点到 `cgen_util_com.cpp` 与 `cgen_expr_call_com_bind.inc` = 那张表从前真住两处；出口定义 0；`R6-THIRD-ANSWER` 读数 7 大于 6），两条 census 防空转的守卫同时红，而 R1..R5 全绿 ⇒ 红得对症，也不是把旧账一起算进这一刀。
 - **清单那一行仍然欠**（`tests/sbhm/SbHm.vbp`）：夹具体与产物都改了，要按过门那台的读数登记。第二十刀带的是 `[skip ci]`、没门；本刀是源码级改动 ⇒ **不带 skip ci**，同一趟把第二十刀那半一起过门。门绿之后按 §B73 的口径登记，再判形状红。
 
+- **门 #471（head `3dc0f6a3`、run 38025387585、attempt 1）= 12 job 里 11 绿、唯一红是 `Emit manifest (shape oracle)`**，而那一红是**已知**的：`tests/sbhm/SbHm.vbp` 那一行记的还是第二十刀之前的产物（第二十刀 + 第二十一刀都改了这枚夹具与它的产物）。同一趟 CI 已把这颗头的新清单发到 `ci/emit-manifest`（`26b7b81b`，`ci: emit manifest head=3dc0f6a3`），**登记取的就是这台 CI 的读数**（§B97：本机冷编那台与 CI 那台的 `bytes/sha256` 会因 include 定序漂，所以只认 CI 那一行）—— `bytes` 13142 到 18905，其余 **398 行逐行相同**（`compare_emit_manifest.ps1` 对本机复算：399/399 相同、哈希不同 0、缺席 0、多出 0；`check_manifest_coverage.ps1`：inputs=399 / registered=399，两套集合相等）。登记那一笔**不带 skip ci**：它要让形状门自己再复算一遍，才算这一批过门。
+
 
 ### B125 账 #278 第十四刀已出 = 两枚集合 Clear 与 CommonDialog 那六枚 Show* 进零实参那张表：「拼法只许来自表」在 Show* 这一族落地（另立一条新判据：哨兵的文件头读不成注释就会绿着空转，2026-10-10，门 #456 attempt 1 全绿（run 37995142510、head `3f972622`、12/12 全 completed/success、非绿 0、created→updated 10m22s；**Emit manifest (shape gate) 那一跑同绿** ⇒ 「398 份逐字节相同」被 CI 那台独立复算证实））
 
