@@ -289,9 +289,16 @@ addBuiltinFunc("CallByName", Vb6Type::Variant);
     addBuiltinFuncWithParams("Filter", Vb6Type::Variant,
         {{"sourcearray", kVariantArray, true, false}, {"match", Vb6Type::String, true, false},
          {"include", Vb6Type::Long, true, true}, {"compare", Vb6Type::Long, true, true}});
-    addBuiltinFunc("VarPtr", Vb6Type::Long);
-    addBuiltinFunc("StrPtr", Vb6Type::Long);
-    addBuiltinFunc("ObjPtr", Vb6Type::Long);
+    // 账 §B138: 指针三枚的类型答案 **LongPtr**, 不是 Long。
+    //   这三枚交的是**地址**, 宽度随目标架构: RTL 侧 vb6_StrPtr 返回 void*、
+    //   vb6_ObjPtr 返回 uintptr_t (vb6rtl_builtin.h:441-442), 而 Vb6Type::Long 在 C 侧
+    //   是 int32_t —— x64 一步式把结果放进槽里就把 64 位地址**截成低 32 位**。
+    //   Vb6Type::LongPtr 在 C 侧是 intptr_t (cgen_base_type.cpp Fix 081e), 与 RTL 同宽。
+    //   改前 Long ⇒ 赋值/实参/比较全按 32 位整型办; 改后按指针宽度办, x86 下
+    //   intptr_t 仍是 32 位, 行为不变。
+    addBuiltinFunc("VarPtr", Vb6Type::LongPtr);
+    addBuiltinFunc("StrPtr", Vb6Type::LongPtr);
+    addBuiltinFunc("ObjPtr", Vb6Type::LongPtr);
     addBuiltinFunc("LSet", Vb6Type::String);
     addBuiltinFunc("RSet", Vb6Type::String);
     addBuiltinFunc("WeekdayName", Vb6Type::String);
