@@ -487,7 +487,7 @@ D11 放开普查范围到整个 `src/rtl` 的那天，只剩两处没接：`vb6f
 **顺带量出来一条新账（§B41/#206）**：`Panels(i).Width` 读的是**请求值**而不是排版后的宽（`vb6_StatusBar_GetPanelWidth` 直接 return `e->width`），所以 sbrContents/sbrSpring 那两档在 VB 侧读不到几何。今天**没有**据此改它 —— VB6 那一读数的单位口径（缇还是像素）还没量准，拿猜去改就是给这一族埋第二根雷。
 补一句为什么本地量不到基准：全仓没有一份**由 VB6 设计器写出来的**状态条设计块（`grep -rln --include=*.frm --include=*.pag "StatusBar"` 只命中我们自己那三份夹具），所以"设计值与实际宽的比"这条路在这儿取不到证据 ⇒ 这条账要动，得先拿到外部读数（原生 OCX 跑一遍，或 MSDN 原文）。
 
-### B41 `Panels(i).Width` 交回的是请求值，不是排版后的宽（账 #206，开着）
+### B41 `Panels(i).Width` 交回的是请求值，不是排版后的宽（账 #206，**两格都已出 —— 第十八刀 + 第二十二刀，第二十二刀门待回填**）
 
 #205 做判据时撞见的：状态条的排版结果只活在 `w->rights[]`（`SB_SETPARTS` 那一份），而 `vb6_StatusBar_GetPanelWidth` 交回 `e->width` —— 设计块没给 Width 的面板一律读回 **0**（实测 `SF01-RAW` 改前那版就是 `small=0 big=0`）。后果不止"读不到数"：`sbrSpring`/`sbrContents` 两档在 VB 代码里没有任何几何可查，凡是按面板宽定位的东西（比如提示气泡、覆盖层）只能自己再算一遍。
 **口径已经量准（2026-10-10，四发外部读数）—— 这一族的开工前置就此清掉，两格都动得了**。本机另有别人用 VB6 存下来的整批工程（`D:\vb_yqt4qPac`，5623 份 .frm），不是本仓那三份夹具，于是"设计值与实际宽的比"这条路取得到证据：
@@ -508,6 +508,15 @@ D11 放开普查范围到整个 `src/rtl` 的那天，只剩两处没接：`vb6f
 - **邻居那两条针的 exact 形状（判据重述要照着这个改，别照数字改）**：`tests/ctrlstatusbar/CtrlStatusBar.frm:74` 的 `SB10-W2=120` 读的是**设计块里那行无前缀的 `.Width = 120`**（第十八刀认的是带前缀的 `Object.Width`，语料真形；这两形在 RTL 里进的是同一格 `e->width`），`CtrlStatusBar.frm:120-121` 的 `SB36-SETW=123` 是**运行期赋值 `Panels(1).Width = 123` 的往返**；同族还有 `SB6-MINW1=40`（设计块 MinWidth）与 `SB35-SETMINW=77`（运行期往返）。⇒ 存储换成缇 + getter 改交排版结果之后这四条都会跟着动，判据按 #157 那条重述：**就地取基线问增量**，别写「读数 = 各步之和」那种手算式。
 - **RTL 那一头现在的三个事实**（读码对过，不是推断）：① `Vb6PanelEntry.width/minWidth` 注的就是**像素**，`SbLayout` 把 `want[i]` **原样**递给 `SB_SETPARTS`；② `vb6_StatusBar_GetPanelWidth` 交回 `e->width`（请求值），排版结果只活在 `SB_SETPARTS` 那一份里；③ 设计块那一档经 `vb6_StatusBar_SetPanelWidthHm` → `vb6_HimetricToPxX`（第十八刀）。⇒ 出口两侧要用的那对权威**已经有了** —— `vb6_TwipToX` / `vb6_XToTwipX`（`vb6forms.c:179/217`，#184/#175 收成一处的那对），**别新开一份**；而 hm↔缇 那条与 DPI 无关的比例现在在 RTL 里有**三份写法**（`axsite/ax_load.c:142` 的 `vb6_twipsToHimetric`、`vb6forms_olecon.c:580-581` 的 `*1440L/2540L`、`vb6forms_olecon.c:609/860` 的 `*15L*2540L/1440L`）—— 正是 §B129 那份名单，这一刀要往下减名单，不能加。
 - **顺手量到新的一格（同批一起交，别单开一刀）**：`Panels(i).Left` **全仓 0 个出口** —— RTL 的名字表 `kPanelNames`（`vb6forms_memberobj.c:113`）八枚里没有它，发码侧那 14 条 recognizer 也没有它，`grep -rn "PanelLeft" src` 空。而语料里正是那两处按面板定位覆盖层的写法在问它（`modAddProgBar.bas`：`pb.Left = sb.Panels(lPan).Left + 25`、`Form1.frm` 的 `.Move (sb.Panels(nPanel).Left + pading), …`）⇒ 今天读回空。它与 Width 同源（都该由 `SB_GETPARTS` 那份 offsets 折回缇），**所以它就是第二格的同一刀的另一面**，不另立账。
+
+**第二格已出（第二十二刀，2026-10-10，门待回填）**：单位这一档从头到尾换成**缇**，读侧改问窗口本人。
+- **动了什么**：① `Vb6PanelEntry.width/minWidth` 存的换成缇，`SbLayout` 的两道折（固定档 + 弹簧下限）都走 `vb6_TwipToX`；② 新立一枚本文件私有的 `SbPanelEdgesPx`（`SendMessageW(SB_GETPARTS)`），`GetPanelWidth` 与**新增的 `GetPanelLeft`** 都由它折回缇（`vb6_XToTwipX`）—— 唯一真相是窗口那份 offsets，不是 `e->width`；③ 新立一对与 DPI 无关的权威 `vb6_TwipsToHimetric` / `vb6_HimetricToTwips`（`vb6forms.c`，缇↔hm = 1440/2540），两枚 `*Hm` 设计出口改调缇档那一枚，第十八刀那版"把像素存进缇档"的形状（状态条里调 `vb6_HimetricToPxX`）归零；④ `axsite/ax_load.c` 那份旧写法改成**只转调**新权威 ⇒ §B129 名单从 5 份/13 行减到 **4 份/14 行**（`vb6forms.c` 由 1 行长成 3 行，净 -1 份文件）；⑤ 设计块那一行 `MinWidth` 从此走新的 `vb6_StatusBar_SetPanelMinWidthHm`（它同样是 himetric，读数在下面）；⑥ `Panels(i).Left` 那一面（改前全仓 0 个出口）一次登记齐：`kPanelNames` 补 `L"Left"`（DISPID 9）+ `memInvokePanel` 的 case + 发码侧 recognizer 一条。
+- **读数**（真跑，x64 与 x86 两份 run.out 逐行相同）：夹具 `tests/sbhm` 的证人从像素换成 `像素 * Screen.TwipsPerPixelX`（**用 Screen 那一条独立路，不用本仓那对权威，否则就是自己证自己**）⇒ HM09..HM12 四条同批 True；三条新判据在 BASE（`b437_base_k21.exe` 跑同一份夹具）上全 False、在改后全 True：`HM13-SPRING-WIDTH-FOLLOWS-WINDOW`（弹簧档从前请求宽恒 0）、`HM14-PANEL-LEFT`（BASE 上还多三条 `property "Left" not found`）、`HM15-DESIGN-MINWIDTH-NOT-RAW`（BASE `minw=26 frm=26` = 设计档原样吐回来，改后 `minw=14`）。邻居夹具按 #157 那条重述：`SB6-MINW1` 从 40 变 **22**（设计块那 40 是 himetric），`SB10-W2=120` 不动（固定档往返，缇→8px→缇），`SB36-SETW=123` 那一形作废 ⇒ 换成 `SB36-RAW before=5880 after=5880 sum=6630 bar=6000` + `SB36-SPRING-FOLLOWS-WINDOW=True`（BASE：`before=0 after=123 sum=243`，判据 False）。
+- **顺手量到、刻意不带的一格（另立 §B132 / 账 #303）**：`sum=6630` 比 `bar=6000` 多出 630 缇 = **42 像素**，正好是那枚 `sbrTime`+`sbrContents` 面板的测量文本宽 —— `SbLayout` 第一遍把内容档的实测宽放进 `want[i]` 却没累加进 `fixedTotal`，于是弹簧把同一格宽吃两次，最右边界越过客户区。**这是改前就在的缺陷**，只是从前 getter 交请求值所以看不见。所以 SB36 那趟只钉"往弹簧档写宽不该改变它报出来的数"这一半（增量不变），"三格铺满"那一半留给 §B132，RAW 那行把 `sum` 与 `bar` 两个数一起打出来，等它落地就看得见。
+- **护栏**：哨兵 `check_statusbar_panel_hm.ps1`（第 51 道 [STATIC]）改形 + 加长：R2 名单钉 4 份/14 行、三枚权威定义各 1 处、`ax_load.c` 只许转调 1 处（它就是它退名单的条件）、状态条三道折各 2 处、本地 `MulDiv` **0** 处、第十八刀那形状 `vb6_HimetricToPxX(` **0** 处（墓碑）；R3 兜底那行改钉 `take < floorPx` 且必须问 `vb6_TwipToX`；R1 加两枚产物计数（`SetPanelMinWidthHm`=3、`GetPanelLeft`=3 —— 少一个落点就是"设计值整格不见"/"读回空"）；**新增 R7**：一枚成员从"名字认得"到"真做得动"要过的六格登记（memberobj 名字表 / DISPID / 派发 case / memberobj 调用 / RTL 定义 / header 声明 / 发码 recognizer）各恰好 1 处 + 设计 `MinWidth` 那三处同步 + 排版那一趟必须折一次（单位用代码形状钉，不靠注释）；R4 加两条 census 防空转。**负控 = 真 BASE 树**：`git archive HEAD` 出一份副本（`.build/wt_k22neg`）+ `b437_base_k21.exe`，`-Root` 指过去一次报出 **25 条**，而第二十/二十一刀的 R1/R5/R6 那几条在同一台上一条没红 ⇒ 新钉的每一条都是本刀的存在性证人，不是重报上一刀的账。51 道 [STATIC] 全跑一遍 = 51/51 绿。
+- **本刀自己漏过又被哨兵抓住的一格（记下形状，不是遗漏）**：`vb6_StatusBar_SetPanelMinWidthHm` 的 **header 声明当时没写**，而产物照跑、构建日志一条不报（改前/改后两份 `run.out` 逐行相同 = 这格静默的直接证据：调用返回 void、实参按 ABI 到位，隐式声明在这条链上不出声）⇒ 补声明 + R7-MINW-DECL 钉住。这与账 #174（`SelectedControls` 发成隐式声明）同形，而本仓的构建日志里没有 cl 警告这一族（§B…，已记录），所以**这一类只能靠数落点**。
+- **刻意留下的两格（归 §B129 / 账 #298）**：`vb6forms_olecon.c` 那 7 行、`vb6forms_picture_prop.c` 那 3 行、`ax_site_ext.c` 的 `k = 96.0/2540.0`（本机 DPI 就是 96 ⇒ 高 DPI 读数取不到，未定罪）都没顺手并表 —— 各有一份自己的判据面。另记一条口径不对称（是有意的）：设计块里**带前缀**的 `Object.Width` 与**无前缀**的 `MinWidth` 都按 himetric 折，而**无前缀**的 `Width` 按缇直交 —— 因为语料里状态条上 `Width =` 那形 0 处（是我们自己造的），而 `MinWidth =` 那形是真设计器写的（457 枚里 398 枚与 `Object.Width` 逐字相同）。
+
 ### B42 设计期 `.frx` 的 List/ItemData 只接了 ListBox 一档，ComboBox 那 17 处全落空（账 #207，**已出**）
 
 Fix 195 那轮把 .frx 三种 blob 的**布局**钉准了（字符串 / 字符串表 / 整数表），但发码侧的接线只写了一档：`emitControlFrxProps` 里 `if (ctrl.controlType == FrmControlType::ListBox)` 才发 `LB_ADDSTRING` / `LB_SETITEMDATA`。语料普查：`List =` / `ItemData =` 指向 .frx 的共 **17 + 17 处，全在 ComboBox 上**（Charts 2020 的 ucTreeMaps / ucChartBar / ucPieChart / ucProgressCircular 四份 demo 的 "Number of Series"、"Chart Style"、"Legend Position" 那一类）⇒ 编出来的下拉框是空的。
@@ -2053,16 +2062,27 @@ marker、重编，之后 `check_rtl_embedded` 报 **125/125 逐字节相同**。
 - **顺手订正**：`check_rtl_proto_arity.ps1` 头注释里那格「行数恰好 15」订正成 23 —— 代码在第十四刀已改到 23，注释没跟上。这类「注释与判据两个数」迟早骗下一次推理（本轮就是靠它才没把 15 当成新的实数）。
 - **§B124 剩下的那一半**（仍未拍板，本刀没碰）：RTL 那枚 `vb6_Data_Self` 导出（`src/rtl/vb6forms_data.c` + `vb6forms_prop_ctrl.h`）现在全仓 0 个调用者 —— 连 memberobj 都不叫它。撤它要动 `src/rtl` ⇒ 按控件线规矩必须 touch `c3rtl.rc` 再重编 C3.exe（账 #156 那条坑：只改 RTL 不 touch rc，探针测的是旧 RTL 且一行 trace 都不打印）。留着它的代价是 RTL 里一枚永不应答的导出，撤它的代价是一次 rc + 全量重编 —— 与本线其它「先拍口径」那几格一起排。
 
-### B129 himetric↔像素/缇 的折算在 RTL 里住了 5 份文件（账 #298，开着）
+### B132 新账 = `SbLayout` 没把内容档面板的实测宽从 `fixedTotal` 里扣 ⇒ 弹簧把同一格宽吃两次，末格右边界越过客户区（账 #303，2026-10-10 量，**未开工**）
 
-第十八刀做 `Object.Width` 那一档时顺带数出来的：`src/rtl` 里含 `2540` 的**非注释行 = 13 行 / 5 份文件** ——
-`vb6forms.c` 1（本刀新立的 `vb6_HimetricToPxX`，唯一按真实 DPI 的那枚）、`vb6forms_olecon.c` 7、
-`vb6forms_picture_prop.c` 3、`axsite/ax_load.c` 1（`vb6_twipsToHimetric`）、`axsite/ax_site_ext.c` 1。
+第二十二刀把 `Panels(i).Width` 换成"问窗口本人"之后才露面的存量缺陷 —— 从前 getter 交请求值，这一格在任何读数里都不存在（与 §B41 第一格那句"缺的是接线不是解码器"同形）。
+
+- **读数**（`tests/ctrlstatusbar` 真跑，x64 与 x86 逐行相同）：`SB36-RAW before=5880 after=5880 sum=6630 bar=6000` —— 三枚面板宽度之和比控件自身的宽多 **630 缇 = 42 像素**，而 42 正好是那枚 `.Style = 5`（sbrTime）+ `.AutoSize = 2`（sbrContents）面板的测量文本宽。另一份夹具 `tests/sbhm`（两枚固定档 + 一枚弹簧档，没有内容档）里 `HM03-SPRING-TILES` 是 True（`e3 = cw`）⇒ 多出来的那一格只跟着**内容档**出现。
+- **成因**（读码对过，不是推断）：`SbLayout` 第一遍只在 `else`（固定档）那一支累加 `fixedTotal`，`VB6_SBR_CONTENTS` 那一支把实测宽放进 `want[i]` 却不累加 ⇒ 第二遍 `remaining = clientW - fixedTotal` 把同一格宽又发给了弹簧 ⇒ `acc` 的末值 > 客户区宽。
+- **为什么不是"看着不挤"**：VB6 里状态条各格铺满客户区（`SB_GETPARTS` 的末值就是宽），而 §B41 第二格之后 `Panels(i).Width` / `Left` 交的正是这份 offsets ⇒ 读数**跟着一起偏大**，语料里那四处"按面板宽摆覆盖层"的写法（`pb.Width = sb.Panels(lPan).Width - 45` 那一族）会多摆出一格的量，把时钟那一格压住。
+- **判据现成**：`ctrlstatusbar` 的 `SB36-RAW` 已经把 `sum` 与 `bar` 打在同一个窗口里（第二十二刀刻意只钉"增量不变"那一半）⇒ 修好那趟加一条 `SB36-TILES-BAR=True` 即可，证人同源，不用新建夹具。
+
+### B129 himetric↔像素/缇 的折算在 RTL 里住了 4 份文件（账 #298，开着 —— 第二十二刀把名单从 5 份/13 行减成 4 份/14 行，还剩 3 处未并表）
+
+第十八刀做 `Object.Width` 那一档时顺带数出来的：那时是 `src/rtl` 里含 `2540` 的**非注释行 = 13 行 / 5 份文件**。
+**第二十二刀之后的读数（= 哨兵里钉的那份名单）= 14 行 / 4 份文件**：`vb6forms.c` 3（三枚权威本人 ——
+按真实 DPI 的像素档 `vb6_HimetricToPxX` + 与 DPI 无关的缇档一对 `vb6_TwipsToHimetric` / `vb6_HimetricToTwips`）、
+`vb6forms_olecon.c` 7、`vb6forms_picture_prop.c` 3、`axsite/ax_site_ext.c` 1。
+`axsite/ax_load.c` 那一处（`vb6_twipsToHimetric`）已退名单 —— 它现在只转调权威，哨兵另钉一条"只许转调 1 次"守住这个条件。
 其中 `ax_site_ext.c:128` 写的是 `const double k = 96.0 / 2540.0` —— **DPI 被写死成 96**，
 与 #184 修 `vb6_TwipToX` 之前那个形状一模一样（当时 VBFlexGridDemo 的网格在 120 DPI 下被缩小 20%）。
 这条**还没实测**（要一枚高 DPI 下的 ActiveX 容器读数才定得了罪），所以本刀只把它记成名单里的一行，不动它。
-哨兵 `check_statusbar_panel_hm.ps1` 的 R2 已经把"5 份文件 / 13 行"钉死，多长一份就红 ——
-并表的时候把名单往下减，别往上加。
+哨兵 `check_statusbar_panel_hm.ps1` 的 R2 钉的是"4 份文件 / 14 行"+ 三枚权威的定义各 1 行 ——
+多长一份就红，并表的时候把名单往下减，别往上加（R2-LOCAL-MATH 还钉住"状态条这一族只许转调"）。
 
 ### B131 `Panels(<数字>).Index` 把整数交给 `wchar_t*` 槽 ⇒ 启动期 AV（账 #300，**已出 —— 第十九刀，2026-10-10，门 #464 全绿 = run 38014099324、head `597bd6d1`、attempt 1、12 job 全 completed/success、非绿 0、wall 10m52s；`Emit manifest (shape oracle)` 同绿 => 那行改写被 CI 独立复算证实，`Tests (vbp #1..#4)` 四片全绿 => sbhm 的两头判据两架构真跑过）
 
