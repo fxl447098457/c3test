@@ -56,6 +56,19 @@ $exp = DataRows $Expect
 
 if ($Bless) {
     $hdr = @(HeaderRows $Expect)
+    # 【登记不许吃注释行】HeaderRows 只认**头部**那一块（到第一条数据行为止），而每刀的「登记来源」是写在清单**末尾**的（门 #501 实测：这一档原先会静默吃掉末尾两条来源注脚，22 行注释变 20 行，还照样报「已登记」）。
+    # 所以末尾那段单独收下来，落盘前两头各数一遍：注释总数对不上就拒绝登记，而不是少一条也照样整写。
+    $expLines = @(Get-Content -LiteralPath $Expect -Encoding UTF8)
+    $hdrCmt = @($hdr | Where-Object { $_ -match '^#' }).Count
+    $tailCmt = @()
+    for ($i = $hdr.Count; $i -lt $expLines.Count; $i++) {
+        if ($expLines[$i] -match '^#') { $tailCmt += [string]$expLines[$i] }
+    }
+    $cmtAll = @($expLines | Where-Object { $_ -match '^#' }).Count
+    if (($hdrCmt + $tailCmt.Count) -ne $cmtAll) {
+        Write-Host ('拒绝登记：期望清单共 ' + $cmtAll + ' 行注释，头部 ' + $hdrCmt + ' + 末尾 ' +$tailCmt.Count + ' 对不上 —— 登记会把对不上的那几行吃掉')
+        exit 2
+    }
     # 登记**保持现有行的次序**，新出现的输入按清单自己的顺序追加在末尾。
     # 为什么：语料枚举的次序与这张清单的历史次序实测差 68 个位置（同一批路径、两种排法），
     # 照清单顺序整写一遍 = git diff 里 398 行全动，而真正变的只有 7 行 —— 别人review 时看不出
@@ -82,11 +95,11 @@ if ($Bless) {
     # 而 CI 那一步跑的就是 pwsh 7。这张期望清单是被 check_manifest_coverage.ps1 的 K2 钉成
     # 「BOM + 纯 CRLF」的（没 BOM 时 5.1 会把中文注脚按 ANSI 读坏），所以这里自己写死，
     # 两个版本的 PowerShell 出来必须是同一串字节。
-    $text = ((@($hdr) + $ordered) -join "`r`n") + "`r`n"
+    $text = ((@($hdr) + $ordered + $tailCmt) -join "`r`n") + "`r`n"
     $enc = New-Object System.Text.UTF8Encoding($true)
     [System.IO.File]::WriteAllText((Resolve-Path $Expect).Path, $text, $enc)
     $changed = @($exp | Where-Object { $kept.ContainsKey((PathOfRow $_)) -and ([string]$newByPath[(PathOfRow $_)]) -ne $_ }).Count
-    Write-Host ('已登记 ' + $Expect + '：注脚 ' + $hdr.Count + ' 行 + 数据行 ' + $ordered.Count +
+    Write-Host ('已登记 ' + $Expect + '：注脚 ' + ($hdrCmt + $tailCmt.Count) + ' 行（头部 ' + $hdrCmt + ' + 末尾 ' + $tailCmt.Count + '）+ 数据行 ' + $ordered.Count +
                 ' 行（改写 ' + $changed + ' / 新增 ' + $appended.Count + ' / 退场 ' + $vanished.Count + '）')
     exit 0
 }
