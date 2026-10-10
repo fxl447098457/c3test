@@ -4518,6 +4518,31 @@ if ($Category -in @("all", "run", "vbp")) {
         "GC-DONE")
     Test-Vbp "geomcache" "$Tests\geomcache\GCCache.vbp" $geomExpected
     Test-Vbp "geomcache_x86" "$Tests\geomcache\GCCache.vbp" $geomExpected -Arch "x86"
+    # 第二十七刀 = 账 #230（VB 侧几何缓存）里唯一没被问过的一条来路：**数组元素**。
+    # 缓存按 (窗口, 属性名) 存，元素那条交的是 `vb6_CtrlArr_GetAt(&vb6_arr_<名>, i)` 这枚窗口 ⇒
+    # "同一处权威"在原理上成立；但原理上不是判据：这台夹具之前，全门禁没有一条针向数组元素要过
+    # 几何（#193 那枚 `U-ARREXT` 读的是自己写进去的 15 的倍数，量化差天生看不见）。
+    # 为什么单独一枚夹具而不是往 geomcache 加控件：那 31 条里有五条是"把所有成员一起读/一起写"的
+    # 形状（GC17 把每一枚的宽求和、GC18 用 With 给每一枚写 1234、GC20..GC23 按成员问身份），
+    # 多两枚元素会把那五条一起改动 —— 那是重述别人的判据，不是本刀要办的事。
+    # GA05b 单独打"两枚元素是两枚窗口"，不并进 GA05 那条 And 链：并进去那一版整条读 False、
+    # 单独读 True（LongPtr 与 <> 混在 And 链里，§B238 那一族的另一张脸）—— 混在一格里只会让红找不到人。
+    $gaExpected = @("GA-DONE", "GA01-e0-design=True", "GA02-e1-design=True", "GA03-e1-write=True", "GA04-e1-move=True", "GA05-e0-untouched=True", "GA05b-two-windows=True", "GA06-solo-write=True")
+    Test-Vbp "geomarr" "$Tests\geomarr\GeomArr.vbp" $gaExpected
+    Test-Vbp "geomarr_x86" "$Tests\geomarr\GeomArr.vbp" $gaExpected -Arch "x86"
+    # 形状两头：元素的四档读写必须走那四个具名出口（单枚那条同表同一路，一起钉住不被带跑）；
+    # 元素属性落回 COM 属性访问那一形必须**不在** —— 那是 §B75 那一族"同一个属性两个答案"的形状。
+    # 元素的 `.Move` 今天走的是泛派发 vb6_ComCall(那一枚, L"Move", …) —— 属"带实参方法"那一族，
+    # 行为面由 GA04 钉（四档读回 + 三枚像素证人），这里刻意不把它的形状当罪证。
+    Test-EmitcShape "ga_emitc_arr_geometry_authority" @("$Tests\geomarr\GeomArr.vbp") @(
+        "vb6_GetControlLeft(vb6_CtrlArr_GetAt(&vb6_arr_arrA, 0))",
+        "vb6_GetControlWidth(vb6_CtrlArr_GetAt(&vb6_arr_arrA, 0))",
+        "vb6_SetControlLeft(vb6_CtrlArr_GetAt(&vb6_arr_arrA, 1), 5000)",
+        "vb6_SetControlWidth(vb6_CtrlArr_GetAt(&vb6_arr_arrA, 1), 7777)",
+        "vb6_SetControlLeft(vb6_hwnd_soloT, 2227)")
+    Test-EmitcAbsent "ga_emitc_arr_geometry_com_prop" @("$Tests\geomarr\GeomArr.vbp") @(
+        'vb6_ComGetProp(vb6_CtrlArr_GetAt(&vb6_arr_arrA, 0), L"Left")',
+        'vb6_ComGetProp(vb6_CtrlArr_GetAt(&vb6_arr_arrA, 1), L"Width")')
     # 发码两头：套了数值转换的形必须在，裸传 vb6_GetControlLeft 进 Concat 的形必须不在。
     # 只钉读数会放过"两边都不套"那一族；这一格是发码面的形状，直接钉形状。
     # (整条语句作针：PSParser 在 `@(` 续行里按**字面**数括号，单引号串里不配平的括号会让
