@@ -2433,11 +2433,13 @@ bool CCodeGen::cExprIsVariantCarrier(const std::string& cExpr) const {
 // C 表示不一致时才改写; 其余一律逐字节退回 vb6_VariantFromValue (_Generic 按 C 类型
 // 选 ctor) —— 早退式的"已是 VARIANT 就不包"看着更干净, 但它会把存量码也一起改了
 // (护栏实测 VbEclipse 的 VB6_SA_AT 实参少了那层恒等包装)。
-// 需要显式档案的四种 (C 表示区分不出来或就是错的):
+// 需要显式档案的五种 (C 表示区分不出来或就是错的):
 //   Boolean → VT_BOOL(11)   C 侧是 int16_t/int32_t, _Generic 会装成 VT_I4
 //   Byte    → VT_UI1(17)    C 侧 uint8_t 走得到对档, 但模块级 Byte 曾被推断成 Long
 //   Single  → VT_R4(4)      _Generic 的 float 档以前也升到 VT_R8 (哨兵实测 5)
 //   Date    → VT_DATE(7)    C 侧就是 double, 只有 VB 类型能说话 (哨兵实测 5)
+//   LongPtr → 按指针宽度的数值档  句柄 getter 交 void*, 而 _Generic 的 default 一档是
+//          vb6_VariantObject —— 类型那一问 (§B136 第二十八刀) 答了句柄, 这一路不吃它
 // 不显式改写的 (Integer/Long/Double/String/Object) 在 _Generic 下与 VB6 同档, 保持
 // 原样以免动到存量发码。
 std::string CCodeGen::boxToVariant(Expr* expr, const std::string& cExpr) const {
@@ -2479,6 +2481,16 @@ std::string CCodeGen::boxToVariant(Expr* expr, const std::string& cExpr) const {
         return "vb6_VariantSingle((float)(" + cExpr + "))";
     case Vb6Type::Date:
         return "vb6_VariantDate(" + cExpr + ")";
+    case Vb6Type::LongPtr:
+        // 账 #230 §B137（第二十九刀）：句柄读进 Variant 槽以前落的是 _Generic 的 default
+        // 一档 = vb6_VariantObject，于是**一枚 HWND 被当 IDispatch\* 装走**。实测读数（两台同形，
+        // 所以不是第二十八刀带来的）：`Dim v As Variant: v = arrA(0).hWnd` 之后 VarType 答 9、
+        // TypeName 借宿主表答控件名（"TextBox"）、CStr 交空串、CLng 答 0、与任何数比较恒不等。
+        // 不是野调用：vb6_ComAddRefDispatch 里的 vb6_ComIsDispatchable 对 IsWindow 的句柄直接判否
+        // （vb6com_invoke.c 那条注释就是为这一形写的），代价是这一档看着像对象、值面全错。
+        // 按 intptr_t 走宽度：x86 = long → VT_I4，正是 VB6 对 hWnd 的答案（VarType 3 / TypeName
+        // "Long"）；x64 = long long → VT_I8，不截断，与 Fix 082 的 VarPtr 档同族。
+        return "vb6_VariantFromValue((intptr_t)(" + cExpr + "))";
     default: break;
     }
     return "vb6_VariantFromValue(" + cExpr + ")";

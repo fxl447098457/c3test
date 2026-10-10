@@ -63,6 +63,9 @@ Option Explicit
 '               numbers -- a handle is a pointer value, and VB6 hands hWnd out as Long
 '   GA05d       the same type answer on the two stringify roads: a handle prints its
 '               digits, and CStr of a DC-shaped read stays on the Variant road
+'   GA05e       the same type answer on the boxing road: a handle read into a Variant
+'               slot holds a number (not a fake object), a Variant-held address compares
+'               numerically, and a real Set of a control still answers VarType 9
 '   GA06        the array never swallows its single-named sibling's write
 
 Private Declare PtrSafe Function GetWindowRect Lib "user32" (ByVal hwnd As LongPtr, ByRef lpRect As RECTAPI) As Long
@@ -148,6 +151,9 @@ Private Sub tmrGA_Timer()
     Dim ok5c As Boolean
     Dim h5a As Long, h5b As Long
     Dim t5 As String
+    Dim v11 As Variant, v12 As Variant
+    Dim pv12 As LongPtr
+    Dim o8 As Object
 
     ok1 = (arrA(0).Left = 1007) And (arrA(0).Top = 449) And (arrA(0).Width = 3001) And (arrA(0).Height = 247) _
         And (PxLeft(arrA(0).hwnd) = ToPx(1007)) And (PxTop(arrA(0).hwnd) = ToPy(449)) _
@@ -203,6 +209,24 @@ Private Sub tmrGA_Timer()
     ' Variant road -- cast that one to a number and the fixture does not even compile.
     t5 = "H" & arrA(0).hwnd
     Debug.Print "GA05d-digits=" & TF(Len(t5) > 1) & " hdcstr=" & TF(Len(CStr(soloT.hDC)) > 0)
+
+    ' GA05e: the boxing road. A handle read assigned into a Variant slot used to reach
+    ' _Generic's default arm = vb6_VariantObject, so an HWND sat in a VT_DISPATCH slot:
+    ' VarType answered 9, CStr answered empty, and the slot compared unequal to the very
+    ' number it holds (measured on both compilers). It must answer like the number VB6
+    ' hands out -- and a real object reference beside it must stay an object, or this arm
+    ' would be turning every Set into a digit.
+    v11 = arrA(0).hwnd
+    Debug.Print "GA05e-notobj=" & TF(VarType(v11) <> 9) & " str=" & TF(Len(CStr(v11)) > 1) _
+        & " num=" & TF(CLng(v11) = h5a) & " eq=" & TF(v11 = h5a) _
+        & " ne-other=" & TF(Not (v11 = h5b))
+    ' The converter every Variant comparison reads through had no VT_I8 arm, so a 64-bit
+    ' numeric box collapsed to 0.0 there -- reachable without any handle at all, through
+    ' the address a VarPtr box carries (x64 read: VarPtr(x) <> 0 answered False).
+    pv12 = VarPtr(h5a)
+    v12 = pv12
+    Set o8 = soloT
+    Debug.Print "GA05e-vp-nz=" & TF(v12 <> 0) & " obj=" & TF(VarType(o8) = 9)
 
     ' GA06: the single-named sibling answers its own write too, so the array road
     ' did not take over the named-control road next to it.

@@ -4529,7 +4529,7 @@ if ($Category -in @("all", "run", "vbp")) {
     # 多两枚元素会把那五条一起改动 —— 那是重述别人的判据，不是本刀要办的事。
     # GA05b 单独打"两枚元素是两枚窗口"，不并进 GA05 那条 And 链：并进去那一版整条读 False、
     # 单独读 True（LongPtr 与 <> 混在 And 链里，§B238 那一族的另一张脸）—— 混在一格里只会让红找不到人。
-    $gaExpected = @("GA-DONE", "GA01-e0-design=True", "GA02-e1-design=True", "GA03-e1-write=True", "GA04-e1-move=True", "GA05-e0-untouched=True", "GA05b-two-windows=True", "GA05c-inline=True chain=True eqself=True", "GA05d-digits=True hdcstr=True", "GA06-solo-write=True")
+    $gaExpected = @("GA-DONE", "GA01-e0-design=True", "GA02-e1-design=True", "GA03-e1-write=True", "GA04-e1-move=True", "GA05-e0-untouched=True", "GA05b-two-windows=True", "GA05c-inline=True chain=True eqself=True", "GA05d-digits=True hdcstr=True", "GA05e-notobj=True str=True num=True eq=True ne-other=True", "GA05e-vp-nz=True obj=True", "GA06-solo-write=True")
     Test-Vbp "geomarr" "$Tests\geomarr\GeomArr.vbp" $gaExpected
     Test-Vbp "geomarr_x86" "$Tests\geomarr\GeomArr.vbp" $gaExpected -Arch "x86"
     # 形状两头：元素的四档读写必须走那四个具名出口（单枚那条同表同一路，一起钉住不被带跑）；
@@ -4557,6 +4557,16 @@ if ($Category -in @("all", "run", "vbp")) {
     Test-EmitcAbsent "ga_emitc_handle_not_object_box" @("$Tests\geomarr\GeomArr.vbp") @(
         'vb6_VariantFromValue(vb6_GetControlHwnd(vb6_CtrlArr_GetAt(&vb6_arr_arrA, 0)))',
         'vb6_VariantFromValue(vb6_GetControlHwnd(vb6_CtrlArr_GetAt(&vb6_arr_arrA, 1)))')
+    # 装箱那一路的形状两头（账 #230 第二十九刀，§B137）：句柄读进 Variant 槽必须发成
+    # vb6_VariantFromValue((intptr_t)(…)) —— 宽度跟着架构走 ⇒ x86 落 VT_I4（VB6 对 hWnd 的答案就是
+    # VarType 3），x64 落 VT_I8（不截断，与 Fix 082 那条 VarPtr 装箱同档）。实测出现次数 NEW 2 / BASE 0，
+    # 而 BASE 那台在同一份夹具上发的是 10 处「指针值进对象档」（其中 8 处就是句柄读）——
+    # 反面证人就是上面那枚 ga_emitc_handle_not_object_box，它现在同时管两条路：比较面（第二十八刀）
+    # 与装箱面（这一刀）。pv12 那一枚钉的是「声明过的 LongPtr 变量」进槽那一路，与属性读那一路同档
+    # 但发码点不同，所以两头各钉一针。
+    Test-EmitcShape "ga_emitc_handle_variant_box" @("$Tests\geomarr\GeomArr.vbp") @(
+        'vb6_VariantFromValue((intptr_t)(vb6_GetControlHwnd(vb6_CtrlArr_GetAt(&vb6_arr_arrA, 0))));',
+        'vb6_VariantFromValue((intptr_t)(pv12));')
     # 发码两头：套了数值转换的形必须在，裸传 vb6_GetControlLeft 进 Concat 的形必须不在。
     # 只钉读数会放过"两边都不套"那一族；这一格是发码面的形状，直接钉形状。
     # (整条语句作针：PSParser 在 `@(` 续行里按**字面**数括号，单引号串里不配平的括号会让

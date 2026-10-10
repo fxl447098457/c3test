@@ -606,6 +606,11 @@ static double vb6_VarToDouble_internal(vb6_VARIANT* v) {
     switch ((vb6_vartype)v->vt) {
         case (vb6_vartype)VT_I2: return (double)v->iVal;
         case (vb6_vartype)VT_I4: return (double)v->lVal;
+        /* 账 #230 §B137（第二十九刀）: VT_I8 以前没有档 —— default 交 0.0，于是**任何** 64 位
+         * 整数档案的 Variant 在比较面都被抹成 0：`VarPtr(x) <> 0` 在 x64 实测答 False
+         * （Fix 082 那条装箱本身就是 VT_I8），句柄进 Variant 槽之后与它自己比也答不等。
+         * 取数一侧 (VariantToLong/ToBoolean/ToDouble/ToIntPtr) 早就有 VT_I8 档，只有这里漏了。 */
+        case (vb6_vartype)VT_I8: return (double)v->llVal;
         case (vb6_vartype)VT_R4: return (double)v->fltVal;
         case (vb6_vartype)VT_R8: return v->dblVal;
         case (vb6_vartype)VT_BOOL: return v->boolVal ? -1.0 : 0.0;
