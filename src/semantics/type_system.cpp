@@ -233,10 +233,18 @@ bool TypeSystem::intShape(Vb6Type t, int* bitsOut, bool* signedOut) {
         case Vb6Type::ULong:    bits = 32; isSigned = false; break;
         case Vb6Type::LongLong: bits = 64; isSigned = true;  break;   // (= VB.NET 的 Long)
         case Vb6Type::ULongLong:bits = 64; isSigned = false; break;
-        // Boolean 与 LongPtr 刻意不在这里: 前者在 VB 里"参与算术时被强制升到 Short";
-        // 后者宽度现在拿得到了 (§B139 的 targetPtrBits()), 但放进来会改 promote /
-        // 发码层混符号加宽的答案, 需单独消融负控 —— 见 promote 注释与本文件
-        // type_system.hpp 的 intShape 声明处。
+        // 账 #230 §B141: LongPtr 收进来 —— 宽度按**目标架构** (§B139 的 targetPtrBits()),
+        // 与 VBA 一致 (x86 32 位 / x64 64 位), 有符号。LongLong 则恒 64 位, 已在上两行。
+        //   改前它落 default ⇒ promote 走 (3) 的 rank 兜底, 而 rank 表里 LongPtr
+        //   **不登记** (见 promote 注释: 写死任何一档都会错), 于是 `LongPtr + Long`
+        //   恒答 Long —— x64 上把 LongPtr 那 64 位缩回 32 位。
+        //   收进来后改走 (2) 的宽度正确提升: x64 答 LongPtr, x86 上 LongPtr 与 Long
+        //   同宽、C 侧同为 32 位, 与改前逐字等价。
+        //   **浮点那一侧不受影响**: promote 的规则 (1) (浮点/Currency/Decimal 侧优先)
+        //   排在 (2) 之前, `p + 1.5` 仍答 Double —— 夹具 tests/test_vbnet_ext.bas
+        //   的 VE-promote-lp-dbl=4.5 / VE-promote-lp-mul=7.5 由 CI 的 bas 档守着。
+        case Vb6Type::LongPtr:  bits = targetPtrBits(); isSigned = true; break;
+        // Boolean 刻意不在这里: VB 里它"参与算术时被强制升到 Short", 不是定宽整型。
         default: return false;
     }
     if (bitsOut)   *bitsOut = bits;

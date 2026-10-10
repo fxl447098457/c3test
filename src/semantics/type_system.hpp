@@ -55,11 +55,14 @@ public:
     static bool targetIsX64() { return targetPtrBits_ == 64; }
 
     // 整型的"位宽 + 符号" (ai/032 rev2)。返回 false 表示这个类型不是"位宽与符号都
-    // 确定"的整型 —— Boolean (VB 语义上强制升到 Short) 与 LongPtr (宽度随目标架构)
-    // 刻意不收, promote 对它们走原来的档位兜底。
-    // §B139 后架构其实已经拿得到了 (targetPtrBits()), 但**本格不改这里的行为**:
-    // 放 LongPtr 进来会改 promote / 发码层混符号加宽的答案, 需要单独做消融负控
-    // (promote 处注释记着"登记 6 档后 CStr(p + 1.5) 出 4"那组读数), 不搭车改。
+    // 确定"的整型 —— Boolean (VB 语义上强制升到 Short) 刻意不收, promote 对它走档位兜底。
+    //
+    // 账 #230 §B141: **LongPtr 已收进来**, 宽度 = targetPtrBits() (目标架构, 与 VBA 一致)。
+    //   此前它因"宽度随架构"被排除、只能走 promote 的 rank 兜底 (而 rank 表里它又
+    //   不登记) ⇒ `LongPtr + Long` 恒答 Long, x64 上把 64 位缩回 32 位。
+    //   注意**不要**顺手去动 promote 的 rank 表: 那张表里 LongPtr 不登记是有负控
+    //   依据的 (登记 6 档后 CStr(p + 1.5) 出 4), 两条路不是一回事 ——
+    //   intShape 走的是"两侧都定宽"的宽度正确提升, rank 是"位宽不确定"时的兜底。
     // 只此一份: promote 与发码层 (cgen_expr_binary 的混符号加宽) 都问这里,
     // 免得两侧各写一套 8/16/32/64 的对照表而漂移。
     static bool intShape(Vb6Type t, int* bitsOut, bool* signedOut);
