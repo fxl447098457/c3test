@@ -277,17 +277,6 @@ std::string CCodeGen::inferClassTypeOfExpr(const ASTNode& expr) const {
                     std::string retClsFromProp =
                         getClassMethodReturnType(info.className, wmRef.memberName);
                     if (!retClsFromProp.empty()) return retClsFromProp;
-                    // Fix 246b: `.X` 是**已知成员** (方法/属性, resolveClassMemberCall
-                    // 认得) 但不返回项目类 ⇒ 它不是"With 目标类的实例", 链必须终止,
-                    // 交下游按后期绑定发 COM 读取。判据比 classMemberReturnsAsObject
-                    // 宽 (那支只认 type==Object 的符号), 覆盖 `As IPictureDisp` 这类
-                    // **接口**返回 —— ComCtlsDemo TbrButtonMenu.cls:137
-                    // `Property Get Picture() As IPictureDisp`: 修复前 `.Picture` 沿用
-                    // vb6_cls_TbrButtonMenu*, `.Handle` 发成
-                    // `vb6_TbrButtonMenu_prop_get_Picture(x)->Handle` → C2223×6 (ToolBar.c)。
-                    // 数据字段 (resolveClassMemberCall 为空) 不受影响, 仍返回 info.className。
-                    if (!resolveClassMemberCall(info.className, wmRef.memberName).empty())
-                        return "";
                 }
                 // Fix 246: `.X` 是**返回 As Object/Variant 的成员**时, 它本身是后期绑定
                 // 对象, 成员链必须走 COM —— 不能继续沿用 With 目标类。
