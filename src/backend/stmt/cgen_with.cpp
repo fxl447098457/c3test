@@ -618,6 +618,23 @@ auto& idExpr = static_cast<IdentifierExpr&>(*callExpr.callee);
 
     suppressDefaultProp_ = prevSuppress;
 
+    // 账 #299 (§B130) 第二十五刀: 这一路以前**从不消费**那枚 COM 标记。
+    // `With SB1.Panels` 的 emitExpr 把接收者留在宿主槽上、把成员名挂在标记里，于是两件事同时发生:
+    //   ① 体内每一档成员按"不是集合"去问 (实测 `.Count` 交 0)；
+    //   ② 那枚标记漏进体内**第一条语句**，把 `c = .Count` 发成
+    //      `vb6_ComSetProp(<宿主>, L"Panels", …)` —— 一次读变成往控件写属性 (不响、不崩)。
+    // 消费口径与 Set 那一路同一个出口 (memberCollectionObjectExpr 一处答"这枚成员集合怎么立"),
+    // 答不出就一字不变 —— 本刀不顺手改别的 With 形 (#260 那一族的剩余形状另说)。
+    if (isComMarker_) {
+        std::string collW = memberCollectionObjectExpr(comObjExpr_, comMemberName_);
+        if (!collW.empty()) {
+            lastExpr_ = collW;
+            isComMarker_ = false;
+            comObjExpr_.clear();
+            comMemberName_.clear();
+        }
+    }
+
     // Fix <vbeclipse>: 工程内 UserControl 实例作 With 目标时, 目标表达式要取**宿主窗口
     // 反查到的实例指针** (vb6_UC_InstanceOf(hwnd)), 而不是裸 HWND 槽 —— 否则 tempType
     // vb6_cls_<UC>* 被灌入一个 HWND, 体内成员调用等于拿 HWND 当结构体解引用.

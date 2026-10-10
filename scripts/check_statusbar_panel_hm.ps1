@@ -266,7 +266,8 @@ foreach ($f in $tri) {
 # = 拿 HWND 当 IDispatch 用（C29-8b 当年给 TreeView Nodes 写下的同一句症状），
 # `For Each` 连循环都没进 —— BASE 那台跑同一份夹具是 fe=0 idx=0 txt=0，
 # 第二十刀之后是 fe=3 idx=6 txt=5。
-# 第二十一刀把四条发射路（值语境 / 对象语境 / 默认成员下标的 binder）收成同一处出口，所以这里钉的是**读数**不是愿望。
+# 第二十一刀把**三条**发射路（值语境 / 对象语境 / 默认成员下标的 binder）收成同一处出口，
+# 第二十五刀补上第四条（With 的头）—— 四条现在都问 memberCollectionObjectExpr，所以这里钉的是**读数**不是愿望。
 $gaPath = Join-Path $Root 'src\backend\detail\expr\cgen_expr_member_generic_access.inc'
 $stPath = Join-Path $Root 'src\backend\detail\util\cgen_state.inc'
 $moPath = Join-Path $rtlRoot 'core\vb6forms\vb6forms_memberobj.c'
@@ -277,6 +278,8 @@ $moTxt = [System.IO.File]::ReadAllText($moPath)
 $hdTxt = [System.IO.File]::ReadAllText($hdPath)
 # com_bind 那条默认成员下标的发射路（第二十一刀起也问同一处出口）
 $cbTxt = [System.IO.File]::ReadAllText((Join-Path $Root 'src\backend\detail\expr\cgen_expr_call_com_bind.inc'))
+# With 的头 = 第四条发射路（第二十五刀起也问同一处出口）
+$cwTxt = [System.IO.File]::ReadAllText((Join-Path $Root 'src\backend\stmt\cgen_with.cpp'))
 
 # R6-A 产物：四形全部由 memberobj 那枚入口造出来（第二十一刀之后 Set / 模块级 Object /
 # With / For Each 走的是同一处出口），而"拿 HWND 当 IDispatch"那一形必须归零 ——
@@ -285,7 +288,10 @@ $coll = Count-Of 'vb6_StatusBar_Panels((void*)vb6_hwnd_StatusBar1)'
 $collItem = Count-Of 'vb6_ComCallObject(vb6_StatusBar_Panels('
 $collEnum = Count-Of 'vb6_ForEach_Init(vb6_StatusBar_Panels('
 $stale = Count-Of 'vb6_ComGetObjectProp(vb6_hwnd_StatusBar1, L"Panels")'
-if ($coll -ne 11) { $viol += ('R6-CREATOR-EMIT want exactly 11 (10 走 Item + 1 走枚举), got ' + $coll) }
+# 第二十五刀的墓碑：With 的头没消费标记时，体内第一条语句会把它当自己的写目标 ——
+$leakW = Count-Of 'vb6_ComSetProp(vb6_hwnd_StatusBar1, L"Panels"'
+if ($coll -ne 13) { $viol += ('R6-CREATOR-EMIT want exactly 13 (10 走 Item + 1 走枚举 + 2 走 With 头), got ' + $coll) }
+if ($leakW -ne 0) { $viol += ('R6-WITH-LEAK-TOMBSTONE ' + $leakW + ' read(s) inside a With block are emitted as a property WRITE again') }
 if ($collItem -ne 10) { $viol += ('R6-ITEM-VIA-CREATOR want exactly 10, got ' + $collItem) }
 if ($collEnum -ne 1) { $viol += ('R6-FOREACH-VIA-CREATOR want exactly 1, got ' + $collEnum) }
 if ($stale -ne 0) {
@@ -306,10 +312,12 @@ if ($stC -ne 1) { $viol += ('R6-LIST isControlCollectionExpr want exactly 1, got
 # R6-C 出口本身只许有一处**定义**，并且三条发射路都问它（值语境 / 对象语境 / 默认成员下标）。
 $cgN = ([regex]::Matches($comTxt, 'memberCollectionObjectExpr\(')).Count
 $cbN = ([regex]::Matches($cbTxt, 'memberCollectionObjectExpr\(')).Count
+$cwN = ([regex]::Matches($cwTxt, 'memberCollectionObjectExpr\(')).Count
 $defN = ([regex]::Matches($stTxt, 'std::string memberCollectionObjectExpr\(')).Count
 if ($defN -ne 1) { $viol += ('R6-EXIT definition must exist exactly once in cgen_state.inc, got ' + $defN) }
 if ($cgN -ne 2) { $viol += ('R6-EXIT-CALLS cgen_util_com must ask the exit twice (value+object), got ' + $cgN) }
 if ($cbN -ne 1) { $viol += ('R6-EXIT-CALLS com-bind indexer must ask the exit once, got ' + $cbN) }
+if ($cwN -ne 1) { $viol += ('R6-EXIT-CALLS the With header must ask the exit once (fourth road), got ' + $cwN) }
 
 # R6-D 一表到底只许一处写：**创建式字面量**在非注释行里只许出现在 cgen_state.inc。
 # 这六枚是仓里"成员集合由谁造"这张表的全部行；再有一处在别的文件里出现，就是第二份答案
@@ -449,7 +457,7 @@ if ($HmFiles.Count -ne 1) { $viol += 'R4-LIST the allowlist itself changed size 
 if ($HmWantTotal -ne 5) { $viol += 'R4-TOTAL the pinned total changed (must stay 5)' }
 if ($pm.Count -lt 1) { $viol += 'R4-R5-CENSUS the pair scan found nothing = the sentinel is idling' }
 if (($gaN + $stK + $stC + $cgN) -lt 5) { $viol += 'R4-R6-CENSUS the panels-list scan found nothing = the sentinel is idling' }
-if (($coll + $collItem + $collEnum + $defN + $cbN) -lt 15) { $viol += 'R4-R6-CENSUS2 the panels emit/exit scan found nothing = the sentinel is idling' }
+if (($coll + $collItem + $collEnum + $defN + $cbN + $cwN) -lt 15) { $viol += 'R4-R6-CENSUS2 the panels emit/exit scan found nothing = the sentinel is idling' }
 if (($plNames + $plDisp + $plCase + $plMoCall + $plDef + $plDecl + $plRecog + $minEmit + $minDef + $minDecl + $unitFold) -lt 6) {
     $viol += 'R4-R7-CENSUS the Left/design-MinWidth registration scan found nothing = the sentinel is idling'
 }
@@ -462,7 +470,7 @@ if ($viol.Count -eq 0) {
                 " add=3 autosz=1 plain=0 left=$plEmit / himetric sites $sum in $($perFile.Count) files" +
                 " (statusbar asks $sbTwip+$sbBack+$sbHm, local math $sbMul, old shape $sbPx, tiles reserved $tileAcc; callers olc=$olcPx+$olcHm+$olcTw pp=$ppOnDc axs=$axsF)" +
                 " / rtl_files=$rtlFiles / panels coll=$coll item=$collItem " +
-                "enum=$collEnum stale=$stale exit=$defN+$cgN+$cbN lists=$gaN+$stK+$stC " +
+                "enum=$collEnum stale=$stale withwrite=$leakW exit=$defN+$cgN+$cbN+$cwN lists=$gaN+$stK+$stC " +
                 "onemap=$oneMapTot inline=$inline")
     exit 0
 }

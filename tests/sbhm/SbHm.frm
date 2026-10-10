@@ -92,6 +92,9 @@ Private Sub Form_Load()
     Dim tpp As Long
     Dim ok11 As Boolean, ok12 As Boolean, ok13 As Boolean
     Dim feCount As Long, feIdx As Long, feSum As Long, feWant As Long, feTxt As Long
+    Dim ok14 As Boolean
+    Dim withN As Long, withTxt As Long, withTxt1 As Long
+    Dim ecount As Long
 
     SbGetParts StatusBar1.hWnd, 1030, 3, pt(0)
     w1 = pt(0)                       ' panel1 right edge == its width (it starts at 0)
@@ -216,6 +219,34 @@ Private Sub Form_Load()
     Debug.Print "HM15-RAW minw=" & StatusBar1.Panels(1).MinWidth & " frm=" & 26
     ok13 = (StatusBar1.Panels(1).MinWidth > 0) And (StatusBar1.Panels(1).MinWidth <> 26)
     Debug.Print "HM15-DESIGN-MINWIDTH-NOT-RAW=" & TF(ok13)
+
+    ' HM16 = zhang 299 (B130), 25th cut: the FOURTH emit road -- the With header.
+    ' The 21st cut put "which member-collection does this name create" in ONE place, but only
+    ' three roads asked it (value / object / default-member indexer). The With header never
+    ' consumed the pending COM marker at all. Measured on the pre-cut compiler, two things
+    ' went wrong in one statement: the receiver stayed (void*)vb6_hwnd_StatusBar1 (a HWND used
+    ' as an IDispatch answers nothing -> .Count read 0), and the leftover marker leaked into
+    ' the FIRST body statement, where `withN = .Count` was emitted as
+    ' vb6_ComSetProp(<hwnd>, L"Panels", ...) -- a READ turned into a property WRITE.
+    ' Witnesses are not the RTL: ecount is the early-bound route, feCount the enumerator
+    ' (HM08), and "BB"/"A" come from the design block. HM16-BAR-INTACT is the guard that the
+    ' body did not damage the bar (the old mis-emit wrote to it).
+    ecount = StatusBar1.Panels.Count
+    withN = 0
+    withTxt = 0
+    With StatusBar1.Panels
+        withN = .Count
+        withTxt = Len(.Item(2).Text)
+    End With
+    withTxt1 = 0
+    With StatusBar1.Panels
+        withTxt1 = Len(.Item(1).Text)
+    End With
+    ok14 = (withN = 3) And (withTxt = 2) And (withTxt1 = 1) And (ecount = 3) And (feCount = 3)
+    Debug.Print "HM16-WITH-COLLECTION=" & TF(ok14)
+    Debug.Print "HM16-RAW with=" & CStr(withN) & " item2=" & CStr(withTxt) _
+                & " item1=" & CStr(withTxt1) & " early=" & CStr(ecount) & " foreach=" & CStr(feCount)
+    Debug.Print "HM16-BAR-INTACT=" & TF((StatusBar1.Panels.Count = 3) And (StatusBar1.Panels(2).Text = "BB"))
 
     Debug.Print "HM-DONE"
     Unload Me

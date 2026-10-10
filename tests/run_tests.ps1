@@ -4353,13 +4353,22 @@ if ($Category -in @("all", "run", "vbp")) {
     # 证自己）。HM13 是这一格的存在性证人（弹簧档从前请求宽恒 0 ⇒ 读回 0）；HM14 钉新补的
     # Panel.Left 那一面（改前全仓 0 个出口）；HM15 钉设计块 MinWidth 的 himetric 档
     # （语料 457 枚里 398 枚 MinWidth 与 Object.Width 逐字相同），回来的数不再是 .frm 里那 26。
+    # 第二十五刀（同一账，剩下的那一格 (b)）：`With <集合本体>` 这第四条发射路以前**从不消费**
+    # 那枚 COM 标记 ⇒ 两件事同时坏：接收者退成控件 HWND（.Count 读 0），而漏下的标记被体内
+    # **第一条语句**当成自己的写目标 —— 实测 `withN = .Count` 发成
+    # `vb6_ComSetProp(<hwnd>, L"Panels", …)`，一次读变成往控件属性写（不响、不崩）。
+    # HM16 钉两头：块内 `.Count` == 3 且 `.Item(2).Text` 的长度 == 设计块里那个 "BB"；
+    # HM16-BAR-INTACT 是"体内那一写没把状态条写坏"的证人（改前那一形真在写它）。
+    # 语料里 `With x.Panels` 这一形 0 处 ⇒ 判据只能自己造，别指望门会红。
     $sbHmExpected = @("HM00-RAW w1=", "HM01-HM-DESIGN-WIDTH=True", "HM02-SINGLE-CONVERSION=True",
         "HM03-SPRING-TILES=True", "HM04-PANELS-ARRIVED=True", "HM05-RAW cs=",
         "HM06-INDEX-BOTH-FORMS=True", "HM07-RAW idx9=", "HM08-FOREACH-COLLECTION=True",
         "HM08-RAW fe=", "HM09-OBJVAR-ROADS=True", "HM10-MODVAR-ROADS=True",
         "HM11-WITH-AND-KEYSUB=True", "HM12-ARG-ROADS=True",
         "HM13-SPRING-WIDTH-FOLLOWS-WINDOW=True", "HM14-PANEL-LEFT=True",
-        "HM15-RAW minw=", "HM15-DESIGN-MINWIDTH-NOT-RAW=True", "HM-DONE")
+        "HM15-RAW minw=", "HM15-DESIGN-MINWIDTH-NOT-RAW=True",
+        "HM16-WITH-COLLECTION=True", "HM16-RAW with=", "HM16-BAR-INTACT=True",
+        "HM-DONE")
     Test-Vbp "sbhm" "$Tests\sbhm\SbHm.vbp" $sbHmExpected
     Test-Vbp "sbhm_x86" "$Tests\sbhm\SbHm.vbp" $sbHmExpected -Arch "x86"
     # <vbeclipse> 账 #221 = C29-PL-a: Picture.Line 落原生 GDI。这条判据只能**画完再问像素** ——
