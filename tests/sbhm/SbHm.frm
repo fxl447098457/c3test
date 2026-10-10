@@ -89,6 +89,8 @@ Private Sub Form_Load()
     Dim po As Object
     Dim pv As Variant
     Dim withW As Long
+    Dim tpp As Long
+    Dim ok11 As Boolean, ok12 As Boolean, ok13 As Boolean
     Dim feCount As Long, feIdx As Long, feSum As Long, feWant As Long, feTxt As Long
 
     SbGetParts StatusBar1.hWnd, 1030, 3, pt(0)
@@ -139,8 +141,8 @@ Private Sub Form_Load()
     ' Pinned face: the enumerator, three ways at once - iteration count, the sum of the
     ' Index each item reports, and the total text length ("A"+"BB"+"SP" = 5). Pinning
     ' only "the loop ran" would let a one-item or mis-subscripted collection through.
-    ' The widths are RAW, not pinned: Panels(i).Width still answers the REQUESTED value
-    ' (B41's remaining face), so a width sum here would move when that caliber lands.
+    ' Widths are still printed RAW (HM13..HM15 own that caliber now), but note the sum moved
+    ' when the 22nd cut landed: spring panel went 0 -> its laid-out twip width.
     feCount = 0
     feIdx = 0
     feSum = 0
@@ -151,9 +153,8 @@ Private Sub Form_Load()
         feSum = feSum + CLng(pv.Width)
         feTxt = feTxt + Len(pv.Text)
     Next
-    ' want= is the SAME three reads taken through the early-bound route. It measures 0:
-    ' inside CLng(...) the receiver is re-resolved by the generic COM path, which is
-    ' exactly B130's remaining face - so it is printed, never judged.
+    ' want= is the SAME three reads taken through the early-bound route (the face this
+    ' account opened with). Since the 21st cut it agrees with fe - printed, not judged.
     feWant = CLng(StatusBar1.Panels(1).Width)
     feWant = feWant + CLng(StatusBar1.Panels(2).Width)
     feWant = feWant + CLng(StatusBar1.Panels(3).Width)
@@ -169,26 +170,52 @@ Private Sub Form_Load()
     ' those spellings kept handing back the HWND-as-IDispatch chain. Every judgment below is
     ' still a CROSS-READ against a witness that is NOT the RTL: w1/w2 come from SB_GETPARTS,
     ' key/index/text from the design block.
+    tpp = Screen.TwipsPerPixelX       ' witness factor: pixels -> twips, the Screen route,
+                                      ' NOT this repo's converter (so it stays a witness)
     Set po = StatusBar1.Panels(1)
-    ok7 = (CStr(po.Width) = CStr(w1)) And (po.Key = "fx1") And (CStr(po.Index) = "1")
+    ok7 = (CStr(po.Width) = CStr(w1 * tpp)) And (po.Key = "fx1") And (CStr(po.Index) = "1")
     Debug.Print "HM09-OBJVAR-ROADS=" & TF(ok7)
     Set mPo = StatusBar1.Panels(2)
-    ok8 = (CStr(mPo.Width) = CStr(w2)) And (mPo.Text = "BB")
+    ok8 = (CStr(mPo.Width) = CStr(w2 * tpp)) And (mPo.Text = "BB")
     Debug.Print "HM10-MODVAR-ROADS=" & TF(ok8)
     With StatusBar1.Panels(1)
         withW = .Width
     End With
     Set po = StatusBar1.Panels("fx2")
-    ok9 = (withW = w1) And (CStr(po.Index) = "2") And (CStr(po.Width) = CStr(w2))
+    ok9 = (withW = w1 * tpp) And (CStr(po.Index) = "2") And (CStr(po.Width) = CStr(w2 * tpp))
     Debug.Print "HM11-WITH-AND-KEYSUB=" & TF(ok9)
 
     ' HM12 = the face this account was opened with: the member read sitting in an ARGUMENT
     ' (CStr / CLng). It reads the requested width now through the same collection object, so
     ' the "argument re-resolves the receiver" half of the diagnosis turned out to be the very
     ' same missing table row - not a second defect.
-    ok10 = (CStr(StatusBar1.Panels(1).Width) = CStr(w1)) _
-           And (CLng(StatusBar1.Panels(2).Width) = w2)
+    ok10 = (CStr(StatusBar1.Panels(1).Width) = CStr(w1 * tpp)) _
+           And (CLng(StatusBar1.Panels(2).Width) = w2 * tpp)
     Debug.Print "HM12-ARG-ROADS=" & TF(ok10)
+
+    ' HM13..HM15 = zhang 206 (B41) second face, 22nd cut. `Panels(i).Width` used to answer
+    ' the STORED number; VB6 answers the laid-out geometry, in twips (corpus: 9 independent
+    ' sites mix it with ScaleWidth / another control's Width, one divides by
+    ' Screen.TwipsPerPixelX to feed Win32). Three things are pinned, each with a witness that
+    ' is NOT the RTL's own store:
+    '   HM13 the SPRING panel - it has no requested width at all, so it read 0 before this
+    '        cut; now it must equal what the window says: client right (e3) minus the two
+    '        fixed panels' right edges, converted by the Screen factor.
+    '   HM14 Panel.Left - the other half of the same projection; repo-wide there was no exit
+    '        for it at all, so the two corpus overlay-positioning sites read back empty.
+    '   HM15 design-block MinWidth - VB6 persists it in himetric too (398 of 457 panels write
+    '        MinWidth identical to Object.Width), so the number that comes back must NOT be
+    '        the 26 the .frm carries.
+    ok11 = (StatusBar1.Panels(3).Width > 0) _
+           And (StatusBar1.Panels(3).Width = (e3 - w1 - w2) * tpp)
+    Debug.Print "HM13-SPRING-WIDTH-FOLLOWS-WINDOW=" & TF(ok11)
+    ok12 = (StatusBar1.Panels(1).Left = 0) _
+           And (StatusBar1.Panels(2).Left = w1 * tpp) _
+           And (StatusBar1.Panels(3).Left = (w1 + w2) * tpp)
+    Debug.Print "HM14-PANEL-LEFT=" & TF(ok12)
+    Debug.Print "HM15-RAW minw=" & StatusBar1.Panels(1).MinWidth & " frm=" & 26
+    ok13 = (StatusBar1.Panels(1).MinWidth > 0) And (StatusBar1.Panels(1).MinWidth <> 26)
+    Debug.Print "HM15-DESIGN-MINWIDTH-NOT-RAW=" & TF(ok13)
 
     Debug.Print "HM-DONE"
     Unload Me

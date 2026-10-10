@@ -112,7 +112,7 @@ static const wchar_t* kColumnHeaderNames[] = {
 // C29-4: StatusBar 的 Panel (事件参数)。数据面照 vb6forms_statusbar.c 的 getter/setter。
 static const wchar_t* kPanelNames[] = {
     L"Key", L"Index", L"Text", L"Width", L"MinWidth", L"AutoSize", L"Style",
-    L"ToolTipText", NULL };
+    L"ToolTipText", L"Left", NULL };   // Left = 账 #206 第二格补的那一枚 (DISPID 9)
 // C29-8b: TreeView 的 Node。名字表顺序即 DISPID (下标 + 1)。
 // 只登记扁平层真做得动的成员: Bold / Sorted / RelativeX / Node.Style 一律不放,
 // 放进去就是「看着支持、实则答错」 (与 ListView 那族同一取舍)。
@@ -155,6 +155,7 @@ static const wchar_t* kRsFieldNames[] = {
 #define VB6_MEMD_AUTOSIZE   6
 #define VB6_MEMD_STYLE      7
 #define VB6_MEMD_TOOLTIP    8
+#define VB6_MEMD_PANEL_LEFT 9   // Panel.Left —— 排版后的左界 (缇), 与 Width 同源
 // Node (kNodeNames 顺序; Key/Index/Text 沿用上面同号的定义)
 #define VB6_MEMD_NODE_TAG       4
 #define VB6_MEMD_NODE_CHECKED   5
@@ -519,6 +520,9 @@ static HRESULT memInvokePanel(Vb6MemObj* p, int dispid, VARIANT* out) {
         return S_OK;
     case VB6_MEMD_TOOLTIP:
         memSetStr(out, (const wchar_t*)vb6_StatusBar_GetPanelToolTip(p->owner, p->index));
+        return S_OK;
+    case VB6_MEMD_PANEL_LEFT:
+        memSetI4(out, vb6_StatusBar_GetPanelLeft(p->owner, p->index));
         return S_OK;
     default:
         break;

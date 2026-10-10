@@ -4299,7 +4299,7 @@ if ($Category -in @("all", "run", "vbp")) {
     # SB34-LASTKEY= 为空是对的 (第 3 格是没给 Key 的时间面板)。
     Test-Vbp "ctrlstatusbar" "$Tests\ctrlstatusbar\CtrlStatusBar.vbp" @(
         "SB0-HWND= CAP=CtrlStatusBar CL=", "SB1-COUNT=3", "SB2-KEY1=pr",
-        "SB3-TEXT1=Ready", "SB4-STYLE1=0", "SB5-AUTOSZ1=1", "SB6-MINW1=40",
+        "SB3-TEXT1=Ready", "SB4-STYLE1=0", "SB5-AUTOSZ1=1", "SB6-MINW1=22",
         "SB7-KEY2=tp", "SB8-TEXT2=Tip", "SB9-STYLE2=2", "SB10-W2=120",
         "SB11-AUTOSZ2=0", "SB12-TIP2=NumLock state", "SB13-STYLE3=5",
         "SB14-IDXBYKEY=2", "SB15-TEXTBYKEY=Tip", "SB16-ALIGN=2", "SB17-STYLE=0",
@@ -4307,7 +4307,8 @@ if ($Category -in @("all", "run", "vbp")) {
         "SB21-SETTEXT=Busy", "SB22-ADDIDX=4", "SB23-COUNT2=4", "SB24-NEWKEY=extra",
         "SB25-NEWTEXT=Extra", "SB26-INSERT=2", "SB27-COUNT3=5", "SB28-IDXP2=ins",
         "SB29-IDXP3=tp", "SB30-AFTERRM=4", "SB31-P2KEY=tp", "SB32-COUNT4=4",
-        "SB33-AFTERRM2=3", "SB34-LASTKEY=", "SB35-SETMINW=77", "SB36-SETW=123",
+        "SB33-AFTERRM2=3", "SB34-LASTKEY=", "SB35-SETMINW=77",
+        "SB36-RAW before=", "SB36-SPRING-FOLLOWS-WINDOW=True",
         "SB37-SETAUTOSZ=0", "SB38-SETTIP=hello", "SB39-SETSTYLE=6",
         "SB40-AFTERCLR=0", "CTRLSTATUSBAR-DONE")
 
@@ -4343,11 +4344,18 @@ if ($Category -in @("all", "run", "vbp")) {
     # 升成判据，证人全部**不经过 RTL**（w1/w2 来自 SB_GETPARTS，键/下标/文本来自设计块）。
     # HM12 钉的正是本账开局那张脸：成员读法坐在**实参**位上（CStr(...) / CLng(...)）—— 实测从
     # 空串/0 变成 57/100 ⇒ 台账里"实参那一步重解接收者"那半不是第二个缺陷，就是同一处缺行。
+    # 第二十二刀（账 #206 §B41 第二格）：面板几何改交**排版后的缇** ⇒ HM09..HM12 的证人从像素
+    # 换成 `像素 * Screen.TwipsPerPixelX`（Screen 那一条独立路，不是本仓那对权威，否则就自己
+    # 证自己）。HM13 是这一格的存在性证人（弹簧档从前请求宽恒 0 ⇒ 读回 0）；HM14 钉新补的
+    # Panel.Left 那一面（改前全仓 0 个出口）；HM15 钉设计块 MinWidth 的 himetric 档
+    # （语料 457 枚里 398 枚 MinWidth 与 Object.Width 逐字相同），回来的数不再是 .frm 里那 26。
     $sbHmExpected = @("HM00-RAW w1=", "HM01-HM-DESIGN-WIDTH=True", "HM02-SINGLE-CONVERSION=True",
         "HM03-SPRING-TILES=True", "HM04-PANELS-ARRIVED=True", "HM05-RAW cs=",
         "HM06-INDEX-BOTH-FORMS=True", "HM07-RAW idx9=", "HM08-FOREACH-COLLECTION=True",
         "HM08-RAW fe=", "HM09-OBJVAR-ROADS=True", "HM10-MODVAR-ROADS=True",
-        "HM11-WITH-AND-KEYSUB=True", "HM12-ARG-ROADS=True", "HM-DONE")
+        "HM11-WITH-AND-KEYSUB=True", "HM12-ARG-ROADS=True",
+        "HM13-SPRING-WIDTH-FOLLOWS-WINDOW=True", "HM14-PANEL-LEFT=True",
+        "HM15-RAW minw=", "HM15-DESIGN-MINWIDTH-NOT-RAW=True", "HM-DONE")
     Test-Vbp "sbhm" "$Tests\sbhm\SbHm.vbp" $sbHmExpected
     Test-Vbp "sbhm_x86" "$Tests\sbhm\SbHm.vbp" $sbHmExpected -Arch "x86"
     # <vbeclipse> 账 #221 = C29-PL-a: Picture.Line 落原生 GDI。这条判据只能**画完再问像素** ——

@@ -23,8 +23,10 @@
 //     所以这四个"系统自动显示"的面板得由这里自己算文本; 时钟用 SetTimer + 子类化。
 //   - comctl32 只认**下标**, VB6 的 Key/Text 是字符串 → 额外维护一份平行表,
 //     下标与面板顺序严格同步 (Add 插到中间 / Remove 后搬动)。
-//   - VB6 的面板宽度是**缇**吗? 不是 —— StatusBar 的 Width/MinWidth 在 VB6 里就是像素
-//     (设计期属性页按像素给), 这里直接当像素用。
+//   - 面板 Width / MinWidth 存的是**缇** (§B41 第二格, 2026-10-10 语料钉的): 代码那一头
+//     有 9 处独立站点把它与 ScaleWidth / 控件 Width 同式用, 其中一处显式除以
+//     Screen.TwipsPerPixelX 去喂 Win32 API; 设计块那一头 (Object.Width / MinWidth) 是
+//     himetric, 由 *Hm 那两枚出口折进来。缇->像素只发生在 SbLayout 那一步。
 //   - 布局口径: 固定宽面板各占 Width; 弹簧面板(MinWidth 为下限)瓜分剩余空间;
 //     随内容面板(sbrContents)按文字实测宽。全部换算成 SB_SETPARTS 的右边界数组。
 
@@ -76,8 +78,8 @@ typedef struct {
                          // (.frm 里 `Panels(2) = "Tip"` 就是设计期 Text, 不能吞)。
     wchar_t* tip;        // ToolTipText (仅存起来, msctls_status32 的 SBARS_TOOLTIPS
                          // 需要 SB_SETTEXTLENGTH 那套 tooltip, 这里不实现激活)
-    int      width;      // Width (像素, <=0 = 未指定)
-    int      minWidth;   // MinWidth (弹簧面板的下限)
+    int      width;      // Width (**缇**, <=0 = 未指定) —— 排版时才折成像素
+    int      minWidth;   // MinWidth (**缇**, 弹簧面板的下限)
     int      autoSize;   // 0 fixed / 1 spring / 2 contents
     int      style;      // 0 text / 1 caps / 2 num / 5 time / 6 date
 } Vb6PanelEntry;
@@ -244,7 +246,9 @@ static int SbLayout(Vb6StatusBar* sb, int* outOffsets, int outCap) {
         } else if (e->autoSize == VB6_SBR_CONTENTS) {
             want[i] = SbMeasureText(sb->hwnd, SbDisplayText(e));
         } else {
-            want[i] = e->width > 0 ? e->width : SbMeasureText(sb->hwnd, SbDisplayText(e));
+            // 存缇、排像素: 这一道折只走 vb6_TwipToX 那一枚权威 (#184 收成一处的那对)。
+            want[i] = e->width > 0 ? vb6_TwipToX(e->width)
+                                   : SbMeasureText(sb->hwnd, SbDisplayText(e));
             fixedTotal += want[i];
         }
     }
@@ -262,7 +266,8 @@ static int SbLayout(Vb6StatusBar* sb, int* outOffsets, int outCap) {
         if (e->autoSize == VB6_SBR_SPRING) {
             take = want[i] + perSpring;
             if (leftover > 0) { take += 1; leftover--; }   // 除不尽的零头给第一个弹簧
-            if (take < (e->minWidth > 0 ? e->minWidth : 0)) take = e->minWidth > 0 ? e->minWidth : 0;
+            int floorPx = e->minWidth > 0 ? vb6_TwipToX(e->minWidth) : 0;
+            if (take < floorPx) take = floorPx;
         }
         acc += take;
         outOffsets[i] = acc;
@@ -874,11 +879,40 @@ int32_t vb6_StatusBar_GetPanelIndex(void* hwnd, int32_t index) {
     return SbAt(vb6_SbFromHwnd(hwnd), index) ? index : 0;
 }
 
-int32_t vb6_StatusBar_GetPanelWidth(void* hwnd, int32_t index) {
-    Vb6PanelEntry* e = SbAt(vb6_SbFromHwnd(hwnd), index);
-    return e ? e->width : 0;
+// 第 index 格 (1 基) 在窗口里的左右边界, 单位**像素**; 拿不到返回 0。
+// 唯一真相 = 窗口本人的 parts 表 (SB_GETPARTS 交回的那份右边界), 不是 e->width:
+// §B41 量到的那 4 处按面板定位覆盖层的源码 (`pb.Width = sb.Panels(lPan).Width - 45'
+// 与 `.Move (sb.Panels(nPanel).Left + pading), …') 要的就是排版结果 —— 弹簧档与
+// 随内容档的请求值跟实际宽根本不是一回事 (弹簧档请求恒 0, 改前这里就恒交 0)。
+static int SbPanelEdgesPx(void* hwnd, int32_t index, int* left, int* right) {
+    Vb6StatusBar* sb = vb6_SbFromHwnd(hwnd);
+    if (!sb || !sb->hwnd || index < 1 || index > sb->count) return 0;
+    int n = sb->count;
+    int* arr = (int*)calloc((size_t)n, sizeof(int));
+    if (!arr) return 0;
+    int got = (int)SendMessageW((HWND)sb->hwnd, SB_GETPARTS, (WPARAM)n, (LPARAM)arr);
+    if (got <= 0 || index > got) { free(arr); return 0; }
+    *left  = (index >= 2) ? arr[index - 2] : 0;
+    *right = arr[index - 1];
+    free(arr);
+    return 1;
 }
 
+int32_t vb6_StatusBar_GetPanelWidth(void* hwnd, int32_t index) {
+    int l = 0, r = 0;
+    if (!SbPanelEdgesPx(hwnd, index, &l, &r)) return 0;
+    return vb6_XToTwipX(r > l ? r - l : 0);        // 排版结果, 折回缇交出去
+}
+
+// 账 #206 第二格顺带的那一面: VB6 的 Panel.Left 与 Width 同源 (都是排版结果的投影),
+// 语料里两处覆盖层写法在问它, 而改前全仓 0 个出口 —— 不补就是"名字认得、读数交空"。
+int32_t vb6_StatusBar_GetPanelLeft(void* hwnd, int32_t index) {
+    int l = 0, r = 0;
+    if (!SbPanelEdgesPx(hwnd, index, &l, &r)) return 0;
+    return vb6_XToTwipX(l > 0 ? l : 0);
+}
+
+// val = **缇** (VB 代码那一头的口径)。
 void vb6_StatusBar_SetPanelWidth(void* hwnd, int32_t index, int32_t val) {
     Vb6StatusBar* sb = vb6_SbFromHwnd(hwnd);
     Vb6PanelEntry* e = SbAt(sb, index);
@@ -890,14 +924,19 @@ void vb6_StatusBar_SetPanelWidth(void* hwnd, int32_t index, int32_t val) {
 // 账 #206 (§B41): **真 VB6 设计器**把面板宽持久化成 himetric(0.01mm), 那一行的键名还带
 // `Object.` 前缀 (量法见台账: 语料 5623 份 .frm 里 92 枚状态条的 sum(面板宽)/控件的 _ExtentX
 // 中位数 0.986, 而 sum/控件 Width(缇) 是 1.738, 落在缇档的 0 枚)。本族 e->width 存的仍是
-// **像素** ⇒ 这里只把那一档接到像素: MulDiv(hm, dpi, 2540)。
-// himetric -> 像素只有一处答案: vb6_HimetricToPxX (账 #206; 本族另三处各写各的换算记在 §B129)。
-// "绕开 DPI 折成缇"那条路 (hm × 72/127) 刻意没在这儿开, 因为 VB 侧改按缇读是 §B41 剩下的
-// 那一格, 它要连 getter 一起改, 不该由设计期这一趟先动。
+// 第二十二刀之后本族 e->width 存的是**缇** ⇒ 这一档只折 himetric -> 缇 (与 DPI 无关的那条
+// 比例), 缇 -> 像素留给排版那一步的 vb6_TwipToX —— 两侧同一口径, 不再有两份答案。
+// 第十八刀当时是按像素存的, 所以那一版这里折的是 vb6_HimetricToPxX (像素), 而 VB 代码那一头
+// 读写的是缇 ⇒ 同一格几何存两种单位, 正是 §B41 剩下的那一格。
+// himetric <-> 缇 只有一处答案: vb6_TwipsToHimetric / vb6_HimetricToTwips (本族另三处各写各的
+// 换算记在 §B129, 那一头要连各自的判据面一起并, 不由这一刀顺手改)。
 void vb6_StatusBar_SetPanelWidthHm(void* hwnd, int32_t index, int32_t hm) {
-    int px = vb6_HimetricToPxX(hm);
-    if (px < 0) px = 0;
-    vb6_StatusBar_SetPanelWidth(hwnd, index, px);
+    // 第二格之后存储这一档是缇, 所以这里折的是 himetric -> 缇 (与 DPI 无关),
+    // 缇 -> 像素留给 SbLayout 那一步。第十八刀当时写的是 vb6_HimetricToPxX
+    // (那一档把像素直接存进 e->width), 现在两侧同一口径, 不再有两份答案。
+    long tw = vb6_HimetricToTwips(hm);
+    if (tw < 0) tw = 0;
+    vb6_StatusBar_SetPanelWidth(hwnd, index, (int32_t)tw);
 }
 
 int32_t vb6_StatusBar_GetPanelMinWidth(void* hwnd, int32_t index) {
@@ -909,8 +948,17 @@ void vb6_StatusBar_SetPanelMinWidth(void* hwnd, int32_t index, int32_t val) {
     Vb6StatusBar* sb = vb6_SbFromHwnd(hwnd);
     Vb6PanelEntry* e = SbAt(sb, index);
     if (!e) return;
-    e->minWidth = (int)val;
+    e->minWidth = (int)val;            // **缇**; 排版时才折像素
     SbApplyParts(sb);
+}
+
+// 设计块那一行的 MinWidth 同样是 himetric —— 语料里 457 枚同时写了
+// `Object.Width` 与 `MinWidth` 的面板, **398 枚两个数字逐字相同** ⇒ 同一档
+// (脚本 .build/b447_panel_minwidth.py, 读数 .build/b447_readings.txt)。
+void vb6_StatusBar_SetPanelMinWidthHm(void* hwnd, int32_t index, int32_t hm) {
+    long tw = vb6_HimetricToTwips(hm);
+    if (tw < 0) tw = 0;
+    vb6_StatusBar_SetPanelMinWidth(hwnd, index, (int32_t)tw);
 }
 
 int32_t vb6_StatusBar_GetPanelAutoSize(void* hwnd, int32_t index) {

@@ -222,6 +222,15 @@ int vb6_XToTwipX(int px) { return MulDiv(px, 1440, vb6_DpiX()); }
 // 其中 ax_site_ext 那处把 DPI 写死成 96。新加的调用一律走这一枚(按真实 DPI)，
 // 那三处何时并进来由 §B129 定, 本刀不顺手改(它们各有各的判据面)。
 int vb6_HimetricToPxX(int hm) { return MulDiv(hm, vb6_DpiX(), 2540); }
+
+// 账 #206 (§B41) 第二格 + 账 #298 (§B129): himetric <-> 缇 是**与 DPI 无关**的那条比例 ——
+// 两个都是绝对长度 (1 缇 = 1/1440 英寸, 1 himetric = 1/100 mm ⇒ 1 hm = 1440/2540 缇)。
+// VB6 往 .frm 里写的那一档是 himetric, VB 代码读写的那一档是缇: 所以设计块的值进来先折成
+// 缇存着, 缇->像素只许在排版那一步做 (走上面那枚按真实 DPI 的权威)。
+// §B129 数出来的另外几份写法 (ax_load.c 的 twipsToHimetric、olecon 的 *1440L/2540L 与
+// *15L*2540L/1440L) 从这里转调; 整数**截断**语义照旧保留, 免得并表顺手改了值。
+long vb6_TwipsToHimetric(long tw) { return (long)(((__int64)tw) * 2540 / 1440); }
+long vb6_HimetricToTwips(long hm) { return (long)(((__int64)hm) * 1440 / 2540); }
 int vb6_YToTwipY(int px) { return MulDiv(px, 1440, vb6_DpiY()); }
 
 // ============================================================

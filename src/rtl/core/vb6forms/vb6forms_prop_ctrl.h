@@ -434,10 +434,12 @@ int32_t vb6_StatusBar_GetPanelIndexByKey(void* hwnd, const wchar_t* key);  // 0 
 void*           vb6_StatusBar_Panels(void* hwnd);        // 集合对象 (真 IDispatch, 账 #299)
 int32_t vb6_StatusBar_GetPanelIndex(void* hwnd, int32_t index);  // 账 #300: 数字下标那一形, 0 = 无此面板
 int32_t vb6_StatusBar_GetPanelWidth(void* hwnd, int32_t index);
+int32_t vb6_StatusBar_GetPanelLeft(void* hwnd, int32_t index);   // 排版后的左界 (缇, 账 #206 第二格)
 void    vb6_StatusBar_SetPanelWidth(void* hwnd, int32_t index, int32_t val);
 void    vb6_StatusBar_SetPanelWidthHm(void* hwnd, int32_t index, int32_t hm);  // 账 #206: 形参是 himetric
 int32_t vb6_StatusBar_GetPanelMinWidth(void* hwnd, int32_t index);
 void    vb6_StatusBar_SetPanelMinWidth(void* hwnd, int32_t index, int32_t val);
+void    vb6_StatusBar_SetPanelMinWidthHm(void* hwnd, int32_t index, int32_t hm);  // 账 #206 第二格: 设计块那一档同样是 himetric
 int32_t vb6_StatusBar_GetPanelAutoSize(void* hwnd, int32_t index);
 void    vb6_StatusBar_SetPanelAutoSize(void* hwnd, int32_t index, int32_t val);
 int32_t vb6_StatusBar_GetPanelStyle(void* hwnd, int32_t index);

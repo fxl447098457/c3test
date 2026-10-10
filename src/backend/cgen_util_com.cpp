@@ -311,6 +311,10 @@ std::string CCodeGen::resolveComValue(const std::string& unpackType) {
                                               isComMarker_ = false; return lastExpr_; }
             if (memLower == "tooltiptext")  { lastExpr_ = sbGet("vb6_StatusBar_GetPanelToolTip");
                                               isComMarker_ = false; return lastExpr_; }
+            // 账 #206 第二格: Panel.Left 与 Width 同源 (都是排版结果的投影)。语料里有两处
+            // 按面板定位覆盖层的写法在问它, 而改前全仓 0 个出口。
+            if (memLower == "left")         { lastExpr_ = sbGet("vb6_StatusBar_GetPanelLeft");
+                                              isComMarker_ = false; return lastExpr_; }
         }
     }
 

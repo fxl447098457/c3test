@@ -60,13 +60,20 @@ Option Explicit
 ' ③Align/Style/SimpleText 三个自身属性 ④时间/日期面板的文本由 RTL 自己算
 ' (SDK 10.0.19041.0 的 commctrl.h 里没有 SBT_TIME/SBT_DATE, 只能自己来)。
 
+' prints a boolean as True/False (this fixture printed bare values only until SB36 moved)
+Function SBTF(b As Boolean) As String
+    If b Then SBTF = "True" Else SBTF = "False"
+End Function
+
 Private Sub Form_Load()
+    Dim sbW0 As Long, sbW1 As Long, sbSum As Long
     Debug.Print "SB0-HWND=" & Me.hwnd & " CAP=" & Me.Caption & " CL=" & Me.Controls.Count
     Debug.Print "SB1-COUNT=" & StatusBar1.Panels.Count
     Debug.Print "SB2-KEY1=" & StatusBar1.Panels(1).Key
     Debug.Print "SB3-TEXT1=" & StatusBar1.Panels(1).Text
     Debug.Print "SB4-STYLE1=" & StatusBar1.Panels(1).Style
     Debug.Print "SB5-AUTOSZ1=" & StatusBar1.Panels(1).AutoSize
+    ' Design-block MinWidth is himetric like Object.Width; the getter answers twips -> 22
     Debug.Print "SB6-MINW1=" & StatusBar1.Panels(1).MinWidth
     Debug.Print "SB7-KEY2=" & StatusBar1.Panels(2).Key
     Debug.Print "SB8-TEXT2=" & StatusBar1.Panels(2).Text
@@ -117,8 +124,27 @@ Private Sub Form_Load()
     ' 设置类属性回读
     StatusBar1.Panels(1).MinWidth = 77
     Debug.Print "SB35-SETMINW=" & StatusBar1.Panels(1).MinWidth
+    ' SB36 used to pin 123, i.e. "whatever you wrote is what you read back". From the 22nd
+    ' cut (zhang 206, B41 face 2) this member answers the Laid-out geometry in twips, and
+    ' panel 1 is a spring panel whose requested width is meaningless - so that number can
+    ' only come from the window. Restated per #157: take the baseline in place and ask for
+    ' the increment (writing a width into a spring panel must not move what it reports),
+    ' never a hand-added total. The RAW line prints all four numbers so the next caliber
+    ' change - and the tiling defect above - stay visible.
+    sbW0 = StatusBar1.Panels(1).Width
     StatusBar1.Panels(1).Width = 123
-    Debug.Print "SB36-SETW=" & StatusBar1.Panels(1).Width
+    sbW1 = StatusBar1.Panels(1).Width
+    sbSum = StatusBar1.Panels(1).Width + StatusBar1.Panels(2).Width _
+            + StatusBar1.Panels(3).Width
+    Debug.Print "SB36-RAW before=" & sbW0 & " after=" & sbW1 & " sum=" & sbSum _
+                & " bar=" & StatusBar1.Width
+    ' Only the invariance half is pinned here. The third term (three panels tile the bar)
+    ' does NOT hold, and that is its own defect, not this knife's: SbLayout leaves a
+    ' sbrContents panel's measured width out of fixedTotal, so the spring absorbs it twice
+    ' -> the last right edge runs past the client width (measured: sum=6630 vs bar=6000
+    ' twips = 42px of clock text handed out twice). Filed as a separate account; RAW above
+    ' carries both numbers so the fix is visible when it lands.
+    Debug.Print "SB36-SPRING-FOLLOWS-WINDOW=" & SBTF((sbW1 > 0) And (sbW1 = sbW0))
     StatusBar1.Panels(1).AutoSize = 0
     Debug.Print "SB37-SETAUTOSZ=" & StatusBar1.Panels(1).AutoSize
     StatusBar1.Panels(1).ToolTipText = "hello"

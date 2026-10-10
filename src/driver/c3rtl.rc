@@ -500,3 +500,5 @@
 /* 15e119f3 (ai/032 rev2) 又改了 src/rtl/core/vb6rtl/vb6rtl.c (id 101) 与 vb6rtl_builtin.h (id 135) 而没 touch 这个 .rc —— 补一行 marker 让 rc.exe 重跑。第 43 道哨兵 scripts/check_rtl_embedded.ps1 现在会把这种情形自己报红，不再靠人记（同一形状已撞过两次：#225 与 57b1f64e）。 */
 
 /* Fix 224: vb6rtl_userctl.h / vb6rtl_com.c 的 vb6_UserControl_ScaleX/Y 改 _Generic 分派 (真函数挂 _Raw) —— RTL 源变动, 本行是那次 touch, 让 rc.exe 重跑并把新 RTL 嵌进 C3.exe (见上一条 marker 的同款地雷)。 */
+
+/* 账 #206 第二十二刀 (面板几何换成缇 + getter 交排版结果): vb6forms_statusbar.c / vb6forms.c / vb6forms_memberobj.c / vb6forms_prop_ctrl.h / axsite/ax_load.c 都动了 RTL 源, 本行是那次 touch, 让 rc.exe 重跑并把新 RTL 嵌进 C3.exe。 */

@@ -48,6 +48,9 @@ int vb6_TwipToY(int twips);
 // 走这四个入口，禁止再写死 15。
 int vb6_DpiX(void);
 int vb6_HimetricToPxX(int hm);   // 账 #206: himetric -> 设备像素, 唯一那一处(按真实 DPI)
+// 账 #206 第二格 + 账 #298: himetric <-> 缇 (与 DPI 无关的纯单位换算), 唯一那一处。
+long vb6_TwipsToHimetric(long tw);
+long vb6_HimetricToTwips(long hm);
 int vb6_DpiY(void);
 int vb6_XToTwipX(int px);
 int vb6_YToTwipY(int px);
