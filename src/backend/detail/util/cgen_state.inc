@@ -676,7 +676,12 @@
         //   vb6_ComCallObject(vb6_hwnd_X, L"Panels", …)     真窗口期链式下标
         // 都按 `vb6_<X>` 抠, 再用 statusBarVars_ 核对是不是真 StatusBar
         // (vb6_ComCallObject(vb6_hwnd_Form1, L"Controls") 会抠出 Form1, 核对刷掉)。
-        static const char* kHeads[] = { "vb6_ComGetObjectProp(vb6_", "vb6_ComCallObject(vb6_" };
+        // 账 #299 起还有第三种写法: 集合本体由 memberobj 的真 IDispatch 答
+        //   `vb6_StatusBar_Panels((void*)vb6_hwnd_X)` (以及它外面套的 Item 那一层)。
+        // 这一条**必须**跟着拦子一起加: 不认新头, 链式那 8 条成员与 `Panels.Add/Remove`
+        // 的直译就全都判不出"接收者是 StatusBar", 一起打回晚绑定 —— 那是行为改动, 不是收口。
+        static const char* kHeads[] = { "vb6_ComGetObjectProp(vb6_", "vb6_ComCallObject(vb6_",
+                                        "vb6_StatusBar_Panels((void*)vb6_" };
         for (const char* h : kHeads) {
             size_t p = objExpr.find(h);
             while (p != std::string::npos) {
@@ -785,6 +790,8 @@
         static const std::vector<std::string> heads = {
             "vb6_TreeView_Nodes(", "vb6_Toolbar_Buttons(", "vb6_ImageList_ListImages(",
             "vb6_ListView_ListItems(", "vb6_ListView_ColumnHeaders(",
+            // 账 #299: StatusBar 的 Panels 集合对象 (与上面几族同一个 memberobj 机制)。
+            "vb6_StatusBar_Panels(",
         };
         for (const auto& h : heads) {
             if (expr.size() >= h.size() && expr.compare(0, h.size(), h) == 0) return true;

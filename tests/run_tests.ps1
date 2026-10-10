@@ -4329,9 +4329,23 @@ if ($Category -in @("all", "run", "vbp")) {
     # HM01 是唯一那枚改前会 False 的判据；HM02 钉"只有一处换算"（两枚数的比 == himetric 的比）；
     # HM03/HM04 是反面证人（两台都 True，只拦"顺手把所有面板都改成内容宽/把面板整批丢掉"那种坏修法）；
     # HM05 只钉前缀：Panels(i).Width 读回仍是请求值 —— §B41 剩下的那一格，本刀刻意没动。
+    # 账 #299（§B130）夹具格：`Panels` 作为**真集合对象**。改前这档压根没立起来，
+    # "把成员当对象用"的写法头一律发成 `vb6_ComGetObjectProp(HWND, L"Panels")`
+    # （拿 HWND 当 IDispatch —— C29-8b 给 TreeView Nodes 写下的同一句症状），
+    # `For Each` 连循环都没进（实测 0 次，负控 = 改前的编译器）。
+    # HM08 钉三头：迭代 3 次 + 每格 Index 之和 6 + 每格 Text 长度之和 5（"A"+"BB"+"SP"）——
+    # 只钉"进过循环"会放过"集合只出一格"或"下标全答同一个"。
+    # 宽度那一路只打 RAW：`Panels(i).Width` 交回的仍是**请求值**（§B41 剩下那一格），
+    # 钉死它会让本刀与那一格缠在一起。同一条 RAW 里的 want= 是同一个成员改走
+    # `CLng(Panels(i).Width)` 实参那一路的读数，实测 0（对象那一形反而交回 157）
+    # ⇒ #299 的病名落在"实参那一步把接收者重解了一遍"，不在 For Each。
+    # HM09..HM11 刻意只打 RAW、不判 True/False：这一刀落了四种对象写法里的**一种**，
+    # `Set` / 模块级 `As Object` / `With` 三形的头由 Set-RHS 与 With-object-ref 那两条
+    # 发射路拼，不经过集合拦子 ⇒ 仍然读空/读 0。读数留在产物里，剩下的那一格记在台账。
     $sbHmExpected = @("HM00-RAW w1=", "HM01-HM-DESIGN-WIDTH=True", "HM02-SINGLE-CONVERSION=True",
         "HM03-SPRING-TILES=True", "HM04-PANELS-ARRIVED=True", "HM05-RAW cs=",
-        "HM06-INDEX-BOTH-FORMS=True", "HM07-RAW idx9=", "HM-DONE")
+        "HM06-INDEX-BOTH-FORMS=True", "HM07-RAW idx9=", "HM08-FOREACH-COLLECTION=True",
+        "HM08-RAW fe=", "HM09-RAW objvar", "HM10-RAW modvar", "HM11-RAW with=", "HM-DONE")
     Test-Vbp "sbhm" "$Tests\sbhm\SbHm.vbp" $sbHmExpected
     Test-Vbp "sbhm_x86" "$Tests\sbhm\SbHm.vbp" $sbHmExpected -Arch "x86"
     # <vbeclipse> 账 #221 = C29-PL-a: Picture.Line 落原生 GDI。这条判据只能**画完再问像素** ——

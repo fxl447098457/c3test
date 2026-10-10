@@ -496,7 +496,11 @@ static HRESULT memInvokePanel(Vb6MemObj* p, int dispid, VARIANT* out) {
         memSetStr(out, (const wchar_t*)vb6_StatusBar_GetPanelKey(p->owner, p->index));
         return S_OK;
     case VB6_MEMD_INDEX:
-        memSetI4(out, p->index);
+        // 账 #299: 以前这里是 inline 交 `p->index` —— 同一个事实的**第三份答案**
+        // (另两份: 发码侧 recognizer 的 `vb6_StatusBar_GetPanelIndex`, 与存储层的
+        // `SbAt`)。改成问那唯一一枚 getter: 面板已被 Remove 时它答 0, 而 inline 那
+        // 一份会照样交出旧下标。
+        memSetI4(out, vb6_StatusBar_GetPanelIndex(p->owner, p->index));
         return S_OK;
     case VB6_MEMD_TEXT:
         memSetStr(out, (const wchar_t*)vb6_StatusBar_GetPanelText(p->owner, p->index));
@@ -1034,6 +1038,9 @@ static HRESULT STDMETHODCALLTYPE memColl_Invoke(IDispatch* This, DISPID dispid, 
             else if (p->kind == VB6_MEMCK_LISTIMAGES) idx = vb6_ImageListIndexByKey(owner, key);
             else if (p->kind == VB6_MEMCK_NODES)      idx = vb6_TreeView_NodeIndexByKey(owner, key);
             else if (p->kind == VB6_MEMCK_BUTTONS)  idx = vb6_Toolbar_ButtonIndexByKey(owner, key);
+            // 账 #299: 集合对象立起来之后, `Panels("k")` 走的就是这一支。以前名单里没有
+            // PANELS ⇒ 掉进 `else idx = 0` ⇒ 交回 Nothing, 而 VB6 交的是那一格面板。
+            else if (p->kind == VB6_MEMCK_PANELS)   idx = vb6_StatusBar_GetPanelIndexByKey(owner, key);
             else                                     idx = 0;
         }
         if (idx <= 0) { memSetEmpty(out); return S_OK; }
@@ -1207,6 +1214,19 @@ void* vb6_StatusBar_PanelAt(void* hwnd, int32_t index) {
     if (!hwnd || index < 1) return NULL;
     if (index > vb6_StatusBar_GetPanelsCount(hwnd)) return NULL;
     return (void*)memObjNew(VB6_MEMK_PANEL, hwnd, index);
+}
+
+// 账 #299: `StatusBar1.Panels` 的**集合对象**。姊妹控件这一枚早就有
+// (vb6_TreeView_Nodes / vb6_Toolbar_Buttons / vb6_ListView_ListItems /
+// vb6_ImageList_ListImages, 同一处机制), Panels 一族只补了事件参数用的
+// PanelAt, 集合本体一直没人造 ⇒ `Set po = SB1.Panels(1)` / 模块级 `As Object`
+// / `For Each pv In SB1.Panels` / `With SB1.Panels(1)` 四形的头都掉回
+// vb6_ComGetObjectProp(HWND, L"Panels") = 拿 HWND 当 IDispatch 用, 一条读数都
+// 交不出(实测 `.build/b351_probe/P300b.frm`)。立起来之后整条链
+// (Count/Item(i)/Item("key")/For Each/Panel.八成员) 由这里答, cgen 零特例。
+void* vb6_StatusBar_Panels(void* hwnd) {
+    if (!hwnd) return NULL;
+    return (void*)memCollNew(VB6_MEMCK_PANELS, hwnd);
 }
 
 // C29-8b: TreeView1.Nodes —— owner 是 HWND (与 ListView / StatusBar 同)。

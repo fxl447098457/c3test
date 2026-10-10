@@ -343,6 +343,27 @@ std::string CCodeGen::resolveComValue(const std::string& unpackType) {
         }
     }
 
+    // 账 #299: `StatusBar1.Panels` → **真集合对象** (与 C29-8b 的 Nodes、C29-5b 的
+    // Buttons、C29-7 的 ListItems 同一口径、同一个 vb6forms_memberobj.c 机制)。
+    // 排在上面那段 P20-40 recognizer **之后**: 那一段管链上更外层的成员
+    // (`Panels(i).Width` 这类), 这里要把**集合本身**立起来 —— 不拦就发
+    // `vb6_ComGetObjectProp(vb6_hwnd_X, L"Panels")`, 即拿 HWND 当 IDispatch 用,
+    // `Set po =` / 模块级 `As Object` / `For Each` / `With` 四形一条读数都交不出。
+    //
+    // 这一拦会把 isComMarker_ 落成 false, 所以**必须同时**把 `vb6_StatusBar_Panels(`
+    // 加进"什么算集合对象表达式"那三张名单 (cgen_expr_member_generic_access.inc 两处 +
+    // cgen_state.inc 的 isControlCollectionExpr)。少加一处, 链上更外层的成员就被调用方
+    // 当结构体字段直接拼 —— `Panels.Count = 3` 实测发成
+    // `vb6_StatusBar_Panels((void*)vb6_hwnd_SB1).Count` ⇒ cl C2224。
+    if (Symbol::toLower(memberName) == "panels") {
+        std::string sbBare = statusBarNameOfExpr(objExpr);
+        if (!sbBare.empty()) {
+            lastExpr_ = "vb6_StatusBar_Panels((void*)vb6_hwnd_" + sbBare + ")";
+            isComMarker_ = false;
+            return lastExpr_;
+        }
+    }
+
     // P24-07: 早期绑定推断 — 利用TypeLib签名的returnType决策
     if (isEarlyBoundCom_ && earlyBoundSym_) {
         isEarlyBoundCom_ = false;
@@ -796,6 +817,15 @@ std::string CCodeGen::resolveComMarkerForPack(const std::string& packFnHint) {
         std::string tbBare = toolbarNameOfExpr(objExpr);
         if (!tbBare.empty())
             return "vb6_Toolbar_Buttons((void*)vb6_hwnd_" + tbBare + ")";
+    }
+
+    // 账 #299: `StatusBar1.Panels` → 真集合对象 (同 resolveComValue 那条)。走这条的
+    // 是"集合被当对象用"的场合: `Set po = SB1.Panels(1)`、模块级 `Dim mPo As Object`、
+    // `For Each pv In SB1.Panels`、`With SB1.Panels(1)`。
+    if (Symbol::toLower(memName) == "panels") {
+        std::string sbBare = statusBarNameOfExpr(objExpr);
+        if (!sbBare.empty())
+            return "vb6_StatusBar_Panels((void*)vb6_hwnd_" + sbBare + ")";
     }
 
     // C29-OLE: `OLE1.Object` (被当实参/整体赋值的场合, 如 `Set o = OLE1.Object`)。
