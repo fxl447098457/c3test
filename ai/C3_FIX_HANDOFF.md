@@ -2072,7 +2072,7 @@ marker、重编，之后 `check_rtl_embedded` 报 **125/125 逐字节相同**。
 - **为什么不是"看着不挤"**：VB6 里状态条各格铺满客户区（`SB_GETPARTS` 的末值就是宽），而 §B41 第二格之后 `Panels(i).Width` / `Left` 交的正是这份 offsets ⇒ 读数**跟着一起偏大**，语料里那四处"按面板宽摆覆盖层"的写法（`pb.Width = sb.Panels(lPan).Width - 45` 那一族）会多摆出一格的量，把时钟那一格压住。
 - **判据现成**：`ctrlstatusbar` 的 `SB36-RAW` 已经把 `sum` 与 `bar` 打在同一个窗口里（第二十二刀刻意只钉"增量不变"那一半）⇒ 修好那趟加一条 `SB36-TILES-BAR=True` 即可，证人同源，不用新建夹具。
 
-**第二十三刀的落地与读数（2026-10-10，门待回填）**：
+**第二十三刀的落地与读数（2026-10-10，门 #478/#479）**：
 - **动了什么（就一行代码）**：`SbLayout` 的 `VB6_SBR_CONTENTS` 那一支补上 `fixedTotal += want[i];` —— 占位的两档（固定档 + 内容档）各从剩余空间里扣一次。顺带订正一处注释：第一遍上方那句"弹簧面板先按 MinWidth 占位"是**第十八刀之前**的旧形状（那一档早就改成第二遍兜底了，注释一直没跟上）。
 - **读数**（真跑，x64 与 x86 两份 run.out 逐行相同）：`SB36-RAW before=5250 after=5250 sum=6000 bar=6000` ⇒ `SB36-TILES-BAR` True；BASE（`.build/b476_base_k22.exe` = 第二十二刀那台，跑**同一份夹具**）`before=5880 after=5880 sum=6630 bar=6000` ⇒ False。弹簧档从 5880 降到 5250 缇，差的正好是那一格时钟的 630 缇 = 42 像素。**另两份夹具一台没动**：`tests/sbhm`（两固定 + 一弹簧，没有内容档）与 `tests/sbfont`（固定 + 内容，没有弹簧）改后输出与第二十二刀那台**逐行相同**，且与 BASE 也相同 ⇒ 这一刀只动"弹簧与内容档同时在场"那一形 —— 而那两份夹具各缺一条腿，正是本账归因时用的两条互证。
 - **护栏**：哨兵 `check_statusbar_panel_hm.ps1` 长出 **R8** —— `fixedTotal += want[i];` 在 `vb6forms_statusbar.c` 里必须**恰好 2 次**：0 次 = 本账的形状（内容档不占位），3 次 = 第十八刀撤掉的那个"MinWidth 当加项"复发。两个方向都是真形状，所以钉死数而不是钉下限。**负控 = 第二十二刀那棵树**（`git archive HEAD` 出 `.build/wt_k23neg` + `b476_base_k22.exe`）：一条命令**只报 R8 这一条红**，第二十二刀的 R1/R2/R3/R5/R6/R7 全部仍绿 ⇒ 判据是特定的。51 道 [STATIC] 全跑 = 51/51 绿；改 RTL 已 touch `c3rtl.rc` 重编，`check_rtl_embedded` OK（exe sha `9d77f8558161`）。
@@ -2101,7 +2101,7 @@ marker、重编，之后 `check_rtl_embedded` 报 **125/125 逐字节相同**。
 olecon（唯一会把尺寸真交给外部对象的一枚）> 非 Stretch 的 Picture（补法很轻：一枚 `Stretch = 0` + 装图 + 读回画出来的宽）>
 `ax_site_ext`（要换显示缩放，本机无手段，先挂着）。
 
-### B129 himetric↔像素/缇 的折算：4 份文件并成 1 份权威（账 #298，**已出 —— 第二十四刀，2026-10-10，门待回填**）
+### B129 himetric↔像素/缇 的折算：4 份文件并成 1 份权威（账 #298，**已出 —— 第二十四刀，2026-10-10，门 #480 全绿**）
 
 第十八刀做 `Object.Width` 那一档时顺带数出来的：那时是 `src/rtl` 里含 `2540` 的**非注释行 = 13 行 / 5 份文件**。
 第二十二刀并掉 `axsite/ax_load.c`（那一处现在只转调 `vb6_TwipsToHimetric`，哨兵另钉一条"只许转调 1 次"守住这个条件），
@@ -2140,6 +2140,7 @@ olecon（唯一会把尺寸真交给外部对象的一枚）> 非 Stretch 的 Pi
   `ctrlstatusbar` / `sbhm` / `sbfont` 三枚**两架构**共六份 run.out 与第二十三刀那台**逐行相同**（44/44、19/19、7/7，
   `.build/b506_k24_ab.py`），`resload` 七条针 + `resalpha` 两条针全中，`tests/olecon` **x64 与 x86 都编得过**。
 - **RTL 已 touch `c3rtl.rc` 重编**：`check_rtl_embedded` OK（125 份逐字节相同，exe sha `1876e1efc5ed`）。
+- **形状门那一格：一行都没动，所以本刀没有登记动作**：门 #480（run 38041505334、head `35bac8e2`、attempt 1、12 条 check-run 全 completed/success、非绿 0）里 `Emit manifest (shape oracle)` **同绿** ⇒ 398 行逐行相同，这是"纯 RTL + 注释"那一类刀**预期**的形状（发码文本里没有 RTL，清单自然不动），CI 那台因此独立证实了本机那句"这一刀零发码改动"。
 
 ### B131 `Panels(<数字>).Index` 把整数交给 `wchar_t*` 槽 ⇒ 启动期 AV（账 #300，**已出 —— 第十九刀，2026-10-10，门 #464 全绿 = run 38014099324、head `597bd6d1`、attempt 1、12 job 全 completed/success、非绿 0、wall 10m52s；`Emit manifest (shape oracle)` 同绿 => 那行改写被 CI 独立复算证实，`Tests (vbp #1..#4)` 四片全绿 => sbhm 的两头判据两架构真跑过）
 
@@ -2160,7 +2161,7 @@ COM 侧那张 recognizer（`cgen_util_com.cpp` 里按成员名硬拼出口的那
 
 **判据**：崩的那一行要变成一枚真跑夹具（`Panels(1).Index` 与 `Panels("k").Index` **两头**都要钉，
 只钉一头正是这格能活着发货的原因）；负控 = 改前那台在同一份夹具上 AV / 无产物。
-**已出（第十九刀，2026-10-10，门待回填）**：数字/键两条各答各的 —— 新出口 `vb6_StatusBar_GetPanelIndex(hwnd, index)`（面板存在就交回自己的 1 基下标，不存在交 0，与 `*ByKey` 那枚的"未找到=0"同一口径），键下标仍走 `*ByKey`；发码侧只把 `index` 那一条的两个参数改成不同名字，三处同步（header 声明 / RTL 定义 / 发码点，各恰好 1 处，哨兵 R5-TRIPLE 钉住）。
+**已出（第十九刀，2026-10-10，门 #464）**：数字/键两条各答各的 —— 新出口 `vb6_StatusBar_GetPanelIndex(hwnd, index)`（面板存在就交回自己的 1 基下标，不存在交 0，与 `*ByKey` 那枚的"未找到=0"同一口径），键下标仍走 `*ByKey`；发码侧只把 `index` 那一条的两个参数改成不同名字，三处同步（header 声明 / RTL 定义 / 发码点，各恰好 1 处，哨兵 R5-TRIPLE 钉住）。
 **读数**（真跑）：夹具 `tests/sbhm` 加 HM06/HM07 两头 —— 新台两架构 `HM06-INDEX-BOTH-FORMS=True`、`HM07-RAW idx9=0`、9 行跑到 `HM-DONE`、rc=0；**负控就是那枚 AV 本身**：BASE 那台跑**同一份**夹具 `rc=0xC0000005`、只打 6 行、停在 HM05（注意：我那个 .bat 里 `if exist (...)` 块内的 `%ERRORLEVEL%` 是解析期展开的，打出来一片假 `RUN_EXIT=0` —— 退出码要用 python 直接起进程才算数，这是 [[c3-build-test-hazards]] 那条 for 循环课的同一形状）。
 **哨兵**：`check_statusbar_panel_hm.ps1` 长出 R5 两头（三处 `sbFinishByKey` 的两个出口名不凸相同 + 新出口三处同步），各自用一处假改动证红（多一处调用点 → R5-PAIRS=4；发码点改名 → R5-TRIPLE 报 `cgen_util_com.cpp got 0`），植完按 md5 还原（`c64f4f0bcf53`，字节级相同）。R1 也加两条产物面（by-index 恰好 2、by-key 恰好 1），负控直接用 BASE 树 + 同一份夹具就红。
 **可复用的一条**：凡是"两个参数理应不同名字"的函数型式（一个答数字下标、一个答键名），**结构性地**查得出来：数调用点 + 要求两个字面量不相等。这一样的针不靠语义、也不靠记忆，改错就红。
