@@ -13,6 +13,7 @@
 # 注：以 '#' 开头的行不参与比较（身份注脚：c3-exe 哈希、pe-lnk、runner 名天生随机器/随构建变）。
 # 2026-10-10 补一笔来源：`tests/sbhm/SbHm.vbp` 那一行按 CI 的 Emit manifest 作业登记（run 38025387585、head 3dc0f6a3 = 账 #299 第二十/二十一刀），其余 398 行仍是上面 #418 那批的读数。
 # 2026-10-10 第二十二刀的登记来源：门 #475（run 38034455442、head 64b4d43e、attempt 1）= 11 绿 + 唯一红是这道形状门，红因就是这三行还没登记。按 CI 那台自己交的清单登记（github/ci/emit-manifest 提交 9ffd4672）：移动的三行 = tests/ctrlstatusbar/CtrlStatusBar.vbp、tests/sbfont/SbFont.vbp、tests/sbhm/SbHm.vbp，其余 396 行逐字节没动。三行都因发码文本变了：设计块那行 MinWidth 从此走 *Hm 出口（sbhm 3 / ctrlstatusbar 2 / sbfont 3 处），夹具新增的判据行只在 sbhm 与 ctrlstatusbar 里。登记前本机已按同一份预测对上，登记后复算 399/399。
+# 2026-10-10 第二十三刀的登记来源：门 #478（run 38036598915、head 83f61e33、attempt 1）= 11 绿 + 唯一红是这道形状门，移动的一行 = tests/ctrlstatusbar/CtrlStatusBar.vbp（新增 SB36-TILES-BAR 那两条 Debug.Print 进了产物），其余 398 行逐字节没动 —— 含 tests/sbfont：那一趟只换了它过程体外的注释，而这类注释不进 --emit-c 产物。来源 = CI 那台自己交的清单（github/ci/emit-manifest）。
 sha256=cc5442d3a253db96f710f36211ac65ef3d1a0f57741437ef388d80afc192b380 ascii256=0bb6b6f96b4a8c3decdce233e48a15cdaf847773b3e980b558b132c80072a8ff rc=0 bytes=1769 tests/acc/acc_fam_main.bas
 sha256=c5326a40c06990dd025682e7511510568ba01c5c40301264481554cd64e1f10f ascii256=5603c2e6088a71cb791bb0942fedd3fc8a3457b27310e626dee694df794751f6 rc=0 bytes=7718 tests/acc/acc_fam.vbp
 sha256=64ca3fee78a5a527ff6433d36f32bcc19fd81618d6a16379479007b79c7fc3d6 ascii256=4f779f832dd9588e83d6f6f4458ecf49c443b3d5d9e66d7fac3f2ca02369d801 rc=0 bytes=1785 tests/acc/acc_main.bas
@@ -121,7 +122,7 @@ sha256=43271dad1d960cde9b17f0eb506a0467c50796467529c3abec9fa70b112e6db6 ascii256
 sha256=d8bc1481c8b388de9c6742d120d2eefce2115be3d58bf221c82154eb448f17d8 ascii256=6d728c8b4cc2e45dc872d7ccefec578688d51c87e48a8ee3fccb59319553d78b rc=0 bytes=58938 tests/ctrlslider/SlidApp.vbp
 sha256=99a8e171b6051720aea4f627c690c944458c80104a155bb4fef1a73d5e8444b1 ascii256=5a99de9dc1b062fefa1b616e122d8b8098e7c81fbbf0c0e97c253dae32e09637 rc=0 bytes=29432 tests/ctrlsstab/CtrlSSTab.vbp
 sha256=5b7f7933567aa2cd61a44ed8330fd0aaa29f2bc78e1668bdf627d4bd575e259a ascii256=8f4381621e3518509435ba069dab9b5f250984a6816af659850846adf2cea138 rc=0 bytes=20533 tests/ctrlstate/CtrlState.vbp
-sha256=72ecc0e2ed458e093219fc68425eff58877bd06d583597f90e894b79445b6944 ascii256=33047177bbc08819a6eeadc45b3a4205c742aa09e64167b3204fb6986255710c rc=0 bytes=19252 tests/ctrlstatusbar/CtrlStatusBar.vbp
+sha256=54dcfeacc095014e82dee477ab835ec0a67d0fa52ecf2785a43d67763593d31e ascii256=cba7453610cb9e27fcbd160b3a911517ee181025430c24bf6b54c626c87c4f91 rc=0 bytes=19610 tests/ctrlstatusbar/CtrlStatusBar.vbp
 sha256=7f5b2c41e6d977c1a2b066e078ef8a6829f1a48ff99e723789d12c0addef92f0 ascii256=5da7af689b16ff5a30526604940776b79e27d8745019623440794d4b17da09f6 rc=0 bytes=13607 tests/ctrltabindex/TiApp.vbp
 sha256=c9b4baa03c259f339a2b3bf5ecd346bd293ab98273259a693c7e4a8469a20843 ascii256=f902586abc5e161bb0686b68d1788b880acba44b2b11dc8602acbabce712a9c8 rc=0 bytes=25095 tests/ctrltoolbar/TbApp.vbp
 sha256=54e71ba4ca0d20e441073526afadfd490c23150e7b695b43804cea1fda786fdd ascii256=ae013111a1d19dc67bc5a9ea46ae305f644506110ba56f4d1511f9725856b860 rc=0 bytes=27687 tests/ctrltreeview/TvfApp.vbp
