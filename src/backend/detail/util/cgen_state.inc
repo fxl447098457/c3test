@@ -798,6 +798,50 @@
         }
         return false;
     }
+
+    // <vbeclipse> 账 #299 第二十一刀: "这枚成员集合的创建式是什么" —— 唯一一处答案。
+    // 这张表以前在**三处**各写一遍 (resolveComValue / resolveComMarkerForPack /
+    // cgen_expr_call_com_bind 的默认成员下标那一段)，而且每一处各缺几族: Panels 三处全缺
+    // ⇒ `Set po = SB.Panels(1)` 与 `With SB.Panels(1)` 的头一直发成
+    // `vb6_ComGetObjectProp(<HWND>, L"Panels")` = 拿 HWND 当 IDispatch 用 (一条读数都交不出)，
+    // 第二十刀只补了 resolveComValue 那一处 ⇒ 四形里只有 `For Each` 活了过来。
+    // 三条发射路的**返回语义**各不相同 (改 lastExpr_+isComMarker_ / 直接 return /
+    // 拼完还要再套一层 Item)，所以这里只交**串**，语义留在调用点。空串 = 不是已知的成员集合。
+    // 宿主槽前缀按族走各自的事实: ImageList 无窗口 ⇒ vb6_com_X 是实例指针；
+    // TreeView/Toolbar/StatusBar 是真窗口 ⇒ vb6_hwnd_X；ListView 用 listViewHwndExprOf
+    // (它还认 With 槽里那个裸 HWND 变量)；跨窗体 TreeView 查 externalTreeViewAccs_。
+    std::string memberCollectionObjectExpr(const std::string& hostExpr,
+                                           const std::string& memberName) const {
+        std::string mem = memberName;
+        for (char& ch : mem) ch = (char)tolower((unsigned char)ch);
+        if (mem == "nodes") {                                   // C29-8b
+            std::string bare = treeViewNameOfExpr(hostExpr);
+            if (!bare.empty()) return "vb6_TreeView_Nodes((void*)vb6_hwnd_" + bare + ")";
+            auto itExt = externalTreeViewAccs_.find(hostExpr);   // 跨窗体: 槽是访问器文本
+            if (itExt != externalTreeViewAccs_.end())
+                return "vb6_TreeView_Nodes((void*)" + itExt->second + ")";
+            return "";
+        }
+        if (mem == "buttons") {                                 // C29-5b
+            std::string bare = toolbarNameOfExpr(hostExpr);
+            return bare.empty() ? "" : "vb6_Toolbar_Buttons((void*)vb6_hwnd_" + bare + ")";
+        }
+        if (mem == "panels") {                                  // 账 #299
+            std::string bare = statusBarNameOfExpr(hostExpr);
+            return bare.empty() ? "" : "vb6_StatusBar_Panels((void*)vb6_hwnd_" + bare + ")";
+        }
+        if (mem == "listimages") {                               // C29-3
+            std::string bare = imageListNameOfExpr(hostExpr);
+            return bare.empty() ? "" : "vb6_ImageList_ListImages((void*)vb6_com_" + bare + ")";
+        }
+        if (mem == "listitems" || mem == "columnheaders") {      // C29-7
+            std::string lvHwnd = listViewHwndExprOf(hostExpr);
+            if (lvHwnd.empty()) return "";
+            return (mem == "listitems") ? ("vb6_ListView_ListItems((void*)" + lvHwnd + ")")
+                                        : ("vb6_ListView_ColumnHeaders((void*)" + lvHwnd + ")");
+        }
+        return "";
+    }
     // C29-DT-c: DTPicker 的裸名登记。认法照 treeViewNameOfExpr —— 它也是真窗口，
     // 判据方法 (SimChange/SimDropDown/SimCloseUp) 的宿主槽只会是 `vb6_hwnd_<裸名>`，
     // 名字比对同样要过标识符边界 (dt1 不能命中 dt10)。

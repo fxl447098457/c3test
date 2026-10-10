@@ -107,19 +107,9 @@ std::string CCodeGen::resolveComValue(const std::string& unpackType) {
     std::string objExpr = std::move(comObjExpr_);
     std::string memberName = std::move(comMemberName_);
 
-    // C29-5b: `Toolbar1.Buttons` → **真集合对象** (C29-3 那套成员对象机制，与 8b 的
-    // Nodes 同一条 cheapest route)。5a 那只只改道 `Buttons.Count` 的特例钩子就此退休 ——
-    // Count 现在由集合自己答 (memberobj → vb6_Toolbar_ButtonCount → TB_BUTTONCOUNT)，
-    // 仍然是**控件侧**证据，不是我那张表自说自话。
-    // 位置照旧赶在 P24-07 那段 early-bound 决策之前，否则会被当普通 COM 成员发成 vb6_ComGetProp。
-    if (Symbol::toLower(memberName) == "buttons") {
-        std::string tbName = toolbarNameOfExpr(objExpr);
-        if (!tbName.empty()) {
-            lastExpr_ = "vb6_Toolbar_Buttons((void*)vb6_hwnd_" + tbName + ")";
-            isComMarker_ = false;
-            return lastExpr_;
-        }
-    }
+    // 账 #299 第二十一刀: 这里原来还有一份 `Toolbar1.Buttons` 的抄本 (C29-5b 当时只
+    // 有这一处)。现在由下面 memberCollectionObjectExpr 那一处统一答 —— 那条同样排在
+    // P24-07 的 early-bound 决策之前，顺序与原意一致。
 
     // P20-44: OLE 拖放的 **DataObject 形参**成员 —— `Data.GetText` 等。
     // 处理器形参 `void** Data` 不是 IDispatch, 掉 COM 派发运行期必炸/答错。
@@ -145,43 +135,19 @@ std::string CCodeGen::resolveComValue(const std::string& unpackType) {
     // 今天由 memberobj 的真 IDispatch 应答，成员类型走既有的 COM 型别表
     // (`vb6_ComGetIntProp` / `vb6_ComGetStringProp`，九形探针量过)。
 
-    // C29-7: `ListView1.ListItems` / `.ColumnHeaders` → **真集合对象** (与 C29-3 的
-    // ImageList.ListImages 同一口径)。ListView 是**真窗口**, 宿主槽是 vb6_hwnd_X,
-    // 不是 ImageList 那种 vb6_com_X 实例指针。
+    // 账 #299 第二十一刀: 成员集合的创建式只由 memberCollectionObjectExpr 一处答
+    // (这张表以前在本函数里各写一遍，四族一套、Panels 那一族根本没有)。
+    // 位置留在原来那几段的地方: 必须排在 P20-39 / P20-40 两段 recognizer **之前** ——
+    // 那两段管链上更外层的成员 (ListImages.Count / Panels(i).Width)，本段先把**集合本身**
+    // 立起来；两边按成员名匹配，六个集合名与那两段的成员名互不相交，所以顺序不敏感。
     {
-        std::string lvLower = Symbol::toLower(memberName);
-        if (lvLower == "listitems" || lvLower == "columnheaders") {
-            std::string lvHwnd = listViewHwndExprOf(objExpr);
-            if (!lvHwnd.empty()) {
-                lastExpr_ = (lvLower == "listitems")
-                    ? ("vb6_ListView_ListItems((void*)" + lvHwnd + ")")
-                    : ("vb6_ListView_ColumnHeaders((void*)" + lvHwnd + ")");
-                isComMarker_ = false;
-                return lastExpr_;
-            }
-        }
-    }
-
-    // C29-8b: `TreeView1.Nodes` → **真集合对象** (与 C29-7 的 ListView 同一口径、
-    // 同一个 vb6forms_memberobj.c 机制)。不拦就发 `vb6_ComGetObjectProp(vb6_hwnd_X,
-    // L"Nodes")` —— HWND 不是 IDispatch, 链接过、运行期读数全空。
-    if (Symbol::toLower(memberName) == "nodes") {
-        std::string tvBare = treeViewNameOfExpr(objExpr);
-        if (!tvBare.empty()) {
-            lastExpr_ = "vb6_TreeView_Nodes((void*)vb6_hwnd_" + tvBare + ")";
-            isComMarker_ = false;
-            return lastExpr_;
-        }
-        // Fix <vbeclipse>: 跨窗体 TreeView (`frmViewViews.tvwViews.Nodes`) ——
-        // objExpr 是控件句柄访问器文本, 在 externalTreeViewAccs_ 里登记过。
-        auto itExtTv = externalTreeViewAccs_.find(objExpr);
-        if (itExtTv != externalTreeViewAccs_.end()) {
-            lastExpr_ = "vb6_TreeView_Nodes((void*)" + itExtTv->second + ")";
+        std::string collObj = memberCollectionObjectExpr(objExpr, memberName);
+        if (!collObj.empty()) {
+            lastExpr_ = collObj;
             isComMarker_ = false;
             return lastExpr_;
         }
     }
-
     // C29-OLE: `OLE1.Object` → 嵌入对象的 IDispatch (真 OLE 容器)。
     // 其它属性 (Class/OLEType/SizeMode…) 走属性表 (cgen_util_ctrl.cpp), 不在这拦。
     if (Symbol::toLower(memberName) == "object") {
@@ -190,24 +156,6 @@ std::string CCodeGen::resolveComValue(const std::string& unpackType) {
             lastExpr_ = "vb6_OleCon_GetObject((void*)vb6_hwnd_" + ocBare + ")";
             isComMarker_ = false;
             return lastExpr_;
-        }
-    }
-
-    // C29-3: `ImageList1.ListImages` → **真集合对象** (原生复刻的成员集合, 见
-    // vb6forms_memberobj.c)。必须排在下面那条 P20-39 分支之前: 那条管的是链上更外层的
-    // 成员 (ListImages.Count / ListImages(i).Key), 这里要先把**集合本身**立起来。
-    // 不拦就会发 `vb6_ComGetObjectProp(vb6_com_X, L"ListImages")` —— 而 ImageList 无窗口,
-    // vb6_com_X 槽里放的是 HIMAGELIST 实例指针 (不是 IDispatch), 对它做属性读 =
-    // 运行期拿垃圾当 vtable 用。
-    {
-        std::string liLower = Symbol::toLower(memberName);
-        if (liLower == "listimages") {
-            std::string liBare = imageListNameOfExpr(objExpr);
-            if (!liBare.empty()) {
-                lastExpr_ = "vb6_ImageList_ListImages((void*)vb6_com_" + liBare + ")";
-                isComMarker_ = false;
-                return lastExpr_;
-            }
         }
     }
 
@@ -363,27 +311,6 @@ std::string CCodeGen::resolveComValue(const std::string& unpackType) {
                                               isComMarker_ = false; return lastExpr_; }
             if (memLower == "tooltiptext")  { lastExpr_ = sbGet("vb6_StatusBar_GetPanelToolTip");
                                               isComMarker_ = false; return lastExpr_; }
-        }
-    }
-
-    // 账 #299: `StatusBar1.Panels` → **真集合对象** (与 C29-8b 的 Nodes、C29-5b 的
-    // Buttons、C29-7 的 ListItems 同一口径、同一个 vb6forms_memberobj.c 机制)。
-    // 排在上面那段 P20-40 recognizer **之后**: 那一段管链上更外层的成员
-    // (`Panels(i).Width` 这类), 这里要把**集合本身**立起来 —— 不拦就发
-    // `vb6_ComGetObjectProp(vb6_hwnd_X, L"Panels")`, 即拿 HWND 当 IDispatch 用,
-    // `Set po =` / 模块级 `As Object` / `For Each` / `With` 四形一条读数都交不出。
-    //
-    // 这一拦会把 isComMarker_ 落成 false, 所以**必须同时**把 `vb6_StatusBar_Panels(`
-    // 加进"什么算集合对象表达式"那三张名单 (cgen_expr_member_generic_access.inc 两处 +
-    // cgen_state.inc 的 isControlCollectionExpr)。少加一处, 链上更外层的成员就被调用方
-    // 当结构体字段直接拼 —— `Panels.Count = 3` 实测发成
-    // `vb6_StatusBar_Panels((void*)vb6_hwnd_SB1).Count` ⇒ cl C2224。
-    if (Symbol::toLower(memberName) == "panels") {
-        std::string sbBare = statusBarNameOfExpr(objExpr);
-        if (!sbBare.empty()) {
-            lastExpr_ = "vb6_StatusBar_Panels((void*)vb6_hwnd_" + sbBare + ")";
-            isComMarker_ = false;
-            return lastExpr_;
         }
     }
 
@@ -811,44 +738,10 @@ std::string CCodeGen::resolveComMarkerForPack(const std::string& packFnHint) {
         }
     }
 
-    // C29-7: `ListView1.ListItems` / `.ColumnHeaders` → 真集合对象 (同 resolveComValue)。
-    // 走这条的是"集合被当实参 / 被整体赋值"的场合, 例如 `Set c = ListView1.ListItems`。
+    // 账 #299 第二十一刀: 同一枚唯一出口 (本函数只管"被当对象/实参用"那一头)。
     {
-        std::string lvLower = Symbol::toLower(memName);
-        if (lvLower == "listitems" || lvLower == "columnheaders") {
-            std::string lvHwnd = listViewHwndExprOf(objExpr);
-            if (!lvHwnd.empty())
-                return (lvLower == "listitems")
-                    ? ("vb6_ListView_ListItems((void*)" + lvHwnd + ")")
-                    : ("vb6_ListView_ColumnHeaders((void*)" + lvHwnd + ")");
-        }
-    }
-
-    // C29-8b: `TreeView1.Nodes` → 真集合对象 (同 resolveComValue 那条)。走这条的是
-    // "集合被当实参 / 被整体赋值"的场合, 例如 `Set ns = TreeView1.Nodes`。
-    if (Symbol::toLower(memName) == "nodes") {
-        std::string tvBare = treeViewNameOfExpr(objExpr);
-        if (!tvBare.empty())
-            return "vb6_TreeView_Nodes((void*)vb6_hwnd_" + tvBare + ")";
-        auto itExtTv = externalTreeViewAccs_.find(objExpr);
-        if (itExtTv != externalTreeViewAccs_.end())
-            return "vb6_TreeView_Nodes((void*)" + itExtTv->second + ")";
-    }
-
-    // C29-5b: `Toolbar1.Buttons` → 真集合对象 (同 resolveComValue 那条)。
-    if (Symbol::toLower(memName) == "buttons") {
-        std::string tbBare = toolbarNameOfExpr(objExpr);
-        if (!tbBare.empty())
-            return "vb6_Toolbar_Buttons((void*)vb6_hwnd_" + tbBare + ")";
-    }
-
-    // 账 #299: `StatusBar1.Panels` → 真集合对象 (同 resolveComValue 那条)。走这条的
-    // 是"集合被当对象用"的场合: `Set po = SB1.Panels(1)`、模块级 `Dim mPo As Object`、
-    // `For Each pv In SB1.Panels`、`With SB1.Panels(1)`。
-    if (Symbol::toLower(memName) == "panels") {
-        std::string sbBare = statusBarNameOfExpr(objExpr);
-        if (!sbBare.empty())
-            return "vb6_StatusBar_Panels((void*)vb6_hwnd_" + sbBare + ")";
+        std::string collObj = memberCollectionObjectExpr(objExpr, memName);
+        if (!collObj.empty()) return collObj;
     }
 
     // C29-OLE: `OLE1.Object` (被当实参/整体赋值的场合, 如 `Set o = OLE1.Object`)。
@@ -856,17 +749,6 @@ std::string CCodeGen::resolveComMarkerForPack(const std::string& packFnHint) {
         std::string ocBare = oleConNameOfExpr(objExpr);
         if (!ocBare.empty())
             return "vb6_OleCon_GetObject((void*)vb6_hwnd_" + ocBare + ")";
-    }
-
-    // C29-3: `ImageList1.ListImages` → 真集合对象 (与 resolveComValue 那条同一口径)。
-    // 走这条的是"集合被当实参 / 被整体赋值"的场合, 例如 `Set c = ImageList1.ListImages`。
-    {
-        std::string liLower = Symbol::toLower(memName);
-        if (liLower == "listimages") {
-            std::string liBare = imageListNameOfExpr(objExpr);
-            if (!liBare.empty())
-                return "vb6_ImageList_ListImages((void*)vb6_com_" + liBare + ")";
-        }
     }
 
     // 前期绑定: 利用签名确定返回类型

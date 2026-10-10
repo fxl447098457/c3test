@@ -156,44 +156,13 @@
             // C29-3: ImageList 的 ListImages 是**真集合对象** (原生复刻, 见
             // vb6forms_memberobj.c), 不能对它发 vb6_ComGetObjectProp —— vb6_com_X 槽里
             // 放的是 HIMAGELIST 实例指针不是 IDispatch, 那样做等于拿垃圾当 vtable。
-            std::string collectionExpr;
-            {
-                if (Symbol::toLower(axMember) == "listimages") {
-                    std::string bareIL = imageListNameOfExpr(axObjExpr);
-                    if (!bareIL.empty())
-                        collectionExpr = "vb6_ImageList_ListImages((void*)vb6_com_" + bareIL + ")";
-                } else if (Symbol::toLower(axMember) == "buttons") {
-                    // C29-5b: Toolbar1.Buttons —— 宿主槽是 vb6_hwnd_X (真窗口)。
-                    std::string bareTB = toolbarNameOfExpr(axObjExpr);
-                    if (!bareTB.empty())
-                        collectionExpr = "vb6_Toolbar_Buttons((void*)vb6_hwnd_" + bareTB + ")";
-                } else if (Symbol::toLower(axMember) == "nodes") {
-                    // C29-8b: TreeView1.Nodes —— 宿主槽是 vb6_hwnd_X (真窗口)。
-                    std::string bareTV = treeViewNameOfExpr(axObjExpr);
-                    if (!bareTV.empty())
-                        collectionExpr = "vb6_TreeView_Nodes((void*)vb6_hwnd_" + bareTV + ")";
-                    // Fix <vbeclipse>: 跨窗体 TreeView (`frmViewViews.tvwViews.Nodes`) —
-                    // 宿主槽是控件句柄访问器文本。
-                    if (collectionExpr.empty()) {
-                        auto itExtTv = externalTreeViewAccs_.find(axObjExpr);
-                        if (itExtTv != externalTreeViewAccs_.end())
-                            collectionExpr = "vb6_TreeView_Nodes((void*)" + itExtTv->second + ")";
-                    }
-                } else {
-                    // C29-7: ListView 的 ListItems / ColumnHeaders 同一口径。
-                    // ⚠ 宿主槽是 **vb6_hwnd_X** (ListView 是真窗口), 不是 vb6_com_X。
-                    std::string memLV = Symbol::toLower(axMember);
-                    if (memLV == "listitems" || memLV == "columnheaders") {
-                        std::string lvHwnd = listViewHwndExprOf(axObjExpr);
-                        if (!lvHwnd.empty())
-                            collectionExpr = (memLV == "listitems")
-                                ? ("vb6_ListView_ListItems((void*)" + lvHwnd + ")")
-                                : ("vb6_ListView_ColumnHeaders((void*)" + lvHwnd + ")");
-                    }
-                }
-                if (collectionExpr.empty())
-                    collectionExpr = "vb6_ComGetObjectProp(" + axObjExpr + ", L\"" + axMember + "\")";
-            }
+            // 账 #299 第二十一刀: 这张表以前在这里也抄了一份 (listimages/buttons/nodes/
+            // listitems+columnheaders 四族，**没有 panels**) ⇒ `Set po = SB.Panels(1)` 与
+            // `With SB.Panels(1)` 的头一直发成拿 HWND 当 IDispatch。现在问唯一那一处，
+            // 认不出来才兜底。
+            std::string collectionExpr = memberCollectionObjectExpr(axObjExpr, axMember);
+            if (collectionExpr.empty())
+                collectionExpr = "vb6_ComGetObjectProp(" + axObjExpr + ", L\"" + axMember + "\")";
             // Step 2: 调用 Item(idx) 获取集合中的元素
             std::vector<std::string> packedArgs;
             for (size_t i = 0; i < node.positional.size(); i++) {

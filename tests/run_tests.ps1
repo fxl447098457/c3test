@@ -4335,17 +4335,19 @@ if ($Category -in @("all", "run", "vbp")) {
     # `For Each` 连循环都没进（实测 0 次，负控 = 改前的编译器）。
     # HM08 钉三头：迭代 3 次 + 每格 Index 之和 6 + 每格 Text 长度之和 5（"A"+"BB"+"SP"）——
     # 只钉"进过循环"会放过"集合只出一格"或"下标全答同一个"。
-    # 宽度那一路只打 RAW：`Panels(i).Width` 交回的仍是**请求值**（§B41 剩下那一格），
-    # 钉死它会让本刀与那一格缠在一起。同一条 RAW 里的 want= 是同一个成员改走
-    # `CLng(Panels(i).Width)` 实参那一路的读数，实测 0（对象那一形反而交回 157）
-    # ⇒ #299 的病名落在"实参那一步把接收者重解了一遍"，不在 For Each。
-    # HM09..HM11 刻意只打 RAW、不判 True/False：这一刀落了四种对象写法里的**一种**，
-    # `Set` / 模块级 `As Object` / `With` 三形的头由 Set-RHS 与 With-object-ref 那两条
-    # 发射路拼，不经过集合拦子 ⇒ 仍然读空/读 0。读数留在产物里，剩下的那一格记在台账。
+    # 宽度那一路仍只打 RAW：`Panels(i).Width` 交回的仍是**请求值**（§B41 剩下那一格），
+    # 钉死它会让这一族的两格缠在一起。
+    # 第二十一刀（同一账）：那张"成员集合由谁造"的表以前在**三处**各抄一遍（值语境 / 对象语境 /
+    # 默认成员下标那个 binder），三处都缺 StatusBar 这一行 ⇒ `Set` / 模块级 `As Object` / `With`
+    # 三形一直读空/读 0。收成一处出口 memberCollectionObjectExpr 之后，HM09..HM11 从"只打读数"
+    # 升成判据，证人全部**不经过 RTL**（w1/w2 来自 SB_GETPARTS，键/下标/文本来自设计块）。
+    # HM12 钉的正是本账开局那张脸：成员读法坐在**实参**位上（CStr(...) / CLng(...)）—— 实测从
+    # 空串/0 变成 57/100 ⇒ 台账里"实参那一步重解接收者"那半不是第二个缺陷，就是同一处缺行。
     $sbHmExpected = @("HM00-RAW w1=", "HM01-HM-DESIGN-WIDTH=True", "HM02-SINGLE-CONVERSION=True",
         "HM03-SPRING-TILES=True", "HM04-PANELS-ARRIVED=True", "HM05-RAW cs=",
         "HM06-INDEX-BOTH-FORMS=True", "HM07-RAW idx9=", "HM08-FOREACH-COLLECTION=True",
-        "HM08-RAW fe=", "HM09-RAW objvar", "HM10-RAW modvar", "HM11-RAW with=", "HM-DONE")
+        "HM08-RAW fe=", "HM09-OBJVAR-ROADS=True", "HM10-MODVAR-ROADS=True",
+        "HM11-WITH-AND-KEYSUB=True", "HM12-ARG-ROADS=True", "HM-DONE")
     Test-Vbp "sbhm" "$Tests\sbhm\SbHm.vbp" $sbHmExpected
     Test-Vbp "sbhm_x86" "$Tests\sbhm\SbHm.vbp" $sbHmExpected -Arch "x86"
     # <vbeclipse> 账 #221 = C29-PL-a: Picture.Line 落原生 GDI。这条判据只能**画完再问像素** ——

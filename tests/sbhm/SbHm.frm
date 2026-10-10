@@ -85,7 +85,7 @@ Private Sub Form_Load()
     Dim w1 As Long, w2 As Long, e3 As Long, cw As Long
     Dim ok1 As Boolean, ok2 As Boolean, ok3 As Boolean, ok4 As Boolean
     Dim ok5 As Boolean
-    Dim ok6 As Boolean
+    Dim ok6 As Boolean, ok7 As Boolean, ok8 As Boolean, ok9 As Boolean, ok10 As Boolean
     Dim po As Object
     Dim pv As Variant
     Dim withW As Long
@@ -162,23 +162,33 @@ Private Sub Form_Load()
     Debug.Print "HM08-RAW fe=" & CStr(feCount) & " idx=" & CStr(feIdx) & " txt=" & CStr(feTxt) _
                 & " sum=" & CStr(feSum) & " want=" & CStr(feWant)
 
-    ' HM09..HM11 are RAW-only on purpose: the knife landed one of the four object
-    ' spellings. `Set po =`, a module-level `As Object` and `With ...` still build their
-    ' head in the emitter that handles Set-RHS / With-object-ref, which never asks the
-    ' collection interceptor - so they still hand back the HWND-as-IDispatch chain and
-    ' read empty/zero. Recorded in the ledger as the next face; these lines carry the
-    ' reading, not a judgment, so the gate cannot silently bless them.
+    ' HM09..HM12 = the second knife on this account (zhang 299, 21st cut). The map
+    ' "which creator answers this member-collection name" used to be hand-copied into THREE
+    ' emitters (value context / object context / the default-member indexer that Set-RHS and
+    ' With-object-ref go through), and the StatusBar row was missing from all three - so
+    ' those spellings kept handing back the HWND-as-IDispatch chain. Every judgment below is
+    ' still a CROSS-READ against a witness that is NOT the RTL: w1/w2 come from SB_GETPARTS,
+    ' key/index/text from the design block.
     Set po = StatusBar1.Panels(1)
-    Debug.Print "HM09-RAW objvar w=" & CStr(po.Width) & " k=" & CStr(po.Key) _
-                & " i=" & CStr(po.Index)
+    ok7 = (CStr(po.Width) = CStr(w1)) And (po.Key = "fx1") And (CStr(po.Index) = "1")
+    Debug.Print "HM09-OBJVAR-ROADS=" & TF(ok7)
     Set mPo = StatusBar1.Panels(2)
-    Debug.Print "HM10-RAW modvar w=" & CStr(mPo.Width) & " t=" & CStr(mPo.Text)
+    ok8 = (CStr(mPo.Width) = CStr(w2)) And (mPo.Text = "BB")
+    Debug.Print "HM10-MODVAR-ROADS=" & TF(ok8)
     With StatusBar1.Panels(1)
         withW = .Width
     End With
     Set po = StatusBar1.Panels("fx2")
-    Debug.Print "HM11-RAW with=" & CStr(withW) & " keyobj i=" & CStr(po.Index) _
-                & " w=" & CStr(po.Width)
+    ok9 = (withW = w1) And (CStr(po.Index) = "2") And (CStr(po.Width) = CStr(w2))
+    Debug.Print "HM11-WITH-AND-KEYSUB=" & TF(ok9)
+
+    ' HM12 = the face this account was opened with: the member read sitting in an ARGUMENT
+    ' (CStr / CLng). It reads the requested width now through the same collection object, so
+    ' the "argument re-resolves the receiver" half of the diagnosis turned out to be the very
+    ' same missing table row - not a second defect.
+    ok10 = (CStr(StatusBar1.Panels(1).Width) = CStr(w1)) _
+           And (CLng(StatusBar1.Panels(2).Width) = w2)
+    Debug.Print "HM12-ARG-ROADS=" & TF(ok10)
 
     Debug.Print "HM-DONE"
     Unload Me

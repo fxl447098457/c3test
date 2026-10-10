@@ -181,7 +181,7 @@ foreach ($f in $tri) {
 # = 拿 HWND 当 IDispatch 用（C29-8b 当年给 TreeView Nodes 写下的同一句症状），
 # `For Each` 连循环都没进 —— BASE 那台跑同一份夹具是 fe=0 idx=0 txt=0，
 # 第二十刀之后是 fe=3 idx=6 txt=5。
-# 所以这里钉的是**读数**不是愿望：剩下的三形还走 Set-RHS / With-object-ref 那两条发射路。
+# 第二十一刀把四条发射路（值语境 / 对象语境 / 默认成员下标的 binder）收成同一处出口，所以这里钉的是**读数**不是愿望。
 $gaPath = Join-Path $Root 'src\backend\detail\expr\cgen_expr_member_generic_access.inc'
 $stPath = Join-Path $Root 'src\backend\detail\util\cgen_state.inc'
 $moPath = Join-Path $rtlRoot 'core\vb6forms\vb6forms_memberobj.c'
@@ -190,38 +190,82 @@ $gaTxt = [System.IO.File]::ReadAllText($gaPath)
 $stTxt = [System.IO.File]::ReadAllText($stPath)
 $moTxt = [System.IO.File]::ReadAllText($moPath)
 $hdTxt = [System.IO.File]::ReadAllText($hdPath)
+# com_bind 那条默认成员下标的发射路（第二十一刀起也问同一处出口）
+$cbTxt = [System.IO.File]::ReadAllText((Join-Path $Root 'src\backend\detail\expr\cgen_expr_call_com_bind.inc'))
 
-# R6-A 产物：集合本体由 memberobj 那枚入口造出来，For Each 走的就是它
-if ((Count-Of 'vb6_StatusBar_Panels((void*)vb6_hwnd_StatusBar1)') -ne 1) {
-    $viol += 'R6-COLLECTION-OBJ want exactly 1 vb6_StatusBar_Panels(...) in the emit'
-}
-if ((Count-Of 'vb6_ForEach_Init(vb6_StatusBar_Panels(') -ne 1) {
-    $viol += 'R6-FOREACH want exactly 1 ForEach over the real collection object'
-}
-
-# R6-B 还重叠着的那一格是**现状 8 处**，只许降不许升：下一刀落 Set / With / 模块级 Object
-# 那三条发射路时这个数应当往 0 走；长回去就是有人又给 HWND 点属性。
-$still = Count-Of 'vb6_ComGetObjectProp(vb6_hwnd_StatusBar1, L"Panels")'
-if ($still -gt 8) {
-    $viol += ('R6-OVERLAP HWND-as-IDispatch heads grew 8 -> ' + $still + ' (只许降不许升)')
-}
-if ($still -lt 8) {
-    Write-Host ('NOTE R6-OVERLAP 已降到 ' + $still + '（钉的是 8）—— 那一格落了就把针面一起降下来')
+# R6-A 产物：四形全部由 memberobj 那枚入口造出来（第二十一刀之后 Set / 模块级 Object /
+# With / For Each 走的是同一处出口），而"拿 HWND 当 IDispatch"那一形必须归零 ——
+# 改前三形各有 1 处、实参那一路还有 4 处（合计 8 处 stale head），这一条就是它的墓碑。
+$coll = Count-Of 'vb6_StatusBar_Panels((void*)vb6_hwnd_StatusBar1)'
+$collItem = Count-Of 'vb6_ComCallObject(vb6_StatusBar_Panels('
+$collEnum = Count-Of 'vb6_ForEach_Init(vb6_StatusBar_Panels('
+$stale = Count-Of 'vb6_ComGetObjectProp(vb6_hwnd_StatusBar1, L"Panels")'
+if ($coll -ne 11) { $viol += ('R6-CREATOR-EMIT want exactly 11 (10 走 Item + 1 走枚举), got ' + $coll) }
+if ($collItem -ne 10) { $viol += ('R6-ITEM-VIA-CREATOR want exactly 10, got ' + $collItem) }
+if ($collEnum -ne 1) { $viol += ('R6-FOREACH-VIA-CREATOR want exactly 1, got ' + $collEnum) }
+if ($stale -ne 0) {
+    $viol += ('R6-OVERLAP ' + $stale + ' head(s) still use the HWND as an IDispatch - ' +
+              '成员集合的创建式只许 memberCollectionObjectExpr 一处答')
 }
 
-# R6-C 三处"什么算集合对象表达式"的名单必须同时认这一枚前缀。
+# R6-B 认"这串表达式是集合对象"的三张名单必须同时认这一枚前缀。
 # 少一处的后果是**实测过的**：只补拦子不补名单，`Panels.Count = 3` 发成
-# vb6_StatusBar_Panels((void*)vb6_hwnd_SB1).Count ⇒ cl C2224（void* 上点成员）。
+# `vb6_StatusBar_Panels((void*)vb6_hwnd_SB1).Count` ⇒ cl C2224（void* 上点成员）。
 $gaN = ([regex]::Matches($gaTxt, 'find\("vb6_StatusBar_Panels\("\)')).Count
 if ($gaN -ne 2) { $viol += ('R6-LIST generic_access must carry the prefix at both sites, got ' + $gaN) }
 $stK = ([regex]::Matches($stTxt, '"vb6_StatusBar_Panels\(\(void\*\)vb6_"')).Count
 if ($stK -ne 1) { $viol += ('R6-LIST statusBarNameOfExpr kHeads want exactly 1, got ' + $stK) }
 $stC = ([regex]::Matches($stTxt, '"vb6_StatusBar_Panels\("')).Count
 if ($stC -ne 1) { $viol += ('R6-LIST isControlCollectionExpr want exactly 1, got ' + $stC) }
-$cgN = ([regex]::Matches($comTxt, '== "panels"')).Count
-if ($cgN -ne 2) { $viol += ('R6-INTERCEPT cgen_util_com must answer panels at the value+object sites, got ' + $cgN) }
 
-# R6-D RTL 那一头：入口定义 / 声明 / Item 按 Key 那一档，各恰好一次
+# R6-C 出口本身只许有一处**定义**，并且三条发射路都问它（值语境 / 对象语境 / 默认成员下标）。
+$cgN = ([regex]::Matches($comTxt, 'memberCollectionObjectExpr\(')).Count
+$cbN = ([regex]::Matches($cbTxt, 'memberCollectionObjectExpr\(')).Count
+$defN = ([regex]::Matches($stTxt, 'std::string memberCollectionObjectExpr\(')).Count
+if ($defN -ne 1) { $viol += ('R6-EXIT definition must exist exactly once in cgen_state.inc, got ' + $defN) }
+if ($cgN -ne 2) { $viol += ('R6-EXIT-CALLS cgen_util_com must ask the exit twice (value+object), got ' + $cgN) }
+if ($cbN -ne 1) { $viol += ('R6-EXIT-CALLS com-bind indexer must ask the exit once, got ' + $cbN) }
+
+# R6-D 一表到底只许一处写：**创建式字面量**在非注释行里只许出现在 cgen_state.inc。
+# 这六枚是仓里"成员集合由谁造"这张表的全部行；再有一处在别的文件里出现，就是第二份答案
+# (#234 拿 DC 抄两遍、#235 画笔色两份存储、#229/#88 同一族的复发)。
+$creatorLits = @(
+    'vb6_TreeView_Nodes((void*)', 'vb6_Toolbar_Buttons((void*)', 'vb6_StatusBar_Panels((void*)',
+    'vb6_ImageList_ListImages((void*)', 'vb6_ListView_ListItems((void*)', 'vb6_ListView_ColumnHeaders((void*)')
+$creatorWant = @{
+    'vb6_TreeView_Nodes((void*)' = 2; 'vb6_Toolbar_Buttons((void*)' = 1
+    'vb6_StatusBar_Panels((void*)' = 2; 'vb6_ImageList_ListImages((void*)' = 2
+    'vb6_ListView_ListItems((void*)' = 2; 'vb6_ListView_ColumnHeaders((void*)' = 2 }
+$creatorFiles = @{}
+$creatorTot = @{}
+foreach ($L in $creatorLits) { $creatorTot[$L] = 0 }
+Get-ChildItem -Path (Join-Path $Root 'src\backend') -Recurse -File -Include *.cpp, *.inc, *.h | ForEach-Object {
+    $rel = ($_.FullName.Substring($Root.Length).Replace('\', '/').TrimStart('/'))
+    foreach ($ln in ([System.IO.File]::ReadAllText($_.FullName) -replace "`r`n", "`n").Split("`n")) {
+        $s = $ln.Trim()
+        if ($s.StartsWith('//')) { continue }
+        foreach ($L in $creatorLits) {
+            $n = ([regex]::Matches($s, [regex]::Escape($L))).Count
+            if ($n -gt 0) {
+                $creatorTot[$L] += $n
+                if (-not $creatorFiles.ContainsKey($L)) { $creatorFiles[$L] = @{} }
+                $creatorFiles[$L][$rel] = 1
+            }
+        }
+    }
+}
+foreach ($L in $creatorLits) {
+    $got = $creatorTot[$L]
+    $want = $creatorWant[$L]
+    if ($got -ne $want) { $viol += ("R6-ONE-MAP $L code-line count want exactly $want, got $got") }
+    foreach ($f in $creatorFiles[$L].Keys) {
+        if ($f -ne 'src/backend/detail/util/cgen_state.inc') {
+            $viol += ("R6-ONE-MAP-SITE $L is also written in $f - the table must live in one place")
+        }
+    }
+}
+
+# R6-E RTL 那一头：入口定义 / 声明 / Item 按 Key 那一档，各恰好一次
 if (([regex]::Matches($moTxt, 'vb6_StatusBar_Panels\(void\* hwnd\)')).Count -ne 1) {
     $viol += 'R6-CREATOR vb6forms_memberobj.c must define the collection entry exactly once'
 }
@@ -241,17 +285,23 @@ if (([regex]::Matches($moTxt, 'memSetI4\(out, vb6_StatusBar_GetPanelIndex\(p->ow
     $viol += 'R6-INDEX-AUTHORITY Panel.Index must ask the one getter exactly once'
 }
 
+$oneMapTot = 0
+foreach ($L in $creatorLits) { $oneMapTot += $creatorTot[$L] }
+if ($oneMapTot -lt 11) { $viol += ("R4-R6-ONEMAP the one-map census found $oneMapTot sites, floor 11 = it is idling") }
+
 # ---------- R4: 防空转 ----------
 if ($rtlFiles -lt 100) { $viol += "R4-RTL-FILES floor 100, got $rtlFiles" }
 if ($HmFiles.Count -ne 5) { $viol += 'R4-LIST the allowlist itself changed size (must stay 5 files)' }
 if ($HmWantTotal -ne 13) { $viol += 'R4-TOTAL the pinned total changed (must stay 13)' }
 if ($pm.Count -lt 1) { $viol += 'R4-R5-CENSUS the pair scan found nothing = the sentinel is idling' }
 if (($gaN + $stK + $stC + $cgN) -lt 5) { $viol += 'R4-R6-CENSUS the panels-list scan found nothing = the sentinel is idling' }
+if (($coll + $collItem + $collEnum + $defN + $cbN) -lt 15) { $viol += 'R4-R6-CENSUS2 the panels emit/exit scan found nothing = the sentinel is idling' }
 
 if ($viol.Count -eq 0) {
     Write-Host ("PASS static_sentinel_statusbar_panel_hm: emit Hm=2 add=3 autosz=1 plain=0 / himetric sites " +
-                "$sum in $($perFile.Count) files / rtl_files=$rtlFiles / panels obj=1 still=$still lists=" +
-                "$gaN+$stK+$stC+$cgN inline=$inline")
+                "$sum in $($perFile.Count) files / rtl_files=$rtlFiles / panels coll=$coll item=$collItem " +
+                "enum=$collEnum stale=$stale exit=$defN+$cgN+$cbN lists=$gaN+$stK+$stC " +
+                "onemap=$oneMapTot inline=$inline")
     exit 0
 }
 Write-Host 'FAIL statusbar_panel_hm:'
