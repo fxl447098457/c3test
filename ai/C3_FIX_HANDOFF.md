@@ -2133,6 +2133,15 @@ BASE（dev 头 `4e9d05ff`，不含本刀）在 `For Each` 那一形 **一次都�
 逐行对过 CI 两份清单与 dev 的登记，除这一行外 398 行全部相同）。**本刀带 `[skip ci]` 推，
 没有过门**：谁下一次跑 GA，先按 §B73 的口径把这一行登记掉再判形状红。
 
+**第二十一刀已出（落的正是上一轮写下的那道题面：三条发射路改问同一处出口）**：
+- **动了什么**：`src/backend/detail/util/cgen_state.inc` 长出唯一出口 `memberCollectionObjectExpr(hostExpr, memberName)` —— 六族成员集合的创建式（Nodes / Buttons / Panels / ListImages / ListItems / ColumnHeaders）从此只在这一处写。宿主槽按各族自己的事实走：ImageList 无窗口 ⇒ `vb6_com_X` 是实例指针；TreeView / Toolbar / StatusBar 是真窗口 ⇒ `vb6_hwnd_X`；ListView 用 `listViewHwndExprOf`（它还认 With 槽里那枚裸 HWND 变量）；跨窗体 TreeView 查 `externalTreeViewAccs_`。出口只交**串**：三条路的返回语义不一样（值语境要改 `lastExpr_` 与 `isComMarker_`、对象语境直接 return、默认成员下标那一路拼完还得再套一层 Item），语义留在调用点。三份抄本一起撤：`resolveComValue` 里四段（buttons / listitems+columnheaders / nodes / listimages）再加 panels 那一段、`resolveComMarkerForPack` 里五段、`cgen_expr_call_com_bind.inc` 那段四族 if/else。行数 +14/-132、+7/-38、+44/0，`cgen_util_com.cpp` 51906 到 46587 字节。
+- **读数**：夹具 HM09..HM12 从「只打 RAW」升成判据，NEW 的 x64 与 x86 两台四形全 True；A/B 拿第二十刀那枚 exe 编跑同一份夹具，四形全 False 而且 want=0（`HM08-RAW ... want=` 那一格当时留的就是这个数）。HM01..HM08 两台与第二十刀一字不差 ⇒ 不是把邻居推动的。
+- **病名第三次改口（这次是撤掉一格）**：上一轮写的 (b)「实参那一步把接收者重解了一遍」**不是第二个机制**。HM12 钉的正是那张脸（`CStr(Panels(1).Width)` 与 `CLng(Panels(2).Width)`），出口收口之后它直接从空串与 0 变成 57 与 100 —— 与 (a) 同因：默认成员下标那一路的表也缺 panels 这一行。⇒ 本账到此只剩**单位**那一格，它归 §B41 第二格（getter 该交排版后的宽），与 #298/§B129 合批。
+- **零行为改动的证据**：撤掉最后一份重复（com_bind 那四族）前后，7 份工程 `--emit-c` 逐字节相同（TbApp / TvfApp / CtrlImageList / C29ImgObj / C29ListView / SbEvent / SbHm，快照 `.build/b422before` 与 `.build/b423after`）；相对 dev 头，产物变的只有状态条那几行 —— 变的正是本刀要修的那张脸。
+- **哨兵 R6 跟着改形**（`check_statusbar_panel_hm.ps1`）：从「三处名单 + 两处拦子」改成钉出口 —— 定义恰好 1 处且住在 `cgen_state.inc` / 问出口 2+1（值语境与对象语境、下标 binder）/ 认前缀那三张名单 2+1+1（这一张不改：它是第二十一刀的前提而不是收口对象，漏一处就是实测过的 C2224）/ **创建式字面量的代码行 census**：六族 2+1+2+2+2+2 = 11，且只许出现在 `cgen_state.inc`，别处出现即 `R6-ONE-MAP-SITE`（这一格防的就是「表又被抄走一遍」，#234 拿 DC 抄两遍、#235 画笔色两份存储同一族）/ 产物里 `vb6_ComGetObjectProp(vb6_hwnd_StatusBar1, L"Panels")` = 0（墓碑）/ inline `p->index` 小于等于 6 只许降。PASS 行同步长出 onemap=11。
+- **负控**：拿第二十刀**之前**那棵树（`.build/wt_mf @ 4e9d05ff`）整棵跑新哨兵 —— R6 全族红（`R6-ONE-MAP-SITE` 同时点到 `cgen_util_com.cpp` 与 `cgen_expr_call_com_bind.inc` = 那张表从前真住两处；出口定义 0；`R6-THIRD-ANSWER` 读数 7 大于 6），两条 census 防空转的守卫同时红，而 R1..R5 全绿 ⇒ 红得对症，也不是把旧账一起算进这一刀。
+- **清单那一行仍然欠**（`tests/sbhm/SbHm.vbp`）：夹具体与产物都改了，要按过门那台的读数登记。第二十刀带的是 `[skip ci]`、没门；本刀是源码级改动 ⇒ **不带 skip ci**，同一趟把第二十刀那半一起过门。门绿之后按 §B73 的口径登记，再判形状红。
+
 
 ### B125 账 #278 第十四刀已出 = 两枚集合 Clear 与 CommonDialog 那六枚 Show* 进零实参那张表：「拼法只许来自表」在 Show* 这一族落地（另立一条新判据：哨兵的文件头读不成注释就会绿着空转，2026-10-10，门 #456 attempt 1 全绿（run 37995142510、head `3f972622`、12/12 全 completed/success、非绿 0、created→updated 10m22s；**Emit manifest (shape gate) 那一跑同绿** ⇒ 「398 份逐字节相同」被 CI 那台独立复算证实））
 
