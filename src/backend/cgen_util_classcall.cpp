@@ -660,27 +660,20 @@ bool CCodeGen::emitUcInstanceMemberExpr(const std::string& ucClass,
         lastExpr_ = resolvedFn;
         return true;
     }
-    // 值上下文无括号调用: 按形参表补 Optional 默认值 (同 Fix 089h)
-    // Fix 239: `_prop_get_` **也要**补 —— 此前整个 `_prop_` 家族被一刀排除, 于是
-    // `ListView2.InsertMark`
-    //   (Property Get InsertMark(Optional ByRef After As Boolean) As LvwListItem
-    //    ⇒ C 声明 vb6_ListView_prop_get_InsertMark(me, int16_t* After, int _has_After))
-    // 发成 `vb6_ListView_prop_get_InsertMark(me)` → C2198 ×14 (ComCtlsDemo MainForm.c
-    // 1528/1539/1543/1559/1571/1625/1629/1644/1648/1693 及 ListBoxW/TreeView 同类)。
-    // 裸 `obj.Prop` 在 VB6 里只在形参全可省略时合法, 故按形参表补默认值正是它要的;
-    // 已带的实参走 asCallCallee_ 那条 (带括号调用), 不会走到这里。
-    // 只放 Get 进来 —— `_prop_let_`/`_prop_set_` 是写方向, 另有 Fix 158h 那条口径。
+    // 值上下文无括号调用: 按形参表补 Optional 默认值 (同 Fix 089h)。
+    // Fix 239/240: `_prop_get_` 也要补, 但形参表必须取**读方向**那一份 ——
+    // findClassMemberCallParams 对 Get+Let 并存的属性交回 Let 表 (末参 Value),
+    // 按它补会多发一枚 vb6_VariantEmpty() 顶到 `int _has_After` → C2440。
     const bool isPropGet239 = resolvedFn.find("_prop_get_") != std::string::npos;
     std::vector<ParameterInfo> paramsUC;
     bool isBuiltinUC = false;
-    // Fix 240: `_prop_get_` 用**读方向**参数表 (findClassMemberGetParams)。上面那句
-    // "属性不 pad" 的注释与实测一致 —— findClassMemberCallParams 对 Get+Let 并存的属性
-    // 交回 Let 表 [After, Value], 按它 pad 会多发一枚 `vb6_VariantEmpty()` 顶到
-    // `int _has_After` → C2440。只读方向、无回退: 认不出就不 pad。
-    const bool paramsOkUC = isPropGet239
-        ? findClassMemberGetParams(ucClass, member, paramsUC)
-        : (findClassMemberCallParams(ucClass, member, paramsUC, isBuiltinUC)
-           && !isBuiltinUC);
+    bool paramsOkUC = findClassMemberCallParams(ucClass, member, paramsUC, isBuiltinUC)
+                      && !isBuiltinUC;
+    if (isPropGet239) {
+        // 读方向那份说了算: 取不到就**不补** (CallParams 对 Get+Let 并存给的是 Let 表)
+        paramsOkUC = findClassMemberGetParams(ucClass, member, paramsUC);
+        isBuiltinUC = false;
+    }
     if ((resolvedFn.find("_prop_") == std::string::npos || isPropGet239)
         && paramsOkUC
         && !paramsUC.empty()) {
