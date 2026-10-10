@@ -1998,6 +1998,7 @@ marker、重编，之后 `check_rtl_embedded` 报 **125/125 逐字节相同**。
 只在推 dev 时才硬判红。现在它是硬的：新加的自救面已经把「处理它」压成一条命令，本线倾向保持硬判。
 
 ### B104 那 5 条「窗体伪成员」不是缺项 —— 发码面早就答对了，只有诊断在报噪声（2026-10-09 量完，**未开工**）
+> **2026-10-10 复测（把这节的标题从"未开工"改成"已出"的依据）**：探针 `.build/b556_probe/P104.frm`（`Option Explicit` + 裸写 `w = ScaleWidth` 与 `Debug.Print ScaleWidth, ScaleHeight, WindowState`）在现在这台 C3.exe 上：三条读数 `vb6_GetScaleWidth/…ScaleHeight/…WindowState` 各就位，**诊断一条都不报**（rc=0，stderr 空）。 这一格的堵点由 §B109（账 #278 第四刀，门 #445）解掉 —— 语义层现在include `common/form_pseudo.hpp` 并问 `kFormPseudoRows`（`semantic_analyzer_expr.cpp:7` 与 `:158`）。**本节原来的"未开工"是这刀之后没回头改的标题**， 不是还欠着一格。
 
 探针 `.build/b902_probe`（一枚最小 `.frm` + `Option Explicit`，三种写法并排），实测产物与诊断**各是一半**：
 
@@ -2082,7 +2083,7 @@ marker、重编，之后 `check_rtl_embedded` 报 **125/125 逐字节相同**。
   登记 = 按 CI 那台自己交的清单（`scripts/rebless_emit_manifest.ps1 -Bless`，numstat 1/1、行序零移动、复算 399/399、`check_manifest_coverage` 绿）。**复验 = 门 #479**（run 38037616826、head `29582214`、attempt 1、12 条 check-run 全 completed/success、非绿 0，其中 `Emit manifest (shape oracle)` 绿 ⇒ 那一行的新哈希被 CI 那台独立复算证实，而 `Tests (vbp #1..#4)` 四片全绿 ⇒ `SB36-TILES-BAR` 在两架构真跑过）。
 - **这一趟没验的一格（不立案，只记形状）**：当弹簧档的 `MinWidth` **大于**它分到的空间时，第二遍的兜底照样会把末格顶出客户区（下限赢）—— 本机夹具够不着这个条件（下限折出来 22 缇，实际分到 3600+ 缇），要一枚故意收窄的夹具才测得到，而**那种情形下 VB6 本人交回什么没有读数** ⇒ 别照猜改。
 
-### B133 OLE 容器 / Picture 那两条单位换算路没有行为面（账 #301，**开着 —— 第二十四刀量到**）
+### B133 OLE 容器 / Picture 那两条单位换算路没有行为面（账 #301，**Picture 那一格已出 —— 第二十六刀，2026-10-10，门 #483（源码那一跑）+ 门 #484 attempt 2（登记那一跑，12/12）；olecon 与 ax_site_ext 两格仍开着**）
 
 并表 §B129 时给搬掉的三处各找一枚判据，结果是三处都没有**行为**读数可拿 —— 形状钉得住，行为钉不住：
 
@@ -2101,6 +2102,15 @@ marker、重编，之后 `check_rtl_embedded` 报 **125/125 逐字节相同**。
 olecon（唯一会把尺寸真交给外部对象的一枚）> 非 Stretch 的 Picture（补法很轻：一枚 `Stretch = 0` + 装图 + 读回画出来的宽）>
 `ax_site_ext`（要换显示缩放，本机无手段，先挂着）。
 
+**第二十六刀的落地（把上面优先级里的第二格办掉了）**：`tests/resload/ResAlpha.frm` 长出一枚 `imgN` —— **不写 `Stretch` 行**（= 0 ⇒ 走 `vb6forms_picture_prop.c` 那条按图的天然尺寸画的支路），盒子 96 x 64 px （1440 x 960 缇），装的是 `alpha.png`（48 x 48，左半红 / 右半全透明）。`tChk` 里 GetDC/GetPixel 沿 y=24 扫 x=0..119，问三件事：红像素（`255`）走到哪、非蓝像素走到哪、白底计数。判据 `NS01` 把红段收在 [18,30]（天然宽 ~23），而**盒子边是 95** —— 这一格钉的正是"按图的尺寸"与"按盒子的尺寸"两种决定的分界。
+
+- 两架构真跑读数**同号同形**：x64 与 x86 都是 `NS01-NATURAL=True / NS01-RAW red=23 nonblue=23 white=0`，  原有的 `PICSET=True`、`PAINTED=True` 一并保住（`$resAlphaNeedles` 长出两条新针）。
+- **负控（这枚针能红，且红的就是被并表那一处）**：把唯一权威 `vb6_HimetricToPxOnDc` 的除数从 `2540` 改成 `254`  （10 倍单位错，正是并表之后只有那一处能犯的错误），在 HEAD 归档出来的源码副本 `.build/b569neg_k26` 里冷编一台   C3.exe，用它重编**同一份夹具** ⇒ `NS01-NATURAL=False / NS01-RAW red=95 nonblue=95 white=0`。  同一份夹具、同一台机器、只有编译器不同 ⇒ 这枚针确实吃那处换算。
+- **一条读法教训（第一版探针把自己骗了）**：先前扫的是"任何非背景色的最后一格"，两台都读回 95 = 盒子边，  看着像"非 Stretch 那一支根本没生效"。真因是画之前还有一步**白底填满整盒**（`Render` 前那句 `FillRect`），  于是"非蓝"数到的是填充而不是图 ⇒ 证人必须认**图自己的颜色**（红），并把白底计数单独打出来当旁证  （`white=0` ⇒ 这一支走的是 RGBA `AlphaBlend`，压根没进白底那条）。**"覆盖了"与"看对了"是两件事**，  判据里带一条 RAW 读数才看得见这种自我欺骗。
+
+**剩下的两格照旧开着**：`vb6forms_olecon.c`（`tests/olecon/OleCon.vbp` 在 `tests/run_tests.ps1:5138-5139` 是 `Test-VbpBuild` ⇒ 只编不跑，要真读数得有一枚被当对象装进跑起来的容器的控件）与 `ax_site_ext.c`（DPI 从写死 96 换成真实 DPI ⇒ 本机就是 96，本地永远不会变读数）。两处现在仍由哨兵 R9 的调用点 + 墓碑托着。
+- **门（第二十六刀）**：源码那一跑 = **#483**（run 38051241817、head `238563d9`、attempt 1）= 12 条 check-run 全 completed、11 绿 + 唯一红 `Emit manifest (shape oracle)` —— 夹具文本进了产物而那一行还没按 CI 的读数重登记，形状门按设计说话；登记那一跑 = **#484**（run 38052053772、head `7a5ca1c2`）attempt 1 = 11 绿 + 唯一红 `Tests (vbp #1)` 里的 `[VBP] ctrldlg_probe ... FAIL (run error)`，**attempt 2（同一枚 head、只重跑失败那片）= 12/12 全绿、非绿 0**。`Emit manifest (shape oracle)` 在 #484 的 attempt 1 就是绿的 ⇒ 第二十六刀那一行的新哈希被 CI 那台独立复算证实。
+- **那一发红的归因（走的是「GUI / 计数类红」那套三步，不是「看着像抖」）**：① 两份 CI 工件对形 —— #483 的 `DlApp.out` 交满 15 行（`DL1..DL14` + `CTRLDLG-DONE`），#484 那份停在 `DL10` ⇒ 进程是被杀在真弹框那一格（`DL11` 之前）而不是崩；而 483→484 之间 `src/` 逐字相同（那一笔只动清单）。② 拿 **CI 那台自己编的 `C3.exe`**（工件 `c3-exe`）在本机重编同一份 `tests/ctrldlg/DlApp.vbp`、设 `C3_CDPROBE=1` 真跑：空载 2.8s 交 15 行全对；**8 枚忙等压 4 vCPU**（2 倍超订）连跑三趟 13.8 / 31.4 / 34.5s 仍 15 行全对 ⇒ 这条用例的墙钟能被负载放大 ×11，而预算是全局的 `-RunTimeoutSec = 60`（`tests/run_tests.ps1:23` 那条注释本来就在讲「5s 在并行编译下会误杀」这一族）。③ 只重跑失败那片一次。⇒ 定性 = **判据的墙钟余量**，产品那一头四条读数（DL11 取消报 32755 / DL12 取消不改进数 / DL13 模态循环 ≥30ms / DL14 静默返回）一条没少。待办记在这儿：这枚「会真弹框」的用例若**再**红一次，就给它一条具名的逐例墙钟预算（今天 `Invoke-TestExe` 只吃全局那一个数、没有逐例出口），**别去放宽判据、也别把全局 60s 整个抬大**。
 ### B129 himetric↔像素/缇 的折算：4 份文件并成 1 份权威（账 #298，**已出 —— 第二十四刀，2026-10-10，门 #480 全绿**）
 
 第十八刀做 `Object.Width` 那一档时顺带数出来的：那时是 `src/rtl` 里含 `2540` 的**非注释行 = 13 行 / 5 份文件**。
