@@ -86,5 +86,20 @@ Public Sub Main()
     Debug.Print "VB-date-cdate="; (CDate(vd) = m_d)
     Debug.Print "VB-sin-cdbl="; CDbl(vs)
     Debug.Print "VB-sin-clng="; CLng(vs)
+    ' 账 #305 (§B138 尾巴): §B138 把 VarPtr/StrPtr/ObjPtr 的类型答案换成 LongPtr 之后, 同一枚地址
+    ' 在 x64 装成 VT_I8(20)、在 x86 装成 VT_I4(3)。VarType 因此**不能钉**(它本来就该随位数变);
+    ' 钉的是那四问在两台机器上必须给同一个答案 —— 改之前 x64 读出来是 Variant / False。
+    ' 刻意不钉 CLng(vp): x64 那个地址放不下 Long, 报 6 (Overflow) 才是 VB6 的正确答案。
+    Dim vp As Variant
+    Dim vs2 As Variant
+    Dim hx As Long
+    hx = 7
+    vp = VarPtr(hx)
+    vs2 = StrPtr("box")
+    Debug.Print "VB-ptr-tn="; TypeName(vp)
+    Debug.Print "VB-ptr-isnum="; IsNumeric(vp)
+    Debug.Print "VB-ptr-cbool="; CBool(vp)
+    Debug.Print "VB-ptr-selfeq="; (vp = vp)
+    Debug.Print "VB-str-tn="; TypeName(vs2)
     Debug.Print "VB-DONE"
 End Sub

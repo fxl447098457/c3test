@@ -1,4 +1,10 @@
 // c3rtl.rc - RTL runtime library embedded as resources
+// 账 #305 (§B138 尾巴): 「指针宽度那一档属于 Long 同族」这条决定在 RTL 的 VB-facing 表里
+//   实现了多遍, 而其中四处漏了 VT_I8 —— §B138 把 VarPtr/StrPtr/ObjPtr 的类型答案改成 LongPtr 之后,
+//   x64 上这四处第一次真的被吃到: TypeName 答 "Variant"、IsNumeric 答假、vb6_ComPackVariant 落
+//   default ⇒ 地址**静默打包成 VT_EMPTY**、UC 宿主模型两枚取数读回 0。补的四处 =
+//   vb6rtl_conv.c (TypeName / IsNumeric) + vb6rtl_com.c (ComPackVariant) + uc_hostmodel.c (两枚取数)。
+//   touch 这份 .rc 是 RTL 重嵌的约定动作 (check_rtl_embedded.ps1 拿产物字节核对, 不靠人记着)。
 // 2026-10-06: 新增 Form/Printer 绘图方法家族 vb6forms_draw.c/.h (PSet/Line/
 //   Circle/Point/Cls, 资源 223/224)。此前 Form 级绘图面**完全缺失** —— 只有
 //   Shape/Line 控件的自绘路径, `Form_Paint` 里的 Me.PSet 等落进 COM dispatch

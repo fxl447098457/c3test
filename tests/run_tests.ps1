@@ -1267,6 +1267,19 @@ function Test-VariantCmpBoxing {
         $out | Select-Object -First 6 | ForEach-Object { Write-Host "  $_" }
     }
 }
+function Test-VariantI8Coverage {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] variant_i8_coverage ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\check_variant_i8_coverage.ps1" 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        $out | Select-Object -First 6 | ForEach-Object { Write-Host "  $_" }
+    }
+}
 function Test-RunBudget {
     $script:total++
     Write-Host -NoNewline "  [STATIC] run_budget ... "
@@ -2510,13 +2523,17 @@ if ($Category -in @("all", "run", "bas")) {
         "VB-mod-int=2", "VB-mod-str=8", "VB-mod-sin=4", "VB-mod-dbl=5", "VB-mod-date=7",
         "VB-asg-bool=11/Boolean", "VB-asg-byte=17/Byte", "VB-asg-date=7", "VB-call-date=7/Date",
         "VB-date-clng=46023", "VB-date-cdbl=46023", "VB-date-isdate=True", "VB-date-cdate=True",
-        "VB-sin-cdbl=1.5", "VB-sin-clng=2", "VB-DONE")
+        "VB-sin-cdbl=1.5", "VB-sin-clng=2",
+        "VB-ptr-tn=Long", "VB-ptr-isnum=True", "VB-ptr-cbool=True", "VB-ptr-selfeq=True",
+        "VB-str-tn=Long", "VB-DONE")
     # ⚠ 这里曾经是字面 TAB: `"$Tests<TAB>est_variant_boxing.bas"`。
     # PowerShell 的 "" 里 **`\t` 不是转义**（转义是反引号），所以只要有人把 `\t` 写成真 TAB,
     # 路径就变成 `tests` + TAB + `est_...` —— 门里读到的是 `error VB1006: 无法打开文件`,
     # 而本机 `Get-ChildItem` 永远看不到它（文件明明在）。判据见文件末尾的
     # `Assert-TestRegistry`（注册表自检: 每条 Add-* 的 .bas/.vbp 必须真存在）。
     Add-BasTest "test_variant_boxing" "$Tests\test_variant_boxing.bas" $boxNeedles
+    # 账 #305: 上面那五条 VB-ptr-*/VB-str-tn 是**两架构同一个答案**那一类, 所以 x86 必须同针同过
+    Add-BasTest "test_variant_boxing_x86" "$Tests\test_variant_boxing.bas" $boxNeedles -Arch "x86"
     # <vbeclipse>: vbTextCompare 六个入口对表 (InStr 两形/InStrRev/Replace/Split/Filter/
     # StrComp)。修复前 RTL 5 处 (void)compare + InStr 第 4 参被截、三参"字符串优先"形
     # 错接槽位 (实测段错误)；另修 Debug.Print StrComp(...) 被 "vb6_Str" 前缀误判成 BSTR
@@ -5648,6 +5665,7 @@ if ($Category -in @("all", "compile")) {
     Test-FixtureTimerClose
     Test-VariantCmpBoxing
     Test-RunBudget
+    Test-VariantI8Coverage
     Test-EventHandlerNames
     Test-UcInstanceExit
     Test-StaticSentinelRegistration

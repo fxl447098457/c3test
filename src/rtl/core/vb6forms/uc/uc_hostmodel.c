@@ -187,6 +187,7 @@ int32_t vb6_ho_variantToLong(const vb6_VARIANT* v) {
         case vb6_vtInteger: case vb6_vtLong: case vb6_vtBoolean: case vb6_vtByte:
             return v->lVal;
         case vb6_vtSingle: case vb6_vtDouble: return (int32_t)v->dblVal;
+        case VT_I8: return (int32_t)v->llVal;   /* 账 #305: 这一档以前落 default ⇒ 读回 0 */
         default: return 0;
     }
 }
@@ -196,6 +197,7 @@ double vb6_ho_variantToDouble(const vb6_VARIANT* v) {
     switch (v->vt) {
         case vb6_vtSingle: case vb6_vtDouble: return v->dblVal;
         case vb6_vtInteger: case vb6_vtLong: case vb6_vtBoolean: return (double)v->lVal;
+        case VT_I8: return (double)v->llVal;   /* 账 #305: 同上 */
         default: return 0.0;
     }
 }
