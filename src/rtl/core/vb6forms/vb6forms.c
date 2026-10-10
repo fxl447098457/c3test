@@ -215,6 +215,13 @@ int vb6_DpiY(void) {
 }
 
 int vb6_XToTwipX(int px) { return MulDiv(px, 1440, vb6_DpiX()); }
+
+// 账 #206: himetric(0.01mm) 是 **VB6 容器/OCX 存几何用的那一档**(设计块里 `Object.Width`
+// 就是它), 与本族另外三处各写各的换算(§B129 数出来: ax_load.c 的 twipsToHimetric、
+// ax_site_ext.c 的 k=96.0/2540.0、vb6forms_olecon.c 的 *1440L/2540L)同形而不同源 ——
+// 其中 ax_site_ext 那处把 DPI 写死成 96。新加的调用一律走这一枚(按真实 DPI)，
+// 那三处何时并进来由 §B129 定, 本刀不顺手改(它们各有各的判据面)。
+int vb6_HimetricToPxX(int hm) { return MulDiv(hm, vb6_DpiX(), 2540); }
 int vb6_YToTwipY(int px) { return MulDiv(px, 1440, vb6_DpiY()); }
 
 // ============================================================

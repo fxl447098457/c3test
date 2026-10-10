@@ -236,7 +236,10 @@ static int SbLayout(Vb6StatusBar* sb, int* outOffsets, int outCap) {
     for (int i = 0; i < sb->count; i++) {
         Vb6PanelEntry* e = &sb->ents[i];
         if (e->autoSize == VB6_SBR_SPRING) {
-            want[i] = e->minWidth > 0 ? e->minWidth : 0;
+            // MinWidth 是**下限**, 不是加在剩余空间之上的加项 (账 #206 夹具实测: 三格
+            // 面板排完 e3=493 而客户区 cw=467, 多出来的正好是这一枚 MinWidth=26 ——
+            // 下面第二趟本来就按 take<minWidth 兜底, 这里再占一次位就是两份答案)。
+            want[i] = 0;
             springs++;
         } else if (e->autoSize == VB6_SBR_CONTENTS) {
             want[i] = SbMeasureText(sb->hwnd, SbDisplayText(e));
@@ -863,6 +866,14 @@ int32_t vb6_StatusBar_GetPanelIndexByKey(void* hwnd, const wchar_t* key) {
     return (i >= 0) ? (int32_t)(i + 1) : 0;   // 出口仍是 1 基
 }
 
+// 账 #300 (§B131): `Panels(<数字>).Index` 以前被发成 *ByKey(hwnd, 1) —— 整数进 `wchar_t*` 槽,
+// 上面那枚出口第一句 `!key[0]` 就去读地址 0x1 ⇒ 启动期 AV（键下标那一形是对的, 所以症状按
+// "下标写数字还是键"分家, 存量 SB14 那条针从没露面）。数字下标本来自身就是答案: 面板在就交回
+// 它自己的 1 基下标, 不在交 0 —— 与 *ByKey 那枚"未找到=0"同一口径。
+int32_t vb6_StatusBar_GetPanelIndex(void* hwnd, int32_t index) {
+    return SbAt(vb6_SbFromHwnd(hwnd), index) ? index : 0;
+}
+
 int32_t vb6_StatusBar_GetPanelWidth(void* hwnd, int32_t index) {
     Vb6PanelEntry* e = SbAt(vb6_SbFromHwnd(hwnd), index);
     return e ? e->width : 0;
@@ -874,6 +885,19 @@ void vb6_StatusBar_SetPanelWidth(void* hwnd, int32_t index, int32_t val) {
     if (!e) return;
     e->width = (int)val;
     if (e->autoSize == VB6_SBR_FIXED) SbApplyParts(sb);
+}
+
+// 账 #206 (§B41): **真 VB6 设计器**把面板宽持久化成 himetric(0.01mm), 那一行的键名还带
+// `Object.` 前缀 (量法见台账: 语料 5623 份 .frm 里 92 枚状态条的 sum(面板宽)/控件的 _ExtentX
+// 中位数 0.986, 而 sum/控件 Width(缇) 是 1.738, 落在缇档的 0 枚)。本族 e->width 存的仍是
+// **像素** ⇒ 这里只把那一档接到像素: MulDiv(hm, dpi, 2540)。
+// himetric -> 像素只有一处答案: vb6_HimetricToPxX (账 #206; 本族另三处各写各的换算记在 §B129)。
+// "绕开 DPI 折成缇"那条路 (hm × 72/127) 刻意没在这儿开, 因为 VB 侧改按缇读是 §B41 剩下的
+// 那一格, 它要连 getter 一起改, 不该由设计期这一趟先动。
+void vb6_StatusBar_SetPanelWidthHm(void* hwnd, int32_t index, int32_t hm) {
+    int px = vb6_HimetricToPxX(hm);
+    if (px < 0) px = 0;
+    vb6_StatusBar_SetPanelWidth(hwnd, index, px);
 }
 
 int32_t vb6_StatusBar_GetPanelMinWidth(void* hwnd, int32_t index) {
