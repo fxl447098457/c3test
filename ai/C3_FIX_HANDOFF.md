@@ -2102,6 +2102,37 @@ COM 侧那张 recognizer（`cgen_util_com.cpp` 里按成员名硬拼出口的那
 **顺带量到两条**（都影响刀形）：① `vb6_ComUnpackBSTR`（`vb6com_pack.c:107`）对非 BSTR 的 VARIANT 会走 `VariantChangeType` ⇒ 真 IDispatch 交回 VT_I4 也读得出 "1200"，所以"数值成员被按字符串取"那一族（#88/#229）**在对象头立起来之后不再是空值的原因**，别顺手去改那一段；② `memColl_Invoke` 的 `Item` 按 Key 那一支的名单里**没有 PANELS**（`else idx = 0`）⇒ 集合对象一旦立起来，`Panels("k")` 会答 Nothing；这是同一条刀要顺手补的第二格，不是新账。
 **刀形（按读数收窄，一处权威 = memberobj 那枚真 IDispatch，第十五刀撤 Data 的同一口径）**：RTL 三格 —— 补 `vb6_StatusBar_Panels(hwnd)` 入口、`Item` 按 Key 补 PANELS 一档、`VB6_MEMD_INDEX` 从 inline `p->index` 改成问 `vb6_StatusBar_GetPanelIndex`（#300 那格留下的**第三份答案**，一起撤）；发码侧两处拦子各补 panels 一条，并且 `statusBarNameOfExpr` 必须认新头 `vb6_ComCallObject(vb6_StatusBar_Panels((void*)vb6_hwnd_X), L"Item", …)` —— 不认就会把链式那 8 条与 `Panels.Add/Remove` 的直译一起打回晚绑定，那是**行为改动**而不是收口，负控要能把它照出来。
 
+**第二十刀已出（落的是一格，量出来的剩两格）**：负控与判据都取同一份夹具、两台编译器 ——
+BASE（dev 头 `4e9d05ff`，不含本刀）在 `For Each` 那一形 **一次都没进循环**
+（`HM08=False`、`fe=0 idx=0 txt=0`），NEW（合完 dev + 本刀）x64 与 x86 两台都是
+`HM08=True`、`fe=3 idx=6 txt=5`（下标之和 6、文本长度之和 5 = "A"+"BB"+"SP"），
+而 HM01..HM07 两台完全一致 ⇒ 这一格是真红的变绿，也不是顺手把邻居推动。
+**没落的三形与它的题面**：产物里 `vb6_ComGetObjectProp(vb6_hwnd_SB1, L"Panels")` 还剩 **8 处**
+（按产物行数的账：HM05 的 CStr 那一路 ×1、`CLng(…)` 三行 ×3、`Set po =` 两形 ×2、
+模块级 `mPo =` ×1、`With` ×1 = 8），
+它们的头是 `cgen_setlet_set_rhs.inc` 那条与 `cgen_with.cpp` 里三处
+`comObjectRefFromCallExpr` 直接拼的，**不经过** `resolveComValue` / `resolveComMarkerForPack`
+这两个拦子 ⇒ 下一刀不许再补第四个拦子，题面是把"集合本体怎么立"收成一处出口，让四条发射路都问它。
+**病名第二次改口（这次是加一格，不是换一格）**：同一枚 `Panels(i).Width` 在
+`For Each` 的对象那一形交回 **157**，而 `CLng(Panels(i).Width)`（实参那一路）交回 **0**
+⇒ #299 至少有两格：(a) 集合对象没立起来（本刀落了），(b) **实参那一步把接收者重解了一遍**
+（现在主要剩这一格，它才是最初"CStr 打空"看到的那张脸）。RAW 行把两个数一起打出来，
+就是为了下一次改 (b) 时能当场看见 157 与 0 合上。
+**这条刀踩过的坑（已写成契约）**：把 `panels` 拦成 `vb6_StatusBar_Panels(...)` 之后，
+"什么算集合对象表达式"这张名单在仓里住**三处**（`cgen_expr_member_generic_access.inc` 两处 +
+`cgen_state.inc` 的 `isControlCollectionExpr` 一处），外加 `statusBarNameOfExpr` 的新头 ——
+只补拦子、名单漏一处的后果是实测的：`Panels.Count = 3` 发成
+`vb6_StatusBar_Panels((void*)vb6_hwnd_SB1).Count` ⇒ cl C2224（void* 上点成员）。
+哨兵 `check_statusbar_panel_hm.ps1` 因此长出 **R6** 六格（产物 obj=1 / ForEach=1 /
+三处名单 2+1+1 / 拦子两处 / RTL 入口+声明+Item 按 Key 各 1 / inline `p->index` 6 处只许降），
+负控不是假针：拿 dev 头那棵树整棵跑一遍，R6 十一条全红而 R1..R5 仍绿。
+**发码清单（这一行现在又是旧的，且是**已知**的旧）**：夹具体改了 ⇒ `tests/sbhm/SbHm.vbp`
+那一行必须按下一次过门时 CI 那台的读数重新登记。本轮顺带把那行**先前**的旧账更正过一笔
+（`4e9d05ff`，原委：他们那批 33 行的登记是在**还没有这枚夹具**的树上算的 —— CI `d206761f`
+那份清单压根没有 tests/sbhm 这一行 —— PR 合并时这一行从我们这边继承了第十九刀之前的哈希；
+逐行对过 CI 两份清单与 dev 的登记，除这一行外 398 行全部相同）。**本刀带 `[skip ci]` 推，
+没有过门**：谁下一次跑 GA，先按 §B73 的口径把这一行登记掉再判形状红。
+
 
 ### B125 账 #278 第十四刀已出 = 两枚集合 Clear 与 CommonDialog 那六枚 Show* 进零实参那张表：「拼法只许来自表」在 Show* 这一族落地（另立一条新判据：哨兵的文件头读不成注释就会绿着空转，2026-10-10，门 #456 attempt 1 全绿（run 37995142510、head `3f972622`、12/12 全 completed/success、非绿 0、created→updated 10m22s；**Emit manifest (shape gate) 那一跑同绿** ⇒ 「398 份逐字节相同」被 CI 那台独立复算证实））
 
