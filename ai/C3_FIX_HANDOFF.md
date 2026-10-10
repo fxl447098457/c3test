@@ -2094,7 +2094,8 @@ COM 侧那张 recognizer（`cgen_util_com.cpp` 里按成员名硬拼出口的那
 #229（数组元素 extender 属性读进 `&` 拼接 = 裸 int 进 BSTR 槽）。
 **机制已量到（2026-10-10 探针 `.build/b351_probe/P299.frm`，x64 真跑 + `--emit-c` 两头对看）**：同一枚 `SB1.Panels(1).Width` 四种写法，产物与读数是这样分的 —— `& 裸拼接`、`= 给 Long`、`= 给 Variant` **三形都走早绑定**（`vb6_StatusBar_GetPanelWidth`，读数 1200），只有 **`CStr(…)` 那一形换了路**：`vb6_CStr(vb6_VariantFromValue(vb6_VariantFromComResult(vb6_ComGetProp(` …晚绑定链…`)))` ⇒ 读数空。⇒ 分岔不在"成员是谁"，在 **CStr 的实参那一路把接收者重新按通用 COM 解了一遍**，解出来的对象在 RTL 里没有 Panels/Buttons 这一档 ⇒ "认识但什么都不做" ⇒ Empty。旁证（同一枚探针里另两族的**裸拼接**形）：`TB1.Buttons(1).Width` 与 `TV1.Nodes.Count` 的裸形**也**发成 `vb6_ComGetStringProp(…)` —— 数值成员按字符串取（#88/#229 那一族），只是这几族从没被钉过。
 所以第一步应是枚**跨控件探针**（同一枚成员读法 × {直接拼接, CStr, CLng, 赋值给 Variant} × {memberobj 家族：Panels/Columns/Nodes/Buttons} 四形），
-而不是给 `Panels` 单补一格 CStr 特判（那正是本线第 N 次给同一事实写第二份答案）。
+而不是给 `Panels` 单补一格 CStr 特判（那正是本线第 N 次给同一事实写第二份答案）。**第十九刀之后补的 census（`.build/b373_two_answer_census.py`，读数留档）**：**StatusBar 的面板成员是"一枚事实两个答案"的完整样本** —— 发码侧那张 recognizer（`cgen_util_com.cpp` 里按 `memLower == "…"` 硬拼出口的 14 条）答 `count/key/index/text/width/minwidth/autosize/style/tooltiptext`，而 RTL 成员表 `kPanelNames`（`vb6forms_memberobj.c:114`）答的是**同一批 8 个名字**（key/index/text/width/minwidth/autosize/style/tooltiptext）。两边都活：直接拼接与赋值那一形走发码侧那张表（实测产物里就是 `vb6_StatusBar_GetPanelWidth`），而 `CStr(…)` 那一形换到通用 COM 晚绑定那条路（空值），memberobj 那一头则在把面板当对象交出去之后才被问到（`Panels("k").Index` 的键形态同理会分岔）。#300 只是这 8 格里**第一个被发现答错**的（数字下标把整数递进 `wchar_t*` 槽）—— 所以下一步不是继续按名字补格子，而是**先定一枚权威**：面板成员的读法只由一处答（第十五刀撤 Data 一族时定的就是 memberobj 那枚真 IDispatch，本族可照同一口径），然后把"哪一格现在由谁答"写成 census 哨兵（重叠 = 红）再动 `CStr` 那一路 —— 它要修的是"实参那一步把接收者重解了一遍"，不是给 Panels 单开一档。
+
 
 ### B125 账 #278 第十四刀已出 = 两枚集合 Clear 与 CommonDialog 那六枚 Show* 进零实参那张表：「拼法只许来自表」在 Show* 这一族落地（另立一条新判据：哨兵的文件头读不成注释就会绿着空转，2026-10-10，门 #456 attempt 1 全绿（run 37995142510、head `3f972622`、12/12 全 completed/success、非绿 0、created→updated 10m22s；**Emit manifest (shape gate) 那一跑同绿** ⇒ 「398 份逐字节相同」被 CI 那台独立复算证实））
 
