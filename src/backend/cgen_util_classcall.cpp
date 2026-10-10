@@ -376,6 +376,73 @@ bool CCodeGen::findClassMemberWriteParams(const std::string& className,
 
 
 // ============================================================
+// Fix 240: 属性读方向 (Property Get) 参数查找 (声明见 cgen.hpp)
+// ============================================================
+// 为什么另开一张表、而不是复用 findClassMemberCallParams: 实测「Get 与 Let 并存」的
+// 属性 (ComCtlsDemo ListView.ctl:6928/6949
+//   Property Get InsertMark(Optional ByRef After As Boolean) As LvwListItem
+//   Property Let InsertMark(Optional ByRef After As Boolean, ByVal Value As LvwListItem)
+// ) 在**窗体消费侧**经 findClassMemberCallParams 拿到的是 **Let** 那一份
+// [After, Value] —— 这正是 cgen_expr_member_class_module.inc 那段「属性不 pad」注释
+// 记下的现象。拿 Let 表去补 prop_get_ 的 Optional 入口参数, 会多发一枚
+// `vb6_VariantEmpty()`(Let 末参 Value 的默认值) 顶到 `int _has_After` 位置上
+// → C2440 "无法从 vb6_VARIANT 转换为 int" (ComCtlsDemo MainForm.c 十余处)。
+// 这里只认读方向那一份; Phase B 必须带「不许与 Let 同宽」那道否决 —— 认不出就不 pad
+// (宁可退回"参数太少" C2198, 也不拿错方向的表硬凑参数个数; 个数错了会静默编过)。
+bool CCodeGen::findClassMemberGetParams(const std::string& className,
+                                        const std::string& memberName,
+                                        std::vector<ParameterInfo>& outParams) const {
+    outParams.clear();
+    if (className.empty() || memberName.empty() || !symTab_.moduleScope()) return false;
+
+    const std::string memberLower = Symbol::toLower(memberName);
+    const std::string classLower  = Symbol::toLower(className);
+
+    for (const auto& [key, sym] : symTab_.moduleScope()->symbols()) {
+        if (!sym || sym->kind != SymbolKind::PropertyGet) continue;
+        if (sym->lowerName != memberLower) continue;
+        bool matches = false;
+        if (sym->isExternal) {
+            if (Symbol::toLower(sym->sourceModule) == classLower) matches = true;
+        } else if (isClassModule_ && Symbol::toLower(moduleName_) == classLower) {
+            matches = true;
+        }
+        if (!matches) continue;
+        outParams = sym->params;
+        return true;
+    }
+
+    // ---- Phase B: Class 符号自身的 memberParams ----
+    // 语义分析按「Get 总是胜出」填充 (semantic_analyzer_decl.cpp:294-297: propKind 为
+    // PropertyGet 时 wins=true) ⇒ 有 Get 的成员这条表就是读方向那一份。
+    // 消费侧 (窗体引用工程内 .ctl) Phase A 实测匹配不到 external PropertyGet 符号,
+    // 故这一跳不是可选的 —— 少了它 pad 整个失效, C2198 原样回来。
+    for (const auto& [ckey, csym] : symTab_.moduleScope()->symbols()) {
+        if (!csym || csym->kind != SymbolKind::Class) continue;
+        bool classMatches = false;
+        if (csym->isExternal) {
+            if (Symbol::toLower(csym->sourceModule) == classLower) classMatches = true;
+        } else if (isClassModule_ && Symbol::toLower(moduleName_) == classLower) {
+            classMatches = true;
+        }
+        if (!classMatches) continue;
+        auto it = csym->memberParams.find(memberLower);
+        if (it == csym->memberParams.end()) continue;
+        // 只认**读方向**的形状: memberParams 是单值槽, 万一被 Let 覆盖过就会带上
+        // 末参 Value —— 那种表拿去 pad prop_get_ 会让 `vb6_VariantEmpty()` 顶掉
+        // `int _has_After` (C2440)。宁可退回 C2198 (少量) 也不要错方向的表。
+        if (csym->memberLetParams.count(memberLower)
+            && csym->memberLetParams[memberLower].size() == it->second.size()) {
+            return false;   // 与 Let 同宽 ⇒ 不能断定是读方向, 不 pad
+        }
+        outParams = it->second;
+        return true;
+    }
+    return false;
+}
+
+
+// ============================================================
 // Fix 015: Method chaining 解析辅助
 // ============================================================
 
@@ -606,9 +673,17 @@ bool CCodeGen::emitUcInstanceMemberExpr(const std::string& ucClass,
     const bool isPropGet239 = resolvedFn.find("_prop_get_") != std::string::npos;
     std::vector<ParameterInfo> paramsUC;
     bool isBuiltinUC = false;
+    // Fix 240: `_prop_get_` 用**读方向**参数表 (findClassMemberGetParams)。上面那句
+    // "属性不 pad" 的注释与实测一致 —— findClassMemberCallParams 对 Get+Let 并存的属性
+    // 交回 Let 表 [After, Value], 按它 pad 会多发一枚 `vb6_VariantEmpty()` 顶到
+    // `int _has_After` → C2440。只读方向、无回退: 认不出就不 pad。
+    const bool paramsOkUC = isPropGet239
+        ? findClassMemberGetParams(ucClass, member, paramsUC)
+        : (findClassMemberCallParams(ucClass, member, paramsUC, isBuiltinUC)
+           && !isBuiltinUC);
     if ((resolvedFn.find("_prop_") == std::string::npos || isPropGet239)
-        && findClassMemberCallParams(ucClass, member, paramsUC, isBuiltinUC)
-        && !paramsUC.empty() && !isBuiltinUC) {
+        && paramsOkUC
+        && !paramsUC.empty()) {
         std::string argListUC = thisArg;
         for (size_t i = 0; i < paramsUC.size(); i++) {
             const auto& pm = paramsUC[i];

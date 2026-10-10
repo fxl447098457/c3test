@@ -843,6 +843,20 @@
                                     bool isSet,
                                     std::vector<ParameterInfo>& outParams) const;
 
+    // ---- Fix 240: 属性**读方向** (Property Get) 参数查找 ----
+    // `prop_get_X` 还需要能补 Optional 入口参数 (`ListView2.InsertMark` 的 C 声明是
+    // `(me, int16_t* After, int _has_After)`), 而 findClassMemberCallParams 对
+    // 「Get 与 Let 并存」的属性实测交出的是 **Let** 参数表 (After + Value) ——
+    // cgen_expr_member_class_module.inc 里那段"属性不 pad"的注释记的正是这件事。
+    // 拿 Let 表去 pad prop_get_ 会多出一个 `vb6_VariantEmpty()` 顶掉 `_has_After`
+    // (C2440 "vb6_VARIANT → int")。
+    // 这里只认**读方向**那一份, 且**不设 Phase B 回退** —— 认不出就不 pad
+    // (宁可变回 C2198 少给参数, 也不拿错方向的表硬凑参数个数)。
+    // Phase A: 模块作用域中 kind==PropertyGet 且类归属匹配的符号 → 其 params。
+    bool findClassMemberGetParams(const std::string& className,
+                                  const std::string& memberName,
+                                  std::vector<ParameterInfo>& outParams) const;
+
     // ---- Fix 015: Method chaining 解析辅助 ----
     // 给定一个表达式 AST 节点, 推断其在运行时返回的类名 (如果它返回类实例)
     //  - IdentifierExpr: 查 knownClassVars_, 找到则返回该变量的声明类名
