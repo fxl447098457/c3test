@@ -2,6 +2,63 @@
 // 由 src/backend/expr/cgen_expr_call.cpp 拆出（2026-09-17），在函数体内被 #include，非独立编译单元。
 // 内容 = 原文件第 806~1009 行，逐行未改。
 
+    // Fix 245c: `<返回 Object/Variant 的无参 Function>.方法(args)` —— 后期绑定调用。
+    // ComCtlsDemo Pager.ctl:1249 `PropBuddyControl.Move PropBuddyControl.Left,
+    // PropBuddyControl.Top, …` (Pager.ctl:1203 `Private Function PropBuddyControl()
+    // As Object`)。callee 的对象部分既不是变量也不是工程内模块名 ⇒ 唯一合理的语义是
+    // 「(调用 Fn) 得到的 IDispatch 上做方法调用」→ 直接发 vb6_ComCall。
+    // **必须排在下面的 Fix 037 之前**: 否则 callee 被当"成员访问"取成属性值
+    // (`.Move` 读成 L"Move" 属性), 外层实参再被当默认成员索引, 生成
+    // vb6_ComCall(<VARIANT>, L"Item", …) → C2172 (vb6_ComCall 第一参数不是指针)
+    // ×2 + C2440 vb6_VARIANT→double ×2 (Pager.c)。
+    if (node.callee && node.callee->kind == ASTNodeKind::MemberAccessExpr
+        && node.named.empty()) {
+        auto& ma245c = static_cast<MemberAccessExpr&>(*node.callee);
+        if (ma245c.object && ma245c.object->kind == ASTNodeKind::IdentifierExpr) {
+            auto& oid245c = static_cast<IdentifierExpr&>(*ma245c.object);
+            const std::string oLower245c = Symbol::toLower(oid245c.name);
+            const bool otherKind245c =
+                knownLocalVars_.count(oLower245c) || knownClassVars_.count(oLower245c)
+                || knownObjectVars_.count(oLower245c) || knownTypedComVars_.count(oLower245c)
+                || knownUdtVars_.count(oLower245c) || knownIfaceVars_.count(oLower245c)
+                || knownNewVars_.count(oLower245c) || knownFormControls_.count(oLower245c);
+            if (!otherKind245c) {
+                Symbol* fn245c = symTab_.lookup(oid245c.name);
+                if (!fn245c) fn245c = symTab_.lookupModule(oid245c.name);
+                if (fn245c && fn245c->kind == SymbolKind::Function
+                    && (Symbol::toLower(fn245c->variableTypeName) == "object"
+                        || Symbol::toLower(fn245c->variableTypeName) == "variant")
+                    && !(currentProc_ && Symbol::toLower(currentProc_->name) == oLower245c)) {
+                    std::string fnMod245c = fn245c->isExternal ? fn245c->sourceModule
+                                          : (isClassModule_ ? moduleName_ : std::string());
+                    if (!fnMod245c.empty()) {
+                        std::string fnCall245c = cProcName(fn245c->name, fn245c->access, fnMod245c)
+                                               + "((void*)me)";
+                        std::vector<std::string> packed245c;
+                        for (size_t i = 0; i < node.positional.size(); i++) {
+                            std::string packFn245c = comPackExpr(*node.positional[i]);
+                            emitExpr(*node.positional[i]);
+                            { std::string r245c = resolveComMarkerForPack(packFn245c);
+                              if (!r245c.empty()) lastExpr_ = r245c; }
+                            packed245c.push_back(packFn245c + "(" + lastExpr_ + ")");
+                        }
+                        int32_t argc245c = (int32_t)packed245c.size();
+                        std::string argsArr245c = "(void*[]){";
+                        for (int i = 0; i < argc245c; i++) {
+                            if (i > 0) argsArr245c += ", ";
+                            argsArr245c += packed245c[i];
+                        }
+                        argsArr245c += "}";
+                        lastExpr_ = "vb6_VariantFromComResult(vb6_ComCall(" + fnCall245c
+                                  + ", L\"" + escapeWideCString(ma245c.memberName) + "\", "
+                                  + argsArr245c + ", " + std::to_string(argc245c) + "))";
+                        return;
+                    }
+                }
+            }
+        }
+    }
+
     // ---- Fix 037: MemberAccessExpr callee with positional args — array field/COM dispatch ----
     // 处理 obj.field(idx) 模式, field 可能是:
     //   - UDT 数组字段 (固定/动态)     — Pattern A/B → obj.member[idx] / VB6_SA_AT(...)

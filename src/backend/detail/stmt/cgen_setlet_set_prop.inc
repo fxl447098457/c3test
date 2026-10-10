@@ -257,6 +257,32 @@
                 if (!_ucOwned) _psSym = nullptr;
             }
         }
+        // Fix 234: 接收者是 **UDT 值 / UDT 字段链 / UDT 数组元素** (如
+        // `InitButtons(i).ButtonMenus(ii)`) 时, 成员必是结构体字段 ——
+        // lookupModuleByKind 是**全局按名**查找, 会命中无关类的同名 Property Set/Let。
+        // 实测 ComCtlsDemo ToolBar.ctl:1012
+        //   `Set InitButtons(i).ButtonMenus(ii).Picture = PropBagButtonMenus.ReadProperty(...)`
+        // 命中 CheckBoxW.Picture → `vb6_CheckBoxW_prop_set_Picture(<UDT 指针>, ...)`
+        // → C2440(InitButtonMenuStruct/ShadowButtonMenuStruct → vb6_cls_CheckBoxW*) ×26。
+        // 判据与 Let 侧 Fix 084j (knownUdtVars_ 守卫) 同源, 但这里接收者是表达式而
+        // 非裸标识符, 裸名表捡不到 ⇒ 换成 UDT 类型推断那把尺 (inferUdtTypeOfExpr)。
+        // UDT 的字段永远不是类属性, 故置空符号、交给下方 visit(MemberAccessExpr) 发
+        // `obj.field` 字段赋值。
+        //
+        // 宿主伪对象 (UserControl/PropertyPage/Ambient/Extender/VBA/Constants …) 同理:
+        // 它们不是工程类, lookupModuleByKind 命中的必是**无关类的同名属性**。
+        // 实测 ImageList.ctl:482 `Set UserControl.Picture = Picture` 命中
+        // CheckBoxW.Picture → `vb6_CheckBoxW_prop_set_Picture(UserControl, Picture)`
+        // 接收者是裸名 `UserControl` → C2065 ×3 (ImageList.c:728/883/957)。
+        // 交回宿主伪通道 (cgen_assign_host_pseudo.inc / 表 host_pseudo.hpp)。
+        if (_psSym && _ma.object && _ma.object->kind == ASTNodeKind::IdentifierExpr
+            && hostPseudoIsObject(Symbol::toLower(
+                   static_cast<IdentifierExpr&>(*_ma.object).name))) {
+            _psSym = nullptr;
+        }
+        if (_psSym && _ma.object && !inferUdtTypeOfExpr(*_ma.object).empty()) {
+            _psSym = nullptr;
+        }
         if (_psSym) {
             std::string _objClass = inferClassTypeOfExpr(*_ma.object);
             // Fix 084g-2: 外部注入的跨类属性符号 — 对象类型无法从符号表推断
@@ -339,10 +365,38 @@
                 //   警告, 所以编译期全绿、错误数为 0 也照样崩。**别再加回无条件包装。**
                 bool _psValByVal166 = !_psSym->params.empty()
                     && _psSym->params.back().isByVal;
-                if (_valIsVar159 && _psValVariant159) {
+                // Fix 236b: 末形参在**语义层**记成 Variant、但 C 声明是 typed 对象指针
+                // (`Property Set SelectedItem(ByVal Value As LvwListItem)` →
+                // `prop_set_SelectedItem(cls* me, vb6_cls_LvwListItem* Value)`) 时
+                // **不许装箱** —— 否则 VARIANT 结构体被灌进指针槽 → C2440
+                // "vb6_VARIANT → vb6_cls_LvwListItem*" (ListView.c:9758/9880/9962/
+                // 10255, ImageCombo.c:2317, TreeView.c:1261…)。与 Set 侧
+                // cgen_setlet_set_rhs.inc 的 Fix 084n / ai/022 B08f-1 同一条否决规则:
+                // 判据看字段/形参的**真实 C 类型**, 不看语义层那档 Variant。
+                bool _psValTypedPtr236 = false;
+                if (_psValVariant159) {
+                    const std::string& _trn236 = _psSym->params.back().typeRefName;
+                    if (!_trn236.empty()
+                        && cTypeForDeclaredTypeName(_trn236) != "vb6_VARIANT") {
+                        _psValTypedPtr236 = true;
+                    }
+                }
+                if (_psValTypedPtr236) {
+                    _arg2 = _valIsVar159 ? ("vb6_VariantToObjectVal(" + _valE + ")")
+                                         : _valE;
+                } else if (_valIsVar159 && _psValVariant159) {
                     _arg2 = _valE;
                 } else if (_valIsVar159) {
                     _arg2 = "vb6_VariantToObjectVal(" + _valE + ")";
+                } else if (_psValVariant159 && _psValByVal166) {
+                    // Fix 236: 末形参是**按值 Variant** (`Property Set ImageList(ByVal
+                    // Value As Variant)` — CheckBoxW.ctl:1230 / CommandButtonW /
+                    // OptionButtonW / UpDown / CoolBar / ToolBar / CbrBand) 而 RHS 不是
+                    // Variant 表达式时, 必须装箱。此前三个分支都不接: 不装箱、也不套
+                    // `&(void*){...}` (那是 ByRef 对象槽的形状) ⇒ RHS 以 BSTR / 类指针 /
+                    // void* 裸传 → C2440 (CheckBoxW.c:2733, PagerForm.c:187 …)。
+                    // 装箱走 boxToVariant 这一权威 (按 VB 声明类型选档)。
+                    _arg2 = boxToVariant(node.value.get(), _valE);
                 } else if (_arg2 != "NULL" && _arg2 != "0" && _arg2[0] != '&'
                            && _arg2.find("vb6_ComPack") == std::string::npos
                            && !_psValByVal166) {

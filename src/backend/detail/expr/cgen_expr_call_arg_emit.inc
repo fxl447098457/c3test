@@ -12,7 +12,7 @@
             if (op142.hasDefaultValue && !op142.defaultValueExpr.empty()) {
                 odefVal142 = op142.defaultValueExpr;
             } else {
-                odefVal142 = defaultValue(op142.type);
+                odefVal142 = defaultValueForParam(op142);
             }
             if (op142.isByVal || op142.isParamArray) {
                 args.push_back(odefVal142);
@@ -1264,8 +1264,9 @@
                         //     vb6_cHttpServerCookieAttr_prop_get_Expires 返回 vb6_VARIANT);
                         //     cHttpServerResponse File: ComputeETag(fileInfo.DateLastModified,
                         //     ...) (COM 属性 → vb6_VariantFromComResult(...) vb6_VARIANT).
-                        bool argIsVariant090d = isDefinitelyVariantExpr(*node.positional[i]);
-                        if (!argIsVariant090d) argIsVariant090d = cExprIsVariant(argVal);
+                        bool aVarSym090d = isDefinitelyVariantExpr(*node.positional[i]);
+                        bool aVarCex090d = cExprIsVariant(argVal);
+                        bool argIsVariant090d = aVarSym090d || aVarCex090d;
                         // Fix <vbeclipse> rev7: 类槽已交付 (&temp) —— 整段 Variant 提取
                         // 跳过。cType 此时是 vb6_cls_X* / vb6_ivref_X*, 上面的 case 都不
                         // 匹配, 但留显式护栏: 将来若给类指针加 case 也不会静默吃掉它。
