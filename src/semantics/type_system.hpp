@@ -44,9 +44,22 @@ public:
     // 两个类型是否可以隐式转换
     static bool canImplicitConvert(Vb6Type from, Vb6Type to);
 
+    // ---- 账 #230 §B139: 目标架构贯通到语义层 ----
+    // 背景: 这一层此前**拿不到目标架构**, 于是所有"宽度随架构"的地方只能拿宿主
+    // 的 sizeof(void*) 顶替 —— typeSize(LongPtr) 就是这么答的, 而 C3 是 x64 进程,
+    // 编译 --arch x86 目标时会答 8 (应为 4), 属 Fix 081e 留下的既有隐患。
+    // C3 一次运行只服务一个目标架构 (--arch 全局开关), 故这里用进程级设置,
+    // 由驱动在开局按 options.arch 注入一次; 默认 x64 与既有行为一致。
+    static void setTargetPtrBits(int bits) { targetPtrBits_ = (bits == 32 ? 32 : 64); }
+    static int  targetPtrBits() { return targetPtrBits_; }
+    static bool targetIsX64() { return targetPtrBits_ == 64; }
+
     // 整型的"位宽 + 符号" (ai/032 rev2)。返回 false 表示这个类型不是"位宽与符号都
     // 确定"的整型 —— Boolean (VB 语义上强制升到 Short) 与 LongPtr (宽度随目标架构)
     // 刻意不收, promote 对它们走原来的档位兜底。
+    // §B139 后架构其实已经拿得到了 (targetPtrBits()), 但**本格不改这里的行为**:
+    // 放 LongPtr 进来会改 promote / 发码层混符号加宽的答案, 需要单独做消融负控
+    // (promote 处注释记着"登记 6 档后 CStr(p + 1.5) 出 4"那组读数), 不搭车改。
     // 只此一份: promote 与发码层 (cgen_expr_binary 的混符号加宽) 都问这里,
     // 免得两侧各写一套 8/16/32/64 的对照表而漂移。
     static bool intShape(Vb6Type t, int* bitsOut, bool* signedOut);
@@ -84,6 +97,8 @@ public:
 private:
     // 类型名到Vb6Type的映射 (小写)
     std::unordered_map<std::string, Vb6Type> builtinTypes_;
+    // 账 #230 §B139: 目标架构指针位宽 (32 / 64), 默认 64。见上方 setTargetPtrBits。
+    static int targetPtrBits_;
 };
 
 } // namespace vb6c3

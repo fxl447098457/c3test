@@ -9,6 +9,7 @@
 #include "common/source_manager.hpp"
 #include "ast/ast.hpp"
 #include "semantics/semantic_analyzer.hpp"
+#include "semantics/type_system.hpp"      // 账 #230 §B139: 目标架构注入语义层
 #include "driver/rtl_embedded.hpp"
 #include "project/vbp_parser.hpp"
 #include "project/package_manifest.hpp"   // ai/023 S01: 包引用三条硬校验
@@ -40,6 +41,13 @@ CompileResult Driver::compile(int argc, char* argv[]) {
 CompileResult Driver::compile(const CompileOptions& options) {
     CompileResult result;
     diag_->clear();
+
+    // 账 #230 §B139: 把目标架构贯通到语义层 —— 必须在任何语义分析之前。
+    //   语义层此前拿不到 --arch, 凡"宽度随架构"处只能拿**宿主** sizeof(void*) 顶替
+    //   (typeSize(LongPtr) 就是), 而 C3 是 x64 进程: 目标 --arch x86 时会答 8 而非 4。
+    //   §B138 起 VarPtr/StrPtr/ObjPtr 已答 LongPtr, 这个数会被真正用上, 故先把它正过来。
+    //   两个 compile 重载都汇到这一处, 注入一次即可覆盖全部入口。
+    TypeSystem::setTargetPtrBits((options.arch == "x86") ? 32 : 64);
 
     // 应用警告抑制 (性能优化: 减少大型项目的日志I/O)
     for (int id : options.suppressedWarningIds) {
