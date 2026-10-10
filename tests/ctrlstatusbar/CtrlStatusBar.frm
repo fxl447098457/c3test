@@ -67,7 +67,12 @@ End Function
 
 Private Sub Form_Load()
     Dim sbW0 As Long, sbW1 As Long, sbSum As Long, sbTol As Long
-    Debug.Print "SB0-HWND=" & Me.hwnd & " CAP=" & Me.Caption & " CL=" & Me.Controls.Count
+    Dim sbH0 As String
+    ' SB0 asks whether a handle survives the stringify road: VB6 hands hWnd out as a
+    ' Long, so CStr of it is digits. An empty string here meant the pointer went into
+    ' the object box and came back as "".
+    sbH0 = CStr(Me.hwnd)
+    Debug.Print "SB0-HWND-NUM=" & SBTF(Len(sbH0) > 0) & " CAP=" & Me.Caption & " CL=" & Me.Controls.Count
     Debug.Print "SB1-COUNT=" & StatusBar1.Panels.Count
     Debug.Print "SB2-KEY1=" & StatusBar1.Panels(1).Key
     Debug.Print "SB3-TEXT1=" & StatusBar1.Panels(1).Text

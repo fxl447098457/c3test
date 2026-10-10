@@ -59,6 +59,10 @@ Option Explicit
 '   GA03        a runtime write to an element reads back the requested number
 '   GA04        Move on an element reads back all four and lands the window
 '   GA05        the two elements are two windows: moving one leaves the other
+'   GA05c       the two handles compared straight (no CLng round-trip) answer like
+'               numbers -- a handle is a pointer value, and VB6 hands hWnd out as Long
+'   GA05d       the same type answer on the two stringify roads: a handle prints its
+'               digits, and CStr of a DC-shaped read stays on the Variant road
 '   GA06        the array never swallows its single-named sibling's write
 
 Private Declare PtrSafe Function GetWindowRect Lib "user32" (ByVal hwnd As LongPtr, ByRef lpRect As RECTAPI) As Long
@@ -141,7 +145,9 @@ Private Sub tmrGA_Timer()
 
     Dim ok1 As Boolean, ok2 As Boolean, ok3 As Boolean
     Dim ok4 As Boolean, ok5 As Boolean, ok6 As Boolean
+    Dim ok5c As Boolean
     Dim h5a As Long, h5b As Long
+    Dim t5 As String
 
     ok1 = (arrA(0).Left = 1007) And (arrA(0).Top = 449) And (arrA(0).Width = 3001) And (arrA(0).Height = 247) _
         And (PxLeft(arrA(0).hwnd) = ToPx(1007)) And (PxTop(arrA(0).hwnd) = ToPy(449)) _
@@ -181,6 +187,22 @@ Private Sub tmrGA_Timer()
     h5b = CLng(arrA(1).hwnd)
     Debug.Print "GA05b-two-windows=" & TF(h5a <> h5b) & " raw=" & h5a & "/" & h5b & _
         " idx=" & arrA(0).Index & "/" & arrA(1).Index
+
+    ' GA05c: the same pair asked straight, without the CLng round-trip. A handle is a
+    ' pointer value and VB6 hands hWnd out as a Long, so two different windows must
+    ' answer "not equal" both on its own and inside an And chain. eqself is the
+    ' opposite-side witness -- a road that simply answered True would pass the first
+    ' two and fail this one.
+    ok5c = (arrA(0).hwnd <> arrA(1).hwnd) And (arrA(0).hwnd = arrA(0).hwnd)
+    Debug.Print "GA05c-inline=" & TF(arrA(0).hwnd <> arrA(1).hwnd) & " chain=" & TF(ok5c) _
+        & " eqself=" & TF(arrA(0).hwnd = arrA(0).hwnd)
+
+    ' GA05d: the same type answer feeds the two stringify roads. Before a handle was
+    ' registered as one, "x" & ctrl.hwnd printed only "x" (the pointer went into the
+    ' object box and came back empty) and CStr of a DC-looking read had to stay on the
+    ' Variant road -- cast that one to a number and the fixture does not even compile.
+    t5 = "H" & arrA(0).hwnd
+    Debug.Print "GA05d-digits=" & TF(Len(t5) > 1) & " hdcstr=" & TF(Len(CStr(soloT.hDC)) > 0)
 
     ' GA06: the single-named sibling answers its own write too, so the array road
     ' did not take over the named-control road next to it.

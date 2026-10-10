@@ -12,7 +12,7 @@
 #   A2  controlPropType 全库提及数 = 3 (定义 + 声明 + **恰好一个**调用点)
 #   A3  ctrlTypeOfMemberObject ("这枚对象是不是窗体控件") 同样 = 3, 且那唯一的调用点在
 #       cgen_util_type.cpp —— 别处再判一次控件身份 = 又开一条平行路
-#   A4  搬进来的那 28 条属性名必须逐条在表里答到 (`p == "<名>"`)。语料不覆盖的名字在
+#   A4  搬进来的那 30 条属性名必须逐条在表里答到 (`p == "<名>"`)。语料不覆盖的名字在
 #       emit A/B 上是哑的 (#229 那轮的教训: changed 全是夹具自身新增行), 所以这条硬钉。
 #   A5  表里那道 "不是 Unknown" 的闸必须还在、且只有 1 处 (自定义 OCX 的属性面归类型库)
 #   A6 (256) defaultPropType = 3 (definition + declaration + **exactly 1** call site) and that
@@ -91,7 +91,8 @@ if ($body -ne "") {
                    "bordercolor", "x1", "y1", "x2", "y2",
                    "drive", "path", "pattern", "filename", "list",
                    "filter", "filetitle", "dialogtitle", "initdir", "defaultext", "fontname",
-                   "flags", "cancelerror", "color", "min", "max", "copies", "fontsize")
+                   "flags", "cancelerror", "color", "min", "max", "copies", "fontsize",
+                   "hwnd", "hdc")
     foreach ($p in $collapsed) {
         $n = @([regex]::Matches($body, 'p\s*==\s*"' + [regex]::Escape($p) + '"')).Count
         if ($n -lt 1) { $bad += ("A4 property dropped from the table: " + $p) }

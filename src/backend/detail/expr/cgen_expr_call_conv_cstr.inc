@@ -82,7 +82,12 @@
                 // **空串**, 而 VB6 里 ContainerHwnd / hWnd 是 Long、CStr 打的是数字。
                 // 不能往 _Generic 补一档 void* : 真对象引用在 C 层也是 void*, 那样会把
                 // 对象一律打成数字 (装箱那一路比句柄更常见) ⇒ 只能在**类型已知**的这里分诊。
-                if (!args.empty()) {
+                // 账 #230 第二十八刀 (§B136): 但「类型答 LongPtr」不等于「实参在 C 侧是标量」——
+                // 属性读没登记具名出口时落 COM 兜底, 交出的是 vb6_VARIANT (实测
+                // `CStr(soloT.hDC)` 发成 (int64_t)(intptr_t)(vb6_VariantFromComResult(…))
+                // ⇒ C2440 + C2198)。所以这一档也要先问下面 Fix 225 那一句: 已是 VARIANT
+                // 就什么也不转, 交给默认那条 vb6_CStr 按档案自己拆。
+                if (!args.empty() && !cExprIsVariantCarrier(args[0])) {
                     lastExpr_ = "vb6_CStrLongLong((int64_t)(intptr_t)(" + args[0] + "))";
                     return;
                 }

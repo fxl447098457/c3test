@@ -4299,14 +4299,16 @@ if ($Category -in @("all", "run", "vbp")) {
     # SB8/SB15 盯 sbrNum 面板的设计期 Text 不能被"系统自动显示"覆盖 (text / shown 两个字段);
     # SB29/SB31 盯 Panels.Add 插到中间时 memmove 留下的悬垂副本 (双重释放 → ClearPanels 崩)。
     # P20-43 修正: 同 ctrlprogress —— 期望串与夹具完整标签逐字一致。
-    # SB0 是已知局限 (vb6_GetControlHwnd 直返入参, Me.hwnd 在 Debug.Print 里为空),
+    # SB0 原来钉的是「Me.hwnd 在 Debug.Print 里是空串」那格已知局限 —— 账 #230 第二十八刀
+    # (§B136) 把句柄登记成指针数值档之后，那一路交回数字，所以这一格改成问「打出东西了没有」。
+    # 值本身是窗口句柄，天生会抖，因此针面只吃 SBTF 那个布尔，不吃 RAW。
     # SB34-LASTKEY= 为空是对的 (第 3 格是没给 Key 的时间面板)。
     # SB36 是两半：第二十二刀把"写什么读什么"那条针换成「往弹簧档写宽不许改变它报出来的数」
     # (增量不变, 按 #157 就地取基线), 第二十三刀（账 #303）补上另一半 —— 三格必须铺满控件宽。
     # 内容档那格的实测宽以前没从 fixedTotal 里扣, 弹簧把它吃两次（BASE 读数 sum=6630 而 bar=6000,
     # 差的 630 缇 = 42 像素 = 那枚时钟文本宽）。RAW 那行把两个数一起打出来, 容差 3 像素。
     Test-Vbp "ctrlstatusbar" "$Tests\ctrlstatusbar\CtrlStatusBar.vbp" @(
-        "SB0-HWND= CAP=CtrlStatusBar CL=", "SB1-COUNT=3", "SB2-KEY1=pr",
+        "SB0-HWND-NUM=True CAP=CtrlStatusBar CL=", "SB1-COUNT=3", "SB2-KEY1=pr",
         "SB3-TEXT1=Ready", "SB4-STYLE1=0", "SB5-AUTOSZ1=1", "SB6-MINW1=22",
         "SB7-KEY2=tp", "SB8-TEXT2=Tip", "SB9-STYLE2=2", "SB10-W2=120",
         "SB11-AUTOSZ2=0", "SB12-TIP2=NumLock state", "SB13-STYLE3=5",
@@ -4527,7 +4529,7 @@ if ($Category -in @("all", "run", "vbp")) {
     # 多两枚元素会把那五条一起改动 —— 那是重述别人的判据，不是本刀要办的事。
     # GA05b 单独打"两枚元素是两枚窗口"，不并进 GA05 那条 And 链：并进去那一版整条读 False、
     # 单独读 True（LongPtr 与 <> 混在 And 链里，§B238 那一族的另一张脸）—— 混在一格里只会让红找不到人。
-    $gaExpected = @("GA-DONE", "GA01-e0-design=True", "GA02-e1-design=True", "GA03-e1-write=True", "GA04-e1-move=True", "GA05-e0-untouched=True", "GA05b-two-windows=True", "GA06-solo-write=True")
+    $gaExpected = @("GA-DONE", "GA01-e0-design=True", "GA02-e1-design=True", "GA03-e1-write=True", "GA04-e1-move=True", "GA05-e0-untouched=True", "GA05b-two-windows=True", "GA05c-inline=True chain=True eqself=True", "GA05d-digits=True hdcstr=True", "GA06-solo-write=True")
     Test-Vbp "geomarr" "$Tests\geomarr\GeomArr.vbp" $gaExpected
     Test-Vbp "geomarr_x86" "$Tests\geomarr\GeomArr.vbp" $gaExpected -Arch "x86"
     # 形状两头：元素的四档读写必须走那四个具名出口（单枚那条同表同一路，一起钉住不被带跑）；
@@ -4543,6 +4545,18 @@ if ($Category -in @("all", "run", "vbp")) {
     Test-EmitcAbsent "ga_emitc_arr_geometry_com_prop" @("$Tests\geomarr\GeomArr.vbp") @(
         'vb6_ComGetProp(vb6_CtrlArr_GetAt(&vb6_arr_arrA, 0), L"Left")',
         'vb6_ComGetProp(vb6_CtrlArr_GetAt(&vb6_arr_arrA, 1), L"Width")')
+    # 句柄那一档的形状两头（账 #230 第二十八刀，§B136）：两枚窗口的句柄直接比必须发成**原生
+    # !=** —— BASE 那台在同一份夹具上发的是七处对象装箱走 vb6_VarCmp*，而取数值那一头对
+    # 对象档一律答 0.0，于是「两枚不同窗口」恒答相等，编得过、链得过、门不红。
+    # 第二根针钉的是 CStr 那一路**保持**在 Variant 档上：属性读没登记具名出口时落 COM 兜底、
+    # 交出的是 vb6_VARIANT，把它裸转成数值产物是 C2440 ⇒ 这一枚夹具压根编不过，
+    # 所以它自己就是那道闸的编译级反面证人（实测：闸摘掉 ⇒ NEW-BUILD-RC=1）。
+    Test-EmitcShape "ga_emitc_handle_value_compare" @("$Tests\geomarr\GeomArr.vbp") @(
+        '-(vb6_GetControlHwnd(vb6_CtrlArr_GetAt(&vb6_arr_arrA, 0)) != vb6_GetControlHwnd(vb6_CtrlArr_GetAt(&vb6_arr_arrA, 1)))',
+        'vb6_CStr(vb6_VariantFromValue(vb6_VariantFromComResult(vb6_ComGetProp(vb6_hwnd_soloT, L"hDC"))))')
+    Test-EmitcAbsent "ga_emitc_handle_not_object_box" @("$Tests\geomarr\GeomArr.vbp") @(
+        'vb6_VariantFromValue(vb6_GetControlHwnd(vb6_CtrlArr_GetAt(&vb6_arr_arrA, 0)))',
+        'vb6_VariantFromValue(vb6_GetControlHwnd(vb6_CtrlArr_GetAt(&vb6_arr_arrA, 1)))')
     # 发码两头：套了数值转换的形必须在，裸传 vb6_GetControlLeft 进 Concat 的形必须不在。
     # 只钉读数会放过"两边都不套"那一族；这一格是发码面的形状，直接钉形状。
     # (整条语句作针：PSParser 在 `@(` 续行里按**字面**数括号，单引号串里不配平的括号会让

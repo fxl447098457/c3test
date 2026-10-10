@@ -76,8 +76,10 @@ Vb6Type CCodeGen::controlPropType(FrmControlType ctrlType, const std::string& pr
     // `InStr(...)` 这些**直接拿指针**的面反而是对的 —— 同一枚属性两种答案，就是没登记的证状。
     // 登记成 String 之后所有消费面统一按 BSTR 取值（与 `vb6_GetControlText` 那条同档），
     // RTL 侧的返回型也一起改成 `wchar_t*`，让**万一**还剩的装箱落到 VT_BSTR。
-    // 同一段里 `MouseIcon` / `Hwnd` 的 getter 也是 `void*`，但那两条**本来就是对象**，
-    // 装箱成对象是对的（FlexGrid 的 `CellPicture` 同型），刻意不动。
+    // 同一段里 `MouseIcon` 的 getter 也是 `void*`，那条**本来就是对象**（FlexGrid 的
+    // `CellPicture` 同型），装箱成对象是对的。同一句把 `Hwnd` 也一起算成对象是错的 ——
+    // VB6 那边 `hWnd` / `hDC` 是**句柄数值**（`TypeName(Form1.hWnd)` 答 "Long"），
+    // 订正与读数见账 §B136 / 下面那两行。
     if (p == "tooltiptext" || p == "tag") {
         return Vb6Type::String;
     }
@@ -94,6 +96,18 @@ Vb6Type CCodeGen::controlPropType(FrmControlType ctrlType, const std::string& pr
     // 登记成 Boolean 之后打印面就是 True/False（探针 `.build/sltab` 里 VarType 读回 3 = Integer 就是没登记的证状）。
     if (p == "tabstop") {
         return Vb6Type::Boolean;
+    }
+
+    // 账 §B136（第二十八刀）: 句柄属性登记成**数值**，不是对象。这两枚以前根本没登记 ⇒ 类型答
+    // Unknown ⇒ 消费面一律走装箱那条路，而 `vb6_VariantFromValue` 的 `_Generic` 把**任何指针**都投给
+    // `vb6_VariantObject`（rtl 那张表自己写的最后一行），于是 `If a.hWnd = b.hWnd` 发成
+    // `vb6_VarCmpEq(&对象档, &对象档)` —— 而 `vb6_VarToDouble_internal` 只认 VT_I2/I4/R4/R8/BOOL/BSTR、
+    // `default: return 0.0` ⇒ **两枚不同窗口的句柄恒答相等**（`<>` 恒假；探针 `.build/b606_inline`：
+    // 单独打 `TF(a.hwnd <> b.hwnd)` 与并进 And 链同答 False，先 CLng 落进声明过的 Long 才答 True）。
+    // 档位取 LongPtr = 与 RTL 的 `void*` / `intptr_t` 同宽（账 #180 已定「句柄按指针宽度」这一档），
+    // 也比 VB6 的 Long 更适合 x64；登记之后比较面走原生 `==`/`!=`（与「声明过的 LongPtr 变量」同形）。
+    if (p == "hwnd" || p == "hdc") {
+        return Vb6Type::LongPtr;
     }
 
     if (ctrlType == FrmControlType::SSTab) {
