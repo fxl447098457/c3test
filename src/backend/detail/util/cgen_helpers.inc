@@ -863,6 +863,23 @@
     bool classMemberReturnsAsObject(const std::string& className,
                                     const std::string& memberName) const;
 
+    // Fix 219: 接收者 C 表达式是不是一枚 **Variant 载体** —— 它的静态类型是
+    // `vb6_VARIANT` (结构体值), 不是 `vb6_cls_X*`, 所以对它拼 `obj->member` /
+    // `obj.member` 一定是 C2039/C2224 ("不是 vb6_VARIANT 的成员" / "左侧必须具有
+    // 结构/联合类型")。
+    // 名单与 cgen_expr_member_class_fallback.inc 既有的 Variant 分支同源:
+    // cExprIsVariant (vb6_VariantFromComResult( / vb6_VariantFromValue( / VB6_SA_AT(
+    // (vb6_VARIANT,…) 等), 外加 `vb6_List_*` 这一族返回对象型 Variant 的函数。
+    bool isVariantCarrierExpr(const std::string& cExpr) const;
+
+    // Fix 219: Variant 载体上的成员访问 —— 按 VB6 语义是**后期绑定**的属性读:
+    // 取出 Variant 所持的 IDispatch, 在其上 GetProp, 结果仍回包成 Variant。
+    // 与 class_fallback 里既有的那条 Variant 分支是同一个表达式形状 (单一权威,
+    // 两条路都调这里), 免得同一口径在两处各写一遍、日后各自漂移。
+    std::string lateBoundReadOnVariantCarrier(const std::string& carrierExpr,
+                                             const std::string& memberName) const;
+
+
     // ---- Fix 037: UDT 类型推断辅助 ----
     // 给定一个表达式 AST 节点, 递归推断其 UDT C 类型标识符 (如 "vb6_type_UcsBuffer").
     //  - IdentifierExpr: 查 knownUdtVars_ 得到 UDT C 类型

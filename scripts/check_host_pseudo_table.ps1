@@ -62,22 +62,29 @@ $rowRe = '\{"(UserControl|PropertyPage|Extender|Ambient)",\s*"([a-z]+)",\s*"([A-
 # Select-String 默认**不区分大小写** (§B120 实测: 把表里一行 obj 列改回小写, 这条不加就还是 54 行,
 # 于是那行躲过的是"逐行对 RTL 声明"这道检查, 报出来的却是 ROW-SYMBOL-MISSING —— 红是红了, 说的不是这件事)
 $rows = @(Select-String -Path $tblPath -Pattern $rowRe -CaseSensitive)
-# 恰好 54 行: 从前的 "< 40" 会让"某一行从正则里掉出去"静默通过 —— 而每行都要逐条对 RTL 声明,
+# 恰好 61 行: 从前的 "< 40" 会让"某一行从正则里掉出去"静默通过 —— 而每行都要逐条对 RTL 声明,
 # 少认一行 = 那一行没人查 (账 #278 §B120 把 obj 列改成 PascalCase 时正是这个形状)。
-# 改这张表要同批改这道针 (加一行 -> 55, 删一行 -> 53)。
-if ($rows.Count -ne 54) {
-    $viol += ("TABLE-ROWS: parsed {0} rows (want exactly 54 - a deleted or reformatted row makes the per-row RTL checks spin)" -f $rows.Count)
+# 改这张表要同批改这道针 (加一行 -> 62, 删一行 -> 60)。
+# 54 -> 61: ComCtlsDemo 那一刀往表里补了 7 行宿主伪成员 (RTL 侧同步补了真身):
+#   UserControl 的 AccessKeys / Appearance / DrawStyle / ContainedControls / EventsFrozen
+#   (后两枚此前既不在表也不在 RTL ⇒ C2065, 实测 CoolBar/ToolBar 那一族);
+#   Extender 的 Cancel / vb6_Default。逐行的 RTL 声明核对照旧跑, 故只是把数目改对。
+if ($rows.Count -ne 61) {
+    $viol += ("TABLE-ROWS: parsed {0} rows (want exactly 61 - a deleted or reformatted row makes the per-row RTL checks spin)" -f $rows.Count)
 }
 
 # ---------- 2) 读 RTL 声明 (指针全局 / struct 全局 / 值全局 / 函数) ----------
+# Fix 214: 拼写段放宽到 [A-Za-z_]+ —— VB6 关键字成员经 cIdent 转义后 RTL 名里会带下划线
+# (Extender.Default → vb6_Extender_**vb6_**Default)。原来的 [A-Za-z]+ 匹配不到它,
+# 表里那一行会被误判成 ROW-SYMBOL-MISSING。放宽只影响"能不能认出名字", 不放松类型比对。
 $symType = @{}
-foreach ($m in [regex]::Matches($hdrRaw, 'extern\s+([A-Za-z_][\w]*\s*\*)\s*(vb6_(?:UserControl|PropertyPage|Extender|Ambient)_[A-Za-z]+)\s*;')) {
+foreach ($m in [regex]::Matches($hdrRaw, 'extern\s+([A-Za-z_][\w]*\s*\*)\s*(vb6_(?:UserControl|PropertyPage|Extender|Ambient)_[A-Za-z_]+)\s*;')) {
     $symType[$m.Groups[2].Value] = ($m.Groups[1].Value -replace '\s+', '')
 }
-foreach ($m in [regex]::Matches($hdrRaw, 'extern\s+(struct\s+[A-Za-z_]\w*)\s+(vb6_(?:UserControl|PropertyPage|Extender|Ambient)_[A-Za-z]+)\s*;')) {
+foreach ($m in [regex]::Matches($hdrRaw, 'extern\s+(struct\s+[A-Za-z_]\w*)\s+(vb6_(?:UserControl|PropertyPage|Extender|Ambient)_[A-Za-z_]+)\s*;')) {
     $symType[$m.Groups[2].Value] = "struct"
 }
-foreach ($m in [regex]::Matches($hdrRaw, 'extern\s+([A-Za-z_][\w]*)\s+(vb6_(?:UserControl|PropertyPage|Extender|Ambient)_[A-Za-z]+)\s*;')) {
+foreach ($m in [regex]::Matches($hdrRaw, 'extern\s+([A-Za-z_][\w]*)\s+(vb6_(?:UserControl|PropertyPage|Extender|Ambient)_[A-Za-z_]+)\s*;')) {
     if (-not $symType.ContainsKey($m.Groups[2].Value)) { $symType[$m.Groups[2].Value] = $m.Groups[1].Value }
 }
 $fn = @{}

@@ -214,12 +214,22 @@
     // 账 #278 §B105: "哪个名字是保留的宿主集合 / 它由哪条码头回答"不再写在这里 ——
     // 问那张表 (kHostPseudoRows 的 HPF_CHANNEL 行)，语义层的放行问的也是同一句。
     std::string hostDock;
-    const bool reservedHostObj =
+    const bool reservedHostChannel =
         hostPseudoChannel(isPropertyPageDesigner_ ? "PropertyPage" : "UserControl", lower, hostDock);
+    // Fix 221: 裸 `Extender` 与 CHANNEL 同档保留 —— 但它不是表里的 HPF_CHANNEL:
+    // RTL 实体是一枚**结构体** vb6_UserControl_Extender (DataChanged 是 Fix 221 补的
+    // 第三个字段), 取地址即对象指针, 不是 <dock>() 那种函数调用形态, 故单独一支。
+    // Pager.ctl:481 `Set ControlsExtender = Extender` / FontCombo.ctl 的
+    // `ControlEnum == Extender` 走这里; 不保留就落"发射裸标识符"兜底 ⇒ C2065。
+    const bool reservedHostObj = reservedHostChannel || (lower == "extender");
     if (isDesignerModule_ && !knownLocalVars_.count(lower)
         && (!sym || reservedHostObj)) {
-        if (reservedHostObj) {
+        if (reservedHostChannel) {
             lastExpr_ = hostDock + "()";
+            return;
+        }
+        if (lower == "extender") {
+            lastExpr_ = "(&vb6_UserControl_Extender)";
             return;
         }
         std::string rtlHp;

@@ -266,6 +266,19 @@
                     return;
                 }
                 // 类中无此成员 → 数据字段
+                //
+                // Fix 219: 但接收者是 **Variant 载体** (`vb6_VariantFromComResult(...)`
+                // 这类, 静态类型是 vb6_VARIANT 值, 不是 vb6_cls_X*) 时, 它压根没有
+                // 结构字段可读 —— `obj->member` 必是 C2039 "不是 vb6_VARIANT 的成员"。
+                // VB6 语义是在该 Variant 所持 IDispatch 上做后期绑定的属性读。
+                // 实测 ComCtlsDemo: CoolBar.ctl:874 `Me.Bands(i).Caption` — 内层
+                // `Bands(i)` 已按 Fix 086 走了晚绑定的 Item 调用 (冷知识: 那正是
+                // "项目类默认成员" 的既有出口), 于是外层就不能再当结构体字段,
+                // 否则同一表达式里一半是 COM 一半是结构体 (整族 135+53 处)。
+                if (isVariantCarrierExpr(obj)) {
+                    lastExpr_ = lateBoundReadOnVariantCarrier(obj, node.memberName);
+                    return;
+                }
                 lastExpr_ = obj + "->" + cIdent(node.memberName);
                 return;
             }
@@ -284,15 +297,14 @@
             // 语义 = IDispatch 上的属性读, 必须晚绑定。
             } else if (objIsAsObjectMemberV8(node.object)) {
                 lastExpr_ = "vb6_ComGetProp(" + obj + ", L\"" + node.memberName + "\")";
-            } else if (cExprIsVariant(obj)
-                       || obj.rfind("vb6_List_", 0) == 0) {
+            } else if (isVariantCarrierExpr(obj)) {
                 // Fix <vbeclipse>: Variant 表达式 (vb6_List_Item(...) 返回 vb6_VARIANT)
                 // 上的 COM 属性读取 → 取回对象后用 ComGetProp 晚绑定, 避免
                 // `.ViewId`/`->ViewId` → C2039 (ucTabStrip.c:260 / ucPerspective.c:331).
                 // List.* 属函数返回对象型Variant, rfind 兜底 variantPrefixes 表缺失项.
-                std::string memLit = std::string("L\"") + node.memberName + "\"";
-                lastExpr_ = std::string("vb6_VariantFromComResult(vb6_ComGetProp(vb6_VariantToObjectVal(")
-                          + obj + "), " + memLit + "))";
+                // Fix 219: 表达式形状挪进 lateBoundReadOnVariantCarrier —— 上面
+                // clsFromAst 分支的同一个形状要与这里逐字一致, 不能再各写一遍。
+                lastExpr_ = lateBoundReadOnVariantCarrier(obj, node.memberName);
             } else {
                 lastExpr_ = obj + "." + cIdent(node.memberName);
             }

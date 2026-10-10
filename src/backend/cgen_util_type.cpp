@@ -380,6 +380,19 @@ Vb6Type CCodeGen::inferExprType(Expr& expr) const {
                     }
                 }
             }
+            // Fix 220d: `<宿主>.<宿主对象>` 形 (UserControl.Ambient / UserControl.Extender /
+            // PropertyPage.Ambient …) —— 这个成员访问的结果**仍是宿主伪对象本身**, 它的成员
+            // (如 .Font / .Left) 在生成码里是结构体字段/独立全局 (vb6_UserControl_Ambient.Font),
+            // 不是后期绑定读。
+            // 必须在这里返回 Unknown 拦住下面的 Fix 220: 否则 Fix 220 会顺着
+            // `inferExprType(UserControl) == Variant` (兜底) 把 `.Ambient` 答成 Variant,
+            // 外层 `.Font` 再答 Variant ⇒ comPackExpr 选 vb6_ComPackValue 而非
+            // vb6_ComPackObject ⇒ 生成的 exe 起来即崩。
+            // 实测 Charts 2020 生成码 diff 的残留就是这个形状
+            //   `- vb6_ComPackObject(vb6_UserControl_Ambient.Font)`
+            //   `+ vb6_ComPackValue(vb6_UserControl_Ambient.Font)`
+            // (LabelPlus.c / ucTreeMaps.c)。
+            if (hostPseudoIsObject(Symbol::toLower(ma.memberName))) return Vb6Type::Unknown;
             // Fix 081i: UDT字段访问 — 先查找UDT成员类型，避免lookupModule
             // 匹配到内置函数(如Left→String)导致类型推断错误
             {
@@ -449,6 +462,58 @@ Vb6Type CCodeGen::inferExprType(Expr& expr) const {
                         }
                         break;
                     }
+                }
+            }
+            // Fix 220: 对象是 **Variant 载体** (集合 .Item(i) 返回 Variant / Variant 局部变量
+            // 持有对象 / ComCall 结果 …) 时, 成员访问是后期绑定属性读, 结果**本身也是
+            // Variant** —— 必须与 codegen 侧 Fix 219 (cgen_expr_member_class_fallback.inc /
+            // cgen_expr_member_voidptr_com.inc) 发出的
+            //   `vb6_VariantFromComResult(vb6_ComGetProp(vb6_VariantToObjectVal(obj), L"member"))`
+            // (返回 vb6_VARIANT 值) 严格一致。
+            // 若这里落到下方 `lookupModule(memberName)` 用成员的**声明类型** (如 Long) 答, 两条路
+            // 就错位: comPackExpr 据此选 vb6_ComPackInt, 生成
+            //   `vb6_ComPackInt(vb6_VariantFromComResult(...))`
+            // → C2440 "vb6_VARIANT 无法转换为 int32_t" (CoolBar.c:1230/1235 等, 共约 170 处
+            // VARIANT→int32_t/float/double)。本修复与早期绑定互不干扰: 早期绑定只在 codegen 侧
+            // 已知对象类时触发, 那时 inferExprType(object) 会答出该类而非 Variant, 不会进此分支。
+            // Fix 220b/c/f: **必须先把三类"其实不是 Variant 载体"的对象摘出去**,
+            // 否则下面那条规则会把它们的成员访问也答成 Variant, 下游 (comPackExpr /
+            // 赋值转换 / 实参包装) 据此生成错代码, 生成的 exe 起来就崩。
+            //   220b —— 裸标识符若符号表里查不到, 它更可能是**命名空间/库限定符**
+            //          (VBA / Constants …): `VBA.DateAdd(...)`。若答 Variant,
+            //          cgen_assign_com_prop.inc 的 Fix 159-B (isScalarImplicitStr159)
+            //          不命中 ⇒ 裸拼 vb6_DateAdd(...) 给 BSTR 形参 ⇒ C2440
+            //          (VBFlexGridDemo UserEditingForm.c 2 处)。
+            //   220c —— **宿主伪对象本身** (Ambient / Extender / UserControl /
+            //          PropertyPage): `Ambient.Font` / `Extender.Left` 在生成码里是
+            //          结构体字段/独立全局 (vb6_Ambient_Font / vb6_Extender_Left),
+            //          不是后期绑定读。若答 Variant, comPackExpr 选 vb6_ComPackValue
+            //          而非 vb6_ComPackObject ⇒ Charts 2020 起来即崩 (0xC000041D)。
+            //   220f —— 对象能被推成**具体类** ⇒ 早期绑定的直接调用, 同样不是后期
+            //          绑定读 (Charts 2020 PropPagLP.pag:401
+            //          `m_oUCImage.PictureFromStream LabelPlus1.PictureGetStream`)。
+            // `Me` 例外保留 (它同样可能不在符号表里, 但确是实例载体)。
+            {
+                bool objIsRuntimeEntity = true;
+                if (ma.object && ma.object->kind == ASTNodeKind::IdentifierExpr) {
+                    const std::string& objNm =
+                        static_cast<IdentifierExpr&>(*ma.object).name;
+                    const std::string objLower220 = Symbol::toLower(objNm);
+                    if (objLower220 == "me") {
+                        // `Me` 例外保留
+                    } else if (hostPseudoIsObject(objLower220)) {
+                        objIsRuntimeEntity = false;                 // 220c
+                    } else if (!inferClassTypeOfExpr(*ma.object).empty()) {
+                        objIsRuntimeEntity = false;                 // 220f
+                    } else {
+                        const Symbol* objSym = symTab_.lookup(objNm);
+                        if (!objSym) objSym = symTab_.lookupModule(objNm);
+                        if (!objSym) objIsRuntimeEntity = false;    // 220b
+                    }
+                }
+                if (objIsRuntimeEntity
+                    && inferExprType(*ma.object) == Vb6Type::Variant) {
+                    return Vb6Type::Variant;
                 }
             }
             // 查找成员函数/属性的返回类型

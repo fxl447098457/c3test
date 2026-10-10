@@ -1061,8 +1061,25 @@ int32_t vb6_Extender_WhatsThisHelpID = 0;
 void*   vb6_Extender_Container = NULL;
 void*   vb6_Extender_DragIcon = NULL;
 
+// --- Fix 214: 宿主伪对象其余成员 (ComCtlsDemo / ComCtls 控件组) ---
+// 声明在 vb6rtl_userctl.h。设计期/运行期都由控件自己的属性过程收发 (见那头部的注释),
+// 初值取 VB6 默认: Appearance=0 (Flat), DrawStyle=0 (vbSolid),
+// AccessKeys/DisplayAsDefault/Default/Cancel 空或 0。
+int32_t vb6_UserControl_Appearance   = 0;
+int32_t vb6_UserControl_DrawStyle    = 0;
+BSTR    vb6_UserControl_AccessKeys   = NULL;
+int16_t vb6_Ambient_DisplayAsDefault = 0;
+int16_t vb6_Extender_vb6_Default = 0;
+int16_t vb6_Extender_Cancel  = 0;
+
 // --- Fix 133u: Extender.Visible/Height (czUI.ctl) ---
-struct vb6_UserControl_Extender_Type vb6_UserControl_Extender = { -1, 0 };
+// Fix 221: 第三格 DataChanged (ComCtlsDemo 的 `UserControl.Extender.DataChanged = True`,
+// 32 处). 运行期容器不活动 ⇒ 只写不读, 保留可写字段。
+struct vb6_UserControl_Extender_Type vb6_UserControl_Extender = { -1, 0, 0 };
+
+// Fix 221: UserControl.EventsFrozen —— .ctl 里只出现在读位置 (见 vb6rtl_userctl.h
+// 的注释), VB6 运行期恒 False ⇒ 恒 0 的槽位就是正确值。
+int16_t vb6_UserControl_EventsFrozen = 0;
 
 // --- Fix 133u: UserControl.hWnd / AutoRedraw (czUI.ctl) ---
 void*   vb6_UserControl_hWnd = NULL;
@@ -1235,11 +1252,13 @@ double vb6_ScaleUnitY(double y, int32_t fromScale, int32_t toScale) {
     return (f == 0.0) ? y : (px / f);
 }
 
-double vb6_UserControl_ScaleX(double x, int32_t fromScale, int32_t toScale) {
+// Fix 224: 这两个名字在 vb6rtl_userctl.h 里已交 `_Generic` 宏按首参类型分派 (VB6 的
+// Variant 隐式数值转换), 故**定义必须挂 _Raw** —— 否则宏会把这里的定义整形成乱语。
+double vb6_UserControl_ScaleXRaw(double x, int32_t fromScale, int32_t toScale) {
     return vb6_ScaleUnitX(x, fromScale, toScale);
 }
 
-double vb6_UserControl_ScaleY(double y, int32_t fromScale, int32_t toScale) {
+double vb6_UserControl_ScaleYRaw(double y, int32_t fromScale, int32_t toScale) {
     return vb6_ScaleUnitY(y, fromScale, toScale);
 }
 

@@ -35,6 +35,29 @@ std::string CCodeGen::comObjectRefFromCallExpr(const std::string& expr) {
     if (top("vb6_ComCallByDispid(") || top("vb6_ComGetProp(")) {
         return "vb6_ComUnpackObject(" + expr + ")";
     }
+    // Fix 223: 后期绑定 COM 调用/属性读被包成 VARIANT 值 (Fix 219 的 late-bound 读形态
+    // `vb6_VariantFromComResult(vb6_ComCall(...))` / `(vb6_ComGetProp(...))`)。With 目标是
+    // 具体类指针 (vb6_cls_X*) 或 Set 属性取对象时, 要的是**对象指针**而非 VARIANT 盒,
+    // 故剥掉外层盒子、递归处理内层拿到解包成对象指针的形态:
+    //   vb6_VariantFromComResult(vb6_ComCall(a, L"Item", ...))
+    //     → 内层 vb6_ComCall(...) → vb6_ComCallObject(a, L"Item", ...)   (正确对象指针)
+    //   vb6_VariantFromComResult(vb6_ComGetProp(o, L"m"))
+    //     → 内层 vb6_ComGetProp(...) → vb6_ComUnpackObject(vb6_ComGetProp(o, L"m"))
+    // 修复前: 此分支不识别该前缀 → 原样返回 → 调用方只补 (vb6_cls_X*) 强转, 把
+    // vb6_VARIANT 结构体值当指针 → C2440 "无法从 vb6_VARIANT 转换为 vb6_cls_X *"
+    // (CoolBar.c:1547 `With Me.Bands(i)` 等, 约 50 处; Set 属性取对象同款)。
+    if (top("vb6_VariantFromComResult(")) {
+        std::string inner = expr.substr(std::char_traits<char>::length("vb6_VariantFromComResult("));
+        // 剥掉开头的 "vb6_VariantFromComResult(" 后, 末尾多一个闭合 VARIANT 盒的右括号需摘除。
+        if (!inner.empty() && inner.back() == ')') {
+            inner.pop_back();
+            // 内层可能仍以 vb6_VariantFromComResult( 嵌套 (多重 late-bound), 递归到底。
+            return comObjectRefFromCallExpr(inner);
+        }
+        // 非 COM 调用形态 (如 vb6_VariantFromComResult(me->x), me->x 已是 VARIANT 值):
+        // 直接用 VariantToObjectVal 取对象指针。
+        return "vb6_VariantToObjectVal(" + expr + ")";
+    }
     return expr;
 }
 
