@@ -35,6 +35,21 @@
     std::string defaultArgForParam(Vb6Type type, bool isByVal,
                                    const std::string& explicitDefault) const;
 
+    // Fix 250: 形参**槽**的缺省值 —— 比 defaultValue(type) 多认一类: 类实例指针槽。
+    //   `Optional ByVal RelativeNode As TvwNode` 这类形参, 符号层把类类型折成
+    //   Vb6Type::Variant (真类名只在 ParameterInfo::typeRefName 里), 于是
+    //   defaultValue(Variant) 给出 `vb6_VariantEmpty()`; 而定义侧按 typeRefName
+    //   发出来的是 `vb6_cls_TvwNode*` ⇒ C2440 "无法从 vb6_VARIANT 转换为
+    //   vb6_cls_TvwNode *"。
+    //     实测 ComCtlsDemo TreeView.ctl:2115
+    //       Friend Sub FNodesAdd(ByRef NewNode As TvwNode,
+    //                            Optional ByVal RelativeNode As TvwNode, ...)
+    //     调用点 TreeView.ctl:767 `Me.FNodesAdd SampleNode, , TvwNodeRelationshipFirst, ...`
+    //     (第二实参**省略**) ⇒ TreeView.c 1261/1266/1348/1353 共 4 条 C2440。
+    //   VB6 里对象形参省略时就是 Nothing, C 侧即 NULL。判据复用 cParamClassPtrType
+    //   (与定义侧同一份 mapTypeRef 映射), 不另立第二套尺。
+    std::string defaultValueForParam(const ParameterInfo& p) const;
+
     // ---- 标识符命名 ----
 
     // VB6标识符 → 安全C标识符 (处理关键字冲突、特殊字符)

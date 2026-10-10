@@ -228,6 +228,11 @@ addConst("vbActiveTitleBarText", Vb6Type::Long, (long long)0x80000009);
     addConst("vbDropEffectNone", Vb6Type::Long, 0);
     addConst("vbDropEffectCopy", Vb6Type::Long, 1);
     addConst("vbDropEffectMove", Vb6Type::Long, 2);
+    addConst("vbDropEffectScroll", Vb6Type::Long, 0x80000000);
+
+    // ZOrder position constants
+    addConst("vbBringToFront", Vb6Type::Long, 0);
+    addConst("vbSendToBack", Vb6Type::Long, 1);
 
     // OLEDragOver State constants (State 参数)
     addConst("vbEnter", Vb6Type::Long, 0);

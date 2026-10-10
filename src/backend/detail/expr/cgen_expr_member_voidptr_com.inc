@@ -71,7 +71,7 @@
                             if (param.hasDefaultValue && !param.defaultValueExpr.empty()) {
                                 defVal090 = param.defaultValueExpr;
                             } else {
-                                defVal090 = defaultValue(param.type);
+                                defVal090 = defaultValueForParam(param);
                             }
                             if (param.isByVal) {
                                 argList090 += defVal090;
@@ -216,7 +216,7 @@
                             if (param.hasDefaultValue && !param.defaultValueExpr.empty()) {
                                 defVal89h = param.defaultValueExpr;
                             } else {
-                                defVal89h = defaultValue(param.type);
+                                defVal89h = defaultValueForParam(param);
                             }
                             if (param.isByVal) {
                                 argList89h += defVal89h;

@@ -204,12 +204,31 @@
                                 // ⇒ Form1.c C2440 vb6_VARIANT→int32_t。只有字符串这一档才是
                                 // ComCtlsDemo MainForm.frm `CoolBar1.ImageList = "ImageList1"`
                                 // 真正要的 (CoolBar.ctl:1499 Property Let … As Variant)。
-                                if (!arrCarrier091n
+                                //
+                                // Fix 248: 判据从"仅字符串值"放开为"**真 Variant 形参**"。
+                                // Fix 243 当时只能按**值类型**收窄, 是因为符号层对
+                                // `As <枚举>` 形参同样记成 Variant 而 C 形参是 int32_t,
+                                // 一装箱就 C2440 (Charts 2020 三工程 Form1.c)。
+                                // 可靠判据在 Fix 243c 已经找到: ParameterInfo::typeRefName
+                                // —— 源码里真写了 `As Variant` 时为空或就叫 "Variant"
+                                // (cTypeForDeclaredTypeName 映射出 vb6_VARIANT);
+                                // `As ChartOrientation` 则带枚举名, 映射出的 C 类型是 int32_t。
+                                // 用同一把尺后, `ColumnHeader.Icon = 1` 这类
+                                // (**具体标量 → Variant 形参**) 也能正确装箱:
+                                //   LvwColumnHeader.cls:118 `Property Let Icon(ByVal Value As Variant)`
+                                //   ⇒ MainForm.c 1363/1367/1371/1384/1388/1392 C2440 int→vb6_VARIANT ×6。
+                                const bool lastPIsRealVariant248 =
+                                    lastP091n.typeRefName.empty()
+                                    || cTypeForDeclaredTypeName(lastP091n.typeRefName) == "vb6_VARIANT";
+                                if (!arrCarrier091n && lastPIsRealVariant248
                                     && (!objClass.empty()
                                         || (knownFormControls_.count(objLower) && !formCtrlNotOwned43))
-                                    && node.value
-                                    && inferExprType(*node.value) == Vb6Type::String)
-                                    arrCarrier091n = true;
+                                    && node.value) {
+                                    // 值已是 Variant 表达式 (后期绑定读 / Variant 变量) 时
+                                    // 无需再装箱 (boxToVariant 的 _Generic 恒等档虽安全,
+                                    // 但少一层少一处形状漂移)。
+                                    if (!cExprIsVariant(valExpr)) arrCarrier091n = true;
+                                }
                                 if (arrCarrier091n) {
                                     valExpr = packLetValueArg(lastP091n, node.value.get(), valExpr);
                                 }
@@ -250,7 +269,7 @@
                                 const ParameterInfo& pp158h = wp091n[j];
                                 std::string defP158h =
                                     (pp158h.hasDefaultValue && !pp158h.defaultValueExpr.empty())
-                                    ? pp158h.defaultValueExpr : defaultValue(pp158h.type);
+                                    ? pp158h.defaultValueExpr : defaultValueForParam(pp158h);
                                 padArgs158h += ", ";
                                 if (pp158h.isByVal) {
                                     padArgs158h += defP158h;
@@ -354,9 +373,7 @@
                     // (Fix 158h 教训), external 符号维持原发射不介入.
                     if (isClassModule_ && !propSym->isExternal
                         && propSym->kind == SymbolKind::PropertyLet
-                        && !propSym->params.empty()
-                        && (propSym->params.back().type == Vb6Type::Variant
-                            || !propSym->params.back().isByVal)) {
+                        && !propSym->params.empty()) {
                         valExpr = packLetValueArg(propSym->params.back(),
                                                   node.value.get(), valExpr);
                     }
@@ -507,9 +524,11 @@
                     // Fix 185: 除 Variant 外, ByRef 值类型形参 (String/Boolean/
                     // Integer/Long/...) 的 C 形参同样是 <T>* (VB6 默认 ByRef),
                     // 实参裸传值会被当地址解引用 → 非确定 AV/堆破坏.
-                    if (letPropSym && !letPropSym->params.empty()
-                        && (letPropSym->params.back().type == Vb6Type::Variant
-                            || !letPropSym->params.back().isByVal)) {
+                    // Fix 249: 守卫去掉"类型必须 Variant 或 ByRef"那一档 ——
+                    // packLetValueArg 现在对**按值具体类型形参 ← Variant 实参**也解箱
+                    // (见 cgen_util_comwrite.cpp), 其余形状原样返回 ⇒ 无条件调用与
+                    // 旧行为逐字等价, 只多出解箱那一档。
+                    if (letPropSym && !letPropSym->params.empty()) {
                         lastExpr_ = packLetValueArg(letPropSym->params.back(),
                                                     node.value.get(), lastExpr_);
                     }
@@ -535,7 +554,7 @@
                                 const ParameterInfo& ppW = wpWith[j];
                                 std::string defW =
                                     (ppW.hasDefaultValue && !ppW.defaultValueExpr.empty())
-                                    ? ppW.defaultValueExpr : defaultValue(ppW.type);
+                                    ? ppW.defaultValueExpr : defaultValueForParam(ppW);
                                 padArgsWithLet += ", ";
                                 if (ppW.isByVal) {
                                     padArgsWithLet += defW;
@@ -575,9 +594,7 @@
                     // CommandButtonW.c:2955, OptionButtonW.c:2594, Pager.c:1836,
                     // UpDown.c:1930, PagerForm.c:187 …)。复用同一把尺 packLetValueArg,
                     // ByRef 槽的 `&(T){...}` / `&(vb6_VARIANT){...}` 也由它给。
-                    if (setPropSym && !setPropSym->params.empty()
-                        && (setPropSym->params.back().type == Vb6Type::Variant
-                            || !setPropSym->params.back().isByVal)) {
+                    if (setPropSym && !setPropSym->params.empty()) {
                         lastExpr_ = packLetValueArg(setPropSym->params.back(),
                                                     node.value.get(), lastExpr_);
                     }
@@ -626,9 +643,7 @@
                         emitExpr(*node.value);
                         // Fix 185: 与主路径一致 — ByRef 值类型形参需打包成 <T>*.
                         std::string val090h = lastExpr_;
-                        if (!clsParams090h.empty()
-                            && (clsParams090h.back().type == Vb6Type::Variant
-                                || !clsParams090h.back().isByVal)) {
+                        if (!clsParams090h.empty()) {
                             val090h = packLetValueArg(clsParams090h.back(),
                                                       node.value.get(), val090h);
                         }
@@ -655,9 +670,7 @@
                             bool b090h = false;
                             if (findClassMemberCallParams(canonCls090h, wmExpr.memberName,
                                                           p090h, b090h)
-                                && !p090h.empty()
-                                && (p090h.back().type == Vb6Type::Variant
-                                    || !p090h.back().isByVal)) {
+                                && !p090h.empty()) {
                                 lastExpr_ = packLetValueArg(p090h.back(),
                                                             node.value.get(), lastExpr_);
                             }

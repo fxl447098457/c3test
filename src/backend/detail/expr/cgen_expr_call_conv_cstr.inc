@@ -109,7 +109,13 @@
             if (!args.empty()) {
                 const std::string& a0 = args[0];
                 if (a0.find("vb6_ComGetStringProp") == 0 || a0.find("vb6_ComCallBSTR") == 0) {
-                    // 已是BSTR, CStr是空操作
+                    Vb6Type cstrArgType = inferExprType(*firstArg);
+                    if (cstrArgType == Vb6Type::Date && a0.find("vb6_ComGetStringProp") == 0) {
+                        std::string fixed = a0;
+                        fixed.replace(0, 23, "vb6_ComGetDoubleProp");
+                        lastExpr_ = "vb6_CStrDate(" + fixed + ")";
+                        return;
+                    }
                     lastExpr_ = a0;
                     return;
                 } else if (a0.find("vb6_ComGetIntProp") == 0 || a0.find("vb6_ComVtableGetInt") == 0) {

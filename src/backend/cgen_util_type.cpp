@@ -633,6 +633,11 @@ bool CCodeGen::isDefinitelyVariantExpr(Expr& expr, bool* isArrOut) const {
             // 符号表查询
             auto* sym = symTab_.lookup(id.name);
             if (!sym) sym = symTab_.lookupModule(id.name);
+            // Fix <ComCtlsDemo>: 属性遮蔽内置函数时按内置函数类型答 (非 Variant) ——
+            // 与 inferExprType 的 IdentifierExpr 护栏同口径. 例: DTPicker 自带
+            // `Property Get Month() As Variant` 与内置 Month 撞名, 裸引用 Me 之外的
+            // `Month` 若落到该 Variant 属性符号会被误判 Variant.
+            if (sym && isPropShadowingBuiltinFunc(sym, id.name)) return false;
             return checkSym(sym);
         }
         case ASTNodeKind::IndexOrCallExpr: {
@@ -643,8 +648,39 @@ bool CCodeGen::isDefinitelyVariantExpr(Expr& expr, bool* isArrOut) const {
                 if (isPolymorphicBuiltin(cid.name)) return false;
                 auto* sym = symTab_.lookup(cid.name);
                 if (!sym) sym = symTab_.lookupModule(cid.name);
+                // Fix <ComCtlsDemo>: 名字在内置函数表 (kBuiltinFuncNames) 的**调用**一律
+                // 按内置 (typed) 处理, 不当 Variant —— 发码侧就是发这个内置 RTL
+                // (vb6_Month 返回 int32_t 等), 与"是否撞名类模块的 Variant 属性"无关.
+                // 旧护栏 isPropShadowingBuiltinFunc 只认 PropertyGet/Let/Set 符号, 而
+                // DTPicker 自带的 Property Get Month()/Year()/Day()/... As Variant 其
+                // 符号 kind 未必是 PropertyGet (可能为 Function/Variable 装载 Variant),
+                // 于是漏判 → 误当 Variant → vb6_VariantToLong(vb6_Month(...)) C2440
+                // "无法从 int32_t 转换为 vb6_VARIANT". 这里直接按"名字是内置"判,
+                // 覆盖面更全, 且与发码侧 (cgen_expr_ident_builtin_table) 同一张表、同一口径.
+                // 注: 多态内置 (IIf/Choose/Switch/If) 不在此表, 仍由上方 isPolymorphicBuiltin
+                // 处理; 此表只含具类型内置, 返回非 Variant.
+                std::string bname = Symbol::toLower(cid.name);
+                if (!bname.empty() && bname.back() == '$') bname.pop_back();
+                if (kBuiltinFuncNames.count(bname)) return false;
                 // 关键差异: sym==null (内置函数) 视为非 Variant
                 return checkSym(sym);
+            }
+            // Fix <ComCtlsDemo>: callee 是成员访问调用 (形如 VBA.Month(x) / obj.Month(x))
+            // 且成员名是内置函数 (Month/Year/Day/Hour/Minute/Second 等) 时, 按内置
+            // (typed) 处理, 不当 Variant —— 发码侧就是发这个内置 RTL (vb6_Month 返回
+            // int32_t 等), 与"是否撞名类模块的 Variant 属性"无关.
+            // 例: DTPicker.ctl:1546 `DateSerial(Value, VBA.Month(PropValue), ...)`.
+            // 此前 callee 是 MemberAccessExpr, 落到下方递归分支, lookupModule("Month")
+            // 命中 DTPicker 自带 `Property Get Month() As Variant` → 误判 Variant →
+            // vb6_VariantToLong(vb6_Month(...)) C2440 "无法从 int32_t 转换为 vb6_VARIANT".
+            // 这里按"成员名是内置"判 (kBuiltinFuncNames), 与上方 IdentifierExpr 分支
+            // 同一张表、同一口径; 上方 IdentifierExpr 分支只覆盖裸名 Month(...), 此处
+            // 补上带限定符 VBA.Month(...) 这一形.
+            if (call.callee && call.callee->kind == ASTNodeKind::MemberAccessExpr) {
+                auto& ma2 = static_cast<MemberAccessExpr&>(*call.callee);
+                std::string mname = Symbol::toLower(ma2.memberName);
+                if (!mname.empty() && mname.back() == '$') mname.pop_back();
+                if (kBuiltinFuncNames.count(mname)) return false;
             }
             // 类方法调用 a.Method(): 递归推断 callee 类型
             if (call.callee && call.callee->kind == ASTNodeKind::MemberAccessExpr) {

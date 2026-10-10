@@ -360,11 +360,38 @@ void CCodeGen::visit(ForEachStmt& node) {
         bool collIsObjPtr091q = collExpr.rfind("vb6_ComCall(", 0) == 0
                              || collExpr.rfind("vb6_ComCallByDispid(", 0) == 0
                              || collExpr.rfind("vb6_ComCallObject(", 0) == 0;
+        // Fix 247: 集合表达式**能推断出项目类**时, 它本身就是类实例指针
+        // (void* 兼容), vb6_ForEach_Init 直接接收 —— 绝不能再按 Variant 提取.
+        //
+        // 实测 ComCtlsDemo 里 6 个"返回项目集合类"的**无参属性**全被
+        // isDefinitelyVariantExpr 判成 Variant:
+        //   ListView.ctl:5145  Property Get Groups()         As LvwGroups
+        //   ListView.ctl:4047  Property Get ListItems()      As LvwListItems
+        //   ListView.ctl:4525  Property Get ColumnHeaders()  As LvwColumnHeaders
+        //   CoolBar.ctl:1876   Property Get Bands()          As CbrBands
+        //   TreeView.ctl:2106  Property Get Nodes()          As TvwNodes
+        //   TreeView.ctl:2941  Property Get SelectedNodes()  As TvwSelectedNodes
+        // 该函数对 MemberAccessExpr 走 `symTab_.lookupModule(成员名)` **全局按名**查
+        // 符号 (不看接收者类型), 对"属性返回项目类"这一形会命中一份 Variant 类型
+        // 的同名符号 ⇒ 发
+        //   vb6_VariantToObjectVal(vb6_ListView_prop_get_Groups((void*)me))
+        // ⇒ C2440 (vb6_cls_LvwGroups* → vb6_VARIANT) ×9 (ListView.c 6354/10638,
+        //   MainForm.c 909/1264/1590, TreeView.c 4831/1261, ...).
+        // 同工程里 ContainedControls 那几个同形却未被包 (发射成裸调用), 正是
+        // "全局按名查"时有时无的典型.
+        //
+        // 判据用 inferClassTypeOfExpr: 只有真能推成**项目类**才置真。Variant 变量 /
+        // COM 集合属性 (返回空串) / 数组槽一概不受影响, 包裹行为原样保留。
+        bool collIsProjectClass247 = false;
+        if (node.collection) {
+            collIsProjectClass247 = !inferClassTypeOfExpr(*node.collection).empty();
+        }
         // Fix 040c: vb6_ForEach_Init expects void* (IDispatch*). If the collection
         // expression is a Variant (vb6_VARIANT struct), extract the object pointer.
-        if (!collIsObjPtr091q && cExprIsVariant(collExpr)) {
+        if (!collIsObjPtr091q && !collIsProjectClass247 && cExprIsVariant(collExpr)) {
             collExpr = "vb6_VariantToObjectVal(" + collExpr + ")";
-        } else if (node.collection && node.collection->kind == ASTNodeKind::IdentifierExpr) {
+        } else if (!collIsProjectClass247
+                   && node.collection && node.collection->kind == ASTNodeKind::IdentifierExpr) {
             auto& ident = static_cast<IdentifierExpr&>(*node.collection);
             std::string lower = ident.name;
             std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
@@ -373,7 +400,8 @@ void CCodeGen::visit(ForEachStmt& node) {
             }
         }
         // Fix 040c: fallback — project class methods returning Variant (e.g. Dictionary.Keys)
-        else if (!collIsObjPtr091q && node.collection && isDefinitelyVariantExpr(*node.collection)) {
+        else if (!collIsObjPtr091q && !collIsProjectClass247
+                 && node.collection && isDefinitelyVariantExpr(*node.collection)) {
             collExpr = "vb6_VariantToObjectVal(" + collExpr + ")";
         }
         c_.emitLine("void* " + enumVar + " = vb6_ForEach_Init(" + collExpr + ");");

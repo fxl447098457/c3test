@@ -682,7 +682,7 @@ bool CCodeGen::emitUcInstanceMemberExpr(const std::string& ucClass,
             const auto& pm = paramsUC[i];
             argListUC += ", ";
             std::string defV = (pm.hasDefaultValue && !pm.defaultValueExpr.empty())
-                             ? pm.defaultValueExpr : defaultValue(pm.type);
+                             ? pm.defaultValueExpr : defaultValueForParam(pm);
             if (pm.isByVal) argListUC += defV;
             else {
                 std::string ct = mapType(pm.type);
