@@ -2100,6 +2100,23 @@ marker、重编，之后 `check_rtl_embedded` 报 **125/125 逐字节相同**。
 - **机理（两格咬在一起，读码定位）**：`vb6_VariantFromValue` 的 `_Generic` 把**任何指针**都投给 `vb6_VariantObject`（那张表自己最后一行写着「其余指针 (void*/class*/type*) → VariantObject」，`src/rtl/core/vb6rtl/vb6rtl_variant.h:176-200`）；而 `vb6_VarToDouble_internal` 只认 VT_I2/I4/R4/R8/BOOL/BSTR，`default: return 0.0`（`src/rtl/core/vb6rtl/vb6rtl.c:604-619`）⇒ 两枚对象档都折成 0.0 ⇒ Eq/Ne/Lt/Gt/Le/Ge 六条一起塌。发码现场就是 `vb6_VARIANT _vcmp_0 = vb6_VariantFromValue(vb6_GetControlHwnd(…))` 配 `vb6_VarCmpNe(&_vcmp_0, &_vcmp_1)`。
 - **语料暴露 ≈ 0**（先量了再定性：机制坏 ≠ 产品在坏）：CI 工件里两枚真工程的 emit —— Charts ucChartArea 4 条 VarCmp 行、VBFlexGridDemo 159 条，含 `hwnd` 的只有 2 条，而那两条走的是 `vb6_VarCmpLong*` 数值档（不经过坏的那一步）；自家 modal / tabwalk 夹具比句柄**一律**写成 `HexEq(f, x.hwnd)` 字符串比（37 处）⇒ 今天没有一条真流量踩在上面。
 - **修法要先定一档**（这格的关键）：VB6 里 `LongPtr` 的比较是**数值**比较，对象引用的 `=` 走**默认属性**、`Is` 走**身份** ⇒ 缺口在「装箱档按什么算」——`.hwnd` 的值类型是 LongPtr，不该进 VariantObject。**别在 `vb6_VarToDouble_internal` 里给 VT_DISPATCH 补一档就当修完**：那等于顺手把「两枚对象引用相等」也改成按指针比，是另一个口径。这一问与账 #228（同一 VB 类型两种拼法给出两种 C 类型）、账 #256（装箱档不跟值类型走）同族，开工前先对齐那两格的答案。
+- **下一刀的形状（2026-10-10 量完，两条都不必再猜）**：
+  ① **哪些名字中招** —— 伪成员表（`src/common/form_pseudo.hpp` + `host_pseudo.hpp`，共 38 名）里，
+     `controlPropType` 答不上类型的有 **24 名**；按 RTL 声明的 C 返回型过一遍（`.build/b623_pseudo_types.py`
+     把 24 行逐条打出来），真正是**指针/句柄**的只有 `hwnd`(`void*`) 与 `hdc`(`intptr_t`) 两枚
+     （`mouseicon` 交的是 `void*` 但那本来就是 IPicture 对象档、`caption` 是 `wchar_t*` = BSTR，字符串那族
+     `vb6_VarCmp*` 自己会认 VT_BSTR ⇒ 不中招）。⇒ 本刀的范围就是这两枚，不是补一张 24 行的名单。
+  ② **该问哪张表** —— 这不是「两格机制」要并表的那种重复：`form_pseudo.hpp` 那张表只管**发码调哪个 RTL 符号**，
+     `controlPropType` 只管**这枚属性是什么 VB 类型**（账 #231 写死的分工），而且**先例已经在原地** ——
+     `left`/`top`/`width`/`height` 四行同时住在两张表里（伪成员表给 getter、类型表给 Long），
+     没人觉得那是一格该并的重复。⇒ 落地就是给 `controlPropType` 补 `hwnd`/`hdc` 两行答 `LongPtr`
+     （与 RTL 的 `void*`/`intptr_t` 同宽，账 #180 早就定了「句柄按指针宽度」这一档），
+     哨兵 `check_ctrl_prop_type_authority.ps1` 的 A4 名单从 28 条跟着长，别在 `vb6_VarToDouble_internal` 里动手（见上格那条「别把对象引用也改了」）。
+  ③ **风险面已点名**：改的是**类型答案**，所以会牵动打印/装箱/拼接，不只是比较 —— 自家 `tests/modal` 与
+     `tests/tabwalk` 判句柄用的正是 `HexEq(f, x.hwnd)`（把句柄转成十六进制串再比），这两枚夹具就是这刀的
+     现成反面证人：若 `hwnd` 打成 LongPtr 之后那套串的形状变了，它们当场红。护栏照旧 = 全语料 A/B
+     （BASE 用 CI 那台 `c3-exe` 工件即可，不必冷编）+ 改动行逐份归因 + 两架构真跑。
+
 - **判据面**：`tests/geomarr` 的 GA05 / GA05b / GA05c 三行已经是这格的现成证人（②/①/③ 三形齐；GA05c 在 `.build/b606_inline/` 那份**带这一形的副本**里量到，正式夹具今天只有 ②/③ 两行 ⇒ 开工时把 ① 也升进门禁，并把两枚发码形状各钉一针：属性读那一形**不许**再发 `vb6_VarCmp*(vb6_VariantFromValue(vb6_GetControlHwnd(...)))`，而 ③ 那形的原生数值形状不许漂走）。
 
 ### B133 OLE 容器 / Picture 那两条单位换算路没有行为面（账 #301，**Picture 那一格已出 —— 第二十六刀，2026-10-10，门 #483（源码那一跑）+ 门 #484 attempt 2（登记那一跑，12/12）；olecon 与 ax_site_ext 两格仍开着**）
