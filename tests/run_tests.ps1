@@ -3109,7 +3109,8 @@ if ($Category -in @("all", "run", "vbp")) {
                     "TW-in1=Y/in2=Y", "TW-deep=Y/inpic=Y", "TW-picstop=Y",
                     "TW-orenter=N",
                     "TW-order=cmdIn1,cmdIn2,cmdDeep,cmdTop2,cmdInPic,cmdTop1,",
-                    "AK-pre=optA/down=optB/wrap=optA/up=optB/optA=N/optB=Y/clicks=3")
+                    "AK-pre=optA/down=optB/wrap=optA/up=optB/optA=N/optB=Y/clicks=3",
+                    "TW-SETTLE late=0")
     Test-Vbp "tabwalk" "$Tests\tabwalk\TabWalkApp.vbp" $twNeedles
     Test-Vbp "tabwalk_x86" "$Tests\tabwalk\TabWalkApp.vbp" $twNeedles -Arch "x86"
     # 账 #278 §B112: 夹具以前只声明了 WM_KEYDOWN / WM_KEYUP / VK_TAB / VK_DOWN，`AK-*` 那一路用的
