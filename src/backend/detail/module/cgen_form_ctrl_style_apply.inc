@@ -846,6 +846,13 @@
                     pv = intOf(p.properties, "Width");
                     if (pv > 0) c_.emitLine("vb6_StatusBar_SetPanelWidth((void*)" + sbHwnd
                                           + ", " + std::to_string(idx) + ", " + std::to_string(pv) + ");");
+                    // 真 VB6 设计器那一行写的是 `Object.Width`(键名带前缀, 值是 himetric),
+                    // 而 frm_parser.cpp:81 保留点号全名 ⇒ 上面那一眼在**别人的工程**里从来没命中
+                    // (账 #206: 语料 356 份 .frm / 1634 处 Object.Width, 状态条上点号形 .Width 0 处)。
+                    // 折法不在这里做 —— 交原数, 由唯一那一枚 *Hm 出口按真实 DPI 折成像素。
+                    pv = intOf(p.properties, "Object.Width");
+                    if (pv > 0) c_.emitLine("vb6_StatusBar_SetPanelWidthHm((void*)" + sbHwnd
+                                          + ", " + std::to_string(idx) + ", " + std::to_string(pv) + ");");
                     pv = intOf(p.properties, "MinWidth");
                     if (pv > 0) c_.emitLine("vb6_StatusBar_SetPanelMinWidth((void*)" + sbHwnd
                                           + ", " + std::to_string(idx) + ", " + std::to_string(pv) + ");");

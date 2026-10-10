@@ -431,8 +431,10 @@ void*   vb6_StatusBar_GetPanelKeyByKey(void* hwnd, const wchar_t* key);
 void    vb6_StatusBar_SetPanelKey(void* hwnd, int32_t index, const wchar_t* key);
 void    vb6_StatusBar_SetPanelText(void* hwnd, int32_t index, const wchar_t* text);
 int32_t vb6_StatusBar_GetPanelIndexByKey(void* hwnd, const wchar_t* key);  // 0 = 未找到
+int32_t vb6_StatusBar_GetPanelIndex(void* hwnd, int32_t index);  // 账 #300: 数字下标那一形, 0 = 无此面板
 int32_t vb6_StatusBar_GetPanelWidth(void* hwnd, int32_t index);
 void    vb6_StatusBar_SetPanelWidth(void* hwnd, int32_t index, int32_t val);
+void    vb6_StatusBar_SetPanelWidthHm(void* hwnd, int32_t index, int32_t hm);  // 账 #206: 形参是 himetric
 int32_t vb6_StatusBar_GetPanelMinWidth(void* hwnd, int32_t index);
 void    vb6_StatusBar_SetPanelMinWidth(void* hwnd, int32_t index, int32_t val);
 int32_t vb6_StatusBar_GetPanelAutoSize(void* hwnd, int32_t index);
