@@ -348,6 +348,27 @@ function Test-NeedleHit {
 #   方案 A: .NET Process + Diagnostic (ReadToEndAsync, 不阻塞)
 #   方案 B: Start-Process -RedirectStandardOutput (简单但不支持实时读取)
 # 若启用了 VCVARSALL, 会自动按它配置编译环境, 生成的目标写于 "output\" 目录
+# === 逐例跑步预算：这一问只有这一处答案 (新账 §B140) ============================================
+# 「这一枚用例该给几秒」以前只有全局那一个数 (`-RunTimeoutSec = 60`)，而 GUI 里**真弹模态框**的那几枚
+# 天生吃墙钟余量：`tests/ctrldlg` 本机空载 2.8s，8 枚忙等压 4 vCPU 时读到 13.8 / 31.4 / 34.5s（台账 §B133 量的），
+# 同一份产物在 CI 上能被负载推过 60s ⇒ 红的是余量，不是判据。两次现场同一形状（门 #484 与门 #491 的
+# `Tests (vbp #1)`）：那片工件里 `DlApp.out` 停在 `DL10`、而 `DlApp.err` **不存在** —— 超时那一支只在
+# stderr 非空才写 .err，所以「只有 .out 且半截」就是被杀现场（崩溃那支两枚都写）。
+# 三条规矩都是读数逼出来的，别改：
+#   ① 只给**具名**的夹具加数，全局那个数不许动 —— 把 60 抬大等于把所有真挂死的用例一起放出去；
+#   ② 不许为了让它过而减判据（`DL11..DL14` 四条读数一条不能少，少了就等于把真模态那一格判没了）；
+#   ③ 键 = **产物的名**（两条路都取源文件基名：`DlApp`、`rs_gbk_crlf`）—— 同一个夹具在两条路上
+#      必须问到同一个数；写了却不存在的键会**静默按全局**走 = "只接了一半"，所以哨兵逐枚问「这键认得吗」。
+$RunBudgetSec = @{
+    'DlApp' = 150    # tests/ctrldlg/DlApp.vbp —— ctrldlg / ctrldlg_probe 两片 × x64/x86 都吃这一个数
+}
+
+function Get-RunBudgetSec {
+    param([string]$Name)
+    if ($Name -and $RunBudgetSec.ContainsKey($Name)) { return [int]$RunBudgetSec[$Name] }
+    return [int]$RunTimeoutSec
+}
+
 function Invoke-TestExe {
     param(
         [string]$ExePath,
@@ -368,6 +389,8 @@ function Invoke-TestExe {
         if (Test-Path $stale) { Remove-Item $stale -ErrorAction SilentlyContinue }
     }
 
+    # 唯一出口：这一枚的墙钟预算（表里没有就回落全局那个数，见上面那张具名预算表的三条规矩）
+    $budgetSec = Get-RunBudgetSec $Name
     $errors = @()
 
     # --- 方案 A: .NET Process + 重定向 (实时读取, 推荐) ---
@@ -386,7 +409,7 @@ function Invoke-TestExe {
         $proc = [System.Diagnostics.Process]::Start($psi)
         $soTask = $proc.StandardOutput.ReadToEndAsync()
         $seTask = $proc.StandardError.ReadToEndAsync()
-        if (-not $proc.WaitForExit($RunTimeoutSec * 1000)) {
+        if (-not $proc.WaitForExit($budgetSec * 1000)) {
             # 两步读数: 杀之前只能量 CPU/存活/窗口 (管道还开着, 读不到输出); 杀掉、管道关闭
             # 之后才拿得到"被杀前已经写出的那部分输出"。缺了后半步就只剩 last='' —— 看不出
             # 卡在哪一步 (是 Form_Load 就没起来, 还是 Timer 没触发, 还是 Unload 没落地)。
@@ -402,7 +425,7 @@ function Invoke-TestExe {
                 Ok       = $false
                 ExitCode = $null
                 Output   = @()
-                Detail   = "run timeout: ${RunTimeoutSec}s$diag$tail"
+                Detail   = "run timeout: ${budgetSec}s$diag$tail"
             }
         }
         $stdout = $soTask.Result
@@ -1244,6 +1267,19 @@ function Test-VariantCmpBoxing {
         $out | Select-Object -First 6 | ForEach-Object { Write-Host "  $_" }
     }
 }
+function Test-RunBudget {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] run_budget ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\check_run_budget.ps1" 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        $out | Select-Object -First 6 | ForEach-Object { Write-Host "  $_" }
+    }
+}
 function Test-FixtureTimerClose {
     $script:total++
     Write-Host -NoNewline "  [STATIC] fixture_timer_close ... "
@@ -1412,14 +1448,15 @@ function Invoke-BasSetParallel {
     }
     if ($shards.Count -eq 0) { return }
 
-    # -Parallel 的 runspace 里调不到脚本函数 ⇒ 超时预算用 $using: 传, 读数逻辑内联
-    $runTimeoutMs = $RunTimeoutSec * 1000
+    # -Parallel 的 runspace 里调不到脚本函数 ⇒ 读数逻辑内联，预算则在下面逐枚问权威
+    # runspace 里调不到脚本函数 ⇒ 「这一枚几秒」在**进 runspace 之前**按同一处权威问一遍，runspace 只消费那个数
+    foreach ($it in $Items) { $it.BudgetMs = (Get-RunBudgetSec ([IO.Path]::GetFileNameWithoutExtension($it.Source))) * 1000 }
     $results = $shards | ForEach-Object -Parallel {
         $shardItems = $_[0]
         $workDir    = $_[1]
         New-Item -ItemType Directory -Path $workDir -Force | Out-Null
         $c3 = $using:C3
-        $runTimeoutMs = $using:runTimeoutMs
+        # 预算已逐枚带在 $it.BudgetMs 里（上面那一趟问的是同一处权威）
         $incArg = $using:IncArg   # ai/030 T30-B: runspace 里够不到脚本变量
         $p = 0; $f = 0; $details = @()
         foreach ($it in $shardItems) {
@@ -1465,7 +1502,7 @@ function Invoke-BasSetParallel {
                 $proc = [System.Diagnostics.Process]::Start($psi)
                 $soTask = $proc.StandardOutput.ReadToEndAsync()
                 $seTask = $proc.StandardError.ReadToEndAsync()
-                if (-not $proc.WaitForExit($runTimeoutMs)) {
+                if (-not $proc.WaitForExit($it.BudgetMs)) {
                     # 读数: CPU 时间 + 进程状态 + 顶层窗口 + 最后一行输出 (CPU≈0 且无输出 = 没被调度, 不是挂)
                     $cpu = -1; $st = '?'; $win = ''
                     try { $cpu = [int]$proc.TotalProcessorTime.TotalMilliseconds } catch { }
@@ -1484,7 +1521,7 @@ function Invoke-BasSetParallel {
                             if ($txt) { $line = @($txt.TrimEnd() -split "`r?`n" | Where-Object { $_ }); if ($line.Count -gt 0) { $last = $line[-1] } }
                         }
                     }
-                    $f++; $details += "$($it.Name): run timeout (cpu=${cpu}ms, ${st}$win, last='$last')"; continue
+                    $f++; $details += "$($it.Name): run timeout (budget=$($it.BudgetMs)ms, cpu=${cpu}ms, ${st}$win, last='$last')"; continue
                 }
                 [IO.File]::WriteAllText($stdoutFile, [string]$soTask.Result, [Text.Encoding]::Default)
                 [IO.File]::WriteAllText($stderrFile, [string]$seTask.Result, [Text.Encoding]::Default)
@@ -5610,6 +5647,7 @@ if ($Category -in @("all", "compile")) {
     Test-FloatToIntRound
     Test-FixtureTimerClose
     Test-VariantCmpBoxing
+    Test-RunBudget
     Test-EventHandlerNames
     Test-UcInstanceExit
     Test-StaticSentinelRegistration
