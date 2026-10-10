@@ -1,4 +1,14 @@
 // c3rtl.rc - RTL runtime library embedded as resources
+// 账 #305 §B141: CDec(...) 交出来的 VT_DECIMAL 这一档, 两张 VB-facing 读表从来没答过 —— 
+//   vb6_TypeName 落 default 答 "Variant"、vb6_IsNumeric 落 default 答假(两架构同错, 实测)。
+//   本刀补这两档(与 §B138 尾巴那批 VT_I8 同一族决定: 问的是「这枚 Variant 里是什么类型 / 算不算数」。
+//   写侧 vb6_CDec 四档本来就都答, 含 BSTR 走 VarDecFromStr)。
+// ⚠ 同一批读数把「往外读」的第二张表(vb6_Format 的类型分诊, detail/vb6rtl_format_extract.inc)量成
+//   另一格: 那一臂补上去之后 x86 把 DECIMAL 读成堆地址、x64 对 CDec(整数) 读出 0 ⇒ 罪在写侧/所有权,
+//   另立 §B142(候选块与四台读数留在 .build/b990_format_arm_candidate.inc)。
+//   过程里量到两条工具事实: ① vb6_VARIANT 在 x64 内联的 decVal 是**同布局的匿名 struct**, 不是 DECIMAL
+//   类型(直接赋值 C2440, 报错里源类型是空的); ② 本 TU 里调 VarDecToR8 只有 C4013 隐式声明,
+//   x86 真名是 _VarDecToR8@16 ⇒ LNK2019 **只在 x86 炸**(x64 不装饰反而过)。
 // 账 #305 (§B138 尾巴): 「指针宽度那一档属于 Long 同族」这条决定在 RTL 的 VB-facing 表里
 //   实现了多遍, 而其中四处漏了 VT_I8 —— §B138 把 VarPtr/StrPtr/ObjPtr 的类型答案改成 LongPtr 之后,
 //   x64 上这四处第一次真的被吃到: TypeName 答 "Variant"、IsNumeric 答假、vb6_ComPackVariant 落

@@ -101,5 +101,21 @@ Public Sub Main()
     Debug.Print "VB-ptr-cbool="; CBool(vp)
     Debug.Print "VB-ptr-selfeq="; (vp = vp)
     Debug.Print "VB-str-tn="; TypeName(vs2)
+    ' 账 #305 (§B141): CDec 造出来的那一档 (VT_DECIMAL=14) 从来没人在「往外读」这一侧答过 ——
+    ' 两张表原先都落进 default: vb6_TypeName 答 "Variant"、vb6_IsNumeric 答假, 而且两架构同错
+    ' (这一档不像 VT_I8, 它不是位数问题, 是那张表根本没有这一格)。本刀只补这两张表。
+    ' 只钉两条: CStr/Format 那两条读数照打但**不进针面** —— 今天两台都打空(vb6_Format 里那一
+    ' 格没补); 把读侧那臂补上之后实测 x64 对 CDec(整数) 交 0、x86 把 DECIMAL 读成堆地址
+    ' ⇒ 罪在写侧/所有权, 另立 §B142(候选臂与四台读数留在 .build/b990_format_arm_candidate.inc)
+    ' 刻意不钉 CDec 的算术/比较面: 那要另一族出口 (VarDec* 一族), 与本格的「读出来」无关。
+    Dim vd2 As Variant
+    Dim vd3 As Variant
+    vd2 = CDec(5)
+    vd3 = CDec("1.25")
+    Debug.Print "VB-dec-tn="; TypeName(vd2)
+    Debug.Print "VB-dec-cstr=[" & CStr(vd2) & "]"
+    Debug.Print "VB-dec2-cstr=[" & CStr(vd3) & "]"
+    Debug.Print "VB-dec-isnum="; IsNumeric(vd2)
+    Debug.Print "VB-dec-fmt=[" & Format(vd2, "0.00") & "]"
     Debug.Print "VB-DONE"
 End Sub
