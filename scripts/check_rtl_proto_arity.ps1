@@ -8,8 +8,11 @@
 #
 # 判据面：
 #   R1 两头都有的名字：声明侧的个数集合必须等于定义侧的个数集合，否则红并列出 文件:行 与两边的数
+#      （账 #278 §B128：认「这是一条声明」之前先把注释剥干净 —— `//` 之外还要剥 `/* … */`，
+#      因为 RTL 头里大量写法是 `void f(…);   /* 说明 */`，尾巴不是 ';' 就当没声明，头/体两头一起隐身）
 #   R2 census 地板：扫到的 .h/.c 文件数 >= 100，且「两头都有」的签名对数 >= 900
-#      （实测 112 份文件 / 1108 对）—— 路径写错或正则被改坏时，哨兵不许变成"绿着的空转"
+#      （实测：§B128 之前 112 份 / 1108 对，之后 127 份 / 1267 对 —— 多出来的那 8 对从前成对隐身）
+#      —— 路径写错或正则被改坏时，哨兵不许变成"绿着的空转"
 #
 #   R3（账 #278 §B72）发码那几张控件方法表（cgen_util_ctrl.cpp 的 controlExit("vb6_…", 个数, outArgc)）
 #      三面都得对上：名字在 RTL 头里真有原型且个数相同（查不到原型也红 —— 没有声明就没有担保）、
@@ -39,6 +42,17 @@ $Rtl  = Join-Path $Root 'src\rtl'
 
 $HeadRx = [regex]'^[A-Za-z_][A-Za-z0-9_]*(?:[\s\*]+[A-Za-z_][A-Za-z0-9_]*)*?[\s\*]+(vb6_[A-Za-z0-9_]+)\s*\('
 $ItemRx = [regex]'^([A-Za-z_][A-Za-z0-9_]*\s*\*{0,3}\s*)?[A-Za-z_][A-Za-z0-9_]*$'
+
+# 账 #278 §B128: 注释剥离的唯一出口。三种都要处理：`//` 到行尾、成对的 `/* … */`、
+# 以及"本行起了 /* 却在这一行外面才关"的那种（跨行块 —— 从 /* 起整段切掉）。
+# 从前这里只剥 `//`，而续行才剥成对的块注释 ⇒ 单行声明带行尾块注释时 $tail 以 `*/` 结尾，
+# R1 的「声明」判定（尾巴是 ';'）当场失配，头/体两头同时隐身。
+function Strip-Cmt([string]$S) {
+    $t = ($S -replace '/\*.*?\*/', '') -replace '//.*$', ''
+    $ix = $t.IndexOf('/*')
+    if ($ix -ge 0) { $t = $t.Substring(0, $ix) }
+    return $t
+}
 
 function Get-Balance([string]$S) {
     $n = 0
@@ -87,11 +101,11 @@ foreach ($f in $files) {
         if ($ln -eq '' -or $ln -match '^[ \t#/]') { $i += 1; continue }
         $m = $HeadRx.Match($ln)
         if (-not $m.Success) { $i += 1; continue }
-        $buf = ($ln -replace '//.*$', '')
+        $buf = Strip-Cmt $ln
         $k = $i
         while ((Get-Balance $buf) -gt 0 -and ($k + 1 -lt $lines.Count)) {
             $k += 1
-            $buf += ' ' + (($lines[$k] -replace '//.*$', '') -replace '/\*.*?\*/', '').Trim()
+            $buf += ' ' + (Strip-Cmt $lines[$k]).Trim()
         }
         $open  = $buf.IndexOf('(')
         $close = $buf.LastIndexOf(')')
@@ -107,7 +121,7 @@ foreach ($f in $files) {
             if ($tail.StartsWith('{') -or $nxt.StartsWith('{')) { $kind = 'def' }
         }
         if ($kind -ne '') {
-            $ar = Get-Arity (($params -replace '//.*$', '') -replace '/\*.*?\*/', '')
+            $ar = Get-Arity (Strip-Cmt $params)
             if ($ar -ge 0) {
                 $name = $m.Groups[1].Value
                 $bag = $defs
