@@ -14,6 +14,7 @@
 # 2026-10-10 补一笔来源：`tests/sbhm/SbHm.vbp` 那一行按 CI 的 Emit manifest 作业登记（run 38025387585、head 3dc0f6a3 = 账 #299 第二十/二十一刀），其余 398 行仍是上面 #418 那批的读数。
 # 2026-10-10 第二十二刀的登记来源：门 #475（run 38034455442、head 64b4d43e、attempt 1）= 11 绿 + 唯一红是这道形状门，红因就是这三行还没登记。按 CI 那台自己交的清单登记（github/ci/emit-manifest 提交 9ffd4672）：移动的三行 = tests/ctrlstatusbar/CtrlStatusBar.vbp、tests/sbfont/SbFont.vbp、tests/sbhm/SbHm.vbp，其余 396 行逐字节没动。三行都因发码文本变了：设计块那行 MinWidth 从此走 *Hm 出口（sbhm 3 / ctrlstatusbar 2 / sbfont 3 处），夹具新增的判据行只在 sbhm 与 ctrlstatusbar 里。登记前本机已按同一份预测对上，登记后复算 399/399。
 # 2026-10-10 第二十三刀的登记来源：门 #478（run 38036598915、head 83f61e33、attempt 1）= 11 绿 + 唯一红是这道形状门，移动的一行 = tests/ctrlstatusbar/CtrlStatusBar.vbp（新增 SB36-TILES-BAR 那两条 Debug.Print 进了产物），其余 398 行逐字节没动 —— 含 tests/sbfont：那一趟只换了它过程体外的注释，而这类注释不进 --emit-c 产物。来源 = CI 那台自己交的清单（github/ci/emit-manifest）。
+# 2026-10-10 第二十五刀的登记来源：门 #481（run 38045656192、head 12155d3b、attempt 1）= 11 绿 + 唯一红是这道形状门，移动的一行 = tests/sbhm/SbHm.vbp（夹具新增 HM16 那一段的文本进了产物）。按 CI 那台自己交的清单登记（github/ci/emit-manifest 提交 d0d6e3b5，其注脚 head=12155d3b 与本门同源）。
 sha256=cc5442d3a253db96f710f36211ac65ef3d1a0f57741437ef388d80afc192b380 ascii256=0bb6b6f96b4a8c3decdce233e48a15cdaf847773b3e980b558b132c80072a8ff rc=0 bytes=1769 tests/acc/acc_fam_main.bas
 sha256=c5326a40c06990dd025682e7511510568ba01c5c40301264481554cd64e1f10f ascii256=5603c2e6088a71cb791bb0942fedd3fc8a3457b27310e626dee694df794751f6 rc=0 bytes=7718 tests/acc/acc_fam.vbp
 sha256=64ca3fee78a5a527ff6433d36f32bcc19fd81618d6a16379479007b79c7fc3d6 ascii256=4f779f832dd9588e83d6f6f4458ecf49c443b3d5d9e66d7fac3f2ca02369d801 rc=0 bytes=1785 tests/acc/acc_main.bas
@@ -412,4 +413,4 @@ sha256=1909e155016cd7b29c7e43050a86386e2bdc7180547b716f5a157f7cdf7f7369 ascii256
 sha256=d6250e06af2a5b6a796ecb7f33b1506834cc1180ca91fa72dc7d365c3da20485 ascii256=9e3d4e8cdb8be23ae895e721a4e629f230b95839b4d026e0314ee5e0b3a9445c rc=0 bytes=11699 tests/ve_list/VeListMain.bas
 sha256=1d3cd6424b343f58e7ce1ce6ff683ccf4295a344f35223cb15ac254af1477487 ascii256=cd38c108194cb21b0df3770cae283ec83ae37dc1765c7d47eec7a76f8188b7a9 rc=0 bytes=49900 tests/ve_units/Units.vbp
 sha256=c3d331c3ed7e9ea0ab0a41b600a0e67c9bafbce507e7965f5e80b5f384b9f806 ascii256=7a2cd5352beb31e02564191dd8d24d1f69c0e041fdccab7b73e09dde301e6711 rc=0 bytes=6231 tests/test_intrinsic_consts.bas
-sha256=bcd69989127247e3418f2fd16383d7cf2e7dc4fb850162654c110fddc1884e2f ascii256=a048f4fcb02f069112bd7a46ee9bba4550ef63169c0cfafcb0d5a9e694156c0e rc=0 bytes=21052 tests/sbhm/SbHm.vbp
+sha256=ca7b4562686ba3c2ea5bab37a5a970a5d0003938329b86a052f69bcebfe45275 ascii256=95b2daf4dfa1fda01c008f08056e656846e66301498a885ad3efa6e7a9dbf36e rc=0 bytes=23323 tests/sbhm/SbHm.vbp
