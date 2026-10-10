@@ -147,6 +147,24 @@
                 }
             }
 
+            // Fix 235: obj 是**无参 Function** (返回类对象) — `ShadowCoolBar.ImageList`
+            // (ComCtlsDemo CbrBands.cls:74, 同类模块内 `Private Function ShadowCoolBar()
+            // As CoolBar`)。函数名既不是变量也不是工程内模块名, 按"模块名.方法名"分支
+            // 会发成 `vb6_ShadowCoolBar_ImageList` → C2065 (没人声明它); CbrBands.c:73 /
+            // ImcComItems.c:75,81 共 3 处。这里只**摘掉模块名标签** (置 isVarName), 让
+            // 后面的 Fix 088c AST 层兜底按 inferClassTypeOfExpr 认 Function 返回类
+            // (cgen_util_classtype.cpp:76, Fix 218 已扩 Function), 由它生成
+            // `<类成员取用>(vb6_<Mod>_<Fn>(me))` —— 方法/字段两条形态都走同一条路,
+            // 不在这里另拼函数名 (Fix 083c 那条只认 PropertyGet 的 prop_get 形状)。
+            // 排除**当前过程自身**的函数名: 那是"引用函数名 = 引用返回值槽 vb6_ret_X"
+            // 的另一条语义 (与 inferClassTypeOfExpr 的同一处排除对称)。
+            if (!isVarName && objSym && objSym->kind == SymbolKind::Function
+                && !objSym->variableTypeName.empty()
+                && !(currentProc_ && Symbol::toLower(currentProc_->name) == objLower)) {
+                const Symbol* fnClsSym = symTab_.lookup(objSym->variableTypeName);
+                if (fnClsSym && fnClsSym->kind == SymbolKind::Class) isVarName = true;
+            }
+
             // Fix 086: 成员命中本模块符号但限定符是另一个模块名时, 优先在该模块
             // 中解析成员常量 (modSerialPortAPI.SetDTR — 本模块恰有同名 Sub SetDTR,
             // 误生成 vb6_modSerialPortAPI_SetDTR → C2065; 实际取的是模块常量 SETDTR=5).

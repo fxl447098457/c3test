@@ -439,6 +439,28 @@ void CCodeGen::emitLocalDeclCode(LocalDeclStmt& node) {
                 knownUdtVars_[udtLower] = cType;
             }
 
+            // Fix 233: 局部 UDT 变量**遮蔽**同名类变量 —— 与 UDT 互斥的那几张表全程
+            // 不清空 (全后端无一处 .clear()), 同名条目会从别的模块/过程泄漏过来。
+            // 变量名复用极常见: ComCtlsDemo ToolBar.ctl 里 `NewButton` 既是
+            // `Friend Sub FButtonsAdd(ByVal NewButton As TbrButton)` 的类形参, 又是
+            // `Friend Property Let FButtonStyle` 里的
+            // `Dim OldButton As ShadowButtonStruct, NewButton As ShadowButtonStruct`。
+            // 残留的 knownClassVars_["newbutton"]="TbrButton" 让 `With NewButton`
+            // (cgen_with.cpp 的类分支排在 UDT 分支之前) 被当类实例, `.TBB / .fsState /
+            // .fsStyle` 全走类成员分发 ⇒ C2039×33 + C2440(ShadowButtonStruct →
+            // vb6_cls_TbrButton*)。局部 Dim 是**本过程**的作用域事实, 故照
+            // cgen_decl_func.cpp 的 UDT 形参守卫同一口径, 把互斥条目一并擦掉。
+            if (isLocalUdtType) {
+                std::string udtLower = var.name;
+                std::transform(udtLower.begin(), udtLower.end(), udtLower.begin(), ::tolower);
+                knownClassVars_.erase(udtLower);
+                knownTypedComVars_.erase(udtLower);
+                knownIfaceVars_.erase(udtLower);
+                knownIvrefVars_.erase(udtLower);
+                knownObjectVars_.erase(udtLower);
+                knownVariantVars_.erase(udtLower);
+            }
+
             // VB6 Static变量: 跨调用持久化 → C static局部变量
             // 包括: 显式Static声明 或 Static Sub/Function内的所有局部变量
             std::string storageClass = (var.isStatic || inStaticProc_) ? "static " : "";

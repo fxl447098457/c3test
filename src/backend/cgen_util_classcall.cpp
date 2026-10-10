@@ -594,9 +594,19 @@ bool CCodeGen::emitUcInstanceMemberExpr(const std::string& ucClass,
         return true;
     }
     // 值上下文无括号调用: 按形参表补 Optional 默认值 (同 Fix 089h)
+    // Fix 239: `_prop_get_` **也要**补 —— 此前整个 `_prop_` 家族被一刀排除, 于是
+    // `ListView2.InsertMark`
+    //   (Property Get InsertMark(Optional ByRef After As Boolean) As LvwListItem
+    //    ⇒ C 声明 vb6_ListView_prop_get_InsertMark(me, int16_t* After, int _has_After))
+    // 发成 `vb6_ListView_prop_get_InsertMark(me)` → C2198 ×14 (ComCtlsDemo MainForm.c
+    // 1528/1539/1543/1559/1571/1625/1629/1644/1648/1693 及 ListBoxW/TreeView 同类)。
+    // 裸 `obj.Prop` 在 VB6 里只在形参全可省略时合法, 故按形参表补默认值正是它要的;
+    // 已带的实参走 asCallCallee_ 那条 (带括号调用), 不会走到这里。
+    // 只放 Get 进来 —— `_prop_let_`/`_prop_set_` 是写方向, 另有 Fix 158h 那条口径。
+    const bool isPropGet239 = resolvedFn.find("_prop_get_") != std::string::npos;
     std::vector<ParameterInfo> paramsUC;
     bool isBuiltinUC = false;
-    if (resolvedFn.find("_prop_") == std::string::npos
+    if ((resolvedFn.find("_prop_") == std::string::npos || isPropGet239)
         && findClassMemberCallParams(ucClass, member, paramsUC, isBuiltinUC)
         && !paramsUC.empty() && !isBuiltinUC) {
         std::string argListUC = thisArg;

@@ -543,6 +543,20 @@
                 }
                 if (!setFn.empty()) {
                     emitExpr(*node.value);
+                    // Fix 237: 与上方 Fix 090x / Fix 185 同款值实参打包 —— setFn 兜底
+                    // 此前**直接裸拼**, 末形参是**按值 Variant** 的属性
+                    // (CbrBand.cls:95 / TbrButton.cls:88 / ToolBar.ctl:`Property Set
+                    // ImageList(ByVal Value As Variant)`) 收到 BSTR / 类指针 / void*
+                    // → C2440 (ComCtlsDemo CoolBar.c:1117/1143, CheckBoxW.c:2733,
+                    // CommandButtonW.c:2955, OptionButtonW.c:2594, Pager.c:1836,
+                    // UpDown.c:1930, PagerForm.c:187 …)。复用同一把尺 packLetValueArg,
+                    // ByRef 槽的 `&(T){...}` / `&(vb6_VARIANT){...}` 也由它给。
+                    if (setPropSym && !setPropSym->params.empty()
+                        && (setPropSym->params.back().type == Vb6Type::Variant
+                            || !setPropSym->params.back().isByVal)) {
+                        lastExpr_ = packLetValueArg(setPropSym->params.back(),
+                                                    node.value.get(), lastExpr_);
+                    }
                     c_.emitLine(setFn + "(" + tempVar + ", " + lastExpr_ + ");  /* With class prop_set_ (fallback) */");
                     return;
                 }
@@ -567,6 +581,24 @@
                     }
                     if (findClassMemberCallParams(canonCls090h, wmExpr.memberName,
                                                   clsParams090h, clsBuiltin090h)) {
+                        // Fix 238: **值参方向**必须问 write 方向那张表。memberParams 存
+                        // 的是 Get 方向, 对 `Property Let Tag(ByVal Value As Variant)`
+                        // (TbrButton.cls:84 / TbrButtonMenu.cls:79 / TbsTab.cls:73) 它
+                        // 是空的 ⇒ 下面的打包守卫 `!clsParams090h.empty()` 判不出来,
+                        // RHS 裸拼成 BSTR → C2440 (ComCtlsDemo ToolBar.c:1423/1463/1485,
+                        // TabStrip.c:1234/1243)。与 Fix 091a (Pattern C/D2) 同一把尺。
+                        {
+                            std::vector<ParameterInfo> w090h;
+                            bool got090h = findClassMemberWriteParams(
+                                canonCls090h, wmExpr.memberName, /*isSet=*/false, w090h);
+                            if ((!got090h || w090h.empty())
+                                && findClassMemberWriteParams(canonCls090h,
+                                                              wmExpr.memberName,
+                                                              /*isSet=*/true, w090h)) {
+                                got090h = true;
+                            }
+                            if (got090h && !w090h.empty()) clsParams090h = w090h;
+                        }
                         emitExpr(*node.value);
                         // Fix 185: 与主路径一致 — ByRef 值类型形参需打包成 <T>*.
                         std::string val090h = lastExpr_;
