@@ -216,12 +216,20 @@ int vb6_DpiY(void) {
 
 int vb6_XToTwipX(int px) { return MulDiv(px, 1440, vb6_DpiX()); }
 
-// 账 #206: himetric(0.01mm) 是 **VB6 容器/OCX 存几何用的那一档**(设计块里 `Object.Width`
-// 就是它), 与本族另外三处各写各的换算(§B129 数出来: ax_load.c 的 twipsToHimetric、
-// ax_site_ext.c 的 k=96.0/2540.0、vb6forms_olecon.c 的 *1440L/2540L)同形而不同源 ——
-// 其中 ax_site_ext 那处把 DPI 写死成 96。新加的调用一律走这一枚(按真实 DPI)，
-// 那三处何时并进来由 §B129 定, 本刀不顺手改(它们各有各的判据面)。
-int vb6_HimetricToPxX(int hm) { return MulDiv(hm, vb6_DpiX(), 2540); }
+// 账 #206 + 账 #298 (§B129): himetric(0.01mm) 是 **VB6 容器/OCX 存几何用的那一档**(设计块里
+// `Object.Width` 就是它)。这一族的折算以前在 RTL 里各写各的（§B129 那份名单：olecon 两处方向、
+// picture_prop 按 DC 的 DPI、ax_site_ext 把 DPI 写死成 96、ax_load 自己乘一遍），第二十四刀起
+// **公式只住这一枚**：DPI 从外面递进来，屏 DPI / 某枚 DC 的 DPI 各是调用方的一层选择。
+int vb6_HimetricToPxOnDc(int hm, int dpi) { return MulDiv(hm, dpi, 2540); }
+int vb6_HimetricToPxX(int hm) { return vb6_HimetricToPxOnDc(hm, vb6_DpiX()); }
+int vb6_HimetricToPxY(int hm) { return vb6_HimetricToPxOnDc(hm, vb6_DpiY()); }
+
+// float 那一档是给 **OLE 容器坐标** 用的（IOleControlSite::TransformCoords 交的是 POINTF）：
+// 表示必须留在浮点里，替容器把亚像素量化成整数 px 就是把决定改了。DPI 同样问权威 ——
+// 这一对在并表之前住在 axsite/ax_site_ext.c 里，那里的 DPI 写死成 96（换 DPI 的机器上容器坐标
+// 跟着缩 —— 与 #184 那条 VBFlexGrid 同一族；本机就是 96，这条只有形状能证，见 §B133）。
+float vb6_HimetricToPxF(float hm, float dpi) { return hm * dpi / 2540.0f; }
+float vb6_PxToHimetricF(float px, float dpi) { return px * 2540.0f / dpi; }
 
 // 账 #206 (§B41) 第二格 + 账 #298 (§B129): himetric <-> 缇 是**与 DPI 无关**的那条比例 ——
 // 两个都是绝对长度 (1 缇 = 1/1440 英寸, 1 himetric = 1/100 mm ⇒ 1 hm = 1440/2540 缇)。

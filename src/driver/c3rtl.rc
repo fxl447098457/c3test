@@ -504,3 +504,7 @@
 /* 账 #206 第二十二刀 (面板几何换成缇 + getter 交排版结果): vb6forms_statusbar.c / vb6forms.c / vb6forms_memberobj.c / vb6forms_prop_ctrl.h / axsite/ax_load.c 都动了 RTL 源, 本行是那次 touch, 让 rc.exe 重跑并把新 RTL 嵌进 C3.exe。 */
 
 /* 账 #303 第二十三刀 (内容档那格的实测宽没从 fixedTotal 里扣 ⇒ 弹簧吃两次、末格越过客户区): 只动 vb6forms_statusbar.c 的 SbLayout, 本行是那次 touch。 */
+
+/* 账 #298 第二十四刀 (§B129 并表收尾): vb6forms.c 长出公式的唯一住处 (OnDc + 一对 float)，
+ * vb6forms_olecon.c / vb6forms_picture_prop.c / axsite/ax_site_ext.c / 头文件都改成只转调 ——
+ * DPI 不许再写死成 96。本行是那次 touch, 让 rc.exe 重跑并把新 RTL 嵌进 C3.exe。 */

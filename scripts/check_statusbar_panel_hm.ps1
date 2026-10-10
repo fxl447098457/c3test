@@ -7,9 +7,10 @@
 # 而本仓三份状态条夹具用的都是自己造的点号形 ⇒ 全语料 A/B 对这一族永远沉默（零覆盖）。
 # 这个哨兵钉住修法之后的形状，防的是：
 #   ① 那条前缀认读被改掉（发码又看不见设计值了）；
-#   ② himetric 与 像素/缇 之间的折算被抄第二份（§B129 那份名单现存 4 份文件 / 14 个非注释行 ——
-#      第二十二刀把 ax_load.c 那一处并进权威 vb6_TwipsToHimetric，名单**往下减**是本职；
-#      再长一份就是 #234「拿 DC 抄两遍」、#235「画笔色两份存储」那个形状）；
+#   ② himetric 与 像素/缇 之间的折算被抄第二份（§B129 那份名单到第二十四刀只剩 1 份文件 / 5 个非
+#      注释行，且全在权威本人 vb6forms.c 里 —— 第二十二刀并掉 ax_load.c，第二十四刀并掉 olecon /
+#      picture_prop / ax_site_ext 三处；名单**往下减**是本职，再长一份就是 #234「拿 DC 抄两遍」、
+#      #235「画笔色两份存储」那个形状）；
 #   ③ 弹簧档的 MinWidth 又变成"加项"（夹具实测 e3=493 而 cw=467，多出来正好一枚 MinWidth）。
 #   ④ 面板几何那一档的单位回到两份答案（第十八刀把像素存进 e->width，而 VB 代码那一头读写的是
 #      缇 ⇒ 同一格两种单位，正是 §B41 剩下的那一格）。第二十二刀之后的口径只有一套：
@@ -22,11 +23,14 @@
 #      （设计期这一趟只走 Hm 出口；运行期赋值走的是另一张表，不归这条判据管）。
 #      第二十二刀起再钉两枚新出口：SetPanelMinWidthHm 恰好 3（三枚面板都写了设计 MinWidth）、
 #      GetPanelLeft 恰好 3（HM14 那三处读）—— 缺一个落点就是"设计值整格不见"/"读回空"。
-#   R2 源码：src/rtl 里含 2540 的**非注释行**必须逐文件对上名单（4 份 / 14 行，见下），
-#      多出一份文件即红；且 vb6forms.c 里那三枚必须是权威本人（像素档 vb6_HimetricToPxX +
-#      缇档一对 vb6_TwipsToHimetric / vb6_HimetricToTwips）。状态条那一族只许**转调**权威：
-#      本地一次乘除都不许出现（该文件里 MulDiv 0 处、HimetricToPxX 0 处 —— 后者是第十八刀
-#      那一版"把像素存进缇档"的形状，本刀之后它必须归零）。
+#   R2 源码：src/rtl 里含 2540 的**非注释行**必须逐文件对上名单（第二十四刀起 1 份 / 5 行，见下），
+#      多出一份文件即红。数之前先把注释剥干净 —— 从前这里只剥每行的 `//`，**块注释的续行**因此被
+#      当代码数（第二十二刀那版名单里的 14 行有两行是 `/* … 2540 … */` 的续行，补上剥法后同一棵
+#      树是 12 行；第十七刀定的"剥注释要跨行"这一条对本哨兵同样成立）。vb6forms.c 里那 5 行必须
+#      是权威本人：公式档 vb6_HimetricToPxOnDc、浮点对 vb6_HimetricToPxF / vb6_PxToHimetricF、
+#      缇档一对 vb6_TwipsToHimetric / vb6_HimetricToTwips（屏 DPI 的两枚 vb6_HimetricToPxX/Y 是
+#      转调，本身不含 2540）。状态条那一族只许**转调**权威：本地一次乘除都不许出现（该文件里
+#      MulDiv 0 处、HimetricToPxX 0 处 —— 后者是第十八刀那一版"把像素存进缇档"的形状）。
 #   R3 源码：vb6forms_statusbar.c 里 `want[i] = e->minWidth` 这一形必须 0 处（下限只答一次），
 #      而兜底那一行恰好 1 处、且它折像素问的也是 vb6_TwipToX。
 #   R4 防空转：扫到的 RTL 份数 >= 100、产物字节数 >= 4000、两张名单自己的长度也钉死。
@@ -35,6 +39,11 @@
 #   R7（账 #206 第二格同轮加）：一枚成员要过四道登记才"真做得动"（memberobj 名字表 / DISPID /
 #      派发 case / 发码 recognizer）+ RTL 定义 + header 声明。Panel.Left 这六格各恰好 1 处，
 #      设计块那行 MinWidth 的三处同钉 —— **header 那一格是实测漏过的一格**：产物照跑、日志一声不报。
+#   R8（账 #303 同轮加）：`fixedTotal += want[i];` 恰好 2 处 —— 固定档与内容档各从剩余空间里扣一次。
+#      0 处是本账（弹簧把内容档那格宽吃两次、末格越过客户区），3 处是第十八刀撤掉的"MinWidth 当加项"复发。
+#   R9（账 #298 第二十四刀加）：并表之后换算只剩一处权威，所以钉的是**调用点** —— olecon 2+4+4、
+#      picture_prop 2（仍按 DC 的 DPI）、ax_site_ext 4（浮点对），外加三条旧形状墓碑各 0 处
+#      （picture_prop 的 MulDiv、olecon 的 `* 15L *`、ax_site_ext 的 `const double k`）。
 #
 # 出口只走 --emit-c（只到发码，不起 cl），所以这条判据是秒级的；负控用 -Root 把整棵树指到副本上跑。
 
@@ -46,20 +55,19 @@ if (-not $Root) { $Root = Split-Path -Parent $PSScriptRoot }
 
 $viol = @()
 
-# R2 名单：himetric 与 像素/缇 之间的折算在 RTL 里的现有住处（账 #226 同族：一份决定抄几遍）。
-# 这份名单是**读数**不是愿望：第二十二刀之后实测 4 份文件 / 14 个非注释行
-# （axsite/ax_load.c 那一处已被并进来 —— 它现在转调 vb6_TwipsToHimetric，所以从名单上退掉；
-#  vb6forms.c 因此从 1 行长成 3 行：像素档 1 枚 + 缇档 2 枚，三枚都是权威本人）。
-# 其中按真实 DPI 的只有 vb6_HimetricToPxX 那一枚，其余各按各自口径 ——
-# §B129 要并表，但本刀不动它们（各有各的判据面），所以这里把它们钉住防"再长一份"。
+# R2 名单：himetric / 像素 / 缇 之间的折算在 RTL 里的全部住处（账 #226 同族：一份决定抄几遍）。
+# 这份名单是**读数**不是愿望。第二十四刀（账 #298 §B129 收尾）之后 = **1 份文件 / 5 个非注释行**，
+# 全在 vb6forms.c：公式本身（`vb6_HimetricToPxOnDc` 一枚 int + `vb6_HimetricToPxF` /
+# `vb6_PxToHimetricF` 一对 float）+ 缇档那一对（与 DPI 无关）。以前各写各的三处 —— olecon 的两个
+# 方向、picture_prop 按 DC 的 DPI、ax_site_ext 把 DPI 写死成 96 —— 现在一律只转调。
+# ⚠ 计数口径本刀起变了：扫描改成**跨行剥块注释**（账 #278 第十七刀在 arity 哨兵上办掉的同一族，
+#   这是那份盲区的第二格）。按新口径重算的**改前**读数是 12 行 / 4 份，不是旧名单上的 14 / 5 ——
+#   多出来的两条一直是块注释续行被数成代码（olecon 那句"反过来用"、picture_prop 那句英文说明）。
 $HmFiles = [ordered]@{
-    'src/rtl/core/vb6forms/vb6forms.c'                   = 3
-    'src/rtl/core/vb6forms/vb6forms_olecon.c'            = 7
-    'src/rtl/core/vb6forms/vb6forms_picture_prop.c'      = 3
-    'src/rtl/core/vb6forms/axsite/ax_site_ext.c'         = 1
+    'src/rtl/core/vb6forms/vb6forms.c'                   = 5
 }
-$HmWantTotal = 14
-$HmAuthority = 'vb6_HimetricToPxX'
+$HmWantTotal = 5
+$HmAuthority = 'vb6_HimetricToPxOnDc'
 
 # ---------- R1: 产物形状 ----------
 $C3 = Join-Path $Root '.build\C3.exe'
@@ -125,10 +133,27 @@ Get-ChildItem -Path $rtlRoot -Recurse -File -Include *.c, *.h, *.inc | ForEach-O
     $rtlFiles++
     $txt = [System.IO.File]::ReadAllText($_.FullName)
     $n = 0
+    $inBlock = $false
     foreach ($ln in ($txt -replace "`r`n", "`n").Split("`n")) {
-        if ($ln.IndexOf('2540') -lt 0) { continue }
-        $code = ($ln -replace '/\*.*?\*/', '') -replace '//.*$', ''
-        if ($code.IndexOf('2540') -ge 0) { $n++ }
+        # 剥注释要**跨行**：块注释的续行（` * 说明 ...`）里出现常数，从前会被数成代码 ——
+        # 这正是账 #278 第十七刀在 arity 哨兵上办掉的那一族（"同一个判断抄几份"抄在判据自己身上）。
+        $line = $ln
+        if ($inBlock) {
+            $ix = $line.IndexOf('*/')
+            if ($ix -lt 0) { continue }
+            $line = $line.Substring($ix + 2)
+            $inBlock = $false
+        }
+        while ($true) {
+            $o = $line.IndexOf('/*')
+            if ($o -lt 0) { break }
+            $c = $line.IndexOf('*/', $o + 2)
+            if ($c -lt 0) { $line = $line.Substring(0, $o); $inBlock = $true; break }
+            $line = $line.Substring(0, $o) + $line.Substring($c + 2)
+        }
+        $dc = $line.IndexOf('//')
+        if ($dc -ge 0) { $line = $line.Substring(0, $dc) }
+        if ($line.IndexOf('2540') -ge 0) { $n++ }
     }
     if ($n -gt 0) {
         $rel = ($_.FullName.Substring($Root.Length).Replace('\', '/').TrimStart('/'))
@@ -142,7 +167,7 @@ foreach ($k in $HmFiles.Keys) {
     if ($got -ne $want) { $viol += "R2-HM-SITES $k want exactly $want, got $got" }
 }
 foreach ($k in $perFile.Keys) {
-    if (-not $HmFiles.Contains($k)) { $viol += "R2-HM-NEW-SITE $k carries an extra himetric conversion (list has 4 files)" }
+    if (-not $HmFiles.Contains($k)) { $viol += "R2-HM-NEW-SITE $k carries an extra himetric conversion (the list is down to 1 file: vb6forms.c)" }
 }
 $sum = 0
 foreach ($v in $perFile.Values) { $sum += $v }
@@ -150,8 +175,19 @@ if ($sum -ne $HmWantTotal) { $viol += "R2-HM-TOTAL want $HmWantTotal, got $sum" 
 
 $authPath = Join-Path $rtlRoot 'core\vb6forms\vb6forms.c'
 $authTxt = [System.IO.File]::ReadAllText($authPath)
-$authDef = ([regex]::Matches($authTxt, [regex]::Escape('int vb6_HimetricToPxX(int hm) { return MulDiv(hm, vb6_DpiX(), 2540); }'))).Count
-if ($authDef -ne 1) { $viol += "R2-AUTHORITY $HmAuthority definition want exactly 1 real-DPI line, got $authDef" }
+# 公式本人的定义必须逐字住在 vb6forms.c（int 那一枚 + float 那一对）；屏 DPI 与某枚 DC 的 DPI
+# 都只是它的调用方 —— 这一条钉的是"公式只有一份"，第二十四刀（账 #298 收尾）之后是硬要求。
+$authDef = ([regex]::Matches($authTxt, [regex]::Escape('int vb6_HimetricToPxOnDc(int hm, int dpi) { return MulDiv(hm, dpi, 2540); }'))).Count
+if ($authDef -ne 1) { $viol += "R2-AUTHORITY $HmAuthority definition want exactly 1 formula line, got $authDef" }
+$pxX = ([regex]::Matches($authTxt, [regex]::Escape('int vb6_HimetricToPxX(int hm) { return vb6_HimetricToPxOnDc(hm, vb6_DpiX()); }'))).Count
+$pxY = ([regex]::Matches($authTxt, [regex]::Escape('int vb6_HimetricToPxY(int hm) { return vb6_HimetricToPxOnDc(hm, vb6_DpiY()); }'))).Count
+if ($pxX -ne 1) { $viol += ('R2-AUTHORITY the screen-DPI wrapper vb6_HimetricToPxX must ask OnDc exactly once, got ' + $pxX) }
+if ($pxY -ne 1) { $viol += ('R2-AUTHORITY the screen-DPI wrapper vb6_HimetricToPxY must ask OnDc exactly once, got ' + $pxY) }
+$tfDef = ([regex]::Matches($authTxt, [regex]::Escape('float vb6_HimetricToPxF(float hm, float dpi)'))).Count
+$tfInv = ([regex]::Matches($authTxt, [regex]::Escape('float vb6_PxToHimetricF(float px, float dpi)'))).Count
+if ($tfDef -ne 1 -or $tfInv -ne 1) {
+    $viol += ('R2-AUTHORITY the float pair for OLE container coords must be 1+1, got ' + $tfDef + '+' + $tfInv)
+}
 # 缇档那一 pair 也必须是权威本人（第二十二刀新增：存储换缇之后，设计期那一档与 getter 那一档
 # 都转调它们，本族不再自己乘除）。少了其中一枚 = 某一侧改回本地写法 = 第二份答案。
 $twipDef = ([regex]::Matches($authTxt, [regex]::Escape('long vb6_TwipsToHimetric(long tw)'))).Count
@@ -376,14 +412,41 @@ if ($unitFold -ne 1) { $viol += ('R7-UNIT the layout must fold e->width through 
 $tileAcc = ([regex]::Matches($sbTxt, 'fixedTotal \+= want\[i\];')).Count
 if ($tileAcc -ne 2) { $viol += ('R8-TILE-RESERVE want exactly 2 reserved tiles (fixed + contents), got ' + $tileAcc) }
 
+# ---------- R9: 账 #298 (§B129) 并表收尾 —— 那三处以前各写各的，现在只许转调 ----------
+# 并表之后"这一族有几处换算"这个问题只能有一个答案（vb6forms.c 里那 5 行，R2 已经钉死），
+# 所以这里钉的是**调用点**：数对了说明没人偷偷把旧写法搬回来。三条墓碑 = 旧形状本身。
+# 值面（写进台账 §B129，别只信这条哨兵）：picture_prop 是**同一条公式搬走**（构造上同值，且它
+# 仍按 DC 的 DPI 而不是屏 DPI）；olecon 的 px->hm 两处 96 DPI 下逐值相同（1440/96=15 整除）并
+# 顺带消掉 32 位溢出；olecon 的 hm->px 那一处由"两次截断"变成"一次就近"，实测差值只有 0 或 +1 px；
+# ax_site_ext 的 DPI 从写死 96 换成真实 DPI —— 本机就是 96，那条只有形状能证。
+$olcTxt = [System.IO.File]::ReadAllText((Join-Path $rtlRoot 'core\vb6forms\vb6forms_olecon.c'))
+$ppTxt = [System.IO.File]::ReadAllText((Join-Path $rtlRoot 'core\vb6forms\vb6forms_picture_prop.c'))
+$axsTxt = [System.IO.File]::ReadAllText((Join-Path $rtlRoot 'core\vb6forms\axsite\ax_site_ext.c'))
+$olcPx = ([regex]::Matches($olcTxt, 'vb6_HimetricToPxX\(')).Count + ([regex]::Matches($olcTxt, 'vb6_HimetricToPxY\(')).Count
+$olcHm = ([regex]::Matches($olcTxt, 'vb6_TwipsToHimetric\(')).Count
+$olcTw = ([regex]::Matches($olcTxt, 'vb6_XToTwipX\(')).Count + ([regex]::Matches($olcTxt, 'vb6_YToTwipY\(')).Count
+$ppOnDc = ([regex]::Matches($ppTxt, 'vb6_HimetricToPxOnDc\(')).Count
+$axsF = ([regex]::Matches($axsTxt, 'vb6_HimetricToPxF\(')).Count + ([regex]::Matches($axsTxt, 'vb6_PxToHimetricF\(')).Count
+if ($olcPx -ne 2) { $viol += ('R9-OLECON-SIZE olcSizeToObject must ask the hm->px authorities (X+Y) exactly twice, got ' + $olcPx) }
+if ($olcHm -ne 4) { $viol += ('R9-OLECON-EXTENT the two SetExtent sites must fold px->hm through vb6_TwipsToHimetric 4 times, got ' + $olcHm) }
+if ($olcTw -ne 4) { $viol += ('R9-OLECON-EXTENT px->twip must go through the X/Y authorities 4 times, got ' + $olcTw) }
+if ($ppOnDc -ne 2) { $viol += ('R9-PICTURE-ONDCC Picture non-stretch must ask the formula authority twice (X+Y), got ' + $ppOnDc) }
+if ($axsF -ne 4) { $viol += ('R9-AXSITE the OLE container transform must ask the float pair 4 times (2 ax x 2 dir), got ' + $axsF) }
+$ppMul = ([regex]::Matches($ppTxt, 'MulDiv')).Count
+$olcOld = ([regex]::Matches($olcTxt, '\* 15L \*')).Count
+$axsOld = ([regex]::Matches($axsTxt, 'const double k')).Count
+if ($ppMul -ne 0) { $viol += ('R9-TOMBSTONE picture_prop computes ' + $ppMul + ' conversion(s) itself again - the formula lives in vb6forms.c only') }
+if ($olcOld -ne 0) { $viol += ('R9-TOMBSTONE olecon multiplied by a hardcoded 15 again (' + $olcOld + ' site(s)) - that 15 was the DPI=96 assumption') }
+if ($axsOld -ne 0) { $viol += ('R9-TOMBSTONE ax_site_ext recomputes the himetric factor itself again (' + $axsOld + ') - DPI must come from vb6_DpiX/Y') }
+
 $oneMapTot = 0
 foreach ($L in $creatorLits) { $oneMapTot += $creatorTot[$L] }
 if ($oneMapTot -lt 11) { $viol += ("R4-R6-ONEMAP the one-map census found $oneMapTot sites, floor 11 = it is idling") }
 
 # ---------- R4: 防空转 ----------
 if ($rtlFiles -lt 100) { $viol += "R4-RTL-FILES floor 100, got $rtlFiles" }
-if ($HmFiles.Count -ne 4) { $viol += 'R4-LIST the allowlist itself changed size (must stay 4 files)' }
-if ($HmWantTotal -ne 14) { $viol += 'R4-TOTAL the pinned total changed (must stay 14)' }
+if ($HmFiles.Count -ne 1) { $viol += 'R4-LIST the allowlist itself changed size (must stay 1 file: vb6forms.c)' }
+if ($HmWantTotal -ne 5) { $viol += 'R4-TOTAL the pinned total changed (must stay 5)' }
 if ($pm.Count -lt 1) { $viol += 'R4-R5-CENSUS the pair scan found nothing = the sentinel is idling' }
 if (($gaN + $stK + $stC + $cgN) -lt 5) { $viol += 'R4-R6-CENSUS the panels-list scan found nothing = the sentinel is idling' }
 if (($coll + $collItem + $collEnum + $defN + $cbN) -lt 15) { $viol += 'R4-R6-CENSUS2 the panels emit/exit scan found nothing = the sentinel is idling' }
@@ -397,7 +460,7 @@ if (($sbTwip + $sbBack + $sbHm + $axDeleg + $twipDef + $hm2twDef) -lt 3) {
 if ($viol.Count -eq 0) {
     Write-Host ("PASS static_sentinel_statusbar_panel_hm: emit Hm=" + $hm + "/" + $hmMin +
                 " add=3 autosz=1 plain=0 left=$plEmit / himetric sites $sum in $($perFile.Count) files" +
-                " (statusbar asks $sbTwip+$sbBack+$sbHm, local math $sbMul, old shape $sbPx, tiles reserved $tileAcc)" +
+                " (statusbar asks $sbTwip+$sbBack+$sbHm, local math $sbMul, old shape $sbPx, tiles reserved $tileAcc; callers olc=$olcPx+$olcHm+$olcTw pp=$ppOnDc axs=$axsF)" +
                 " / rtl_files=$rtlFiles / panels coll=$coll item=$collItem " +
                 "enum=$collEnum stale=$stale exit=$defN+$cgN+$cbN lists=$gaN+$stK+$stC " +
                 "onemap=$oneMapTot inline=$inline")
