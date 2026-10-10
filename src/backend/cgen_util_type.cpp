@@ -1195,13 +1195,21 @@ std::string CCodeGen::wrapWholeArrayAssign(const std::string& target,
 // 目标宽度以外的整型、以及一切浮点 (Single/Double/Currency/Date), 都能越界;
 // 目标宽度以内的 (含 Boolean —— 值域只有 -1/0), 永远不可能, 套检查纯属噪声。
 // Unknown/Variant 一律按"可能越界"算 —— 宁可多查, 不可漏查, 因为漏查就是静默错编。
-static int cgenIntBits(Vb6Type t) {
+// 账 #230 §B138b: ptrBits = 目标架构的指针位宽 (x86 → 32, x64 → 64)。
+//   **LongPtr 与 VBA 里一样是跟平台走的**: x86 下就是 32 位, x64 下才是 64 位。
+//   改前这里把它和 Long/Single 一起写死在 32 位档 —— 与紧邻那句注释
+//   ("LongLong/LongPtr 是 64 位整数") 自相矛盾; 后果是 x64 上把 LongPtr 存进
+//   Byte/Integer/Long 时, srcBits(32) <= tgtBits(32) ⇒ "装得下" ⇒ **不套检查**,
+//   静默截掉高 32 位 (正是 VarPtr/StrPtr/ObjPtr 那三枚交地址的典型下场)。
+//   **LongLong 则始终 64 位**, 与平台无关 (C 侧固定 int64_t), 故不进这一档。
+static int cgenIntBits(Vb6Type t, int ptrBits) {
     switch (t) {
     case Vb6Type::Byte: case Vb6Type::Boolean: return 8;
     case Vb6Type::Integer: return 16;
     case Vb6Type::Long: case Vb6Type::ULong:
-    case Vb6Type::Single: case Vb6Type::LongPtr: return 32;
-    // Currency/Date 在 C 侧是 double, LongLong/LongPtr 是 64 位整数, 都可能越界
+    case Vb6Type::Single: return 32;
+    case Vb6Type::LongPtr: return ptrBits;
+    // Currency/Date 在 C 侧是 double, LongLong 恒 64 位整数, 都可能越界
     case Vb6Type::Double: case Vb6Type::Currency: case Vb6Type::Date:
     case Vb6Type::LongLong: return 64;
     // C3 扩展 (ai/032): 新整型按实际位宽入档。注意 SByte 与 Byte 同为 8 位 ——
@@ -1357,7 +1365,9 @@ std::string CCodeGen::narrowCheckAssign(Expr* target, Expr* value,
     if (vt == Vb6Type::Single || vt == Vb6Type::Double || vt == Vb6Type::Currency)
         return std::string(fn) + "(vb6_FltToLng(" + cValue + "))";
 
-    int srcBits = value ? cgenIntBits(vt) : 0;
+    // §B138b: LongPtr 的宽度跟目标架构走 (x86=32 / x64=64), 见 cgenIntBits 处注释。
+    const int ptrBits138 = (targetArch_ == "x86") ? 32 : 64;
+    int srcBits = value ? cgenIntBits(vt, ptrBits138) : 0;
     if (srcBits != 0 && srcBits <= tgtBits) return cValue;   // 装得下, 不套
 
     return std::string(fn) + "(" + cValue + ")";
