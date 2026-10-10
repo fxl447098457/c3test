@@ -3023,7 +3023,11 @@ if ($Category -in @("all", "run", "vbp")) {
     # (字符串表/裸 DIB/组图标/PNG·WebP 字节签名/CUSTOM 数据/错误 326)。
     $resNeedles = @("STR=ResString-OK|Y", "BMP=Y/0", "ICO=Y/0", "PNG=Y/0", "WEBP=Y/0", "BIN=8/222", "MISS=326")
     Test-Vbp "resload" "$Tests\resload\ResLoad.vbp" $resNeedles
-    $resAlphaNeedles = @("PICSET=True", "PAINTED=True")
+    # 账 #301 第二十六刀：非 Stretch 那一支的行为面。imgN 的盒子 96 x 64 px，装的是 alpha.png
+    # (48 x 48，左半红)。不拉伸 ⇒ 红段必须停在图的天然宽 (~23)，而不是盒子边 (95)；
+    # 红段之外还得透出 BackColor（蓝），white 计数必须为 0 —— 白底填充满盒是另一条支路，
+    # 用它当证人的第一版探针读到的 95 就是填充而不是画出来的图（读法教训写进夹具注释）。
+    $resAlphaNeedles = @("PICSET=True", "PAINTED=True", "NS01-NATURAL=True", "NS01-RAW red=")
     Test-Vbp "resalpha" "$Tests\resload\ResAlpha.vbp" $resAlphaNeedles
     Test-Vbp "tmtimer_x86" "$Tests\c29timer\TmApp.vbp" $tmNeedles -Arch "x86"
     # 账 #157: 窗体显示时把焦点交给**这枚窗体里 TabIndex 最小的那枚拿得到焦点的控件**（VB6 口径）。
