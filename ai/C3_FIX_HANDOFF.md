@@ -500,7 +500,7 @@ D11 放开普查范围到整个 `src/rtl` 的那天，只剩两处没接：`vb6f
 - **B 单位那一格**（RTL `vb6forms_statusbar.c`）：`Vb6PanelEntry.width/minWidth` 注释写**像素**、`SbLayout` 也按像素参与排版，而 VB 侧口径是**缇** ⇒ 出口两侧改用已有的那对唯一换算（`vb6_TwipToX` / `vb6_XToTwipX`，#184/#175 收成一处的那对，**别新开一份**），getter 改交**排版后的宽**（`SbApplyParts` 那份 offsets 差值）折回缇。
 **刻意不跟着改的一格（记下别当遗漏）**：TLB 说 propget 是 Single，而 `vb6forms_memberobj.c:505` 走 `memSetI4` —— 折出来的缇取整后 I4 与 R4 在 `=` / `CStr` 两头同值，改它要动成员表与类型权威(#231)，收益只有 `VarType()` 一项。
 **判据必须自己造**（A/B 对这族永远沉默：本仓三份状态条夹具都没有 `Object.Width`，全语料 0 处 ⇒ 形状门 `changed=0` 是"零覆盖"而不是"没改到"，#233 那一课在这里重演）：夹具加一枚**按 VB6 真实形状**写的 `BeginProperty Panels {…}` / `BeginProperty PanelN {…}` / `Object.Width = …` 状态条，两头钉 —— 设计值折成缇读得到（拦 A）、弹簧/内容档读回排版后的宽（拦 B），证人用 `SB_GETTEXT`/`SB_GETPARTS` 问窗口本人（与 #205 那三条同源）。
-**第一格已出（第十八刀，2026-10-10）**：发码侧认了 `Object.Width` 那一档 —— 新建一枚 RTL 出口 `vb6_StatusBar_SetPanelWidthHm`，它只做一件事：转调本族唯一那枚按真实 DPI 的权威 `vb6_HimetricToPxX`（`vb6forms.c`，与 #184/#175 那对缇换算住在一起）。**读数**（真跑，两台逐行相同）：夹具 `tests/sbhm`（**按 VB6 设计器的真实形状写**：`BeginProperty Panels {GUID}` + `BeginProperty PanelN {GUID}` + `Object.Width`）—— 改后 `w1=57 w2=100 e3=467 cw=467`（1500 hm 与 2646 hm 折成 57/100 px，正是 MulDiv(hm,96,2540)），改前那台**跑同一份夹具** `w1=7 w2=14`（两枚固定档面板退化成文字宽 = 设计值整格没进来）⇒ `HM01-HM-DESIGN-WIDTH` False→True。**同一刀里顺带修掉一格实测缺陷**：弹簧档的 `MinWidth` 被当成"加在剩余空间上的加项"而不是下限（`SbLayout` 第一遍占位 + 第二遍兜底 = 同一个答案两处），读数 `e3=493` 而 `cw=467`，多出来的正好一枚 MinWidth=26 ⇒ 判据 `HM03-SPRING-TILES` False→True。**护栏**：新哨兵 `check_statusbar_panel_hm.ps1`（第 51 道 [STATIC]）四头，负控两头各证能红 —— BASE 树（`wt_k17neg3`，改前那台编译器 + 同一份夹具）一次报出 R1/R2/R3 九条，名单被清空的副本报出 R4；夹具那四条判据里只有 HM01/HM03 是真翻 False 的存在性证人，**HM02 在 BASE 上也 True**（7:14 恰好也落在容差内）⇒ 它只是"只许一处换算"的形状护栏，不当罪证。**刻意留下的一格**：`vb6_HimetricToPxX` 之外，himetric 与像素/缇的折算在 RTL 里已有 13 个非注释行、住 5 份文件（§B129）—— 本刀只把**新增**那一处放进权威，没顺手并表（各有一份自己的判据面）。
+**第一格已出（第十八刀，2026-10-10，门 #463 全绿 = run 38011638007、head `177fca98`、attempt 1、12 job 全 completed/success、非绿 0、wall 10m22s；`Emit manifest (shape oracle)` 那一跑同绿 ⇒ 新登记的那行被 CI 那台独立复算证实，而 vbp 四片全绿 ⇒ 新夹具 `sbhm` 两台真跑过了 —— 缺 .vbp 会让 Test-Vbp 直接报失败，绿就是跑了）**：发码侧认了 `Object.Width` 那一档 —— 新建一枚 RTL 出口 `vb6_StatusBar_SetPanelWidthHm`，它只做一件事：转调本族唯一那枚按真实 DPI 的权威 `vb6_HimetricToPxX`（`vb6forms.c`，与 #184/#175 那对缇换算住在一起）。**读数**（真跑，两台逐行相同）：夹具 `tests/sbhm`（**按 VB6 设计器的真实形状写**：`BeginProperty Panels {GUID}` + `BeginProperty PanelN {GUID}` + `Object.Width`）—— 改后 `w1=57 w2=100 e3=467 cw=467`（1500 hm 与 2646 hm 折成 57/100 px，正是 MulDiv(hm,96,2540)），改前那台**跑同一份夹具** `w1=7 w2=14`（两枚固定档面板退化成文字宽 = 设计值整格没进来）⇒ `HM01-HM-DESIGN-WIDTH` False→True。**同一刀里顺带修掉一格实测缺陷**：弹簧档的 `MinWidth` 被当成"加在剩余空间上的加项"而不是下限（`SbLayout` 第一遍占位 + 第二遍兜底 = 同一个答案两处），读数 `e3=493` 而 `cw=467`，多出来的正好一枚 MinWidth=26 ⇒ 判据 `HM03-SPRING-TILES` False→True。**护栏**：新哨兵 `check_statusbar_panel_hm.ps1`（第 51 道 [STATIC]）四头，负控两头各证能红 —— BASE 树（`wt_k17neg3`，改前那台编译器 + 同一份夹具）一次报出 R1/R2/R3 九条，名单被清空的副本报出 R4；夹具那四条判据里只有 HM01/HM03 是真翻 False 的存在性证人，**HM02 在 BASE 上也 True**（7:14 恰好也落在容差内）⇒ 它只是"只许一处换算"的形状护栏，不当罪证。**刻意留下的一格**：`vb6_HimetricToPxX` 之外，himetric 与像素/缇的折算在 RTL 里已有 13 个非注释行、住 5 份文件（§B129）—— 本刀只把**新增**那一处放进权威，没顺手并表（各有一份自己的判据面）。
 ### B42 设计期 `.frx` 的 List/ItemData 只接了 ListBox 一档，ComboBox 那 17 处全落空（账 #207，**已出**）
 
 Fix 195 那轮把 .frx 三种 blob 的**布局**钉准了（字符串 / 字符串表 / 整数表），但发码侧的接线只写了一档：`emitControlFrxProps` 里 `if (ctrl.controlType == FrmControlType::ListBox)` 才发 `LB_ADDSTRING` / `LB_SETITEMDATA`。语料普查：`List =` / `ItemData =` 指向 .frx 的共 **17 + 17 处，全在 ComboBox 上**（Charts 2020 的 ucTreeMaps / ucChartBar / ucPieChart / ucProgressCircular 四份 demo 的 "Number of Series"、"Chart Style"、"Legend Position" 那一类）⇒ 编出来的下拉框是空的。
@@ -2057,6 +2057,26 @@ marker、重编，之后 `check_rtl_embedded` 报 **125/125 逐字节相同**。
 哨兵 `check_statusbar_panel_hm.ps1` 的 R2 已经把"5 份文件 / 13 行"钉死，多长一份就红 ——
 并表的时候把名单往下减，别往上加。
 
+### B131 `Panels(<数字>).Index` 把整数交给 `wchar_t*` 槽 ⇒ 启动期 AV（账 #300，**新**，第十八刀那枚探针撞见）
+
+`.build/b351_probe/P299.frm` 跑到第 6 行崩（bash 报 139；BASE 那台**同样崩在同一行** ⇒ 与第十八刀无关，是存量）。
+产物形状把两件事叠在一处：
+
+- 成员名表把 `Index` 这一档答成 **`vb6_StatusBar_GetPanelIndexByKey`**（`cgen_util_com.cpp:328-329` 两个分支同名），
+  而那枚出口的签名是 `int32_t (void* hwnd, const wchar_t* key)`；
+- 于是 `SB1.Panels(1).Index` 发成 `vb6_StatusBar_GetPanelIndexByKey((void*)vb6_hwnd_SB1, 1)` ——
+  **整数 1 进 `wchar_t*` 槽**，RTL 里 `if (!key || !key[0])` 去读地址 0x1 ⇒ AV。
+  `Panels("tp").Index`（字符串下标）反而是对的，所以这格在存量判据 SB14 里从没露过面：**症状按"下标写的是数字还是键"分家**。
+
+**修法方向（别按名字补一格）**：这一枚成员本来就有早绑定的答案 —— `vb6forms_memberobj.c:114` 那张面板名单里
+`Index` 在册，由 p->index+1 答；崩的原因和第十五刀撤掉的 C29-Data 直译是**同一个形状**：
+COM 侧那张 recognizer（`cgen_util_com.cpp` 里按成员名硬拼出口的那一段）抢在 memberobj 之前答了同一枚成员。
+所以第一步是问"这一族里还有哪些名字被两边同时答"（census），第二步才决定撤哪一边 ——
+#229 那条"数组元素 extender 属性两形同归一处出口"是同一课。
+
+**判据**：崩的那一行要变成一枚真跑夹具（`Panels(1).Index` 与 `Panels("k").Index` **两头**都要钉，
+只钉一头正是这格能活着发货的原因）；负控 = 改前那台在同一份夹具上 AV / 无产物。
+
 ### B130 `CStr(成员对象的数值成员)` 交出空串（账 #299，开着；第十八刀的夹具撞见）
 
 `tests/sbhm` 的 HM05 一行里两种写法同时问同一枚属性，两台读数是**定论级**的：
@@ -2066,7 +2086,7 @@ marker、重编，之后 `check_rtl_embedded` 报 **125/125 逐字节相同**。
 —— **整条链掉进了 COM 晚绑定兜底**，而晚绑定那一头对状态条面板对象一无所知（RTL 里"认识但什么都不做"），
 于是交回 Empty。同族已知样本：账 #143（控件方法两形都落 COM 兜底）、#221（Picture.Line 两跳都空 ⇒ 静默不画）、
 #229（数组元素 extender 属性读进 `&` 拼接 = 裸 int 进 BSTR 槽）。
-**动之前先量口径**：这一族的分岔是"同一个成员读法，套不套 CStr 走两条路"，不是状态条专属 ——
+**机制已量到（2026-10-10 探针 `.build/b351_probe/P299.frm`，x64 真跑 + `--emit-c` 两头对看）**：同一枚 `SB1.Panels(1).Width` 四种写法，产物与读数是这样分的 —— `& 裸拼接`、`= 给 Long`、`= 给 Variant` **三形都走早绑定**（`vb6_StatusBar_GetPanelWidth`，读数 1200），只有 **`CStr(…)` 那一形换了路**：`vb6_CStr(vb6_VariantFromValue(vb6_VariantFromComResult(vb6_ComGetProp(` …晚绑定链…`)))` ⇒ 读数空。⇒ 分岔不在"成员是谁"，在 **CStr 的实参那一路把接收者重新按通用 COM 解了一遍**，解出来的对象在 RTL 里没有 Panels/Buttons 这一档 ⇒ "认识但什么都不做" ⇒ Empty。旁证（同一枚探针里另两族的**裸拼接**形）：`TB1.Buttons(1).Width` 与 `TV1.Nodes.Count` 的裸形**也**发成 `vb6_ComGetStringProp(…)` —— 数值成员按字符串取（#88/#229 那一族），只是这几族从没被钉过。
 所以第一步应是枚**跨控件探针**（同一枚成员读法 × {直接拼接, CStr, CLng, 赋值给 Variant} × {memberobj 家族：Panels/Columns/Nodes/Buttons} 四形），
 而不是给 `Panels` 单补一格 CStr 特判（那正是本线第 N 次给同一事实写第二份答案）。
 
