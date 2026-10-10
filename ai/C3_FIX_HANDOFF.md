@@ -499,6 +499,7 @@ D11 放开普查范围到整个 `src/rtl` 的那天，只剩两处没接：`vb6f
 - **A 设计块那一格**（`cgen_form_ctrl_style_apply.inc:847` 那一趟读 `p.properties["Width"]`）：真 VB6 那一行键名带 `Object.` 前缀，而 `frm_parser.cpp:81` 保留点号全名 ⇒ **今天的真实工程里面板宽压根没进 RTL**（这才是"读回 0"的第一半；"读请求值"那半是第二格）。补法 = 认 `Object.Width` / `Object.MinWidth`，发码期按 72/127 折成缇再交给出口。语料面：全 5623 份 .frm 里 `Object.Width` **1634 处 / 356 份**，点号集合项形（`.Width =`）在状态条上 **0 处** ⇒ 我们夹具那形是自己造的，不是 VB6 的。
 - **B 单位那一格**（RTL `vb6forms_statusbar.c`）：`Vb6PanelEntry.width/minWidth` 注释写**像素**、`SbLayout` 也按像素参与排版，而 VB 侧口径是**缇** ⇒ 出口两侧改用已有的那对唯一换算（`vb6_TwipToX` / `vb6_XToTwipX`，#184/#175 收成一处的那对，**别新开一份**），getter 改交**排版后的宽**（`SbApplyParts` 那份 offsets 差值）折回缇。
 **刻意不跟着改的一格（记下别当遗漏）**：TLB 说 propget 是 Single，而 `vb6forms_memberobj.c:505` 走 `memSetI4` —— 折出来的缇取整后 I4 与 R4 在 `=` / `CStr` 两头同值，改它要动成员表与类型权威(#231)，收益只有 `VarType()` 一项。
+**第二格的口径也有主了（2026-10-10 同一批语料，`.build/b363_panel_read_width.py`）**：扫 9546 份源文件找到 **10 处读面板宽/左**的写法，其中四行是"把一枚浮动的进度条按面板定位"—— `Form1.frm` 的 `.Move (sb.Panels(n).Left + pading), (sb.Top + pading), (sb.Panels(n).Width - pading*2), …`、`modAddProgBar.bas` 的 `pb.Width = sb.Panels(lPan).Width - 45`、`frmDataSource/frmEdit` 的 `ProgressBar1.Move 3060, …, Me.sbStatusBar.Panels(1).Width - 3060`。这些覆盖层只在** getter 交回排版后的几何 **时才对得准（弹簧档的面板"请求值"跟实际宽根本不是一回事），而设计块那一头量到的是 `sum(面板宽) ≈ _ExtentX`（63/92 铺满）—— 两条互证 ⇒ **§B41 的靶子成立：VB6 交回的是排版结果**。**但这仍是"作者期望"级证据，不是 OCX 行为级**：真要改，动手前有两件必须一并做 —— ① 邻居夹具 `tests/ctrlstatusbar` 那两条针（SB10-W2=120 / SB36-SETW=123）钉的就是"显式给过的 Width"，改了 getter 它们必翻 False ⇒ 判据要按 #157 那条重述（就地取基线问增量，别拿"总数=各步之和"当式子）；② VB 侧存储要从"像素"换成"缇"（本刀刻意留在像素那一档，见 §B129），两件事一起做才不会又留一份第二答案。
 **判据必须自己造**（A/B 对这族永远沉默：本仓三份状态条夹具都没有 `Object.Width`，全语料 0 处 ⇒ 形状门 `changed=0` 是"零覆盖"而不是"没改到"，#233 那一课在这里重演）：夹具加一枚**按 VB6 真实形状**写的 `BeginProperty Panels {…}` / `BeginProperty PanelN {…}` / `Object.Width = …` 状态条，两头钉 —— 设计值折成缇读得到（拦 A）、弹簧/内容档读回排版后的宽（拦 B），证人用 `SB_GETTEXT`/`SB_GETPARTS` 问窗口本人（与 #205 那三条同源）。
 **第一格已出（第十八刀，2026-10-10，门 #463 全绿 = run 38011638007、head `177fca98`、attempt 1、12 job 全 completed/success、非绿 0、wall 10m22s；`Emit manifest (shape oracle)` 那一跑同绿 ⇒ 新登记的那行被 CI 那台独立复算证实，而 vbp 四片全绿 ⇒ 新夹具 `sbhm` 两台真跑过了 —— 缺 .vbp 会让 Test-Vbp 直接报失败，绿就是跑了）**：发码侧认了 `Object.Width` 那一档 —— 新建一枚 RTL 出口 `vb6_StatusBar_SetPanelWidthHm`，它只做一件事：转调本族唯一那枚按真实 DPI 的权威 `vb6_HimetricToPxX`（`vb6forms.c`，与 #184/#175 那对缇换算住在一起）。**读数**（真跑，两台逐行相同）：夹具 `tests/sbhm`（**按 VB6 设计器的真实形状写**：`BeginProperty Panels {GUID}` + `BeginProperty PanelN {GUID}` + `Object.Width`）—— 改后 `w1=57 w2=100 e3=467 cw=467`（1500 hm 与 2646 hm 折成 57/100 px，正是 MulDiv(hm,96,2540)），改前那台**跑同一份夹具** `w1=7 w2=14`（两枚固定档面板退化成文字宽 = 设计值整格没进来）⇒ `HM01-HM-DESIGN-WIDTH` False→True。**同一刀里顺带修掉一格实测缺陷**：弹簧档的 `MinWidth` 被当成"加在剩余空间上的加项"而不是下限（`SbLayout` 第一遍占位 + 第二遍兜底 = 同一个答案两处），读数 `e3=493` 而 `cw=467`，多出来的正好一枚 MinWidth=26 ⇒ 判据 `HM03-SPRING-TILES` False→True。**护栏**：新哨兵 `check_statusbar_panel_hm.ps1`（第 51 道 [STATIC]）四头，负控两头各证能红 —— BASE 树（`wt_k17neg3`，改前那台编译器 + 同一份夹具）一次报出 R1/R2/R3 九条，名单被清空的副本报出 R4；夹具那四条判据里只有 HM01/HM03 是真翻 False 的存在性证人，**HM02 在 BASE 上也 True**（7:14 恰好也落在容差内）⇒ 它只是"只许一处换算"的形状护栏，不当罪证。**刻意留下的一格**：`vb6_HimetricToPxX` 之外，himetric 与像素/缇的折算在 RTL 里已有 13 个非注释行、住 5 份文件（§B129）—— 本刀只把**新增**那一处放进权威，没顺手并表（各有一份自己的判据面）。
 ### B42 设计期 `.frx` 的 List/ItemData 只接了 ListBox 一档，ComboBox 那 17 处全落空（账 #207，**已出**）
@@ -2057,7 +2058,7 @@ marker、重编，之后 `check_rtl_embedded` 报 **125/125 逐字节相同**。
 哨兵 `check_statusbar_panel_hm.ps1` 的 R2 已经把"5 份文件 / 13 行"钉死，多长一份就红 ——
 并表的时候把名单往下减，别往上加。
 
-### B131 `Panels(<数字>).Index` 把整数交给 `wchar_t*` 槽 ⇒ 启动期 AV（账 #300，**新**，第十八刀那枚探针撞见）
+### B131 `Panels(<数字>).Index` 把整数交给 `wchar_t*` 槽 ⇒ 启动期 AV（账 #300，**已出 —— 第十九刀，2026-10-10，门待回填**）
 
 `.build/b351_probe/P299.frm` 跑到第 6 行崩（bash 报 139；BASE 那台**同样崩在同一行** ⇒ 与第十八刀无关，是存量）。
 产物形状把两件事叠在一处：
@@ -2076,6 +2077,11 @@ COM 侧那张 recognizer（`cgen_util_com.cpp` 里按成员名硬拼出口的那
 
 **判据**：崩的那一行要变成一枚真跑夹具（`Panels(1).Index` 与 `Panels("k").Index` **两头**都要钉，
 只钉一头正是这格能活着发货的原因）；负控 = 改前那台在同一份夹具上 AV / 无产物。
+**已出（第十九刀，2026-10-10，门待回填）**：数字/键两条各答各的 —— 新出口 `vb6_StatusBar_GetPanelIndex(hwnd, index)`（面板存在就交回自己的 1 基下标，不存在交 0，与 `*ByKey` 那枚的"未找到=0"同一口径），键下标仍走 `*ByKey`；发码侧只把 `index` 那一条的两个参数改成不同名字，三处同步（header 声明 / RTL 定义 / 发码点，各恰好 1 处，哨兵 R5-TRIPLE 钉住）。
+**读数**（真跑）：夹具 `tests/sbhm` 加 HM06/HM07 两头 —— 新台两架构 `HM06-INDEX-BOTH-FORMS=True`、`HM07-RAW idx9=0`、9 行跑到 `HM-DONE`、rc=0；**负控就是那枚 AV 本身**：BASE 那台跑**同一份**夹具 `rc=0xC0000005`、只打 6 行、停在 HM05（注意：我那个 .bat 里 `if exist (...)` 块内的 `%ERRORLEVEL%` 是解析期展开的，打出来一片假 `RUN_EXIT=0` —— 退出码要用 python 直接起进程才算数，这是 [[c3-build-test-hazards]] 那条 for 循环课的同一形状）。
+**哨兵**：`check_statusbar_panel_hm.ps1` 长出 R5 两头（三处 `sbFinishByKey` 的两个出口名不凸相同 + 新出口三处同步），各自用一处假改动证红（多一处调用点 → R5-PAIRS=4；发码点改名 → R5-TRIPLE 报 `cgen_util_com.cpp got 0`），植完按 md5 还原（`c64f4f0bcf53`，字节级相同）。R1 也加两条产物面（by-index 恰好 2、by-key 恰好 1），负控直接用 BASE 树 + 同一份夹具就红。
+**可复用的一条**：凡是"两个参数理应不同名字"的函数型式（一个答数字下标、一个答键名），**结构性地**查得出来：数调用点 + 要求两个字面量不相等。这一样的针不靠语义、也不靠记忆，改错就红。
+**刻意没接的一格**：越界那一问（`Panels(9).Index`）在 VB6 是错误 9，本刀只交 0 且只钉前缀 —— 与 #209 那族（动态数组越界裸读→AV）的口径是同一个，要动就一起动。
 
 ### B130 `CStr(成员对象的数值成员)` 交出空串（账 #299，开着；第十八刀的夹具撞见）
 
