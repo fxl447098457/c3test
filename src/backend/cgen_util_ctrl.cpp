@@ -1538,6 +1538,24 @@ std::string CCodeGen::controlZeroArgMethod(FrmControlType ctrlType,
     if (memberLower == "clear"
         && (ctrlType == FrmControlType::ListBox || ctrlType == FrmControlType::ComboBox))
         return controlExit("vb6_ClearList", 1, outArgc);
+    // 账 #278 §B72 第十四刀: 集合那一族的 Clear。两枚的**接收者表达式不一样** —— ImageList 的
+    // 槽位是 `vb6_com_<名>`（它是宿主对象不是窗口），StatusBar 才是 `vb6_hwnd_<名>` —— 所以表管
+    // "叫什么、递几枚"，"递给谁"仍由码头拼。这一刀之前，这两枚名字在两条码头各抄一遍。
+    if (memberLower == "clear" && ctrlType == FrmControlType::ImageList)
+        return controlExit("vb6_ImageList_ClearImages", 1, outArgc);
+    if (memberLower == "clear" && ctrlType == FrmControlType::StatusBar)
+        return controlExit("vb6_StatusBar_ClearPanels", 1, outArgc);
+    // CommonDialog 那六枚: 从前两条码头各自做一遍**字符串手术**
+    // （`"vb6_CdShow" + toupper(m[4]) + m.substr(5)`）—— 命名规则住在调用点，正是 §B115 那句
+    // "拼法只许来自表"要禁的形状；而且它对 `mCd[4]` 的依赖意味着名单加一枚就得信拼法还对。
+    if (ctrlType == FrmControlType::CommonDialog) {
+        if (memberLower == "showopen")    return controlExit("vb6_CdShowOpen", 1, outArgc);
+        if (memberLower == "showsave")    return controlExit("vb6_CdShowSave", 1, outArgc);
+        if (memberLower == "showcolor")   return controlExit("vb6_CdShowColor", 1, outArgc);
+        if (memberLower == "showfont")    return controlExit("vb6_CdShowFont", 1, outArgc);
+        if (memberLower == "showprinter") return controlExit("vb6_CdShowPrinter", 1, outArgc);
+        if (memberLower == "showabout")   return controlExit("vb6_CdShowAbout", 1, outArgc);
+    }
     return "";
 }
 

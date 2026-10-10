@@ -765,18 +765,42 @@ function Test-RtlResourceIds {
 }
 # 账 #240: RTL 的头与体必须同一张签名（参数个数）。本机那台 cl 在 C 模式下不诊断「实参过多」，
 # 头追不上体的缺陷只有 runner 上新 cl 才报 error C2197 ⇒ 判据不能靠真编，只能对着源码比。
-# 账 #278 §B72 把同一把针往外接两头：发码那几张控件方法表（名字 + 实参个数, 恰好 15 行 =
-# 第十二刀那 7 行 + 第十三刀 Winsock 那一族 8 行）要与 RTL 头、与 cgen_util_type.cpp 那张
+# 账 #278 §B72 把同一把针往外接两头：发码那几张控件方法表（名字 + 实参个数, 恰好 23 行 =
+# 第十二刀那 7 行 + 第十三刀 Winsock 那一族 8 行 + 第十四刀并进零实参表的 8 行）要与 RTL 头、与 cgen_util_type.cpp 那张
 # 运行时参数表对上，且与**产物里实际递出的实参数**对上（跑一次 --emit-c 数
-# tests/ctrlzero/ZeroForm.frm 里那 14 枚调用, 只走前端不起 cl）。反过来的形状
+# tests/ctrlzero/ZeroForm.frm 里那 22 枚调用, 只走前端不起 cl）。反过来的形状
 # —— RTL 加形参、发码仍递旧个数 —— 本机只 warning C4020, 到新 cl 才升 error C2197,
-# 所以两头都必须钉在源码与产物上, 不能等编译红。另钉 R5: 表里那些出口名不许在别处再拼一遍;
+# 所以两头都必须钉在源码与产物上, 不能等编译红。§B128 又订正了一格识别面: 认「这是一条声明」之前
+# 要把 `/* … */` 也剥掉 —— RTL 头大量写法是 `void f(…);   /* 说明 */`, 从前尾巴不是 ';' 就两头一起隐身。另钉 R5: 表里那些出口名不许在别处再拼一遍（比 "名字" 与 "名字(" 两种字面量开头 —— 码头习惯把左括号拼进同一条串,
+# 只比前者会漏掉一半站点, 第十三刀实测就这样少报过; 第十四刀把口径收严）;
 # 而「没括号那一形」的 Winsock 码头拿的是表里「个数 == 1」那一档 —— 个数在这里不只是判据,
 # 还是接不接这条形的条件。
 function Test-RtlProtoArity {
     $script:total++
     Write-Host -NoNewline "  [STATIC] rtl_proto_arity ... "
     $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\check_rtl_proto_arity.ps1" 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        $out | Select-Object -First 8 | ForEach-Object { Write-Host "  $_" }
+    }
+}
+
+# 账 #278 §B124（第十五刀）：Data 控件的 recordset 成员面从前住着两套答案 —— 一整套
+# `vb6_Data_Self(` 前缀直译（Refresh/Move*/Fields/FieldValueStr，五格认前缀 + 三格抠槽 + 三格再认求值结果）
+# 与 memberobj 交出的真 IDispatch。§B124 的九形探针量到前者在产物里 0 处（那条路从没被走过），
+# 第十二刀立起的 census（arity 哨兵 R5）把它点名为"同一个事实的第二份答案"。撤完钉四头：
+# 夹具那十形仍只发 vb6_Data_RecordsetObj + vb6_Com*（逐成员名字面量条数钉死）、
+# 撤掉的那七枚出口名不许在 src/backend 的非注释行里再出现成字面量、RTL 那头也不许留它们当
+# "没人叫的出口"（§B127：撤了读者就把被读者一起撤，判据去注释后各恰好 0 次）、
+# 两张名单与两头普查（backend 122 份 / rtl 127 份）自己不许变空。
+function Test-RsRecordsetShape {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] data_recordset_shape ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\check_data_recordset_shape.ps1" 2>&1
     if ($LASTEXITCODE -eq 0) {
         $script:pass++
         Write-Host "PASS" -ForegroundColor Green
@@ -5440,6 +5464,7 @@ if ($Category -in @("all", "compile")) {
     Test-RtlNakedNames
     Test-RtlResourceIds
     Test-RtlProtoArity
+    Test-RsRecordsetShape
     Test-Ps51JoinPath
     Test-UcArrayEventSites
     Test-SubclassSlotSites
