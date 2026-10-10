@@ -66,7 +66,7 @@ Function SBTF(b As Boolean) As String
 End Function
 
 Private Sub Form_Load()
-    Dim sbW0 As Long, sbW1 As Long, sbSum As Long
+    Dim sbW0 As Long, sbW1 As Long, sbSum As Long, sbTol As Long
     Debug.Print "SB0-HWND=" & Me.hwnd & " CAP=" & Me.Caption & " CL=" & Me.Controls.Count
     Debug.Print "SB1-COUNT=" & StatusBar1.Panels.Count
     Debug.Print "SB2-KEY1=" & StatusBar1.Panels(1).Key
@@ -129,8 +129,7 @@ Private Sub Form_Load()
     ' panel 1 is a spring panel whose requested width is meaningless - so that number can
     ' only come from the window. Restated per #157: take the baseline in place and ask for
     ' the increment (writing a width into a spring panel must not move what it reports),
-    ' never a hand-added total. The RAW line prints all four numbers so the next caliber
-    ' change - and the tiling defect above - stay visible.
+    ' never a hand-added total. The RAW line prints all four numbers.
     sbW0 = StatusBar1.Panels(1).Width
     StatusBar1.Panels(1).Width = 123
     sbW1 = StatusBar1.Panels(1).Width
@@ -138,13 +137,16 @@ Private Sub Form_Load()
             + StatusBar1.Panels(3).Width
     Debug.Print "SB36-RAW before=" & sbW0 & " after=" & sbW1 & " sum=" & sbSum _
                 & " bar=" & StatusBar1.Width
-    ' Only the invariance half is pinned here. The third term (three panels tile the bar)
-    ' does NOT hold, and that is its own defect, not this knife's: SbLayout leaves a
-    ' sbrContents panel's measured width out of fixedTotal, so the spring absorbs it twice
-    ' -> the last right edge runs past the client width (measured: sum=6630 vs bar=6000
-    ' twips = 42px of clock text handed out twice). Filed as a separate account; RAW above
-    ' carries both numbers so the fix is visible when it lands.
     Debug.Print "SB36-SPRING-FOLLOWS-WINDOW=" & SBTF((sbW1 > 0) And (sbW1 = sbW0))
+    ' SB36-TILES-BAR = the existence witness for zhang 303 (B132), the defect the 22nd cut
+    ' exposed by fixing the getter: SbLayout put a sbrContents tile's measured width into
+    ' want[] but never into fixedTotal, so the spring was handed that width a second time and
+    ' the last right edge ran past the client rect - BASE reads sum=6630 against bar=6000
+    ' (the 630 twips = 42px clock text, counted twice), NEW must tile the bar.
+    ' Tolerance, not a hand-added total: every tile is folded pixels->twips with rounding, so
+    ' three tiles may differ from the bar's own width by a couple of twips (45 twips = 3px).
+    sbTol = Abs(sbSum - StatusBar1.Width)
+    Debug.Print "SB36-TILES-BAR=" & SBTF((sbSum > 0) And (sbTol <= 45))
     StatusBar1.Panels(1).AutoSize = 0
     Debug.Print "SB37-SETAUTOSZ=" & StatusBar1.Panels(1).AutoSize
     StatusBar1.Panels(1).ToolTipText = "hello"

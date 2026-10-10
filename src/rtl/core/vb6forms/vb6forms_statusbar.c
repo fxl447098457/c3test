@@ -231,7 +231,8 @@ static int SbLayout(Vb6StatusBar* sb, int* outOffsets, int outCap) {
     int clientW = rc.right - rc.left;
     if (clientW < 0) clientW = 0;
 
-    // 第一遍: 各面板"先要"的宽度。弹簧面板先按 MinWidth 占位。
+    // 第一遍: 各面板"先要"的宽度。弹簧档在这一遍要 0 (它吃的是剩下的), MinWidth 的下限
+    // 在第二遍兜 (账 #206 第十八刀撤掉了这里占位那一份 —— 同一个答案不许有两处)。
     int* want = (int*)calloc((size_t)sb->count, sizeof(int));
     int  springs = 0;
     int  fixedTotal = 0;
@@ -245,6 +246,12 @@ static int SbLayout(Vb6StatusBar* sb, int* outOffsets, int outCap) {
             springs++;
         } else if (e->autoSize == VB6_SBR_CONTENTS) {
             want[i] = SbMeasureText(sb->hwnd, SbDisplayText(e));
+            // 账 #303 (§B132): 内容档也是**占位**的一格, 以前只有固定档累加进 fixedTotal,
+            // 于是弹簧把同一格宽吃两次 —— 末格右边界越过客户区 (夹具实测 sum=6630 而 bar=6000,
+            // 差的 630 缇 = 42 像素正好是那枚 sbrTime 面板的文本宽)。状态条各格铺满客户区,
+            // 这是 SB_SETPARTS 的定义, 不是审美问题: §B41 第二格之后 VB 侧读的就是这份 offsets,
+            // 读数跟着一起偏大, 语料里那四处"按面板宽摆覆盖层"的写法会多摆一格。
+            fixedTotal += want[i];
         } else {
             // 存缇、排像素: 这一道折只走 vb6_TwipToX 那一枚权威 (#184 收成一处的那对)。
             want[i] = e->width > 0 ? vb6_TwipToX(e->width)

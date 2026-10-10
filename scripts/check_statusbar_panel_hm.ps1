@@ -367,6 +367,15 @@ if ($minDecl -ne 1) { $viol += ('R7-MINW-DECL header must declare SetPanelMinWid
 $unitFold = ([regex]::Matches($sbTxt, 'want\[i\] = e->width > 0 \? vb6_TwipToX\(e->width\)')).Count
 if ($unitFold -ne 1) { $viol += ('R7-UNIT the layout must fold e->width through vb6_TwipToX exactly once (storage is not pixels), got ' + $unitFold) }
 
+# ---------- R8: 账 #303 (§B132) —— 要占位的那两档各从剩余空间里扣一次，不多不少 ----------
+# 病名（第二十二刀把 getter 改成交排版结果才露面的存量）：`SbLayout` 第一遍把内容档的实测宽写进
+# want[i] 却**没累加进 fixedTotal** ⇒ 弹簧把同一格宽吃两次 ⇒ 末格右边界越过客户区
+# （夹具实测 sum=6630 而 bar=6000，差的 630 缇 = 42 像素 = 那枚 sbrTime 面板的文本宽）。
+# 钉成"恰好 2 次"的两个方向都是真形状：0 次 = 本账；3 次（把弹簧档也扣上）= 第十八刀撤掉的
+# 那个"MinWidth 当加项"复发。判据面 = tests/ctrlstatusbar 的 SB36-TILES-BAR（BASE 上 False）。
+$tileAcc = ([regex]::Matches($sbTxt, 'fixedTotal \+= want\[i\];')).Count
+if ($tileAcc -ne 2) { $viol += ('R8-TILE-RESERVE want exactly 2 reserved tiles (fixed + contents), got ' + $tileAcc) }
+
 $oneMapTot = 0
 foreach ($L in $creatorLits) { $oneMapTot += $creatorTot[$L] }
 if ($oneMapTot -lt 11) { $viol += ("R4-R6-ONEMAP the one-map census found $oneMapTot sites, floor 11 = it is idling") }
@@ -388,7 +397,7 @@ if (($sbTwip + $sbBack + $sbHm + $axDeleg + $twipDef + $hm2twDef) -lt 3) {
 if ($viol.Count -eq 0) {
     Write-Host ("PASS static_sentinel_statusbar_panel_hm: emit Hm=" + $hm + "/" + $hmMin +
                 " add=3 autosz=1 plain=0 left=$plEmit / himetric sites $sum in $($perFile.Count) files" +
-                " (statusbar asks $sbTwip+$sbBack+$sbHm, local math $sbMul, old shape $sbPx)" +
+                " (statusbar asks $sbTwip+$sbBack+$sbHm, local math $sbMul, old shape $sbPx, tiles reserved $tileAcc)" +
                 " / rtl_files=$rtlFiles / panels coll=$coll item=$collItem " +
                 "enum=$collEnum stale=$stale exit=$defN+$cgN+$cbN lists=$gaN+$stK+$stC " +
                 "onemap=$oneMapTot inline=$inline")

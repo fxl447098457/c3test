@@ -4297,6 +4297,10 @@ if ($Category -in @("all", "run", "vbp")) {
     # P20-43 修正: 同 ctrlprogress —— 期望串与夹具完整标签逐字一致。
     # SB0 是已知局限 (vb6_GetControlHwnd 直返入参, Me.hwnd 在 Debug.Print 里为空),
     # SB34-LASTKEY= 为空是对的 (第 3 格是没给 Key 的时间面板)。
+    # SB36 是两半：第二十二刀把"写什么读什么"那条针换成「往弹簧档写宽不许改变它报出来的数」
+    # (增量不变, 按 #157 就地取基线), 第二十三刀（账 #303）补上另一半 —— 三格必须铺满控件宽。
+    # 内容档那格的实测宽以前没从 fixedTotal 里扣, 弹簧把它吃两次（BASE 读数 sum=6630 而 bar=6000,
+    # 差的 630 缇 = 42 像素 = 那枚时钟文本宽）。RAW 那行把两个数一起打出来, 容差 3 像素。
     Test-Vbp "ctrlstatusbar" "$Tests\ctrlstatusbar\CtrlStatusBar.vbp" @(
         "SB0-HWND= CAP=CtrlStatusBar CL=", "SB1-COUNT=3", "SB2-KEY1=pr",
         "SB3-TEXT1=Ready", "SB4-STYLE1=0", "SB5-AUTOSZ1=1", "SB6-MINW1=22",
@@ -4308,7 +4312,7 @@ if ($Category -in @("all", "run", "vbp")) {
         "SB25-NEWTEXT=Extra", "SB26-INSERT=2", "SB27-COUNT3=5", "SB28-IDXP2=ins",
         "SB29-IDXP3=tp", "SB30-AFTERRM=4", "SB31-P2KEY=tp", "SB32-COUNT4=4",
         "SB33-AFTERRM2=3", "SB34-LASTKEY=", "SB35-SETMINW=77",
-        "SB36-RAW before=", "SB36-SPRING-FOLLOWS-WINDOW=True",
+        "SB36-RAW before=", "SB36-SPRING-FOLLOWS-WINDOW=True", "SB36-TILES-BAR=True",
         "SB37-SETAUTOSZ=0", "SB38-SETTIP=hello", "SB39-SETSTYLE=6",
         "SB40-AFTERCLR=0", "CTRLSTATUSBAR-DONE")
 
