@@ -101,6 +101,8 @@
     }
     // P8.4: Variant赋值检测 - 如果目标是Variant变量, 用Variant构造函数包装值
     bool targetIsVariant = false;
+    // Fix 232: 标记"目标 = UDT 的 Variant 字段", 供下方选**深拷贝**槽位语义
+    bool targetIsUdtVariantField232 = false;
     {
         std::string checkName = target;
         if (checkName.substr(0, 4) == "me->") checkName = checkName.substr(4);
@@ -130,6 +132,29 @@
         if (!targetIsVariant && target.compare(0, 7, "VB6_SA_") == 0
             && target.find("(vb6_VARIANT,") != std::string::npos) {
             targetIsVariant = true;
+        }
+        // Fix 232: UDT 的 **Variant 字段** (`.Image` / `With` 块内的 `.Image`) —— 与
+        // 上方 Fix 154 同源同口径, 只是判据换成字段的**声明类型**。目标发出来是
+        // `VB6_SA_AT(vb6_type_<Udt>, arr, i).Image`, 裸名集合与 Fix 154 的
+        // `(vb6_VARIANT,` 子串两道判据都捡不到它, RHS 又是裸 BSTR/int32_t →
+        // 直接 `elem.Image = ...` → C2440 "无法从 BSTR/int32_t 转换为 vb6_VARIANT"。
+        // 实测 ComCtlsDemo CoolBar.ctl / PPCoolBarBands.pag / StatusBar.ctl 的
+        // `InitBands(i).Image = <BSTR|Long>` 一族。
+        // 字段的真 C 类型是 `vb6_cls_*` 时否决 —— 那是 typed 对象指针槽, 不是
+        // Variant 容器 (与 Set 侧 cgen_setlet_set_rhs.inc Fix 084n/B08f-1 同一条
+        // 否决规则); `As Variant` 字段自身 resolveTypeName 就给 `vb6_VARIANT`,
+        // 装箱是必须的, 不能一并挡掉。字段类型问 inferUdtFieldVb6Type —— 那是
+        // UDT 字段类型的既有唯一出口, 不另抄一份成员类型表。
+        if (!targetIsVariant) {
+            const std::string udtFldC232 = udtFieldCTypeOfTarget(node.target.get());
+            if (udtFldC232.rfind("vb6_cls_", 0) != 0
+                && inferUdtFieldVb6Type(node.target.get(), nullptr) == Vb6Type::Variant) {
+                const std::string fldTRN232 = udtFieldTypeRefNameOfTarget(node.target.get());
+                if (fldTRN232.empty() || cTypeForDeclaredTypeName(fldTRN232) == "vb6_VARIANT") {
+                    targetIsVariant = true;
+                    targetIsUdtVariantField232 = true;
+                }
+            }
         }
     }
     if (targetIsBstr) {
@@ -289,7 +314,11 @@
         // 与同一个类的 m_Keys (String 数组, 走 vb6_BSTR_Assign) 同一口径。
         bool targetIsVariantArraySlot =
             (target.compare(0, 7, "VB6_SA_") == 0
-             && target.find("(vb6_VARIANT,") != std::string::npos);
+             && target.find("(vb6_VARIANT,") != std::string::npos)
+            // Fix 232: UDT 的 Variant 字段同属"槽位"—— `Clear(&字段)` + 浅拷贝赋值
+            // 会把 wrapVariantValue 给出的借用值 (BSTR / Dispatch) 与容器共用,
+            // 借用方一释放槽即悬垂 (与 Fix 154 的数组元素同一个理由)。
+            || targetIsUdtVariantField232;
         if (targetIsVariantArraySlot) {
             c_.emitLine("vb6_VariantAssign(&" + target + ", " + wrappedValue + ");");
         } else {

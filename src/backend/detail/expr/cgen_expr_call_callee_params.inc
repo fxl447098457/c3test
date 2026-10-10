@@ -130,7 +130,23 @@
             if (!className.empty()) {
                 std::vector<ParameterInfo> params;
                 bool isBuiltin = false;
-                if (findClassMemberCallParams(className, maExpr.memberName, params, isBuiltin)) {
+                // Fix 240b: 该成员解析成 `prop_get_` 时, 形参表取**读方向**那一份。
+                // findClassMemberCallParams 对「Get 与 Let 并存」的属性 (ListView.ctl:6928/6949
+                // `Get InsertMark(Optional ByRef After)` / `Let InsertMark(Optional ByRef
+                // After, ByVal Value)`) 实测交回 **Let** 表 ⇒ 补默认值时多发一枚
+                // `vb6_VariantEmpty()` (Let 末参 Value 的默认值) 顶到 `int _has_After`
+                // → C2440 "vb6_VARIANT → int" (ComCtlsDemo MainForm.frm 七处
+                // `ListView2.InsertMark(After)` / `ListView2.InsertMark`)。
+                // 只在名字确为 prop_get_ 时换表, 其余成员一字不动。
+                const std::string rcDir240 =
+                    resolveClassMemberCall(className, maExpr.memberName);
+                if (rcDir240.find("_prop_get_") != std::string::npos
+                    && findClassMemberGetParams(className, maExpr.memberName, params)) {
+                    calleeParams = std::move(params);
+                    calleeIsBuiltin = false;
+                    classAwareResolved = true;
+                    calleeParamsFound = true;
+                } else if (findClassMemberCallParams(className, maExpr.memberName, params, isBuiltin)) {
                     calleeParams = std::move(params);
                     calleeIsBuiltin = isBuiltin;
                     classAwareResolved = true;

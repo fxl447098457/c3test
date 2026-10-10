@@ -49,6 +49,16 @@ std::string CCodeGen::defaultValue(Vb6Type type) const {
 // Optional ByRef String 形参被填成 vb6_BSTR_Empty() 的 BSTR **值**, 传到声明为
 // BSTR* 的 C 形参后, 被调方 (*SocketAddress) 把 BSTR 数据首 4 字节当 BSTR 指针,
 // 在 OLEAUT32 里对 0xBAAD0000 (L"" 之后的未初始化堆字节) 解引用 → 0xC0000005.
+// Fix 250: 见 cgen_helpers.inc 声明处的注释。类实例指针槽的省略实参是 Nothing ⇒ NULL;
+// 其余形状原样回落 defaultValue(type), 行为逐字不变。
+std::string CCodeGen::defaultValueForParam(const ParameterInfo& p) const {
+    // cParamClassPtrType 非 const (与 mapTypeRef 同族), 本函数是 const —— 只读调用,
+    // 与 cgen_base_naming.cpp 里既有的同款 const_cast 先例一致。
+    const std::string clsPtr = const_cast<CCodeGen*>(this)->cParamClassPtrType(p);
+    if (!clsPtr.empty()) return "NULL";
+    return defaultValue(p.type);
+}
+
 std::string CCodeGen::defaultArgForParam(Vb6Type type, bool isByVal,
                                         const std::string& explicitDefault) const {
     std::string defVal = (explicitDefault.empty() ? defaultValue(type) : explicitDefault);

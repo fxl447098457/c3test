@@ -35,6 +35,21 @@
     std::string defaultArgForParam(Vb6Type type, bool isByVal,
                                    const std::string& explicitDefault) const;
 
+    // Fix 250: 形参**槽**的缺省值 —— 比 defaultValue(type) 多认一类: 类实例指针槽。
+    //   `Optional ByVal RelativeNode As TvwNode` 这类形参, 符号层把类类型折成
+    //   Vb6Type::Variant (真类名只在 ParameterInfo::typeRefName 里), 于是
+    //   defaultValue(Variant) 给出 `vb6_VariantEmpty()`; 而定义侧按 typeRefName
+    //   发出来的是 `vb6_cls_TvwNode*` ⇒ C2440 "无法从 vb6_VARIANT 转换为
+    //   vb6_cls_TvwNode *"。
+    //     实测 ComCtlsDemo TreeView.ctl:2115
+    //       Friend Sub FNodesAdd(ByRef NewNode As TvwNode,
+    //                            Optional ByVal RelativeNode As TvwNode, ...)
+    //     调用点 TreeView.ctl:767 `Me.FNodesAdd SampleNode, , TvwNodeRelationshipFirst, ...`
+    //     (第二实参**省略**) ⇒ TreeView.c 1261/1266/1348/1353 共 4 条 C2440。
+    //   VB6 里对象形参省略时就是 Nothing, C 侧即 NULL。判据复用 cParamClassPtrType
+    //   (与定义侧同一份 mapTypeRef 映射), 不另立第二套尺。
+    std::string defaultValueForParam(const ParameterInfo& p) const;
+
     // ---- 标识符命名 ----
 
     // VB6标识符 → 安全C标识符 (处理关键字冲突、特殊字符)
@@ -842,6 +857,20 @@
                                     const std::string& memberName,
                                     bool isSet,
                                     std::vector<ParameterInfo>& outParams) const;
+
+    // ---- Fix 240: 属性**读方向** (Property Get) 参数查找 ----
+    // `prop_get_X` 还需要能补 Optional 入口参数 (`ListView2.InsertMark` 的 C 声明是
+    // `(me, int16_t* After, int _has_After)`), 而 findClassMemberCallParams 对
+    // 「Get 与 Let 并存」的属性实测交出的是 **Let** 参数表 (After + Value) ——
+    // cgen_expr_member_class_module.inc 里那段"属性不 pad"的注释记的正是这件事。
+    // 拿 Let 表去 pad prop_get_ 会多出一个 `vb6_VariantEmpty()` 顶掉 `_has_After`
+    // (C2440 "vb6_VARIANT → int")。
+    // 这里只认**读方向**那一份, 且**不设 Phase B 回退** —— 认不出就不 pad
+    // (宁可变回 C2198 少给参数, 也不拿错方向的表硬凑参数个数)。
+    // Phase A: 模块作用域中 kind==PropertyGet 且类归属匹配的符号 → 其 params。
+    bool findClassMemberGetParams(const std::string& className,
+                                  const std::string& memberName,
+                                  std::vector<ParameterInfo>& outParams) const;
 
     // ---- Fix 015: Method chaining 解析辅助 ----
     // 给定一个表达式 AST 节点, 推断其在运行时返回的类名 (如果它返回类实例)

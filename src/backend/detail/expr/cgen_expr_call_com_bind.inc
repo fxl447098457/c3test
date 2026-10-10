@@ -811,6 +811,11 @@
             // 对象的 Item 调用. 不能并入内层参数表 (C2197 参数太多).
             // 有声明参数的 prop_get (Prop(k)) 仍走合并 (内层只发了this).
             bool innerIsChainedObj = false;
+            // Fix 242b: 内层无参 `_prop_get_` 的返回类型是**项目类集合**时, 外层 (idx) 是该
+            // 集合默认成员 Item 的索引 —— 记下项目类 Item 的发射函数, 下方改走项目类路径,
+            // 而不是把它当 IDispatch (项目类实例不是 COM 对象)。见使用点注释。
+            std::string collItemFn242b;
+            std::string collCls242b;
             if (!node.positional.empty() && node.named.empty()) {
                 // funcPart 是拆开后的裸函数名 (无括号)
                 if (funcPart == "vb6_ComCall" || funcPart == "vb6_ComCallObject"
@@ -824,6 +829,20 @@
                         Symbol* propSym86 = symTab_.lookupModuleByKind(propName, SymbolKind::PropertyGet);
                         if (propSym86 && propSym86->params.empty()) {
                             innerIsChainedObj = true;
+                            // Fix 242b: 该无参属性返回**项目类集合**时记下项目类 Item 发射
+                            // 函数 (下方走项目类路径)。判据用 getClassMethodReturnType(返回名,
+                            // "Item") 非空 = 返回名前确实是一个项目 Class 且它有 Item 成员。
+                            if (!propSym86->variableTypeName.empty()) {
+                                const std::string retName242b = propSym86->variableTypeName;
+                                if (!getClassMethodReturnType(retName242b, "Item").empty()) {
+                                    const std::string itemFn242b =
+                                        resolveClassMemberCall(retName242b, "Item");
+                                    if (!itemFn242b.empty()) {
+                                        collItemFn242b = itemFn242b;
+                                        collCls242b = retName242b;
+                                    }
+                                }
+                            }
                         } else {
                             // Fix 092w: 内层 prop_get 调用已自带实参 (classMethodObjArg
                             // 顶层段数 >= 2, 即 this + 至少 1 个实参) 说明内层调用已自足,
@@ -846,6 +865,40 @@
             }
             if (innerIsChainedObj) {
                 std::string innerObj = funcPart + "(" + classMethodObjArg + ")";
+                // Fix 242b: 项目类集合索引 —— 内层 `_prop_get_` 返回项目类 (C 侧
+                // vb6_cls_<Coll>*) 时, 外层 (idx) 是该项目类集合默认成员 Item 的索引,
+                // 必须发 vb6_<Coll>_prop_get_Item(<coll>, <idx>) 直接拿元素类指针。
+                //
+                // 此前一律发 vb6_VariantFromComResult(vb6_ComCall(<coll>, L"Item", …))
+                // —— 把**项目类实例**当 IDispatch: C 里 vb6_cls_X* 隐式转 void* 编得过,
+                // 但结果是 VARIANT, 下游按元素类做成员访问时 `(void*)VARIANT` ⇒ C2440。
+                // 实测 ComCtlsDemo (Fix 242 同时把元素类推断接上之后暴露):
+                //   CoolBar.ctl:874 `Me.Bands(i).Caption`
+                //     Bands As CbrBands (项目类) → CbrBands.Item(i) As CbrBand
+                //     ⇒ C2440 vb6_VARIANT → void* ×157
+                //   ToolBar.ctl  `Buttons(i).ButtonMenus(ii).Key` 族
+                //     ⇒ C2440 vb6_VARIANT → vb6_cls_TbrButton* ×25
+                // 与 Pattern L (cgen_expr_call_callee_ident/member.inc 的"项目类字段
+                // 集合索引"发 vb6_<Type>_prop_get_Item) 同口径, 只是这里集合来自**属性**。
+                if (!collItemFn242b.empty()) {
+                    std::vector<ParameterInfo> collParams242b;
+                    findClassMemberGetParams(collCls242b, "Item", collParams242b);
+                    // 形参个数必须与外层索引个数一致, 否则是别的形态 → 退回 COM。
+                    if (collParams242b.size() == node.positional.size()) {
+                        std::string args242b;
+                        for (size_t i = 0; i < node.positional.size(); i++) {
+                            emitExpr(*node.positional[i]);
+                            std::string one242b = std::move(lastExpr_);
+                            if (collParams242b[i].type == Vb6Type::Variant) {
+                                one242b = boxToVariant(node.positional[i].get(), one242b);
+                            }
+                            if (i) args242b += ", ";
+                            args242b += one242b;
+                        }
+                        lastExpr_ = collItemFn242b + "(" + innerObj + ", " + args242b + ")";
+                        return;
+                    }
+                }
                 // Fix 092w: 内层函数返回 vb6_VARIANT (如 cCollection.prop_get_Item) 时,
                 // vb6_ComCall 的 obj 形参是 void* — 需先经 vb6_VariantToObjectVal 提取
                 // 对象指针, 否则 vb6_VARIANT 直传 → C2440. (无参 prop_get 返回 void* 的

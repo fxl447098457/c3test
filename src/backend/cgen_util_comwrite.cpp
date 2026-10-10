@@ -418,7 +418,22 @@ bool CCodeGen::tryRewriteCOMLvalue(const std::string& target, const std::string&
                             lastP90w = &letParams90w.back();
                         }
                     }
-                    if (lastP90w && lastP90w->type == Vb6Type::Variant) {
+                    // Fix 251: 末形参槽在 C 侧是**类实例指针**时不装箱。
+                    //   `Property Let SelectedItem(ByVal Value As ImcComboItem)`
+                    //   (ImageCombo.ctl:2087) / `Property Let Group(ByVal Value As LvwGroup)`
+                    //   (LvwListItem.cls:343) 这类"对象型的 Property Let", 符号层把
+                    //   `As <类>` 折成 Vb6Type::Variant (类名只在 typeRefName 里),
+                    //   于是这里按 Variant 槽装箱 ⇒ vb6_VariantFromValue(类指针) /
+                    //   vb6_VariantFromValue(NULL) ⇒ C2440 "无法从 vb6_VARIANT 转换为
+                    //   vb6_cls_X *"。
+                    //     实测 ComCtlsDemo: ImageCombo.c:2317 (ImcComboItem*)、
+                    //     LvwListItem.c:501 (LvwGroup*)、MainForm.c:1975
+                    //     (TvwNode*, 源 `TreeView1.InsertMark = Nothing` ⇒ NULL)。
+                    //   判据与定义侧同一份映射 (cParamClassPtrType), 不另立尺。
+                    //   不装箱后落到下面的 Fix 156-B 分支: 该分支只在 RHS **是**
+                    //   Variant 表达式时才提取, 类指针/NULL 一概原样交付 —— 正是要的。
+                    if (lastP90w && lastP90w->type == Vb6Type::Variant
+                        && cParamClassPtrType(*lastP90w).empty()) {
                         valArg = packLetValueArg(*lastP90w, valueExpr, value);
                     } else if (lastP90w && writeDirResolved90w
                                && lastP90w->type != Vb6Type::Empty) {
@@ -624,7 +639,43 @@ std::string CCodeGen::packLetValueArg(const ParameterInfo& lastP, Expr* valueExp
         // 对象地址, 同时兼容非常量左值实参 (常量 (-1)、函数返回值
         // vb6_BSTR_FromStr(L"/")、prop_get_xxx()). 未列出的类型 (Object/UDT/
         // 数组/Date/Currency) 保持原样, 不改变既有行为.
-        if (lastP.isByVal) return val;
+        // Fix 249: **按值具体类型形参 ← Variant 实参 → 解箱**。VB6 在这一步做隐式
+        //   转换, C 侧原样把整只 `vb6_VARIANT` 递进 BSTR/int16_t/float 形参 ⇒ C2440。
+        //   实测 ComCtlsDemo RichTextBoxForm.frm:
+        //     With CommonDialog1
+        //         .FontName = RichTextBox1.SelFontName
+        //         .FontBold = RichTextBox1.SelBold
+        //         .FontSize = RichTextBox1.SelFontSize
+        //     End With
+        //   而 RichTextBox.ctl:2802/3097/3140 这三个属性声明都是
+        //   `Property Get …() As Variant` ⇒ 生成的 C 返回 vb6_VARIANT ⇒
+        //   vb6_CommonDialog_prop_let_FontName(_vb6_with_6, vb6_RichTextBox_prop_get_SelFontName(x))
+        //   ⇒ C2440 vb6_VARIANT→BSTR / →int16_t / →float (RichTextBoxForm.c 400/405/410/
+        //   417/422/429/436/443 共 8 条)。
+        //   解箱档位与 cgen_expr_call_arg_variant.inc 的 Fix 092q/090r/049b 同口径
+        //   (Long 档含 Integer/Byte/Boolean, Double 档含 Single/Date/Currency)。
+        if (lastP.isByVal) {
+            if (!cExprIsVariant(val)) return val;
+            switch (lastP.type) {
+                case Vb6Type::String:
+                    return "vb6_VariantToString(" + val + ")";
+                case Vb6Type::Integer:
+                case Vb6Type::Boolean:
+                    return "(int16_t)vb6_VariantToLong(" + val + ")";
+                case Vb6Type::Long:
+                    return "vb6_VariantToLong(" + val + ")";
+                case Vb6Type::Byte:
+                    return "(uint8_t)vb6_VariantToLong(" + val + ")";
+                case Vb6Type::Single:
+                    return "(float)vb6_VariantToDouble(" + val + ")";
+                case Vb6Type::Double:
+                case Vb6Type::Date:
+                case Vb6Type::Currency:
+                    return "vb6_VariantToDouble(" + val + ")";
+                default:
+                    return val;
+            }
+        }
         switch (lastP.type) {
             case Vb6Type::String:
                 if (valueExpr && cExprIsVariant(val)) {
