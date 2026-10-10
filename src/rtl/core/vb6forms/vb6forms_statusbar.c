@@ -866,6 +866,14 @@ int32_t vb6_StatusBar_GetPanelIndexByKey(void* hwnd, const wchar_t* key) {
     return (i >= 0) ? (int32_t)(i + 1) : 0;   // 出口仍是 1 基
 }
 
+// 账 #300 (§B131): `Panels(<数字>).Index` 以前被发成 *ByKey(hwnd, 1) —— 整数进 `wchar_t*` 槽,
+// 上面那枚出口第一句 `!key[0]` 就去读地址 0x1 ⇒ 启动期 AV（键下标那一形是对的, 所以症状按
+// "下标写数字还是键"分家, 存量 SB14 那条针从没露面）。数字下标本来自身就是答案: 面板在就交回
+// 它自己的 1 基下标, 不在交 0 —— 与 *ByKey 那枚"未找到=0"同一口径。
+int32_t vb6_StatusBar_GetPanelIndex(void* hwnd, int32_t index) {
+    return SbAt(vb6_SbFromHwnd(hwnd), index) ? index : 0;
+}
+
 int32_t vb6_StatusBar_GetPanelWidth(void* hwnd, int32_t index) {
     Vb6PanelEntry* e = SbAt(vb6_SbFromHwnd(hwnd), index);
     return e ? e->width : 0;

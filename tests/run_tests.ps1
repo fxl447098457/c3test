@@ -4330,7 +4330,8 @@ if ($Category -in @("all", "run", "vbp")) {
     # HM03/HM04 是反面证人（两台都 True，只拦"顺手把所有面板都改成内容宽/把面板整批丢掉"那种坏修法）；
     # HM05 只钉前缀：Panels(i).Width 读回仍是请求值 —— §B41 剩下的那一格，本刀刻意没动。
     $sbHmExpected = @("HM00-RAW w1=", "HM01-HM-DESIGN-WIDTH=True", "HM02-SINGLE-CONVERSION=True",
-        "HM03-SPRING-TILES=True", "HM04-PANELS-ARRIVED=True", "HM05-RAW cs=", "HM-DONE")
+        "HM03-SPRING-TILES=True", "HM04-PANELS-ARRIVED=True", "HM05-RAW cs=",
+        "HM06-INDEX-BOTH-FORMS=True", "HM07-RAW idx9=", "HM-DONE")
     Test-Vbp "sbhm" "$Tests\sbhm\SbHm.vbp" $sbHmExpected
     Test-Vbp "sbhm_x86" "$Tests\sbhm\SbHm.vbp" $sbHmExpected -Arch "x86"
     # <vbeclipse> 账 #221 = C29-PL-a: Picture.Line 落原生 GDI。这条判据只能**画完再问像素** ——

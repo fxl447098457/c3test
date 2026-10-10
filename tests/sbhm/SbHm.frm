@@ -81,6 +81,7 @@ Private Sub Form_Load()
     Dim r As RECT
     Dim w1 As Long, w2 As Long, e3 As Long, cw As Long
     Dim ok1 As Boolean, ok2 As Boolean, ok3 As Boolean, ok4 As Boolean
+    Dim ok5 As Boolean
 
     SbGetParts StatusBar1.hWnd, 1030, 3, pt(0)
     w1 = pt(0)                       ' panel1 right edge == its width (it starts at 0)
@@ -110,6 +111,17 @@ Private Sub Form_Load()
     ' RAW only: the requested-value caliber (B41's remaining face). Panel1 was given 1500 hm.
     Debug.Print "HM05-RAW cs=" & CStr(StatusBar1.Panels(1).Width) _
                 & " bare=" & StatusBar1.Panels(2).Width
+
+    ' HM06 = zhang 300 (§B131). Panels(<number>).Index used to be emitted as the *ByKey
+    ' exit with an INTEGER in a wchar_t* slot -> the RTL dereferenced address 0x1 and the
+    ' process died during Form_Load. Both spellings have to answer, and with the SAME
+    ' number: pinning only one of them is exactly how this shipped silently (the key form
+    ' was always fine, so SB14-IDXBYKEY in the neighbour fixture stayed green).
+    ok5 = (StatusBar1.Panels(2).Index = 2) And (StatusBar1.Panels("fx2").Index = 2)
+    Debug.Print "HM06-INDEX-BOTH-FORMS=" & TF(ok5)
+    ' RAW only: an out-of-range subscript answers 0 here. VB6 raises error 9 at that point
+    ' - that caliber is a separate account, so this line is deliberately not pinned to a number.
+    Debug.Print "HM07-RAW idx9=" & StatusBar1.Panels(9).Index
 
     Debug.Print "HM-DONE"
     Unload Me

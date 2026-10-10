@@ -325,7 +325,9 @@ std::string CCodeGen::resolveComValue(const std::string& unpackType) {
             if (memLower == "text")  { lastExpr_ = sbFinishByKey("vb6_StatusBar_GetPanelText",
                                                                   "vb6_StatusBar_GetPanelTextByKey");
                                        isComMarker_ = false; return lastExpr_; }
-            if (memLower == "index") { lastExpr_ = sbFinishByKey("vb6_StatusBar_GetPanelIndexByKey",
+            // 账 #300: 这两个参数以前写的是**同一个名字**（都由 *ByKey 答）⇒ 数字下标那一形
+            // 把整数递进了 `const wchar_t*` 槽, 真跑启动期 AV。数字/键两条各答各的。
+            if (memLower == "index") { lastExpr_ = sbFinishByKey("vb6_StatusBar_GetPanelIndex",
                                                                   "vb6_StatusBar_GetPanelIndexByKey");
                                        isComMarker_ = false; return lastExpr_; }
             if (memLower == "width")        { lastExpr_ = sbGet("vb6_StatusBar_GetPanelWidth");

@@ -21,6 +21,8 @@
 #   R3 源码：vb6forms_statusbar.c 里 `want[i] = e->minWidth` 这一形必须 0 处（下限只答一次），
 #      而兜底那一行恰好 1 处。
 #   R4 防空转：扫到的 RTL 份数 >= 100、产物字节数 >= 4000、两张名单自己的长度也钉死。
+#   R5（账 #300 同轮加）：`sbFinishByKey` 三处的两个出口名不许相同，且新出口 `vb6_StatusBar_GetPanelIndex`
+#      必须在 header / RTL 定义 / 发码点三处各出现恰好一次（少一处就是 LNK2019 或 C2065 那一族）。
 #
 # 出口只走 --emit-c（只到发码，不起 cl），所以这条判据是秒级的；负控用 -Root 把整棵树指到副本上跑。
 
@@ -85,6 +87,15 @@ if ((Count-Of 'vb6_StatusBar_SetPanelAutoSize(') -ne 1) { $viol += 'R1-AUTOSIZE 
 if ((Count-Of 'vb6_StatusBar_SetPanelWidth((void*)') -ne 0) { $viol += 'R1-NO-PLAIN-SET want 0 (design path goes through the *Hm exit)' }
 if ($bytes.Length -lt 4000) { $viol += ('R4-EMIT-BYTES floor 4000, got ' + $bytes.Length) }
 
+# 账 #300 (§B131): Panels(<数字>).Index 与 Panels("键").Index 必须各走各的出口。
+# 改前那一格发的是 *ByKey(hwnd, 1) —— 整数进 wchar_t* 槽, 真跑 0xC0000005。
+if ((Count-Of 'vb6_StatusBar_GetPanelIndex((void*)') -ne 2) {
+    $viol += 'R1-INDEX-BYIDX want exactly 2 (the two numeric subscripts, Panels(2)/Panels(9))'
+}
+if ((Count-Of 'vb6_StatusBar_GetPanelIndexByKey((void*)') -ne 1) {
+    $viol += 'R1-INDEX-BYKEY want exactly 1 (the key subscript only, Panels("fx2"))'
+}
+
 # ---------- R2 + R3: 源码面 ----------
 $rtlRoot = Join-Path $Root 'src\rtl'
 $perFile = @{}
@@ -140,10 +151,35 @@ foreach ($ln in $sbLines) {
 if ($seed -ne 0) { $viol += "R3-SPRING-SEED want[i]=e->minWidth must be 0 (MinWidth is a floor, not an addend), got $seed" }
 if ($flo -ne 1) { $viol += "R3-SPRING-FLOOR want exactly 1 floor line, got $flo" }
 
+# ---------- R5: 数字/键两条出路不许同名（账 #300 的结构性面） ----------
+# `sbFinishByKey($byIdx, $byKey)` 的两个参数一旦写成同一个名字，数字下标那一形就会把
+# 整数递进 `const wchar_t*` 槽（#300 的真实形状：Index 两格都填 *ByKey ⇒ 启动期 AV，
+# 而键下标那一形是对的 ⇒ 症状按"下标写数字还是键"分家，存量针永远看不见）。
+$comPath = Join-Path $Root 'src\backend\cgen_util_com.cpp'
+$comTxt = [System.IO.File]::ReadAllText($comPath)
+$pm = [regex]::Matches($comTxt, 'sbFinishByKey\(\s*"([A-Za-z0-9_]+)"\s*,\s*"([A-Za-z0-9_]+)"')
+if ($pm.Count -ne 3) { $viol += ('R5-PAIRS want exactly 3 sbFinishByKey call sites, got ' + $pm.Count) }
+foreach ($m in $pm) {
+    if ($m.Groups[1].Value -eq $m.Groups[2].Value) {
+        $viol += ('R5-SAME-EXIT ' + $m.Groups[1].Value + ' answers both the numeric and the key form')
+    }
+}
+# 新出口三处必须同步（header 声明 / RTL 定义 / 发码点）—— 少一处就是 LNK 或 C2065 那一族
+$tri = @(
+    (Join-Path $rtlRoot 'core\vb6forms\vb6forms_prop_ctrl.h'),
+    (Join-Path $rtlRoot 'core\vb6forms\vb6forms_statusbar.c'),
+    $comPath
+)
+foreach ($f in $tri) {
+    $c = ([regex]::Matches([System.IO.File]::ReadAllText($f), 'vb6_StatusBar_GetPanelIndex\b')).Count
+    if ($c -ne 1) { $viol += ('R5-TRIPLE ' + (Split-Path -Leaf $f) + ' must carry vb6_StatusBar_GetPanelIndex exactly 1 time, got ' + $c) }
+}
+
 # ---------- R4: 防空转 ----------
 if ($rtlFiles -lt 100) { $viol += "R4-RTL-FILES floor 100, got $rtlFiles" }
 if ($HmFiles.Count -ne 5) { $viol += 'R4-LIST the allowlist itself changed size (must stay 5 files)' }
 if ($HmWantTotal -ne 13) { $viol += 'R4-TOTAL the pinned total changed (must stay 13)' }
+if ($pm.Count -lt 1) { $viol += 'R4-R5-CENSUS the pair scan found nothing = the sentinel is idling' }
 
 if ($viol.Count -eq 0) {
     Write-Host ("PASS static_sentinel_statusbar_panel_hm: emit Hm=2 add=3 autosz=1 plain=0 / himetric sites " +
