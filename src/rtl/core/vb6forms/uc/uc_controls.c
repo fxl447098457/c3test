@@ -25,6 +25,15 @@ static vb6_UCControls g_uc_controlsSingleton = { VB6_UC_CONTROLS_TAG, NULL };
 
 void* vb6_UC_Controls(void) { return (void*)&g_uc_controlsSingleton; }
 
+// Fix 221: 生成端对 `UserControl.ContainedControls` 拼出的名字 (见 vb6rtl_userctl.h)。
+// 它按值取集合 —— `Set ContainedControls = UserControl.ContainedControls` 与
+// `For Each ControlEnum In UserControl.ContainedControls` 两形。VB6 里
+// UC 的 ContainedControls 与 Controls 指向同一个集合 (容器塞进来的子控件),
+// 所以这里**必须**静态初始化成上面那枚单例 (取它的地址是常量表达式, 可以静态初始化),
+// 而不是 NULL —— 退化成 NULL 时 `For Each` 枚举到空集 (FrameW.ctl:1240 的
+// "找同名子控件" 会静默失配), Set 到 vb6_ret_* 再往下用也解不出东西。
+void* vb6_UserControl_ContainedControls = (void*)&g_uc_controlsSingleton;
+
 static void* vb6_uc_controlsForm(const void* coll) {
     if (!coll) return NULL;
     void* f = ((const vb6_UCControls*)coll)->formHwnd;

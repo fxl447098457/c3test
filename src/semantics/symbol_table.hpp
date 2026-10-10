@@ -562,6 +562,26 @@ private:
     Scope* current_;
     std::vector<std::unique_ptr<Scope>> scopes_;
     std::unordered_map<std::string, std::unordered_set<std::string>> implicitVars_;
+    // Fix 216: 被用户成员顶掉的内置函数符号留档 (见 lookupShadowedBuiltin 的注释)。
+    std::unordered_map<std::string, std::unique_ptr<Symbol>> shadowedBuiltins_;
+
+public:
+    // Fix 216: 被"用户成员覆盖内置函数"那条规则 (define 里 Fix 048 那段) 挪走的内置符号。
+    //
+    // 为什么需要它: 那条 erase 是**必要**的 —— 同名属性与内置 Function 符号共存会让
+    // TypeLib 出现幽灵 Function 变体 (同名同 dispid, SetFuncAndParamNames 返回
+    // TYPE_E_TYPEMISMATCH)。但它同时是**数据损失**: 内置函数**只在这里带形参表**,
+    // 一旦被顶掉, 该模块里再也没有第二个来源。
+    // 后果实测 (ComCtlsDemo Builds/DTPicker/DTPicker.ctl): 控件自己有
+    // `Public Property Get Year()` / `Property Let Year(...)`, 于是
+    //   `ST(0).wYear = VBA.Year(PropMinDate)` 的 calleeParams 落到空的
+    //   `Property Get Year` 上 ⇒ 下游 Fix 041b "实参多于形参就截断" 把实参全砍掉
+    //   ⇒ `vb6_Year()` ⇒ C2198 (该工程 Year/Month/Day/Hour/Minute/Second 共 49 处)。
+    // `VBA.<成员>` 是**显式限定**写法, VB6 里只可能指内置函数, 所以 codegen 侧拿它兜底。
+    Symbol* lookupShadowedBuiltin(const std::string& name) const {
+        auto it = shadowedBuiltins_.find(Symbol::toLower(name));
+        return it == shadowedBuiltins_.end() ? nullptr : it->second.get();
+    }
 };
 
 } // namespace vb6c3

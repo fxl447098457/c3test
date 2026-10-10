@@ -47,6 +47,39 @@ std::string CCodeGen::inferClassTypeOfExpr(const ASTNode& expr) const {
                     return sym->variableTypeName;
                 }
             }
+            // Fix 218: 当前模块的**裸函数名 (返回项目类)** 也是一个类实例表达式 ——
+            // 与 084g 的局部变量/参数、084z-2 的 PropertyGet 同档。VB6 里 `Fn.Member`
+            // 中 Fn 是无参 Function 时, 语义就是 "(调用 Fn).Member", 接收者是这个
+            // 函数**返回的那个对象**, 不是"模块 Fn"。
+            //
+            // 实测 ComCtlsDemo (两处 pattern 完全一致, 都是"影子访问器"惯用法):
+            //   Builds/CoolBar/CbrBand.cls:44   Private Function ShadowCoolBar() As CoolBar
+            //   Builds/CoolBar/CbrBand.cls:114  Caption = ShadowCoolBar.FBandCaption(PropID)
+            //   Builds/ListView/LvwListItem.cls:52  Private Function ShadowListView() As ListView
+            //   Builds/ListView/LvwListItem.cls:80  If ShadowListView.FListItemVerify(PropPtr, PropIndex) …
+            // 修复前: Fix 083c (cgen_expr_member_class_module.inc) 只兜了 PropertyGet,
+            // 于是这两处 inferClassTypeOfExpr 返回空 → 第 18-22 行的
+            // `itClassVar.emplace` 不成立 → 落优先级3"模块名.方法名" → 接收者丢失,
+            // 生成的 callee 里根本没有这个对象 (实测 CbrBand.c:110 发成
+            // `vb6_CoolBar_prop_get_FBandCaption(me->PropID)`、LvwListItem.c:69 发成
+            // `vb6_ListView_FListItemVerify(me->PropPtr, &(me->PropIndex))`) →
+            // 下游 opt_pad 只补 `(void*)me` / com_bind 只前置部分实参 ⇒ C2198 参数太少
+            // (an5.py 归因: "Friend 方法调用(可能缺 receiver)" 408 条, 是 MSVC 侧最大一族)。
+            //
+            // 修好之后 callee 是 `vb6_<Mod>_ShadowCoolBar((void*)me)` (值上下文发射,
+            // 见本文件 path 上方 asCallCallee_ 的存取), 外层 com_bind 的 P6.5 拆分
+            // (cgen_expr_call_com_bind.inc:859) 会自动把接收者前置进实参列表。
+            //
+            // 注意排除**当前过程自身**的函数名: 那是"引用函数名 = 引用返回值槽"
+            // 的另一条语义 (Fix 084z-4 / cgen_expr_ident_dispatch.inc:118 已处理),
+            // 在这里抢先命中会把 `vb6_ret_X` 槽再包一层, 属于另一条通路, 不动。
+            if (sym && sym->kind == SymbolKind::Function && !sym->variableTypeName.empty()
+                && !(currentProc_ && Symbol::toLower(currentProc_->name) == lower)) {
+                const Symbol* clsSym = symTab_.lookup(sym->variableTypeName);
+                if (clsSym && clsSym->kind == SymbolKind::Class) {
+                    return sym->variableTypeName;
+                }
+            }
             // Fix <vbeclipse>: 上面符号表路径全落空时, 该标识符的名字**本身就是一个
             // 工程类** → 按该工程类推断 (VB6 语义: 工程内定义优先于宿主同名符号)。
             // 用 projectClassNameOf (driver 注入的工程类名表) 判, 而不是顺着符号表
@@ -227,6 +260,20 @@ std::string CCodeGen::inferClassTypeOfExpr(const ASTNode& expr) const {
             return "";
     }
 }
+
+
+// Fix 219: Variant 载体判定 —— 见 cgen_helpers.inc 的声明注释。
+bool CCodeGen::isVariantCarrierExpr(const std::string& cExpr) const {
+    return cExprIsVariant(cExpr) || cExpr.rfind("vb6_List_", 0) == 0;
+}
+
+// Fix 219: Variant 载体上的成员访问 = 后期绑定的属性读。
+std::string CCodeGen::lateBoundReadOnVariantCarrier(const std::string& carrierExpr,
+                                                    const std::string& memberName) const {
+    return std::string("vb6_VariantFromComResult(vb6_ComGetProp(vb6_VariantToObjectVal(")
+         + carrierExpr + "), L\"" + memberName + "\"))";
+}
+
 
 
 // Fix 037: 递归推断表达式的 UDT C 类型标识符 (如 "vb6_type_UcsBuffer").

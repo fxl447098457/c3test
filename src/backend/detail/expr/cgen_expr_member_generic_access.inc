@@ -218,6 +218,13 @@
                 return;
             }
             // 类中无此方法/属性 → 类数据字段 (Public Field): objExpr->field
+            // Fix 229: 接收者是 **Variant 载体** (VARIANT 值) 时没有结构体字段 ——
+            // `objExpr->field` ⇒ C2039 "field 不是 vb6_VARIANT 的成员"。
+            // 口径同 Fix 219/229 的其余三处: 改发后期绑定属性读。
+            if (isVariantCarrierExpr(objExpr)) {
+                lastExpr_ = lateBoundReadOnVariantCarrier(objExpr, node.memberName);
+                return;
+            }
             lastExpr_ = objExpr + "->" + cIdent(node.memberName);
             return;
         }

@@ -170,7 +170,20 @@ bool SymbolTable::define(std::unique_ptr<Symbol> sym) {
                 || sym->kind == SymbolKind::PropertyLet
                 || sym->kind == SymbolKind::PropertySet)) {
             // 移除内置符号, 允许用户符号替换
-            current_->symbols_.erase(existing->storageKey());
+            // Fix 216: 但别把形参表一起扔掉 —— 内置函数的形参只在这里, 顶掉之后本模块
+            // 再没有第二份来源。`VBA.<成员>` 这种显式限定调用在 VB6 里一定指内置函数,
+            // 丢了形参表就会发成 0 实参 (`vb6_Year()` → C2198, 见 .hpp 里 lookupShadowedBuiltin
+            // 的注释)。这里把符号整体**转移**到留档表 (move 而非拷贝: 所有权换手,
+            // existing 指针仍有效), 再按原键 erase。
+            auto itShadowed = current_->symbols_.find(existing->storageKey());
+            if (itShadowed != current_->symbols_.end()) {
+                if (shadowedBuiltins_.find(existing->storageKey()) == shadowedBuiltins_.end()) {
+                    shadowedBuiltins_.emplace(existing->storageKey(), std::move(itShadowed->second));
+                }
+                current_->symbols_.erase(itShadowed);
+            } else {
+                current_->symbols_.erase(existing->storageKey());
+            }
         }
     }
 

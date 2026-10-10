@@ -94,6 +94,10 @@ private:
     // 新行处理: VB6 新行是语句分隔符
     // 跳过零或多个 NewLine (同时跳过 Comment)
     void skipNewLines();
+    // 跳过零或多个 NewLine/Colon/LienContinuation 等语句分隔符。
+    // 用于块语句 header 之后: VB6 允许 `Do While x: stmt: Loop` /
+    // `For i=1 To 9: stmt: Next` 这类**单行冒号形式**, 冒号与换行等价。
+    void skipStatementSeparators();
     // 期望至少一个 NewLine (语句终止), 变体: 也接受冒号
     bool expectEndOfStatement();
 
@@ -191,6 +195,8 @@ private:
     // ai/vb-asm-extension-spec: `<Naked>` 角括号过程属性。角括号属性行 (VB6 家族没有这条路)
     // 只承载 Naked 一个名字; 解析后暂存, 由紧随其后的 Sub/Function 声明取走。
     bool pendingNaked_ = false;
+    int pendingPackingAlign_ = 0;  // tB: [PackingAlignment(n)] 前置于 Type/Enum? TBC
+
     bool tryParseAngleAttr();   // 命中并消费 `<Naked>` 返回 true; 否则不动 token 流
 
     // 单行语句

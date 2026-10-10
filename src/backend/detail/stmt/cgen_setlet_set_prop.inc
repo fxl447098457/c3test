@@ -548,7 +548,88 @@
                         return;
                     }
                     value = ivPtr;
+                } else if (value.find("vb6_Common_PtrToObj(") != std::string::npos ||
+                           value.find("vb6_ObjPtr(") != std::string::npos) {
+                    // Fix 215: `Set <接口变量> = PtrToObj(<LongPtr>)` —— 真实 VB6 工程把
+                    // 接口引用塞进窗口/控件数据槽、稍后再取回来的标准手法:
+                    // ComCtlsDemo Builds/ComCtlsBase.bas:786 `SetWindowSubclass hWnd,
+                    // ComCtlsSubclassProcPtr, ObjPtr(This), dwRefData` 存, 回调里
+                    // :873 `Dim This As ISubclass` + `Set This = PtrToObj(uIdSubclass)` 取。
+                    // 为什么这里不该报 VB4001: C3 的 canonical 接口表示里, **接口引用本身
+                    // 就是薄指针** `vb6_ivref_I*` (Fix 213 登记 ISubclass 之后走的就是这条),
+                    // 于是 `ObjPtr(<接口变量>)` 拿到的正是薄指针 (已知 Fix 108c-3 的 `.obj`
+                    // 改写只针对 legacy 的 `knownIfaceVars_`, 不碰 ivref), 而 Fix 158e 已把
+                    // `PtrToObj` 认成返回 void* 的转换助手 ⇒ 两边是同一个值, 圆回来了。
+                    // 所以只需把裸指针贴回接口指针类型: 没有偏移问题 (不是 &me->__iv_I),
+                    // 也没有引用计数变动 —— 存进去的那 1 次引用在存入时就记在调用方头上,
+                    // 取回只是把同一枚指针还原成变量, 与 B04/B05 的 AddRef/Release 不重叠。
+                    // 注意放在上面 `isClassVar || isNewExpr` 之后: 真类实例 / New 仍走
+                    // 那条带 AddRef 的路, 这里只兜"裸指针往返"这一种形态。
+                    c_.emitLine(target + " = (vb6_ivref_" + cIdent(v->name) + "*)" + value +
+                                ";  /* tB Interface: PtrToObj/ObjPtr 裸指针往返 (Fix 215) */");
+                    return;
                 } else {
+                    // Fix 215b: `Set <接口变量> = <返回项目类实例的表达式>` —— VB6 语义是
+                    // **QI**: 目标接口由 RHS 对象的实际类决定, 绑不上就运行期报错 13。
+                    // 实测 (ComCtlsDemo Builds/ListView/LvwGroups.cls:195):
+                    //     Dim This As ISubclass
+                    //     Set This = ShadowListView     ' Private Function … As ListView
+                    // `ListView` 是工程内 UserControl 且自己 `Implements ISubclass`, 所以
+                    // RHS 的 C 表达式是 `vb6_cls_ListView*` (类实例) —— 既不是类变量、
+                    // 不是 New、也不是 PtrToObj 裸指针, 于是落到这条最后的 else 报 VB4001
+                    // (整个工程只剩这 1 条 error 级诊断)。
+                    // canonical 接口表示 (B04) 里薄指针就是 `&obj->__iv_<I>`, 所以取该字段
+                    // 地址即可。借一枚 temp 求值一次 —— 形如 `ShadowListView` 的调用内部带
+                    // AddRef (ComCtlsObjSetAddRef), 出现两次就多记一笔引用。计数口径照 B05:
+                    // 新值 AddRef, 旧值 Release。
+                    std::string ivCls215;
+                    if (node.value) {
+                        std::string nm215;
+                        switch (node.value->kind) {
+                            case ASTNodeKind::IdentifierExpr:
+                                nm215 = static_cast<IdentifierExpr&>(*node.value).name;
+                                break;
+                            case ASTNodeKind::IndexOrCallExpr: {
+                                auto& call215 = static_cast<IndexOrCallExpr&>(*node.value);
+                                if (call215.callee && call215.callee->kind == ASTNodeKind::IdentifierExpr)
+                                    nm215 = static_cast<IdentifierExpr&>(*call215.callee).name;
+                                else if (call215.callee && call215.callee->kind == ASTNodeKind::MemberAccessExpr)
+                                    nm215 = static_cast<MemberAccessExpr&>(*call215.callee).memberName;
+                                break;
+                            }
+                            case ASTNodeKind::MemberAccessExpr:
+                                nm215 = static_cast<MemberAccessExpr&>(*node.value).memberName;
+                                break;
+                            default:
+                                break;
+                        }
+                        if (!nm215.empty()) {
+                            const Symbol* fs215 = symTab_.lookupModule(nm215);
+                            if (!fs215) fs215 = symTab_.lookup(nm215);
+                            if (fs215 && !fs215->variableTypeName.empty())
+                                ivCls215 = projectClassNameOf(fs215->variableTypeName);
+                        }
+                        if (ivCls215.empty()) ivCls215 = inferClassTypeOfExpr(*node.value);
+                    }
+                    if (!ivCls215.empty()) {
+                        const std::string ivCType215 = "vb6_ivref_" + cIdent(v->name) + "*";
+                        const std::string clsPtr215  = "vb6_cls_" + cIdent(ivCls215) + "*";
+                        const std::string ivOld215  = "__ivold" + std::to_string(ivrefSetSeq_);
+                        const std::string ivTmp215  = "__ivtmp" + std::to_string(ivrefSetSeq_);
+                        ivrefSetSeq_++;
+                        c_.emitLine("{  /* tB Interface B05: Set " + target + " = <" + ivCls215 +
+                                    " 实例> (Fix 215b: 取 __iv_ 槽) */");
+                        c_.indent();
+                        c_.emitLine(ivCType215 + " " + ivOld215 + " = " + target + ";");
+                        c_.emitLine("void* " + ivTmp215 + " = (void*)(" + value + ");");
+                        c_.emitLine(target + " = " + ivTmp215 + " ? &((" + clsPtr215 + ")" + ivTmp215 +
+                                    ")->__iv_" + cIdent(v->name) + " : NULL;");
+                        c_.emitLine("if (" + target + ") " + target + "->vt->AddRef(" + target + ");");
+                        c_.emitLine("if (" + ivOld215 + ") " + ivOld215 + "->vt->Release(" + ivOld215 + ");");
+                        c_.dedent();
+                        c_.emitLine("}");
+                        return;
+                    }
                     diag_.error(DiagnosticID::CodeGenUnsupportedFeature, SourceLocation{},
                         "Interface binding: Set " + target + " = <expr> needs a class instance,"
                         " New, or another interface value on the right side"

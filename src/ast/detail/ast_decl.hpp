@@ -166,6 +166,10 @@ public:
              std::vector<std::unique_ptr<TypeMember>> m)
         : Decl(ASTNodeKind::TypeDecl, loc),
           access(acc), name(std::move(n)), members(std::move(m)) {}
+    // tB 扩展: [PackingAlignment(n)] (1|2|4|8|16|32|64). 0 = 未设置 (编译器默认对齐).
+    // 语义等价 C 的 #pragma pack(n), 控制 UDT 字段对齐 (API 互操作, 对应
+    // pshpackN.h / #pragma pack 的头文件结构). 只影响对齐, 不是 __declspec(align).
+    int packingAlignment = 0;
 };
 
 // Enum 成员: MemberName [= value]
@@ -190,6 +194,7 @@ public:
              std::vector<std::unique_ptr<EnumMember>> m)
         : Decl(ASTNodeKind::EnumDecl, loc),
           access(acc), name(std::move(n)), members(std::move(m)) {}
+    int packingAlignment = 0;
 };
 
 // Declare 声明: Declare [PtrSafe] Sub/Function name Lib "lib" [Alias "alias"] (params)

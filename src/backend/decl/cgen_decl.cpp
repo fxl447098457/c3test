@@ -476,7 +476,10 @@ void CCodeGen::visit(TypeDecl& node) {
     // 泛型模板 (tB, G2): 模板本体不发码 (特化副本由泛型器注入, 是普通 TypeDecl)
     if (!node.typeParams.empty()) return;
     std::string typeName = cIdent(node.name);
-
+    bool hasPack = (node.packingAlignment > 0);
+    if (hasPack) {
+        h_.emitLine("#pragma pack(push, " + std::to_string(node.packingAlignment) + ")");
+    }
     // Fix 010b: 多个VB6模块可能定义同名UDT (如SYSTEMTIME, FILETIME), 用#ifndef防止C2011重定义
     std::string guardName = "VB6_TYPE_" + typeName + "_DEFINED";
     h_.emitLine("#ifndef " + guardName);
@@ -537,6 +540,9 @@ void CCodeGen::visit(TypeDecl& node) {
     h_.dedent();
     h_.emitLine("} vb6_type_" + typeName + ";");
     h_.emitLine("#endif");
+    if (hasPack) {
+        h_.emitLine("#pragma pack(pop)");
+    }
     h_.emitBlank();
 }
 

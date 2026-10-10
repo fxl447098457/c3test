@@ -78,14 +78,19 @@ struct HostPseudoRow {
 
 inline const HostPseudoRow kHostPseudoRows[] = {
     // ---- UserControl (.ctl) ----
+    {"UserControl", "accesskeys",      "AccessKeys",      Vb6Type::String,   HPF_NONE},
+    {"UserControl", "appearance",      "Appearance",      Vb6Type::Long,     HPF_NONE},
     {"UserControl", "asyncread",       "AsyncRead",       Vb6Type::Unknown,  HPF_BARE | HPF_METHOD},
     {"UserControl", "autoredraw",      "AutoRedraw",      Vb6Type::Boolean,  HPF_NONE},
     {"UserControl", "backcolor",       "BackColor",       Vb6Type::Long,     HPF_NONE},
     {"UserControl", "cancelasyncread", "CancelAsyncRead", Vb6Type::Unknown,  HPF_METHOD},
     {"UserControl", "cls",             "Cls",             Vb6Type::Unknown,  HPF_METHOD},
+    {"UserControl", "containedcontrols", "ContainedControls", Vb6Type::Unknown, HPF_NONE},
     {"UserControl", "containerhwnd",   "ContainerHwnd",   Vb6Type::LongPtr,  HPF_BARE},
     {"UserControl", "controls",        "Controls",        Vb6Type::Unknown,  HPF_BARE | HPF_CHANNEL, "vb6_UC_Controls"},
+    {"UserControl", "drawstyle",       "DrawStyle",       Vb6Type::Long,     HPF_NONE},
     {"UserControl", "enabled",         "Enabled",         Vb6Type::Boolean,  HPF_BARE},
+    {"UserControl", "eventsfrozen",    "EventsFrozen",    Vb6Type::Boolean,  HPF_NONE},
     {"UserControl", "extender",        "Extender",        Vb6Type::Unknown,  HPF_NONE},
     {"UserControl", "forecolor",       "ForeColor",       Vb6Type::Long,     HPF_NONE},
     {"UserControl", "hdc",             "hDC",             Vb6Type::LongPtr,  HPF_BARE},
@@ -107,8 +112,7 @@ inline const HostPseudoRow kHostPseudoRows[] = {
     {"UserControl", "size",            "Size",            Vb6Type::Unknown,  HPF_METHOD},
     {"UserControl", "textheight",      "TextHeight",      Vb6Type::Unknown,  HPF_METHOD},
     {"UserControl", "textwidth",       "TextWidth",       Vb6Type::Unknown,  HPF_METHOD},
-    {"UserControl", "width",           "Width",           Vb6Type::Long,     HPF_NONE},
-    // 对象成员只登记用于**拼写规范化**; 值面一律不答 (各有专用通道: Controls 集合走
+    {"UserControl", "width",           "Width",           Vb6Type::Long,     HPF_NONE},    // 对象成员只登记用于**拼写规范化**; 值面一律不答 (各有专用通道: Controls 集合走
     // vb6_UC_Controls()、Parent 链由 Fix 133u 在 cgen_base.cpp 改写、Font 是
     // vb6_ComIface_Font*, 装箱比较本来就不该按标量发)。
     {"UserControl", "ambient",         "Ambient",         Vb6Type::Unknown,  HPF_NONE},
@@ -129,7 +133,9 @@ inline const HostPseudoRow kHostPseudoRows[] = {
 
     // ---- Extender (容器提供的扩展对象) ----
     {"Extender", "align",           "Align",           Vb6Type::Long,    HPF_NONE},
+    {"Extender", "cancel",          "Cancel",          Vb6Type::Boolean, HPF_NONE},
     {"Extender", "container",       "Container",       Vb6Type::Unknown, HPF_NONE},
+    {"Extender", "default",         "vb6_Default",     Vb6Type::Boolean, HPF_NONE},
     {"Extender", "drag",            "Drag",            Vb6Type::Unknown, HPF_METHOD},
     {"Extender", "dragicon",        "DragIcon",        Vb6Type::Unknown, HPF_NONE},
     {"Extender", "dragmode",        "DragMode",        Vb6Type::Long,    HPF_NONE},
@@ -147,12 +153,12 @@ inline const HostPseudoRow kHostPseudoRows[] = {
 
     // ---- Ambient (宿主环境) ----
     {"Ambient", "backcolor",   "BackColor",   Vb6Type::Long,     HPF_NONE},
+    {"Ambient", "displayasdefault", "DisplayAsDefault", Vb6Type::Boolean,  HPF_NONE},
     {"Ambient", "displayname", "DisplayName", Vb6Type::String,   HPF_NONE},
     {"Ambient", "forecolor",   "ForeColor",   Vb6Type::Long,     HPF_NONE},
     {"Ambient", "font",        "Font",        Vb6Type::Unknown,  HPF_NONE},
     {"Ambient", "righttoleft", "RightToLeft", Vb6Type::Integer,  HPF_NONE},
-    {"Ambient", "usermode",    "UserMode",    Vb6Type::Boolean,  HPF_NONE},
-};
+    {"Ambient", "usermode",    "UserMode",    Vb6Type::Boolean,  HPF_NONE},};
 
 inline const HostPseudoRow* hostPseudoFind(const std::string& pseudoObj,
                                     const std::string& memberName) {
