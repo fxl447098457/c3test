@@ -175,15 +175,83 @@ foreach ($f in $tri) {
     if ($c -ne 1) { $viol += ('R5-TRIPLE ' + (Split-Path -Leaf $f) + ' must carry vb6_StatusBar_GetPanelIndex exactly 1 time, got ' + $c) }
 }
 
+# ---------- R6: 账 #299 (§B130) —— Panels 的集合对象只许 memberobj 那一头答 ----------
+# 立这一格的原委（全部实测）：改前 `Set po =` / 模块级 `As Object` / `For Each` / `With`
+# 四种"把成员当对象用"的写法，头一律发成 vb6_ComGetObjectProp(<HWND>, L"Panels")
+# = 拿 HWND 当 IDispatch 用（C29-8b 当年给 TreeView Nodes 写下的同一句症状），
+# `For Each` 连循环都没进 —— BASE 那台跑同一份夹具是 fe=0 idx=0 txt=0，
+# 第二十刀之后是 fe=3 idx=6 txt=5。
+# 所以这里钉的是**读数**不是愿望：剩下的三形还走 Set-RHS / With-object-ref 那两条发射路。
+$gaPath = Join-Path $Root 'src\backend\detail\expr\cgen_expr_member_generic_access.inc'
+$stPath = Join-Path $Root 'src\backend\detail\util\cgen_state.inc'
+$moPath = Join-Path $rtlRoot 'core\vb6forms\vb6forms_memberobj.c'
+$hdPath = Join-Path $rtlRoot 'core\vb6forms\vb6forms_prop_ctrl.h'
+$gaTxt = [System.IO.File]::ReadAllText($gaPath)
+$stTxt = [System.IO.File]::ReadAllText($stPath)
+$moTxt = [System.IO.File]::ReadAllText($moPath)
+$hdTxt = [System.IO.File]::ReadAllText($hdPath)
+
+# R6-A 产物：集合本体由 memberobj 那枚入口造出来，For Each 走的就是它
+if ((Count-Of 'vb6_StatusBar_Panels((void*)vb6_hwnd_StatusBar1)') -ne 1) {
+    $viol += 'R6-COLLECTION-OBJ want exactly 1 vb6_StatusBar_Panels(...) in the emit'
+}
+if ((Count-Of 'vb6_ForEach_Init(vb6_StatusBar_Panels(') -ne 1) {
+    $viol += 'R6-FOREACH want exactly 1 ForEach over the real collection object'
+}
+
+# R6-B 还重叠着的那一格是**现状 8 处**，只许降不许升：下一刀落 Set / With / 模块级 Object
+# 那三条发射路时这个数应当往 0 走；长回去就是有人又给 HWND 点属性。
+$still = Count-Of 'vb6_ComGetObjectProp(vb6_hwnd_StatusBar1, L"Panels")'
+if ($still -gt 8) {
+    $viol += ('R6-OVERLAP HWND-as-IDispatch heads grew 8 -> ' + $still + ' (只许降不许升)')
+}
+if ($still -lt 8) {
+    Write-Host ('NOTE R6-OVERLAP 已降到 ' + $still + '（钉的是 8）—— 那一格落了就把针面一起降下来')
+}
+
+# R6-C 三处"什么算集合对象表达式"的名单必须同时认这一枚前缀。
+# 少一处的后果是**实测过的**：只补拦子不补名单，`Panels.Count = 3` 发成
+# vb6_StatusBar_Panels((void*)vb6_hwnd_SB1).Count ⇒ cl C2224（void* 上点成员）。
+$gaN = ([regex]::Matches($gaTxt, 'find\("vb6_StatusBar_Panels\("\)')).Count
+if ($gaN -ne 2) { $viol += ('R6-LIST generic_access must carry the prefix at both sites, got ' + $gaN) }
+$stK = ([regex]::Matches($stTxt, '"vb6_StatusBar_Panels\(\(void\*\)vb6_"')).Count
+if ($stK -ne 1) { $viol += ('R6-LIST statusBarNameOfExpr kHeads want exactly 1, got ' + $stK) }
+$stC = ([regex]::Matches($stTxt, '"vb6_StatusBar_Panels\("')).Count
+if ($stC -ne 1) { $viol += ('R6-LIST isControlCollectionExpr want exactly 1, got ' + $stC) }
+$cgN = ([regex]::Matches($comTxt, '== "panels"')).Count
+if ($cgN -ne 2) { $viol += ('R6-INTERCEPT cgen_util_com must answer panels at the value+object sites, got ' + $cgN) }
+
+# R6-D RTL 那一头：入口定义 / 声明 / Item 按 Key 那一档，各恰好一次
+if (([regex]::Matches($moTxt, 'vb6_StatusBar_Panels\(void\* hwnd\)')).Count -ne 1) {
+    $viol += 'R6-CREATOR vb6forms_memberobj.c must define the collection entry exactly once'
+}
+if (([regex]::Matches($hdTxt, 'vb6_StatusBar_Panels\(void\* hwnd\)')).Count -ne 1) {
+    $viol += 'R6-DECL vb6forms_prop_ctrl.h must declare it exactly once'
+}
+if (([regex]::Matches($moTxt, 'VB6_MEMCK_PANELS\)\s+idx = vb6_StatusBar_GetPanelIndexByKey')).Count -ne 1) {
+    $viol += 'R6-ITEM-BY-KEY memColl Item must answer the PANELS key form (else Panels("k") = Nothing)'
+}
+# #300 那格留下的第三份答案不许回到面板这一族：inline `p->index` 全仓现存 6 处（别的族），
+# 面板那一处已改成问 getter。这个数只许降不许升。
+$inline = ([regex]::Matches($moTxt, 'memSetI4\(out, p->index\);')).Count
+if ($inline -gt 6) {
+    $viol += ('R6-THIRD-ANSWER inline p->index answers grew beyond the 6 that exist: ' + $inline)
+}
+if (([regex]::Matches($moTxt, 'memSetI4\(out, vb6_StatusBar_GetPanelIndex\(p->owner, p->index\)\);')).Count -ne 1) {
+    $viol += 'R6-INDEX-AUTHORITY Panel.Index must ask the one getter exactly once'
+}
+
 # ---------- R4: 防空转 ----------
 if ($rtlFiles -lt 100) { $viol += "R4-RTL-FILES floor 100, got $rtlFiles" }
 if ($HmFiles.Count -ne 5) { $viol += 'R4-LIST the allowlist itself changed size (must stay 5 files)' }
 if ($HmWantTotal -ne 13) { $viol += 'R4-TOTAL the pinned total changed (must stay 13)' }
 if ($pm.Count -lt 1) { $viol += 'R4-R5-CENSUS the pair scan found nothing = the sentinel is idling' }
+if (($gaN + $stK + $stC + $cgN) -lt 5) { $viol += 'R4-R6-CENSUS the panels-list scan found nothing = the sentinel is idling' }
 
 if ($viol.Count -eq 0) {
     Write-Host ("PASS static_sentinel_statusbar_panel_hm: emit Hm=2 add=3 autosz=1 plain=0 / himetric sites " +
-                "$sum in $($perFile.Count) files / rtl_files=$rtlFiles")
+                "$sum in $($perFile.Count) files / rtl_files=$rtlFiles / panels obj=1 still=$still lists=" +
+                "$gaN+$stK+$stC+$cgN inline=$inline")
     exit 0
 }
 Write-Host 'FAIL statusbar_panel_hm:'
