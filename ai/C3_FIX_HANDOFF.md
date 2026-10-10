@@ -516,7 +516,7 @@ D11 放开普查范围到整个 `src/rtl` 的那天，只剩两处没接：`vb6f
 - **顺手量到、刻意不带的一格（另立 §B132 / 账 #303）**：`sum=6630` 比 `bar=6000` 多出 630 缇 = **42 像素**，正好是那枚 `sbrTime`+`sbrContents` 面板的测量文本宽 —— `SbLayout` 第一遍把内容档的实测宽放进 `want[i]` 却没累加进 `fixedTotal`，于是弹簧把同一格宽吃两次，最右边界越过客户区。**这是改前就在的缺陷**，只是从前 getter 交请求值所以看不见。所以 SB36 那趟只钉"往弹簧档写宽不该改变它报出来的数"这一半（增量不变），"三格铺满"那一半留给 §B132，RAW 那行把 `sum` 与 `bar` 两个数一起打出来，等它落地就看得见。**（已落地 = 第二十三刀，读数与护栏见 §B132 末；`SB36-TILES-BAR` 那条判据就是它补上的）**
 - **护栏**：哨兵 `check_statusbar_panel_hm.ps1`（第 51 道 [STATIC]）改形 + 加长：R2 名单钉 4 份/14 行、三枚权威定义各 1 处、`ax_load.c` 只许转调 1 处（它就是它退名单的条件）、状态条三道折各 2 处、本地 `MulDiv` **0** 处、第十八刀那形状 `vb6_HimetricToPxX(` **0** 处（墓碑）；R3 兜底那行改钉 `take < floorPx` 且必须问 `vb6_TwipToX`；R1 加两枚产物计数（`SetPanelMinWidthHm`=3、`GetPanelLeft`=3 —— 少一个落点就是"设计值整格不见"/"读回空"）；**新增 R7**：一枚成员从"名字认得"到"真做得动"要过的六格登记（memberobj 名字表 / DISPID / 派发 case / memberobj 调用 / RTL 定义 / header 声明 / 发码 recognizer）各恰好 1 处 + 设计 `MinWidth` 那三处同步 + 排版那一趟必须折一次（单位用代码形状钉，不靠注释）；R4 加两条 census 防空转。**负控 = 真 BASE 树**：`git archive HEAD` 出一份副本（`.build/wt_k22neg`）+ `b437_base_k21.exe`，`-Root` 指过去一次报出 **25 条**，而第二十/二十一刀的 R1/R5/R6 那几条在同一台上一条没红 ⇒ 新钉的每一条都是本刀的存在性证人，不是重报上一刀的账。51 道 [STATIC] 全跑一遍 = 51/51 绿。
 - **本刀自己漏过又被哨兵抓住的一格（记下形状，不是遗漏）**：`vb6_StatusBar_SetPanelMinWidthHm` 的 **header 声明当时没写**，而产物照跑、构建日志一条不报（改前/改后两份 `run.out` 逐行相同 = 这格静默的直接证据：调用返回 void、实参按 ABI 到位，隐式声明在这条链上不出声）⇒ 补声明 + R7-MINW-DECL 钉住。这与账 #174（`SelectedControls` 发成隐式声明）同形，而本仓的构建日志里没有 cl 警告这一族（§B…，已记录），所以**这一类只能靠数落点**。
-- **刻意留下的两格（归 §B129 / 账 #298）**：`vb6forms_olecon.c` 那 7 行、`vb6forms_picture_prop.c` 那 3 行、`ax_site_ext.c` 的 `k = 96.0/2540.0`（本机 DPI 就是 96 ⇒ 高 DPI 读数取不到，未定罪）都没顺手并表 —— 各有一份自己的判据面。另记一条口径不对称（是有意的）：设计块里**带前缀**的 `Object.Width` 与**无前缀**的 `MinWidth` 都按 himetric 折，而**无前缀**的 `Width` 按缇直交 —— 因为语料里状态条上 `Width =` 那形 0 处（是我们自己造的），而 `MinWidth =` 那形是真设计器写的（457 枚里 398 枚与 `Object.Width` 逐字相同）。
+- **第二十四刀收掉的那两格（原记「刻意留下」，归 §B129 / 账 #298）**：`vb6forms_olecon.c` 那 7 行、`vb6forms_picture_prop.c` 那 3 行、`ax_site_ext.c` 的 `k = 96.0/2540.0` 已并到 `vb6forms.c` 那一处权威上（名单现 1 份 / 5 行，值面与护栏见 §B129 末）；`ax_site_ext` 那条高 DPI 改动本机仍取不到读数（这台就是 96）⇒ 未定罪那一格改记 §B133。另记一条口径不对称（是有意的）：设计块里**带前缀**的 `Object.Width` 与**无前缀**的 `MinWidth` 都按 himetric 折，而**无前缀**的 `Width` 按缇直交 —— 因为语料里状态条上 `Width =` 那形 0 处（是我们自己造的），而 `MinWidth =` 那形是真设计器写的（457 枚里 398 枚与 `Object.Width` 逐字相同）。
 
 ### B42 设计期 `.frx` 的 List/ItemData 只接了 ListBox 一档，ComboBox 那 17 处全落空（账 #207，**已出**）
 
@@ -2082,18 +2082,64 @@ marker、重编，之后 `check_rtl_embedded` 报 **125/125 逐字节相同**。
   登记 = 按 CI 那台自己交的清单（`scripts/rebless_emit_manifest.ps1 -Bless`，numstat 1/1、行序零移动、复算 399/399、`check_manifest_coverage` 绿）。**复验 = 门 #479**（run 38037616826、head `29582214`、attempt 1、12 条 check-run 全 completed/success、非绿 0，其中 `Emit manifest (shape oracle)` 绿 ⇒ 那一行的新哈希被 CI 那台独立复算证实，而 `Tests (vbp #1..#4)` 四片全绿 ⇒ `SB36-TILES-BAR` 在两架构真跑过）。
 - **这一趟没验的一格（不立案，只记形状）**：当弹簧档的 `MinWidth` **大于**它分到的空间时，第二遍的兜底照样会把末格顶出客户区（下限赢）—— 本机夹具够不着这个条件（下限折出来 22 缇，实际分到 3600+ 缇），要一枚故意收窄的夹具才测得到，而**那种情形下 VB6 本人交回什么没有读数** ⇒ 别照猜改。
 
-### B129 himetric↔像素/缇 的折算在 RTL 里住了 4 份文件（账 #298，开着 —— 第二十二刀把名单从 5 份/13 行减成 4 份/14 行，还剩 3 处未并表）
+### B133 OLE 容器 / Picture 那两条单位换算路没有行为面（账 #301，**开着 —— 第二十四刀量到**）
+
+并表 §B129 时给搬掉的三处各找一枚判据，结果是三处都没有**行为**读数可拿 —— 形状钉得住，行为钉不住：
+
+- `vb6forms_olecon.c`：`tests/olecon/OleCon.vbp` 在 `tests/run_tests.ps1:5138-5139` 是 **`Test-VbpBuild`**（两架构都只编不跑）
+  ⇒ 它只证"这族 RTL 编得过、链得上"，证不了 `SetExtent`（px→hm 交出去那份尺寸）与 `olcSizeToObject`（hm→px 交给
+  `SetWindowPos` 那份尺寸）这两个决定。本仓没有"运行期真被嵌进容器"的夹具 —— 要补就得有一枚在跑起来的 UI 里被当对象装载的
+  控件，而且 `ScaleMode` 得非默认才看得出单位走错。
+- `vb6forms_picture_prop.c`：那条折算住在**非 Stretch** 那一支（`VB6_Stretch` 为 0 时按图的天然尺寸画）。
+  全 `tests/` 只有三枚 `VB.Image` 盒（`.build/b505_picture_face.py` 数出来的）：`resload/ResAlpha.frm` 与
+  `VbQRCodegen-master/test/Form1.frm` 都写 `Stretch = -1`（走的是另一支），`pbsub/PbForm.frm` 那枚 `Img1`
+  **从来没装过图** ⇒ `GetPropW(hwnd, L"VB6_IPicture")` 那一支压根进不去。**非 Stretch + 真装着图 = 0 覆盖**。
+- `axsite/ax_site_ext.c`：DPI 从写死 96 换成真实 DPI ⇒ **本机就是 96 DPI，这条改动在本地永远不会改变读数**；
+  它要的是一枚高 DPI 下的 ActiveX 容器读数（CI 那台的显示缩放没量过，别假设）。
+
+⇒ 三条现在都只靠 R9 那五条调用点 + 三条墓碑托着。这格不是缺陷，是**覆盖缺口**。要补的话优先级：
+olecon（唯一会把尺寸真交给外部对象的一枚）> 非 Stretch 的 Picture（补法很轻：一枚 `Stretch = 0` + 装图 + 读回画出来的宽）>
+`ax_site_ext`（要换显示缩放，本机无手段，先挂着）。
+
+### B129 himetric↔像素/缇 的折算：4 份文件并成 1 份权威（账 #298，**已出 —— 第二十四刀，2026-10-10，门待回填**）
 
 第十八刀做 `Object.Width` 那一档时顺带数出来的：那时是 `src/rtl` 里含 `2540` 的**非注释行 = 13 行 / 5 份文件**。
-**第二十二刀之后的读数（= 哨兵里钉的那份名单）= 14 行 / 4 份文件**：`vb6forms.c` 3（三枚权威本人 ——
-按真实 DPI 的像素档 `vb6_HimetricToPxX` + 与 DPI 无关的缇档一对 `vb6_TwipsToHimetric` / `vb6_HimetricToTwips`）、
-`vb6forms_olecon.c` 7、`vb6forms_picture_prop.c` 3、`axsite/ax_site_ext.c` 1。
-`axsite/ax_load.c` 那一处（`vb6_twipsToHimetric`）已退名单 —— 它现在只转调权威，哨兵另钉一条"只许转调 1 次"守住这个条件。
-其中 `ax_site_ext.c:128` 写的是 `const double k = 96.0 / 2540.0` —— **DPI 被写死成 96**，
-与 #184 修 `vb6_TwipToX` 之前那个形状一模一样（当时 VBFlexGridDemo 的网格在 120 DPI 下被缩小 20%）。
-这条**还没实测**（要一枚高 DPI 下的 ActiveX 容器读数才定得了罪），所以本刀只把它记成名单里的一行，不动它。
-哨兵 `check_statusbar_panel_hm.ps1` 的 R2 钉的是"4 份文件 / 14 行"+ 三枚权威的定义各 1 行 ——
-多长一份就红，并表的时候把名单往下减，别往上加（R2-LOCAL-MATH 还钉住"状态条这一族只许转调"）。
+第二十二刀并掉 `axsite/ax_load.c`（那一处现在只转调 `vb6_TwipsToHimetric`，哨兵另钉一条"只许转调 1 次"守住这个条件），
+**第二十四刀并掉剩下的三处调用点** ⇒ 名单收成 **1 份文件 / 5 行**，全在权威本人 `vb6forms.c` 里：公式档
+`vb6_HimetricToPxOnDc(hm, dpi)`、浮点对 `vb6_HimetricToPxF` / `vb6_PxToHimetricF`、缇档一对
+`vb6_TwipsToHimetric` / `vb6_HimetricToTwips`（屏 DPI 那两枚 `vb6_HimetricToPxX/Y` 是转调，本身不含 2540 ⇒ 不进名单）。
+
+搬掉的三处（从前各写各的，`ax_site_ext.c` 那处还把 DPI 写死成 96 —— 与 #184 修 `vb6_TwipToX` 之前同形，
+当时 VBFlexGridDemo 的网格在 120 DPI 下被缩小 20%）：
+
+- `vb6forms_olecon.c` 7 行 → 0：`olcSizeToObject` 交给 `SetWindowPos` 的宽高改问 `vb6_HimetricToPxX/Y`；
+  两枚 `SetExtent` 那四行把 `* 15L * 2540L / 1440L` 换成 `vb6_TwipsToHimetric(vb6_XToTwipX(px))` 那样的三步转调。
+- `vb6forms_picture_prop.c` 3 行 → 0：两枚 `MulDiv(hm, dpi, 2540)` 换成 `vb6_HimetricToPxOnDc(hm, dpi)`，
+  **刻意继续喂 DC 的 DPI**（不是屏 DPI）—— 图进打印机/虚屏 DC 时要跟着那个 DC 缩，这条口径不属于"屏 DPI 一族"。
+- `axsite/ax_site_ext.c` 1 行 → 0：`TransformCoords` 两向 × 两轴改问浮点对，DPI 从 `vb6_DpiX/Y` 拿。
+
+**并表前先量了四条值面**（不是"看着同形就搬"；扫描脚本 = `.build/b500_olecon_rounding.py`）：
+`picture_prop` 搬走的是同一条公式 ⇒ 构造上同值；`olecon` 的 px→hm 两处 96 DPI 下**逐值相同**（1440/96=15 整除），
+顺带把 `px * 15L * 2540L` 那截 32 位溢出消掉（旧写法从 px 56365 起开始漂）；`olecon` 的 hm→px 一处由"两次截断"
+变成"一次就近"，himetric 1..40000 全扫差值只有 **0 或 +1 px**、从没 ≥2；`ax_site_ext` 那条**本机就是 96 DPI ⇒ 只有形状能证**
+（未定罪那一格改记 §B133，别当已验）。
+
+**顺带修的是这条哨兵自己的盲区**：R2 数"非注释行"时从前只剥每行的 `//`，**块注释的续行**因此被当代码数。
+按跨行剥法（账 #278 第十七刀定的那条）重算第二十二刀那台（`.build/wt_k23neg`）= **12 行 / 4 份**，比当时钉着的 14 行少 2 ——
+`vb6forms_olecon.c` 与 `vb6forms_picture_prop.c` 各有一行 `/* … 2540 … */` 的续行被数了进去。
+⇒ "名单只许往下减"这条纪律一直带着两份注释的水分，读数偏高而没人察觉。
+
+**第二十四刀的落地与读数**：
+- **判据**：R2 名单缩成 1 份/5 行，且那 5 行 + 两枚屏 DPI 包装逐行钉死；新增 **R9** 钉的是**调用点**
+  （olecon 2+4+4、picture_prop 2、ax_site_ext 4）外加三条旧形状墓碑（`MulDiv` / `* 15L *` / `const double k` 各 0 处）——
+  并表之后"这一族有几处换算"只剩一个答案，剩下的问题只有"有没有人把旧写法偷偷搬回来"。
+- **负控** = 第二十二刀那棵树：只报 R2（名单/总数/权威本人）+ R9（五条调用点全 0、三条墓碑非 0）+ R8
+  （那台还没第二十三刀），而 R1/R3/R5/R6/R7 照旧绿 ⇒ 新红是特定的。本树 PASS：
+  `himetric sites 5 in 1 files … callers olc=2+4+4 pp=2 axs=4`。
+- **真跑面 = 一台都不许动**（`vb6forms.c` 是所有夹具都链进去的那一枚，这一刀的护栏因此是"读数逐行相同"而不是"读数变好"）：
+  `ctrlstatusbar` / `sbhm` / `sbfont` 三枚**两架构**共六份 run.out 与第二十三刀那台**逐行相同**（44/44、19/19、7/7，
+  `.build/b506_k24_ab.py`），`resload` 七条针 + `resalpha` 两条针全中，`tests/olecon` **x64 与 x86 都编得过**。
+- **RTL 已 touch `c3rtl.rc` 重编**：`check_rtl_embedded` OK（125 份逐字节相同，exe sha `1876e1efc5ed`）。
 
 ### B131 `Panels(<数字>).Index` 把整数交给 `wchar_t*` 槽 ⇒ 启动期 AV（账 #300，**已出 —— 第十九刀，2026-10-10，门 #464 全绿 = run 38014099324、head `597bd6d1`、attempt 1、12 job 全 completed/success、非绿 0、wall 10m52s；`Emit manifest (shape oracle)` 同绿 => 那行改写被 CI 独立复算证实，`Tests (vbp #1..#4)` 四片全绿 => sbhm 的两头判据两架构真跑过）
 
