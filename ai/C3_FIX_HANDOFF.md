@@ -490,7 +490,17 @@ D11 放开普查范围到整个 `src/rtl` 的那天，只剩两处没接：`vb6f
 ### B41 `Panels(i).Width` 交回的是请求值，不是排版后的宽（账 #206，开着）
 
 #205 做判据时撞见的：状态条的排版结果只活在 `w->rights[]`（`SB_SETPARTS` 那一份），而 `vb6_StatusBar_GetPanelWidth` 交回 `e->width` —— 设计块没给 Width 的面板一律读回 **0**（实测 `SF01-RAW` 改前那版就是 `small=0 big=0`）。后果不止"读不到数"：`sbrSpring`/`sbrContents` 两档在 VB 代码里没有任何几何可查，凡是按面板宽定位的东西（比如提示气泡、覆盖层）只能自己再算一遍。
-开工第一步不是改 getter，而是**把 VB6 那一读数的单位钉准**（`Panel.Width` 文档写的是缇，而 rights[] 是像素；拿 OCX 原生版对照最快，见 `tests/ctrlstatusbar` 那份 .frm 的设计值与实测宽的比）。口径钉错 ⇒ 把"读回 0"换成"读回错单位的数"，比现在更难查。
+**口径已经量准（2026-10-10，四发外部读数）—— 这一族的开工前置就此清掉，两格都动得了**。本机另有别人用 VB6 存下来的整批工程（`D:\vb_yqt4qPac`，5623 份 .frm），不是本仓那三份夹具，于是"设计值与实际宽的比"这条路取得到证据：
+- ① **类型库那一手**（探针 `.build/b314_panel_tlb.cpp` → `b318_tlb_out.txt`，读 `C:\Windows\System32\comctl32.ocx` 内嵌的 ComctlLib 5.0 SP2，133 型）：`IPanel.Width` / `Left` / `MinWidth` 的 propget 一律 **VT_R4(Single)**；`PanelAutoSizeConstants` = sbrNoAutoSize 0 / sbrSpring 1 / sbrContents 2；`PanelStyleConstants` = sbrText 0 / Caps 1 / Num 2 / Ins 3 / Scrl 4 / Time 5 / Date 6 / Kana 7 ⇒ 与 RTL 那批 `VB6_SBR_*` 对上。**库里的 docstring 只有属性名、不带单位** ⇒ 单位不可能从 TLB 取，只能从②③取。
+- ② **设计块那一手**（`.build/b321_panel_unit.py`：338 枚 `Begin MSComctlLib.StatusBar` 里 92 枚带面板宽）：VB6 设计器写的那一行键名是 **`Object.Width`**（不是 `Width`）。`sum(面板宽)/控件的 _ExtentX` 中位数 **0.986**、63/92 落在 [0.9,1.1]；`sum/控件自己的 Width(缇)` 中位数 **1.738**、落在 [0.9,1.1] 的 **0 枚** ⇒ 面板铺满的是 `_ExtentX` 那一档 = **himetric(0.01mm)**，不是缇。系数 1.7639 = 100/56.6929 与同一块里 `Width`:`_ExtentX` 逐位对上（3780:6668、7365:12991）。
+- ③ **代码那一手**（`.build/b323_panel_code_unit.py` + `b324_panel_context.py`）：真源码里 `Panels(i).Width = …` 共 27 处，其中 3 处右式直接就是 `Me.ScaleWidth`（`报表/ListView报表打印模块/200612128325487/Form/PagrVisual.frm:504`、`报表/表格打印模块/20073722249267/Form/PagrVisual.frm:785`、`数据库/IC卡考勤系统源代码/200582218428876/…/BatchSetup.frm:483`），而**这三张窗体都没写 ScaleMode ⇒ 缇档** ⇒ 运行期读写的单位是**缇**。旁证：同族 `ColumnHeaders(i).Width` 赋的 literal 幅值 med=1100 / p75=2000 / max=3200（缇那一档，不是像素那档的几十..几百）。
+- ④ **②③合起来才叫钉准**（`.build/b322_listview_unit.py`）：ListView 的 `ColumnHeader` 设计块里 `Object.Width` = 2646 / 2117 / 1411，反算缇正好 **1500 / 1200 / 800**（反算像素是 100 / 80 / 53.3，最后那枚不整）⇒ **设计器存的是「缇 × 72/127」（himetric），属性本身是缇**。这条换算与 DPI 无关（两个都是绝对长度单位）⇒ 发码期折一次就够：`tw = MulDiv(hm, 72, 127)`。
+⇒ 于是这一族要补的是**两格**，且不必再等外部读数：
+- **A 设计块那一格**（`cgen_form_ctrl_style_apply.inc:847` 那一趟读 `p.properties["Width"]`）：真 VB6 那一行键名带 `Object.` 前缀，而 `frm_parser.cpp:81` 保留点号全名 ⇒ **今天的真实工程里面板宽压根没进 RTL**（这才是"读回 0"的第一半；"读请求值"那半是第二格）。补法 = 认 `Object.Width` / `Object.MinWidth`，发码期按 72/127 折成缇再交给出口。语料面：全 5623 份 .frm 里 `Object.Width` **1634 处 / 356 份**，点号集合项形（`.Width =`）在状态条上 **0 处** ⇒ 我们夹具那形是自己造的，不是 VB6 的。
+- **B 单位那一格**（RTL `vb6forms_statusbar.c`）：`Vb6PanelEntry.width/minWidth` 注释写**像素**、`SbLayout` 也按像素参与排版，而 VB 侧口径是**缇** ⇒ 出口两侧改用已有的那对唯一换算（`vb6_TwipToX` / `vb6_XToTwipX`，#184/#175 收成一处的那对，**别新开一份**），getter 改交**排版后的宽**（`SbApplyParts` 那份 offsets 差值）折回缇。
+**刻意不跟着改的一格（记下别当遗漏）**：TLB 说 propget 是 Single，而 `vb6forms_memberobj.c:505` 走 `memSetI4` —— 折出来的缇取整后 I4 与 R4 在 `=` / `CStr` 两头同值，改它要动成员表与类型权威(#231)，收益只有 `VarType()` 一项。
+**判据必须自己造**（A/B 对这族永远沉默：本仓三份状态条夹具都没有 `Object.Width`，全语料 0 处 ⇒ 形状门 `changed=0` 是"零覆盖"而不是"没改到"，#233 那一课在这里重演）：夹具加一枚**按 VB6 真实形状**写的 `BeginProperty Panels {…}` / `BeginProperty PanelN {…}` / `Object.Width = …` 状态条，两头钉 —— 设计值折成缇读得到（拦 A）、弹簧/内容档读回排版后的宽（拦 B），证人用 `SB_GETTEXT`/`SB_GETPARTS` 问窗口本人（与 #205 那三条同源）。
+**第一格已出（第十八刀，2026-10-10）**：发码侧认了 `Object.Width` 那一档 —— 新建一枚 RTL 出口 `vb6_StatusBar_SetPanelWidthHm`，它只做一件事：转调本族唯一那枚按真实 DPI 的权威 `vb6_HimetricToPxX`（`vb6forms.c`，与 #184/#175 那对缇换算住在一起）。**读数**（真跑，两台逐行相同）：夹具 `tests/sbhm`（**按 VB6 设计器的真实形状写**：`BeginProperty Panels {GUID}` + `BeginProperty PanelN {GUID}` + `Object.Width`）—— 改后 `w1=57 w2=100 e3=467 cw=467`（1500 hm 与 2646 hm 折成 57/100 px，正是 MulDiv(hm,96,2540)），改前那台**跑同一份夹具** `w1=7 w2=14`（两枚固定档面板退化成文字宽 = 设计值整格没进来）⇒ `HM01-HM-DESIGN-WIDTH` False→True。**同一刀里顺带修掉一格实测缺陷**：弹簧档的 `MinWidth` 被当成"加在剩余空间上的加项"而不是下限（`SbLayout` 第一遍占位 + 第二遍兜底 = 同一个答案两处），读数 `e3=493` 而 `cw=467`，多出来的正好一枚 MinWidth=26 ⇒ 判据 `HM03-SPRING-TILES` False→True。**护栏**：新哨兵 `check_statusbar_panel_hm.ps1`（第 51 道 [STATIC]）四头，负控两头各证能红 —— BASE 树（`wt_k17neg3`，改前那台编译器 + 同一份夹具）一次报出 R1/R2/R3 九条，名单被清空的副本报出 R4；夹具那四条判据里只有 HM01/HM03 是真翻 False 的存在性证人，**HM02 在 BASE 上也 True**（7:14 恰好也落在容差内）⇒ 它只是"只许一处换算"的形状护栏，不当罪证。**刻意留下的一格**：`vb6_HimetricToPxX` 之外，himetric 与像素/缇的折算在 RTL 里已有 13 个非注释行、住 5 份文件（§B129）—— 本刀只把**新增**那一处放进权威，没顺手并表（各有一份自己的判据面）。
 ### B42 设计期 `.frx` 的 List/ItemData 只接了 ListBox 一档，ComboBox 那 17 处全落空（账 #207，**已出**）
 
 Fix 195 那轮把 .frx 三种 blob 的**布局**钉准了（字符串 / 字符串表 / 整数表），但发码侧的接线只写了一档：`emitControlFrxProps` 里 `if (ctrl.controlType == FrmControlType::ListBox)` 才发 `LB_ADDSTRING` / `LB_SETITEMDATA`。语料普查：`List =` / `ItemData =` 指向 .frx 的共 **17 + 17 处，全在 ComboBox 上**（Charts 2020 的 ucTreeMaps / ucChartBar / ucPieChart / ucProgressCircular 四份 demo 的 "Number of Series"、"Chart Style"、"Legend Position" 那一类）⇒ 编出来的下拉框是空的。
@@ -2035,6 +2045,30 @@ marker、重编，之后 `check_rtl_embedded` 报 **125/125 逐字节相同**。
 - **A/B（零行为改动，取两头，因为语料只吃 `.vbp`/`.bas`）**：① 全语料形状门 —— `emit_manifest.ps1` 对 `emit-manifest.expected.txt` **398 份输入逐字节相同**，未重钉；② `.frm` 家族不在语料里，另拿**同一份夹具**两台并排：BASE = 本机冷编的 `wt_base_k15 @ d2caf7c0`（那一版还带着死码），对 `tests/c29data/DataApp.frm`（装在门上真编真跑那枚证人，11965 B）、`tests/ctrlzero/ZeroForm.frm`（12859 B）、新夹具 `tests/ctrlzero/RsForm.frm`（8056 B）三份产物**逐字节相同**。⇒ 撤的确实是一条没人走的路；而 `RsForm.frm` 在 BASE 上发的也是同一套 memberobj —— 这正是 §B124 那句「恒假」的产物侧证据。
 - **顺手订正**：`check_rtl_proto_arity.ps1` 头注释里那格「行数恰好 15」订正成 23 —— 代码在第十四刀已改到 23，注释没跟上。这类「注释与判据两个数」迟早骗下一次推理（本轮就是靠它才没把 15 当成新的实数）。
 - **§B124 剩下的那一半**（仍未拍板，本刀没碰）：RTL 那枚 `vb6_Data_Self` 导出（`src/rtl/vb6forms_data.c` + `vb6forms_prop_ctrl.h`）现在全仓 0 个调用者 —— 连 memberobj 都不叫它。撤它要动 `src/rtl` ⇒ 按控件线规矩必须 touch `c3rtl.rc` 再重编 C3.exe（账 #156 那条坑：只改 RTL 不 touch rc，探针测的是旧 RTL 且一行 trace 都不打印）。留着它的代价是 RTL 里一枚永不应答的导出，撤它的代价是一次 rc + 全量重编 —— 与本线其它「先拍口径」那几格一起排。
+
+### B129 himetric↔像素/缇 的折算在 RTL 里住了 5 份文件（账 #298，开着）
+
+第十八刀做 `Object.Width` 那一档时顺带数出来的：`src/rtl` 里含 `2540` 的**非注释行 = 13 行 / 5 份文件** ——
+`vb6forms.c` 1（本刀新立的 `vb6_HimetricToPxX`，唯一按真实 DPI 的那枚）、`vb6forms_olecon.c` 7、
+`vb6forms_picture_prop.c` 3、`axsite/ax_load.c` 1（`vb6_twipsToHimetric`）、`axsite/ax_site_ext.c` 1。
+其中 `ax_site_ext.c:128` 写的是 `const double k = 96.0 / 2540.0` —— **DPI 被写死成 96**，
+与 #184 修 `vb6_TwipToX` 之前那个形状一模一样（当时 VBFlexGridDemo 的网格在 120 DPI 下被缩小 20%）。
+这条**还没实测**（要一枚高 DPI 下的 ActiveX 容器读数才定得了罪），所以本刀只把它记成名单里的一行，不动它。
+哨兵 `check_statusbar_panel_hm.ps1` 的 R2 已经把"5 份文件 / 13 行"钉死，多长一份就红 ——
+并表的时候把名单往下减，别往上加。
+
+### B130 `CStr(成员对象的数值成员)` 交出空串（账 #299，开着；第十八刀的夹具撞见）
+
+`tests/sbhm` 的 HM05 一行里两种写法同时问同一枚属性，两台读数是**定论级**的：
+`bare=100`（`"x=" & Panels(2).Width` 走 memberobj 的真出口 `vb6_StatusBar_GetPanelWidth`）而
+`cs=`（`CStr(Panels(1).Width)`）**打空**。产物侧看得到原因的形状：CStr 那一支发成
+`vb6_CStr(vb6_VariantFromComResult(vb6_ComGetProp(vb6_ComGetObjectProp(vb6_hwnd_StatusBar1, L"Panels")…`
+—— **整条链掉进了 COM 晚绑定兜底**，而晚绑定那一头对状态条面板对象一无所知（RTL 里"认识但什么都不做"），
+于是交回 Empty。同族已知样本：账 #143（控件方法两形都落 COM 兜底）、#221（Picture.Line 两跳都空 ⇒ 静默不画）、
+#229（数组元素 extender 属性读进 `&` 拼接 = 裸 int 进 BSTR 槽）。
+**动之前先量口径**：这一族的分岔是"同一个成员读法，套不套 CStr 走两条路"，不是状态条专属 ——
+所以第一步应是枚**跨控件探针**（同一枚成员读法 × {直接拼接, CStr, CLng, 赋值给 Variant} × {memberobj 家族：Panels/Columns/Nodes/Buttons} 四形），
+而不是给 `Panels` 单补一格 CStr 特判（那正是本线第 N 次给同一事实写第二份答案）。
 
 ### B125 账 #278 第十四刀已出 = 两枚集合 Clear 与 CommonDialog 那六枚 Show* 进零实参那张表：「拼法只许来自表」在 Show* 这一族落地（另立一条新判据：哨兵的文件头读不成注释就会绿着空转，2026-10-10，门 #456 attempt 1 全绿（run 37995142510、head `3f972622`、12/12 全 completed/success、非绿 0、created→updated 10m22s；**Emit manifest (shape gate) 那一跑同绿** ⇒ 「398 份逐字节相同」被 CI 那台独立复算证实））
 
