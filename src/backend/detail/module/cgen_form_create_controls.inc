@@ -377,6 +377,17 @@
                     if (canonPn.empty()) canonPn = pn;
                     std::string setter = "vb6_" + cIdent(ctlClass) + "_prop_let_" + cIdent(canonPn);
                     const ParameterInfo& p114 = wp114.back();
+                    // Fix 243c: 是否"真" Variant 形参 —— 判据是 typeRefName 为空**或**就叫
+                    // "Variant"。ParameterInfo::type 对源码里写了类型名的形参 (尤其
+                    // `As <枚举>`) 也被 resolveTypeOrDefault 折成 Vb6Type::Variant, 只看
+                    // type 会把 `Property Let ChartOrientation(ByVal New_Value As
+                    // ChartOrientationConstants)` (C 形参其实是 int32_t) 也装箱 ⇒ C2440
+                    // (Charts 2020 / ucChartBar / ucPieChart 三工程 Form1.c 回归)。
+                    // 而 `As Variant` 的 typeRefName 是 "Variant" (不是空), 所以两条都要收。
+                    const std::string p114RefLower = Symbol::toLower(p114.typeRefName);
+                    const bool p114RealVariant =
+                        p114.type == Vb6Type::Variant
+                        && (p114.typeRefName.empty() || p114RefLower == "variant");
                     std::string meExpr = "(vb6_cls_" + cIdent(ctlClass)
                                        + "*)vb6_UC_InstanceOf(" + hwndExpr + ")";
 
@@ -397,6 +408,17 @@
                         if (textVal.size() >= 2 && textVal.front() == '"' && textVal.back() == '"')
                             textVal = textVal.substr(1, textVal.size() - 2);
                         std::string lit = "vb6_BSTR_FromStr(L\"" + escapeWideCString(textVal) + "\")";
+                        // Fix 243c: 目标属性末形参是 **真 Variant** 时设计期字面量必须装箱。
+                        // 实测 ComCtlsDemo MainForm.frm 的 `Begin ... ImageList =
+                        // "ImageList1" ... End` (CoolBar.ctl:1499 `Property Let
+                        // ImageList(ByVal Value As Variant)`) 发成
+                        // vb6_CoolBar_prop_let_ImageList(me, vb6_BSTR_FromStr(L"ImageList1"))
+                        // → C2440 BSTR→vb6_VARIANT ×10 (MainForm.c)。
+                        // 数值同理: `Value = 44012` (DTPicker.ctl:1468 `Property Let
+                        // Value(ByVal DateValue As Variant)`) → C2440 int→vb6_VARIANT ×8。
+                        if (p114RealVariant && p114.isByVal) {
+                            lit = "vb6_VariantFromValue(" + lit + ")";
+                        }
                         if (p114.isByVal) {
                             c_.emitLine(setter + "(" + meExpr + ", " + lit + ");");
                         } else {
@@ -407,6 +429,9 @@
                     } else {
                         std::string valExpr = kv.second.rawText.empty()
                                 ? std::to_string(kv.second.intValue) : kv.second.rawText;
+                        if (p114RealVariant && p114.isByVal) {
+                            valExpr = "vb6_VariantFromValue(" + valExpr + ")";
+                        }
                         c_.emitLine(setter + "(" + meExpr + ", " + valExpr + ");");
                     }
                 }

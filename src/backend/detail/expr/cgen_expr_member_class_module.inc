@@ -162,7 +162,30 @@
                 && !objSym->variableTypeName.empty()
                 && !(currentProc_ && Symbol::toLower(currentProc_->name) == objLower)) {
                 const Symbol* fnClsSym = symTab_.lookup(objSym->variableTypeName);
-                if (fnClsSym && fnClsSym->kind == SymbolKind::Class) isVarName = true;
+                if (fnClsSym && fnClsSym->kind == SymbolKind::Class) {
+                    isVarName = true;
+                } else if (Symbol::toLower(objSym->variableTypeName) == "object"
+                           || Symbol::toLower(objSym->variableTypeName) == "variant") {
+                    // Fix 245: 返回 **Object/Variant** 的无参 Function 名 + `.成员` ——
+                    // ComCtlsDemo Pager.ctl:1203 `Private Function PropBuddyControl()
+                    // As Object` 与 :1247/:1337/:1350 的
+                    // `PropBuddyControl.Height / .Width / .Left / .Top`。
+                    // 函数名既不是变量、不是工程内模块名, 返回类型又推不出项目类 ⇒
+                    // 唯一合理的语义就是"(调用 Fn).成员"的**后期绑定** —— 直接发
+                    // vb6_VariantFromComResult(vb6_ComGetProp(<Fn>(me), L"<成员>")),
+                    // 与 lateBoundReadOnVariantCarrier 同形。
+                    // 修复前落优先级3 发 `vb6_PropBuddyControl_prop_get_Height`
+                    // (没有任何地方声明它) → C2065×8 (Pager.c)。
+                    std::string fnMod245 = objSym->isExternal ? objSym->sourceModule
+                                         : (isClassModule_ ? moduleName_ : std::string());
+                    if (!fnMod245.empty()) {
+                        std::string fnCall245 = cProcName(objSym->name, objSym->access, fnMod245)
+                                              + "((void*)me)";
+                        lastExpr_ = "vb6_VariantFromComResult(vb6_ComGetProp(" + fnCall245
+                                  + ", L\"" + escapeWideCString(node.memberName) + "\"))";
+                        return;
+                    }
+                }
             }
 
             // Fix 086: 成员命中本模块符号但限定符是另一个模块名时, 优先在该模块

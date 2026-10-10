@@ -176,7 +176,36 @@ std::string CCodeGen::inferClassTypeOfExpr(const ASTNode& expr) const {
             std::string baseClassName = inferClassTypeOfExpr(*ma.object);
             if (baseClassName.empty()) return "";
             // 查找该方法的返回类型
-            return getClassMethodReturnType(baseClassName, ma.memberName);
+            const std::string retCls242 = getClassMethodReturnType(baseClassName, ma.memberName);
+            if (retCls242.empty()) return "";
+            // Fix 242: `<集合>(i)` —— callee 是**无参属性**且返回项目集合类时, `(i)` 不是
+            // 该属性的实参, 而是返回的那个集合的**默认成员** (VB_UserMemId = 0, VB6 集合
+            // 惯例名 `Item`) 的索引; 表达式类型是**元素类**, 不是集合类本身.
+            //
+            // 实测 ComCtlsDemo Builds/ToolBar/ToolBar.ctl:4199
+            //     With Button.ButtonMenus(i)
+            //         If .Visible = True Then … .Separator … .Text … .Picture …
+            //   TbrButton.cls:308  Property Get ButtonMenus() As TbrButtonMenus   (无参)
+            //   TbrButtonMenus.cls:96 Property Get Item(ByVal Index As Variant) As TbrButtonMenu
+            //                        (Attribute Item.VB_UserMemId = 0)
+            // 修复前把 With 目标推成 vb6_cls_TbrButtonMenus*, 块内 .Visible/.Separator/
+            // .Text/.Picture/.Enabled/.Checked 全按**集合类**找成员 ⇒ C2039×18.
+            //
+            // 两道闸, 都不命中就维持原返回值 (集合类), 既不劣化既有场景也不乱动
+            // `obj.Method(args)` 这类"member 自己带参"的调用:
+            //   (a) 确实带索引 (`call.positional` 非空);
+            //   (b) member 在 base 类里是**无参**成员 (读方向形参表为空) — 带参属性/
+            //       方法走不到这里, `(i)` 就该是它自己的实参, 返回类型仍是 member 的返回类.
+            // 元素类取不出 (Item 返回非项目类) 时同样回退.
+            if (!call.positional.empty()) {
+                std::vector<ParameterInfo> collParams242;
+                if (findClassMemberGetParams(baseClassName, ma.memberName, collParams242)
+                    && collParams242.empty()) {
+                    const std::string elemCls242 = getClassMethodReturnType(retCls242, "Item");
+                    if (!elemCls242.empty()) return elemCls242;
+                }
+            }
+            return retCls242;
         }
         // Fix 037: MeExpr → 类模块内 me 即当前类
         case ASTNodeKind::MeExpr: {
@@ -248,7 +277,28 @@ std::string CCodeGen::inferClassTypeOfExpr(const ASTNode& expr) const {
                     std::string retClsFromProp =
                         getClassMethodReturnType(info.className, wmRef.memberName);
                     if (!retClsFromProp.empty()) return retClsFromProp;
+                    // Fix 246b: `.X` 是**已知成员** (方法/属性, resolveClassMemberCall
+                    // 认得) 但不返回项目类 ⇒ 它不是"With 目标类的实例", 链必须终止,
+                    // 交下游按后期绑定发 COM 读取。判据比 classMemberReturnsAsObject
+                    // 宽 (那支只认 type==Object 的符号), 覆盖 `As IPictureDisp` 这类
+                    // **接口**返回 —— ComCtlsDemo TbrButtonMenu.cls:137
+                    // `Property Get Picture() As IPictureDisp`: 修复前 `.Picture` 沿用
+                    // vb6_cls_TbrButtonMenu*, `.Handle` 发成
+                    // `vb6_TbrButtonMenu_prop_get_Picture(x)->Handle` → C2223×6 (ToolBar.c)。
+                    // 数据字段 (resolveClassMemberCall 为空) 不受影响, 仍返回 info.className。
+                    if (!resolveClassMemberCall(info.className, wmRef.memberName).empty())
+                        return "";
                 }
+                // Fix 246: `.X` 是**返回 As Object/Variant 的成员**时, 它本身是后期绑定
+                // 对象, 成员链必须走 COM —— 不能继续沿用 With 目标类。
+                // 实测 ComCtlsDemo ToolBar.ctl:4199 `With Button.ButtonMenus(i)` 块内
+                // `.Picture.Handle` / `.Picture.Type`: TbrButtonMenu.cls:137
+                // `Property Get Picture() As IPictureDisp` (C 侧 void*)。修复前把
+                // `.Picture` 推成 vb6_cls_TbrButtonMenu* ⇒ `.Handle` 发成
+                // `vb6_TbrButtonMenu_prop_get_Picture(x)->Handle` → C2223×6 (ToolBar.c
+                // 7147/7151/7153/7198/7202/7204)。返回空让下游按后期绑定发
+                // vb6_ComGetProp(<prop_get_Picture(x)>, L"Handle")。
+                if (classMemberReturnsAsObject(info.className, wmRef.memberName)) return "";
                 // .X 非数据字段 (方法/属性等) → 维持原行为: With 目标类自身
                 // (Fix 085b 在调用链推断处对 callee=WithMemberExpr 已按方法返回类
                 // 特判, 此处不做方法返回类型推断以免误伤 String/Long 属性场景)

@@ -124,10 +124,29 @@
             std::string aLower = args[0];
             std::transform(aLower.begin(), aLower.end(), aLower.begin(), ::tolower);
             if (knownIfaceVars_.count(aLower)) {
-                std::string newVal = "(" + args[0] + ").obj";
-                replaceInArgList108c(args[0], newVal);
-                args[0] = newVal;
-                argsFixed108c = true;
+                // Fix 241: 上面的 `.obj` 改写只对 **legacy 胖值结构体**
+                // (vb6_iface_<I>, 字段 obj + vtbl) 成立。新式 ivref 表示
+                // (vb6_ivref_<I>*, 结构体里**只有** vt, 见 ai/022 B04) 没有 .obj
+                // ⇒ 生成 `(This).obj` 直接 C2039。ivref 的薄指针本来就是接口引用
+                // 的地址，与 Fix 215 的 `PtrToObj` 往返同口径 —— 存进去什么、
+                // 取回来就是什么，所以只需把裸指针当 void* 交出去。
+                // 实测 ComCtlsDemo Builds/ListView/ListView.ctl:5226
+                // `ByVal ObjPtr(This)` (This As ISubclass 形参，C 侧 vb6_ivref_ISubclass*)
+                // 与 Builds/ComCtlsBase.bas:786 `ObjPtr(This)`：
+                // 修复前 ListView.c:7552 / ComCtlsBase.c:783 发 `vb6_ObjPtr((This).obj)`
+                // ⇒ C2039×5 + C2198×5。
+                const std::string ifaceNm241 = knownIfaceVars_[aLower];
+                if (!ivrefCType(ifaceNm241).empty()) {
+                    std::string newVal = "(void*)(" + args[0] + ")";
+                    replaceInArgList108c(args[0], newVal);
+                    args[0] = newVal;
+                    argsFixed108c = true;
+                } else {
+                    std::string newVal = "(" + args[0] + ").obj";
+                    replaceInArgList108c(args[0], newVal);
+                    args[0] = newVal;
+                    argsFixed108c = true;
+                }
             }
         }
         (void)argsFixed108c;

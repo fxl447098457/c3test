@@ -186,6 +186,30 @@
                                     arrCarrier091n = knownArrays_.count(vLower091n) > 0
                                                      || knownByteArrayVars_.count(vLower091n) > 0;
                                 }
+                                // Fix 243: 目标属性**归属项目类** (objClass 推得出) 时, 形参表
+                                // 是 VB 源码的真实记录 (Property Let X(ByVal Value As Variant))
+                                // —— 具体类型实参同样必须装箱, 否则 vb6_<X>_prop_let_<Y>(me,
+                                // vb6_VARIANT) 收到 BSTR/int32_t → C2440。
+                                // 实测 ComCtlsDemo MainForm.frm `CoolBar1.ImageList =
+                                // "ImageList1"` (CoolBar.ctl:1499 `Property Let ImageList(ByVal
+                                // Value As Variant)`) ⇒ C2440 BSTR→vb6_VARIANT ×10。
+                                // 原注释顾虑的"符号表 Variant 判定对 COM/后期绑定属性不可靠"
+                                // 由外层三道闸 (objClassMatchesProp / formCtrlNotOwned43 /
+                                // objIsComVar092b) 挡住 —— 命中的确实是目标类自己的属性。
+                                // Fix 243 **收窄到字符串值**: 形参表在符号层对**枚举**型
+                                // 形参同样记成 Variant, 而 C 形参其实是 int32_t, 装箱即
+                                // C2440。实测回归: Charts 2020 三工程
+                                //   ucChartBar/Form1.frm:448 `ucChartBar1.ChartOrientation = Index`
+                                //   ucPieChart/Form1.frm     `ucPieChart1.LabelsPositions = cbo….ListIndex`
+                                // ⇒ Form1.c C2440 vb6_VARIANT→int32_t。只有字符串这一档才是
+                                // ComCtlsDemo MainForm.frm `CoolBar1.ImageList = "ImageList1"`
+                                // 真正要的 (CoolBar.ctl:1499 Property Let … As Variant)。
+                                if (!arrCarrier091n
+                                    && (!objClass.empty()
+                                        || (knownFormControls_.count(objLower) && !formCtrlNotOwned43))
+                                    && node.value
+                                    && inferExprType(*node.value) == Vb6Type::String)
+                                    arrCarrier091n = true;
                                 if (arrCarrier091n) {
                                     valExpr = packLetValueArg(lastP091n, node.value.get(), valExpr);
                                 }
