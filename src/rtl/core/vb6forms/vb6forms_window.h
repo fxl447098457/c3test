@@ -47,6 +47,7 @@ int vb6_TwipToY(int twips);
 // Fix 184: 唯一 DPI 源 + 反向换算 (像素 -> 缇)。RTL 内任何 px/缇 转换都必须
 // 走这四个入口，禁止再写死 15。
 int vb6_DpiX(void);
+int vb6_HimetricToPxX(int hm);   // 账 #206: himetric -> 设备像素, 唯一那一处(按真实 DPI)
 int vb6_DpiY(void);
 int vb6_XToTwipX(int px);
 int vb6_YToTwipY(int px);

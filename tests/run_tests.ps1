@@ -811,6 +811,23 @@ function Test-RsRecordsetShape {
     }
 }
 
+# 账 #206 §B41 第一格（himetric 设计块）+ §B129（himetric 折算在 RTL 里住了 5 份文件）：
+# 状态条面板宽这一族今天有两处答案要钉 —— 发码侧认不认 `Object.Width` 那一行，
+# 以及 himetric→像素是不是只有 vb6_HimetricToPxX 一枚按真实 DPI 答。四头各带假改动证过能红。
+function Test-SbPanelHm {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] statusbar_panel_hm ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\check_statusbar_panel_hm.ps1" 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        $out | Select-Object -First 8 | ForEach-Object { Write-Host "  $_" }
+    }
+}
+
 # §B93（从 origin/ferock/0.10.7 的 5735aff6 捞回）：Join-Path 在 Windows PowerShell 5.1 只有两个位置参数，
 # 第三段写成位置参数会抛 ParameterBindingException，而它常待在 "$(...)" 内插里 —— 报错只剩一行噪声、那一段**静默变空**。
 # 本机实测改前 Get-MsvcToolset：5.1 下 IncludeSegs 6→1、LibSegs 3→0、空段 8（SDK 五段全丢）⇒ cl C1083 找不到 stddef.h，
@@ -4306,6 +4323,16 @@ if ($Category -in @("all", "run", "vbp")) {
         "SF05-FIXED-EDGE-UNCHANGED=True", "SBFONT-DONE")
     Test-Vbp "sbfont" "$Tests\sbfont\SbFont.vbp" $sbFontExpected
     Test-Vbp "sbfont_x86" "$Tests\sbfont\SbFont.vbp" $sbFontExpected -Arch "x86"
+    # <vbeclipse> 账 #206（§B41 的第一格）：**真 VB6 设计器**把状态条面板宽持久化成
+    # `Object.Width`（himetric，0.01mm）。语料 5623 份 .frm 里 356 份 / 1634 处这么写，
+    # 而本仓的 ingest 只认无前缀的 `Width` ⇒ 别人工程的面板几何整格丢掉（fixed 档退化成文字宽）。
+    # HM01 是唯一那枚改前会 False 的判据；HM02 钉"只有一处换算"（两枚数的比 == himetric 的比）；
+    # HM03/HM04 是反面证人（两台都 True，只拦"顺手把所有面板都改成内容宽/把面板整批丢掉"那种坏修法）；
+    # HM05 只钉前缀：Panels(i).Width 读回仍是请求值 —— §B41 剩下的那一格，本刀刻意没动。
+    $sbHmExpected = @("HM00-RAW w1=", "HM01-HM-DESIGN-WIDTH=True", "HM02-SINGLE-CONVERSION=True",
+        "HM03-SPRING-TILES=True", "HM04-PANELS-ARRIVED=True", "HM05-RAW cs=", "HM-DONE")
+    Test-Vbp "sbhm" "$Tests\sbhm\SbHm.vbp" $sbHmExpected
+    Test-Vbp "sbhm_x86" "$Tests\sbhm\SbHm.vbp" $sbHmExpected -Arch "x86"
     # <vbeclipse> 账 #221 = C29-PL-a: Picture.Line 落原生 GDI。这条判据只能**画完再问像素** ——
     # 改前 8 处 Line 全发成 ComGetObjectProp(hwnd,"Line") 再取 Item, 两跳在 RTL 都登记成
     # "认识但什么都不做" ⇒ 编得过、跑得起、一笔不画、一条诊断也不打 (CLINE 那族静默空转的第三例)。
@@ -5465,6 +5492,7 @@ if ($Category -in @("all", "compile")) {
     Test-RtlResourceIds
     Test-RtlProtoArity
     Test-RsRecordsetShape
+    Test-SbPanelHm
     Test-Ps51JoinPath
     Test-UcArrayEventSites
     Test-SubclassSlotSites
