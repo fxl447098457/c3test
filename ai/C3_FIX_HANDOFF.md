@@ -2058,7 +2058,7 @@ marker、重编，之后 `check_rtl_embedded` 报 **125/125 逐字节相同**。
 哨兵 `check_statusbar_panel_hm.ps1` 的 R2 已经把"5 份文件 / 13 行"钉死，多长一份就红 ——
 并表的时候把名单往下减，别往上加。
 
-### B131 `Panels(<数字>).Index` 把整数交给 `wchar_t*` 槽 ⇒ 启动期 AV（账 #300，**已出 —— 第十九刀，2026-10-10，门待回填**）
+### B131 `Panels(<数字>).Index` 把整数交给 `wchar_t*` 槽 ⇒ 启动期 AV（账 #300，**已出 —— 第十九刀，2026-10-10，门 #464 全绿 = run 38014099324、head `597bd6d1`、attempt 1、12 job 全 completed/success、非绿 0、wall 10m52s；`Emit manifest (shape oracle)` 同绿 => 那行改写被 CI 独立复算证实，`Tests (vbp #1..#4)` 四片全绿 => sbhm 的两头判据两架构真跑过）
 
 `.build/b351_probe/P299.frm` 跑到第 6 行崩（bash 报 139；BASE 那台**同样崩在同一行** ⇒ 与第十八刀无关，是存量）。
 产物形状把两件事叠在一处：
