@@ -348,6 +348,21 @@ int vb6_DecimalAsVariant(vb6_VARIANT v, VARIANT *out) {
 #endif
 }
 
+/* 账 #305 §B144: 上面那枚出口的**反向一问** ——「手里这枚 OLE VARIANT 里的那 16 字节 DECIMAL
+ * 住在哪」。两架构的答案都是**结构体的头**，分歧只在 SDK 怎么称呼它：x64 的 VARIANT 里
+ * `decVal` 是与 `vt` 同起点的 union 成员(取 &v->decVal 就是取头)，x86 那枚 VARIANT 整个被
+ * DECIMAL 盖住(头就是 v 本身)。§B144 量到的两处静默错(x64 把值放在 offset 8、x86 只交指针
+ * ⇒ oleaut32 把地址当数值答出来)都是这一问被各自抄了一遍抄错的产物 —— 所以「往里读」
+ * (FromComResult / FromStackVARIANT 两臂)与「服务端借用实参」今后只问这里，不再抄第二次。 */
+DECIMAL *vb6_DecimalPtrFromVariant(const VARIANT *v) {
+    if (!v || v->vt != VT_DECIMAL) return NULL;
+#ifdef _WIN64
+    return (DECIMAL *)&v->decVal;
+#else
+    return (DECIMAL *)v;
+#endif
+}
+
 BSTR vb6_DecimalToBSTR(vb6_VARIANT v) {
     VARIANT src;
     VariantInit(&src);

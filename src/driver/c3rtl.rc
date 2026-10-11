@@ -564,3 +564,7 @@
  * 与四枚运行期算术出口 (vb6_VarAddV / SubV / MulV / DivV)；vb6rtl.c 的 vb6_DecimalAsVariant 从
  * static 出来；vb6rtl_variant.h 加声明；两条「往里读」的 x86 Decimal 臂一起改从结构体的头铺。
  * 本行是那次 touch, 让 rc.exe 重跑并把新 RTL 嵌进 C3.exe。 */
+/* 账 #305 §B144 (2026-10-11 第三十八刀): vb6comserver_obj.c 的两处 memcpy 换成 RTL 出口
+ *   vb6_VariantBorrowIntoSlot / vb6_VariantPackCopyInto (新在 vb6rtl_com.c)，另把
+ *   「DECIMAL 住在 VARIANT 的哪一字节」收成 vb6_DecimalPtrFromVariant (vb6rtl.c)。
+ *   touch 本文件 = 让 125 份 RCDATA 重嵌一次 (§B99② 那道哨兵盯的就是这一格)。 */

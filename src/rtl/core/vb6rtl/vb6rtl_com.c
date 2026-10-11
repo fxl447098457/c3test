@@ -331,17 +331,18 @@ vb6_VARIANT vb6_VariantFromComResult(void* variant_ptr) {
          * 就交回 vt=20 的结果(实测)，所以这一格是 Variant 算术的必经之路。 */
         case VT_I8:    result.llVal = pv->llVal; break;
         case VT_DECIMAL:
+            /* 账 #305 §B144: 这一档只问唯一出口「DECIMAL 住在哪一字节」—— 两架构的布局
+             * 不在这里抄第二遍(这里曾经抄过两次，都是抄错的)。 */
+            {
+                const DECIMAL *d144 = vb6_DecimalPtrFromVariant(pv);
 #ifdef _WIN64
-            memcpy(&result.decVal, &pv->decVal, sizeof(result.decVal));
+                if (d144) memcpy(&result.decVal, d144, sizeof(result.decVal));
 #else
-            /* 账 #305 §B144/§B145: x86 的 VT_DECIMAL VARIANT **不走指钄** —— 那 16 字节
-             * 整个被一枚 DECIMAL 盖住(wReserved↔vt、lo64↔数据区)。上面那句 rev11 的
-             * 「DECIMAL 在外部由 pdecVal 指向」是错的，于是这一步是**从一枚数值当地址去
-             * 读 16 字节**(5 就是读地址 0x5 ⇒ 原生 AV，不是读错数这么轻)。修法与「往外写」
-             * 同形: 从结构体的头铺 16 字节。判空也一起撤 —— 那一格现在是数值本体。 */
-            result.pdecVal = (DECIMAL*)CoTaskMemAlloc(sizeof(DECIMAL));
-            if (result.pdecVal) memcpy(result.pdecVal, pv, sizeof(DECIMAL));
+                result.pdecVal = (DECIMAL *)CoTaskMemAlloc(sizeof(DECIMAL));
+                if (result.pdecVal && d144)
+                    memcpy(result.pdecVal, d144, sizeof(DECIMAL));
 #endif
+            }
             break;
         default:
             // P24-02: VT_ARRAY - 将Windows SAFEARRAY转换为vb6_SafeArray1D
@@ -466,17 +467,18 @@ vb6_VARIANT vb6_VariantFromStackVARIANT(VARIANT* pv) {
          * 就交回 vt=20 的结果(实测)，所以这一格是 Variant 算术的必经之路。 */
         case VT_I8:    result.llVal = pv->llVal; break;
         case VT_DECIMAL:
+            /* 账 #305 §B144: 这一档只问唯一出口「DECIMAL 住在哪一字节」—— 两架构的布局
+             * 不在这里抄第二遍(这里曾经抄过两次，都是抄错的)。 */
+            {
+                const DECIMAL *d144 = vb6_DecimalPtrFromVariant(pv);
 #ifdef _WIN64
-            memcpy(&result.decVal, &pv->decVal, sizeof(result.decVal));
+                if (d144) memcpy(&result.decVal, d144, sizeof(result.decVal));
 #else
-            /* 账 #305 §B144/§B145: x86 的 VT_DECIMAL VARIANT **不走指钄** —— 那 16 字节
-             * 整个被一枚 DECIMAL 盖住(wReserved↔vt、lo64↔数据区)。上面那句 rev11 的
-             * 「DECIMAL 在外部由 pdecVal 指向」是错的，于是这一步是**从一枚数值当地址去
-             * 读 16 字节**(5 就是读地址 0x5 ⇒ 原生 AV，不是读错数这么轻)。修法与「往外写」
-             * 同形: 从结构体的头铺 16 字节。判空也一起撤 —— 那一格现在是数值本体。 */
-            result.pdecVal = (DECIMAL*)CoTaskMemAlloc(sizeof(DECIMAL));
-            if (result.pdecVal) memcpy(result.pdecVal, pv, sizeof(DECIMAL));
+                result.pdecVal = (DECIMAL *)CoTaskMemAlloc(sizeof(DECIMAL));
+                if (result.pdecVal && d144)
+                    memcpy(result.pdecVal, d144, sizeof(DECIMAL));
 #endif
+            }
             break;
         case VT_ARRAY|VT_BSTR:
         case VT_ARRAY|VT_VARIANT:
@@ -603,6 +605,47 @@ void* vb6_ComPackVariant(vb6_VARIANT v) {
        那一份还要继续用。对象那一档维持原状(借用，不 AddRef) —— 那是另一格的口径。 */
     if (pv->vt == VT_BSTR && pv->bstrVal) pv->bstrVal = SysAllocString(pv->bstrVal);
     return pv;
+}
+/* 账 #305 §B144: 服务端**出站**那一格（COM 客户端拿到的返回值）唯一出口。
+ * 改前那里是 `memcpy(pVarResult, &tmpRet, sizeof(VARIANT))`，注释写着「槽的前 16 字节
+ * 与 OLE VARIANT 内容一致」—— 标量那几档确实一致，VT_DECIMAL 不一致：对端(和 oleaut32)
+ * 从**结构体头**读那 16 字节，而我们 x64 把它放在 offset 8、x86 放的是指针。实测两台都
+ * 静默答错数(x64 三问全答 0；x86 把堆地址当数值答出 18416048)，一个错误都不报。
+ * 现在：表仍问 §B145 那份唯一的 `vb6_VariantPackBorrow`(它自己再问 §B142 的布局出口)，
+ * 这里只补「带权」那一步 —— 交出去的那份归对端 VariantClear，所以串要新分配、对象要 AddRef
+ * (改前那两档是把槽里的指针直接递出去 = 对端释放我们的引用)。 */
+void vb6_VariantPackCopyInto(const void *slot, VARIANT *out) {
+    if (!out) return;
+    VariantInit(out);
+    if (!slot) return;
+    vb6_VariantPackBorrow(*(const vb6_VARIANT *)slot, out);
+    if (out->vt == VT_BSTR && out->bstrVal) out->bstrVal = SysAllocString(out->bstrVal);
+    /* 用受守卫的那枚出口(内含 vb6_ComIsDispatchable)：槽里挂着 VT_DISPATCH 标签的可能是
+     * 裸子控件 HWND，直接 ->AddRef() 会把 HWND 首字段当 vtable 解引用 ⇒ av read。
+     * ⚠ 本文件按 **C** 编(/std:c11)，`p->AddRef()` 那种 C++ 形态的写法根本进不了编译器。 */
+    if (out->vt == VT_DISPATCH && out->pdispVal) vb6_ComAddRefDispatch(out->pdispVal);
+}
+
+/* 账 #305 §B144: 服务端**入站**那一格（调用方递进来的实参）唯一出口，语义是**借用**。
+ * 不能改问现成的 `vb6_VariantFromComResult` —— 那一枚的契约是**消耗所有权**(把 VT_BSTR /
+ * VT_DISPATCH 的指针字段置 NULL 拿走)，而 `IDispatch::Invoke` 的实参数组是对端的，
+ * 被调方不许改动它。先 memcpy 一份私有副本再交给它也不行：转移走的是副本里的裸指针，
+ * 等于最后 clear 掉的是调用方拥有的那只串。所以这里只搬字节、只问布局出口，谁也不接管。 */
+void vb6_VariantBorrowIntoSlot(const VARIANT *src, void *slot) {
+    vb6_VARIANT *s = (vb6_VARIANT *)slot;
+    memset(s, 0, sizeof(*s));
+    if (!src) { s->vt = vb6_vtEmpty; return; }
+    if (src->vt == VT_DECIMAL) {
+        const DECIMAL *d = vb6_DecimalPtrFromVariant(src);
+        s->vt = (vb6_vartype)VT_DECIMAL;
+#ifdef _WIN64
+        if (d) memcpy(&s->decVal, d, sizeof(*d));
+#else
+        s->pdecVal = (DECIMAL *)d;   /* 借用：指向对端内联的那 16 字节，存活期 = 这一趟 Invoke */
+#endif
+        return;
+    }
+    memcpy(s, src, sizeof(VARIANT));  /* 其余各档：对端的头 16 字节与我们那一格本来就对齐 */
 }
 
 /* 账 #305 §B145: Variant 参与 + - * / 时的**唯一运行期出口**。

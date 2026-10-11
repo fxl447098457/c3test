@@ -61,9 +61,38 @@ static void call_member(IDispatch *disp, const wchar_t *name, VARIANT *argv, int
     printf("CALL=%s hr=0x%08lX", tag, (unsigned long)hr);
     if (SUCCEEDED(hr) && res.vt == VT_I4) printf(" result=%ld", (long)V_I4(&res));
     else if (SUCCEEDED(hr) && res.vt != VT_EMPTY) printf(" resultvt=%u", (unsigned)res.vt);
+    /* Acct #305 SB144: a Decimal reply used to print only "resultvt=14" -- the tag was
+     * right while the value was garbage, which is exactly why this cell hid for so long.
+     * Two locale-free readings: VT_CY (fixed point, 1/10000) and VT_I8. If oleaut32
+     * cannot convert the bytes we print FAIL instead of staying silent. */
+    if (SUCCEEDED(hr) && res.vt == VT_DECIMAL) {
+        VARIANT cy, i8;
+        VariantInit(&cy); VariantInit(&i8);
+        if (SUCCEEDED(VariantChangeType(&cy, &res, 0, VT_CY)) && cy.vt == VT_CY)
+            printf(" dec_cy=%lld", (long long)cy.cyVal.int64);
+        else
+            printf(" dec_cy=FAIL");
+        if (SUCCEEDED(VariantChangeType(&i8, &res, 0, VT_I8)) && i8.vt == VT_I8)
+            printf(" dec_i8=%lld", (long long)i8.llVal);
+        else
+            printf(" dec_i8=FAIL");
+        VariantClear(&cy); VariantClear(&i8);
+    }
     printf("\n");
     VariantClear(&res);
     for (i = 0; i < argc; i++) VariantClear(&argv[i]);
+}
+
+/* Acct #305 SB144: build a VT_DECIMAL the way a real client does -- through oleaut32,
+ * so we never hand-write the arch-specific position of those 16 bytes (x86 has no
+ * decVal member at all; x64 puts it at the head). */
+static VARIANT mk_dec_i4(LONG v) {
+    VARIANT src, out;
+    VariantInit(&src); VariantInit(&out);
+    src.vt = VT_I4; src.lVal = v;
+    if (FAILED(VariantChangeType(&out, &src, 0, VT_DECIMAL)) || out.vt != VT_DECIMAL)
+        printf("MKDEC=FAIL vt=%u\n", (unsigned)out.vt);
+    return out;
 }
 
 static VARIANT mk_i4(LONG v) {
@@ -213,6 +242,14 @@ int main(int argc, char **argv) {
     call_member(disp, L"SetValue", args, 1, DISPATCH_METHOD, "SETVALUE");
     call_member(disp, L"GetValue", args, 0, DISPATCH_METHOD, "GETVALUE");
 
+    /* Acct #305 SB144: the Decimal round trip, both directions. */
+    call_member(disp, L"Amt", args, 0, DISPATCH_METHOD, "AMT");
+    call_member(disp, L"Quarter", args, 0, DISPATCH_METHOD, "QUARTER");
+    {
+        VARIANT dargs[1];
+        dargs[0] = mk_dec_i4(5);
+        call_member(disp, L"EchoVal", dargs, 1, DISPATCH_METHOD, "ECHO");
+    }
     {
         DISPID id = DISPID_UNKNOWN;
         LPOLESTR names[1];

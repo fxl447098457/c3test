@@ -5417,7 +5417,9 @@ if ($Category -in @("all", "run", "vbp")) {
         "0x7CA8CD81",
         # ai/022 B17: CImpl 多了个公有成员 Twice（外部晚绑定要有东西可点），methodCount 0→1。
         # 这条针同时钉住"表里的成员面与库里 `_CImpl` 那一档同源"（B13e 的广告==应答）。
-        "1, /* methodCount */") @(
+        # 账 #305 §B144 (第三十八刀): 本格为了让 Decimal 跨过 COM 边界又加了三枚公有成员
+        # （Amt / Quarter / EchoVal），表里的成员面随之 1→4 —— 动的是**这条针**，不是产物走样。
+        "4, /* methodCount */") @(
         "0AD9CBC7") @(
         "CoClass 'PG' identity: CLSID={11112222-3333-4444-5555-666677778888} (vbp)",
         "IID={F5CEF988-3217-6173-94B7-BB99C4B8CB81} (minted)",
@@ -5465,7 +5467,10 @@ if ($Category -in @("all", "run", "vbp")) {
         "TYPEINFOCOUNT=1 hr=0x00000000",
         "CALL=ADD hr=0x00000000 result=42",
         "CALL=GETVALUE hr=0x00000000 result=7",
-        "NAMES=bogus hr=0x80020006 dispid=-1")
+        "NAMES=bogus hr=0x80020006 dispid=-1") @(
+        # 账 #305 §B144: 探针现在也按名问 AMT/QUARTER/ECHO，而那三枚只属于 cc_dll ——
+        # legacy 这张脸一个都不该答（答了就等于新增成员泄进了另一个工程）。
+        "CALL=AMT")
     Test-DispatchInvoke "cc_dll_dispatch_iface_only" "$Tests\cc_dll\CoDll.vbp" `
         "CoDll" "{11112222-3333-4444-5555-666677778888}" @(
         "CREATE hr=0x00000000 ptr=OK",
@@ -5474,7 +5479,15 @@ if ($Category -in @("all", "run", "vbp")) {
         "QI_EXTRA hr=0x00000000 same=no",
         "CREATE_IFACE hr=0x00000000 ptr=OK",
         "VTBL_GET_BEFORE=0",
-        "VTBL_GET_AFTER=42") @(
+        "VTBL_GET_AFTER=42",
+        # 账 #305 §B144 (第三十八刀): 服务端交回一枚 Decimal 时，两处裸 memcpy 在两台上都静默
+        # 答错数 —— BASE 的读数：AMT 交 0 (x64) / 19669320 (x86)、QUARTER 交 131086 / 19669584。
+        # 探针现在把返回值交给 oleaut32 换算成 CY(×10000) 与 I8 两档，三行都钉住。
+        # ⚠ ECHO 是入站那一半的**反面证人**：BASE 上它也答 5 —— 旧的两个方向恰好对称地把那 16
+        # 字节搬了个来回，所以它钉的是"改成借用之后没把 Decimal 读丢"，能红的是前两条。
+        "CALL=AMT hr=0x00000000 resultvt=14 dec_cy=12345670000 dec_i8=1234567",
+        "CALL=QUARTER hr=0x00000000 resultvt=14 dec_cy=12500 dec_i8=1",
+        "CALL=ECHO hr=0x00000000 resultvt=14 dec_cy=50000 dec_i8=5",
         "CALL=ADD") "{F5CEF988-3217-6173-94B7-BB99C4B8CB81}"
     # ai/022 B16: 同一批断言在 x86 上再真跑一遍 —— 这是布局改动（vtable 槽 + 库里的偏移 +
     # 调用约定）唯一的 x86 侧端到端读数：x86 探针按库里那形状直调槽 3/4，
@@ -5487,6 +5500,14 @@ if ($Category -in @("all", "run", "vbp")) {
         "CREATE_IFACE hr=0x00000000 ptr=OK",
         "VTBL_GET_BEFORE=0",
         "VTBL_GET_AFTER=42",
+        # 账 #305 §B144 (第三十八刀): 服务端交回一枚 Decimal 时，两处裸 memcpy 在两台上都静默
+        # 答错数 —— BASE 的读数：AMT 交 0 (x64) / 19669320 (x86)、QUARTER 交 131086 / 19669584。
+        # 探针现在把返回值交给 oleaut32 换算成 CY(×10000) 与 I8 两档，三行都钉住。
+        # ⚠ ECHO 是入站那一半的**反面证人**：BASE 上它也答 5 —— 旧的两个方向恰好对称地把那 16
+        # 字节搬了个来回，所以它钉的是"改成借用之后没把 Decimal 读丢"，能红的是前两条。
+        "CALL=AMT hr=0x00000000 resultvt=14 dec_cy=12345670000 dec_i8=1234567",
+        "CALL=QUARTER hr=0x00000000 resultvt=14 dec_cy=12500 dec_i8=1",
+        "CALL=ECHO hr=0x00000000 resultvt=14 dec_cy=50000 dec_i8=5",
         "DONE") @(
         "CALL=ADD") "{F5CEF988-3217-6173-94B7-BB99C4B8CB81}" "x86"
 
