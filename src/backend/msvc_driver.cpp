@@ -1,4 +1,4 @@
-#include "backend/msvc_driver.hpp"
+﻿#include "backend/msvc_driver.hpp"
 #include "common/encoding.hpp"
 
 #include <iostream>
@@ -252,7 +252,7 @@ bool MsvcDriver::compileAndLink(const MsvcDriverOptions& options) {
 
     // 调试信息
     if (options.debugInfo) {
-        cmd << " /Zi /DEBUG";
+        cmd << " /Zi /FS /DEBUG";
     }
 
     // C11标准, Unicode, UTF-8源码编码, 禁用MSVC安全警告
