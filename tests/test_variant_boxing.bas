@@ -220,5 +220,33 @@ Public Sub Main()
     cad(1) = 7
     cab = cad(1) / 2
     Debug.Print "VB-ar-div-target-byte-fx="; cab
+    ' Acct #305 para-B146 (knife 39): the builtin exits whose C return IS a whole slot
+    ' were never reconciled with the RTL declarations, so four names (CDec / CVErr /
+    ' GetAllSettings / IIf) and the five boxing constructors (Byte/Integer/Single/Date/
+    ' Identity) were missing from the codegen text predicate. Read through a Variant
+    ' *variable* the AST arm covered them; called *directly* the consumer emitted a bare
+    ' scalar: `CDec(1234567) + 1` -> (int32_t)(vb6_CDec(...) + 1) = C2088, `d = CDec("2.5")`
+    ' = C2440. The negative control for the eight lines below is therefore "BASE cannot
+    ' compile this file at all" (11 errors on both arches, probe .build/b1216_probe), not
+    ' "BASE answers a wrong number". Readings are from the NEW build; both arches agree.
+    Dim b6v As Variant
+    Dim b6d As Double
+    Debug.Print "VB-b146-dec-add="; CDec(1234567) + 1
+    Debug.Print "VB-b146-dec-vt="; VarType(CDec(5))
+    Debug.Print "VB-b146-dec-tn="; TypeName(CDec("1.25") * 2)
+    b6d = CDec("2.5")
+    Debug.Print "VB-b146-dec-dbl="; b6d
+    b6v = IIf(True, CDec(1), CDec(2)) + 1
+    Debug.Print "VB-b146-iif="; CStr(b6v)
+    b6v = CVErr(11)
+    Debug.Print "VB-b146-err-vt="; VarType(b6v)
+    Debug.Print "VB-b146-err-iserr="; IsError(b6v)
+    ' Fifth exit (GetAllSettings): reachability witness only. VB6 answers Null here (the
+    ' app has no SaveSettings key) while our RTL stub returns a bare Variant instead
+    ' (vb6rtl_registry.c:113, comment 'simplified: not true 2D array'), so the two lines
+    ' below pin the SHAPE a slot-returning builtin reaches a Variant target with -- not
+    ' VB6 parity. The parity gap is registered as an open item (para-B149).
+    Debug.Print "VB-b146-reg-vt="; VarType(GetAllSettings("C3NoSuchApp146", "Sec"))
+    Debug.Print "VB-b146-reg-isnull="; IsNull(GetAllSettings("C3NoSuchApp146", "Sec"))
     Debug.Print "VB-DONE"
 End Sub

@@ -776,7 +776,21 @@ bool CCodeGen::cExprIsVariant(const std::string& cExpr) const {
     }
     if (start >= cExpr.size()) return false;
 
-    // 已知返回 vb6_VARIANT 的函数前缀
+    // 已知返回 vb6_VARIANT 的函数前缀。
+    //
+    // ⚠ 这张表**不是权威** —— 权威是 RTL 本身: 「一个内置出口交出来的 C 是不是整只槽」问的是
+    //   RTL 里那句 `vb6_VARIANT vb6_X(...)` 声明。手写这张表就会与 RTL 走散, 而两个方向的走散都贵:
+    //   少一名 = 下游按裸标量发码 (账 #305 §B146 的实物是 `CDec(...) + 1` 直接 C2088「+ 对于
+    //   struct 非法」、`d = CDec("2.5")` C2440, 两台真编译都编不过); 多一名 = 死名躺着骗人
+    //   (本表清掉了 11 条: RTL 里没有、400 份语料发码里也一次都没出现过 —— 逐名核过。
+    //    第 12 条 `vb6_DispCallByVtbl(` 被这张 census 报成死名, 实测**不是**, 见下面那条的注释)。
+    //   对账 = 第 54 道哨兵 scripts/check_builtin_slot_returns.ps1: 它从 RTL 派生「返回 vb6_VARIANT
+    //   的函数」与「后端会 emit」两个集合, 两个方向逐名比这张表。
+    //
+    // _Generic 宏只有**每一档变目都交槽**时才登记 (vb6_VariantFromValue 是: 含
+    //   `vb6_VARIANT: vb6_VariantIdentity` 档); vb6_CDbl / vb6_CInt / vb6_LenB / vb6_InStr 那一族
+    //   宏交的是标量, 按名字登记会一律答错, 所以它们不进表。
+    //   指针返回也不进表: vb6_VariantArrayElemPtr 交回 vb6_VARIANT*(槽的地址), 不是槽。
     static const std::vector<std::string> variantPrefixes = {
         "vb6_VariantArrayGet(",
         "vb6_VariantFromComResult(",
@@ -790,17 +804,6 @@ bool CCodeGen::cExprIsVariant(const std::string& cExpr) const {
         "vb6_VariantArray(",
         "vb6_VariantObject(",
         "vb6_VariantNull(",
-        "vb6_VariantNothing(",
-        "vb6_VariantFromI2(",
-        "vb6_VariantFromI4(",
-        "vb6_VariantFromR4(",
-        "vb6_VariantFromR8(",
-        "vb6_VariantFromBSTR(",
-        "vb6_VariantFromBool(",
-        "vb6_VariantFromDate(",
-        "vb6_VariantFromUI1(",
-        "vb6_VariantFromSafeArray(",
-        "vb6_VariantFromSafeArray1D(",
         "vb6_LoadResData(",       // Fix 090bz: VBA LoadResData → vb6_VARIANT;
                                  //   Dim D() As Byte: D = LoadResData(...) 赋值
                                  //   需 VariantToSafeArray1D 提取 (cLang LoadData/LoadInfo C2440).
@@ -816,6 +819,15 @@ bool CCodeGen::cExprIsVariant(const std::string& cExpr) const {
         //   发 vb6_BSTR_Assign 直收 Variant → C2440.
         "vb6_LoadResPicture(",
         "vb6_LoadResString(",
+        // ⚠ 这一名**不是** RTL 出口, 是全表唯一的例外, 所以「从 RTL 派生」的那把 census
+        //   看不见它 —— 它来自语料自己的工程: mdQRCodegen.bas:1407 写着
+        //   `Private Function DispCallByVtbl(...) As Variant`, 而单文件 (非多模块) 发码时工程
+        //   过程的名是裸的 `vb6_<proc>` (cProcName: 只有多模块才拼模块名), 于是
+        //   variantReturnFuncs_ 也够不着 (那张集合里只有 `vb6_<模块>_<proc>` 和 `vb6_pv_<proc>`)。
+        //   实测撤掉这一行: mdQRCodegen 五处 `hResult = DispCallByVtbl(...)` 少掉
+        //   vb6_VariantToLong 提取, 整只槽进 vb6_ChkLong(int64_t) —— 这是 400 份 A/B 里唯一
+        //   一条归因不到的移动。同形缺口 (工程的 Variant 函数直接赋给非 Variant 目标, 单模块)
+        //   两台 BASE/NEW 都还发 `vb6_ChkLong(vb6_MakeDec())`, 另立 §B148。
         "vb6_DispCallByVtbl(",  // Fix 068: DispCallByVtbl returns Variant
         // Fix 110w: VB6 CallByName 返回 vb6_VARIANT (见 vb6rtl_class_com.h) —
         // 参与算术/关系运算或需 BSTR 时必须按 Variant 处理, 否则 C2088
@@ -835,6 +847,24 @@ bool CCodeGen::cExprIsVariant(const std::string& cExpr) const {
         "vb6_VarSubV(",
         "vb6_VarMulV(",
         "vb6_VarDivV(",
+        // 账 #305 §B146: 下面这十名都是「RTL 声明返回 vb6_VARIANT、后端确实会 emit」而表里漏着的
+        // (派生自 src/rtl/** 的声明逐名核过; 前两版 census 各错过一次: 一把漏认 `static inline`
+        //  前缀、一把把 `vb6_VARIANT *f(...)` 的指针返回当成槽 —— 所以 vb6_VariantArrayElemPtr
+        //  刻意**不进**这张表, 它交回的是槽的地址而不是槽)。
+        "vb6_CDec(",                // CDec: 唯一能造出精确 Decimal 的内置出口 (vb6rtl_misc.c:271)
+        "vb6_CVErr(",              // CVErr -> vb6_VARIANT (vt=10, vb6rtl_conv.c:389)
+        "vb6_GetAllSettings(",     // 注册表一组值 -> vb6_VARIANT (vb6rtl_registry.c:113)
+        "vb6_IIfVariant(",         // IIf 的两个分支都是槽时选中的那一族
+        "vb6_VariantArrayGetVal(", // 晚绑定数组元素读值 (vb6rtl_com.c:698)
+        "vb6_VariantByte(",
+        "vb6_VariantInt(",
+        "vb6_VariantSingle(",
+        "vb6_VariantDate(",
+        "vb6_VariantIdentity(",
+        //   ↑ 上面五枚是构造器 (vb6rtl_variant.h 的 static inline)。表里本来就有 Empty/Long/
+        //     Double/String/Bool/Null/Object/Array 那一批, 缺的正是这五档 ——
+        //     cgen_util_ctrl.cpp:2419 早就写着「vb6_VariantByte( 不在 cExprIsVariant 的清单里」
+        //     并为此另立了第二份名单 (cExprIsVariantCarrierStr); 今天把名补进权威这张表。
     };
     for (const auto& prefix : variantPrefixes) {
         if (cExpr.compare(start, prefix.size(), prefix) == 0) return true;

@@ -786,6 +786,22 @@ function Test-RtlResourceIds {
         $out | Select-Object -First 6 | ForEach-Object { Write-Host "  $_" }
     }
 }
+# 账 #305 §B146 (第三十九刀): 「内置出口交出来的 C 是不是整只槽」那张手写表与 RTL 对账。
+# 少一名 = 消费点按裸标量发码 (实物: CDec 那四行, BASE 真编译 6 条错)；多一名 = 死名骗人
+# (本刀清掉 11 条)。两侧都是真代价, 所以这道针两个方向都要问。
+function Test-BuiltinSlotReturns {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] builtin_slot_returns ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\check_builtin_slot_returns.ps1" 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        $out | Select-Object -First 8 | ForEach-Object { Write-Host "  $_" }
+    }
+}
 # 账 #240: RTL 的头与体必须同一张签名（参数个数）。本机那台 cl 在 C 模式下不诊断「实参过多」，
 # 头追不上体的缺陷只有 runner 上新 cl 才报 error C2197 ⇒ 判据不能靠真编，只能对着源码比。
 # 账 #278 §B72 把同一把针往外接两头：发码那几张控件方法表（名字 + 实参个数, 恰好 23 行 =
@@ -2563,7 +2579,25 @@ if ($Category -in @("all", "run", "bas")) {
         # 与 §B77① 未拍的口径无关)：前两枚走运行期出口 (Variant 变量)，第三枚走编译期那一档
         # (定长数组元素 = oracle 答不上来的那一形)，回归那台交 3。
         "VB-ar-div-target-long=4", "VB-ar-div-target-byte=4",
-        "VB-ar-div-target-byte-fx=4", "VB-DONE")
+        "VB-ar-div-target-byte-fx=4",
+        # 账 #305 §B146 (第三十九刀): 内置出口里「C 返回就是整只槽」的那一族, 以前只按手写
+        # 清单登记, 从没与 RTL 的声明对过账 —— CDec / CVErr / GetAllSettings / IIf 与五枚装箱
+        # 构造器都不在表里。经 Variant **变量**中转的形, AST 那一半兜住了 (§B145 那些针今天
+        # 也是绿的); **直接**调用才暴露: 消费点按裸标量发码。BASE (第三十八刀那台 exe) 真编译
+        # 这份夹具当场 6 条错 (ob6/c3-error.log, 两架构同)：
+        #   .c(331) C2088 "+" 对于 struct 非法   = CDec(1234567) + 1
+        #   .c(337) C2088 "*" 对于 struct 非法   = TypeName(CDec("1.25") * 2)
+        #   .c(339) C2440 vb6_VARIANT -> double  = b6d = CDec("2.5")
+        #   .c(344) C2440 vb6_VARIANT -> int32_t = IIf(True, CDec(1), CDec(2)) + 1
+        # 所以前四枚针是「编不过就整条夹具红」那一类，红面在编译而不是读数。CVErr/GetAllSettings
+        # 那三条在 BASE 上编得过 (VarType 的形参本来就是槽)，它们是**读数证人**：vt=10 是
+        # VT_ERROR、IsError 答 True，与 VB6 同档；reg-vt=12 / reg-isnull=False 只钉「内置出口
+        # 交出的槽能走到 Variant 目标」这个形状 —— VB6 这里答 Null，RTL 的简化实现答 12
+        # (vb6rtl_registry.c:113)，那条口径差另立在 §B149 的开放项里，不在本格。
+        "VB-b146-dec-add=1234568", "VB-b146-dec-vt=14", "VB-b146-dec-tn=Decimal",
+        "VB-b146-dec-dbl=2.5", "VB-b146-iif=2",
+        "VB-b146-err-vt=10", "VB-b146-err-iserr=True",
+        "VB-b146-reg-vt=12", "VB-b146-reg-isnull=False", "VB-DONE")
     # ⚠ 这里曾经是字面 TAB: `"$Tests<TAB>est_variant_boxing.bas"`。
     # PowerShell 的 "" 里 **`\t` 不是转义**（转义是反引号），所以只要有人把 `\t` 写成真 TAB,
     # 路径就变成 `tests` + TAB + `est_...` —— 门里读到的是 `error VB1006: 无法打开文件`,
@@ -5695,6 +5729,7 @@ if ($Category -in @("all", "compile")) {
     Test-DocHostAuthority
     Test-RtlNakedNames
     Test-RtlResourceIds
+    Test-BuiltinSlotReturns
     Test-RtlProtoArity
     Test-RsRecordsetShape
     Test-SbPanelHm

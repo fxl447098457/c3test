@@ -19,7 +19,7 @@
 #       三者的标签必须互不相同且都不是 `[COMPILE]` (日志上读得出"这格只发了码")。
 #   H5  `Test-DispatchInvoke` 的**调用面**要用 AST 钉住绑定: 每个调用点的「位置实参个数 / 数组实参
 #       个数 / Needles 与 Absent 各含几条针」都必须等于名单里的数。为什么要 AST —— 往多实参助手的
-#       数组里插针时，插错的那一笔**语法仍然对**，变的只是绑定: 门 #529 上第三十八刀插进 Needles 的
+#       数组里插针时，插错的那一笔**语法仍然对**，变的只是绑定: 门 #532 上第三十八刀插进 Needles 的
 #       三条针吃掉了收尾的 `") @(`, 于是 `"CALL=ADD"` 从 Absent 变成 Needles、ExtraIid 往后挪了一格,
 #       探针少了第三个参数 ⇒ 整段薄指针/契约槽读数(EXTRA_IID/QI_EXTRA/CREATE_IFACE/VTBL_*)安静不出现,
 #       而 `[Parser]::ParseFile` 报 0 错。这一格盯的就是那一种红。
@@ -119,7 +119,7 @@ foreach ($pair in @(@('Test-Compile', '[COMPILE]'), @('Test-CodegenOk', '[CODEGE
     }
 }
 
-# ---- H5: 多数组实参助手的绑定形状 (账 #305 SB144, 门 #529 的实证) ----
+# ---- H5: 多数组实参助手的绑定形状 (账 #305 SB144, 门 #532 的实证 ----
 $tok5 = $null; $err5 = $null
 $ast5 = [System.Management.Automation.Language.Parser]::ParseFile($rt, [ref]$tok5, [ref]$err5)
 if ($err5.Count -gt 0) {

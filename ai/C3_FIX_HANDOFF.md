@@ -2184,7 +2184,7 @@ marker、重编，之后 `check_rtl_embedded` 报 **125/125 逐字节相同**。
 
 - **护栏**：51 道 `[STATIC]` 本地全 rc=0；语料形状清单本机重算一遍 = **inputs=400 / 未变 399 / 移动 1**，移动的正是 `tests/tabwalk/TabWalkApp.vbp`（两侧 rc=0，无新增/缺失输入，`.build/b699_manifest_k30.txt`）。那一行**按 CI 读数登记** —— 本刀没动 `src/`，除夹具自身之外一行都不该动，动了就是归因没做完。
 - **本刀没做的**：`clicks=3` 与 `AK-up` 读的是**落点**不是通知条数的时刻，那两条口径没动；modal 与 pbsb 的既有等法只是被**登记进同一张表**（它们本来就在答同一问），没有改写；`appqquit` / `combofocus` 那一族（#259 / 门 #403）住的是另一问（进程肯不肯自己退），仍由账 #236 那三道闸管。**下一枚写「post 完再读」的夹具必须先进 W1 那张表**，这条口径才算有权威。
-### B147 第三十六刀的 oracle 补课**引入了一族静默回归**：浮点->窄整型目标的取整与范围检查整块丢了（2026-10-11 形状门 #522 的 10 行逐行归因量到；**已出 = 第三十七刀两格**（第一格 `210bba68`：判据收成一条；第二格 `b66869d4`：打包器那一侧改问文本）；门号待回填；清单等这一跑之后按 CI 读数一次性登记）
+### B147 第三十六刀的 oracle 补课**引入了一族静默回归**：浮点->窄整型目标的取整与范围检查整块丢了（2026-10-11 形状门 #522 的 10 行逐行归因量到；**已出 = 第三十七刀两格**（第一格 `210bba68`：判据收成一条；第二格 `b66869d4`：打包器那一侧改问文本）；门 **#527**（head `b66869d4`）唯一红 = 形状门，按 CI 读数登记在 `41bce27a` ⇒ **门 #528**（head `41bce27a`）十二 job attempt 1 全绿）
 
 - **读数**（`.build/b1121_attr/report.txt`；两份二进制都取自 **CI 自己的工件**：BASE = run 38110792863 (#516, head `d8ccff59` = 本批登记过的那台)、NEW = run 38119054002 (#522, head `67f03217`)；同一份工作区的 VB 源，两台各跑一遍 `--emit-c` 再逐行比）。移动的行分两族：
   - **族一 = 本刀要的**：`(vb6_VariantToLong(x) + 1)` -> `(vb6_VarAddV(x, vb6_VariantFromValue(1)))`（VBFlexGridDemo 12 行、test_paramarray 2、test_varcmp_scalar 1、test_variant_boxing 11、Charts/Proyecto1 的 `lPoints` 那两行）。
@@ -2198,7 +2198,7 @@ marker、重编，之后 `check_rtl_embedded` 报 **125/125 逐字节相同**。
 - **判据（本机，全语料 400 份逐行）**：BASE = CI 在 dev head `c8adb814` 的那枚 exe（含第三十六刀 + oracle 补课 + dev 的 Fix 254-268），NEW = 本刀两格之后的本机 exe（`.build/b1147_k37/report.txt`）。**移动的行 = 54，且 54 行全是族二回到 BASE 形状**（`vb6_ChkByte(vb6_FltToLng(vb6_Num_Div(...)))` 这类回来了）；`lost-FltToLng` = **0**；routed 那一族相对 BASE **一行没动**（VBFlexGridDemo 与 test_paramarray / test_varcmp_scalar 都是 -0/+0）。真编译两台：Charts 2020 两台 COMPILE-RC=0 且出 `Proyecto1.exe`、VBFlexGridDemo 两台出 `VBFlexGridDemo.exe`；`test_variant_boxing` 两台 **56/56 零 miss**（本刀新加三枚行为针：`arv / 2` 进 Long 与进 Byte、定长 Byte 数组元素 `cad(1) / 2` 进 Byte —— 都钉 4，回归那台交 3；两台都不碰 §B77① 的平局口径）；`check_rtl_embedded` 125/125（exe sha `db90d808965e`）、`check_variant_i8_coverage` violations=0。
 - **处置**：门 #522 的 10 行**不登记**。等第三十七刀之后按 CI 那一跑自己的读数一次性归因（那时族二应当回到 BASE 形状或变成「交出槽 + 提取 + 检查」三件套，族一按运算符逐行对上）。 ⇒ **订正（同一刀之内）**：族二已由上面两格消掉，本机全语料逐行验过（54 行全是回到 BASE 的那一族），所以登记改到「这一跑的 CI 读数」上做 —— 那时清单里属于 dev 的 Fix 254-268 那一批行也会一起进来（他们的形状门红了没登记），逐行归因要按两个 head 分开对：dev 的账归他们，本线只认自己那 54 行 + routed 族。 **收线数字**：登记后那跑（head `41bce27a` = **门 #528**）十二个 job 全绿；本刀在全语料上的净效果 = 清单从「第三十六刀移动 10 行」收到「只剩 5 行」，而那 5 行逐行都带运行期出口；dev 的 Fix 254-268 在同一口径下移动 **0 行**。
 
-### B146 内联 `CDec(...)` 参与的算术两架构都编不过：`error C2088`「`+` 对 struct 非法」（2026-10-11 第三十六刀的 H 族探针顺手量到，**未开工**）
+### B146 内联 `CDec(...)` 参与的算术两架构都编不过：`error C2088`「`+` 对 struct 非法」（2026-10-11 第三十六刀的 H 族探针顺手量到；**已出 = 第三十九刀**（提交 <待回填 sha>，门 待回填；那张手抄前缀表从此与 RTL 逐名对账 = 第 54 道哨兵 `check_builtin_slot_returns.ps1`））
 
 - **读数**（`.build/b1095_arith/probe6.bas`，两台同一份错误形状：三条 `error C2088` 落在 `probe6.c(18)/(21)/(24)`，另两条 `C2198` 是它们的下游）：`CStr(CDec("1.25") + 1)`、`TypeName(CDec("1.25") + 1)`、`v = CDec("1.25") + 1` 三形全红，而同一份探针里的 H 族（Variant 盒参与的标量目标 / 比较 / 数组下标 / 数值形参）两台都编得过 ⇒ 坏的只有**内联那一形**。
 - **发码**：`vb6_DebugWriteBSTR(vb6_CStr(vb6_VariantFromValue((vb6_CDec(vb6_VariantFromValue(vb6_VariantFromValue(vb6_BSTR_FromStr(L"1.25")))) + 1))));` —— `vb6_CDec` 的返回类型是 `vb6_VARIANT`（`vb6rtl_builtin.h:403`），而它**不在** `cExprIsVariant` 那张前缀表里（HEAD 与本刀之后都不在，`git show HEAD:src/backend/cgen_util_type.cpp | grep -c` = 0），于是 Fix 086 的提取不 fire，C 的 `+` 直接落在 struct 上。
@@ -2208,6 +2208,33 @@ marker、重编，之后 `check_rtl_embedded` 报 **125/125 逐字节相同**。
 - **正确形状不是补名字**：语义层早就答对了 —— `src/semantics/builtin/builtin_funcs.inc:133/137/259` 把 CDec / CVErr / GetAllSettings 都登记成 `Vb6Type::Variant`，而 `isDefinitelyVariantExpr`（`src/backend/cgen_util_type.cpp:575`）读的就是这张表。实测 `--emit-c`（`.build/b1119_b146/emit.txt`）：65 行 `CDec("1.25") + 1`、67 行 `CVErr(5) + 1`、71 行 `GetAllSettings(...) + 1` 三形都发成**裸 C 的 `+`**（= C2088），而同文件 77 行 `v + 1`（`v` 是 Variant 变量）正确走 `vb6_VarAddV` ⇒ 差的就是**改道那一问没有去问 AST 那一侧**。这条与 **§B147** 是同一个缺口的两极，修法同一条（一条判据 = 文本 ∪ AST）。 **订正（第三十七刀之后，就在同一份探针上重测）**：改道现在已经吃了 `variantOperandAST`（= `isDefinitelyVariantExpr` 且排除 Variant 数组本体），三行**依旧不接** → 先条件是那道严格判据先能读出「CDec / CVErr / GetAllSettings / CallByName / LoadRes* 这些内置函数的 C 返回本来就是 `vb6_VARIANT`」，否则 AST 那半永远答 false。派生名单的口径：`builtinFuncs` 的右值（VB 名 → RTL 函数名）与「RTL 头里返回 `vb6_VARIANT` 的那 33 枚」取交集，再把 IIf/Choose/Switch 那族**按上下文发类型化**的排除掉。
 - **另读到的两格**（同一份探针）：`vb6_VariantArrayGetVal(` 与 `vb6_VariantArrayElemPtr(` 只在**晚绑定下标**那一路发出来，实测 `o.Result(0) + 1` 走的是 `vb6_VariantFromComResult(` 那条（表里有）⇒ 这两枚在算术上是**纸面缺口**；而 `IIf(True, CDec(1), CDec(2)) + 1` 发成 `vb6_IIfLong(...)`（`cgen_expr_call_builtin_pre.inc:79-96` 的档位选择只认「实参是 knownVariantVars_ 里的标识符」，两支都不是 ⇒ 落到 Long 档）⇒ IIf 那一族的档位选择问的是**第三种**口径，等 §B147 的那条判据落地之后再回头看它要不要一起吃。
 - **暴露面**：VB6 真语料 `D:\vb_yqt4qPac` 里 `CDec(` 21 处 / 14 份（§B142 数过），其中 VBFlexGrid 那两处是**赋值**（`RowID = CDec(0)`），不是算术 ⇒ 这一格今天也是潜伏项，但严重度是**硬编译错误**（不是静默答错数），开工顺序不必排在 §B144 之前。
+- **第三十九刀落地（2026-10-11，按上面「修法形状」那一族一起数，没有只补 `CDec`）**：
+  - 表里进 10 名（`vb6_CDec` / `vb6_CVErr` / `vb6_GetAllSettings` / `vb6_IIfVariant` / `vb6_VariantArrayGetVal` / `vb6_VariantByte` / `vb6_VariantInt` / `vb6_VariantSingle` / `vb6_VariantDate` / `vb6_VariantIdentity`）、出 11 名（`vb6_VariantFromI2/I4/R4/R8/BSTR/Bool/Date/UI1/SafeArray/SafeArray1D` + `vb6_VariantNothing`）。表 32 条 = RTL 槽出口 30 + `vb6_VariantFromValue`（_Generic，逐档核过每档都交槽）+ `vb6_DispCallByVtbl`（下面那条）。
+  - **`vb6_DispCallByVtbl` 不是死名，是本刀唯一一把 census 报错的**：RTL 里 0 处、后端字面量里也 0 处，可它由**语料工程自己**发出来 —— `tests/VbQRCodegen-master/src/mdQRCodegen.bas:1407` 写着 `Private Function DispCallByVtbl(...) As Variant`，而单文件（非多模块）发码时工程过程的 C 名是裸的 `vb6_<proc>`（`cProcName`：只有多模块才拼模块名），于是 `variantReturnFuncs_` 也够不着（那张集合里只有 `vb6_<模块>_<proc>` 与 `vb6_pv_<proc>`）。撤掉它的实测后果：mdQRCodegen 五处 `hResult = DispCallByVtbl(...)` 少掉 `vb6_VariantToLong` 提取，整只槽进 `vb6_ChkLong(int64_t)` —— 这是 400 份 A/B 里唯一一条**归因不到**的移动，所以「RTL 里没有这枚符号」从来不等于「后端不会 emit 这个名字」。⇒ **同形缺口另立 §B148**（这枚名字只是它唯一有人踩过的实例）。
+  - **A/B（`.build/b1231_ab.py`，BASE = 第三十八刀那台 exe，400 份 `--emit-c`）**：`inputs=400 changed=4 unexplained=0 rc_diff=0`。四份全归因到本刀进的那十名：`tests/cc_dll/CoDll.vbp` ±4（第三十八刀那三枚夹具成员的 `CDec`）、`tests/test_variant_boxing.bas` ±14（新针自身）、`tests/VBFlexGridDemo/Common/Common.bas` ±2 与 `VBFlexGridDemo.vbp` ±36（语料里那两处 `RowID = CDec(0)` + `CVErr` 那一族）。护栏口径照旧：**没有一行不许无法归因**。
+  - **判据（`tests/test_variant_boxing.bas` 末尾 +9 枚针，两台逐行相同，x86 同针同过）**：`dec-add=1234568`（内联 `CDec` 直接进 `+` = 第三十六刀那族运行期出口）、`dec-vt=14`、`dec-tn=Decimal`、`dec-dbl=2.5`（Double 目标）、`iif=2`；证人三枚 `err-vt=10`、`err-iserr=True`、`reg-*`。负控 = BASE 那台**整条夹具编不过**（6 条错，两台同形：`.c(331)` C2088、`(337)` C2088、`(339)` C2440、`(344)` C2440 + 两条下游 C2198）⇒ 前四枚针的红面在编译而不是读数，正是这一族的形状。`GetAllSettings` 那两枚只钉「内置出口交出的槽能走到 Variant 目标」这个形状，不钉 VB6 口径（另立 §B149）。
+  - **第 54 道哨兵 `scripts/check_builtin_slot_returns.ps1`**（登记在 `run_tests.ps1` 的 `[STATIC] builtin_slot_returns`）：R1 表→RTL（死名/错档）、R2 (RTL 槽 ∩ 后端字面量)→表（漏登记）、R3 指针返回（`vb6_VARIANT *f(`）一律不许进表、R4 census 不许读空。实到 `table=32 rtlSlot=33 rtlPtr=1 rtlMacro=25 emittedNames=1264 (RTL槽∩emit)=30` ⇒ 两个方向同时零漂移。两条负控真红（表里塞 `vb6_VariantBogus(` ⇒ R1 红；撤 `vb6_CDec(` ⇒ R2 红），按 md5 还原后复绿。踩到的坑记两条：① 后端字面量那把针原先要求**紧跟 `(`**，于是 `{"cdec","vb6_CDec"}` 那张内置名表整个读空（R4 当场报「扫描读空」—— 没有 R4 就是一道绿着的坏哨兵）；② 「发射面」必须扫**字符串字面量**而不是全文，否则注释里提一句就把名字算成活的。
+
+
+### B148 单模块（非多模块）发码时，工程自己的 Variant 过程直接赋给非 Variant 目标 = 整只槽进 `vb6_ChkLong`（2026-10-11 第三十九刀归因 `vb6_DispCallByVtbl` 那一行时顺手量到，**未开工**）
+
+- **读数**（`.build/b1241_single/SPro.bas`，两台 BASE/NEW **同形**，所以不是本刀引入的）：
+  ```
+  Private Function MakeDec() As Variant : MakeDec = 1234567 : End Function
+  Public Function Twice(ByVal n As Long) As Long
+      Dim h As Long : h = MakeDec() : Twice = h
+  End Function
+  ```
+  ⇒ `h = vb6_ChkLong(vb6_MakeDec());`（`vb6_ChkLong` 的形参是 `int64_t`，`vb6rtl_builtin.h:392`）—— 真编就是 C2440。
+- **成因**：「这枚 C 表达式是不是槽」的 AST 那一半（`inferExprType` / `variantOperandAST`）认得出工程过程的返回类型，所以算术那一族两台都对（同文件 `MakeDec() + 1` 正确走 `vb6_VarAddV`）；**赋值那一族的消费点问的是文本前缀表**，而单模块发码把工程过程拼成裸 `vb6_<proc>`（`cProcName`：只有 `isMultiModule_` 才拼模块名），`variantReturnFuncs_` 里登记的却是 `vb6_<模块>_<proc>` 与 `vb6_pv_<proc>` ⇒ 名字对不上，表里就只有靠人手工钉的那一枚（`vb6_DispCallByVtbl`）。
+- **修法形状（开工前先量覆盖面）**：让预扫描在单模块模式下也登记**裸名**那一形，或者让赋值那一族改问 AST 那半（§B147 的「改道 = AST ∪ 文本」正是这条口径，只是赋值消费点还没吃它）。⚠ 前者不能无条件做：`cProcName` 的注释本身就写着「单模块的裸名会撞 RTL 函数名（用户 `Private Sub ErrRaise` ⇒ `vb6_ErrRaise`）」⇒ 把裸名塞进「返回槽」那张集合，撞到 RTL 同名符号时是**按名字**答 Variant，会把 RTL 那枚真调用一起吞了。先数语料里这个形状有多少处（存量只从 `--emit-c` 就能数，不必真编），再定哪一侧。
+- **暴露面**：全语料 400 份里唯一有人踩到的那一枚靠表里的钉住了；本账的实物是**纸面缺口 + 一枚幸存的钉子**，所以不是急件，但它是 §B147 那条口径（一条判据两头吃）还没铺到的**第三个消费点**。
+
+### B149 `GetAllSettings` 与 VB6 差两层：缺键时该答 Null 而它答一枚裸 Variant，真键该交二维 Variant 数组而它交一维交替表（2026-10-11 第三十九刀写针面时读 RTL 读到，**未开工**）
+
+- **发码/RTL 现场**：`src/rtl/core/vb6rtl/vb6rtl_registry.c:113` 顶上就写着 `/* VB6 returns a 2D Variant array, but we simplify to 1D with alternating key/value */`，而缺键那条路径 `memset(&result,0,…)` 之后 `result.vt = (vb6_vtVariant)` 直接交回 ⇒ 真跑读数 `VarType(GetAllSettings("C3NoSuchApp146","Sec"))` = **12**、`IsNull(...)` = **False**（两台相同，已钉在 `test_variant_boxing` 的 `VB-b146-reg-*` 两枚针上，钉的是**形状**不是 VB6 口径）。
+- **VB6 那一面**：文档口径是「应用没有 `SaveSettings` 条目 ⇒ 返回 Null」+「返回的是 1×N 还是 2-D Variant 数组（section 名 + 键 + 值）」——**这一格今天没有外部读数**：`D:\vb_yqt4qPac` 那批真语料里 `GetAllSettings(` 的实到形状还没数（下一步第一件事），而 `SaveSettings`/`GetSetting` 那两条是否已经写进注册表也要一起量，否则修完对不上账。
+- **口径待拍**：`SaveSettings` 写侧现在是什么形状（有没有对称的存储），以及要不要按 VB6 交真二维 SAFEARRAY（交出去之后 `For i = LBound(a,2) To UBound(a,2)` 那形才可能通）。定完再动 RTL，别只把 Null 那一档补上就结帐。
 
 ### B145 Decimal 的精确算术：Variant 参与 `+ - * /` 时**不该在编译期猜数值档**（2026-10-11 第三十六刀 **已出** = 提交 `b142d338` + 补课 `67f03217`；口径是用户当场拍的「要做精确的 decimal 算数」；门 #517 一台真红已归因修掉（补课 `67f03217`）；下一跑 = **门 #522**（head `67f03217`，12 job 里 11 绿、唯一红是形状门）。**注意**：#522 那次的形状门报的 10 行里有 5 行是静默回归（**§B147**），已在第三十七刀修掉，清单最终只登记五行（门 #527 / 登记 `41bce27a` / 收线 #528））
 
@@ -2231,7 +2258,7 @@ marker、重编，之后 `check_rtl_embedded` 报 **125/125 逐字节相同**。
 - **本刀之后剩下的**：**§B146**（内联 `CDec` 算术，本刀 H 族量到）；`\` `Mod` `^` 三条仍走编译期那一档（`\` 背后是 ai/032 rev2 的 `intDivResultType` 四档判据，动它要先过那一格；`Mod`/`^` 的 Variant 形**还没读数**，开工先量）；静态类型 `As Date` 的变量参与算术仍装箱成 `VT_R8` 而不是 `VT_DATE`（只有**盒里**是 Date 才吃到新的 Date 语义）；`CStr(Null)` 那一问的口径（VB6 是错误 94）没量过、没接。
 
 
-### B144 我们的 COM 服务端交回一枚 Decimal 时，两架构都是静默错（x64 把它放在 offset 8、oleaut32 从 offset 0 读；x86 直接把堆地址当数值）（2026-10-11 第三十五刀第二格收线之后顺手量出；**已出 = 第三十八刀**（提交 <待回填 sha>，门 待回填；同一格把 §B143 在册的最后一处也带走了））
+### B144 我们的 COM 服务端交回一枚 Decimal 时，两架构都是静默错（x64 把它放在 offset 8、oleaut32 从 offset 0 读；x86 直接把堆地址当数值）（2026-10-11 第三十五刀第二格收线之后顺手量出；**已出 = 第三十八刀**（提交 `bd009197` 本体 + `8d8bfb3d` 针面补刀 + `be388a82` 按 CI 读数登记形状门；门 **#532** 两条红 → **#533** 只剩形状那一行 → **#535**（head `be388a82`）十二 job attempt 1 全绿；同一格把 §B143 在册的最后一处也带走了））
 
 - **量法**（不进仓）：把 `tests/cc_dll` 整目录复制到 `.build/b1086_dec/CoDll`，只往 `CImpl.cls` 追加三枚公有成员 —— `Plain() As Long`（对照组）、`Amt() As Variant = CDec(1234567)`、`Half() As Variant = CDec("1.25")`；客户端是现成的**免注册**探针形状（`tests/tools/disp_probe.c` 那套 `LoadLibrary` + `DllGetClassObject` + `IDispatch_Invoke`），扩展成 `.build/b1086_dec/probe_dec.c`：把返回的那枚 VARIANT **整个结构体按字节打出来**，再交给 oleaut32 自己做 `→BSTR/→R8/→I4` 三问（独立证人 —— 我们的槽自洽不代表 OLE 读到的也是它）。两台各编各跑，日志 `.build/b1086_dec/report.txt`。
 - **对照组是好的**：`Plain` 交回 `vt=3`、`REPLY_BYTES=0300…92100000…`，三问全答 4242 ⇒ 这条管线本身通、指针宽度也对，坏的只有 Decimal 那一档。
@@ -2254,9 +2281,9 @@ marker、重编，之后 `check_rtl_embedded` 报 **125/125 逐字节相同**。
   - 两个坑：① **RTL 是按 C 编的**（`/std:c11`），`out->pdispVal->AddRef()` 直接 C2039「不是 IDispatch 的成员」；而这枚编译错误顺带挡住了一条真雷 —— `VT_DISPATCH` 标签下挂着的可能是一枚**裸子控件 HWND**（宿主分派层的对象表示），裸 AddRef 会把 HWND 首字段当 vtable 解引用，受守卫的 `vb6_ComAddRefDispatch` 内含 `vb6_ComIsDispatchable`。② `src/driver/c3rtl.rc` 给 rc.exe 的 touch 注释**必须整块 `/* */`** —— 以 `#` 开头的行被当预处理器指令，构建当场 `fatal C1083/C1021`（本刀第一次重建就栽在这一句）。
   - **口径记一笔（没顺手补）**：出站现在按那张唯一的表答，数组那一档（槽里 `vb6_vtArray|…` + `vb6_SafeArray1D*`，带 `0x5A1D` 魔数、**不是**真 SAFEARRAY）交回 `VT_EMPTY`。改前那两处裸 memcpy 是把自家描述符指针贴个 `VT_ARRAY` 标签递出去 = 对端按 OLE 布局读同一批字节 = 悬垂；两种都不对，而今天没有任何一条路真在跨服务端边界返回数组（语料 0 处）⇒ 补它要另造一份 SAFEARRAY 转换，属独立一格，不在本格。
   - **夹具与针面**：`tests/cc_dll/CImpl.cls` 加 `Amt` / `Quarter` / `EchoVal` 三枚公有成员 ⇒ `dll_entry.c` 的 `methodCount` 1→4（`cc_dll_identity_single_source` 那条针按读数搬，不是产物走样）；`tests/tools/disp_probe.c` 学会读 Decimal（CY + I8 两档，转换失败打 FAIL 而不静默）；`ax_dll_dispatch_invoke` 的 absent 名单加了 `CALL=AMT` —— 新成员泄进 legacy 那张脸就该红。
-  - **门 #529 的红因（两条，都不是产品缺陷，但第二条是本刀自己带进去的）**：
-    - `Emit manifest (shape oracle)` = 存量 **1 份**发码真的变了（`tests/cc_dll/CoDll.vbp`，就是夹具源变了那一行）⇒ 等按 CI 自己的读数登记。
-    - `Tests (vbp #3)` = `[DISPATCH] cc_dll_dispatch_iface_only ... FAIL`，缺的正是 `EXTRA_IID / QI_EXTRA / CREATE_IFACE / VTBL_GET_*` 那一整段 —— **根因在针面那一格**：往 Needles 数组里插三条针时，把收尾的 `") @(` 一起吃掉了。PowerShell 里这一笔**语法仍然对**（`[Parser]::ParseFile` 报 0 错，本刀推之前就是这么自证的），变的是**绑定**：`"CALL=ADD"` 从 Absent 挪进了 Needles，`ExtraIid` 往后挪一格 ⇒ 探针只拿到两个参数，`if (argc >= 4)` 那一段整体没跑。x86 那一格侥幸没红，只因为它的数组收尾本来就在下一行（`"DONE") @(`）。
+  - **门的红因（#532 两条、#533 剩一条；都不是产品缺陷，但 vbp 那一条是本刀自己带进去的）**（门号先按 API 复核再写：`bd009197`→#532、`8d8bfb3d`→#533、`be388a82`→#535，原来这里记的 #529 在仓库的作业列表里查不到对应跑步，按 API 换成真号）：
+    - `Emit manifest (shape oracle)` = 存量 **1 份**发码真的变了（`tests/cc_dll/CoDll.vbp`，就是夹具源变了那一行）⇒ #532、#533 连红两趟都是它，按 CI 自己的读数登记在 `be388a82`（1 行，逐行归因见下面那条登记笔），#535 因此转绿。
+    - `Tests (vbp #3)`（只在 #532 红，#533 起转绿）= `[DISPATCH] cc_dll_dispatch_iface_only ... FAIL`，缺的正是 `EXTRA_IID / QI_EXTRA / CREATE_IFACE / VTBL_GET_*` 那一整段 —— **根因在针面那一格**：往 Needles 数组里插三条针时，把收尾的 `") @(` 一起吃掉了。PowerShell 里这一笔**语法仍然对**（`[Parser]::ParseFile` 报 0 错，本刀推之前就是这么自证的），变的是**绑定**：`"CALL=ADD"` 从 Absent 挪进了 Needles，`ExtraIid` 往后挪一格 ⇒ 探针只拿到两个参数，`if (argc >= 4)` 那一段整体没跑。x86 那一格侥幸没红，只因为它的数组收尾本来就在下一行（`"DONE") @(`）。
     - **自救面（第 40 道哨兵 `scripts/check_test_helper_integrity.ps1` 长出 H5）**：用 AST 钉住 `Test-DispatchInvoke` 三个调用点的绑定形状（位置实参个数 / 数组实参个数 / Needles 与 Absent 各几条针 = 6/6/1、7/10/1、8/10/1）。负控 = 把那一处收尾再吃掉一次 ⇒ H5 三条同时报红；按 md5 还原后 `235e7d0c` 复绿。这一族与 #78（同名遮蔽）、#166（两个权威）同形：**红不在语法，在谁吃到哪个槽位**。
     - 顺带一条**取数口**（此前记在 memory 里是「job-logs 本机拿不到」）：`gh run view <run> --log` 把整份作业日志拉到本机（本刀就是靠它 40 秒定位到那三条 missing），`gh run download <run> -n test-logs-vbp-3` 还能按分片取夹具的 .out/.err。
   - **本地已验**：cc_dll 与 test_activex_dll 两架构真编译真跑；上面那组 BASE 负控；`run_tests.ps1` PSParser 0 错；`check_rtl_embedded`（125/125 逐字节，证明新 RTL 真嵌进了 exe）、`check_variant_i8_coverage`（13 张表 / DEC must 8 / 0 违规）、`check_rtl_resource_ids`、`check_rtl_naked_names`、`check_rtl_proto_arity`、`check_manifest_coverage`（inputs=400 / registered=400）全绿。形状门那一行（`tests/cc_dll/CoDll.vbp`）**必然移动**（夹具源变了），按口径等 CI 自己的读数再登记。
