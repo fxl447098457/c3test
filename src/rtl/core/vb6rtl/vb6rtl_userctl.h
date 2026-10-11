@@ -62,6 +62,7 @@ extern int32_t vb6_UserControl_OLEDropMode;
 // 驱动, 这些成员的真实值来自容器). 命名大小写与 cIdent 保持一致.
 extern void*   vb6_UserControl_Picture;        // IPictureDisp* (Set 读写)
 extern int32_t vb6_UserControl_BackColor;      // OLE_COLOR
+extern int32_t vb6_UserControl_BackStyle;      // Fix 255: 0=Transparent 1=Opaque (与 BackColor 同族)
 extern int32_t vb6_UserControl_ForeColor;      // OLE_COLOR
 extern int16_t vb6_UserControl_RightToLeft;    // TriState: 0/1/-1
 extern void*   vb6_UserControl_ParentControls; // Controls 集合 (For Each)

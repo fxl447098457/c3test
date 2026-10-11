@@ -420,7 +420,16 @@
                 c_.emitLine("if (pNM42->code == 1794 && (void*)pNM42->hwndFrom == "
                             + rtNHwnd + ") {");
                 c_.indent();
-                c_.emitLine("{ extern void " + rtSelFn + "(); " + rtSelFn + "(); }");
+                // Fix 258: 上面那句"VB6 这条处理器没有参数"是错的 ——
+                // RichTextBox.ctl:332 是
+                //   Public Event SelChange(ByVal SelType As Integer, ByVal SelStart As Long, ByVal SelEnd As Long)
+                // ⇒ C 处理器 (int16_t, int32_t, int32_t), 而 0 实参调用 ⇒ C2198 ×2
+                // (RichTextBoxForm.c 97)。与 cgen_form_wndproc_create.inc 的
+                // WM_COMMAND/1815 那条 arm 同一形状, 两处一起补 (RTL 取选区 + SelType=0)。
+                c_.emitLine("extern void " + rtSelFn + "(int16_t, int32_t, int32_t);");
+                c_.emitLine("int32_t vb6_rtSelS258 = vb6_RTB_GetSelStart((void*)" + rtNHwnd + ");");
+                c_.emitLine(rtSelFn + "((int16_t)0, vb6_rtSelS258, (int32_t)(vb6_rtSelS258"
+                            + " + vb6_RTB_GetSelLength((void*)" + rtNHwnd + ")));");
                 c_.dedent();
                 c_.emitLine("}");
             }

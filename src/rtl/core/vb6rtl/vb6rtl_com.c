@@ -1020,6 +1020,7 @@ int32_t vb6_UserControl_OLEDropMode = 0;
 // Fix 154-B: UserControl 其余宿主属性定义 (设计期/宿主状态, 初值随意).
 void*   vb6_UserControl_Picture = NULL;
 int32_t vb6_UserControl_BackColor = 0;
+int32_t vb6_UserControl_BackStyle = 1;   // Fix 255: VB6 的 BackStyle 缺省 Opaque (1)
 int32_t vb6_UserControl_ForeColor = 0;
 int16_t vb6_UserControl_RightToLeft = 0;
 void*   vb6_UserControl_ParentControls = NULL;

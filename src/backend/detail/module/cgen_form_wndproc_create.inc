@@ -366,7 +366,23 @@
                 std::string rtbSelFn = eventHandlerFn(ctrl.controlName, "_SelChange");
                 c_.emitLine("if (id == " + std::to_string(ctrlId) + " && code == 1815) {");
                 c_.indent();
-                c_.emitLine("{ extern void " + rtbSelFn + "(); " + rtbSelFn + "(); }");
+                // Fix 258: 处理器**有**三个 ByVal 参数, 不是 0 个 ——
+                // RichTextBox.ctl:332
+                //   Public Event SelChange(ByVal SelType As Integer, ByVal SelStart As Long, ByVal SelEnd As Long)
+                // 于是 C 处理器签名是 (int16_t, int32_t, int32_t), 而这条 arm 发的是
+                // `extern void f(); f();` ⇒ C2198 "参数太少" ×2
+                // (RichTextBoxForm.c 88 —— 同一条事件的另一条 arm 在
+                // cgen_form_wndproc_dispatch.inc 的 WM_NOTIFY/1794, 本刀两处一起补)。
+                // 选区信息从 RTL 取 (vb6_RTB_GetSelStart/GetSelLength, 与 .SelStart 属性同源);
+                // SelType 交 0: 原生 EN_SELCHANGE 的 seltyp 在 C 侧没有出口, 而 VB6 的
+                // 常规取值就是 0 (选区变化), 1 那一档 (拖放) 本控件不发。
+                const std::string rtbHwnd258 = isArrayCtrl
+                    ? ("vb6_CtrlArr_GetAt(&vb6_arr_" + cIdent(ctrl.controlName) + ", 0)")
+                    : ("vb6_hwnd_" + cIdent(ctrl.controlName));
+                c_.emitLine("extern void " + rtbSelFn + "(int16_t, int32_t, int32_t);");
+                c_.emitLine("int32_t vb6_rtbSelS258 = vb6_RTB_GetSelStart((void*)" + rtbHwnd258 + ");");
+                c_.emitLine(rtbSelFn + "((int16_t)0, vb6_rtbSelS258, (int32_t)(vb6_rtbSelS258"
+                            + " + vb6_RTB_GetSelLength((void*)" + rtbHwnd258 + ")));");
                 c_.dedent();
                 c_.emitLine("}");
             }
