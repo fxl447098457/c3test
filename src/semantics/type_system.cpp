@@ -4,6 +4,10 @@
 
 namespace vb6c3 {
 
+// 账 #230 §B139: 目标架构指针位宽。默认 64 (与 --arch 缺省值一致), 由驱动开局注入。
+// 语义层此前只能拿宿主 sizeof(void*) 顶替, 见 type_system.hpp 的注释。
+int TypeSystem::targetPtrBits_ = 64;
+
 TypeSystem::TypeSystem() {
     // VB6内置类型名映射 (小写)
     builtinTypes_ = {
@@ -229,8 +233,18 @@ bool TypeSystem::intShape(Vb6Type t, int* bitsOut, bool* signedOut) {
         case Vb6Type::ULong:    bits = 32; isSigned = false; break;
         case Vb6Type::LongLong: bits = 64; isSigned = true;  break;   // (= VB.NET 的 Long)
         case Vb6Type::ULongLong:bits = 64; isSigned = false; break;
-        // Boolean 与 LongPtr 刻意不在这里: 前者在 VB 里"参与算术时被强制升到 Short",
-        // 后者宽度随目标架构而 TypeSystem 拿不到目标 (见 promote 注释)。
+        // 账 #230 §B141: LongPtr 收进来 —— 宽度按**目标架构** (§B139 的 targetPtrBits()),
+        // 与 VBA 一致 (x86 32 位 / x64 64 位), 有符号。LongLong 则恒 64 位, 已在上两行。
+        //   改前它落 default ⇒ promote 走 (3) 的 rank 兜底, 而 rank 表里 LongPtr
+        //   **不登记** (见 promote 注释: 写死任何一档都会错), 于是 `LongPtr + Long`
+        //   恒答 Long —— x64 上把 LongPtr 那 64 位缩回 32 位。
+        //   收进来后改走 (2) 的宽度正确提升: x64 答 LongPtr, x86 上 LongPtr 与 Long
+        //   同宽、C 侧同为 32 位, 与改前逐字等价。
+        //   **浮点那一侧不受影响**: promote 的规则 (1) (浮点/Currency/Decimal 侧优先)
+        //   排在 (2) 之前, `p + 1.5` 仍答 Double —— 夹具 tests/test_vbnet_ext.bas
+        //   的 VE-promote-lp-dbl=4.5 / VE-promote-lp-mul=7.5 由 CI 的 bas 档守着。
+        case Vb6Type::LongPtr:  bits = targetPtrBits(); isSigned = true; break;
+        // Boolean 刻意不在这里: VB 里它"参与算术时被强制升到 Short", 不是定宽整型。
         default: return false;
     }
     if (bitsOut)   *bitsOut = bits;
@@ -275,9 +289,10 @@ Vb6Type TypeSystem::promote(Vb6Type a, Vb6Type b) {
             // Boolean/LongPtr/Date 混合时兜底。)
             case Vb6Type::LongLong:return 6;
             case Vb6Type::ULongLong: return 6;
-            // LongPtr **刻意不登记**: 它的宽度是目标相关的 (x86 4 字节 / x64 8 字节),
-            // 而 TypeSystem 这一层拿不到目标架构 (只有后端的 targetArch_, 且
-            // typeSize(LongPtr) 本身也还在用宿主 sizeof(void*), 属既有隐患 Fix 081e)。
+            // LongPtr **刻意不登记**: 它的宽度是目标相关的 (x86 4 字节 / x64 8 字节)。
+            // §B139 后 targetPtrBits() 已经拿得到目标宽度 (typeSize(LongPtr) 也已按
+            // 目标答, 不再用宿主 sizeof(void*)); 但**档位这里仍不登记** —— 登记就有
+            // 下面的负控读数, 要动得单独做消融, 不搭车。
             // 给它写死任何一档都会错: 写 6 会让 `LongPtr + Double` 被判成 LongPtr,
             // CStr 走整型入口把小数截掉 —— 负控实测 (登记 6 档后编
             // tests/test_vbnet_ext.bas): CStr(p + 1.5) 出 4、CStr(p * 2.5) 出 7,
@@ -393,7 +408,11 @@ int TypeSystem::typeSize(Vb6Type t) {
         case Vb6Type::Variant:  return 16; // VARIANT
         case Vb6Type::Decimal:  return 16;  // P20-07: DECIMAL is 14 bytes but aligned to 16
         case Vb6Type::ULong:    return 4;
-        case Vb6Type::LongPtr:  return static_cast<int>(sizeof(void*));  // Fix 081e: 架构宽度
+        // 账 #230 §B139: 按**目标**架构答, 不再用宿主 sizeof(void*)。
+        //   改前 C3 以 x64 进程跑、目标 --arch x86 时这里答 8 (应为 4);
+        //   而 VarPtr/StrPtr/ObjPtr 自 §B138 起就答 LongPtr, 这一步会把 x86 目标的
+        //   地址宽度算成 8 字节。Fix 081e 当年标了"既有隐患", 本格收掉。
+        case Vb6Type::LongPtr:  return targetPtrBits_ / 8;
         case Vb6Type::LongLong: return 8;   // Fix 084m: 恒 64 位有符号
         case Vb6Type::ULongLong: return 8;  // C3 扩展 (ai/032): 恒 64 位无符号
         default:                return 0;
@@ -403,7 +422,17 @@ int TypeSystem::typeSize(Vb6Type t) {
 Vb6Type TypeSystem::defaultIntType(int64_t val) {
     if (val >= -32768 && val <= 32767) return Vb6Type::Integer;
     if (val >= -2147483648LL && val <= 2147483647LL) return Vb6Type::Long;
-    return Vb6Type::Long;  // VB6没有LongLong, 超出范围仍为Long
+    // 账 #230 §B140: 超 Long 范围的整型字面量归 **LongLong**, 不再折回 Long。
+    //   原注释写"VB6没有LongLong, 超出范围仍为Long" —— 那是照搬 VB6 经典语义,
+    //   但 C3 自 ai/032 起就有 LongLong (恒 64 位有符号, typeSize 答 8), 再折回
+    //   Long 等于把值**静默截掉高 32 位**。按 C3 自己的类型表答才是自洽的。
+    //
+    // ⚠ 本函数**当前全仓零调用** (改它不改变任何发射)。将来接线时必须先处理
+    //   十六进制/八进制字面量那一形: VB6 里 `&HFFFFFFFF` 是 Long 的 -1, 若按
+    //   无符号 4294967295 落到这里, 会答 LongLong(4294967295) 而不是 Long(-1)
+    //   —— 语义差一个符号。那一档要在**字面量解析**处按"十六进制按位模式定
+    //   型"先分流, 不能靠本函数按值域猜。
+    return Vb6Type::LongLong;
 }
 
 } // namespace vb6c3
