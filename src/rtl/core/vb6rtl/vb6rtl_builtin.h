@@ -485,6 +485,14 @@ int32_t vb6_CLngBSTR(BSTR s);
 double vb6_CDblBSTR(BSTR s);
 int16_t vb6_CIntBSTR(BSTR s);
 double vb6_CCurBSTR(BSTR s);
+// ComCtlsDemo: 后期绑定 COM 的 **Date** 属性 (DTPicker / MonthView 的 .MinDate/.MaxDate)
+// 在「写进 Text (BSTR)」语境下被 codegen 读成 vb6_ComGetStringProp (BSTR) 再套
+// vb6_CStrDate, 而本函数原签名只收 double → C2440 "无法从 wchar_t* 转换为 double"
+// (PPDTPickerGeneral.c 208/209、PPMonthViewGeneral.c 207/208)。
+// 与上面 vb6_CStrDbl 的 BSTR 档同款: 补一个 BSTR 入口, 由 _Generic 按实参 C 类型分派。
+// BSTR 是日期串, 故这里走 VarDateFromStr 解析 (同 vb6_DateValue 那条口径),
+// 而不是 vb6_CStrDblFromBSTR 的 vb6_Val —— 后者是数值解析, 对日期串答 0。
+BSTR vb6_CStrDateFromBSTR(BSTR s);
 // ai/032: 新增四档转换函数的 BSTR 入口 —— 同 Fix 158r 的 CLngBSTR, 走 vb6_Val 解析
 // (VB6 的 CUInt("42") / CULng("&HFF") 合法)。十进制用 vb6_Val, 前缀式 (&H/&O) 由
 // cgen 那侧改发 vb6_NumVal (见 cgen_expr_call_conv_numeric.inc), 与此处不重复。
@@ -510,6 +518,13 @@ static inline int32_t vb6_CLngPtr(void* p) { return (int32_t)(intptr_t)p; }
     BSTR: vb6_CStrDblFromBSTR, \
     vb6_VARIANT: vb6_CStrDblFromVariant, \
     default: vb6_CStrDbl)((x))
+// ComCtlsDemo: CStrDate 补 BSTR 分派 (默认分支不变, 既有 double 调用点行为一字不改).
+// 背景同 vb6_CStrDbl: 后期绑定 COM 的 Date 属性在 BSTR 语境下被读成
+// vb6_ComGetStringProp (BSTR) 再套 vb6_CStrDate → C2440. 这一档此前是
+// CStr 家族里唯一没有 BSTR 入口的 (Long/Byte 因只有 warning 而漏过).
+#define vb6_CStrDate(x) _Generic((x), \
+    BSTR: vb6_CStrDateFromBSTR, \
+    default: vb6_CStrDate)((x))
 #define vb6_CLng(x) _Generic((x), \
     vb6_VARIANT: vb6_CLngV, \
     BSTR: vb6_CLngBSTR, \

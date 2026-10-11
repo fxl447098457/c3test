@@ -321,6 +321,9 @@ BSTR vb6_CStrByte(uint8_t x) {
     vb6_VARIANT v; memset(&v, 0, sizeof(v)); v.vt = (vb6_vartype)VT_UI1; v.bVal = x;
     return vb6_Format(v, NULL, 1, 1);
 }
+#ifdef vb6_CStrDate
+#undef vb6_CStrDate   // vb6rtl_builtin.h 的 _Generic 宏在这里必须关闭, 否则函数定义被宏改写
+#endif
 BSTR vb6_CStrDate(double x) {
     // Fix 175: VB6 的 CStr(Date) 在**时间分量为 0** 时只给短日期, 而共享的
     // vb6_Format(VT_DATE, NULL) 无条件拼 "短日期 + 空格 + 时间"
@@ -338,6 +341,22 @@ BSTR vb6_CStrDate(double x) {
     }
     vb6_VARIANT v; memset(&v, 0, sizeof(v)); v.vt = (vb6_vartype)VT_DATE; v.dblVal = x;
     return vb6_Format(v, NULL, 1, 1);
+}
+// ComCtlsDemo: 后期绑定 COM 读到的 **Date** 属性, codegen 会发成
+//   vb6_CStrDate(vb6_ComGetStringProp(_vb6_with_N, L"MinDate"))
+// (BSTR 实参), 而 vb6_CStrDate 原签名只收 double → msbuild_vs C2440
+// (PPDTPickerGeneral.c 208/209、PPMonthViewGeneral.c 207/208; 来源是
+//  .pag 里 `TextMinDate.Text = .MinDate` 这条「Date 写进 Text」的读方向).
+// 与 vb6_CStrDblFromBSTR 同款思路: 补一个 BSTR 入口, 由 vb6rtl_builtin.h 的
+// _Generic 按实参 C 类型分派. 差别在于解析口径: 数值档用 vb6_Val, 而这里是
+// 日期串, 走 VarDateFromStr (与 vb6_DateValue 同一条), 否则 "2026/1/1" 会答 0.
+BSTR vb6_CStrDateFromBSTR(BSTR s) {
+    DATE d = 0.0;
+    if (s && SUCCEEDED(VarDateFromStr(s, LOCALE_USER_DEFAULT, 0, &d)))
+        return vb6_CStrDate(d);
+    // 落不到日期解析的 (空串/非日期文本) 按 vb6_CDate 的 BSTR 口径兜底:
+    // 那一档本来就是 vb6_Val, 这里保持一致, 不另立第二套.
+    return vb6_CStrDate(vb6_Val(s));
 }
 // ============================================================
 // 类型检查
