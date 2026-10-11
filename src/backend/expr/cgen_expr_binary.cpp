@@ -249,6 +249,15 @@ void CCodeGen::visit(BinaryExpr& node) {
         return isVariantOperand86(cExpr, astExpr)
                    ? cExpr : "vb6_VariantFromValue(" + cExpr + ")";
     };
+    // 账 #305 §B147: **改道那一问**吃「AST ∪ 文本」，而上面的 isVariantOperand86 刻意维持
+    // 「文本 ∪ 已知变量」不变 —— 它还供着 Fix 086 那条提取 (vb6_VariantToLong(...))，那一档
+    // 只能对**真的是槽**的 C 文本出手，把 AST 的宽答案灌进去就是 vb6_VariantToLong(裸 double)
+    // = C2440。方向性是这一格的要点：Div 的类型 oracle 只吃 variantOperandAST，这里吃它的
+    // 超集 ⇒「oracle 答 Variant」必然蕴含「改道接走了、交出的是整只槽」，§B147 那一族
+    // (oracle 说是槽、发码给裸标量 ⇒ 消费点既不提取也不取整) 就此按构造消失。
+    auto routeOperand86 = [&](const std::string& cExpr, const Expr* astExpr) -> bool {
+        return isVariantOperand86(cExpr, astExpr) || variantOperandAST(astExpr);
+    };
 
     // 账 #305 §B145: Variant 参与 + - * / 时**不再替运行期猜档**。
     // 改前这四条运算符把 Variant 操作数发成 vb6_VariantToLong(...)（加减乘）或
@@ -264,8 +273,8 @@ void CCodeGen::visit(BinaryExpr& node) {
         || node.op == BinaryOp::Mul || node.op == BinaryOp::Div) {
         const bool strL86 = (inferExprType(*node.left) == Vb6Type::String);
         const bool strR86 = (inferExprType(*node.right) == Vb6Type::String);
-        const bool anyVar86 = isVariantOperand86(left, node.left.get())
-                           || isVariantOperand86(right, node.right.get());
+        const bool anyVar86 = routeOperand86(left, node.left.get())
+                           || routeOperand86(right, node.right.get());
         if (anyVar86 && !strL86 && !strR86) {
             const char* fn86 = node.op == BinaryOp::Add  ? "vb6_VarAddV"
                              : node.op == BinaryOp::Sub  ? "vb6_VarSubV"

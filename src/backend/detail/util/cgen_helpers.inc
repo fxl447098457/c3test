@@ -520,6 +520,14 @@
     // 仅检查顶层表达式 (去除前导括号后), 避免对子表达式误判.
     bool cExprIsVariant(const std::string& cExpr) const;
 
+    // 账 #305 §B147: 「这枚 C 表达式是不是整只 vb6_VARIANT 槽」的 **AST 那一半** ——
+    // 与上面 cExprIsVariant (文本前缀表) 合起来回答同一个问句。为什么必须分两头供出：
+    // 类型 oracle 手上只有 AST (它先于发码), 而发码改道能吃两半。于是规矩是
+    //   改道 = AST ∪ 文本,  oracle = AST —— 「oracle 答 Variant」⊆「改道必然交出真槽」。
+    // 反方向的不一致 (oracle 说是槽、发码给的是裸标量) 实物 = §B147 那一族静默丢掉
+    // 窄整型目标的取整与范围检查。定义见 cgen_util_type.cpp。
+    bool variantOperandAST(const Expr* e) const;
+
     // <vbeclipse>: 与 cExprIsVariant 相对的一侧 —— C 表达式是否**已经是
     // vb6_SafeArray1D\* 载体** (Split/Filter/Array 等内置函数的 C 返回, 以及 _arr_N
     // 匿名临时量)。数组槽实参的 vb6_VariantToSafeArray1D 提取对这类表达式必须跳过,

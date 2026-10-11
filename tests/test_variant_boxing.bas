@@ -191,5 +191,34 @@ Public Sub Main()
     arl = arx + 1
     Debug.Print "VB-ar-target-long="; arl
     Debug.Print "VB-ar-if="; CBool(ar3 + ar2)
+    ' Acct #305 para-B147: the narrowing check. "/" let the type oracle answer
+    ' "Variant" from one predicate while codegen decided the routing from a
+    ' second one (the C-text prefix list), so for operands the list cannot read
+    ' (a Variant array's element, a host pseudo-member like TextHeight) the
+    ' emitted C stayed a plain double while consumers believed it was a slot --
+    ' they skipped BOTH the rounding step and the range check. BASE answer for
+    ' the two lines below was 4 (3.5 -> round -> 4); the regressed build gave 3
+    ' (C truncation at the vb6_ChkLong call). One shared predicate now says
+    ' "is this a slot": routing = AST-union-text, oracle = the AST arm only, so
+    ' every oracle-Variant result really is routed. 3.5 is not a tie, so this
+    ' does not touch the unowned para-B77-1 rounding caliber.
+    Dim arv As Variant
+    Dim arb As Byte
+    arv = 7
+    arl = arv / 2
+    Debug.Print "VB-ar-div-target-long="; arl
+    arb = arv / 2
+    Debug.Print "VB-ar-div-target-byte="; arb
+    ' para-B147 second arm: an operand the type oracle cannot read at all -- a
+    ' fixed-size Byte array element. inferExprType defaults such unknowns to
+    ' Variant (that is what made 67f03217 answer Variant for the Charts lines
+    ' while codegen still emitted a plain double), so the strict predicate must
+    ' answer "not a slot" here and the Double arm must keep its rounding exit.
+    ' The regressed build emitted vb6_ChkByte(<double>) = C truncation = 3.
+    Dim cad(2) As Byte
+    Dim cab As Byte
+    cad(1) = 7
+    cab = cad(1) / 2
+    Debug.Print "VB-ar-div-target-byte-fx="; cab
     Debug.Print "VB-DONE"
 End Sub

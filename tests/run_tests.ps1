@@ -2550,7 +2550,20 @@ if ($Category -in @("all", "run", "bas")) {
         "VB-ar-dbl-add=2.5", "VB-ar-dbl-mul=3", "VB-ar-dbl-sub=0.5",
         "VB-ar-dec-add=2.25", "VB-ar-dec-mul=2.5", "VB-ar-dec-tn=Decimal",
         "VB-ar-exact=0.3", "VB-ar-exact-mul=0.02",
-        "VB-ar-target-long=7", "VB-ar-if=True", "VB-DONE")
+        "VB-ar-target-long=7", "VB-ar-if=True",
+        # 账 #305 §B147 (第三十七刀): 「这枚 C 表达式是不是整只槽」以前有**两条答案** ——
+        # 类型 oracle 走 inferExprType (认不出就**默认答 Variant**)、发码改道走 C 文本前缀表。
+        # 第 36 刀只把 oracle 那一侧往 Variant 推，于是「AST 答 Variant 而文本表读不出」那一族
+        # (实测: 定长 Byte 数组的元素、UC 宿主伪成员 TextHeight、Screen_TwipsPerPixelY) 压根没
+        # 改道，却被消费点当成槽 —— 既不提取也不取整，浮点直接进 Byte/Integer/Long 目标 = C 截断。
+        # CI 的两份工件逐行比出来 (BASE=run 38110792863 / NEW=run 38119054002): 4 份真工程 +
+        # tests/dbgdlg 的 `vb6_ChkByte(vb6_FltToLng(...))` 整块变成 `vb6_ChkByte(...)` = 静默丢
+        # 四舍六入五取偶与错误 6。现在两侧同吃一条判据 (改道 = AST ∪ 文本, oracle = AST 那半)，
+        # 「oracle 答 Variant」必然蕴含「改道交出真槽」。下面三枚都是 3.5 -> 4 (不是平局，
+        # 与 §B77① 未拍的口径无关)：前两枚走运行期出口 (Variant 变量)，第三枚走编译期那一档
+        # (定长数组元素 = oracle 答不上来的那一形)，回归那台交 3。
+        "VB-ar-div-target-long=4", "VB-ar-div-target-byte=4",
+        "VB-ar-div-target-byte-fx=4", "VB-DONE")
     # ⚠ 这里曾经是字面 TAB: `"$Tests<TAB>est_variant_boxing.bas"`。
     # PowerShell 的 "" 里 **`\t` 不是转义**（转义是反引号），所以只要有人把 `\t` 写成真 TAB,
     # 路径就变成 `tests` + TAB + `est_...` —— 门里读到的是 `error VB1006: 无法打开文件`,

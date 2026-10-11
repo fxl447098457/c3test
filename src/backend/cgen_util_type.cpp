@@ -239,12 +239,16 @@ Vb6Type CCodeGen::inferExprType(Expr& expr) const {
             // 那一族的发码自第三十六刀起交运行期出口 vb6_VarDivV(...)，C 表达式的类型是整只
             // vb6_VARIANT；这里再答 Double 就是「oracle 与 C 表达式的型不一致」，实物 = 门 #517
             // 唯一那条真红：Charts 2020 ClsResizer.cls 的 COM 实参打包按 inferExprType 选型 ⇒
-            // `vb6_ComPackDouble(一枚槽)` ⇒ C2440，两架构同形。口径与下面 promote 那句
-            // 「Variant: 结果总是 Variant」是同一条，只是 Div 以前抄了个特例。
+            // `vb6_ComPackDouble(一枚槽)` ⇒ C2440，两架构同形。
+            // ⚠ 第三十七刀的订正（§B147）：这一问**必须与发码改道共用同一条判据的 AST 那一半**
+            // (variantOperandAST)，不能拿 inferExprType 的递归答案当「操作数是槽」。改前就是两
+            // 条答案：oracle 看 inferExprType、改道看 C 文本前缀表，于是「AST 说是 Variant 而
+            // 文本表读不出」那一族（实测：Variant 数组的元素访问、UC 宿主伪成员 TextHeight、
+            // Screen_TwipsPerPixelY）压根没改道，却被这条 oracle 答成 Variant ⇒ 消费点不提取
+            // 也不取整 ⇒ 浮点进窄整型目标静默截断。改吃 AST 那一半之后方向性是构造性的：
+            // 改道 = AST ∪ 文本 ⊇ oracle = AST。
             if (bin.op == BinaryOp::Div) {
-                Vb6Type ld28 = inferExprType(*bin.left);
-                Vb6Type rd28 = inferExprType(*bin.right);
-                if (ld28 == Vb6Type::Variant || rd28 == Vb6Type::Variant)
+                if (variantOperandAST(bin.left.get()) || variantOperandAST(bin.right.get()))
                     return Vb6Type::Variant;
                 return Vb6Type::Double;
             }
@@ -854,6 +858,19 @@ bool CCodeGen::cExprIsVariant(const std::string& cExpr) const {
     // 但这种形式通常作为 ByRef 参数传递, 不需要再转换, 故不检测.
 
     return false;
+}
+
+// 账 #305 §B147: 「这枚表达式交出来的 C 是不是整只槽」的 AST 那一半 (另一半天然是
+// 上面那张文本前缀表)。口径就一条: **发码改道吃 AST ∪ 文本, 类型 oracle 只吃 AST**,
+// 于是「oracle 答 Variant」必然蕴含「改道真的发火、真的交出 vb6_VARIANT」。
+// 反过来 (oracle 说槽、发码给裸标量) 就是第三十六刀造出的那一族静默回归: 消费点按
+// Variant 那一档既不提取也不取整, 直接把裸 double 递进 vb6_ChkByte/ChkInt/ChkLong =
+// C 在调用边界截断, 错误 6 也不报了 (§B147 的读数)。
+// isArrOut 为真 = C 类型是 vb6_SafeArray1D* (Variant **数组本体**), 那不是槽, 不算。
+bool CCodeGen::variantOperandAST(const Expr* e) const {
+    if (!e) return false;
+    bool isArr = false;
+    return isDefinitelyVariantExpr(const_cast<Expr&>(*e), &isArr) && !isArr;
 }
 
 // ============================================================
