@@ -1,4 +1,4 @@
-// cgen_expr_call_arg_emit.inc - visit(IndexOrCallExpr&) 函数体片段：位置实参发射（一）—— UDT 打包、Declare ANSI 与 ByRef 取地址（位于实参 for 循环内）
+﻿// cgen_expr_call_arg_emit.inc - visit(IndexOrCallExpr&) 函数体片段：位置实参发射（一）—— UDT 打包、Declare ANSI 与 ByRef 取地址（位于实参 for 循环内）
 // 由 src/backend/expr/cgen_expr_call.cpp 拆出（2026-09-17），在函数体内被 #include，非独立编译单元。
 // 内容 = 原文件第 1771~2136 行，逐行未改。
 
@@ -1319,3 +1319,26 @@
                     } // end Fix 064 else
             }
         } // Fix 024 P2: ByVal Variant 参数 — 调用点用 vb6_VariantFromValue 包装实参.
+
+        // Fix <vbeclipse> 2026-10-12: 类实例实参 → 新式接口 (ivref) 形参 — 传**薄接口
+        // 视图**。cType 在上方作用域已销毁, 这里按形参类型重算。
+        std::string cTypeIvfix = (i < calleeParams.size())
+            ? ivrefCType(calleeParams[i].typeRefName) : std::string();
+        // 视图** (&expr->__iv_I), 不是类基址。Fix 215 的 `ObjPtr(This)`/`PtrToObj`
+        // 裸指针往返假设存取双方都是薄指针 (B04: 薄指针 = &obj->__iv_<I>); 调用点把
+        // 类基址原样传给 ivref 形参, 回调里 `This->vt` 读到的就是类结构首字段
+        // __refcount (ComCtlsDemo ComCtlsSubclassProc 实测: av read 0xC 崩在
+        // Release, StatusBar UC 创建期 100% 复现)。
+        if (cTypeIvfix.compare(0, 10, "vb6_ivref_") == 0 && i < node.positional.size()
+            && node.positional[i]) {
+            std::string argCls = inferClassTypeOfExpr(*node.positional[i]);
+            if (!argCls.empty()) {
+                const IfaceView* ivFix = ivLookupIface(
+                    cTypeIvfix.substr(10, cTypeIvfix.find('*', 10) - 10));
+                if (ivFix) {
+                    std::string ivField = "__iv_" + cIdent(ivFix->name);
+                    argVal = "(vb6_ivref_" + cIdent(ivFix->name) + "*)&((" + argVal
+                           + ")->" + ivField + ")";
+                }
+            }
+        }
