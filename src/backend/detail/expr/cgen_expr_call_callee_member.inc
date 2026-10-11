@@ -227,7 +227,7 @@
                     // 实测 ComCtlsDemo RichTextBoxForm.frm:165
                     //   `RichTextBox1.Move 0, ToolBar1.Height, .ScaleWidth, .ScaleHeight - ToolBar1.Height`
                     if (isComMarker_) {
-                        lastExpr_ = comMarkerValueForWrite("vb6_ComPackDouble", lastExpr_);
+                        lastExpr_ = resolveComValue("Double");
                     }
                     aMV[i] = std::move(lastExpr_);
                 }

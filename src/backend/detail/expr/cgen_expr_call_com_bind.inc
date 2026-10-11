@@ -634,29 +634,15 @@
             auto emitComArg = [&](const ExprPtr& argExpr) {
                 std::string packFn = comPackExpr(*argExpr);
                 emitExpr(*argExpr);
-                // Fix 266: 打包器的**型**与 marker 解析的**型**不同源。
-                // comPackExpr 按 AST 推的型给出 typed 打包器 (ComPackDouble/Int/Bool/BSTR),
-                // 而 resolveComMarkerForPack 交回的是**无型** VARIANT 取值
+                { std::string resolved = resolveComMarkerForPack(packFn); if (!resolved.empty()) lastExpr_ = resolved; }
+                // Fix 266: 打包器的**型**与 marker 解析的**型**不同源 ——
+                // comPackExpr 按 AST 推的给出 typed 打包器 (ComPackDouble/Int/Bool/BSTR),
+                // 而 marker 解析可能交回**无型** VARIANT 取值
                 // `vb6_VariantFromComResult(vb6_ComGetProp(obj, L"m"))` ⇒
                 // `vb6_ComPackDouble(vb6_VARIANT)` = C2440 "无法从 vb6_VARIANT 转换为 double"。
-                // marker 还在时改走 comMarkerValueForWrite (P25 那处出口: 按 packFn 选 hint
-                // 再 resolveComValue) —— 它会给出**同型** getter
-                // (vb6_ComGetDoubleProp / GetIntProp / GetStringProp)，
-                // 与下游 typed 打包器对齐。实测 ComCtlsDemo Pager.ctl 的
-                // `With PagerBuddyControl : .Move .Left, .Top, ...` (Pager.c 2079/2080)。
-                // 只对数值/串这四档介入: 对象档 (ComPackObject) 与 Variant 档
-                // (ComPackValue) 由下面两句各自的原路径处理 (见 653 行的 argIsVariantPtr)。
-                if (isComMarker_
-                    && (packFn == "vb6_ComPackDouble" || packFn == "vb6_ComPackInt"
-                        || packFn == "vb6_ComPackBool" || packFn == "vb6_ComPackBSTR")) {
-                    lastExpr_ = comMarkerValueForWrite(packFn, lastExpr_);
-                }
-                { std::string resolved = resolveComMarkerForPack(packFn); if (!resolved.empty()) lastExpr_ = resolved; }
-                // marker 在 emitExpr 期间就已消费掉时上面那条补不了 —— 交回的是**无型**
-                // VARIANT (`vb6_VariantFromComResult(vb6_ComGetProp(..))`), 与 typed 打包器
-                // 错位。这一格已收口到 packArgValue (见下方 packedArgs.push_back 那一行,
-                // 与 callee_ident/callee_member/prelude 三个片段共用同一处),
-                // 不再在这里单独抄一份。
+                // 这一格收口到 packArgValue 一处（见下方 packedArgs.push_back 那一行；
+                // 与 callee_ident / callee_member / prelude 三个片段共用同一个函数，
+                // 不在每个站点各抄一份 —— 实测只堵一处等于没堵）。
                 // Fix <vbeclipse>: 实参表达式本身已返回**堆 VARIANT*** (ComGetProp /
                 // ComCall / ComGetObjectProp … 返回 void* 承载一个 COM VARIANT) 时, 它
                 // 已经是 ComCall 形参数组要的东西, 不能再包一层 vb6_ComPackObject —— 那会
