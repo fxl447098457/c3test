@@ -772,7 +772,7 @@
     // Fix 084f: 旧实现用 (vb6_VARIANT){<内层调用>} 复合字面量以值初始化结构体,
     // 首成员是 vb6_vartype → 触发 C2440 "vb6_VARIANT → vb6_vartype".
     // 改用按值辅助函数 vb6_VariantArrayGetVal(内层调用, 外层索引).
-    if (callee.compare(0, 20, "vb6_VariantArrayGet(") == 0 && !node.positional.empty()) {
+    if (isVariantSlotElemRead(callee) && !node.positional.empty()) {
         std::string innerCall = callee;
         std::string outerIdx;
         emitExpr(*node.positional[0]);

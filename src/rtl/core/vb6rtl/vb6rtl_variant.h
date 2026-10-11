@@ -264,6 +264,10 @@ static inline vb6_VARIANT vb6_VariantIdentity(vb6_VARIANT v) { return v; }
 vb6_VARIANT vb6_VariantArrayGet(vb6_VARIANT* v, int32_t index);
 // Set element in a Variant that holds an array
 void vb6_VariantArraySet(vb6_VARIANT* v, int32_t index, vb6_VARIANT val);
+// 账 #305 §B150 (第四十刀): 晚绑定槽的多维元素读/写 —— 秩数与全部下标一次交全,
+// 上下界与错误 9 由 vb6rtl_array.h 那唯一一枚 vb6_SaNdElemPtr 管。
+vb6_VARIANT vb6_VariantArrayGetND(vb6_VARIANT* v, int32_t rank, ...);
+void vb6_VariantArraySetND(vb6_VARIANT* v, int32_t rank, ...);
 // Fix 084f: Variant 数组嵌套索引按值版本 — vGateway(lIdx)(0) 中内层
 // vb6_VariantArrayGet(&vGateway, lIdx) 返回 vb6_VARIANT 值(非左值无法取地址),
 // 此函数按值接收后再按索引取元素, 替代非法的 (vb6_VARIANT){...} 复合字面量.
@@ -275,6 +279,9 @@ vb6_VARIANT vb6_VariantArrayGetVal(vb6_VARIANT v, int32_t index);
 // intptr_t). 此函数返回底层 SafeArray 元素槽位的地址 (仅 vb6_sa_variant 支持,
 // 其余类型返回 NULL — 非 Variant 数组槽位不是 VARIANT 布局).
 vb6_VARIANT* vb6_VariantArrayElemPtr(vb6_VARIANT* v, int32_t index);
+/* 账 #305 §B150: 多维版取址, 形参表 = (槽, 秩数, 秩数个 int32_t 下标) —— 与
+   vb6_VariantArrayGetND 同形, 发码侧那两路交址的改写只换函数名。 */
+vb6_VARIANT* vb6_VariantArrayElemPtrND(vb6_VARIANT* v, int32_t rank, ...);
 
 // Variant转基本类型
 int32_t vb6_VariantToLong(vb6_VARIANT v);

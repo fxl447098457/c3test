@@ -234,12 +234,11 @@ void CCodeGen::visit(LetStmt& node) {
     }
 
     // Fix 038 Group 1/2: Variant 数组元素赋值 (同 AssignmentStmt 路径)
-    if (target.find("vb6_VariantArrayGet(") == 0) {
-        size_t argStart = target.find('(');
-        size_t argEnd = target.rfind(')');
-        if (argStart != std::string::npos && argEnd != std::string::npos && argEnd > argStart) {
-            std::string args = target.substr(argStart + 1, argEnd - argStart - 1);
-            c_.emitLine("vb6_VariantArraySet(" + args + ", vb6_VariantFromValue(" + value + "));  /* Let */");
+    if (isVariantSlotElemRead(target)) {
+        // 账 #305 §B150: 与 AssignmentStmt 那一支同一条改写 (一维/多维都在 variantSlotAssignLine 里)
+        std::string slotLine;
+        if (variantSlotAssignLine(target, "vb6_VariantFromValue(" + value + ")", slotLine)) {
+            c_.emitLine(slotLine + ";  /* Let */");
         } else {
             c_.emitLine(target + " = " + value + ";  /* Let */");
         }

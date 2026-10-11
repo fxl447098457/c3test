@@ -141,9 +141,8 @@
             // ObjPtr(VarArgList(i)), VBFlexGrid.c 18504~18645 VarPtr(Value(i))).
             // 158f 的 vb6_VariantArrayElemPtr(vb6_VARIANT*, int32_t) 正是"取元素地址",
             // 与 vb6_VariantArrayGet 同参数形态 → 直接改名, 得到真左值地址.
-            if (lastExpr_.compare(0, 20, "vb6_VariantArrayGet(") == 0) {
-                lastExpr_ = "(intptr_t)vb6_VariantArrayElemPtr("
-                          + lastExpr_.substr(20);
+            if (isVariantSlotElemRead(lastExpr_)) {
+                lastExpr_ = "(intptr_t)" + variantSlotElemAddrRead(lastExpr_);
                 return;
             }
             if (vpIsCall && !vpIsLvalue092s) {

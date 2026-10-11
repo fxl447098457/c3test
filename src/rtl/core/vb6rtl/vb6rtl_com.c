@@ -708,6 +708,83 @@ vb6_VARIANT* vb6_VariantArrayElemPtr(vb6_VARIANT* v, int32_t index) {
     return &((vb6_VARIANT*)arr->data)[index - arr->lBound];
 }
 
+/* 账 #305 §B150: 上面那一枚的多维版 —— 发码侧「整枚元素引用交址」的两路 (As Any ByRef
+   实参 / VarPtr) 以前按老前缀比文本, 本刀新那枚名不认就静默退化成临时盒 (写不回填)
+   或 C2440。参数形态与 vb6_VariantArrayGetND 同形, 所以发码侧只换函数名。
+   越界交回错误 9 (唯一那枚 vb6_SaNdElemPtr, 账 #209 那一族的口径); 非 Variant 数组槽
+   交 NULL, 与上面一维那条同形。 */
+vb6_VARIANT* vb6_VariantArrayElemPtrND(vb6_VARIANT* v, int32_t rank, ...) {
+    if (!v || !(v->vt & vb6_vtArray) || !v->parray || rank < 1 || rank > 16) return NULL;
+    vb6_SafeArrayND* nd = (vb6_SafeArrayND*)v->parray;
+    if (nd->elemType != vb6_sa_variant) return NULL;
+    int32_t idx[16];
+    va_list ap;
+    va_start(ap, rank);
+    for (int32_t d = 0; d < rank; d++) idx[d] = va_arg(ap, int32_t);
+    va_end(ap);
+    if (nd->dimCount < 1 || nd->dimCount > 16) return vb6_VariantArrayElemPtr(v, idx[0]);
+    int32_t es = vb6_SaElemSize(nd->elemType);
+    if (es <= 0 || !nd->data) { vb6_SaNdElemFail(nd, idx, rank); }
+    return (vb6_VARIANT*)vb6_SaNdElemPtr(nd, rank, idx, es);
+}
+
+// 账 #305 §B150 (第四十刀): 「这枚槽里的数组第 off 格是什么档」以前只写在
+// vb6_VariantArrayGet 的函数体里, 而同一枚槽的**多维**读根本没进过这一问 ——
+// 发码侧把 v(1,2) 发成 vb6_VariantArrayGet(&v, 1), 第二个下标整块丢掉 (实测读回空),
+// 可同一份产物里 UBound(v, 2) 却按 ND 问 ⇒ 同一个"这枚槽是几维"的决定说了两遍、漏了一遍。
+// 现在档位表提出来只有一份, 一维与多维都从它出来; 多维的下标检查走那唯一一枚
+// vb6_SaNdElemPtr (越界/NULL 一律抛 9, 与账 #209 那一族同口径)。
+static vb6_VARIANT vb6_VariantElemFromSlotData(void* data, int32_t off, vb6_safearray_elemtype t) {
+    vb6_VARIANT result;
+    memset(&result, 0, sizeof(result));
+    result.vt = vb6_vtEmpty;
+    switch (t) {
+        case vb6_sa_long:
+            result.vt = vb6_vtLong;
+            result.lVal = ((int32_t*)data)[off];
+            break;
+        case vb6_sa_int:
+            result.vt = vb6_vtInteger;
+            result.iVal = ((int16_t*)data)[off];
+            break;
+        case vb6_sa_double:
+            result.vt = vb6_vtDouble;
+            result.dblVal = ((double*)data)[off];
+            break;
+        case vb6_sa_single:
+            result.vt = vb6_vtDouble; /* VB6 Single -> Double promotion */
+            result.dblVal = (double)((float*)data)[off];
+            break;
+        case vb6_sa_bstr:
+            result.vt = vb6_vtBSTR;
+            result.bstrVal = ((BSTR*)data)[off];
+            break;
+        case vb6_sa_bool:
+            result.vt = vb6_vtBoolean;
+            result.boolVal = ((int16_t*)data)[off];
+            break;
+        case vb6_sa_byte:
+            result.vt = vb6_vtInteger; /* VB6 Byte -> Integer promotion */
+            result.iVal = (int16_t)((uint8_t*)data)[off];
+            break;
+        case vb6_sa_variant:
+            result = ((vb6_VARIANT*)data)[off];
+            break;
+        case vb6_sa_ptr:
+            result.vt = vb6_vtLong; /* object pointer as Long */
+            result.lVal = (int32_t)(intptr_t)((void**)data)[off];
+            break;
+        case vb6_sa_currency:
+            result.vt = vb6_vtLong;
+            result.lVal = (int32_t)((int64_t*)data)[off]; /* truncate to Long */
+            break;
+        default:
+            result.vt = vb6_vtEmpty;
+            break;
+    }
+    return result;
+}
+
 /* Variant数组索引: 从持有SafeArray的Variant中取/设元素 */
 vb6_VARIANT vb6_VariantArrayGet(vb6_VARIANT* v, int32_t index) {
     vb6_VARIANT result;
@@ -716,52 +793,59 @@ vb6_VARIANT vb6_VariantArrayGet(vb6_VARIANT* v, int32_t index) {
     if (!v || !(v->vt & vb6_vtArray) || !v->parray) return result;
     vb6_SafeArray1D* arr = v->parray;
     if (index < arr->lBound || index > arr->uBound) return result;
-    int32_t off = index - arr->lBound;
-    switch (arr->elemType) {
-        case vb6_sa_long:
-            result.vt = vb6_vtLong;
-            result.lVal = ((int32_t*)arr->data)[off];
-            break;
-        case vb6_sa_int:
-            result.vt = vb6_vtInteger;
-            result.iVal = ((int16_t*)arr->data)[off];
-            break;
-        case vb6_sa_double:
-            result.vt = vb6_vtDouble;
-            result.dblVal = ((double*)arr->data)[off];
-            break;
-        case vb6_sa_single:
-            result.vt = vb6_vtDouble; /* VB6 Single -> Double promotion */
-            result.dblVal = (double)((float*)arr->data)[off];
-            break;
-        case vb6_sa_bstr:
-            result.vt = vb6_vtBSTR;
-            result.bstrVal = ((BSTR*)arr->data)[off];
-            break;
-        case vb6_sa_bool:
-            result.vt = vb6_vtBoolean;
-            result.boolVal = ((int16_t*)arr->data)[off];
-            break;
-        case vb6_sa_byte:
-            result.vt = vb6_vtInteger; /* VB6 Byte -> Integer promotion */
-            result.iVal = (int16_t)((uint8_t*)arr->data)[off];
-            break;
-        case vb6_sa_variant:
-            result = ((vb6_VARIANT*)arr->data)[off];
-            break;
-        case vb6_sa_ptr:
-            result.vt = vb6_vtLong; /* object pointer as Long */
-            result.lVal = (int32_t)(intptr_t)((void**)arr->data)[off];
-            break;
-        case vb6_sa_currency:
-            result.vt = vb6_vtLong;
-            result.lVal = (int32_t)((int64_t*)arr->data)[off]; /* truncate to Long */
-            break;
-        default:
-            result.vt = vb6_vtEmpty;
-            break;
+    return vb6_VariantElemFromSlotData(arr->data, index - arr->lBound, arr->elemType);
+}
+
+/* 账 #305 §B150: 晚绑定槽的**多维**元素读。形参表 = (槽, 秩数, 秩数个 int32_t 下标)。
+   非数组槽 / 秩数非法交 Empty (与上面一维那一条同形, 越界则由 ND 权威抛 9 —— 那一档
+   与一维不一致的旧口径另记在账里, 本刀不去改既有的一维语义)。 */
+vb6_VARIANT vb6_VariantArrayGetND(vb6_VARIANT* v, int32_t rank, ...) {
+    vb6_VARIANT result;
+    memset(&result, 0, sizeof(result));
+    result.vt = vb6_vtEmpty;
+    if (!v || !(v->vt & vb6_vtArray) || !v->parray || rank < 1 || rank > 16) return result;
+    vb6_SafeArrayND* nd = (vb6_SafeArrayND*)v->parray;
+    int32_t idx[16];
+    va_list ap;
+    va_start(ap, rank);
+    for (int32_t d = 0; d < rank; d++) idx[d] = va_arg(ap, int32_t);
+    va_end(ap);
+    /* 兜底: 槽里其实挂着一枚 1D 描述符 (自家把多维折成一维那一族, 见 §B90 / §B151) ——
+     * 1D 描述符的首字段是魔数 0x5A1D = 23069, 落不进 1..16, 所以这一问就认得出来。
+     * 这种槽改前读的是第一个下标 (VBFlexGridDemo 的 ArrRows(iCol, iRow) 实测就是这个形,
+     * 见 .build/b1274_emit_new.txt 那一行), 所以这里退回**同一枚一维出口**: 修的是真 2-D,
+     * 不把已经在跑的写法换成错误 9。折叠本身是 §B151, 不在本格。 */
+    if (nd->dimCount < 1 || nd->dimCount > 16) return vb6_VariantArrayGet(v, idx[0]);
+    int32_t es = (nd->elemType == vb6_sa_udt) ? nd->elemSize : vb6_SaElemSize(nd->elemType);
+    if (es <= 0 || !nd->data) { vb6_SaNdElemFail(nd, idx, rank); }
+    void* p = vb6_SaNdElemPtr(nd, rank, idx, es);   /* 唯一一枚带上下界检查的 ND 落点 */
+    int32_t off = (int32_t)(((char*)p - (char*)nd->data) / es);
+    return vb6_VariantElemFromSlotData(nd->data, off, nd->elemType);
+}
+
+/* 同上, 写侧: (槽, 秩数, 秩数个 int32_t 下标, 末尾一枚 vb6_VARIANT 值) —— 这个顺序是**故意**
+   与 vb6_VariantArraySet(v, index, val) 同形, 发码侧那两处「Get 改 Set」的改写只换函数名、
+   把装箱后的值追加在末尾, 不必再拼一次参数。 */
+void vb6_VariantArraySetND(vb6_VARIANT* v, int32_t rank, ...) {
+    if (!v || !(v->vt & vb6_vtArray) || !v->parray || rank < 1 || rank > 16) return;
+    vb6_SafeArrayND* nd = (vb6_SafeArrayND*)v->parray;
+    if (nd->elemType != vb6_sa_variant) return;   /* 与一维那条同口径: 只有 Variant 数组可写 */
+    int32_t idx[16];
+    va_list ap;
+    va_start(ap, rank);
+    for (int32_t d = 0; d < rank; d++) idx[d] = va_arg(ap, int32_t);
+    vb6_VARIANT val = va_arg(ap, vb6_VARIANT);
+    va_end(ap);
+    if (nd->dimCount < 1 || nd->dimCount > 16) {
+        /* 同一枚兜底: 一维描述符按第一个下标写回, 与改前一维那条形 */
+        vb6_VariantArraySet(v, idx[0], val);
+        return;
     }
-    return result;
+    int32_t es = vb6_SaElemSize(nd->elemType);
+    if (es <= 0 || !nd->data) { vb6_SaNdElemFail(nd, idx, rank); }
+    vb6_VARIANT* slot = (vb6_VARIANT*)vb6_SaNdElemPtr(nd, rank, idx, es);
+    /* 接管语义 (rev16 那一课): Clear + 浅拷贝会让槽与借来的 Variant 共用同一只 BSTR。 */
+    vb6_VariantAssign(slot, val);
 }
 
 void vb6_VariantArraySet(vb6_VARIANT* v, int32_t index, vb6_VARIANT val) {

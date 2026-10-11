@@ -80,10 +80,8 @@
                 if (classVariantMembers_.count(nameLower) || classVariantMembers_.count(nameMLower)) {
                     emitExpr(*node.callee);  // emits "me->field"
                     std::string fieldExpr = std::move(lastExpr_);
-                    emitExpr(*node.positional[0]);
-                    // Fix 084o: 索引为 Variant 时转 Long
-                    std::string idx = toLongIfVariant(std::move(lastExpr_), node.positional[0].get());
-                    lastExpr_ = "vb6_VariantArrayGet(&" + fieldExpr + ", " + idx + ")";
+                                        // 账 #305 §B150: 秩数 = 实参个数, 这一问只在 variantSlotElemRead 一处答。
+                    lastExpr_ = variantSlotElemRead("&" + fieldExpr, node.positional);
                     handled = true;
                 } else {
                     // void* COM 字段 → vb6_ComCall(me->field, L"Item", args, argc)

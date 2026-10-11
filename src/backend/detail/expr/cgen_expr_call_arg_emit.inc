@@ -649,16 +649,14 @@
                         std::string ccType = mapType(constIdentType(argVal));
                         if (ccType.empty() || ccType == "vb6_VARIANT") ccType = "int32_t";
                         argVal = "(void*)&(" + ccType + "){" + argVal + "}";
-                    } else if (argVal.compare(0, 20, "vb6_VariantArrayGet(") == 0) {
+                    } else if (isVariantSlotElemRead(argVal)) {
                         // Fix 158f: Variant 数组元素整体引用作为 As Any ByRef 实参
                         // (VTableHandle.bas: VariantCopy ArgListRev(i),
                         // ArgList(UBound(ArgList) - i)). 元素是右值 (vb6_VariantArrayGet
                         // 返回值), (void*)(intptr_t)(vb6_VARIANT) → C2440. 用 RTL
                         // vb6_VariantArrayElemPtr(数组, 下标) 取底层槽位地址 — dest/src
                         // 都指向真实元素, VariantCopy 读写落位正确.
-                        std::string inner158f = argVal.substr(20);
-                        if (!inner158f.empty() && inner158f.back() == ')') inner158f.pop_back();
-                        argVal = "vb6_VariantArrayElemPtr(" + inner158f + ")";
+                        argVal = variantSlotElemAddrRead(argVal);
                     } else if (isDefinitelyVariantExpr(*node.positional[i]) || cExprIsVariant(argVal)) {
                         // Fix 158g: Variant 值 (Variant 属性读取函数返回) 作为 As Any
                         // ByRef 实参 — VBFlexGrid.ctl: VariantCopy Cell, .CellTag

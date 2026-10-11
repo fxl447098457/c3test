@@ -29,7 +29,9 @@
 // ============================================================
 
 // 安全数组元素大小表
-static int32_t vb6_sa_elem_size(vb6_safearray_elemtype t) {
+// 账 #305 §B150 (第四十刀): 这张表以前是 array.c 的内部细节, 现在**晚绑定槽的多维读**也要问它
+// —— 步长由元素类型决定这一件事不允许有第二份答案。改名 (vb6_sa_ → vb6_Sa_) 与 public 化一次做完。
+int32_t vb6_SaElemSize(vb6_safearray_elemtype t) {
     switch (t) {
         case vb6_sa_bool:    return (int32_t)sizeof(int16_t);
         case vb6_sa_byte:    return (int32_t)sizeof(uint8_t);
@@ -52,7 +54,7 @@ vb6_SafeArray1D* vb6_SafeArrayCreate1D(vb6_safearray_elemtype elemType,
     if (!arr) return NULL;
     arr->signature = 0x5A1D;  /* Fix 082g: 1D array magic */
     arr->elemType = elemType;
-    arr->elemSize = vb6_sa_elem_size(elemType);
+    arr->elemSize = vb6_SaElemSize(elemType);
     arr->lBound = lBound;
     arr->uBound = uBound;
     arr->count = uBound - lBound + 1;
@@ -474,7 +476,7 @@ vb6_SafeArrayND* vb6_SafeArrayCreateND(vb6_safearray_elemtype elemType,
 
     arr->dimCount = dimCount;
     arr->elemType = elemType;
-    arr->elemSize = vb6_sa_elem_size(elemType);
+    arr->elemSize = vb6_SaElemSize(elemType);
 
     int32_t total = 1;
     for (int32_t d = 0; d < dimCount; d++) {

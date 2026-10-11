@@ -539,6 +539,24 @@
     // 清单漏一枚 (vb6_VariantByte / 新增的 VariantSingle / VariantDate) 就会把
     // 已是 VARIANT 的表达式再按 VB 类型装一层, 换来 C2440 + C2198。
     bool cExprIsVariantCarrier(const std::string& cExpr) const;
+    // 账 #305 §B150 (第四十刀): 「这枚晚绑定槽的第 N 维元素」以前在四个发射点各抄一遍,
+    //   而每一遍都只吃 positional[0] —— v(1,2) 发成 vb6_VariantArrayGet(&v, 1), 第二枚下标
+    //   整块丢掉 (实测读回空), 可同一枚槽的 UBound(v,2) 却按 ND 问 ⇒ 同一个决定说了两遍漏了一遍。
+    //   秩数 = 实参个数, 这一问只在这里答: 一枚走一维出口, 两枚及以上走 GetND。
+    std::string variantSlotElemRead(const std::string& slotArg,
+                                    const std::vector<ExprPtr>& positional);
+    //   写侧同一条: 已发出来的元素读改写成那一对写出口 (Get→Set / GetND→SetND,
+    //   装箱后的值追加在参数表末尾 —— 两枚 ND 出口的形参顺序就是为这个改写定的)。
+    bool variantSlotAssignLine(const std::string& target, const std::string& boxedValue,
+                               std::string& outLine) const;
+    //   认文本那一问也收成一处: 「这串已发出的 C 是不是槽元素读」原先由六处各写一遍字符串
+    //   比较, 抄的还是两种前缀 —— 带括号的 "vb6_VariantArrayGet(" (四处) 与
+    //   不带括号的 "vb6_VariantArrayGet" (两处)。本刀新增多维那枚名之后, 带括号那四处
+    //   对 ND 一律答 false: VarPtr 那一路退成 C2440, Set 那一路退成整条赋值被丢掉 (静默)。
+    bool isVariantSlotElemRead(const std::string& text) const;
+    //   取址改写 (As Any ByRef 实参 / VarPtr(...)) —— 读、取址、写三枚名的参数形态同形
+    //   (槽 [, 秩数] , 下标...), 所以改写只是换函数名。空串 = 这串文本不是槽元素读。
+    std::string variantSlotElemAddrRead(const std::string& text) const;
 
     // <vbeclipse>: 只有声明名（没有 AST 类型引用）时的 C 类型入口 —— 合成一次
     // SimpleTypeRef 走 mapTypeRef, 不复制那份映射。dll/COM 入口的 extern 原型用它，

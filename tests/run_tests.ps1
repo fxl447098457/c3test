@@ -2606,6 +2606,28 @@ if ($Category -in @("all", "run", "bas")) {
     Add-BasTest "test_variant_boxing" "$Tests\test_variant_boxing.bas" $boxNeedles
     # 账 #305: 上面那五条 VB-ptr-*/VB-str-tn 是**两架构同一个答案**那一类, 所以 x86 必须同针同过
     Add-BasTest "test_variant_boxing_x86" "$Tests\test_variant_boxing.bas" $boxNeedles -Arch "x86"
+    # 账 #305 §B149 + §B150 (第四十刀): 注册表家族的真往返 + 晚绑定槽的二维元素读写。
+    # 读数来源 = .build/b1280_rs (新 exe, x64 与 x86 **逐行相同**, 故同针同过); 外部口径证人 =
+    # VB6 真语料 mdoceditor/E-Type/Main.bas:269 (`For i = 0 To UBound(varFiles, 1)` + `varFiles(i, 1)`)。
+    # 改前的四档全错而一声不响 (VarType=12 / IsNull=False / UBound 两维都答 0 / 元素读回空串,
+    # 见 .build/b1265_nd/r6.txt) => 负控 = 拿 BASE 那台跑同一份新夹具, R1/R2/R4 那几条必红。
+    # R3 两枚钉的是「回来的是快照」: 写槽不写注册表 (VB6 同形), 也是「写侧真接到了 ND 落点」的证人。
+    # ⚠ VB6 的 DeleteSetting 有 1/2/3 参三形, 我们那枚出口今天只认三参 (§B149 第三格, 未修),
+    #   所以夹具里四条删除一律写全 —— 少写一个参数不是省事, 是把整条夹具打成 C2198。
+    # R5 两枚钉的是**同一枚元素的地址**那一形: 发码侧「认这串 C 是不是槽元素读」原先按老名
+    # 比文本, 新那枚多维的名字不认 → VarPtr(v(0,1)) 退成复合字面量 (C2440) 或临时盒 (静默)。
+    # BASE 上这一条实测交 False (地址没找到) ⇒ 针面能红。
+    # ⚠ 变量名刻意不叫 $rsNeedles —— 那名字在下面 rawstr 那一族已经有人用了 (同名后写会盖掉
+    #   前写, PSParser 0 错也照样把针换掉, 见 022 记的「PSParser 0 错而绑定已变」那一族)。
+    $rsSetNeedles = @("R1-miss-vt=1", "R1-miss-isnull=True",
+        "R2-vt=8204", "R2-isnull=False",
+        "R2-lb1=0", "R2-ub1=1", "R2-lb2=1", "R2-ub2=2",
+        "R2-cell01=K1", "R2-cell02=V1", "R2-cell12=V2",
+        "R3-slot-after-write=W2", "R3-registry-unchanged=V2",
+        "R5-elemptr-nonzero=True", "R5-cell01-still=K1",
+        "R4-after-delete-vt=1", "R4-after-delete-isnull=True", "RS-DONE")
+    Add-BasTest "test_registry_settings" "$Tests\test_registry_settings.bas" $rsSetNeedles
+    Add-BasTest "test_registry_settings_x86" "$Tests\test_registry_settings.bas" $rsSetNeedles -Arch "x86"
     # <vbeclipse>: vbTextCompare 六个入口对表 (InStr 两形/InStrRev/Replace/Split/Filter/
     # StrComp)。修复前 RTL 5 处 (void)compare + InStr 第 4 参被截、三参"字符串优先"形
     # 错接槽位 (实测段错误)；另修 Debug.Print StrComp(...) 被 "vb6_Str" 前缀误判成 BSTR

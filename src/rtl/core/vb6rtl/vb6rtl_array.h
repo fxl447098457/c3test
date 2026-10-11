@@ -161,6 +161,8 @@ vb6_SafeArrayND* vb6_SafeArrayReDimPreserveND_Udt(int32_t elemSize,
 
 int32_t vb6_SafeArrayND_Offset(vb6_SafeArrayND* arr, int32_t dimCount, int32_t indices[]);
 void* vb6_SafeArrayND_GetPtr(vb6_SafeArrayND* arr, ...);
+// 账 #305 §B150: elemType → 单元素字节数 (UDT 档不在这里答, 由描述符自己的 elemSize 说话)。
+int32_t vb6_SaElemSize(vb6_safearray_elemtype t);
 
 int32_t vb6_UBoundND(vb6_SafeArrayND* arr, int32_t dimension);
 int32_t vb6_LBoundND(vb6_SafeArrayND* arr, int32_t dimension);
