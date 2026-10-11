@@ -743,7 +743,8 @@
                             // 与 Fix 090q / Fix 160-H 同一套路: 声明行挂 pending, 保证先于引用.
                             // 例外: "0" 仍是 (void*)0 —— Fix 069b 场景要 NULL 指针语义.
                             if (argVal == "0" || litBody == "0") {
-                                argVal = "(void*)(intptr_t)(" + argVal + ")";
+                                /* VB6: 字面量/常量传 ByRef As Any = 传装着该值的临时地址, 无指针语义 (ComCtlsDemo PtrToObj 实测: 旧特例发 (void*)0, RtlMoveMemory 读地址 0 启动即 AV) */
+                                argVal = "(void*)&(int32_t){" + argVal + "}";
                             } else {
                                 std::string tmpAnyRel = "_vb6_anytmp" + std::to_string(tempCounter_++);
                                 c_.addPending("intptr_t " + tmpAnyRel

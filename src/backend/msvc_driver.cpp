@@ -253,6 +253,16 @@ bool MsvcDriver::compileAndLink(const MsvcDriverOptions& options) {
     // 调试信息
     if (options.debugInfo) {
         cmd << " /Zi /FS /DEBUG";
+        // Fix <vbeclipse>: /Zi 无 /Fd 时 PDB 落在 **cl 的工作目录** (= 工程目录)
+        // 的 vc140.pdb — 该目录常被防护软件按目录拦截新文件创建 ⇒ C1041 全灭
+        // (ComCtlsDemo -g 实测)。把 PDB 钉到 exe 的输出目录 (与 /Fe 同一目录)。
+        {
+            std::string pdbDir = options.outputFile;
+            size_t slash = pdbDir.find_last_of("/\\");
+            if (slash != std::string::npos) {
+                cmd << " /Fd\"" << pdbDir.substr(0, slash + 1) << "\"";
+            }
+        }
     }
 
     // C11标准, Unicode, UTF-8源码编码, 禁用MSVC安全警告
