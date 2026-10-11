@@ -170,8 +170,11 @@
         // rev14: `vb6_UserControl_Controls` 是恒 NULL 的"编译先行"空桩, 改用 RTL 真实
         // 集合单例 vb6_UC_Controls() (按当前 UC 实例回落 formHwnd); 否则 Controls.Item/Add
         // 恒返回 NULL → ucFolder_AddView(NULL) 崩溃。
-        std::string ctlObjExpr = (obj == "vb6_UserControl_Controls")
-                                     ? "vb6_UC_Controls()" : obj;
+        // 账 #257: ParentControls 同样不该退回恒 NULL 的空桩 —— 换真实访问器
+        // (父容器的集合), 与 Controls 同一口径。
+        std::string ctlObjExpr = obj;
+        if (obj == "vb6_UserControl_Controls")            ctlObjExpr = "vb6_UC_Controls()";
+        else if (obj == "vb6_UserControl_ParentControls") ctlObjExpr = "vb6_UC_ParentControls()";
         comObjExpr_ = "(void*)" + ctlObjExpr;
         comMemberName_ = node.memberName;
         isComMarker_ = true;

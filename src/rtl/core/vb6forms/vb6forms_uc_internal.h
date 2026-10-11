@@ -251,6 +251,9 @@ vb6_UCControls* vb6_uc_newControls(void* formHwnd);  // uc_controls.c
 // --- Fix <vbeclipse> rev14: Controls 集合 (Add/Item/Remove/Count) ---
 // 单例 + 归属窗口 + 对象形态查找 + 动态增删, 定义见 uc_controls.c
 void* vb6_UC_Controls(void);
+// 账 #257: UserControl.ParentControls —— VB6 语义是**容器**(父)的控件集合, 不是本 UC 自己
+// 的子控件。单例的 formHwnd 每次取用时现算成 GetParent(当前 UC 宿主窗口)。
+void* vb6_UC_ParentControls(void);
 void* vb6_UC_ControlsOwnHwnd(void* coll);
 void* vb6_UC_ControlsItemObj(void* coll, int32_t index);
 void* vb6_UC_ControlsItemObjByName(void* coll, const wchar_t* name);

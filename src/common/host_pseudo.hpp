@@ -124,6 +124,15 @@ inline const HostPseudoRow kHostPseudoRows[] = {
     // vb6_ComIface_Font*, 装箱比较本来就不该按标量发)。
     {"UserControl", "ambient",         "Ambient",         Vb6Type::Unknown,  HPF_NONE},
     {"UserControl", "font",            "Font",            Vb6Type::Unknown,  HPF_NONE},
+    // 账 #257: ParentControls 的真实答复是 vb6_UC_ParentControls() (父容器的集合,
+    // uc_controls.c), 恒 NULL 的空桩 vb6_UserControl_ParentControls 不该被发码 ——
+    // `UserControl.ParentControls.Count` 以前发成 vb6_ComGetIntProp((void*)NULL, L"Count")
+    // ⇒ 崩在 vb6_ComUnpackInt (StatusBar 创建期 100% 复现, StatusBar.ctl:481 就在
+    // UserControl_InitProperties 里)。改道在 cgen_expr_member_generic_access.inc。
+    //
+    // ⚠ 刻意**不**给这行挂 HPF_CHANNEL(像 Controls 那样): check_host_pseudo_table.ps1 的
+    // 行正则以 `(HPF_[A-Z| ]+)\}` 收尾, **认不出带 channel 的行** ⇒ 挂了这一行就掉出解析,
+    // 行数 62→61 直接红(且那一行从此没人查)。要挂 channel 得先修那道针的正则。
     {"UserControl", "parentcontrols",  "ParentControls",  Vb6Type::Unknown,  HPF_NONE},
 
     // ---- PropertyPage (.pag) ----

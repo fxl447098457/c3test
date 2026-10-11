@@ -79,6 +79,21 @@
        铺出来的格子是空的，`For Each` 第一格写 `Rects(0)` 就是错误 9（下标越界），
        启动期整个进程退出（CI 把它报成「窗口 5s 内没出现」）。 */
     if (_wcsicmp(name, L"Count") == 0)    { vb6_ho_setVariantLong(out, vb6_UC_ControlsCountOf(obj)); return 1; }
+    /* 账 #257: ParentControls = **容器**的控件集合 —— 不是本 UserControl 自己的子控件。
+       ComCtlsDemo 里的用法全是 UC 去**父容器**上枚举兄弟控件(找 ImageList / 判可停靠):
+         CheckBoxW.ctl:1267  For Each ControlEnum In UserControl.ParentControls
+         CoolBar.ctl:689     If UserControl.ParentControls.Count = 0 Then CoolBarAlignable = False
+       所以取样口径必须与下面 `Container` / `Parent` 那一档**同一条关系**(GetParent),
+       否则「oCtrl 属于 X.Controls」与「oCtrl.Container = X」会给出两套互相矛盾的答案。
+       ComCtlsDemo StatusBar UC 初始化时读它拿到 NULL ⇒ 宿主初始化中断
+       ⇒ MainForm.Show 静默失败(CI 报「窗口 5s 内没出现」)。
+       顶层窗体自己没有父 ⇒ 交回空值, 与 Container 那一档同口径。 */
+    if (_wcsicmp(name, L"ParentControls") == 0) {
+        void* pcHost = (void*)GetParent((HWND)obj);
+        if (!pcHost) { vb6_ho_setVariantEmpty(out); return 1; }
+        vb6_UCControls* cpc = vb6_uc_newControls(pcHost);
+        vb6_ho_setVariantObject(out, cpc); return 1;
+    }
     if (_wcsicmp(name, L"Controls") == 0) {
         /* 账 #250: 这一档以前用的是 setVariantDispatch —— 那一枚**刻意**只交 Empty
            (让字体代理那一路继续走 Nothing 分支, 见 uc_hostmodel.c 的注释)。

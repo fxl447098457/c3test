@@ -1329,7 +1329,7 @@
         // 类基址原样传给 ivref 形参, 回调里 `This->vt` 读到的就是类结构首字段
         // __refcount (ComCtlsDemo ComCtlsSubclassProc 实测: av read 0xC 崩在
         // Release, StatusBar UC 创建期 100% 复现)。
-        if (cTypeIvfix.compare(0, 10, "vb6_ivref_") == 0 && i < node.positional.size()
+        if (cTypeIvfix.rfind("vb6_ivref_", 0) == 0 && i < node.positional.size()
             && node.positional[i]) {
             std::string argCls = inferClassTypeOfExpr(*node.positional[i]);
             if (!argCls.empty()) {
