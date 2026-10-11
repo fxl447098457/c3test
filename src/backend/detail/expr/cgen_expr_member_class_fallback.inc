@@ -9,11 +9,29 @@
     // 走 inferClassTypeOfExpr(它的 object) = "View", 成员名 = "View"。
     // ⚠ node.object 是 ExprPtr (智能指针), 不是裸指针 —— lambda 形参用 ExprPtr。
     auto objIsAsObjectMemberV8 = [this](const ExprPtr& objAst) -> bool {
-        if (!objAst || objAst->kind != ASTNodeKind::MemberAccessExpr) return false;
-        const auto& maV8 = static_cast<const MemberAccessExpr&>(*objAst);
-        if (!maV8.object) return false;
-        return classMemberReturnsAsObject(inferClassTypeOfExpr(*maV8.object),
-                                         maV8.memberName);
+        if (!objAst) return false;
+        if (objAst->kind == ASTNodeKind::MemberAccessExpr) {
+            const auto& maV8 = static_cast<const MemberAccessExpr&>(*objAst);
+            if (!maV8.object) return false;
+            return classMemberReturnsAsObject(inferClassTypeOfExpr(*maV8.object),
+                                             maV8.memberName);
+        }
+        // Fix 246c: **With 块内的 `.X` 是 WithMemberExpr, 不是 MemberAccessExpr** ——
+        //   上面那条一个 kind 判断就把整族挡在门外, 于是 `.Picture.Handle` 在
+        //   `With Button.ButtonMenus(i)` 里永远走不到 rev8 的 `vb6_ComGetProp` 分支,
+        //   掉到最后的 `obj + "." + member` ⇒ C2224 "左侧必须具有结构/联合类型"。
+        //   实测 ComCtlsDemo ToolBar.c 7147/7151/7153/7198/7202/7204 共 6 条
+        //   (TbrButtonMenu.cls:137 `Property Get Picture() As IPictureDisp`)。
+        //   宿主类改从 With 栈顶取 —— 与 inferClassTypeOfExpr 的 WithMemberExpr
+        //   分支同一个来源, 不另立一套。
+        if (objAst->kind == ASTNodeKind::WithMemberExpr) {
+            if (withObjectInfoStack_.empty()) return false;
+            const std::string& hostCls = withObjectInfoStack_.back().className;
+            if (hostCls.empty()) return false;
+            const auto& wm = static_cast<const WithMemberExpr&>(*objAst);
+            return classMemberReturnsAsObject(hostCls, wm.memberName);
+        }
+        return false;
     };
 
     // Fix 010r-10: 类实例变量的成员访问 fallback
