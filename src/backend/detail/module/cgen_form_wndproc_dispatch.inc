@@ -420,7 +420,28 @@
                 c_.emitLine("if (pNM42->code == 1794 && (void*)pNM42->hwndFrom == "
                             + rtNHwnd + ") {");
                 c_.indent();
-                c_.emitLine("{ extern void " + rtSelFn + "(); " + rtSelFn + "(); }");
+                // Fix 258: 同 create.inc 那条 arm —— 实参个数按**处理器自己的形参表**交
+                // (零参那一形在夹具 tests/ctrlrichtextbox/RtfForm.frm:560 就是这个形状,
+                //  且是既有 EMITC-SHAPE 针钉住的; 声明了 3 个形参的处理器才是 C2198 现场)。
+                // 选区从 RTL 取, SelType 交 0。
+                const size_t nSel258 = rtSelSym->params.size();
+                if (nSel258 == 0) {
+                    c_.emitLine("{ extern void " + rtSelFn + "(); " + rtSelFn + "(); }");
+                } else {
+                    std::string selArgs258 = "(int16_t)0";
+                    std::string selPre258;
+                    if (nSel258 >= 2) {
+                        selPre258 = "int32_t vb6_rtSelS258 = vb6_RTB_GetSelStart((void*)"
+                                     + rtNHwnd + "); ";
+                        selArgs258 += ", vb6_rtSelS258";
+                    }
+                    if (nSel258 >= 3) {
+                        selArgs258 += ", (int32_t)(vb6_rtSelS258 + vb6_RTB_GetSelLength((void*)"
+                                      + rtNHwnd + "))";
+                    }
+                    c_.emitLine("{ extern void " + rtSelFn + "(); " + selPre258
+                                + rtSelFn + "(" + selArgs258 + "); }");
+                }
                 c_.dedent();
                 c_.emitLine("}");
             }

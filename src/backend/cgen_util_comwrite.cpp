@@ -81,7 +81,7 @@ bool CCodeGen::tryEmitChainedComWrite(Expr* targetNode, Expr* valueNode) {
             std::string packFn25 = comPackExpr(*ic.positional[j]);
             emitExpr(*ic.positional[j]);
             { std::string r25 = resolveComMarkerForPack(packFn25); if (!r25.empty()) lastExpr_ = r25; }
-            out.push_back(packFn25 + "(" + lastExpr_ + ")");
+            out.push_back(packArgValue(packFn25, lastExpr_));
         }
         return (int32_t)ic.positional.size();
     };
@@ -520,6 +520,29 @@ bool CCodeGen::tryRewriteCOMLvalue(const std::string& target, const std::string&
                             //   VBFlexGrid.c:58027 prop_let_EditText(me, double) C2440.
                             valArg = wrapToBSTR(value, *valueExpr);
                         }
+                    }
+                }
+                // Fix 268: **Set** 方向的同一格。上面那段找写方向形参表的块被
+                // `!isSet` 挡在门外, 于是 `Set X.Prop = <对象>` 的值实参从不装箱 ——
+                // 而 `Property Set Prop(ByVal Value As Variant)` 的 C 形参是 vb6_VARIANT
+                // ⇒ C2440 "无法从 int 转换为 vb6_VARIANT"。
+                //   实测 ComCtlsDemo PagerForm.frm:49 `Set ToolBar1.ImageList = MainForm.ImageList1`
+                //   (ToolBar.ctl:1728 `Property Set ImageList(ByVal Value As Variant)`,
+                //    PagerForm.c:187)。同工程 VirtualControlsForm.c:221 是同形的
+                //   `Set ListView1.SmallIcons = MainForm.ImageList1`, 走的是**另一条**
+                //   码头, 交的是 `vb6_VariantFromValue(vb6_form_ctrl_MainForm_ImageList1())`。
+                // 只在末形参确为 Variant 槽 (且不是类实例槽, 同 Fix 251/264 口径) 时装箱。
+                if (isSet && prefix.rfind("vb6_", 0) == 0 && !afterPg.empty()
+                    && afterPg.find('(') == std::string::npos
+                    && newVerbs.find("prop_get_") == std::string::npos) {
+                    std::string cls268 = prefix.substr(4);
+                    if (!cls268.empty() && cls268.back() == '_') cls268.pop_back();
+                    std::vector<ParameterInfo> setP268;
+                    if (findClassMemberWriteParams(cls268, afterPg, true, setP268)
+                        && !setP268.empty()
+                        && setP268.back().type == Vb6Type::Variant
+                        && cParamClassPtrType(setP268.back()).empty()) {
+                        valArg = packLetValueArg(setP268.back(), valueExpr, value);
                     }
                 }
                 // Fix 090ad: 只写属性 (无 Get, 如 Dictionary.key(OldKey)=NewKey) 的 LHS

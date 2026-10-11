@@ -62,15 +62,20 @@ $rowRe = '\{"(UserControl|PropertyPage|Extender|Ambient)",\s*"([a-z]+)",\s*"([A-
 # Select-String 默认**不区分大小写** (§B120 实测: 把表里一行 obj 列改回小写, 这条不加就还是 54 行,
 # 于是那行躲过的是"逐行对 RTL 声明"这道检查, 报出来的却是 ROW-SYMBOL-MISSING —— 红是红了, 说的不是这件事)
 $rows = @(Select-String -Path $tblPath -Pattern $rowRe -CaseSensitive)
-# 恰好 61 行: 从前的 "< 40" 会让"某一行从正则里掉出去"静默通过 —— 而每行都要逐条对 RTL 声明,
+# 恰好 62 行: 从前的 "< 40" 会让"某一行从正则里掉出去"静默通过 —— 而每行都要逐条对 RTL 声明,
 # 少认一行 = 那一行没人查 (账 #278 §B120 把 obj 列改成 PascalCase 时正是这个形状)。
-# 改这张表要同批改这道针 (加一行 -> 62, 删一行 -> 60)。
+# 改这张表要同批改这道针 (加一行 -> 63, 删一行 -> 61)。
 # 54 -> 61: ComCtlsDemo 那一刀往表里补了 7 行宿主伪成员 (RTL 侧同步补了真身):
 #   UserControl 的 AccessKeys / Appearance / DrawStyle / ContainedControls / EventsFrozen
 #   (后两枚此前既不在表也不在 RTL ⇒ C2065, 实测 CoolBar/ToolBar 那一族);
 #   Extender 的 Cancel / vb6_Default。逐行的 RTL 声明核对照旧跑, 故只是把数目改对。
-if ($rows.Count -ne 61) {
-    $viol += ("TABLE-ROWS: parsed {0} rows (want exactly 61 - a deleted or reformatted row makes the per-row RTL checks spin)" -f $rows.Count)
+# 61 -> 62: Fix 255 补 `UserControl.BackStyle` (LabelW.ctl:936/942 的
+#   `BackStyle = UserControl.BackStyle` / `UserControl.BackStyle = Value`) ——
+#   表里没有这一行时 hostPseudoRtlSymbol 会按 `vb6_<对象>_<成员名>` 硬拼出
+#   vb6_UserControl_BackStyle, 而 RTL 没这枚全局 ⇒ C2065 ×2 (LabelW.c 1608/1618)。
+#   同批补了 RTL 的 extern int32_t 与定义 (长 1 行的 .h/.c 两侧), 故数目 +1。
+if ($rows.Count -ne 62) {
+    $viol += ("TABLE-ROWS: parsed {0} rows (want exactly 62 - a deleted or reformatted row makes the per-row RTL checks spin)" -f $rows.Count)
 }
 
 # ---------- 2) 读 RTL 声明 (指针全局 / struct 全局 / 值全局 / 函数) ----------

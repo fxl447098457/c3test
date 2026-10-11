@@ -679,6 +679,18 @@
     std::string comMarkerValueForWrite(const std::string& packFn,
                                        const std::string& valExpr);
 
+    // Fix 266: 「打包器要标量、实参却是**无型** VARIANT」这一格的唯一收口。
+    // comPackExpr 按 AST 推的型给出 typed 打包器 (ComPackDouble/Int/Bool/BSTR),
+    // 而 marker 解析交回的是 vb6_VariantFromComResult(...) / vb6_VariantFromValue(...)
+    // (一个 vb6_VARIANT 值) ⇒ `vb6_ComPackDouble(vb6_VARIANT)` = C2440
+    // "无法从 vb6_VARIANT 转换为 double"。这里按打包器把 VARIANT 拆成对应标量
+    // (RTL 的 vb6_VariantToXxx 那一族, 与 Fix 156-B 的提取链同源); 其余打包器
+    // (ComPackValue / ComPackObject / ComPackVariant) 原样返回, 分毫不动。
+    // 为什么要收成一处: 组装 `packFn(expr)` 的站点在 com_bind / callee_member /
+    // callee_ident 三个片段里共 8 处, 只堵一处就等于没堵 (实测 Pager.c 2079/2080
+    // 走的是另一个站点)。
+    std::string packArgValue(const std::string& packFn, const std::string& expr) const;
+
     // 账 #245/§B94: `Symbol::comMethods` 的**唯一读出口**。这张表以前在后端被读五遍
     // （四份文件），每份自己写一遍「按 mapType(returnType) 挑哪一条 vb6_Com*」，其中两处还把
     // 「类型未知」当成 BSTR 猜 —— 读表自此只住 comSigViewOf，档位选择只住下面两个函数。

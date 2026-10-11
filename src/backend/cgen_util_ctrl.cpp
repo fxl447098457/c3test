@@ -1547,6 +1547,10 @@ std::string CCodeGen::controlZeroArgMethod(FrmControlType ctrlType,
     }
     if (memberLower == "clearsel" && ctrlType == FrmControlType::Slider)
         return controlExit("vb6_Slider_ClearSel", 1, outArgc);
+    // ⚠ `.Cls` **不登记在本表**：它属于画布家族 (Cls / Print / Line)，出口名只许出自
+    // src/common/canvas_drawing.hpp 那张表 (哨兵 form_draw_state S9 + rtl_proto_arity
+    // R3/R5 都钉着这一条)。With 块里的 `.Cls` 走 `controlCanvasMethod`，见
+    // cgen_expr_with.cpp 的 FormControl 臂 (Fix 263)。
     // 账 #192: ListBox / ComboBox 的 Clear。VB6 里它是方法而不是属性，且只有这两枚
     // 有清空语义（TreeView/ListView 的清是各自那一族，另有出口）。
     if (memberLower == "clear"
