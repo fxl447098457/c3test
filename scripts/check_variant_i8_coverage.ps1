@@ -8,11 +8,26 @@
 # 以后任何人新写一张 vt 表，要么进 must 名单并答这一档，要么进 exempt 并写明理由，否则门红。
 #
 # 规则（改坏了会红，不是装饰）：
-#   V1  src\rtl 里发现的 vt switch 站点数 >= 11 —— 突然变少或数出 0 = glob/正则坏了，那比红更糟
+#   V1  src\rtl 里发现的 vt switch 站点数 >= 13 —— 突然变少或数出 0 = glob/正则坏了，那比红更糟
 #   V2  闭合性：每一处站点的宿主函数必须**要么在 must、要么在 exempt**；两边都没有 ⇒ 红
-#   V3  must 名单里每个函数体必须真有 `case VT_I8:`（挂了名字没写档 = 静默漏答，正是本账的实物）
-#   V4  名单（must + exempt）里每个名字都必须在 src\rtl 里真的存在（拼错的名字会让规则断电）
-#   V5  must 名单不许空着或缩水到 < 10（针面哪天全没了，这道哨兵等于没电）
+#   V3  must 名单里每个函数体必须真有 VT_I8 档（挂了名字没写档 = 静默漏答，正是本账的实物）
+#   V4  名单（must + exempt + decMust + decExempt）里每个名字都必须在 src\rtl 里真的存在（拼错的名字会让规则断电）
+#   V5  must 名单不许空着或缩水到 < 11；decMust 不许缩水到 < 8 (§B145 把 Decimal 的名单加到 8 枚)
+#   D1  decMust 里每个函数体必须真有 VT_DECIMAL 档 —— 与 V3 同形，只是问的是另一档
+#   D2  闭合性按**档**算：每一处站点的宿主函数在 Decimal 这一档也必须二选一（decMust 或 decExempt）
+#   D3  decExempt 的每条理由不许是空话（少于 12 字 ⇒ 红），豁免必须说清「为什么不答这一档」
+#
+# 账 #305 §B145 之后「槽 -> 真 VARIANT」那一族只有一张表(vb6_VariantPackBorrow)：出站打包(V3 名单里
+# 原来是 vb6_ComPackVariant)与 Variant 算术都读它，所以名单换名不换数量——两处各写一遍的那些年，
+# 就是这张表连漏 Decimal/Currency/Date 三档的来历。
+# 站点匹配前会剥掉注释(§B145: 引用了 `switch (v.vt)` 的那句注释自己变成一个站点，
+# 还被算给上一个函数 —— phantom 站点比漏站点更坏，因为它凭空造出一格「要豁免」。
+# 口径从「一档 × 每表」换成「每档 × 每表」的来历（账 #305 §B143）：VT_I8 那一撞之后 Decimal 是第二次，
+# 而两次都只钉了一档 —— 补了 I8 的表照样可以漏 Decimal。现在同一张表要答两档，名单各列各的。
+# ⚠ 站点正则今天只认接收者叫 `v` 的写法（可带强转）。**换成别的变量名就看不见**，实测这类还有 7 处：
+#   ax_propbag.c(p->vt) / uc_hostmodel.c(in->vt ×2) / vb6rtl_com.c(varElem.vt, pv->vt ×2) /
+#   vb6rtl_paramarray.c(retVal.vt) —— 那 2 处 pv->vt 正是 §B143 下一格的 x86 COM 导入两臂。
+#   把它们收进来之前别把 V1 的下限调高，否则会红在一堆没归因的站点上。
 #
 # 用法:  powershell -File scripts\check_variant_i8_coverage.ps1
 # 退出码: 0 = 全绿; 1 = 红
@@ -28,33 +43,66 @@ $bad = @()
 
 $must = @(
     "vb6_VariantToLong", "vb6_VariantToLongPtr", "vb6_VariantToBool", "vb6_VariantToDouble",
-    "vb6_TypeName", "vb6_IsNumeric", "vb6_ComPackVariant", "memVariantToI4",
-    "vb6_ho_variantToLong", "vb6_ho_variantToDouble"
+    "vb6_TypeName", "vb6_IsNumeric", "vb6_VariantPackBorrow", "memVariantToI4",
+    "vb6_ho_variantToLong", "vb6_ho_variantToDouble", "vb6_VarToDouble_internal"
 )
 $exempt = @{
     "vb6_CDec" = "两架构读数本来就相同（CStr(CDec(整数)) 今天就是空串），缺的不是这一档 -> 另立 §B141"
+    "vb6_ResIdOf" = "资源 id 的实参解包：只认 BSTR 与数值档，而 default 交 lVal(不是 0)，与本账「漏档静默交 0」不同形；Decimal 档全仓 0 个调用点"
+}
+
+# Decimal 这一档（§B143）：同一张表要答两档，所以名单也列两份。
+$decMust = @(
+    "vb6_VariantToLong", "vb6_VariantToLongPtr", "vb6_VariantToBool", "vb6_VariantToDouble",
+    "vb6_TypeName", "vb6_IsNumeric", "vb6_VarToDouble_internal",
+    # 账 #305 §B145: 「槽 -> 真 VARIANT」那张表唯一的住处(出站打包与 Variant 算术都读它)。
+    "vb6_VariantPackBorrow"
+)
+$decExempt = @{
+    # 账 #305 §B145: 这一格撤掉——那张 vt 表整个搬进 vb6_VariantPackBorrow(它现在两档都答)，
+    # vb6_ComPackVariant 只剩「借用 -> 带权」那一行升级，自己不再有 switch。
+    "memVariantToI4" = "UC 宿主模型的取数口，全仓 0 个 Decimal 调用点（§B143 量过），要补先证明可达"
+    "vb6_ho_variantToLong" = "UC 宿主模型的取数口，全仓 0 个 Decimal 调用点（§B143 量过），要补先证明可达"
+    "vb6_ho_variantToDouble" = "UC 宿主模型的取数口，全仓 0 个 Decimal 调用点（§B143 量过），要补先证明可达"
+    "vb6_CDec" = "它是造 Decimal 的那一档，不是读表；补它等于把同一个问题抄第二遍"
+    "vb6_ResIdOf" = "资源 id 的实参解包：LoadRes*(CDec(...)) 全仓 0 处，而 default 交的是 lVal 不是 0"
 }
 
 $fnRe     = [regex]'^[A-Za-z_][A-Za-z0-9_ \*]*?([A-Za-z_][A-Za-z0-9_]*)\s*\([^;]*\)\s*\{\s*$'
-$switchRe = [regex]'switch\s*\(\s*(?:v\.vt|v->vt)\s*\)'
+# 接收者叫 v 的 vt switch，**允许带强转**：`switch ((vb6_vartype)v->vt)` 与 `switch (v.vt)` 是同一族表。
+# 以前这条正则不认强转写法，于是「比较走哪个数值」那一口(vb6_VarToDouble_internal)整个不在 census 里。
+$switchRe = [regex]'switch\s*\(\s*(?:\([^)]*\)\s*)?(?:v\.vt|v->vt)\s*\)'
+# 档的写法有两种拼法：SDK 名与 vb6_ 前缀名，且可能带强转 ⇒ 按同一个模式认。
+$armRe = @{
+    I8  = [regex]'case\s+(?:\([^)]*\)\s*)?(?:VT_I8|vb6_vtI8)\s*:'
+    DEC = [regex]'case\s+(?:\([^)]*\)\s*)?(?:VT_DECIMAL|vb6_vtDecimal)\s*:'
+}
 
 # ---------- 扫一遍：站点 + 每个函数的体 ----------
 $files = @(Get-ChildItem -LiteralPath $rtl -Recurse -File -Filter *.c)
 $sites = @()
 $bodies = @{}
+$allNames = @($must + $decMust + @($exempt.Keys) + @($decExempt.Keys)) | Select-Object -Unique
 foreach ($f in $files) {
     $text  = [System.IO.File]::ReadAllText($f.FullName)
     $lines = $text -split "`r?`n"
     $cur   = ""
     for ($i = 0; $i -lt $lines.Count; $i++) {
-        $m = $fnRe.Match($lines[$i])
+        # 账 #305 §B145: 注释里**引用**的形状不是站点。第三十六刀往 vb6rtl_com.c 写了一句
+        # 「接收者叫 v 的 switch (v.vt) 是这道哨兵认的形状」，于是那句注释自己变成了一个
+        # 站点，还被算给上一个函数(vb6_VariantToObject)—— phantom 站点会把闭合 census 变成
+        # 一份凭空的豁免名单，所以先把注释剥掉再匹配。
+        $ln = ($lines[$i] -replace '/\*.*?\*/', '')
+        $t = $ln.TrimStart()
+        if ($t.StartsWith('*') -or $t.StartsWith('//') -or $t.StartsWith('/*')) { continue }
+        $m = $fnRe.Match($ln)
         if ($m.Success) { $cur = $m.Groups[1].Value }
-        if ($switchRe.IsMatch($lines[$i])) {
+        if ($switchRe.IsMatch($ln)) {
             $sites += [pscustomobject]@{ File = $f.FullName.Substring($root.Length + 1)
                                          Line = $i + 1; Fn = $cur }
         }
     }
-    foreach ($name in ($must + @($exempt.Keys))) {
+    foreach ($name in ($allNames)) {
         if ($bodies.ContainsKey($name)) { continue }
         $sig = [regex]::Match($text, '(?m)^[\w \*]*' + [regex]::Escape($name) + '\s*\([^\r\n;]*\)\s*\{')
         if (-not $sig.Success) { continue }
@@ -69,54 +117,65 @@ foreach ($f in $files) {
 }
 
 # ---------- V1: 覆盖面 ----------
-if ($sites.Count -lt 11) {
-    $bad += ("V1 only " + $sites.Count + " vt switches found under src\rtl (floor 11) -> the glob or the " +
-             "regex broke; V2/V3 below would be checking almost nothing")
+if ($sites.Count -lt 13) {
+    $bad += ("V1 only " + $sites.Count + " vt switches found under src\rtl (floor 13) -> the glob or the " +
+             "regex broke; the closure checks below would be checking almost nothing")
 }
 
-# ---------- V2: 闭合 census ----------
-foreach ($s in $sites) {
-    if ($s.Fn -eq "") {
-        $bad += ("V2 " + $s.File + ":" + $s.Line + " switch could not be attributed to a function -> " +
-                 "the census can't tell whether it answers the I8 档; check the signature shape")
-        continue
+# ---------- 每一档各问一遍：闭合 census + 名单自己 ----------
+$arms = @(
+    [pscustomobject]@{ Tag = "V2/V3"; Arm = "VT_I8";      Must = $must;    Exempt = $exempt;    Floor = 11; Re = $armRe.I8 },
+    [pscustomobject]@{ Tag = "D1/D2"; Arm = "VT_DECIMAL"; Must = $decMust; Exempt = $decExempt; Floor = 8;  Re = $armRe.DEC }
+)
+foreach ($a in $arms) {
+    # 闭合性：每张 vt 表都要在这一档二选一(答它 / 写明为什么不答)
+    foreach ($s in $sites) {
+        if ($s.Fn -eq "") {
+            $bad += ($a.Tag + " " + $s.File + ":" + $s.Line + " switch could not be attributed to a function " +
+                     "-> the census can't tell whether it answers the " + $a.Arm + " 档; check the signature shape")
+            continue
+        }
+        if (($a.Must -notcontains $s.Fn) -and (-not $a.Exempt.ContainsKey($s.Fn))) {
+            $bad += ($a.Tag + " " + $s.File + ":" + $s.Line + " in " + $s.Fn + ": a vt switch that is in " +
+                     "neither list for the " + $a.Arm + " 档 -> it drops that 档 into default. Either add it " +
+                     "to the must list AND write the case, or to the exempt list with the reason it doesn't need one")
+        }
     }
-    if (($must -notcontains $s.Fn) -and (-not $exempt.ContainsKey($s.Fn))) {
-        $bad += ("V2 " + $s.File + ":" + $s.Line + " in " + $s.Fn + ": a vt switch that is in neither " +
-                 "must nor exempt -> it silently answers the Long family without VT_I8. Either add it to " +
-                 "$must AND the case, or to $exempt with the reason it doesn't need one")
+    # must 名单：名字要在，档也要在
+    foreach ($name in $a.Must) {
+        if (-not $bodies.ContainsKey($name)) {
+            $bad += ("V4 must-list entry " + $name + " has no function body in src\rtl -> renamed or deleted; " +
+                     "this rule is now dead power")
+            continue
+        }
+        if (-not $a.Re.IsMatch($bodies[$name])) {
+            $bad += ($a.Tag + " " + $name + ": in the must-list for the " + $a.Arm + " 档 but its body has no " +
+                     "case for it -> this table silently answers that 档 through default")
+        }
     }
-}
-
-# ---------- V3 + V4: 名单自己 ----------
-foreach ($name in $must) {
-    if (-not $bodies.ContainsKey($name)) {
-        $bad += ("V4 must-list entry " + $name + " has no function body in src\rtl -> renamed or deleted; " +
-                 "this rule is now dead power")
-        continue
+    # exempt 名单：名字还要在(删了函数就撤豁免)，理由还要写得住
+    foreach ($name in @($a.Exempt.Keys)) {
+        if (-not $bodies.ContainsKey($name)) {
+            $bad += ("V4 exempt entry " + $name + " is not a function in src\rtl anymore -> drop the exemption " +
+                     "together with the function")
+        }
+        if (([string]$a.Exempt[$name]).Length -lt 12) {
+            $bad += ("D3 exempt entry " + $name + " (" + $a.Arm + " 档) has a reason shorter than 12 chars -> an " +
+                     "empty reason turns the exemption into a silent hole in the census")
+        }
     }
-    if ($bodies[$name] -notlike "*case VT_I8:*") {
-        $bad += ("V3 " + $name + ": in the must-list but its body has no 'case VT_I8:' -> x64 hands this " +
-                 "table pointer-width values (VarPtr/StrPtr/ObjPtr answer LongPtr since §B138) and the " +
-                 "switch drops them into default")
+    # 针面非空
+    if ($a.Must.Count -lt $a.Floor) {
+        $bad += ("V5 " + $a.Arm + " must-list holds " + $a.Must.Count + " names (floor " + $a.Floor +
+                 ") -> the needle surface collapsed; if these tables really merged into one authority, " +
+                 "delete this sentinel together with them")
     }
-}
-foreach ($name in @($exempt.Keys)) {
-    if (-not $bodies.ContainsKey($name)) {
-        $bad += ("V4 exempt entry " + $name + " is not a function in src\rtl anymore -> drop the exemption " +
-                 "together with the function")
-    }
-}
-
-# ---------- V5: 针面非空 ----------
-if ($must.Count -lt 10) {
-    $bad += ("V5 must-list holds " + $must.Count + " names (floor 10) -> the needle surface collapsed; " +
-             "if these tables really merged into one authority, delete this sentinel together with them")
 }
 
 if ($bad.Count -eq 0) {
-    Write-Host ("PASS variant_i8_coverage: switches " + $sites.Count + " must " + $must.Count +
-                " exempt " + $exempt.Count + " violations 0") -ForegroundColor Green
+    Write-Host ("PASS variant_i8_coverage: switches " + $sites.Count + " I8 must " + $must.Count +
+                " exempt " + $exempt.Count + " | DEC must " + $decMust.Count + " exempt " +
+                $decExempt.Count + " | violations 0") -ForegroundColor Green
     exit 0
 }
 foreach ($b in $bad) { Write-Host ("FAIL " + $b) -ForegroundColor Red }

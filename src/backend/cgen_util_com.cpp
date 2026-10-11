@@ -715,6 +715,19 @@ std::string CCodeGen::packArgValue(const std::string& packFn,
     // 这里直接用 rfind(..., 0) 前缀判定, 不数长度。
     const bool isVarValue = expr.rfind("vb6_VariantFromComResult(", 0) == 0
                          || expr.rfind("vb6_VariantFromValue(", 0) == 0;
+    // 账 #305 §B147: 槽还有**第三种来源** —— 第三十六/三十七刀的发码改道交回的
+    // (vb6_VarAddV/SubV/MulV/DivV(...))，前缀与上面两条都不同，而 cExprIsVariant 认得它。
+    // 这一族不接就是硬错误 (实测 Charts 2020 ClsResizer.c(144)/(150):
+    // `vb6_ComPackDouble((vb6_VarDivV(...)))` = C2440「无法从 vb6_VARIANT 转换为 double」)。
+    // 修法刻意与上面四条**不同**：这里不拆成标量，而是整只 VARIANT 原样交给对端
+    // (vb6_ComPackValue 的 _Generic 自带 vb6_VARIANT→identity 那一档) —— 拆成标量等于
+    // 又一次在编译期替运行期选数值档，正是 §B145 要消灭的那件事 (实测拆成 Double 会
+    // 静默把 Decimal 的 0.1+0.2 交成 0.29999999999999998，而 3.5 交成 3)。
+    // 只接管「打包器要标量」那四档；ComPackValue/ComPackVariant/ComPackObject 原样不动。
+    if (cExprIsVariant(expr) && (packFn == "vb6_ComPackDouble" || packFn == "vb6_ComPackInt"
+                                 || packFn == "vb6_ComPackBool" || packFn == "vb6_ComPackBSTR")) {
+        return "vb6_ComPackValue(" + expr + ")";
+    }
     if (!isVarValue) return packFn + "(" + expr + ")";
     if (packFn == "vb6_ComPackDouble") return "vb6_ComPackDouble(vb6_VariantToDouble(" + expr + "))";
     if (packFn == "vb6_ComPackInt")    return "vb6_ComPackInt(vb6_VariantToLong(" + expr + "))";

@@ -218,6 +218,75 @@ void CCodeGen::visit(BinaryExpr& node) {
         }
     }
 
+    // 账 #305 §B145: 「这一侧的 C 表达式是不是一枚 Variant」—— Fix 086 的数值提取与下面
+    // 四则运算的改道**共用这一条判据**（三条形状: 前缀表 / As Variant 名单 / (*name) 形参），
+    // 以前这个形状内联在 extractVar86 里，现在不再抄第二遍。
+    auto isVariantOperand86 = [&](const std::string& cExpr, const Expr* astExpr) -> bool {
+        if (cExprIsVariant(cExpr)) return true;
+        if (astExpr && astExpr->kind == ASTNodeKind::IdentifierExpr) {
+            auto& id86 = static_cast<IdentifierExpr&>(const_cast<Expr&>(*astExpr));
+            if (knownVariantVars_.count(Symbol::toLower(id86.name))) return true;
+        }
+        if (cExpr.size() > 4 && cExpr[0] == '(' && cExpr[1] == '*'
+            && cExpr.back() == ')' && cExpr.find('(') == std::string::npos) {
+            // (*name) 解引用形式 — ByRef Variant 参数
+            std::string inner86 = Symbol::toLower(cExpr.substr(2, cExpr.size() - 3));
+            if (knownVariantVars_.count(inner86)) return true;
+            if (currentProc_) {
+                for (const auto& p : currentProc_->params) {
+                    if (Symbol::toLower(p.name) == inner86
+                        && (p.type == Vb6Type::Variant || p.type == Vb6Type::Empty)) {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
+    };
+    // 装箱: 已经是 Variant 的直接交出去，其余按 vb6_VariantFromValue 的 _Generic 造一枚槽
+    // （它自带 vb6_VARIANT 那档的恒等臂，所以两头都不用知道对方是什么）。
+    auto boxVariant86 = [&](const std::string& cExpr, const Expr* astExpr) -> std::string {
+        return isVariantOperand86(cExpr, astExpr)
+                   ? cExpr : "vb6_VariantFromValue(" + cExpr + ")";
+    };
+    // 账 #305 §B147: **改道那一问**吃「AST ∪ 文本」，而上面的 isVariantOperand86 刻意维持
+    // 「文本 ∪ 已知变量」不变 —— 它还供着 Fix 086 那条提取 (vb6_VariantToLong(...))，那一档
+    // 只能对**真的是槽**的 C 文本出手，把 AST 的宽答案灌进去就是 vb6_VariantToLong(裸 double)
+    // = C2440。方向性是这一格的要点：Div 的类型 oracle 只吃 variantOperandAST，这里吃它的
+    // 超集 ⇒「oracle 答 Variant」必然蕴含「改道接走了、交出的是整只槽」，§B147 那一族
+    // (oracle 说是槽、发码给裸标量 ⇒ 消费点既不提取也不取整) 就此按构造消失。
+    auto routeOperand86 = [&](const std::string& cExpr, const Expr* astExpr) -> bool {
+        return isVariantOperand86(cExpr, astExpr) || variantOperandAST(astExpr);
+    };
+
+    // 账 #305 §B145: Variant 参与 + - * / 时**不再替运行期猜档**。
+    // 改前这四条运算符把 Variant 操作数发成 vb6_VariantToLong(...)（加减乘）或
+    // vb6_VariantToDouble(...)（除），实测两架构一致: 盒里是 Double 时 1.5+1 答 3、1.5*2 答 4；
+    // 是 Decimal 时 1.25+1 答 2、0.1+0.2 答 0 —— 小数与 Decimal 的精确值整个丢掉
+    // （探针 .build/b1095_arith/probe5.bas，读数在台账 §B145）。
+    // 现在两侧装箱后交 RTL 那一族运行期出口，数值档由运行期的 vt 决定（= oleaut32 的
+    // VarAdd 一族，VB6 本人的 Variant 算术引擎），于是 Decimal 的 96 位精确、Double 的小数、
+    // Null 传播、Date 加天数一起继承过来。
+    // 刻意**不接管**任一侧静态类型是 String 的那一族: VB6 的 + 只要有一侧是串就走拼接，
+    // 而 VarAdd 是按数值强制（实测 "5"+1 交 6）—— 那一条路留在上面 113g 那张表上。
+    if (node.op == BinaryOp::Add || node.op == BinaryOp::Sub
+        || node.op == BinaryOp::Mul || node.op == BinaryOp::Div) {
+        const bool strL86 = (inferExprType(*node.left) == Vb6Type::String);
+        const bool strR86 = (inferExprType(*node.right) == Vb6Type::String);
+        const bool anyVar86 = routeOperand86(left, node.left.get())
+                           || routeOperand86(right, node.right.get());
+        if (anyVar86 && !strL86 && !strR86) {
+            const char* fn86 = node.op == BinaryOp::Add  ? "vb6_VarAddV"
+                             : node.op == BinaryOp::Sub  ? "vb6_VarSubV"
+                             : node.op == BinaryOp::Mul  ? "vb6_VarMulV"
+                             :                             "vb6_VarDivV";
+            lastExpr_ = std::string("(") + fn86 + "("
+                      + boxVariant86(left, node.left.get()) + ", "
+                      + boxVariant86(right, node.right.get()) + "))";
+            return;
+        }
+    }
+
     // 浮点除法: VB6 / → (double)left / (double)right
     // Fix 156: 操作数为 Variant 时 C 强转非法 (C2440 vb6_VARIANT→double),
     // 改走 vb6_VariantToDouble 提取 (与上方 IntDiv 的 Fix 084o 同构).
@@ -740,31 +809,13 @@ void CCodeGen::visit(BinaryExpr& node) {
     // Fix 086: 算术运算 (+,-,*) 的 Variant 操作数提取 — VARIANT 结构体不能直接
     // 参与 C 算术运算 (C2088). 用 vb6_VariantToLong 提取 (覆盖 ByRef Variant
     // 参数解引用 (*maxLen) 与 vb6_VariantArrayGet 等返回 Variant 的表达式).
+    // 账 #305 §B145: 走到这里说明上面那条改道**没接管**这一对操作数（两侧都不是 Variant，
+    // 或有一侧静态是 String）—— 那两种形状维持 Fix 086 的原样，逐字节未动。
     if (node.op == BinaryOp::Add || node.op == BinaryOp::Sub || node.op == BinaryOp::Mul) {
         auto extractVar86 = [&](std::string& cExpr, const Expr* astExpr) {
-            bool isVar86 = cExprIsVariant(cExpr);
-            if (!isVar86 && astExpr && astExpr->kind == ASTNodeKind::IdentifierExpr) {
-                auto& id86 = static_cast<IdentifierExpr&>(const_cast<Expr&>(*astExpr));
-                if (knownVariantVars_.count(Symbol::toLower(id86.name))) isVar86 = true;
+            if (isVariantOperand86(cExpr, astExpr)) {
+                cExpr = "vb6_VariantToLong(" + cExpr + ")";
             }
-            if (!isVar86 && cExpr.size() > 4 && cExpr[0] == '(' && cExpr[1] == '*'
-                && cExpr.back() == ')' && cExpr.find('(') == std::string::npos) {
-                // (*name) 解引用形式 — ByRef Variant 参数
-                std::string inner86 = cExpr.substr(2, cExpr.size() - 3);
-                std::string innerLower86 = Symbol::toLower(inner86);
-                if (knownVariantVars_.count(innerLower86)) {
-                    isVar86 = true;
-                } else if (currentProc_) {
-                    for (const auto& p : currentProc_->params) {
-                        if (Symbol::toLower(p.name) == innerLower86
-                            && (p.type == Vb6Type::Variant || p.type == Vb6Type::Empty)) {
-                            isVar86 = true;
-                            break;
-                        }
-                    }
-                }
-            }
-            if (isVar86) cExpr = "vb6_VariantToLong(" + cExpr + ")";
         };
         extractVar86(left, node.left.get());
         extractVar86(right, node.right.get());

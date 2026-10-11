@@ -326,18 +326,23 @@ vb6_VARIANT vb6_VariantFromComResult(void* variant_ptr) {
         case VT_BOOL:   result.boolVal = pv->boolVal; break;
         case VT_UI1:    result.bVal = pv->bVal; break;
         case VT_ERROR:  result.lVal = pv->scode; break;
+        /* 账 #305 §B145: 缺这一档时 FromComResult 的 default 走的是**数组**那段(pv->parray
+         * 把 llVal 当指针解) —— 不是「答错数」而是直接垃圾；而 VarAdd(VT_I8, VT_I4) 本来
+         * 就交回 vt=20 的结果(实测)，所以这一格是 Variant 算术的必经之路。 */
+        case VT_I8:    result.llVal = pv->llVal; break;
         case VT_DECIMAL:
+            /* 账 #305 §B144: 这一档只问唯一出口「DECIMAL 住在哪一字节」—— 两架构的布局
+             * 不在这里抄第二遍(这里曾经抄过两次，都是抄错的)。 */
+            {
+                const DECIMAL *d144 = vb6_DecimalPtrFromVariant(pv);
 #ifdef _WIN64
-            memcpy(&result.decVal, &pv->decVal, sizeof(result.decVal));
+                if (d144) memcpy(&result.decVal, d144, sizeof(result.decVal));
 #else
-            /* Fix <vbeclipse> rev11: x86 的 OLE VARIANT union 只 8 字节, DECIMAL 在
-             * 外部由 pdecVal 指向 (vb6_VARIANT 现同布局); 深拷贝到自持缓冲,
-             * 由 vb6_VariantClear 释放。 */
-            if (pv->pdecVal) {
-                result.pdecVal = (DECIMAL*)CoTaskMemAlloc(sizeof(DECIMAL));
-                if (result.pdecVal) memcpy(result.pdecVal, pv->pdecVal, sizeof(DECIMAL));
-            }
+                result.pdecVal = (DECIMAL *)CoTaskMemAlloc(sizeof(DECIMAL));
+                if (result.pdecVal && d144)
+                    memcpy(result.pdecVal, d144, sizeof(DECIMAL));
 #endif
+            }
             break;
         default:
             // P24-02: VT_ARRAY - 将Windows SAFEARRAY转换为vb6_SafeArray1D
@@ -457,18 +462,23 @@ vb6_VARIANT vb6_VariantFromStackVARIANT(VARIANT* pv) {
         case VT_BOOL:   result.boolVal = pv->boolVal; break;
         case VT_UI1:    result.bVal = pv->bVal; break;
         case VT_ERROR:  result.lVal = pv->scode; break;
+        /* 账 #305 §B145: 缺这一档时 FromComResult 的 default 走的是**数组**那段(pv->parray
+         * 把 llVal 当指针解) —— 不是「答错数」而是直接垃圾；而 VarAdd(VT_I8, VT_I4) 本来
+         * 就交回 vt=20 的结果(实测)，所以这一格是 Variant 算术的必经之路。 */
+        case VT_I8:    result.llVal = pv->llVal; break;
         case VT_DECIMAL:
+            /* 账 #305 §B144: 这一档只问唯一出口「DECIMAL 住在哪一字节」—— 两架构的布局
+             * 不在这里抄第二遍(这里曾经抄过两次，都是抄错的)。 */
+            {
+                const DECIMAL *d144 = vb6_DecimalPtrFromVariant(pv);
 #ifdef _WIN64
-            memcpy(&result.decVal, &pv->decVal, sizeof(result.decVal));
+                if (d144) memcpy(&result.decVal, d144, sizeof(result.decVal));
 #else
-            /* Fix <vbeclipse> rev11: x86 的 OLE VARIANT union 只 8 字节, DECIMAL 在
-             * 外部由 pdecVal 指向 (vb6_VARIANT 现同布局); 深拷贝到自持缓冲,
-             * 由 vb6_VariantClear 释放。 */
-            if (pv->pdecVal) {
-                result.pdecVal = (DECIMAL*)CoTaskMemAlloc(sizeof(DECIMAL));
-                if (result.pdecVal) memcpy(result.pdecVal, pv->pdecVal, sizeof(DECIMAL));
-            }
+                result.pdecVal = (DECIMAL *)CoTaskMemAlloc(sizeof(DECIMAL));
+                if (result.pdecVal && d144)
+                    memcpy(result.pdecVal, d144, sizeof(DECIMAL));
 #endif
+            }
             break;
         case VT_ARRAY|VT_BSTR:
         case VT_ARRAY|VT_VARIANT:
@@ -550,6 +560,38 @@ void* vb6_VariantToObject(vb6_VARIANT* v) {
     return NULL;
 }
 
+/* 账 #305 §B145: 槽 → 真 VARIANT 那张 vt 表的**唯一一份**(借用语义: 不复制 BSTR、不 AddRef)。
+ * 「住在哪一格」与「谁负责释放」是两个问题，这里只答前一个 —— 出站要带权副本的那一族
+ * 在下面 vb6_ComPackVariant 里自己补那一步，于是这张表只有一份，两处不会再各自漏档
+ * (§B142 的 census 量到的正是「出站的表」与「Variant 算术」都要它)。
+ * ⚠ 接收者叫 `v` 的 `switch (v.vt)` 是 scripts/check_variant_i8_coverage.ps1 认的形状，
+ *   改名或换接收者 = 这张表从 census 里隐身(§B143 那条「变目只认一种写法」的老坑)。 */
+void vb6_VariantPackBorrow(vb6_VARIANT v, VARIANT *out) {
+    VariantInit(out);
+    switch (v.vt) {
+        case vb6_vtEmpty: out->vt = VT_EMPTY; break;
+        case vb6_vtNull:  out->vt = VT_NULL; break;
+        case vb6_vtInteger: out->vt = VT_I2; out->iVal = v.iVal; break;
+        case vb6_vtLong:    out->vt = VT_I4; out->lVal = v.lVal; break;
+        case vb6_vtSingle:  out->vt = VT_R4; out->fltVal = v.fltVal; break;
+        case vb6_vtDouble:  out->vt = VT_R8; out->dblVal = v.dblVal; break;
+        case vb6_vtBSTR:    out->vt = VT_BSTR; out->bstrVal = v.bstrVal; break;   /* 借用: 不复制 */
+        case vb6_vtDispatch: out->vt = VT_DISPATCH; out->pdispVal = (IDispatch*)v.pdispVal; break;
+        case vb6_vtBoolean: out->vt = VT_BOOL; out->boolVal = v.boolVal ? VARIANT_TRUE : VARIANT_FALSE; break;
+        case vb6_vtByte:    out->vt = VT_UI1; out->bVal = v.bVal; break;
+        /* 账 #305: 以前这一档落 default ⇒ 交出去是 VT_EMPTY —— 地址**静默变成空值**，不是报错。*/
+        case VT_I8:       out->vt = VT_I8; out->llVal = v.llVal; break;
+        /* 账 #305 §B145: §B142 census 点名的那三格 —— Decimal / Currency / Date 以前都落 default
+         * ⇒ 交给 COM 或交给 VarAdd 的是 VT_EMPTY，与上面 VT_I8 同一条严重度分级。
+         * Decimal 走 §B142 那枚唯一出口(两份布局不在这里抄第二遍)；Currency 那一格是
+         * CURRENCY(=LONGLONG) 而不是标量，与上面「往里读」的 *(int64_t*)&pv->cyVal 同形。 */
+        case vb6_vtDecimal:  if (!vb6_DecimalAsVariant(v, out)) out->vt = VT_EMPTY; break;
+        case vb6_vtCurrency: out->vt = VT_CY;   *(int64_t*)&out->cyVal = v.cyVal; break;
+        case vb6_vtDate:     out->vt = VT_DATE; out->date = v.dblVal; break;
+        default: out->vt = VT_EMPTY; break;
+    }
+}
+
 /* P24-04: Pack vb6_VARIANT (by value) into Windows VARIANT for COM call args */
 /* Used when Variant-typed variable member access result is passed as COM arg */
 void* vb6_ComPackVariant(vb6_VARIANT v) {
@@ -558,24 +600,98 @@ void* vb6_ComPackVariant(vb6_VARIANT v) {
        跨分配器释放损坏堆, 表现为 OLEAUT32.dll 内 0xC0000005 (NewTab Theme 赋值实测) */
     VARIANT* pv = (VARIANT*)malloc(sizeof(VARIANT));
     if (!pv) return NULL;
-    VariantInit(pv);
-    switch (v.vt) {
-        case vb6_vtEmpty: pv->vt = VT_EMPTY; break;
-        case vb6_vtNull:  pv->vt = VT_NULL; break;
-        case vb6_vtInteger: pv->vt = VT_I2; pv->iVal = v.iVal; break;
-        case vb6_vtLong:    pv->vt = VT_I4; pv->lVal = v.lVal; break;
-        case vb6_vtSingle:  pv->vt = VT_R4; pv->fltVal = v.fltVal; break;
-        case vb6_vtDouble:  pv->vt = VT_R8; pv->dblVal = v.dblVal; break;
-        case vb6_vtBSTR:    pv->vt = VT_BSTR; pv->bstrVal = SysAllocString(v.bstrVal); break;
-        case vb6_vtDispatch: pv->vt = VT_DISPATCH; pv->pdispVal = (IDispatch*)v.pdispVal; break;
-        case vb6_vtBoolean: pv->vt = VT_BOOL; pv->boolVal = v.boolVal ? VARIANT_TRUE : VARIANT_FALSE; break;
-        case vb6_vtByte:    pv->vt = VT_UI1; pv->bVal = v.bVal; break;
-        /* 账 #305: 以前这一档落 default ⇒ 交出去是 VT_EMPTY —— 地址**静默变成空值**，不是报错。*/
-        case VT_I8:       pv->vt = VT_I8; pv->llVal = v.llVal; break;
-        default: pv->vt = VT_EMPTY; break;
-    }
+    vb6_VariantPackBorrow(v, pv);
+    /* 出站实参要的是**带权**的串: 接收方(IDispatch::Invoke)按自己的副本处理它，而槽里
+       那一份还要继续用。对象那一档维持原状(借用，不 AddRef) —— 那是另一格的口径。 */
+    if (pv->vt == VT_BSTR && pv->bstrVal) pv->bstrVal = SysAllocString(pv->bstrVal);
     return pv;
 }
+/* 账 #305 §B144: 服务端**出站**那一格（COM 客户端拿到的返回值）唯一出口。
+ * 改前那里是 `memcpy(pVarResult, &tmpRet, sizeof(VARIANT))`，注释写着「槽的前 16 字节
+ * 与 OLE VARIANT 内容一致」—— 标量那几档确实一致，VT_DECIMAL 不一致：对端(和 oleaut32)
+ * 从**结构体头**读那 16 字节，而我们 x64 把它放在 offset 8、x86 放的是指针。实测两台都
+ * 静默答错数(x64 三问全答 0；x86 把堆地址当数值答出 18416048)，一个错误都不报。
+ * 现在：表仍问 §B145 那份唯一的 `vb6_VariantPackBorrow`(它自己再问 §B142 的布局出口)，
+ * 这里只补「带权」那一步 —— 交出去的那份归对端 VariantClear，所以串要新分配、对象要 AddRef
+ * (改前那两档是把槽里的指针直接递出去 = 对端释放我们的引用)。 */
+void vb6_VariantPackCopyInto(const void *slot, VARIANT *out) {
+    if (!out) return;
+    VariantInit(out);
+    if (!slot) return;
+    vb6_VariantPackBorrow(*(const vb6_VARIANT *)slot, out);
+    if (out->vt == VT_BSTR && out->bstrVal) out->bstrVal = SysAllocString(out->bstrVal);
+    /* 用受守卫的那枚出口(内含 vb6_ComIsDispatchable)：槽里挂着 VT_DISPATCH 标签的可能是
+     * 裸子控件 HWND，直接 ->AddRef() 会把 HWND 首字段当 vtable 解引用 ⇒ av read。
+     * ⚠ 本文件按 **C** 编(/std:c11)，`p->AddRef()` 那种 C++ 形态的写法根本进不了编译器。 */
+    if (out->vt == VT_DISPATCH && out->pdispVal) vb6_ComAddRefDispatch(out->pdispVal);
+}
+
+/* 账 #305 §B144: 服务端**入站**那一格（调用方递进来的实参）唯一出口，语义是**借用**。
+ * 不能改问现成的 `vb6_VariantFromComResult` —— 那一枚的契约是**消耗所有权**(把 VT_BSTR /
+ * VT_DISPATCH 的指针字段置 NULL 拿走)，而 `IDispatch::Invoke` 的实参数组是对端的，
+ * 被调方不许改动它。先 memcpy 一份私有副本再交给它也不行：转移走的是副本里的裸指针，
+ * 等于最后 clear 掉的是调用方拥有的那只串。所以这里只搬字节、只问布局出口，谁也不接管。 */
+void vb6_VariantBorrowIntoSlot(const VARIANT *src, void *slot) {
+    vb6_VARIANT *s = (vb6_VARIANT *)slot;
+    memset(s, 0, sizeof(*s));
+    if (!src) { s->vt = vb6_vtEmpty; return; }
+    if (src->vt == VT_DECIMAL) {
+        const DECIMAL *d = vb6_DecimalPtrFromVariant(src);
+        s->vt = (vb6_vartype)VT_DECIMAL;
+#ifdef _WIN64
+        if (d) memcpy(&s->decVal, d, sizeof(*d));
+#else
+        s->pdecVal = (DECIMAL *)d;   /* 借用：指向对端内联的那 16 字节，存活期 = 这一趟 Invoke */
+#endif
+        return;
+    }
+    memcpy(s, src, sizeof(VARIANT));  /* 其余各档：对端的头 16 字节与我们那一格本来就对齐 */
+}
+
+/* 账 #305 §B145: Variant 参与 + - * / 时的**唯一运行期出口**。
+ * 改前发码层替运行期猜了一档整数(Variant 操作数一律发成 vb6_VariantToLong(...))，实测两架构
+ * 一致: 盒里是 Double 时 1.5+1 答 **3**、1.5*2 答 **4**；是 Decimal 时 1.25+1 答 **2**、
+ * 0.1+0.2 答 **0** —— 小数与 Decimal 的精确值整个丢掉(探针 .build/b1095_arith，读数在台账)。
+ * 这里不猜档: 两侧装箱成真 VARIANT，交 oleaut32 的 VarAdd/VarSub/VarMul/VarDiv —— VB6 自己的
+ * Variant 算术就是这台引擎，于是 0.1+0.2 交 Decimal 0.3(96 位精确)、1.5+1 交 R8 2.5、
+ * Null 传播 Null、Date+天数交 Date、1/3 交 scale=28 的 Decimal，舍入与越界政策也一起继承。
+ * 只有错误号映射是我们写的，而且**按运算符分家**(两台实测): DISP_E_OVERFLOW 在加减乘是 VB 6
+ * (Overflow)，在除法是 VB 11 —— 因为 x86 那台的 1.0/0 交的是 DISP_E_OVERFLOW，而 x64 交
+ * DISP_E_DIVBYZERO；DISP_E_TYPEMISMATCH(如 "abc"+1)两架构都交回 VB 13。 */
+static vb6_VARIANT vb6_VarArith(int op, vb6_VARIANT a, vb6_VARIANT b) {
+    VARIANT va, vb, res;
+    vb6_VARIANT out;
+    HRESULT hr;
+    vb6_VariantPackBorrow(a, &va);
+    vb6_VariantPackBorrow(b, &vb);
+    VariantInit(&res);
+    switch (op) {
+    case 0:  hr = VarAdd(&va, &vb, &res); break;
+    case 1:  hr = VarSub(&va, &vb, &res); break;
+    case 2:  hr = VarMul(&va, &vb, &res); break;
+    default: hr = VarDiv(&va, &vb, &res); break;
+    }
+    /* 两份实参是借用的: 这里绝不许 VariantClear(那会把槽自己的 BSTR / 对象释放掉)。 */
+    if (FAILED(hr)) {
+        int32_t err;
+        if (hr == DISP_E_DIVBYZERO) err = 11;
+        else if (hr == DISP_E_OVERFLOW) err = (op == 3) ? 11 : 6;
+        else err = 13;
+        vb6_ErrRaiseNumber(err);
+        return vb6_VariantEmpty();
+    }
+    out = vb6_VariantFromStackVARIANT(&res);   /* 复制 BSTR / AddRef 对象，所有权留在 res 上 */
+    VariantClear(&res);
+    /* oleaut32 造的 Decimal 这一族自带标签(b1093 实测: VarDec* 那一族**不写**，而
+     * VarAdd 这一族**写**)，但标签只许有一个写者 —— 再补一次是幂等的。 */
+    vb6_DecSetTag(out);
+    return out;
+}
+
+vb6_VARIANT vb6_VarAddV(vb6_VARIANT a, vb6_VARIANT b) { return vb6_VarArith(0, a, b); }
+vb6_VARIANT vb6_VarSubV(vb6_VARIANT a, vb6_VARIANT b) { return vb6_VarArith(1, a, b); }
+vb6_VARIANT vb6_VarMulV(vb6_VARIANT a, vb6_VARIANT b) { return vb6_VarArith(2, a, b); }
+vb6_VARIANT vb6_VarDivV(vb6_VARIANT a, vb6_VARIANT b) { return vb6_VarArith(3, a, b); }
 
 
 /* Fix 084f: Variant数组嵌套索引按值版本 (见 vb6rtl.h 说明) */

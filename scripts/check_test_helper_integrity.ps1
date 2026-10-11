@@ -17,6 +17,12 @@
 #       `Invoke-CodegenProj`。⇒ 谁再把只发码的那枚改回同名，这一格当场红。
 #   H4  --emit-c 那一族的判据不许冒充构建: `Test-CodegenOk` / `Test-EmitcShape` / `Test-EmitcAbsent`
 #       三者的标签必须互不相同且都不是 `[COMPILE]` (日志上读得出"这格只发了码")。
+#   H5  `Test-DispatchInvoke` 的**调用面**要用 AST 钉住绑定: 每个调用点的「位置实参个数 / 数组实参
+#       个数 / Needles 与 Absent 各含几条针」都必须等于名单里的数。为什么要 AST —— 往多实参助手的
+#       数组里插针时，插错的那一笔**语法仍然对**，变的只是绑定: 门 #532 上第三十八刀插进 Needles 的
+#       三条针吃掉了收尾的 `") @(`, 于是 `"CALL=ADD"` 从 Absent 变成 Needles、ExtraIid 往后挪了一格,
+#       探针少了第三个参数 ⇒ 整段薄指针/契约槽读数(EXTRA_IID/QI_EXTRA/CREATE_IFACE/VTBL_*)安静不出现,
+#       而 `[Parser]::ParseFile` 报 0 错。这一格盯的就是那一种红。
 #
 # 用法: powershell -File scripts/check_test_helper_integrity.ps1   (PASS => exit 0)
 
@@ -113,11 +119,56 @@ foreach ($pair in @(@('Test-Compile', '[COMPILE]'), @('Test-CodegenOk', '[CODEGE
     }
 }
 
+# ---- H5: 多数组实参助手的绑定形状 (账 #305 SB144, 门 #532 的实证 ----
+$tok5 = $null; $err5 = $null
+$ast5 = [System.Management.Automation.Language.Parser]::ParseFile($rt, [ref]$tok5, [ref]$err5)
+if ($err5.Count -gt 0) {
+    $fails += ('H5 parse errors in run_tests.ps1: ' + $err5.Count)
+    $ast5 = $null
+}
+if ($ast5) {
+    $wantD = @{
+    # 名字 = @(位置实参个数, Needles 针数, Absent 针数) —— 加针/加调用点要同时改这张名单
+    'ax_dll_dispatch_invoke'         = @(6, 6, 1)
+    'cc_dll_dispatch_iface_only'     = @(7, 10, 1)
+    'cc_dll_dispatch_iface_only_x86' = @(8, 10, 1)
+}
+$ds = @($ast5.FindAll({ param($n)
+    $n -is [System.Management.Automation.Language.CommandAst] -and
+    $n.GetCommandName() -eq 'Test-DispatchInvoke' }, $true))
+if ($ds.Count -ne $wantD.Count) {
+    $fails += ('H5 Test-DispatchInvoke call sites ' + $ds.Count + ' != ' + $wantD.Count +
+               ' (名单要跟着调用点一起改)')
+}
+foreach ($c in $ds) {
+    $els = @($c.CommandElements)
+    $nm = ($els[1].Extent.Text -replace '"', '')
+    $arrays = @($els | Where-Object { $_.GetType().Name -eq 'ArrayExpressionAst' })
+    # 注释行里也写引号(那几行是给人读的)，先丢掉再数针的条数
+    $counts = @($arrays | ForEach-Object {
+        $clean = ($_.Extent.Text -split '\r?\n' | Where-Object { $_.TrimStart() -notmatch '^#' }) -join "`n"
+        ([regex]::Matches($clean, '"[^"\r\n]*"')).Count
+    })
+    if (-not $wantD.ContainsKey($nm)) { $fails += ('H5 没登记过的调用点 ' + $nm); continue }
+    $w = $wantD[$nm]
+    if (($els.Count - 1) -ne $w[0]) {
+        $fails += ('H5 ' + $nm + ' 位置实参 ' + ($els.Count - 1) + ' != ' + $w[0] +
+                   ' —— 数组收尾被吃掉时后面的实参会整体往前挪')
+    }
+    if ($arrays.Count -ne 2) {
+        $fails += ('H5 ' + $nm + ' 数组实参 ' + $arrays.Count + ' != 2 (Needles + Absent)')
+    }
+    if ($counts.Count -eq 2 -and ($counts[0] -ne $w[1] -or $counts[1] -ne $w[2])) {
+        $fails += ('H5 ' + $nm + ' 针数 ' + ($counts -join '/') + ' != ' + $w[1] + '/' + $w[2])
+    }
+}
+
+}
 if ($fails.Count -gt 0) {
     $fails | ForEach-Object { Write-Host "FAIL $_" }
     exit 1
 }
-Write-Host ('OK check_test_helper_integrity: H1..H4 (functions=' + $defs.Count +
+Write-Host ('OK check_test_helper_integrity: H1..H5 (functions=' + $defs.Count +
              ' Test-* helpers=' + @($defs.Keys | Where-Object { $_ -like 'Test-*' }).Count +
              ' no shadowing, all reachable)')
 exit 0

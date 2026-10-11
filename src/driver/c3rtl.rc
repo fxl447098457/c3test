@@ -12,8 +12,25 @@
 //   转调它的薄壳)。两台实测六针全对(TypeName/IsNumeric/CStr 两条/CLng/CDbl)。
 //   选 VariantChangeType 不是取其方便: 在这套工具链里 `VarDecToR8`/`VarDecToString`/`VarDecToI4`
 //   根本没有可链接的名字(SDK 的 x64 oleaut32.lib 里没有, dll 也不按名字导出)。
+//   【第三十五刀补】标签收成一个写者(`vb6_DecSetTag`，在 `vb6_CDec` 末尾调一次）：纯 C 探针量到
+//   `VarDecFromR8` 造的那枚 `wReserved` 也是 **0**(只有 `VarDecFromStr` 写 14)，所以上面「它造的那些
+//   也写 14」只对字符串臂成立——浮点臂一直没人补，x64 上 `CStr(CDec(2.5))` 交空串、`CDbl` 交 0，而
+//   x86 被读侧的内联盖法救回来(两台不对称的形状)。读侧 x64 现在也补这一枚，与 x86 同形。
+//   同一枚带标签的 DECIMAL 逐一转的实测：→I4/→I8/→R4/→R8/→BOOL/→BSTR 全部 hr=S_OK 且答对，而带尾
+//   数的那几枚按**四舍六入向偶数**(2.5→2、3.5→4、-0.75→-1)，与 VB6 的 CLng 同形；我们的 CLng 现在
+//   答 3(它走的是 ToDouble 那一族)，所以 `CLng(CDec(2.5))` 刻意不钉 —— 它属 §B77① 那个未拍的口径。
 //   剩下的 7 处 vt 读表(ToLong/ToLongPtr/ToBool/ComPackVariant/memVariantToI4/
 //   vb6_ho_variantToLong·ToDouble)不在本刀里, 照 census 一起收在下一刀。
+//   【第三十五刀第二格(§B143)】那一刀的四格已出: vb6_VariantToLong / ToLongPtr / ToBool
+//   + vb6_VarToDouble_internal(「比较走哪个数值」那一口, 六条 Eq/Ne/Lt/Gt/Le/Ge 与它们的
+//   Long 形全从它取数)。每格的政策都不新造 —— 照**这张表对 double 的既有答案**办
+//   (整型两档 round、布尔档非零即真、比较档原样交 double)，取数一律只问 vb6_DecimalToR8。
+//   可达性是量出来的不是名单推的: 发码探针 .build/b1069_reach/probe4.bas 给出
+//   ToLong 4 处落点(赋给 Long / 赋给 Boolean / `CDec(5)+1` / 交数值形参)，其余三处各 1 处。
+//   BASE(第三十五刀第一格那台)两台逐条读数: I4=0 LP=0 BB=False IF=False ADD=1 EQ=False ARG=0。
+//   剩下三处刻意**不**补, 各自有因: vb6_ComPackVariant(往 COM 交参数, Decimal 那一档要走
+//   VARIANT 内联/指针的两套写法, 与本刀的「VB 侧取数」不是一个问)、memVariantToI4 与
+//   vb6_ho_variantToLong·ToDouble(宿主应答表那一路, 全仓 0 个 Decimal 调用点)。
 // 账 #305 §B141: CDec(...) 交出来的 VT_DECIMAL 这一档, 两张 VB-facing 读表从来没答过 —— 
 //   vb6_TypeName 落 default 答 "Variant"、vb6_IsNumeric 落 default 答假(两架构同错, 实测)。
 //   本刀补这两档(与 §B138 尾巴那批 VT_I8 同一族决定: 问的是「这枚 Variant 里是什么类型 / 算不算数」。
@@ -541,3 +558,13 @@
 /* 账 #298 第二十四刀 (§B129 并表收尾): vb6forms.c 长出公式的唯一住处 (OnDc + 一对 float)，
  * vb6forms_olecon.c / vb6forms_picture_prop.c / axsite/ax_site_ext.c / 头文件都改成只转调 ——
  * DPI 不许再写死成 96。本行是那次 touch, 让 rc.exe 重跑并把新 RTL 嵌进 C3.exe。 */
+
+/* 账 #305 §B145 第三十六刀 (精确 Decimal 算数 / Variant 算术不再替运行期猜档): vb6rtl_com.c 长出
+ * 「槽 → 真 VARIANT」那张 vt 表的唯一一份 (vb6_VariantPackBorrow，补 Decimal/Currency/Date 三格)
+ * 与四枚运行期算术出口 (vb6_VarAddV / SubV / MulV / DivV)；vb6rtl.c 的 vb6_DecimalAsVariant 从
+ * static 出来；vb6rtl_variant.h 加声明；两条「往里读」的 x86 Decimal 臂一起改从结构体的头铺。
+ * 本行是那次 touch, 让 rc.exe 重跑并把新 RTL 嵌进 C3.exe。 */
+/* 账 #305 §B144 (2026-10-11 第三十八刀): vb6comserver_obj.c 的两处 memcpy 换成 RTL 出口
+ *   vb6_VariantBorrowIntoSlot / vb6_VariantPackCopyInto (新在 vb6rtl_com.c)，另把
+ *   「DECIMAL 住在 VARIANT 的哪一字节」收成 vb6_DecimalPtrFromVariant (vb6rtl.c)。
+ *   touch 本文件 = 让 125 份 RCDATA 重嵌一次 (§B99② 那道哨兵盯的就是这一格)。 */

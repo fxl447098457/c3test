@@ -786,6 +786,22 @@ function Test-RtlResourceIds {
         $out | Select-Object -First 6 | ForEach-Object { Write-Host "  $_" }
     }
 }
+# 账 #305 §B146 (第三十九刀): 「内置出口交出来的 C 是不是整只槽」那张手写表与 RTL 对账。
+# 少一名 = 消费点按裸标量发码 (实物: CDec 那四行, BASE 真编译 6 条错)；多一名 = 死名骗人
+# (本刀清掉 11 条)。两侧都是真代价, 所以这道针两个方向都要问。
+function Test-BuiltinSlotReturns {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] builtin_slot_returns ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\check_builtin_slot_returns.ps1" 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        $out | Select-Object -First 8 | ForEach-Object { Write-Host "  $_" }
+    }
+}
 # 账 #240: RTL 的头与体必须同一张签名（参数个数）。本机那台 cl 在 C 模式下不诊断「实参过多」，
 # 头追不上体的缺陷只有 runner 上新 cl 才报 error C2197 ⇒ 判据不能靠真编，只能对着源码比。
 # 账 #278 §B72 把同一把针往外接两头：发码那几张控件方法表（名字 + 实参个数, 恰好 23 行 =
@@ -2534,7 +2550,54 @@ if ($Category -in @("all", "run", "bas")) {
         # ⇒ 只填指针时 oleaut32 把那枚地址当数值答出来(读数 = 堆地址形状)。
         # 唯一照打不钉的是 VB-dec-fmt: 带小数点的格式串随区域设置变(与上面 AR-fmt2 同一口径)。
         "VB-dec-tn=Decimal", "VB-dec-isnum=True", "VB-dec-cstr=[5]", "VB-dec2-cstr=[1.25]",
-        "VB-dec-clng=5", "VB-dec-cdbl=1.25", "VB-DONE")
+        "VB-dec-clng=5", "VB-dec-cdbl=1.25",
+        "VB-decf-tn=Decimal", "VB-decf-cstr=[2.5]", "VB-decf-cdbl=2.5",
+        "VB-dec-i4=5", "VB-dec-lp=5", "VB-dec-bb=True",
+        "VB-dec-if=True", "VB-dec-add=6", "VB-dec-eq=True",
+        # 账 #305 §B145 (第三十六刀): Variant 参与 + - * / 的**精确**读数。改前发码层替运行期
+        # 猜了一档整数(Variant 操作数一律发成 vb6_VariantToLong)，BASE 两台逐行同形(探针
+        # .build/b1095_arith/probe5.bas，同一枚 exe 修的也就是那一句): Double 盒 1.5+1 答 **3**、
+        # 1.5*2 答 **4**、1.5-1 答 **1**；Decimal 盒 1.25+1 答 **2**、1.25*2 答 **2**、
+        # 0.1+0.2 答 **0**、TypeName 答 **Long**。现在四处都交 RTL 那一族运行期出口
+        # (vb6_VarAddV/SubV/MulV/DivV -> oleaut32 的 VarAdd 一族 = VB6 本人的 Variant 算术)，
+        # 数值档由运行期的 vt 决定：Decimal 走 96 位精确，Double 保小数，Long 目标仍按 round。
+        # 0.1+0.2 = 0.3 与 0.1*0.2 = 0.02 就是这个功能存在的理由(浮点那两条永远答不精确)；
+        # 针面刻意不钉任何平局答案(2.5/3.5 属 §B77① 未拍的口径)，长整目标那条用 5.75+1=6.75->7。
+        "VB-ar-dbl-add=2.5", "VB-ar-dbl-mul=3", "VB-ar-dbl-sub=0.5",
+        "VB-ar-dec-add=2.25", "VB-ar-dec-mul=2.5", "VB-ar-dec-tn=Decimal",
+        "VB-ar-exact=0.3", "VB-ar-exact-mul=0.02",
+        "VB-ar-target-long=7", "VB-ar-if=True",
+        # 账 #305 §B147 (第三十七刀): 「这枚 C 表达式是不是整只槽」以前有**两条答案** ——
+        # 类型 oracle 走 inferExprType (认不出就**默认答 Variant**)、发码改道走 C 文本前缀表。
+        # 第 36 刀只把 oracle 那一侧往 Variant 推，于是「AST 答 Variant 而文本表读不出」那一族
+        # (实测: 定长 Byte 数组的元素、UC 宿主伪成员 TextHeight、Screen_TwipsPerPixelY) 压根没
+        # 改道，却被消费点当成槽 —— 既不提取也不取整，浮点直接进 Byte/Integer/Long 目标 = C 截断。
+        # CI 的两份工件逐行比出来 (BASE=run 38110792863 / NEW=run 38119054002): 4 份真工程 +
+        # tests/dbgdlg 的 `vb6_ChkByte(vb6_FltToLng(...))` 整块变成 `vb6_ChkByte(...)` = 静默丢
+        # 四舍六入五取偶与错误 6。现在两侧同吃一条判据 (改道 = AST ∪ 文本, oracle = AST 那半)，
+        # 「oracle 答 Variant」必然蕴含「改道交出真槽」。下面三枚都是 3.5 -> 4 (不是平局，
+        # 与 §B77① 未拍的口径无关)：前两枚走运行期出口 (Variant 变量)，第三枚走编译期那一档
+        # (定长数组元素 = oracle 答不上来的那一形)，回归那台交 3。
+        "VB-ar-div-target-long=4", "VB-ar-div-target-byte=4",
+        "VB-ar-div-target-byte-fx=4",
+        # 账 #305 §B146 (第三十九刀): 内置出口里「C 返回就是整只槽」的那一族, 以前只按手写
+        # 清单登记, 从没与 RTL 的声明对过账 —— CDec / CVErr / GetAllSettings / IIf 与五枚装箱
+        # 构造器都不在表里。经 Variant **变量**中转的形, AST 那一半兜住了 (§B145 那些针今天
+        # 也是绿的); **直接**调用才暴露: 消费点按裸标量发码。BASE (第三十八刀那台 exe) 真编译
+        # 这份夹具当场 6 条错 (ob6/c3-error.log, 两架构同)：
+        #   .c(331) C2088 "+" 对于 struct 非法   = CDec(1234567) + 1
+        #   .c(337) C2088 "*" 对于 struct 非法   = TypeName(CDec("1.25") * 2)
+        #   .c(339) C2440 vb6_VARIANT -> double  = b6d = CDec("2.5")
+        #   .c(344) C2440 vb6_VARIANT -> int32_t = IIf(True, CDec(1), CDec(2)) + 1
+        # 所以前四枚针是「编不过就整条夹具红」那一类，红面在编译而不是读数。CVErr/GetAllSettings
+        # 那三条在 BASE 上编得过 (VarType 的形参本来就是槽)，它们是**读数证人**：vt=10 是
+        # VT_ERROR、IsError 答 True，与 VB6 同档；reg-vt=12 / reg-isnull=False 只钉「内置出口
+        # 交出的槽能走到 Variant 目标」这个形状 —— VB6 这里答 Null，RTL 的简化实现答 12
+        # (vb6rtl_registry.c:113)，那条口径差另立在 §B149 的开放项里，不在本格。
+        "VB-b146-dec-add=1234568", "VB-b146-dec-vt=14", "VB-b146-dec-tn=Decimal",
+        "VB-b146-dec-dbl=2.5", "VB-b146-iif=2",
+        "VB-b146-err-vt=10", "VB-b146-err-iserr=True",
+        "VB-b146-reg-vt=12", "VB-b146-reg-isnull=False", "VB-DONE")
     # ⚠ 这里曾经是字面 TAB: `"$Tests<TAB>est_variant_boxing.bas"`。
     # PowerShell 的 "" 里 **`\t` 不是转义**（转义是反引号），所以只要有人把 `\t` 写成真 TAB,
     # 路径就变成 `tests` + TAB + `est_...` —— 门里读到的是 `error VB1006: 无法打开文件`,
@@ -5388,7 +5451,9 @@ if ($Category -in @("all", "run", "vbp")) {
         "0x7CA8CD81",
         # ai/022 B17: CImpl 多了个公有成员 Twice（外部晚绑定要有东西可点），methodCount 0→1。
         # 这条针同时钉住"表里的成员面与库里 `_CImpl` 那一档同源"（B13e 的广告==应答）。
-        "1, /* methodCount */") @(
+        # 账 #305 §B144 (第三十八刀): 本格为了让 Decimal 跨过 COM 边界又加了三枚公有成员
+        # （Amt / Quarter / EchoVal），表里的成员面随之 1→4 —— 动的是**这条针**，不是产物走样。
+        "4, /* methodCount */") @(
         "0AD9CBC7") @(
         "CoClass 'PG' identity: CLSID={11112222-3333-4444-5555-666677778888} (vbp)",
         "IID={F5CEF988-3217-6173-94B7-BB99C4B8CB81} (minted)",
@@ -5436,7 +5501,10 @@ if ($Category -in @("all", "run", "vbp")) {
         "TYPEINFOCOUNT=1 hr=0x00000000",
         "CALL=ADD hr=0x00000000 result=42",
         "CALL=GETVALUE hr=0x00000000 result=7",
-        "NAMES=bogus hr=0x80020006 dispid=-1")
+        "NAMES=bogus hr=0x80020006 dispid=-1") @(
+        # 账 #305 §B144: 探针现在也按名问 AMT/QUARTER/ECHO，而那三枚只属于 cc_dll ——
+        # legacy 这张脸一个都不该答（答了就等于新增成员泄进了另一个工程）。
+        "CALL=AMT")
     Test-DispatchInvoke "cc_dll_dispatch_iface_only" "$Tests\cc_dll\CoDll.vbp" `
         "CoDll" "{11112222-3333-4444-5555-666677778888}" @(
         "CREATE hr=0x00000000 ptr=OK",
@@ -5445,7 +5513,15 @@ if ($Category -in @("all", "run", "vbp")) {
         "QI_EXTRA hr=0x00000000 same=no",
         "CREATE_IFACE hr=0x00000000 ptr=OK",
         "VTBL_GET_BEFORE=0",
-        "VTBL_GET_AFTER=42") @(
+        "VTBL_GET_AFTER=42",
+        # 账 #305 §B144 (第三十八刀): 服务端交回一枚 Decimal 时，两处裸 memcpy 在两台上都静默
+        # 答错数 —— BASE 的读数：AMT 交 0 (x64) / 19669320 (x86)、QUARTER 交 131086 / 19669584。
+        # 探针现在把返回值交给 oleaut32 换算成 CY(×10000) 与 I8 两档，三行都钉住。
+        # ⚠ ECHO 是入站那一半的**反面证人**：BASE 上它也答 5 —— 旧的两个方向恰好对称地把那 16
+        # 字节搬了个来回，所以它钉的是"改成借用之后没把 Decimal 读丢"，能红的是前两条。
+        "CALL=AMT hr=0x00000000 resultvt=14 dec_cy=12345670000 dec_i8=1234567",
+        "CALL=QUARTER hr=0x00000000 resultvt=14 dec_cy=12500 dec_i8=1",
+        "CALL=ECHO hr=0x00000000 resultvt=14 dec_cy=50000 dec_i8=5") @(
         "CALL=ADD") "{F5CEF988-3217-6173-94B7-BB99C4B8CB81}"
     # ai/022 B16: 同一批断言在 x86 上再真跑一遍 —— 这是布局改动（vtable 槽 + 库里的偏移 +
     # 调用约定）唯一的 x86 侧端到端读数：x86 探针按库里那形状直调槽 3/4，
@@ -5458,6 +5534,14 @@ if ($Category -in @("all", "run", "vbp")) {
         "CREATE_IFACE hr=0x00000000 ptr=OK",
         "VTBL_GET_BEFORE=0",
         "VTBL_GET_AFTER=42",
+        # 账 #305 §B144 (第三十八刀): 服务端交回一枚 Decimal 时，两处裸 memcpy 在两台上都静默
+        # 答错数 —— BASE 的读数：AMT 交 0 (x64) / 19669320 (x86)、QUARTER 交 131086 / 19669584。
+        # 探针现在把返回值交给 oleaut32 换算成 CY(×10000) 与 I8 两档，三行都钉住。
+        # ⚠ ECHO 是入站那一半的**反面证人**：BASE 上它也答 5 —— 旧的两个方向恰好对称地把那 16
+        # 字节搬了个来回，所以它钉的是"改成借用之后没把 Decimal 读丢"，能红的是前两条。
+        "CALL=AMT hr=0x00000000 resultvt=14 dec_cy=12345670000 dec_i8=1234567",
+        "CALL=QUARTER hr=0x00000000 resultvt=14 dec_cy=12500 dec_i8=1",
+        "CALL=ECHO hr=0x00000000 resultvt=14 dec_cy=50000 dec_i8=5",
         "DONE") @(
         "CALL=ADD") "{F5CEF988-3217-6173-94B7-BB99C4B8CB81}" "x86"
 
@@ -5645,6 +5729,7 @@ if ($Category -in @("all", "compile")) {
     Test-DocHostAuthority
     Test-RtlNakedNames
     Test-RtlResourceIds
+    Test-BuiltinSlotReturns
     Test-RtlProtoArity
     Test-RsRecordsetShape
     Test-SbPanelHm

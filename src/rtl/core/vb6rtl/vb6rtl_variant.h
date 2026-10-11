@@ -88,6 +88,19 @@ typedef struct vb6_VARIANT {
 #else
   #define vb6_VARIANT_DECVAL(v) (*(v).pdecVal)
 #endif
+/* 账 #305 §B142(第三十五刀): 给槽里那枚 DECIMAL 补上 oleaut32 的 vt 标签，**只在这里写一遍**。
+ * 实测(纯 C 探针)：`VarDecFromR8` 造的那枚这两字节是 **0**，只有 `VarDecFromStr` 会写 14 ⇒ 「OLE
+ * 自己造的一定带标签」这句错了，标签必须在**造出来的那一步末尾**统一补，不许散在 case 里。
+ * x86 那侧要判空：`CDec` 的 default 臂刚把 pdecVal 释放掉，槽还算 Decimal 但没有悬体。 */
+static inline void vb6_DecSetTag(vb6_VARIANT v) {
+    if (v.vt != vb6_vtDecimal) return;
+#ifdef _WIN64
+    vb6_DEC_VT(vb6_VARIANT_DECVAL(v)) = vb6_vtDecimal;
+#else
+    if (v.pdecVal) vb6_DEC_VT(vb6_VARIANT_DECVAL(v)) = vb6_vtDecimal;
+#endif
+}
+
 
 // Variant构造
 static inline vb6_VARIANT vb6_VariantEmpty(void) {
@@ -282,6 +295,34 @@ BSTR vb6_VariantToString(vb6_VARIANT v);
  * 成功返回真; 失败给 0 / 空串, 不抛错(与其它读表的 default 同形)。 */
 BSTR vb6_DecimalToBSTR(vb6_VARIANT v);
 int vb6_DecimalToR8(vb6_VARIANT v, double *out);
+
+/* 账 #305 §B142/§B145: 槽里那枚 Decimal 变成合法 OLE VARIANT 的**唯一出口**(见 vb6rtl.c)。
+ * 返回 0 = 槽不是 Decimal; 返回 1 = out 已铺好(带 oleaut32 的 vt 标签、且是副本)。 */
+int vb6_DecimalAsVariant(vb6_VARIANT v, VARIANT *out);
+
+/* 账 #305 §B144: 与上面那枚成对的**反向一问** ——「这枚 OLE VARIANT 的 DECIMAL 住在哪」。
+ * 两架构的答案都是结构体的头，分歧只在 SDK 的称呼；入站读 Decimal 的地方只问这里，
+ * 不再各自数偏移(x64 数错成 offset 8、x86 把数值当指针，两处都量到过)。 */
+DECIMAL *vb6_DecimalPtrFromVariant(const VARIANT *v);
+
+/* 账 #305 §B144: COM 服务端适配器那两份「槽 ↔ OLE VARIANT」的 memcpy 收成下面这一对出口。
+ * 服务端那份 .c 手上只有匿名槽(3×uint64)，不该知道槽里每一档住在第几个字节 ——
+ * 它原来那句「槽布局前 16 字节与 OLE VARIANT 内容一致」正是 §B144 静默错的根因。 */
+void vb6_VariantPackCopyInto(const void *slot, VARIANT *out);    /* 槽 → 对端 VARIANT(带权副本) */
+void vb6_VariantBorrowIntoSlot(const VARIANT *src, void *slot);  /* 对端 VARIANT → 槽(借用) */
+
+/* 账 #305 §B145: 槽 → 真 VARIANT 的那张 vt 表，**只答「数值住在哪一格」**，一律借用语义
+ * (不复制 BSTR、不 AddRef)。需要带权副本的出站那一族自己补下面那一步。 */
+void vb6_VariantPackBorrow(vb6_VARIANT v, VARIANT *out);
+
+/* 账 #305 §B145: Variant 参与 + - * / 的唯一运行期出口(定义在 vb6rtl_com.c)。
+ * 两侧都装箱成真 VARIANT 后交 oleaut32 的 VarAdd/VarSub/VarMul/VarDiv —— VB6 本人的
+ * Variant 算术引擎，于是 Decimal 的 96 位精确、Double 的小数、Null 传播、Date 加天数
+ * 与它自己的舍入/越界政策一起继承，发码层不再替运行期猜档。 */
+vb6_VARIANT vb6_VarAddV(vb6_VARIANT a, vb6_VARIANT b);
+vb6_VARIANT vb6_VarSubV(vb6_VARIANT a, vb6_VARIANT b);
+vb6_VARIANT vb6_VarMulV(vb6_VARIANT a, vb6_VARIANT b);
+vb6_VARIANT vb6_VarDivV(vb6_VARIANT a, vb6_VARIANT b);
 // Fix 029: Variant → SafeArray extraction (variant holding array).
 // 用于调用点反向强制: callee 期望 vb6_SafeArray1D* 但实参是 vb6_VARIANT.
 struct vb6_SafeArray1D* vb6_VariantToSafeArray1D(vb6_VARIANT v);

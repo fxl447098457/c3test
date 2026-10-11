@@ -284,10 +284,6 @@ vb6_VARIANT vb6_CDec(vb6_VARIANT v) {
         case vb6_vtInteger: case vb6_vtLong: case vb6_vtByte: {
             int32_t ival = (v.vt == vb6_vtInteger) ? v.iVal : (v.vt == vb6_vtByte) ? (int32_t)v.bVal : v.lVal;
             vb6_VARIANT_DECVAL(result).Lo32 = (uint32_t)(ival < 0 ? -ival : ival);
-            /* 账 #305 §B142: 这一枚是 oleaut32 的 vt 标签(它自己造的那些都是 14), 不写它就是
-             * 「数据对但格式不对」的一枚死 DECIMAL。它在「往外读」那些表里面比错误难发现:
-             * VariantChangeType 返回 S_OK 却给 0 / 空串。 */
-            vb6_DEC_VT(vb6_VARIANT_DECVAL(result)) = vb6_vtDecimal;
             vb6_VARIANT_DECVAL(result).Mid32 = 0;
             vb6_VARIANT_DECVAL(result).Hi32 = 0;
             vb6_VARIANT_DECVAL(result).scale = 0;
@@ -302,7 +298,6 @@ vb6_VARIANT vb6_CDec(vb6_VARIANT v) {
                 memcpy(&vb6_VARIANT_DECVAL(result), &winDec, sizeof(winDec));
             } else {
                 int64_t i64 = (int64_t)dval;
-                vb6_DEC_VT(vb6_VARIANT_DECVAL(result)) = vb6_vtDecimal;  /* 账 #305 §B142: 同上 */
                 vb6_VARIANT_DECVAL(result).Lo32 = (uint32_t)(i64 & 0xFFFFFFFF);
                 vb6_VARIANT_DECVAL(result).Mid32 = (uint32_t)((i64 >> 32) & 0xFFFFFFFF);
                 vb6_VARIANT_DECVAL(result).Hi32 = 0;
@@ -332,6 +327,10 @@ vb6_VARIANT vb6_CDec(vb6_VARIANT v) {
             break;
         }
     }
+    /* 账 #305 §B142(第三十五刀): 标签在这里统一补，不再散在各臂里。浮点臂走的是 `VarDecFromR8`，
+     * 它给的那枚 wReserved 是 0，以前没人管 ⇒ x64 上 `CStr(CDec(2.5))` 交空串、`CDbl` 交 0；
+     * 两个手填臂那两行因此撤掉：凡是本函数交回的 Decimal，标签只能在这里决定一次。 */
+    vb6_DecSetTag(result);
     return result;
 }
 

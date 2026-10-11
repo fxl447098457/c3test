@@ -121,5 +121,132 @@ Public Sub Main()
     Debug.Print "VB-dec-fmt=[" & Format(vd2, "0.00") & "]"
     Debug.Print "VB-dec-clng="; CLng(vd2)
     Debug.Print "VB-dec-cdbl="; CDbl(vd3)
+    ' Acct #305 para-B142 cell 2 (the float arm's tag). Comments here stay ASCII: C3 reads
+    ' sources as ANSI/GBK, so UTF-8 Chinese lines round-trip as mojibake in the product.
+    ' CDec(2.5) takes the VarDecFromR8 arm, and that DECIMAL comes back with wReserved = 0
+    ' (only VarDecFromStr writes 14). Knife 34 tagged just the two hand-filled arms, so on
+    ' x64 CStr(CDec(2.5)) printed empty and CDbl gave 0, while x86 was saved by the inline
+    ' overlay on the read side -- an arch asymmetry. Deliberately NOT pinning
+    ' CLng(CDec(2.5)): oleaut32 rounds 2.5 to 2 (banker's, = VB6), we currently answer 3
+    ' (it goes through the double converter), and that half-way caliber is still unowned.
+    Dim vd4 As Variant
+    vd4 = CDec(2.5)
+    Debug.Print "VB-decf-tn="; TypeName(vd4)
+    Debug.Print "VB-decf-cstr=[" & CStr(vd4) & "]"
+    Debug.Print "VB-decf-cdbl="; CDbl(vd4)
+    ' Acct #305 para-B143 cell B1: the numeric ports a Decimal was read through. The
+    ' BASE build answers 0/False for every one of them on BOTH arches (probe
+    ' .build/b1069_reach/probe4.bas): assign to Long / LongPtr / Boolean, a Boolean
+    ' If, arithmetic, comparison and a numeric formal arg. Integer Decimals only on
+    ' purpose -- 2.5/3.5 ties belong to the unowned para-B77-1 rounding caliber, so
+    ' nothing here pins a tie answer. Arith folds through vb6_VariantToLong and
+    ' compare through vb6_VarToDouble_internal, which is why the four ports ship as
+    ' one batch: a table that was patched while its neighbour was not is the defect.
+    Dim vi As Long
+    Dim vl As LongPtr
+    Dim vb As Boolean
+    Dim vsum As Variant
+    vi = vd2
+    Debug.Print "VB-dec-i4="; vi
+    vl = vd2
+    Debug.Print "VB-dec-lp="; vl
+    vb = vd2
+    Debug.Print "VB-dec-bb="; vb
+    If vd2 Then
+        Debug.Print "VB-dec-if=True"
+    Else
+        Debug.Print "VB-dec-if=False"
+    End If
+    vsum = vd2 + 1
+    Debug.Print "VB-dec-add="; vsum
+    Debug.Print "VB-dec-eq="; (vd2 = 5)
+    ' Acct #305 para-B145: exact arithmetic. Codegen used to unwrap a Variant operand
+    ' through vb6_VariantToLong for + - * -- it picked the numeric arm at compile time --
+    ' so the BASE readings were the same on BOTH arches (probe .build/b1095_arith):
+    '   Double box:  1.5+1 -> 3,  1.5*2 -> 4,  1.5-1 -> 1
+    '   Decimal box: 1.25+1 -> 2, 1.25*2 -> 2, 0.1+0.2 -> 0, TypeName -> Long
+    ' The four operators now go through one runtime exit in the RTL, which boxes both
+    ' operands and hands them to oleaut32's VarAdd/VarSub/VarMul/VarDiv -- the engine
+    ' VB6's own Variant arithmetic is built on -- so the arm comes from the value's vt
+    ' at run time. Nothing here pins a tie answer (2.5/3.5 belong to the unowned
+    ' para-B77-1 rounding caliber), and 1.5+1.5=3 is used where a Long target is asked.
+    Dim ar1 As Variant
+    Dim ar2 As Variant
+    Dim ar3 As Variant
+    Dim arx As Variant
+    Dim arl As Long
+    ar1 = 1.5
+    Debug.Print "VB-ar-dbl-add="; ar1 + 1
+    Debug.Print "VB-ar-dbl-mul="; ar1 * 2
+    Debug.Print "VB-ar-dbl-sub="; ar1 - 1
+    ar2 = CDec("1.25")
+    Debug.Print "VB-ar-dec-add="; CStr(ar2 + 1)
+    Debug.Print "VB-ar-dec-mul="; CStr(ar2 * 2)
+    Debug.Print "VB-ar-dec-tn="; TypeName(ar2 + 1)
+    ar3 = CDec("0.1")
+    ar2 = CDec("0.2")
+    Debug.Print "VB-ar-exact="; CStr(ar3 + ar2)
+    Debug.Print "VB-ar-exact-mul="; CStr(ar3 * ar2)
+    arx = CDec("5.75")
+    arl = arx + 1
+    Debug.Print "VB-ar-target-long="; arl
+    Debug.Print "VB-ar-if="; CBool(ar3 + ar2)
+    ' Acct #305 para-B147: the narrowing check. "/" let the type oracle answer
+    ' "Variant" from one predicate while codegen decided the routing from a
+    ' second one (the C-text prefix list), so for operands the list cannot read
+    ' (a Variant array's element, a host pseudo-member like TextHeight) the
+    ' emitted C stayed a plain double while consumers believed it was a slot --
+    ' they skipped BOTH the rounding step and the range check. BASE answer for
+    ' the two lines below was 4 (3.5 -> round -> 4); the regressed build gave 3
+    ' (C truncation at the vb6_ChkLong call). One shared predicate now says
+    ' "is this a slot": routing = AST-union-text, oracle = the AST arm only, so
+    ' every oracle-Variant result really is routed. 3.5 is not a tie, so this
+    ' does not touch the unowned para-B77-1 rounding caliber.
+    Dim arv As Variant
+    Dim arb As Byte
+    arv = 7
+    arl = arv / 2
+    Debug.Print "VB-ar-div-target-long="; arl
+    arb = arv / 2
+    Debug.Print "VB-ar-div-target-byte="; arb
+    ' para-B147 second arm: an operand the type oracle cannot read at all -- a
+    ' fixed-size Byte array element. inferExprType defaults such unknowns to
+    ' Variant (that is what made 67f03217 answer Variant for the Charts lines
+    ' while codegen still emitted a plain double), so the strict predicate must
+    ' answer "not a slot" here and the Double arm must keep its rounding exit.
+    ' The regressed build emitted vb6_ChkByte(<double>) = C truncation = 3.
+    Dim cad(2) As Byte
+    Dim cab As Byte
+    cad(1) = 7
+    cab = cad(1) / 2
+    Debug.Print "VB-ar-div-target-byte-fx="; cab
+    ' Acct #305 para-B146 (knife 39): the builtin exits whose C return IS a whole slot
+    ' were never reconciled with the RTL declarations, so four names (CDec / CVErr /
+    ' GetAllSettings / IIf) and the five boxing constructors (Byte/Integer/Single/Date/
+    ' Identity) were missing from the codegen text predicate. Read through a Variant
+    ' *variable* the AST arm covered them; called *directly* the consumer emitted a bare
+    ' scalar: `CDec(1234567) + 1` -> (int32_t)(vb6_CDec(...) + 1) = C2088, `d = CDec("2.5")`
+    ' = C2440. The negative control for the eight lines below is therefore "BASE cannot
+    ' compile this file at all" (11 errors on both arches, probe .build/b1216_probe), not
+    ' "BASE answers a wrong number". Readings are from the NEW build; both arches agree.
+    Dim b6v As Variant
+    Dim b6d As Double
+    Debug.Print "VB-b146-dec-add="; CDec(1234567) + 1
+    Debug.Print "VB-b146-dec-vt="; VarType(CDec(5))
+    Debug.Print "VB-b146-dec-tn="; TypeName(CDec("1.25") * 2)
+    b6d = CDec("2.5")
+    Debug.Print "VB-b146-dec-dbl="; b6d
+    b6v = IIf(True, CDec(1), CDec(2)) + 1
+    Debug.Print "VB-b146-iif="; CStr(b6v)
+    b6v = CVErr(11)
+    Debug.Print "VB-b146-err-vt="; VarType(b6v)
+    Debug.Print "VB-b146-err-iserr="; IsError(b6v)
+    ' Fifth exit (GetAllSettings): reachability witness only. VB6 answers Null here (the
+    ' app has no SaveSettings key) while our RTL stub returns a bare Variant instead
+    ' (vb6rtl_registry.c:113, comment 'simplified: not true 2D array'), so the two lines
+    ' below pin the SHAPE a slot-returning builtin reaches a Variant target with -- not
+    ' VB6 parity. The parity gap is registered as an open item (para-B149).
+    Debug.Print "VB-b146-reg-vt="; VarType(GetAllSettings("C3NoSuchApp146", "Sec"))
+    Debug.Print "VB-b146-reg-isnull="; IsNull(GetAllSettings("C3NoSuchApp146", "Sec"))
     Debug.Print "VB-DONE"
 End Sub
