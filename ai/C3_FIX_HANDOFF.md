@@ -2290,6 +2290,24 @@ marker、重编，之后 `check_rtl_embedded` 报 **125/125 逐字节相同**。
 - **顺带量到的一条不齐（不在本刀）**：语义表把 `Dir` 的 pathname、`CurDir` 的 drive 标成必填，而 VB6 手册是 `Dir[(pathname[, attributes])]` / `CurDir[(drive)]` —— **第一档本身可省**。发码侧的表答对了，语义那本答错；今天不影响产物（通用 padding 对 builtin 干脆不吃 `isOptional`），所以哨兵里用 `$leadingDefault`（3 条，逐条带手册依据）登记而不改语义表 —— 改它会动 `IsMissing`/包装档，那是另一格的事。
 - **剩下的口径（不是代码）**：语义那本名单与本表的关系现在是「哨兵强制两边齐」，不是「一家吃掉另一家」。真要合成一份，得先让 `addBuiltinFunc` 那 10 枚（无形参表）也把形参补齐 —— 而给它们补 calleeParams 会把 Fix 024 P2 / Fix 029 那两条按形参类型决定的**包装改道**一起打开，那是一次独立的刀，不是本刀的零行为改动口径能养得起的。
 
+### B154 `ReDim` 一个typed多维数组时**元素类型在创建那一步就丢了**：造出来的是 variant 档、写进去的是 BSTR 步长，两者不同一格（2026-10-12 第四十一刀量完，**未开工**）
+
+- **真跑读数**（探针 `D:\c3.vb6.pro\.build\b1366_nd\b151.bas`，x64 新台，`.build/b1366_nd/r6.txt`）：`Dim a() As String` + `ReDim a(1 To 3, 1 To 4)` + `a(2, 3) = "X"` 之后
+  ```
+  P3-cell=1299894904        <- 该答 X；这里把一枚 BSTR 当整数打出来了
+  P4-vt=8204 tn=Variant     <- VB6: VarType=8208 (vbArray+vbString), TypeName="String()"
+  P10-box-cell=             <- v = a 之后 v(2,3): 空串 —— 写的那一格与读的那一格不是同一格
+  ```
+  同一段里 `Dim b() As Long` + `ReDim b(2,2)` + `b(1, 2) = 77` 读回 **77**（P7）而两维的 LBound/UBound 两档全对（P1/P2/P5/P6）⇒ **不是下标那一路坏，是元素类型那一路坏**。
+- **发码现场**（`.build/b1366_nd/e.txt` 第 72 / 73 / 85 / 123 行）：同一件事被说了两遍且互相矛盾 ——
+  - 创建：`a = (vb6_SafeArray1D*)vb6_SafeArrayReDimND(vb6_sa_variant, 2, bounds)` —— **`vb6_sa_variant` 是写死的**，声明里的 `As String` 到这一步没了；
+  - 写：`vb6_BSTR_AssignMove(&VB6_SA_ND_AT2(BSTR, (vb6_SafeArrayND*)a, 2, 3), …)` —— 按 **BSTR 的步长**算地址；
+  - 于是 x64 上写入落在 stride 8 的位置而描述符按 stride 24 数格子 ⇒ 写入与读出不是同一格（P10 交空串就是这件事的读数），而 P4 那声 8204 是它的**症状**；
+  - 另有一格独立的：`Debug.Print a(2, 3)` 发成 `vb6_DebugWriteLong((int32_t)(VB6_SA_ND_AT2(BSTR, …)))` ⇒ 把 BSTR 当整数打（账 #180 那一族「句柄被当数字打」的另一处，与类型档无关，可分刀）。
+- **可达性（真语料 `D:\vb_yqt4qPac`，10138 份，GBK 解码，`.build/b1356_nd.txt` / `b1357_nd2.txt`）**：二维 `ReDim` **414 处**、二维 `Dim` **172 处**（含 `Dim a(3, 3) As Long` 那一族）；同一轮量到 `Variant = 二维数组` 那一形是 **0 处**（那是 §B151，与本格不同形）。⇒ 本格是**有人踩的**，且踩的是静默写错格。
+- **修法形状（开工时照这个）**：先问 §B144/§B150 那条口径 —— **谁拥有这枚描述符**。元素类型只有一个答案来源：声明里那个 `As <类型>`（`vb6_sa_*`），而它今天只被一维那条路（`vb6_arr_<名>` 的创建）吃到；多维那一路（`ReDimND` / `VB6_SA_ND_AT2`）各自挑了档。收成一处 = 创建与访问都问同一张类型表（第四十刀已经把元素步长收成 `vb6_SaElemSize` 一枚出口，**类型档**是它的另一半）。判据 = 两台真跑的 P3/P4/P7/P10 四枚 + 存量 401 份清单逐行护栏（这一刀会**改产物**：`vb6_sa_variant` 那枚字面量要换成按声明算出来的档，所以登记清单会动，动的那几行必须逐行归因）。
+- **顺带**：`Erase a` 之后 `UBound(a, 1)` 交 **0**（P11），VB6 是数组未分配 ⇒ 这一档要不要跟着改，等本格定完类型档再说（未分配数组的 UBound 口径是另一条，先记在这里）。
+
 ### B151 把真二维数组赋给 Variant 槽，槽读回来是 VarType=9 / "Object" 而不是 8204 —— 自家多维描述符被折成一维（2026-10-12 第四十刀量到；**未开工**）
 
 - **读数**（探针 `.build/b1268_ndread/{tnd,tag}.bas`，`.build/b1268_ndread/rt.txt`）：`Dim a(1 To 2, 1 To 3) As Variant: v = a` 之后 `VarType(v)` 交 **9**、`TypeName(v)` 交 **"Object"**；VB6 交 8204 / "Variant()"。而同一枚 `v` 的 `UBound(v, 2)` 那一路是按 ND 问的 ⇒ 装箱那一档少认多维。
