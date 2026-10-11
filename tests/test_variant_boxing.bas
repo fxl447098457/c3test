@@ -134,5 +134,31 @@ Public Sub Main()
     Debug.Print "VB-decf-tn="; TypeName(vd4)
     Debug.Print "VB-decf-cstr=[" & CStr(vd4) & "]"
     Debug.Print "VB-decf-cdbl="; CDbl(vd4)
+    ' Acct #305 para-B143 cell B1: the numeric ports a Decimal was read through. The
+    ' BASE build answers 0/False for every one of them on BOTH arches (probe
+    ' .build/b1069_reach/probe4.bas): assign to Long / LongPtr / Boolean, a Boolean
+    ' If, arithmetic, comparison and a numeric formal arg. Integer Decimals only on
+    ' purpose -- 2.5/3.5 ties belong to the unowned para-B77-1 rounding caliber, so
+    ' nothing here pins a tie answer. Arith folds through vb6_VariantToLong and
+    ' compare through vb6_VarToDouble_internal, which is why the four ports ship as
+    ' one batch: a table that was patched while its neighbour was not is the defect.
+    Dim vi As Long
+    Dim vl As LongPtr
+    Dim vb As Boolean
+    Dim vsum As Variant
+    vi = vd2
+    Debug.Print "VB-dec-i4="; vi
+    vl = vd2
+    Debug.Print "VB-dec-lp="; vl
+    vb = vd2
+    Debug.Print "VB-dec-bb="; vb
+    If vd2 Then
+        Debug.Print "VB-dec-if=True"
+    Else
+        Debug.Print "VB-dec-if=False"
+    End If
+    vsum = vd2 + 1
+    Debug.Print "VB-dec-add="; vsum
+    Debug.Print "VB-dec-eq="; (vd2 = 5)
     Debug.Print "VB-DONE"
 End Sub

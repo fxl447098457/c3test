@@ -21,6 +21,16 @@
 //   答 3(它走的是 ToDouble 那一族)，所以 `CLng(CDec(2.5))` 刻意不钉 —— 它属 §B77① 那个未拍的口径。
 //   剩下的 7 处 vt 读表(ToLong/ToLongPtr/ToBool/ComPackVariant/memVariantToI4/
 //   vb6_ho_variantToLong·ToDouble)不在本刀里, 照 census 一起收在下一刀。
+//   【第三十五刀第二格(§B143)】那一刀的四格已出: vb6_VariantToLong / ToLongPtr / ToBool
+//   + vb6_VarToDouble_internal(「比较走哪个数值」那一口, 六条 Eq/Ne/Lt/Gt/Le/Ge 与它们的
+//   Long 形全从它取数)。每格的政策都不新造 —— 照**这张表对 double 的既有答案**办
+//   (整型两档 round、布尔档非零即真、比较档原样交 double)，取数一律只问 vb6_DecimalToR8。
+//   可达性是量出来的不是名单推的: 发码探针 .build/b1069_reach/probe4.bas 给出
+//   ToLong 4 处落点(赋给 Long / 赋给 Boolean / `CDec(5)+1` / 交数值形参)，其余三处各 1 处。
+//   BASE(第三十五刀第一格那台)两台逐条读数: I4=0 LP=0 BB=False IF=False ADD=1 EQ=False ARG=0。
+//   剩下三处刻意**不**补, 各自有因: vb6_ComPackVariant(往 COM 交参数, Decimal 那一档要走
+//   VARIANT 内联/指针的两套写法, 与本刀的「VB 侧取数」不是一个问)、memVariantToI4 与
+//   vb6_ho_variantToLong·ToDouble(宿主应答表那一路, 全仓 0 个 Decimal 调用点)。
 // 账 #305 §B141: CDec(...) 交出来的 VT_DECIMAL 这一档, 两张 VB-facing 读表从来没答过 —— 
 //   vb6_TypeName 落 default 答 "Variant"、vb6_IsNumeric 落 default 答假(两架构同错, 实测)。
 //   本刀补这两档(与 §B138 尾巴那批 VT_I8 同一族决定: 问的是「这枚 Variant 里是什么类型 / 算不算数」。

@@ -254,6 +254,12 @@ int32_t vb6_VariantToLong(vb6_VARIANT v) {
         case vb6_vtSingle:  return (int32_t)round(v.fltVal);
         case vb6_vtDate:    return (int32_t)round(v.dblVal);  /* <vbeclipse>: VT_DATE 的数值面就是序列号 */
         case vb6_vtDouble:  return (int32_t)round(v.dblVal);
+        /* 账 #305 §B143: Decimal 在这张表里没有档 ⇒ default 交 0，于是
+         * `Dim i As Long` 接 CDec(5) 存进 0，而 `CDec(5) + 1` 交 1
+         * (发码把它折成 vb6_VariantToLong(v)+1)。
+         * 政策不新造：先经唯一出口 vb6_DecimalToR8 取数，再照本表对 double 的 round。
+         * 判据只喂整数 Decimal —— 平局取整的口径还没人拍(§B77 那一格)。 */
+        case vb6_vtDecimal: { double dv = 0.0; vb6_DecimalToR8(v, &dv); return (int32_t)round(dv); }
         case vb6_vtCurrency:return (int32_t)(v.cyVal / 10000);
         case vb6_vtBSTR:    return (int32_t)vb6_Val(v.bstrVal);
         default:            return 0;
@@ -271,6 +277,7 @@ intptr_t vb6_VariantToLongPtr(vb6_VARIANT v) {
         case vb6_vtSingle:  return (intptr_t)round(v.fltVal);
         case vb6_vtDate:    return (intptr_t)round(v.dblVal);  /* <vbeclipse>: 同上 */
         case vb6_vtDouble:  return (intptr_t)round(v.dblVal);
+        case vb6_vtDecimal: { double dv = 0.0; vb6_DecimalToR8(v, &dv); return (intptr_t)round(dv); }  /* 账 #305 §B143: 同上 */
         case vb6_vtCurrency:return (intptr_t)(v.cyVal / 10000);
         case vb6_vtBSTR:    return (intptr_t)vb6_Val(v.bstrVal);
         case VT_I8:         return (intptr_t)v.llVal;
@@ -295,6 +302,7 @@ int16_t vb6_VariantToBool(vb6_VARIANT v) {
         case vb6_vtSingle:   return v.fltVal != 0.0f ? -1 : 0;
         case vb6_vtDate:     return v.dblVal != 0.0 ? -1 : 0;  /* <vbeclipse>: 同上 */
         case vb6_vtDouble:   return v.dblVal != 0.0 ? -1 : 0;
+        case vb6_vtDecimal: { double dv = 0.0; vb6_DecimalToR8(v, &dv); return dv != 0.0 ? -1 : 0; }  /* 账 #305 §B143: 非零即 True，本表口径 */
         case vb6_vtCurrency: return v.cyVal ? -1 : 0;
         case vb6_vtDispatch: return v.pdispVal ? -1 : 0;
         case vb6_vtBSTR:
@@ -679,6 +687,11 @@ static double vb6_VarToDouble_internal(vb6_VARIANT* v) {
          * （Fix 082 那条装箱本身就是 VT_I8），句柄进 Variant 槽之后与它自己比也答不等。
          * 取数一侧 (VariantToLong/ToBoolean/ToDouble/ToIntPtr) 早就有 VT_I8 档，只有这里漏了。 */
         case (vb6_vartype)VT_I8: return (double)v->llVal;
+        /* 账 #305 §B143: 这一处是「比较走哪个数值」的口(第二十九刀给它补的是 VT_I8)。
+         * Decimal 没档 ⇒ default 交 0.0，`(CDec(5) = 5)` 实测 False。补这一格就同时
+         * 通六条比较与它们的 Long 形 —— Eq/Ne/Lt/Gt/Le/Ge 全从这里取数，
+         * 所以换算依旧只问 vb6_DecimalToR8，不留第二条十进制拼装。 */
+        case (vb6_vartype)VT_DECIMAL: { double dv = 0.0; vb6_DecimalToR8(*v, &dv); return dv; }
         case (vb6_vartype)VT_R4: return (double)v->fltVal;
         case (vb6_vartype)VT_R8: return v->dblVal;
         case (vb6_vartype)VT_BOOL: return v->boolVal ? -1.0 : 0.0;
