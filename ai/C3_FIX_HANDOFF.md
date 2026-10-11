@@ -2184,6 +2184,19 @@ marker、重编，之后 `check_rtl_embedded` 报 **125/125 逐字节相同**。
 
 - **护栏**：51 道 `[STATIC]` 本地全 rc=0；语料形状清单本机重算一遍 = **inputs=400 / 未变 399 / 移动 1**，移动的正是 `tests/tabwalk/TabWalkApp.vbp`（两侧 rc=0，无新增/缺失输入，`.build/b699_manifest_k30.txt`）。那一行**按 CI 读数登记** —— 本刀没动 `src/`，除夹具自身之外一行都不该动，动了就是归因没做完。
 - **本刀没做的**：`clicks=3` 与 `AK-up` 读的是**落点**不是通知条数的时刻，那两条口径没动；modal 与 pbsb 的既有等法只是被**登记进同一张表**（它们本来就在答同一问），没有改写；`appqquit` / `combofocus` 那一族（#259 / 门 #403）住的是另一问（进程肯不肯自己退），仍由账 #236 那三道闸管。**下一枚写「post 完再读」的夹具必须先进 W1 那张表**，这条口径才算有权威。
+### B144 我们的 COM 服务端交回一枚 Decimal 时，两架构都是静默错（x64 把它放在 offset 8、oleaut32 从 offset 0 读；x86 直接把堆地址当数值）（2026-10-11 第三十五刀第二格收线之后顺手量出，**未开工**）
+
+- **量法**（不进仓）：把 `tests/cc_dll` 整目录复制到 `.build/b1086_dec/CoDll`，只往 `CImpl.cls` 追加三枚公有成员 —— `Plain() As Long`（对照组）、`Amt() As Variant = CDec(1234567)`、`Half() As Variant = CDec("1.25")`；客户端是现成的**免注册**探针形状（`tests/tools/disp_probe.c` 那套 `LoadLibrary` + `DllGetClassObject` + `IDispatch_Invoke`），扩展成 `.build/b1086_dec/probe_dec.c`：把返回的那枚 VARIANT **整个结构体按字节打出来**，再交给 oleaut32 自己做 `→BSTR/→R8/→I4` 三问（独立证人 —— 我们的槽自洽不代表 OLE 读到的也是它）。两台各编各跑，日志 `.build/b1086_dec/report.txt`。
+- **对照组是好的**：`Plain` 交回 `vt=3`、`REPLY_BYTES=0300…92100000…`，三问全答 4242 ⇒ 这条管线本身通、指针宽度也对，坏的只有 Decimal 那一档。
+- **x64 读数**（`sizeof(VARIANT)=24`）：
+  - `Amt` ⇒ `vt=14`、`REPLY_BYTES=0E00 0000 00000000 | 00000000 00000000 | 87D61200 00000000` —— 十进制 1234567 就在最后 8 字节里，**但它躺在 offset 16**；oleaut32 三问全答 **0**（hr 都是 S_OK）。
+  - `Half` ⇒ `REPLY_BYTES=0E00 0000 00000000 | 0E00 0200 00000000 | 7D000000 …` —— 这 16 字节从 offset 8 起正好是一枚合法的 `wReserved=14, scale=2, lo=125`（= 1.25），而 oleaut32 三问答 **131086** = `0x0002000E` —— 那正是**从 offset 0 数起的低 64 位**（`0E 00 00 00 00 00 00 00` + `0E 00 02 00`）。⇒ ** oleaut32 读 `VT_DECIMAL` 的位置是结构体的头（offset 0），不是 offset 8**：x64 也一样，与 §B142 ② 在 x86 上量到的「整枚 DECIMAL 盖住 VARIANT」是同一条规则，只是这里的产物是「数值变成头字节的整数解释」而不是「地址」。
+- **x86 读数**（`sizeof(VARIANT)=16`）：`Amt` ⇒ `REPLY_BYTES=0E00 0000 00000000 | B0011901 00000000` —— 后 8 字节是 **`0x011901B0`，一枚堆地址**（我们槽里的 `pdecVal` 被当数值铺进了数据区），oleaut32 三问答 **18416048**；`Half` 同形（`0x01190198` → 18416024）。⇒ 与 §B142 那句「只填指针时 oleaut32 把那枚地址当数值答出来」是同一个形状，只不过这次发生在**出站**那一侧。
+- **落点在读码里是现成的**：`src/rtl/core/vb6comserver/vb6comserver_obj.c:283` —— `memcpy(pVarResult, &tmpRet, sizeof(VARIANT))`，注释写着「invokeFunc 的返回槽按 `vb6_VARIANT` 布局，**前 16 字节与 OLE VARIANT 内容一致**」。这句主张现在被两台读数**同时推翻**：对 `VT_I4`/`VT_R8` 那几档确实一致，而 `VT_DECIMAL` 在我们槽里（x64 offset 8 内联 / x86 指针）**与 OLE 要求的「从 offset 0 铺整枚 16 字节」根本不是一回事**。同文件 `:258-267` 的实参方向也是同一处主张的下游（把 16 字节的 OLE VARIANT 整个 memcpy 进 24 字节的槽，然后按槽布局读 —— Decimal 形参交进来时同样错位）。
+- **修法形状（等开工时照 §B142 的口径，别新造第二份）**：出站/入站都改问**唯一出口** —— 现在 `vb6_DecimalAsVariant`（`vb6rtl.c:319`，两份布局各一臂，含补标签）干的正是「槽 → 合法 OLE VARIANT」这件事，只是它是 `static`。所以这一格不是「给 memcpy 打个 Decimal 补丁」，而是：**服务端两侧的 VARIANT↔槽 双向换算收成一对出口**（出：`vb6_DecimalAsVariant` 提公开名；入：与 `vb6_VariantFromComResult` 的 x86/x64 两臂合一），谁都不许再直接 `memcpy` 结构体。顺带把 §B143 记在册的那两格（`vb6_ComPackVariant` 的 Decimal/Currency/Date 出站档 + `vb6rtl_com.c:336/467` 两条 x86 导入臂）一起收 —— 它们问的是**同一个问句**（「这枚 DECIMAL 在哪、谁有权拥有它」），分开修就是第三次把同一件事抄两遍。
+- **判据形状已备好**：这枚探针本身就是夹具 —— 两台各钉「对照组 4242」+「`Amt` 三问都答 1234567」+「`Half` 三问都答 1.25（BSTR 那条随区域设置，照打不钉）」，并且**负控必须是 BASE 那台**（今天它答 0 / 18416048 / 131086 三种数）。真实夹具要不要走注册表那条 `CreateObject` 路（`tests/cc_dll_client`）另说：免注册这条路已经把两端都吃到了，而注册表那条在共享机器上要负责反注册（`tests/com_activate.ps1` 的 try/finally 就是为它写的）。
+- **暴露面**：全语料 `CDec` 只有 21 处 / 14 份文件（见 §B142 那条），且都在**同一进程内**用，从不 crossing COM ⇒ 这一格今天没症状，是潜伏项；严重度定在「静默答错数」（与 §B142 同级），不是崩溃。
+
 
 ### B143 Decimal 拿去做算术 / 比较时静默按 0 算（`+` `*` `=` 三条错而 `/` 对；2026-10-11 第三十四刀收线那一趟顺手量出；**前两条已出** = 第三十五刀第一格(标签/换算出口) + 第二格(四条数值口 + 覆盖面哨兵换成「每档 × 每表」，门 #515/516)；剩第三格 = COM 出站那一档与 x86 两条导入臂）
 - **读数**（一次性探针 `.build/b1050_dec/probe.bas`，x64 与 x86 **逐行相同**）：`v = CDec(5)`、`w = CDec("1.25")` ⇒ `v + 1` 交 **1**、`w * 2` 交 **0**、`(v = 5)` 交 **False**、`(v > 6)` 交 **False**，而 `v / 2` 交 **2.5**（对）、`CLng`/`CInt`/`CDbl`/`CSng`/`CCur`/`CDate` 六条全对、`CBool(CDec(5))` 也交 True。⇒ **同一枚值按运算符分家**。
