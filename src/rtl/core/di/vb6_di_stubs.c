@@ -431,3 +431,37 @@ intptr_t __stdcall vb6_di_GdipPrivateAddMemoryFont(intptr_t mFontCollection, voi
     if (fn == NULL) { return (intptr_t)2; /* GpStatus InvalidParameter */ }
     return fn((void*)(uintptr_t)mFontCollection, (const void*)mMemory, (int)mLength);
 }
+
+/* ============================================================
+ * PutMem4 (msvbvm60 运行时, 无导入库) 原生实现
+ * ------------------------------------------------------------
+ * 文档: https://doc.twinbasic.vb6.pro/official/Reference/VBA/HiddenModule/PutMem4.html
+ *   Sub PutMem4(Address As LongPtr, Value As Long)
+ * 向 Address 写入 4 字节值, 本机字节序 (x86/x64 均为小端), 不做边界/对齐检查。
+ * msvbvm60.lib 在 SDK 中不存在 (x64 无, x86 亦未随 SDK 分发), 故原生实现,
+ * 与同文件其余 msvbvm60 桩一致。生成器把 msvbvm60 标记当作 unknown 族, 但本符号
+ * 在此手写, 生成器按 HandFile 跳过、不会去发一个链接不到的转发桩。 */
+intptr_t __stdcall vb6_di_PutMem4(intptr_t Addr, intptr_t Value) {
+    *(int32_t*)(uintptr_t)Addr = (int32_t)Value;
+    return 0;
+}
+
+/* ============================================================
+ * shell32 序数 #740 (SHCreateFileDataObject) 转发桩
+ * ------------------------------------------------------------
+ * ComCtlsDemo RichTextBox.bas:
+ *   Declare Function SHCreateFileDataObject Lib "shell32" Alias "#740" (...)
+ * 序数导出, 按序号动态解析 (shell32.lib 不导出该符号名)。
+ * 第 5 参是生成的 vb6_ComIface_IDataObject**, 此处收 void** (ABI 兼容; 链接只看
+ * 符号名与调用约定)。解析不到时回 0, 调用方自行判。 */
+typedef intptr_t (WINAPI* vb6_di_SHCreateFileDataObject_fn)(intptr_t, intptr_t, intptr_t, void*, void**);
+intptr_t __stdcall vb6_di_ord_740(intptr_t pIDLFolder, intptr_t cIDL, intptr_t apIDL, void* pDataInner, void** ppDataObject) {
+    static vb6_di_SHCreateFileDataObject_fn pfn = NULL;
+    if (!pfn) {
+        HMODULE h = GetModuleHandleW(L"shell32.dll");
+        if (!h) h = LoadLibraryW(L"shell32.dll");
+        if (h) pfn = (vb6_di_SHCreateFileDataObject_fn)GetProcAddress(h, (LPCSTR)740);
+    }
+    if (pfn) return pfn(pIDLFolder, cIDL, apIDL, pDataInner, ppDataObject);
+    return 0;
+}
