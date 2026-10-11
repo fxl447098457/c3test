@@ -138,8 +138,10 @@ HRESULT vb6_ocxCreateAny(const wchar_t* ocxPath, REFCLSID rclsid, void** ppUnk) 
     }
 }
 
-/* twips → HIMETRIC (VB6: himetric = twips * 2540 / 1440) */
-long vb6_twipsToHimetric(long twips) { return (long)((__int64)twips * 2540 / 1440); }
+/* twips → HIMETRIC。账 #298 (§B129): 这条比例以前在 axsite 里各写一遍
+ * (这里一份、ax_site_ext 一份、vb6forms_olecon 两份), 现在只转调 vb6forms.c 那一处。
+ * 名字与签名照旧 —— 它是 ax_host.c 三处调用者认的那个出口。 */
+long vb6_twipsToHimetric(long twips) { return vb6_TwipsToHimetric(twips); }
 
 
 #ifdef __cplusplus

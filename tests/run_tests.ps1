@@ -348,6 +348,27 @@ function Test-NeedleHit {
 #   方案 A: .NET Process + Diagnostic (ReadToEndAsync, 不阻塞)
 #   方案 B: Start-Process -RedirectStandardOutput (简单但不支持实时读取)
 # 若启用了 VCVARSALL, 会自动按它配置编译环境, 生成的目标写于 "output\" 目录
+# === 逐例跑步预算：这一问只有这一处答案 (新账 §B140) ============================================
+# 「这一枚用例该给几秒」以前只有全局那一个数 (`-RunTimeoutSec = 60`)，而 GUI 里**真弹模态框**的那几枚
+# 天生吃墙钟余量：`tests/ctrldlg` 本机空载 2.8s，8 枚忙等压 4 vCPU 时读到 13.8 / 31.4 / 34.5s（台账 §B133 量的），
+# 同一份产物在 CI 上能被负载推过 60s ⇒ 红的是余量，不是判据。两次现场同一形状（门 #484 与门 #491 的
+# `Tests (vbp #1)`）：那片工件里 `DlApp.out` 停在 `DL10`、而 `DlApp.err` **不存在** —— 超时那一支只在
+# stderr 非空才写 .err，所以「只有 .out 且半截」就是被杀现场（崩溃那支两枚都写）。
+# 三条规矩都是读数逼出来的，别改：
+#   ① 只给**具名**的夹具加数，全局那个数不许动 —— 把 60 抬大等于把所有真挂死的用例一起放出去；
+#   ② 不许为了让它过而减判据（`DL11..DL14` 四条读数一条不能少，少了就等于把真模态那一格判没了）；
+#   ③ 键 = **产物的名**（两条路都取源文件基名：`DlApp`、`rs_gbk_crlf`）—— 同一个夹具在两条路上
+#      必须问到同一个数；写了却不存在的键会**静默按全局**走 = "只接了一半"，所以哨兵逐枚问「这键认得吗」。
+$RunBudgetSec = @{
+    'DlApp' = 150    # tests/ctrldlg/DlApp.vbp —— ctrldlg / ctrldlg_probe 两片 × x64/x86 都吃这一个数
+}
+
+function Get-RunBudgetSec {
+    param([string]$Name)
+    if ($Name -and $RunBudgetSec.ContainsKey($Name)) { return [int]$RunBudgetSec[$Name] }
+    return [int]$RunTimeoutSec
+}
+
 function Invoke-TestExe {
     param(
         [string]$ExePath,
@@ -368,6 +389,8 @@ function Invoke-TestExe {
         if (Test-Path $stale) { Remove-Item $stale -ErrorAction SilentlyContinue }
     }
 
+    # 唯一出口：这一枚的墙钟预算（表里没有就回落全局那个数，见上面那张具名预算表的三条规矩）
+    $budgetSec = Get-RunBudgetSec $Name
     $errors = @()
 
     # --- 方案 A: .NET Process + 重定向 (实时读取, 推荐) ---
@@ -386,7 +409,7 @@ function Invoke-TestExe {
         $proc = [System.Diagnostics.Process]::Start($psi)
         $soTask = $proc.StandardOutput.ReadToEndAsync()
         $seTask = $proc.StandardError.ReadToEndAsync()
-        if (-not $proc.WaitForExit($RunTimeoutSec * 1000)) {
+        if (-not $proc.WaitForExit($budgetSec * 1000)) {
             # 两步读数: 杀之前只能量 CPU/存活/窗口 (管道还开着, 读不到输出); 杀掉、管道关闭
             # 之后才拿得到"被杀前已经写出的那部分输出"。缺了后半步就只剩 last='' —— 看不出
             # 卡在哪一步 (是 Form_Load 就没起来, 还是 Timer 没触发, 还是 Unload 没落地)。
@@ -402,7 +425,7 @@ function Invoke-TestExe {
                 Ok       = $false
                 ExitCode = $null
                 Output   = @()
-                Detail   = "run timeout: ${RunTimeoutSec}s$diag$tail"
+                Detail   = "run timeout: ${budgetSec}s$diag$tail"
             }
         }
         $stdout = $soTask.Result
@@ -1244,6 +1267,32 @@ function Test-VariantCmpBoxing {
         $out | Select-Object -First 6 | ForEach-Object { Write-Host "  $_" }
     }
 }
+function Test-VariantI8Coverage {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] variant_i8_coverage ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\check_variant_i8_coverage.ps1" 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        $out | Select-Object -First 6 | ForEach-Object { Write-Host "  $_" }
+    }
+}
+function Test-RunBudget {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] run_budget ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\check_run_budget.ps1" 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        $out | Select-Object -First 6 | ForEach-Object { Write-Host "  $_" }
+    }
+}
 function Test-FixtureTimerClose {
     $script:total++
     Write-Host -NoNewline "  [STATIC] fixture_timer_close ... "
@@ -1412,14 +1461,15 @@ function Invoke-BasSetParallel {
     }
     if ($shards.Count -eq 0) { return }
 
-    # -Parallel 的 runspace 里调不到脚本函数 ⇒ 超时预算用 $using: 传, 读数逻辑内联
-    $runTimeoutMs = $RunTimeoutSec * 1000
+    # -Parallel 的 runspace 里调不到脚本函数 ⇒ 读数逻辑内联，预算则在下面逐枚问权威
+    # runspace 里调不到脚本函数 ⇒ 「这一枚几秒」在**进 runspace 之前**按同一处权威问一遍，runspace 只消费那个数
+    foreach ($it in $Items) { $it.BudgetMs = (Get-RunBudgetSec ([IO.Path]::GetFileNameWithoutExtension($it.Source))) * 1000 }
     $results = $shards | ForEach-Object -Parallel {
         $shardItems = $_[0]
         $workDir    = $_[1]
         New-Item -ItemType Directory -Path $workDir -Force | Out-Null
         $c3 = $using:C3
-        $runTimeoutMs = $using:runTimeoutMs
+        # 预算已逐枚带在 $it.BudgetMs 里（上面那一趟问的是同一处权威）
         $incArg = $using:IncArg   # ai/030 T30-B: runspace 里够不到脚本变量
         $p = 0; $f = 0; $details = @()
         foreach ($it in $shardItems) {
@@ -1465,7 +1515,7 @@ function Invoke-BasSetParallel {
                 $proc = [System.Diagnostics.Process]::Start($psi)
                 $soTask = $proc.StandardOutput.ReadToEndAsync()
                 $seTask = $proc.StandardError.ReadToEndAsync()
-                if (-not $proc.WaitForExit($runTimeoutMs)) {
+                if (-not $proc.WaitForExit($it.BudgetMs)) {
                     # 读数: CPU 时间 + 进程状态 + 顶层窗口 + 最后一行输出 (CPU≈0 且无输出 = 没被调度, 不是挂)
                     $cpu = -1; $st = '?'; $win = ''
                     try { $cpu = [int]$proc.TotalProcessorTime.TotalMilliseconds } catch { }
@@ -1484,7 +1534,7 @@ function Invoke-BasSetParallel {
                             if ($txt) { $line = @($txt.TrimEnd() -split "`r?`n" | Where-Object { $_ }); if ($line.Count -gt 0) { $last = $line[-1] } }
                         }
                     }
-                    $f++; $details += "$($it.Name): run timeout (cpu=${cpu}ms, ${st}$win, last='$last')"; continue
+                    $f++; $details += "$($it.Name): run timeout (budget=$($it.BudgetMs)ms, cpu=${cpu}ms, ${st}$win, last='$last')"; continue
                 }
                 [IO.File]::WriteAllText($stdoutFile, [string]$soTask.Result, [Text.Encoding]::Default)
                 [IO.File]::WriteAllText($stderrFile, [string]$seTask.Result, [Text.Encoding]::Default)
@@ -2473,13 +2523,26 @@ if ($Category -in @("all", "run", "bas")) {
         "VB-mod-int=2", "VB-mod-str=8", "VB-mod-sin=4", "VB-mod-dbl=5", "VB-mod-date=7",
         "VB-asg-bool=11/Boolean", "VB-asg-byte=17/Byte", "VB-asg-date=7", "VB-call-date=7/Date",
         "VB-date-clng=46023", "VB-date-cdbl=46023", "VB-date-isdate=True", "VB-date-cdate=True",
-        "VB-sin-cdbl=1.5", "VB-sin-clng=2", "VB-DONE")
+        "VB-sin-cdbl=1.5", "VB-sin-clng=2",
+        "VB-ptr-tn=Long", "VB-ptr-isnum=True", "VB-ptr-cbool=True", "VB-ptr-selfeq=True",
+        "VB-str-tn=Long",
+        # 账 #305 §B141 + §B142: Decimal 这一档「往外读」的针面。CDec 不是位数问题(两架构同一
+        # 份表), 故由下面那枚 x86 双胞胎同针同过。第三十四刀之后两台实测全对, 根因两处都是
+        # **格式**不是数值: ① DECIMAL.wReserved 其实是 oleaut32 自己的 vt 标签(它写 14), 手填字段那两路
+        # 以前留 0 ⇒ 数据全对而 OLE 不认, VariantChangeType 返回 S_OK 却交 0 / 交空串;
+        # ② x86 的 VARIANT 装 VT_DECIMAL 不走 pdecVal 指针, 是整枚 16 字节 DECIMAL 内联盖住 VARIANT
+        # ⇒ 只填指针时 oleaut32 把那枚地址当数值答出来(读数 = 堆地址形状)。
+        # 唯一照打不钉的是 VB-dec-fmt: 带小数点的格式串随区域设置变(与上面 AR-fmt2 同一口径)。
+        "VB-dec-tn=Decimal", "VB-dec-isnum=True", "VB-dec-cstr=[5]", "VB-dec2-cstr=[1.25]",
+        "VB-dec-clng=5", "VB-dec-cdbl=1.25", "VB-DONE")
     # ⚠ 这里曾经是字面 TAB: `"$Tests<TAB>est_variant_boxing.bas"`。
     # PowerShell 的 "" 里 **`\t` 不是转义**（转义是反引号），所以只要有人把 `\t` 写成真 TAB,
     # 路径就变成 `tests` + TAB + `est_...` —— 门里读到的是 `error VB1006: 无法打开文件`,
     # 而本机 `Get-ChildItem` 永远看不到它（文件明明在）。判据见文件末尾的
     # `Assert-TestRegistry`（注册表自检: 每条 Add-* 的 .bas/.vbp 必须真存在）。
     Add-BasTest "test_variant_boxing" "$Tests\test_variant_boxing.bas" $boxNeedles
+    # 账 #305: 上面那五条 VB-ptr-*/VB-str-tn 是**两架构同一个答案**那一类, 所以 x86 必须同针同过
+    Add-BasTest "test_variant_boxing_x86" "$Tests\test_variant_boxing.bas" $boxNeedles -Arch "x86"
     # <vbeclipse>: vbTextCompare 六个入口对表 (InStr 两形/InStrRev/Replace/Split/Filter/
     # StrComp)。修复前 RTL 5 处 (void)compare + InStr 第 4 参被截、三参"字符串优先"形
     # 错接槽位 (实测段错误)；另修 Debug.Print StrComp(...) 被 "vb6_Str" 前缀误判成 BSTR
@@ -3023,7 +3086,11 @@ if ($Category -in @("all", "run", "vbp")) {
     # (字符串表/裸 DIB/组图标/PNG·WebP 字节签名/CUSTOM 数据/错误 326)。
     $resNeedles = @("STR=ResString-OK|Y", "BMP=Y/0", "ICO=Y/0", "PNG=Y/0", "WEBP=Y/0", "BIN=8/222", "MISS=326")
     Test-Vbp "resload" "$Tests\resload\ResLoad.vbp" $resNeedles
-    $resAlphaNeedles = @("PICSET=True", "PAINTED=True")
+    # 账 #301 第二十六刀：非 Stretch 那一支的行为面。imgN 的盒子 96 x 64 px，装的是 alpha.png
+    # (48 x 48，左半红)。不拉伸 ⇒ 红段必须停在图的天然宽 (~23)，而不是盒子边 (95)；
+    # 红段之外还得透出 BackColor（蓝），white 计数必须为 0 —— 白底填充满盒是另一条支路，
+    # 用它当证人的第一版探针读到的 95 就是填充而不是画出来的图（读法教训写进夹具注释）。
+    $resAlphaNeedles = @("PICSET=True", "PAINTED=True", "NS01-NATURAL=True", "NS01-RAW red=")
     Test-Vbp "resalpha" "$Tests\resload\ResAlpha.vbp" $resAlphaNeedles
     Test-Vbp "tmtimer_x86" "$Tests\c29timer\TmApp.vbp" $tmNeedles -Arch "x86"
     # 账 #157: 窗体显示时把焦点交给**这枚窗体里 TabIndex 最小的那枚拿得到焦点的控件**（VB6 口径）。
@@ -3105,7 +3172,8 @@ if ($Category -in @("all", "run", "vbp")) {
                     "TW-in1=Y/in2=Y", "TW-deep=Y/inpic=Y", "TW-picstop=Y",
                     "TW-orenter=N",
                     "TW-order=cmdIn1,cmdIn2,cmdDeep,cmdTop2,cmdInPic,cmdTop1,",
-                    "AK-pre=optA/down=optB/wrap=optA/up=optB/optA=N/optB=Y/clicks=3")
+                    "AK-pre=optA/down=optB/wrap=optA/up=optB/optA=N/optB=Y/clicks=3",
+                    "TW-SETTLE late=0")
     Test-Vbp "tabwalk" "$Tests\tabwalk\TabWalkApp.vbp" $twNeedles
     Test-Vbp "tabwalk_x86" "$Tests\tabwalk\TabWalkApp.vbp" $twNeedles -Arch "x86"
     # 账 #278 §B112: 夹具以前只声明了 WM_KEYDOWN / WM_KEYUP / VK_TAB / VK_DOWN，`AK-*` 那一路用的
@@ -4295,11 +4363,17 @@ if ($Category -in @("all", "run", "vbp")) {
     # SB8/SB15 盯 sbrNum 面板的设计期 Text 不能被"系统自动显示"覆盖 (text / shown 两个字段);
     # SB29/SB31 盯 Panels.Add 插到中间时 memmove 留下的悬垂副本 (双重释放 → ClearPanels 崩)。
     # P20-43 修正: 同 ctrlprogress —— 期望串与夹具完整标签逐字一致。
-    # SB0 是已知局限 (vb6_GetControlHwnd 直返入参, Me.hwnd 在 Debug.Print 里为空),
+    # SB0 原来钉的是「Me.hwnd 在 Debug.Print 里是空串」那格已知局限 —— 账 #230 第二十八刀
+    # (§B136) 把句柄登记成指针数值档之后，那一路交回数字，所以这一格改成问「打出东西了没有」。
+    # 值本身是窗口句柄，天生会抖，因此针面只吃 SBTF 那个布尔，不吃 RAW。
     # SB34-LASTKEY= 为空是对的 (第 3 格是没给 Key 的时间面板)。
+    # SB36 是两半：第二十二刀把"写什么读什么"那条针换成「往弹簧档写宽不许改变它报出来的数」
+    # (增量不变, 按 #157 就地取基线), 第二十三刀（账 #303）补上另一半 —— 三格必须铺满控件宽。
+    # 内容档那格的实测宽以前没从 fixedTotal 里扣, 弹簧把它吃两次（BASE 读数 sum=6630 而 bar=6000,
+    # 差的 630 缇 = 42 像素 = 那枚时钟文本宽）。RAW 那行把两个数一起打出来, 容差 3 像素。
     Test-Vbp "ctrlstatusbar" "$Tests\ctrlstatusbar\CtrlStatusBar.vbp" @(
-        "SB0-HWND= CAP=CtrlStatusBar CL=", "SB1-COUNT=3", "SB2-KEY1=pr",
-        "SB3-TEXT1=Ready", "SB4-STYLE1=0", "SB5-AUTOSZ1=1", "SB6-MINW1=40",
+        "SB0-HWND-NUM=True CAP=CtrlStatusBar CL=", "SB1-COUNT=3", "SB2-KEY1=pr",
+        "SB3-TEXT1=Ready", "SB4-STYLE1=0", "SB5-AUTOSZ1=1", "SB6-MINW1=22",
         "SB7-KEY2=tp", "SB8-TEXT2=Tip", "SB9-STYLE2=2", "SB10-W2=120",
         "SB11-AUTOSZ2=0", "SB12-TIP2=NumLock state", "SB13-STYLE3=5",
         "SB14-IDXBYKEY=2", "SB15-TEXTBYKEY=Tip", "SB16-ALIGN=2", "SB17-STYLE=0",
@@ -4307,7 +4381,8 @@ if ($Category -in @("all", "run", "vbp")) {
         "SB21-SETTEXT=Busy", "SB22-ADDIDX=4", "SB23-COUNT2=4", "SB24-NEWKEY=extra",
         "SB25-NEWTEXT=Extra", "SB26-INSERT=2", "SB27-COUNT3=5", "SB28-IDXP2=ins",
         "SB29-IDXP3=tp", "SB30-AFTERRM=4", "SB31-P2KEY=tp", "SB32-COUNT4=4",
-        "SB33-AFTERRM2=3", "SB34-LASTKEY=", "SB35-SETMINW=77", "SB36-SETW=123",
+        "SB33-AFTERRM2=3", "SB34-LASTKEY=", "SB35-SETMINW=77",
+        "SB36-RAW before=", "SB36-SPRING-FOLLOWS-WINDOW=True", "SB36-TILES-BAR=True",
         "SB37-SETAUTOSZ=0", "SB38-SETTIP=hello", "SB39-SETSTYLE=6",
         "SB40-AFTERCLR=0", "CTRLSTATUSBAR-DONE")
 
@@ -4329,9 +4404,41 @@ if ($Category -in @("all", "run", "vbp")) {
     # HM01 是唯一那枚改前会 False 的判据；HM02 钉"只有一处换算"（两枚数的比 == himetric 的比）；
     # HM03/HM04 是反面证人（两台都 True，只拦"顺手把所有面板都改成内容宽/把面板整批丢掉"那种坏修法）；
     # HM05 只钉前缀：Panels(i).Width 读回仍是请求值 —— §B41 剩下的那一格，本刀刻意没动。
+    # 账 #299（§B130）夹具格：`Panels` 作为**真集合对象**。改前这档压根没立起来，
+    # "把成员当对象用"的写法头一律发成 `vb6_ComGetObjectProp(HWND, L"Panels")`
+    # （拿 HWND 当 IDispatch —— C29-8b 给 TreeView Nodes 写下的同一句症状），
+    # `For Each` 连循环都没进（实测 0 次，负控 = 改前的编译器）。
+    # HM08 钉三头：迭代 3 次 + 每格 Index 之和 6 + 每格 Text 长度之和 5（"A"+"BB"+"SP"）——
+    # 只钉"进过循环"会放过"集合只出一格"或"下标全答同一个"。
+    # 宽度那一路仍只打 RAW：`Panels(i).Width` 交回的仍是**请求值**（§B41 剩下那一格），
+    # 钉死它会让这一族的两格缠在一起。
+    # 第二十一刀（同一账）：那张"成员集合由谁造"的表以前在**三处**各抄一遍（值语境 / 对象语境 /
+    # 默认成员下标那个 binder），三处都缺 StatusBar 这一行 ⇒ `Set` / 模块级 `As Object` / `With`
+    # 三形一直读空/读 0。收成一处出口 memberCollectionObjectExpr 之后，HM09..HM11 从"只打读数"
+    # 升成判据，证人全部**不经过 RTL**（w1/w2 来自 SB_GETPARTS，键/下标/文本来自设计块）。
+    # HM12 钉的正是本账开局那张脸：成员读法坐在**实参**位上（CStr(...) / CLng(...)）—— 实测从
+    # 空串/0 变成 57/100 ⇒ 台账里"实参那一步重解接收者"那半不是第二个缺陷，就是同一处缺行。
+    # 第二十二刀（账 #206 §B41 第二格）：面板几何改交**排版后的缇** ⇒ HM09..HM12 的证人从像素
+    # 换成 `像素 * Screen.TwipsPerPixelX`（Screen 那一条独立路，不是本仓那对权威，否则就自己
+    # 证自己）。HM13 是这一格的存在性证人（弹簧档从前请求宽恒 0 ⇒ 读回 0）；HM14 钉新补的
+    # Panel.Left 那一面（改前全仓 0 个出口）；HM15 钉设计块 MinWidth 的 himetric 档
+    # （语料 457 枚里 398 枚 MinWidth 与 Object.Width 逐字相同），回来的数不再是 .frm 里那 26。
+    # 第二十五刀（同一账，剩下的那一格 (b)）：`With <集合本体>` 这第四条发射路以前**从不消费**
+    # 那枚 COM 标记 ⇒ 两件事同时坏：接收者退成控件 HWND（.Count 读 0），而漏下的标记被体内
+    # **第一条语句**当成自己的写目标 —— 实测 `withN = .Count` 发成
+    # `vb6_ComSetProp(<hwnd>, L"Panels", …)`，一次读变成往控件属性写（不响、不崩）。
+    # HM16 钉两头：块内 `.Count` == 3 且 `.Item(2).Text` 的长度 == 设计块里那个 "BB"；
+    # HM16-BAR-INTACT 是"体内那一写没把状态条写坏"的证人（改前那一形真在写它）。
+    # 语料里 `With x.Panels` 这一形 0 处 ⇒ 判据只能自己造，别指望门会红。
     $sbHmExpected = @("HM00-RAW w1=", "HM01-HM-DESIGN-WIDTH=True", "HM02-SINGLE-CONVERSION=True",
         "HM03-SPRING-TILES=True", "HM04-PANELS-ARRIVED=True", "HM05-RAW cs=",
-        "HM06-INDEX-BOTH-FORMS=True", "HM07-RAW idx9=", "HM-DONE")
+        "HM06-INDEX-BOTH-FORMS=True", "HM07-RAW idx9=", "HM08-FOREACH-COLLECTION=True",
+        "HM08-RAW fe=", "HM09-OBJVAR-ROADS=True", "HM10-MODVAR-ROADS=True",
+        "HM11-WITH-AND-KEYSUB=True", "HM12-ARG-ROADS=True",
+        "HM13-SPRING-WIDTH-FOLLOWS-WINDOW=True", "HM14-PANEL-LEFT=True",
+        "HM15-RAW minw=", "HM15-DESIGN-MINWIDTH-NOT-RAW=True",
+        "HM16-WITH-COLLECTION=True", "HM16-RAW with=", "HM16-BAR-INTACT=True",
+        "HM-DONE")
     Test-Vbp "sbhm" "$Tests\sbhm\SbHm.vbp" $sbHmExpected
     Test-Vbp "sbhm_x86" "$Tests\sbhm\SbHm.vbp" $sbHmExpected -Arch "x86"
     # <vbeclipse> 账 #221 = C29-PL-a: Picture.Line 落原生 GDI。这条判据只能**画完再问像素** ——
@@ -4477,6 +4584,53 @@ if ($Category -in @("all", "run", "vbp")) {
         "GC-DONE")
     Test-Vbp "geomcache" "$Tests\geomcache\GCCache.vbp" $geomExpected
     Test-Vbp "geomcache_x86" "$Tests\geomcache\GCCache.vbp" $geomExpected -Arch "x86"
+    # 第二十七刀 = 账 #230（VB 侧几何缓存）里唯一没被问过的一条来路：**数组元素**。
+    # 缓存按 (窗口, 属性名) 存，元素那条交的是 `vb6_CtrlArr_GetAt(&vb6_arr_<名>, i)` 这枚窗口 ⇒
+    # "同一处权威"在原理上成立；但原理上不是判据：这台夹具之前，全门禁没有一条针向数组元素要过
+    # 几何（#193 那枚 `U-ARREXT` 读的是自己写进去的 15 的倍数，量化差天生看不见）。
+    # 为什么单独一枚夹具而不是往 geomcache 加控件：那 31 条里有五条是"把所有成员一起读/一起写"的
+    # 形状（GC17 把每一枚的宽求和、GC18 用 With 给每一枚写 1234、GC20..GC23 按成员问身份），
+    # 多两枚元素会把那五条一起改动 —— 那是重述别人的判据，不是本刀要办的事。
+    # GA05b 单独打"两枚元素是两枚窗口"，不并进 GA05 那条 And 链：并进去那一版整条读 False、
+    # 单独读 True（LongPtr 与 <> 混在 And 链里，§B238 那一族的另一张脸）—— 混在一格里只会让红找不到人。
+    $gaExpected = @("GA-DONE", "GA01-e0-design=True", "GA02-e1-design=True", "GA03-e1-write=True", "GA04-e1-move=True", "GA05-e0-untouched=True", "GA05b-two-windows=True", "GA05c-inline=True chain=True eqself=True", "GA05d-digits=True hdcstr=True", "GA05e-notobj=True str=True num=True eq=True ne-other=True", "GA05e-vp-nz=True obj=True", "GA06-solo-write=True")
+    Test-Vbp "geomarr" "$Tests\geomarr\GeomArr.vbp" $gaExpected
+    Test-Vbp "geomarr_x86" "$Tests\geomarr\GeomArr.vbp" $gaExpected -Arch "x86"
+    # 形状两头：元素的四档读写必须走那四个具名出口（单枚那条同表同一路，一起钉住不被带跑）；
+    # 元素属性落回 COM 属性访问那一形必须**不在** —— 那是 §B75 那一族"同一个属性两个答案"的形状。
+    # 元素的 `.Move` 今天走的是泛派发 vb6_ComCall(那一枚, L"Move", …) —— 属"带实参方法"那一族，
+    # 行为面由 GA04 钉（四档读回 + 三枚像素证人），这里刻意不把它的形状当罪证。
+    Test-EmitcShape "ga_emitc_arr_geometry_authority" @("$Tests\geomarr\GeomArr.vbp") @(
+        "vb6_GetControlLeft(vb6_CtrlArr_GetAt(&vb6_arr_arrA, 0))",
+        "vb6_GetControlWidth(vb6_CtrlArr_GetAt(&vb6_arr_arrA, 0))",
+        "vb6_SetControlLeft(vb6_CtrlArr_GetAt(&vb6_arr_arrA, 1), 5000)",
+        "vb6_SetControlWidth(vb6_CtrlArr_GetAt(&vb6_arr_arrA, 1), 7777)",
+        "vb6_SetControlLeft(vb6_hwnd_soloT, 2227)")
+    Test-EmitcAbsent "ga_emitc_arr_geometry_com_prop" @("$Tests\geomarr\GeomArr.vbp") @(
+        'vb6_ComGetProp(vb6_CtrlArr_GetAt(&vb6_arr_arrA, 0), L"Left")',
+        'vb6_ComGetProp(vb6_CtrlArr_GetAt(&vb6_arr_arrA, 1), L"Width")')
+    # 句柄那一档的形状两头（账 #230 第二十八刀，§B136）：两枚窗口的句柄直接比必须发成**原生
+    # !=** —— BASE 那台在同一份夹具上发的是七处对象装箱走 vb6_VarCmp*，而取数值那一头对
+    # 对象档一律答 0.0，于是「两枚不同窗口」恒答相等，编得过、链得过、门不红。
+    # 第二根针钉的是 CStr 那一路**保持**在 Variant 档上：属性读没登记具名出口时落 COM 兜底、
+    # 交出的是 vb6_VARIANT，把它裸转成数值产物是 C2440 ⇒ 这一枚夹具压根编不过，
+    # 所以它自己就是那道闸的编译级反面证人（实测：闸摘掉 ⇒ NEW-BUILD-RC=1）。
+    Test-EmitcShape "ga_emitc_handle_value_compare" @("$Tests\geomarr\GeomArr.vbp") @(
+        '-(vb6_GetControlHwnd(vb6_CtrlArr_GetAt(&vb6_arr_arrA, 0)) != vb6_GetControlHwnd(vb6_CtrlArr_GetAt(&vb6_arr_arrA, 1)))',
+        'vb6_CStr(vb6_VariantFromValue(vb6_VariantFromComResult(vb6_ComGetProp(vb6_hwnd_soloT, L"hDC"))))')
+    Test-EmitcAbsent "ga_emitc_handle_not_object_box" @("$Tests\geomarr\GeomArr.vbp") @(
+        'vb6_VariantFromValue(vb6_GetControlHwnd(vb6_CtrlArr_GetAt(&vb6_arr_arrA, 0)))',
+        'vb6_VariantFromValue(vb6_GetControlHwnd(vb6_CtrlArr_GetAt(&vb6_arr_arrA, 1)))')
+    # 装箱那一路的形状两头（账 #230 第二十九刀，§B137）：句柄读进 Variant 槽必须发成
+    # vb6_VariantFromValue((intptr_t)(…)) —— 宽度跟着架构走 ⇒ x86 落 VT_I4（VB6 对 hWnd 的答案就是
+    # VarType 3），x64 落 VT_I8（不截断，与 Fix 082 那条 VarPtr 装箱同档）。实测出现次数 NEW 2 / BASE 0，
+    # 而 BASE 那台在同一份夹具上发的是 10 处「指针值进对象档」（其中 8 处就是句柄读）——
+    # 反面证人就是上面那枚 ga_emitc_handle_not_object_box，它现在同时管两条路：比较面（第二十八刀）
+    # 与装箱面（这一刀）。pv12 那一枚钉的是「声明过的 LongPtr 变量」进槽那一路，与属性读那一路同档
+    # 但发码点不同，所以两头各钉一针。
+    Test-EmitcShape "ga_emitc_handle_variant_box" @("$Tests\geomarr\GeomArr.vbp") @(
+        'vb6_VariantFromValue((intptr_t)(vb6_GetControlHwnd(vb6_CtrlArr_GetAt(&vb6_arr_arrA, 0))));',
+        'vb6_VariantFromValue((intptr_t)(pv12));')
     # 发码两头：套了数值转换的形必须在，裸传 vb6_GetControlLeft 进 Concat 的形必须不在。
     # 只钉读数会放过"两边都不套"那一族；这一格是发码面的形状，直接钉形状。
     # (整条语句作针：PSParser 在 `@(` 续行里按**字面**数括号，单引号串里不配平的括号会让
@@ -5519,6 +5673,8 @@ if ($Category -in @("all", "compile")) {
     Test-FloatToIntRound
     Test-FixtureTimerClose
     Test-VariantCmpBoxing
+    Test-RunBudget
+    Test-VariantI8Coverage
     Test-EventHandlerNames
     Test-UcInstanceExit
     Test-StaticSentinelRegistration

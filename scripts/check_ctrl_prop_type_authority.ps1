@@ -12,7 +12,7 @@
 #   A2  controlPropType 全库提及数 = 3 (定义 + 声明 + **恰好一个**调用点)
 #   A3  ctrlTypeOfMemberObject ("这枚对象是不是窗体控件") 同样 = 3, 且那唯一的调用点在
 #       cgen_util_type.cpp —— 别处再判一次控件身份 = 又开一条平行路
-#   A4  搬进来的那 28 条属性名必须逐条在表里答到 (`p == "<名>"`)。语料不覆盖的名字在
+#   A4  搬进来的那 30 条属性名必须逐条在表里答到 (`p == "<名>"`)。语料不覆盖的名字在
 #       emit A/B 上是哑的 (#229 那轮的教训: changed 全是夹具自身新增行), 所以这条硬钉。
 #   A5  表里那道 "不是 Unknown" 的闸必须还在、且只有 1 处 (自定义 OCX 的属性面归类型库)
 #   A6 (256) defaultPropType = 3 (definition + declaration + **exactly 1** call site) and that
@@ -22,6 +22,17 @@
 #   A7 (256) ctrlDefaultPropOf = 4: definition + declaration + the TWO consumers (the identifier
 #       emission and the late-bound argument packing). Before this knife those two each carried
 #       their own copy of the decision, which is exactly how a BSTR ended up in a VT_DISPATCH slot.
+#   A8 (230 §B137) the table's LongPtr answer must be consumed on BOTH roads, and the numeric box
+#       it produces must not be re-flattened downstream:
+#         a) boxToVariant carries a `case Vb6Type::LongPtr:` arm that boxes through `(intptr_t)`
+#            (without it a handle read lands on _Generic's default arm = vb6_VariantObject, i.e.
+#            an HWND stored as an IDispatch* - VarType 9 / TypeName from the host table / CStr empty);
+#         b) that numeric-box emission exists in exactly ONE place in src/ (a second copy is a
+#            parallel boxing road, which is the whole reason this account opened);
+#         c) the RTL converter the vb6_VarCmp* family reads through (vb6_VarToDouble_internal)
+#            has a VT_I8 arm - without it a 64-bit numeric box compares as 0.0 and §B136's
+#            "always equal" returns on the Variant-slot face (measured on x64 through Fix 082's
+#            own VarPtr box: `VarPtr(x) <> 0` answered False).
 #
 # 用法:  pwsh -File scripts\check_ctrl_prop_type_authority.ps1
 # 退出码: 0 = 全绿; 1 = 红
@@ -91,7 +102,8 @@ if ($body -ne "") {
                    "bordercolor", "x1", "y1", "x2", "y2",
                    "drive", "path", "pattern", "filename", "list",
                    "filter", "filetitle", "dialogtitle", "initdir", "defaultext", "fontname",
-                   "flags", "cancelerror", "color", "min", "max", "copies", "fontsize")
+                   "flags", "cancelerror", "color", "min", "max", "copies", "fontsize",
+                   "hwnd", "hdc")
     foreach ($p in $collapsed) {
         $n = @([regex]::Matches($body, 'p\s*==\s*"' + [regex]::Escape($p) + '"')).Count
         if ($n -lt 1) { $bad += ("A4 property dropped from the table: " + $p) }
@@ -145,9 +157,50 @@ if ($got7.Count -ne $want7.Count) {
     $bad += ('A7 a new file asks ctrlDefaultPropOf: ' + (($got7.Keys | Where-Object { -not $want7.ContainsKey($_) }) -join ' '))
 }
 
+# ---- A8 (230 §B137): the table's LongPtr answer must be consumed on BOTH roads ----
+$boxBody = ''
+if (Test-Path -LiteralPath $auth) {
+    $h8 = [System.IO.File]::ReadAllText($auth)
+    $m8 = [regex]::Match($h8, 'CCodeGen::boxToVariant\([\s\S]*?\r?\n\}')
+    if (-not $m8.Success) { $bad += "A8 boxToVariant body not found" } else { $boxBody = $m8.Value }
+}
+if ($boxBody -ne '') {
+    if ($boxBody -notmatch 'case\s+Vb6Type::LongPtr:') {
+        $bad += ("A8 boxToVariant lost its LongPtr arm - a handle read falls to _Generic's default " +
+                 "= vb6_VariantObject (an HWND parked in a VT_DISPATCH slot: VarType 9, TypeName from " +
+                 "the host table, CStr empty, comparisons never equal)")
+    }
+    if ($boxBody -notmatch 'vb6_VariantFromValue\(\(intptr_t\)\(') {
+        $bad += 'A8 the LongPtr arm no longer boxes through (intptr_t) - the pointer-width caliber (x86 VT_I4 / x64 VT_I8) is gone'
+    }
+}
+$emit8 = @()
+foreach ($f in $files) {
+    $c8 = @([regex]::Matches(([System.IO.File]::ReadAllText($f.FullName)), 'vb6_VariantFromValue\(\(intptr_t\)\(')).Count
+    if ($c8 -ne 0) { $emit8 += ($f.Name + "=" + $c8) }
+}
+if ($emit8.Count -ne 1 -or $emit8[0] -ne "cgen_util_ctrl.cpp=1") {
+    $bad += ('A8 numeric handle box emitted from [' + ($emit8 -join " ") +
+             '] (want exactly cgen_util_ctrl.cpp=1 - a second site is a parallel boxing road)')
+}
+$rtlCmp = Join-Path $root "src\rtl\core\vb6rtl\vb6rtl.c"
+if (-not (Test-Path -LiteralPath $rtlCmp)) {
+    $bad += 'A8 missing src\rtl\core\vb6rtl\vb6rtl.c'
+} else {
+    $m8c = [regex]::Match([System.IO.File]::ReadAllText($rtlCmp),
+                          'static\s+double\s+vb6_VarToDouble_internal\([\s\S]*?\r?\n\}')
+    if (-not $m8c.Success) {
+        $bad += 'A8 vb6_VarToDouble_internal body not found'
+    } elseif ($m8c.Value -notmatch 'case\s+\(vb6_vartype\)VT_I8:') {
+        $bad += ('A8 vb6_VarToDouble_internal has no VT_I8 arm - a numeric 64-bit box compares as 0.0 ' +
+                 'through the whole vb6_VarCmp* family (measured on x64 via Fix 082 VarPtr: `VarPtr(x) <> 0` answered False)')
+    }
+}
+
 if ($bad.Count -eq 0) {
     Write-Host ("PASS ctrl-prop type authority: one table, one caller, " +
-                "side-lists retired, " + $collapsed.Count + " collapsed names still answered") -ForegroundColor Green
+                "side-lists retired, " + $collapsed.Count + " collapsed names still answered, " +
+                "LongPtr consumed by boxing + VarCmp converter") -ForegroundColor Green
     exit 0
 }
 foreach ($b in $bad) { Write-Host ("FAIL " + $b) -ForegroundColor Red }

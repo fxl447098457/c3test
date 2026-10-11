@@ -849,12 +849,18 @@
                     // 真 VB6 设计器那一行写的是 `Object.Width`(键名带前缀, 值是 himetric),
                     // 而 frm_parser.cpp:81 保留点号全名 ⇒ 上面那一眼在**别人的工程**里从来没命中
                     // (账 #206: 语料 356 份 .frm / 1634 处 Object.Width, 状态条上点号形 .Width 0 处)。
-                    // 折法不在这里做 —— 交原数, 由唯一那一枚 *Hm 出口按真实 DPI 折成像素。
+                    // 折法不在这里做 —— 交原数, 由唯一那一枚 *Hm 出口折成缇 (§B41 第二格之后,
+                    // 存储这一档是缇, 缇->像素只在 SbLayout 那一步按真实 DPI 做)。
                     pv = intOf(p.properties, "Object.Width");
                     if (pv > 0) c_.emitLine("vb6_StatusBar_SetPanelWidthHm((void*)" + sbHwnd
                                           + ", " + std::to_string(idx) + ", " + std::to_string(pv) + ");");
                     pv = intOf(p.properties, "MinWidth");
-                    if (pv > 0) c_.emitLine("vb6_StatusBar_SetPanelMinWidth((void*)" + sbHwnd
+                    // 这一行的值同样是 **himetric** (账 #206 第二格, 语料 `.build/b447_panel_minwidth.py`):
+                    // 457 枚同时写了 `Object.Width` 与 `MinWidth` 的面板里, 398 枚两个数字逐字相同
+                    // (AutoSize=0/2 两档的中位数都是 1.000) ⇒ 设计器把同一档几何存了两份, 所以它与
+                    // Width 同路走 *Hm 出口。代码那一头 `Panels(i).MinWidth = v` 才是缇 (走
+                    // kSbWriters 那张表, 不经这里)。
+                    if (pv > 0) c_.emitLine("vb6_StatusBar_SetPanelMinWidthHm((void*)" + sbHwnd
                                           + ", " + std::to_string(idx) + ", " + std::to_string(pv) + ");");
                     std::string tip = litOf(p.properties, "ToolTipText");
                     if (!tip.empty()) c_.emitLine("vb6_StatusBar_SetPanelToolTip((void*)" + sbHwnd

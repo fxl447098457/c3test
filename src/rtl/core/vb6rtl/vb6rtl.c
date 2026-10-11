@@ -306,6 +306,65 @@ int16_t vb6_VariantToBool(vb6_VARIANT v) {
     }
 }
 
+/* 账 #305 §B142: 槽里的 Decimal 先变成一枚合法的 OLE VARIANT(两份布局只在这里分岔)。
+ * 交出去的是**副本**, 槽自己那块 CoTaskMem 谁也不借用, 所以调用侧的 VariantClear 不会碰它。 */
+static int vb6_DecimalAsVariant(vb6_VARIANT v, VARIANT *out) {
+    if (v.vt != vb6_vtDecimal) return 0;
+#ifdef _WIN64
+    out->vt = VT_DECIMAL;
+    /* 内联那一份是**同布局的匿名 struct**, 不是 DECIMAL 类型本身:
+     * 直接赋值是 C2440「无法从”转换为“DECIMAL”」(报错里源类型是
+     * 空的) —— 与台账 §B141 那段记的是同一条事实。所以这里按字节拷。 */
+    memcpy(&out->decVal, &v.decVal, sizeof(DECIMAL));
+    return 1;
+#else
+    if (!v.pdecVal) return 0;
+    /* x86 的 VARIANT 装 VT_DECIMAL 时**不走指针**: 那 16 字节整个被一枚 DECIMAL 盖住 ——
+     * `wReserved` 压在 `vt` 上、`scale`/`sign` 在 `wReserved1` 上、`Hi32` 在 `wReserved2`+`wReserved3`
+     * 上、`lo64` 正好落在数据区。上面那行宏注释里「wReserved 其实是 oleaut32 的 vt 标签」
+     * 说的就是这一处重叠（实测：只填 `pdecVal` 时 oleaut32 把指针本身当成数值答出来）。
+     * 所以整块按字节铺, 再把标签补成 VT_DECIMAL（老路造出来的那枚可能还是 0）。 */
+    {
+        DECIMAL d = *v.pdecVal;
+        d.wReserved = vb6_vtDecimal;
+        memcpy(out, &d, sizeof(d));
+    }
+    return 1;
+#endif
+}
+
+BSTR vb6_DecimalToBSTR(vb6_VARIANT v) {
+    VARIANT src;
+    VariantInit(&src);
+    if (!vb6_DecimalAsVariant(v, &src)) return vb6_BSTR_FromStr(L"");
+    if (SUCCEEDED(VariantChangeType(&src, &src, 0, VT_BSTR))
+            && src.vt == VT_BSTR && src.bstrVal) {
+        BSTR r = src.bstrVal;   /* 把权抄给调用方(与其它 CStr 出口同口径), 所以不能 VariantClear */
+        src.bstrVal = NULL;
+        src.vt = VT_EMPTY;
+        VariantClear(&src);
+        return r;
+    }
+    VariantClear(&src);
+    return vb6_BSTR_FromStr(L"");
+}
+
+int vb6_DecimalToR8(vb6_VARIANT v, double *out) {
+    VARIANT src, dst;
+    int ok = 0;
+    if (out) *out = 0.0;
+    VariantInit(&src);
+    VariantInit(&dst);
+    if (!vb6_DecimalAsVariant(v, &src)) return 0;
+    if (SUCCEEDED(VariantChangeType(&dst, &src, 0, VT_R8)) && dst.vt == VT_R8) {
+        if (out) *out = dst.dblVal;
+        ok = 1;
+    }
+    VariantClear(&dst);
+    VariantClear(&src);
+    return ok;
+}
+
 double vb6_VariantToDouble(vb6_VARIANT v) {
     switch (v.vt) {
         case vb6_vtBoolean: return v.boolVal ? -1.0 : 0.0;
@@ -318,6 +377,10 @@ double vb6_VariantToDouble(vb6_VARIANT v) {
         case vb6_vtDouble:  return v.dblVal;
         case vb6_vtCurrency:return (double)v.cyVal / 10000.0;
         case vb6_vtBSTR:    return vb6_Val(v.bstrVal);
+        /* 账 #305 §B142: 以前这一档落 default ⇒ `CLng(CDec(5))` / `CDbl(CDec(5))` / `CInt(CDec(2.5))`
+         * 全部静默答 0(三枚内置函数都是 vb6_×V 薄壳, 全部转调本函数, 所以一处漏答打掉三条)。
+         * 取舍政策交给 oleaut32, 不自己写第二遍。 */
+        case vb6_vtDecimal: { double dv = 0.0; vb6_DecimalToR8(v, &dv); return dv; }
         default:            return 0.0;
     }
 }
@@ -606,6 +669,11 @@ static double vb6_VarToDouble_internal(vb6_VARIANT* v) {
     switch ((vb6_vartype)v->vt) {
         case (vb6_vartype)VT_I2: return (double)v->iVal;
         case (vb6_vartype)VT_I4: return (double)v->lVal;
+        /* 账 #230 §B137（第二十九刀）: VT_I8 以前没有档 —— default 交 0.0，于是**任何** 64 位
+         * 整数档案的 Variant 在比较面都被抹成 0：`VarPtr(x) <> 0` 在 x64 实测答 False
+         * （Fix 082 那条装箱本身就是 VT_I8），句柄进 Variant 槽之后与它自己比也答不等。
+         * 取数一侧 (VariantToLong/ToBoolean/ToDouble/ToIntPtr) 早就有 VT_I8 档，只有这里漏了。 */
+        case (vb6_vartype)VT_I8: return (double)v->llVal;
         case (vb6_vartype)VT_R4: return (double)v->fltVal;
         case (vb6_vartype)VT_R8: return v->dblVal;
         case (vb6_vartype)VT_BOOL: return v->boolVal ? -1.0 : 0.0;

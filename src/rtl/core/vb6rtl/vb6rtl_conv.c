@@ -348,6 +348,12 @@ int32_t vb6_IsNumeric(vb6_VARIANT v) {
         case vb6_vtInteger: case vb6_vtLong: case vb6_vtSingle:
         case vb6_vtDouble: case vb6_vtCurrency: case vb6_vtByte:
         case vb6_vtBoolean:
+        /* 账 #305 (§B138 尾巴): §B138 之后 x64 的 VarPtr/StrPtr/ObjPtr 交出去的就是这一档,
+         * 它与 Long 同族 —— 少这一行就是同一份 VB 源码在两台机器上两个答案。 */
+        case VT_I8:
+        /* 账 #305 (§B141): Decimal 也是数值子类型 —— VB6 的 IsNumeric(CDec(...)) 恒真。
+         * 与上面那档同一条口径（这一族问的是「这枚 Variant 里是不是数」）。 */
+        case vb6_vtDecimal:
             return -1;  // VB6 True
         default:
             return 0;
@@ -395,6 +401,8 @@ BSTR vb6_TypeName(vb6_VARIANT v) {
         case vb6_vtError:    name = L"Error"; break;
         case vb6_vtBoolean:  name = L"Boolean"; break;
         case vb6_vtByte:     name = L"Byte"; break;
+        case VT_I8:        name = L"Long"; break;   /* 账 #305: 与 vb6_IsNumeric 同一条口径 */
+        case vb6_vtDecimal: name = L"Decimal"; break;   /* 账 #305 §B141: 此前落 default 答 "Variant" */
         default:             name = L"Variant"; break;
     }
     return vb6_BSTR_FromStr(name);

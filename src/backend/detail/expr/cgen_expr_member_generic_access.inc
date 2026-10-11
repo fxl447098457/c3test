@@ -37,7 +37,11 @@
             // C29-8b: `TreeView1.Nodes` 的真 IDispatch 集合同理。
             objExpr.find("vb6_TreeView_Nodes(") == 0 ||
             // C29-5b: `Toolbar1.Buttons` 的真 IDispatch 集合同理。
-            objExpr.find("vb6_Toolbar_Buttons(") == 0) {
+            objExpr.find("vb6_Toolbar_Buttons(") == 0 ||
+            // 账 #299: `StatusBar1.Panels` 的真 IDispatch 集合同理 —— 这一族的名单在三处
+        // (这里两处 + cgen_state.inc 的 isControlCollectionExpr)，漏一处就拼出
+        // `vb6_StatusBar_Panels(…).Count` → cl C2224。哨兵 check_statusbar_panels_authority 钉三处同值。
+            objExpr.find("vb6_StatusBar_Panels(") == 0) {
             // 链式COM: 设置COM标记, objExpr是中间对象表达式
             comObjExpr_ = objExpr;
             comMemberName_ = node.memberName;
@@ -112,6 +116,10 @@
         obj.find("vb6_TreeView_Nodes(") == 0 ||
         // C29-5b: `Toolbar1.Buttons` 的真 IDispatch 集合同理。
         obj.find("vb6_Toolbar_Buttons(") == 0 ||
+        // 账 #299: `StatusBar1.Panels` 的真 IDispatch 集合同理 —— 这一族的名单在三处
+        // (这里两处 + cgen_state.inc 的 isControlCollectionExpr)，漏一处就拼出
+        // `vb6_StatusBar_Panels(…).Count` → cl C2224。哨兵 check_statusbar_panels_authority 钉三处同值。
+        obj.find("vb6_StatusBar_Panels(") == 0 ||
         obj.find("vb6_PropertyPage_SelectedControls(") == 0) {
         // 对于vb6_ComCall/vb6_ComGetProp, 需要先解封为对象
         // 链式调用: ComCall返回VARIANT*, 需ComCallObject才能拿到IDispatch*

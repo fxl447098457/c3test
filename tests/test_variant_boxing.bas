@@ -86,5 +86,40 @@ Public Sub Main()
     Debug.Print "VB-date-cdate="; (CDate(vd) = m_d)
     Debug.Print "VB-sin-cdbl="; CDbl(vs)
     Debug.Print "VB-sin-clng="; CLng(vs)
+    ' 账 #305 (§B138 尾巴): §B138 把 VarPtr/StrPtr/ObjPtr 的类型答案换成 LongPtr 之后, 同一枚地址
+    ' 在 x64 装成 VT_I8(20)、在 x86 装成 VT_I4(3)。VarType 因此**不能钉**(它本来就该随位数变);
+    ' 钉的是那四问在两台机器上必须给同一个答案 —— 改之前 x64 读出来是 Variant / False。
+    ' 刻意不钉 CLng(vp): x64 那个地址放不下 Long, 报 6 (Overflow) 才是 VB6 的正确答案。
+    Dim vp As Variant
+    Dim vs2 As Variant
+    Dim hx As Long
+    hx = 7
+    vp = VarPtr(hx)
+    vs2 = StrPtr("box")
+    Debug.Print "VB-ptr-tn="; TypeName(vp)
+    Debug.Print "VB-ptr-isnum="; IsNumeric(vp)
+    Debug.Print "VB-ptr-cbool="; CBool(vp)
+    Debug.Print "VB-ptr-selfeq="; (vp = vp)
+    Debug.Print "VB-str-tn="; TypeName(vs2)
+    ' 账 #305 (§B141 + §B142): CDec 造出来的那一档 (VT_DECIMAL=14) 在「往外读」这一侧的判据。
+    ' §B141 补的是两张表的格子(TypeName / IsNumeric), 第三十四刀补的是**换算本体与写侧的一枚标签**,
+    ' 于是 CStr / CLng / CDbl 一起对上。两处根因都是「格式」不是「数值」:
+    ' ① DECIMAL.wReserved 其实是 oleaut32 自己的 vt 标签(它写 14), 手填字段那两路以前留 0 ——
+    '    数据全对而 OLE 不认, VariantChangeType 返回 S_OK 却交 0 / 交空串;
+    ' ② x86 的 VARIANT 装 VT_DECIMAL 不走 pdecVal 指针, 是整枚 16 字节 DECIMAL 内联盖住 VARIANT
+    '    —— 只填指针时 oleaut32 把那枚地址当数值答出来(此前那个「堆地址」读数就是这一条)。
+    ' Format 那条读数照打但不进针面: 带小数点的格式串随区域设置变(与 AR-fmt2 同口径)。
+    ' 刻意不钉 CDec 的算术/比较面: 那要另一族出口 (VarDec* 一族), 与本格的「读出来」无关。
+    Dim vd2 As Variant
+    Dim vd3 As Variant
+    vd2 = CDec(5)
+    vd3 = CDec("1.25")
+    Debug.Print "VB-dec-tn="; TypeName(vd2)
+    Debug.Print "VB-dec-cstr=[" & CStr(vd2) & "]"
+    Debug.Print "VB-dec2-cstr=[" & CStr(vd3) & "]"
+    Debug.Print "VB-dec-isnum="; IsNumeric(vd2)
+    Debug.Print "VB-dec-fmt=[" & Format(vd2, "0.00") & "]"
+    Debug.Print "VB-dec-clng="; CLng(vd2)
+    Debug.Print "VB-dec-cdbl="; CDbl(vd3)
     Debug.Print "VB-DONE"
 End Sub

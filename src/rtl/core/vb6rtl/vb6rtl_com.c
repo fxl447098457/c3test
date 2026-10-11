@@ -570,6 +570,8 @@ void* vb6_ComPackVariant(vb6_VARIANT v) {
         case vb6_vtDispatch: pv->vt = VT_DISPATCH; pv->pdispVal = (IDispatch*)v.pdispVal; break;
         case vb6_vtBoolean: pv->vt = VT_BOOL; pv->boolVal = v.boolVal ? VARIANT_TRUE : VARIANT_FALSE; break;
         case vb6_vtByte:    pv->vt = VT_UI1; pv->bVal = v.bVal; break;
+        /* 账 #305: 以前这一档落 default ⇒ 交出去是 VT_EMPTY —— 地址**静默变成空值**，不是报错。*/
+        case VT_I8:       pv->vt = VT_I8; pv->llVal = v.llVal; break;
         default: pv->vt = VT_EMPTY; break;
     }
     return pv;

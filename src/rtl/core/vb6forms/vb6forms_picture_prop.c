@@ -402,12 +402,14 @@ static void vb6_ImagePaintHelper(HWND hwnd, HDC hdc) {
             dstW = rc.right;
             dstH = rc.bottom;
         } else {
-            /* Non-stretch: draw at the picture's natural pixel size, converting
-             * HIMETRIC (2540 HIMETRIC per logical inch) using the DC's DPI. */
+            /* Non-stretch: draw at the picture's natural pixel size. The conversion
+             * formula lives in exactly one place now (vb6_HimetricToPxOnDc, zhang 298);
+             * this call site keeps feeding it the **DC's** DPI, not the screen's --
+             * a picture drawn into a printer/VM DC scales with that DC. */
             int dpiX = GetDeviceCaps(hdc, LOGPIXELSX);
             int dpiY = GetDeviceCaps(hdc, LOGPIXELSY);
-            dstW = MulDiv((int)hmW, dpiX, 2540);
-            dstH = MulDiv((int)hmH, dpiY, 2540);
+            dstW = vb6_HimetricToPxOnDc((int)hmW, dpiX);
+            dstH = vb6_HimetricToPxOnDc((int)hmH, dpiY);
             if (dstW <= 0) dstW = rc.right;
             if (dstH <= 0) dstH = rc.bottom;
         }

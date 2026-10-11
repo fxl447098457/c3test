@@ -487,7 +487,7 @@ D11 放开普查范围到整个 `src/rtl` 的那天，只剩两处没接：`vb6f
 **顺带量出来一条新账（§B41/#206）**：`Panels(i).Width` 读的是**请求值**而不是排版后的宽（`vb6_StatusBar_GetPanelWidth` 直接 return `e->width`），所以 sbrContents/sbrSpring 那两档在 VB 侧读不到几何。今天**没有**据此改它 —— VB6 那一读数的单位口径（缇还是像素）还没量准，拿猜去改就是给这一族埋第二根雷。
 补一句为什么本地量不到基准：全仓没有一份**由 VB6 设计器写出来的**状态条设计块（`grep -rln --include=*.frm --include=*.pag "StatusBar"` 只命中我们自己那三份夹具），所以"设计值与实际宽的比"这条路在这儿取不到证据 ⇒ 这条账要动，得先拿到外部读数（原生 OCX 跑一遍，或 MSDN 原文）。
 
-### B41 `Panels(i).Width` 交回的是请求值，不是排版后的宽（账 #206，开着）
+### B41 `Panels(i).Width` 交回的是请求值，不是排版后的宽（账 #206，**两格都已出 —— 第十八刀 + 第二十二刀（门 #475/#476）**）
 
 #205 做判据时撞见的：状态条的排版结果只活在 `w->rights[]`（`SB_SETPARTS` 那一份），而 `vb6_StatusBar_GetPanelWidth` 交回 `e->width` —— 设计块没给 Width 的面板一律读回 **0**（实测 `SF01-RAW` 改前那版就是 `small=0 big=0`）。后果不止"读不到数"：`sbrSpring`/`sbrContents` 两档在 VB 代码里没有任何几何可查，凡是按面板宽定位的东西（比如提示气泡、覆盖层）只能自己再算一遍。
 **口径已经量准（2026-10-10，四发外部读数）—— 这一族的开工前置就此清掉，两格都动得了**。本机另有别人用 VB6 存下来的整批工程（`D:\vb_yqt4qPac`，5623 份 .frm），不是本仓那三份夹具，于是"设计值与实际宽的比"这条路取得到证据：
@@ -502,6 +502,22 @@ D11 放开普查范围到整个 `src/rtl` 的那天，只剩两处没接：`vb6f
 **第二格的口径也有主了（2026-10-10 同一批语料，`.build/b363_panel_read_width.py`）**：扫 9546 份源文件找到 **10 处读面板宽/左**的写法，其中四行是"把一枚浮动的进度条按面板定位"—— `Form1.frm` 的 `.Move (sb.Panels(n).Left + pading), (sb.Top + pading), (sb.Panels(n).Width - pading*2), …`、`modAddProgBar.bas` 的 `pb.Width = sb.Panels(lPan).Width - 45`、`frmDataSource/frmEdit` 的 `ProgressBar1.Move 3060, …, Me.sbStatusBar.Panels(1).Width - 3060`。这些覆盖层只在** getter 交回排版后的几何 **时才对得准（弹簧档的面板"请求值"跟实际宽根本不是一回事），而设计块那一头量到的是 `sum(面板宽) ≈ _ExtentX`（63/92 铺满）—— 两条互证 ⇒ **§B41 的靶子成立：VB6 交回的是排版结果**。**但这仍是"作者期望"级证据，不是 OCX 行为级**：真要改，动手前有两件必须一并做 —— ① 邻居夹具 `tests/ctrlstatusbar` 那两条针（SB10-W2=120 / SB36-SETW=123）钉的就是"显式给过的 Width"，改了 getter 它们必翻 False ⇒ 判据要按 #157 那条重述（就地取基线问增量，别拿"总数=各步之和"当式子）；② VB 侧存储要从"像素"换成"缇"（本刀刻意留在像素那一档，见 §B129），两件事一起做才不会又留一份第二答案。
 **判据必须自己造**（A/B 对这族永远沉默：本仓三份状态条夹具都没有 `Object.Width`，全语料 0 处 ⇒ 形状门 `changed=0` 是"零覆盖"而不是"没改到"，#233 那一课在这里重演）：夹具加一枚**按 VB6 真实形状**写的 `BeginProperty Panels {…}` / `BeginProperty PanelN {…}` / `Object.Width = …` 状态条，两头钉 —— 设计值折成缇读得到（拦 A）、弹簧/内容档读回排版后的宽（拦 B），证人用 `SB_GETTEXT`/`SB_GETPARTS` 问窗口本人（与 #205 那三条同源）。
 **第一格已出（第十八刀，2026-10-10，门 #463 全绿 = run 38011638007、head `177fca98`、attempt 1、12 job 全 completed/success、非绿 0、wall 10m22s；`Emit manifest (shape oracle)` 那一跑同绿 ⇒ 新登记的那行被 CI 那台独立复算证实，而 vbp 四片全绿 ⇒ 新夹具 `sbhm` 两台真跑过了 —— 缺 .vbp 会让 Test-Vbp 直接报失败，绿就是跑了）**：发码侧认了 `Object.Width` 那一档 —— 新建一枚 RTL 出口 `vb6_StatusBar_SetPanelWidthHm`，它只做一件事：转调本族唯一那枚按真实 DPI 的权威 `vb6_HimetricToPxX`（`vb6forms.c`，与 #184/#175 那对缇换算住在一起）。**读数**（真跑，两台逐行相同）：夹具 `tests/sbhm`（**按 VB6 设计器的真实形状写**：`BeginProperty Panels {GUID}` + `BeginProperty PanelN {GUID}` + `Object.Width`）—— 改后 `w1=57 w2=100 e3=467 cw=467`（1500 hm 与 2646 hm 折成 57/100 px，正是 MulDiv(hm,96,2540)），改前那台**跑同一份夹具** `w1=7 w2=14`（两枚固定档面板退化成文字宽 = 设计值整格没进来）⇒ `HM01-HM-DESIGN-WIDTH` False→True。**同一刀里顺带修掉一格实测缺陷**：弹簧档的 `MinWidth` 被当成"加在剩余空间上的加项"而不是下限（`SbLayout` 第一遍占位 + 第二遍兜底 = 同一个答案两处），读数 `e3=493` 而 `cw=467`，多出来的正好一枚 MinWidth=26 ⇒ 判据 `HM03-SPRING-TILES` False→True。**护栏**：新哨兵 `check_statusbar_panel_hm.ps1`（第 51 道 [STATIC]）四头，负控两头各证能红 —— BASE 树（`wt_k17neg3`，改前那台编译器 + 同一份夹具）一次报出 R1/R2/R3 九条，名单被清空的副本报出 R4；夹具那四条判据里只有 HM01/HM03 是真翻 False 的存在性证人，**HM02 在 BASE 上也 True**（7:14 恰好也落在容差内）⇒ 它只是"只许一处换算"的形状护栏，不当罪证。**刻意留下的一格**：`vb6_HimetricToPxX` 之外，himetric 与像素/缇的折算在 RTL 里已有 13 个非注释行、住 5 份文件（§B129）—— 本刀只把**新增**那一处放进权威，没顺手并表（各有一份自己的判据面）。
+
+**第二格动手前的三件前置全部量完（2026-10-10 同日续，读数留档 `.build/b436_panel_unit_readings.json`，脚本 `.build/b436_panel_unit.py`）**：
+- **单位 = 缇，这条从「作者期望」升到「行为级」**：扫 9185 份源文件拿到 `Panels(…).Width/Left/MinWidth` 共 **36 行**（Width 35 / Left 2 / MinWidth 4），其中 **1 行把面板宽显式除以 `Screen.TwipsPerPixelX`** （`Global.bas`：`.Create 100, 2, o.Panels(1).width / Screen.TwipsPerPixelX` —— 拿 Win32 API 摆位子，只有缇才需要这一步）；**5 行右式直接含 `ScaleWidth/ScaleHeight`**（比上一轮 ③ 的 3 处多 2 处）；**3 行与另一枚 `.Width` 同式**（`pnl.Width = StatusBar1.Width - StatusBar1.Panels(1).Width` —— 控件的 Width 定义就是缇）；**2 行 literal 大过 3000**（`Master.frm` 的 3500 与 7000 —— 像素那一档不可能，7000 px 比屏幕还宽）。⇒ 缇这一档现在有 9 处独立站点、跨 7 个工程，加上 ④ 那条与 DPI 无关的单位换算，口径不必再等读数。
+- **邻居那两条针的 exact 形状（判据重述要照着这个改，别照数字改）**：`tests/ctrlstatusbar/CtrlStatusBar.frm:74` 的 `SB10-W2=120` 读的是**设计块里那行无前缀的 `.Width = 120`**（第十八刀认的是带前缀的 `Object.Width`，语料真形；这两形在 RTL 里进的是同一格 `e->width`），`CtrlStatusBar.frm:120-121` 的 `SB36-SETW=123` 是**运行期赋值 `Panels(1).Width = 123` 的往返**；同族还有 `SB6-MINW1=40`（设计块 MinWidth）与 `SB35-SETMINW=77`（运行期往返）。⇒ 存储换成缇 + getter 改交排版结果之后这四条都会跟着动，判据按 #157 那条重述：**就地取基线问增量**，别写「读数 = 各步之和」那种手算式。
+- **RTL 那一头现在的三个事实**（读码对过，不是推断）：① `Vb6PanelEntry.width/minWidth` 注的就是**像素**，`SbLayout` 把 `want[i]` **原样**递给 `SB_SETPARTS`；② `vb6_StatusBar_GetPanelWidth` 交回 `e->width`（请求值），排版结果只活在 `SB_SETPARTS` 那一份里；③ 设计块那一档经 `vb6_StatusBar_SetPanelWidthHm` → `vb6_HimetricToPxX`（第十八刀）。⇒ 出口两侧要用的那对权威**已经有了** —— `vb6_TwipToX` / `vb6_XToTwipX`（`vb6forms.c:179/217`，#184/#175 收成一处的那对），**别新开一份**；而 hm↔缇 那条与 DPI 无关的比例现在在 RTL 里有**三份写法**（`axsite/ax_load.c:142` 的 `vb6_twipsToHimetric`、`vb6forms_olecon.c:580-581` 的 `*1440L/2540L`、`vb6forms_olecon.c:609/860` 的 `*15L*2540L/1440L`）—— 正是 §B129 那份名单，这一刀要往下减名单，不能加。
+- **顺手量到新的一格（同批一起交，别单开一刀）**：`Panels(i).Left` **全仓 0 个出口** —— RTL 的名字表 `kPanelNames`（`vb6forms_memberobj.c:113`）八枚里没有它，发码侧那 14 条 recognizer 也没有它，`grep -rn "PanelLeft" src` 空。而语料里正是那两处按面板定位覆盖层的写法在问它（`modAddProgBar.bas`：`pb.Left = sb.Panels(lPan).Left + 25`、`Form1.frm` 的 `.Move (sb.Panels(nPanel).Left + pading), …`）⇒ 今天读回空。它与 Width 同源（都该由 `SB_GETPARTS` 那份 offsets 折回缇），**所以它就是第二格的同一刀的另一面**，不另立账。
+
+**第二格已出（第二十二刀，2026-10-10，门 #475 = run 38034455442、head `64b4d43e`、attempt 1、11 绿 + 唯一红是这道形状门（红因正是那三行还没登记）；登记之后由门 #476 = run 38035393406、head `de181042`、attempt 1、12 条 check-run 全 completed/success、非绿 0 复验 —— 其中 `Emit manifest (shape oracle)` 绿 ⇒ 那三行的新哈希被 CI 那台独立复算证实，而 `Tests (vbp #1..#4)` 四片全绿 ⇒ sbhm / ctrlstatusbar / sbfont 两架构真跑过）**：单位这一档从头到尾换成**缇**，读侧改问窗口本人。
+- **动了什么**：① `Vb6PanelEntry.width/minWidth` 存的换成缇，`SbLayout` 的两道折（固定档 + 弹簧下限）都走 `vb6_TwipToX`；② 新立一枚本文件私有的 `SbPanelEdgesPx`（`SendMessageW(SB_GETPARTS)`），`GetPanelWidth` 与**新增的 `GetPanelLeft`** 都由它折回缇（`vb6_XToTwipX`）—— 唯一真相是窗口那份 offsets，不是 `e->width`；③ 新立一对与 DPI 无关的权威 `vb6_TwipsToHimetric` / `vb6_HimetricToTwips`（`vb6forms.c`，缇↔hm = 1440/2540），两枚 `*Hm` 设计出口改调缇档那一枚，第十八刀那版"把像素存进缇档"的形状（状态条里调 `vb6_HimetricToPxX`）归零；④ `axsite/ax_load.c` 那份旧写法改成**只转调**新权威 ⇒ §B129 名单从 5 份/13 行减到 **4 份/14 行**（`vb6forms.c` 由 1 行长成 3 行，净 -1 份文件）；⑤ 设计块那一行 `MinWidth` 从此走新的 `vb6_StatusBar_SetPanelMinWidthHm`（它同样是 himetric，读数在下面）；⑥ `Panels(i).Left` 那一面（改前全仓 0 个出口）一次登记齐：`kPanelNames` 补 `L"Left"`（DISPID 9）+ `memInvokePanel` 的 case + 发码侧 recognizer 一条。
+- **读数**（真跑，x64 与 x86 两份 run.out 逐行相同）：夹具 `tests/sbhm` 的证人从像素换成 `像素 * Screen.TwipsPerPixelX`（**用 Screen 那一条独立路，不用本仓那对权威，否则就是自己证自己**）⇒ HM09..HM12 四条同批 True；三条新判据在 BASE（`b437_base_k21.exe` 跑同一份夹具）上全 False、在改后全 True：`HM13-SPRING-WIDTH-FOLLOWS-WINDOW`（弹簧档从前请求宽恒 0）、`HM14-PANEL-LEFT`（BASE 上还多三条 `property "Left" not found`）、`HM15-DESIGN-MINWIDTH-NOT-RAW`（BASE `minw=26 frm=26` = 设计档原样吐回来，改后 `minw=14`）。邻居夹具按 #157 那条重述：`SB6-MINW1` 从 40 变 **22**（设计块那 40 是 himetric），`SB10-W2=120` 不动（固定档往返，缇→8px→缇），`SB36-SETW=123` 那一形作废 ⇒ 换成 `SB36-RAW before=5880 after=5880 sum=6630 bar=6000` + `SB36-SPRING-FOLLOWS-WINDOW=True`（BASE：`before=0 after=123 sum=243`，判据 False）。
+- **邻居第三份夹具的一条读数（没改判据，记下就行）**：`tests/sbfont` 的 `SF01-RAW fix=` 从 **900 变 60** —— 那枚固定档面板在设计块里写的是**无前缀**的 `.Width = 900`（语料里状态条上这一形 **0 处**，是夹具自己造的写法），按缇档就是 900 缇 = 60 像素；三条判据 SF02/SF04/SF05 两台上仍是 True，而 RAW 行钉的是前缀不是数 ⇒ 门不受影响，只有形状门那一行的哈希跟着变（已按 CI 门 #475 那台自己交的清单登记，并由门 #476 的形状门复验（12 格全绿），移动的三行 = ctrlstatusbar / sbfont / sbhm，其余 396 行逐字节没动）。**这一条也正是"无前缀 Width 走缇、无前缀 MinWidth 走 himetric"那条不对称的活样本**：两份邻居夹具各撞上一半。
+- **顺手量到、刻意不带的一格（另立 §B132 / 账 #303）**：`sum=6630` 比 `bar=6000` 多出 630 缇 = **42 像素**，正好是那枚 `sbrTime`+`sbrContents` 面板的测量文本宽 —— `SbLayout` 第一遍把内容档的实测宽放进 `want[i]` 却没累加进 `fixedTotal`，于是弹簧把同一格宽吃两次，最右边界越过客户区。**这是改前就在的缺陷**，只是从前 getter 交请求值所以看不见。所以 SB36 那趟只钉"往弹簧档写宽不该改变它报出来的数"这一半（增量不变），"三格铺满"那一半留给 §B132，RAW 那行把 `sum` 与 `bar` 两个数一起打出来，等它落地就看得见。**（已落地 = 第二十三刀，读数与护栏见 §B132 末；`SB36-TILES-BAR` 那条判据就是它补上的）**
+- **护栏**：哨兵 `check_statusbar_panel_hm.ps1`（第 51 道 [STATIC]）改形 + 加长：R2 名单钉 4 份/14 行、三枚权威定义各 1 处、`ax_load.c` 只许转调 1 处（它就是它退名单的条件）、状态条三道折各 2 处、本地 `MulDiv` **0** 处、第十八刀那形状 `vb6_HimetricToPxX(` **0** 处（墓碑）；R3 兜底那行改钉 `take < floorPx` 且必须问 `vb6_TwipToX`；R1 加两枚产物计数（`SetPanelMinWidthHm`=3、`GetPanelLeft`=3 —— 少一个落点就是"设计值整格不见"/"读回空"）；**新增 R7**：一枚成员从"名字认得"到"真做得动"要过的六格登记（memberobj 名字表 / DISPID / 派发 case / memberobj 调用 / RTL 定义 / header 声明 / 发码 recognizer）各恰好 1 处 + 设计 `MinWidth` 那三处同步 + 排版那一趟必须折一次（单位用代码形状钉，不靠注释）；R4 加两条 census 防空转。**负控 = 真 BASE 树**：`git archive HEAD` 出一份副本（`.build/wt_k22neg`）+ `b437_base_k21.exe`，`-Root` 指过去一次报出 **25 条**，而第二十/二十一刀的 R1/R5/R6 那几条在同一台上一条没红 ⇒ 新钉的每一条都是本刀的存在性证人，不是重报上一刀的账。51 道 [STATIC] 全跑一遍 = 51/51 绿。
+- **本刀自己漏过又被哨兵抓住的一格（记下形状，不是遗漏）**：`vb6_StatusBar_SetPanelMinWidthHm` 的 **header 声明当时没写**，而产物照跑、构建日志一条不报（改前/改后两份 `run.out` 逐行相同 = 这格静默的直接证据：调用返回 void、实参按 ABI 到位，隐式声明在这条链上不出声）⇒ 补声明 + R7-MINW-DECL 钉住。这与账 #174（`SelectedControls` 发成隐式声明）同形，而本仓的构建日志里没有 cl 警告这一族（§B…，已记录），所以**这一类只能靠数落点**。
+- **第二十四刀收掉的那两格（原记「刻意留下」，归 §B129 / 账 #298）**：`vb6forms_olecon.c` 那 7 行、`vb6forms_picture_prop.c` 那 3 行、`ax_site_ext.c` 的 `k = 96.0/2540.0` 已并到 `vb6forms.c` 那一处权威上（名单现 1 份 / 5 行，值面与护栏见 §B129 末）；`ax_site_ext` 那条高 DPI 改动本机仍取不到读数（这台就是 96）⇒ 未定罪那一格改记 §B133。另记一条口径不对称（是有意的）：设计块里**带前缀**的 `Object.Width` 与**无前缀**的 `MinWidth` 都按 himetric 折，而**无前缀**的 `Width` 按缇直交 —— 因为语料里状态条上 `Width =` 那形 0 处（是我们自己造的），而 `MinWidth =` 那形是真设计器写的（457 枚里 398 枚与 `Object.Width` 逐字相同）。
+
 ### B42 设计期 `.frx` 的 List/ItemData 只接了 ListBox 一档，ComboBox 那 17 处全落空（账 #207，**已出**）
 
 Fix 195 那轮把 .frx 三种 blob 的**布局**钉准了（字符串 / 字符串表 / 整数表），但发码侧的接线只写了一档：`emitControlFrxProps` 里 `if (ctrl.controlType == FrmControlType::ListBox)` 才发 `LB_ADDSTRING` / `LB_SETITEMDATA`。语料普查：`List =` / `ItemData =` 指向 .frx 的共 **17 + 17 处，全在 ComboBox 上**（Charts 2020 的 ucTreeMaps / ucChartBar / ucPieChart / ucProgressCircular 四份 demo 的 "Number of Series"、"Chart Style"、"Legend Position" 那一类）⇒ 编出来的下拉框是空的。
@@ -945,7 +961,9 @@ asm 13/14、smoke 1/1；`Build C3.exe` 那片日志正文不含用例行（历�
 
 **护栏**：语料 A/B（BASE = 上一轮 #228 之后那台捕的 90 份）⇒ `inputs=90 same=88 changed=2`，改到的只有 ve_units（两架构各一份），差异行**全是本轮夹具自身新增的 15 行**（纯插入，产品发码零改动）—— 这条读数的含义是：**全语料没有别的数组元素 extender 读法**，所以这一刀只能靠新夹具守，指望存量用例发现它是做梦。 真编译矩阵两架构：9 件工程 rc=0 出 exe（Charts 2020 全家 / czUI / VBFlexGridDemo / ve_units），ucProgressCircular 仍 1 条 C2065 裸名 Count；LabelPlus 那一条 MISSING 是它压根没有 .vbp（无效输入，不是红）。合并 github/dev 的 rev39（LoadRes* 一族）之后重跑同一份夹具：两档 15 条读数全 True。
 
-### B61 数组元素的 extender 属性**写后读回不是请求值**（缇→像素→缇 取整损失），VB6 存的是缇（账 #230，**已量到，未开工**）
+### B61 数组元素的 extender 属性**写后读回不是请求值**（缇→像素→缇 取整损失），VB6 存的是缇（账 #230，**已出 —— 跟着 §B74 那次并表一起答对；覆盖面由第二十七刀补上，见 §B135**）
+> **2026-10-10 复测（把这节从「未开工」改成「已出」的依据）**：拿 CI 那台 `C3.exe`（与 head 同一枚二进制）编一枚控件数组探针真跑，两架构同形 —— `arrT(0)` 的设计值 1007/449/3001/247 原样读回、`arrT(1).Left = 5007` 读回 5007、`Move` 之后四档原样读回 ⇒ 元素那条来路交的就是元素自己的窗口，缓存按 (窗口, 属性名) 存，**跟着账 #230 的并表一起答对了**。本节原来那句「未开工」是 #230 出完之后没回头改的标题；真正欠的是**覆盖面**（全门禁没有一条针向数组元素要过几何），由第二十七刀补上 ⇒ 见 §B135。探针 `.build/b590_b61/PB61.frm`。
+
 
 同一轮探针量出来的：`uArr(0).Left = 5000` 之后读回 **4995**（5000 缇 = 333.33 像素，控件位置只能落整数像素，读回时再乘回去就丢 5 缇）。VB6 的 `Left` 是**属性值**而不是窗口位置的投影，写什么读什么。同族的既有账是 #206（`Panels(i).Width` 交回请求值还是排版后的宽，单位口径待量）—— 两格合起来是一个问题：**控件几何属性到底以哪一侧为准**（存 VB 侧的值 vs 问窗口）。动它之前要先定口径（VB6 语义 = 存 VB 侧），并且别忘了 `Move` 与容器排版会改窗口而不改 VB 侧的值。
 
@@ -1981,7 +1999,12 @@ marker、重编，之后 `check_rtl_embedded` 报 **125/125 逐字节相同**。
 **欠着**：门跑起来才算收线。另一档没动、要拍口径 —— 要不要让这道门**对 PR 只报不挡**（`continue-on-error`），
 只在推 dev 时才硬判红。现在它是硬的：新加的自救面已经把「处理它」压成一条命令，本线倾向保持硬判。
 
+**登记面自己的一格漏（2026-10-11，第三十二刀撞见并已修，提交 `adc4b61f`）**：`compare_emit_manifest.ps1` 的 `-Bless` 只保**头部**注释块（`HeaderRows` 在第一条数据行就停），而每一刀的「登记来源」是写在清单**末尾**的 ⇒ 这一档会静默吃掉末尾那些注脚，还照样报「已登记」。门 #501 之后那次登记实测：末尾 3 行 → 0 行、注释 23 → 20、84975 → 81654 字节，而报告里只说「注脚 20 行」。修法两条一起：末尾那段一并收进写出（`@($hdr) + $ordered + $tailCmt`），落盘前**两头各数一遍注释总数**、对不上就 `exit 2` 拒绝登记（宁可挡下，不许吃掉），报告改成「注脚 N 行（头部 X + 末尾 Y）」。两头对跑（同一份带 3 行末尾注脚的清单，分别交给改前那版（从 HEAD 的 blob 取）与改后这版各登记一遍，`.build/b968_negctl.out`）：改前 tail 3→0 且报成功；改后 tail 3→3、字节数不动、复算仍 400/400 绿。⇒ 口径补一句并交给工具自己钉：**登记完必数注释行数**。
+
+**逐 head 二分：定位「哪一笔发码改动让这一行变的」不必本机冷编基线**（同一轮用的手法）：CI 每一步都把自己那台的清单提交到 `ci/emit-manifest`（§B92 那条 git 回读通道），那一串提交本身就是「每一笔 head 上这一行长什么样」的历史 ⇒ `git fetch github refs/heads/ci/emit-manifest` 后按 head 逐格读哈希、看它在哪一笔第一次变，就够了。这一发用它把 8 行移动归到两笔（7 行 = `e589b1a3`，1 行 = 本刀自己那枚夹具），零编译；再配合**每行字节增量都是 13 的整数倍**（`vb6_ChkLong(` 加右括号 = 13）把成因钉到「x64 上多套了几层窄化检查」那一格 —— 这两条读数合起来才把「本刀只改 RTL，RTL 不进发码，那为什么形状门红了」这句问话答死。
+
 ### B104 那 5 条「窗体伪成员」不是缺项 —— 发码面早就答对了，只有诊断在报噪声（2026-10-09 量完，**未开工**）
+> **2026-10-10 复测（把这节的标题从"未开工"改成"已出"的依据）**：探针 `.build/b556_probe/P104.frm`（`Option Explicit` + 裸写 `w = ScaleWidth` 与 `Debug.Print ScaleWidth, ScaleHeight, WindowState`）在现在这台 C3.exe 上：三条读数 `vb6_GetScaleWidth/…ScaleHeight/…WindowState` 各就位，**诊断一条都不报**（rc=0，stderr 空）。 这一格的堵点由 §B109（账 #278 第四刀，门 #445）解掉 —— 语义层现在include `common/form_pseudo.hpp` 并问 `kFormPseudoRows`（`semantic_analyzer_expr.cpp:7` 与 `:158`）。**本节原来的"未开工"是这刀之后没回头改的标题**， 不是还欠着一格。
 
 探针 `.build/b902_probe`（一枚最小 `.frm` + `Option Explicit`，三种写法并排），实测产物与诊断**各是一半**：
 
@@ -2047,16 +2070,220 @@ marker、重编，之后 `check_rtl_embedded` 报 **125/125 逐字节相同**。
 - **顺手订正**：`check_rtl_proto_arity.ps1` 头注释里那格「行数恰好 15」订正成 23 —— 代码在第十四刀已改到 23，注释没跟上。这类「注释与判据两个数」迟早骗下一次推理（本轮就是靠它才没把 15 当成新的实数）。
 - **§B124 剩下的那一半**（仍未拍板，本刀没碰）：RTL 那枚 `vb6_Data_Self` 导出（`src/rtl/vb6forms_data.c` + `vb6forms_prop_ctrl.h`）现在全仓 0 个调用者 —— 连 memberobj 都不叫它。撤它要动 `src/rtl` ⇒ 按控件线规矩必须 touch `c3rtl.rc` 再重编 C3.exe（账 #156 那条坑：只改 RTL 不 touch rc，探针测的是旧 RTL 且一行 trace 都不打印）。留着它的代价是 RTL 里一枚永不应答的导出，撤它的代价是一次 rc + 全量重编 —— 与本线其它「先拍口径」那几格一起排。
 
-### B129 himetric↔像素/缇 的折算在 RTL 里住了 5 份文件（账 #298，开着）
+### B132 `SbLayout` 没把内容档面板的实测宽从 `fixedTotal` 里扣 ⇒ 弹簧把同一格宽吃两次，末格右边界越过客户区（账 #303，**已出 —— 第二十三刀，2026-10-10，门 #478/#479**）
 
-第十八刀做 `Object.Width` 那一档时顺带数出来的：`src/rtl` 里含 `2540` 的**非注释行 = 13 行 / 5 份文件** ——
-`vb6forms.c` 1（本刀新立的 `vb6_HimetricToPxX`，唯一按真实 DPI 的那枚）、`vb6forms_olecon.c` 7、
-`vb6forms_picture_prop.c` 3、`axsite/ax_load.c` 1（`vb6_twipsToHimetric`）、`axsite/ax_site_ext.c` 1。
-其中 `ax_site_ext.c:128` 写的是 `const double k = 96.0 / 2540.0` —— **DPI 被写死成 96**，
-与 #184 修 `vb6_TwipToX` 之前那个形状一模一样（当时 VBFlexGridDemo 的网格在 120 DPI 下被缩小 20%）。
-这条**还没实测**（要一枚高 DPI 下的 ActiveX 容器读数才定得了罪），所以本刀只把它记成名单里的一行，不动它。
-哨兵 `check_statusbar_panel_hm.ps1` 的 R2 已经把"5 份文件 / 13 行"钉死，多长一份就红 ——
-并表的时候把名单往下减，别往上加。
+第二十二刀把 `Panels(i).Width` 换成"问窗口本人"之后才露面的存量缺陷 —— 从前 getter 交请求值，这一格在任何读数里都不存在（与 §B41 第一格那句"缺的是接线不是解码器"同形）。
+
+- **读数**（`tests/ctrlstatusbar` 真跑，x64 与 x86 逐行相同）：`SB36-RAW before=5880 after=5880 sum=6630 bar=6000` —— 三枚面板宽度之和比控件自身的宽多 **630 缇 = 42 像素**，而 42 正好是那枚 `.Style = 5`（sbrTime）+ `.AutoSize = 2`（sbrContents）面板的测量文本宽。另一份夹具 `tests/sbhm`（两枚固定档 + 一枚弹簧档，没有内容档）里 `HM03-SPRING-TILES` 是 True（`e3 = cw`）⇒ 多出来的那一格只跟着**内容档**出现。
+- **成因**（读码对过，不是推断）：`SbLayout` 第一遍只在 `else`（固定档）那一支累加 `fixedTotal`，`VB6_SBR_CONTENTS` 那一支把实测宽放进 `want[i]` 却不累加 ⇒ 第二遍 `remaining = clientW - fixedTotal` 把同一格宽又发给了弹簧 ⇒ `acc` 的末值 > 客户区宽。
+- **为什么不是"看着不挤"**：VB6 里状态条各格铺满客户区（`SB_GETPARTS` 的末值就是宽），而 §B41 第二格之后 `Panels(i).Width` / `Left` 交的正是这份 offsets ⇒ 读数**跟着一起偏大**，语料里那四处"按面板宽摆覆盖层"的写法（`pb.Width = sb.Panels(lPan).Width - 45` 那一族）会多摆出一格的量，把时钟那一格压住。
+- **判据现成**：`ctrlstatusbar` 的 `SB36-RAW` 已经把 `sum` 与 `bar` 打在同一个窗口里（第二十二刀刻意只钉"增量不变"那一半）⇒ 修好那趟加一条 `SB36-TILES-BAR=True` 即可，证人同源，不用新建夹具。
+
+**第二十三刀的落地与读数（2026-10-10，门 #478/#479）**：
+- **动了什么（就一行代码）**：`SbLayout` 的 `VB6_SBR_CONTENTS` 那一支补上 `fixedTotal += want[i];` —— 占位的两档（固定档 + 内容档）各从剩余空间里扣一次。顺带订正一处注释：第一遍上方那句"弹簧面板先按 MinWidth 占位"是**第十八刀之前**的旧形状（那一档早就改成第二遍兜底了，注释一直没跟上）。
+- **读数**（真跑，x64 与 x86 两份 run.out 逐行相同）：`SB36-RAW before=5250 after=5250 sum=6000 bar=6000` ⇒ `SB36-TILES-BAR` True；BASE（`.build/b476_base_k22.exe` = 第二十二刀那台，跑**同一份夹具**）`before=5880 after=5880 sum=6630 bar=6000` ⇒ False。弹簧档从 5880 降到 5250 缇，差的正好是那一格时钟的 630 缇 = 42 像素。**另两份夹具一台没动**：`tests/sbhm`（两固定 + 一弹簧，没有内容档）与 `tests/sbfont`（固定 + 内容，没有弹簧）改后输出与第二十二刀那台**逐行相同**，且与 BASE 也相同 ⇒ 这一刀只动"弹簧与内容档同时在场"那一形 —— 而那两份夹具各缺一条腿，正是本账归因时用的两条互证。
+- **护栏**：哨兵 `check_statusbar_panel_hm.ps1` 长出 **R8** —— `fixedTotal += want[i];` 在 `vb6forms_statusbar.c` 里必须**恰好 2 次**：0 次 = 本账的形状（内容档不占位），3 次 = 第十八刀撤掉的那个"MinWidth 当加项"复发。两个方向都是真形状，所以钉死数而不是钉下限。**负控 = 第二十二刀那棵树**（`git archive HEAD` 出 `.build/wt_k23neg` + `b476_base_k22.exe`）：一条命令**只报 R8 这一条红**，第二十二刀的 R1/R2/R3/R5/R6/R7 全部仍绿 ⇒ 判据是特定的。51 道 [STATIC] 全跑 = 51/51 绿；改 RTL 已 touch `c3rtl.rc` 重编，`check_rtl_embedded` OK（exe sha `9d77f8558161`）。
+- **判据里的容差是留给换 DPI 的，不是留给这台的**：`SB36-TILES-BAR` 写的是 `Abs(sum - bar) <= 45` 缇（3 像素）—— 本机实测 `sum` 与 `bar` **逐字相等**（6000 = 6000），但每格是 px→缇 各折一次回来的，96 DPI 之外会留取整余量，钉死相等会把判据变成这台机器的读数（#171 那条"判据不许钉绝对数"同形）。
+- **形状门那一格**：门 #478（run 38036598915、head `83f61e33`、attempt 1）= 11 绿 + 唯一红是形状门，而移动的**只有一行** = `tests/ctrlstatusbar/CtrlStatusBar.vbp`（新增那两条 `Debug.Print` 进了产物）。
+  顺带量到一条此前没记过的事实：**`.frm` 里过程体外的注释不进 `--emit-c` 产物** —— 同一趟 `tests/sbfont` 只把那段说"VB 里没有现成的门"的注释换成 ASCII，清单上它那一行**逐字节没动**（第二十二刀那次 sbfont 之所以动，是因为 `*Hm` 那行**发码**真变了）。⇒ 以后"只改过程体外注释"的刀不必预留重登记，也别把注释改动算进门红里。
+  登记 = 按 CI 那台自己交的清单（`scripts/rebless_emit_manifest.ps1 -Bless`，numstat 1/1、行序零移动、复算 399/399、`check_manifest_coverage` 绿）。**复验 = 门 #479**（run 38037616826、head `29582214`、attempt 1、12 条 check-run 全 completed/success、非绿 0，其中 `Emit manifest (shape oracle)` 绿 ⇒ 那一行的新哈希被 CI 那台独立复算证实，而 `Tests (vbp #1..#4)` 四片全绿 ⇒ `SB36-TILES-BAR` 在两架构真跑过）。
+- **这一趟没验的一格（不立案，只记形状）**：当弹簧档的 `MinWidth` **大于**它分到的空间时，第二遍的兜底照样会把末格顶出客户区（下限赢）—— 本机夹具够不着这个条件（下限折出来 22 缇，实际分到 3600+ 缇），要一枚故意收窄的夹具才测得到，而**那种情形下 VB6 本人交回什么没有读数** ⇒ 别照猜改。
+
+### B135 控件数组元素的几何第一次被问 —— 六格读数两架构齐，BASE 那台逐条翻回量化值（账 #230 第二十七刀，2026-10-10，门 #485（源码那一跑）+ 门 #486（登记那一跑，12/12 全绿））
+
+- **这格为什么开**：`tests/geomcache` 那 31 条钉的是账 #230 的 VB 侧几何缓存，可每一条读的都是**单枚具名控件**；元素那条来路在发码里交的是另一枚窗口（`vb6_CtrlArr_GetAt(&vb6_arr_<名>, i)`），而存储按 (窗口, 属性名) 走 ⇒ 「同一处权威」在原理上成立，但**原理上不是判据**：全门禁从没向数组元素要过几何（#193 那枚 `U-ARREXT` 读的是自己写进去的 15 的倍数，量化差天生看不见）。顺带把 §B61 那格旧标题办掉（订正依据见那一节的复测注）。
+- **落地**：新夹具 `tests/geomarr`（一枚 TextBox 数组两枚设计期元素 `arrA(0)/arrA(1)` + 一枚同表单控件 `soloT`，几何值刻意都不是 15 的倍数）。GA01/GA02 钉两枚元素的设计值原样读回，GA03 钉运行期赋值，GA04 钉 `Move`，GA05 钉「写元素 1 不动元素 0」，GA05b 钉两枚是两枚窗口（并把 `.Index` 0/1 打出来），GA06 钉单枚那条路没被带跑；每格配一枚**不经产品换算**的像素证人（user32 的 rect + kernel32 的 MulDiv）。发码两头：`ga_emitc_arr_geometry_authority` 钉元素的四档读写都走那四个具名出口（含单枚那条同表的一起钉），`ga_emitc_arr_geometry_com_prop` 钉元素属性落回 COM 属性访问那一形**不在**。元素的 `.Move` 今天走泛派发 `vb6_ComCall(那一枚, L"Move", …)` —— 属「带实参方法」那一族（§B72 那四张表外的一格），行为面由 GA04 钉，本刀不把它的形状当罪证。
+- **为什么单独一枚夹具，而不是往 geomcache 加控件**（本轮最贵的一条读数，别的刀也用得上）：那 31 条里有**五条**的形状是「把所有成员一起读 / 一起写」—— GC17 把每一枚的宽求和、GC18 用 `With collC(i)` 给**每一枚**写 1234、GC20..GC23 按成员问身份。第一版我把数组加进 GCForm，当场读出 `GC32 raw=1007,2501,1234,247` —— 那个 1234 就是 GC18 写进去的，另外 GC13/14/15 的计数范围也被推着走。⇒ 往这类夹具加控件 = 同时重述别人的判据；本刀不办，另起一枚小夹具。
+- **负控（这六格能红，且红的就是被并表那一处）**：拿**上一代**（9 月 30 日那台、账 #230 之前）编同一份夹具真跑 ⇒ `GA01=False raw=1005,450,3000,240`、`GA03=False raw=4995,450,7770,3000`、`GA06=False raw=2220` ⇒ 症状正是 §B61 记的那个量化差；同一台 `GA05b=True 但 idx=-1/-1`（`.Index` 那档是账 #252 之后才接上的，两枚夹具的读数顺手把那一格也钉住了）。
+- **CI 侧读数**：门 #485 = run 38057764933、head `5cd7c3b4`、attempt 1 = 12 条里 10 绿 + 两条红，而两条红是**同一件事**（`Emit manifest (shape oracle)` 与 `Tests (compile)` 里的 `[STATIC] manifest_coverage` ⇒ 新语料那一行还没登记哈希，其余 399 行逐行相同）。同一跑的两片 vbp 工件里 `GeomArr.out` 各 8 行、**无一条 False**、`GeomArr.err` 都在（= 正常跑完，不是被超时杀 —— 分辨法见 §B133 那一格的 `.err` 对形），读数与本机两台逐字相同。登记那一跑 = **门 #486**（run 38059103972、head `59fc3421`、attempt 1）= 12 条 check-run 全 completed/success、非绿 0，其中 `Emit manifest (shape oracle)` 与 `Tests (compile)` 两格同绿 ⇒ GeomArr 那一行的新哈希被 CI 那台独立复算证实。
+- **顺带撞出的独立缺陷**（另开 §B136，本刀一条没碰，且**本格第一版把因由归错了**，订正见那一节的读数）：同一枚表达式 `arrA(0).hwnd <> arrA(1).hwnd` 单独打也读 False，**不是**「并进 And 链才坏」；先 `CLng` 落进声明过的 Long 再比才读 True。
+
+### B136 两枚窗口的句柄直接比 `=` / `<>` 恒答「相等」—— 指针被 `_Generic` 一律投成对象档，而 VarCmp 那族没有数值档（账 #230 第二十八刀，2026-10-11，**已出 —— 门 #487（源码那一跑，11 绿 + 唯一红是形状门）+ 门 #488（登记那一跑，12/12 全绿）**；剩下「句柄装进 Variant 槽」那一格另开 §B137）
+
+- **读数（三形并排，两架构同形；本账第一版把因由归到「并进 And 链」，那是错的，这三条把它钉正）**：① `TF(arrA(0).hwnd <> arrA(1).hwnd)`（**没有** And 链、直接当参数打）⇒ **False**；② 同一格里的 `ok5 = (…) And (arrA(0).hwnd <> arrA(1).hwnd)` ⇒ 整条 **False**（与①同因，链不链无关）；③ 同一对句柄先 `h5a = CLng(arrA(0).hwnd)` 存进**声明过的 Long** 再 `TF(h5a <> h5b)` ⇒ **True**，而且同行的 `.Index` 打出 0/1、`PxLeft/PxW` 两枚窗口证人各报各的数 ⇒ 两枚窗口确实是两枚。⇒ 分岔不在「嵌不嵌套」，在**发码那一步问不问得出操作数的类型**：控件属性读来的 `.hwnd` 没有声明类型可问 ⇒ 掉进装箱那条路，而声明过的变量（Long/LongPtr）走原生数值比较 —— 探针 `.build/b605_lp_probe/LPcmp.bas` 的 `--emit-c` 里，两枚 `Dim As LongPtr` 变量之间同一个 `<>` 发的就是 `a1 = (-(h1 != h2));`（那条探针**只取发码形状，没跑成**，构建红在另一格上，别当运行期读数用）。
+- **机理（两格咬在一起，读码定位）**：`vb6_VariantFromValue` 的 `_Generic` 把**任何指针**都投给 `vb6_VariantObject`（那张表自己最后一行写着「其余指针 (void*/class*/type*) → VariantObject」，`src/rtl/core/vb6rtl/vb6rtl_variant.h:176-200`）；而 `vb6_VarToDouble_internal` 只认 VT_I2/I4/R4/R8/BOOL/BSTR，`default: return 0.0`（`src/rtl/core/vb6rtl/vb6rtl.c:604-619`）⇒ 两枚对象档都折成 0.0 ⇒ Eq/Ne/Lt/Gt/Le/Ge 六条一起塌。发码现场就是 `vb6_VARIANT _vcmp_0 = vb6_VariantFromValue(vb6_GetControlHwnd(…))` 配 `vb6_VarCmpNe(&_vcmp_0, &_vcmp_1)`。
+- **语料暴露 ≈ 0**（先量了再定性：机制坏 ≠ 产品在坏）：CI 工件里两枚真工程的 emit —— Charts ucChartArea 4 条 VarCmp 行、VBFlexGridDemo 159 条，含 `hwnd` 的只有 2 条，而那两条走的是 `vb6_VarCmpLong*` 数值档（不经过坏的那一步）；自家 modal / tabwalk 夹具比句柄**一律**写成 `HexEq(f, x.hwnd)` 字符串比（37 处）⇒ 今天没有一条真流量踩在上面。
+- **修法要先定一档**（这格的关键）：VB6 里 `LongPtr` 的比较是**数值**比较，对象引用的 `=` 走**默认属性**、`Is` 走**身份** ⇒ 缺口在「装箱档按什么算」——`.hwnd` 的值类型是 LongPtr，不该进 VariantObject。**别在 `vb6_VarToDouble_internal` 里给 VT_DISPATCH 补一档就当修完**：那等于顺手把「两枚对象引用相等」也改成按指针比，是另一个口径。这一问与账 #228（同一 VB 类型两种拼法给出两种 C 类型）、账 #256（装箱档不跟值类型走）同族，开工前先对齐那两格的答案。
+- **下一刀的形状（2026-10-10 量完，两条都不必再猜）**：
+  ① **哪些名字中招** —— 伪成员表（`src/common/form_pseudo.hpp` + `host_pseudo.hpp`，共 38 名）里，
+     `controlPropType` 答不上类型的有 **24 名**；按 RTL 声明的 C 返回型过一遍（`.build/b623_pseudo_types.py`
+     把 24 行逐条打出来），真正是**指针/句柄**的只有 `hwnd`(`void*`) 与 `hdc`(`intptr_t`) 两枚
+     （`mouseicon` 交的是 `void*` 但那本来就是 IPicture 对象档、`caption` 是 `wchar_t*` = BSTR，字符串那族
+     `vb6_VarCmp*` 自己会认 VT_BSTR ⇒ 不中招）。⇒ 本刀的范围就是这两枚，不是补一张 24 行的名单。
+  ② **该问哪张表** —— 这不是「两格机制」要并表的那种重复：`form_pseudo.hpp` 那张表只管**发码调哪个 RTL 符号**，
+     `controlPropType` 只管**这枚属性是什么 VB 类型**（账 #231 写死的分工），而且**先例已经在原地** ——
+     `left`/`top`/`width`/`height` 四行同时住在两张表里（伪成员表给 getter、类型表给 Long），
+     没人觉得那是一格该并的重复。⇒ 落地就是给 `controlPropType` 补 `hwnd`/`hdc` 两行答 `LongPtr`
+     （与 RTL 的 `void*`/`intptr_t` 同宽，账 #180 早就定了「句柄按指针宽度」这一档），
+     哨兵 `check_ctrl_prop_type_authority.ps1` 的 A4 名单从 28 条跟着长，别在 `vb6_VarToDouble_internal` 里动手（见上格那条「别把对象引用也改了」）。
+  ③ **风险面已点名**：改的是**类型答案**，所以会牵动打印/装箱/拼接，不只是比较 —— 自家 `tests/modal` 与
+     `tests/tabwalk` 判句柄用的正是 `HexEq(f, x.hwnd)`（把句柄转成十六进制串再比），这两枚夹具就是这刀的
+     现成反面证人：若 `hwnd` 打成 LongPtr 之后那套串的形状变了，它们当场红。护栏照旧 = 全语料 A/B
+     （BASE 用 CI 那台 `c3-exe` 工件即可，不必冷编）+ 改动行逐份归因 + 两架构真跑。
+
+  ④ **这条形状与源码里一条既有的刻意决定相撞，动手之前必须先翻它** —— `src/backend/cgen_util_ctrl.cpp:79-81`（账 C29-SL-e 的收尾）写着「同一段里 `MouseIcon` / `Hwnd` 的 getter 也是 `void*`，但那两条**本来就是对象**，装箱成对象是对的 … 刻意不动」。VB6 那边 `MouseIcon` 确实是 `StdPicture` 对象，而 `hWnd` 是**句柄数值**（`TypeName(Form1.hWnd)` 在 VB6 里答 "Long"，不是 "Object"）⇒ 那条决定把两件事当了一件。落地要么明确翻掉它、要么在类型表里把「句柄」与「对象」分档，别绕过注释默默改。
+  ⑤ **动之前只有一件事要先量**：今天有没有什么东西真吃着 `hwnd` 的**对象装箱** —— 第一个要问的就是`tests/modal` / `tests/tabwalk` 里那 37 处 `HexEq(f, x.hwnd)`（实参位的打包档归谁说话 = §B85/账 #256那条「装箱档跟不跟上一步真正交出的值」在这儿是活的）。若那两枚夹具换了档还能绿，就说明对象装箱没人吃；若红，就先按「两形两答」那族记下答案，再定这一刀的形状。
+- **判据面**：`tests/geomarr` 的 GA05 / GA05b / GA05c 三行已经是这格的现成证人（②/①/③ 三形齐；GA05c 在 `.build/b606_inline/` 那份**带这一形的副本**里量到，正式夹具今天只有 ②/③ 两行 ⇒ 开工时把 ① 也升进门禁，并把两枚发码形状各钉一针：属性读那一形**不许**再发 `vb6_VarCmp*(vb6_VariantFromValue(vb6_GetControlHwnd(...)))`，而 ③ 那形的原生数值形状不许漂走）。
+
+**第二十八刀的落地（把上面 ①②③④⑤ 五问一次办完；产品改两处、夹具改两枚）**：
+
+- **改的两处**：`controlPropType`（`src/backend/cgen_util_ctrl.cpp`）补两行 —— `p == "hwnd" || p == "hdc"` 答 `Vb6Type::LongPtr`（与 RTL 的 `void*` / `intptr_t` 同宽，账 #180 早定了「句柄按指针宽度」那一档）；`cgen_expr_call_conv_cstr.inc` 里账 #180 那条 LongPtr 分支加一道闸：先问现成的 `cExprIsVariantCarrier(实参)`，已是 VARIANT 就**什么都不转**、交给默认那条 `vb6_CStr` 自己按档案拆。哨兵 `check_ctrl_prop_type_authority.ps1` 的 A4 名单 28→30 条（**是名单跟着长，不是又开一张表**）。
+- **④ 那条刻意决定已明确翻掉**：原注释把 `MouseIcon` 与 `Hwnd` 并成「本来就是对象、装箱成对象是对的」。现在 `MouseIcon` 留在对象档（VB6 那边它确实是 `StdPicture`），`hWnd` / `hDC` 改答句柄数值 —— VB6 里 `TypeName(Form1.hWnd)` 答 "Long" 不是 "Object"。注释改的是**结论**，留着「当初为什么并成一件」，不是抹掉。
+- **本刀撞出来的一条，比修本身贵**：「类型答 LongPtr」**不等于**「实参在 C 侧是标量」。属性读没登记具名出口时会落 COM 兜底（`soloT.hDC` 就是这一形），交出的表达式是 `vb6_VariantFromComResult(vb6_ComGetProp(…))` = 一个 `vb6_VARIANT` 结构体 ⇒ 账 #180 那条 `(int64_t)(intptr_t)(…)` 裸转的产物是 **C2440 + C2198**（压根编不过，不是运行期才错）。**闸摘掉真编译过一次**：`NEW-BUILD-RC=1`（两处报错都在 `GAForm.c:299`），装上 `rc=0`。同一族在比较面早有解（Fix 158m「C 表达式确实是 VARIANT 就升级成 Variant 档」）、在 CStr 面也有（同一文件下面那条 Fix 225）⇒ 这一刀只是把**那一句现成的问话搬到 LongPtr 那一档**，不新开名单。⇒ 以后动「类型答案」这种单一权威，凡下游有「按类型裸转 C」的分支，都要问一遍实参的 C 形状；这一族的红藏在**编译期**，不在判据里。
+- **读数（两架构真跑 + 同一份夹具在 BASE 那台对跑，`.build/b638_k28/report.txt`）**：GA05c 三形 —— NEW 读 `inline=True chain=True eqself=True`，BASE 读 `inline=False chain=False eqself=True`（⑤ 那一问的答案就在 `eqself`：BASE 上它也是 True，因为两边都折成 0.0 ⇒ 反面证人吃的是「不许恒 False」，而「不许恒 True」靠 BASE 那侧的 False 与 `eqself` 两头一起夹住）。GA05d 两条 stringify 面 —— `"H" & arrA(0).hwnd`：NEW 交回 `H5442058`、BASE 只交 `H`（`catlen` 1→8，**改前打的是空串**，与 §B136 上面那条「CStr(句柄) 打成空」同源）；`CStr(soloT.hDC)` 两台都非空（那一格正是靠上面那道闸保住的，不是靠换档）。x86 与 x64 判据行同号；x64 那台还顺手把 BASE 一个**负数**读数（把 64 位 DC 折成 int32 打出的 `-419357591`）改回完整句柄数 ⇒ 这一格在 x64 才现形。
+- **判据**：`tests/geomarr` 长出 GA05c / GA05d 两行（`$gaExpected` 两条针，两架构都吃）+ 两枚发码形状用例 —— `ga_emitc_handle_value_compare`（原生 `-(vb6_GetControlHwnd(…) != vb6_GetControlHwnd(…))` 在，`vb6_CStr(vb6_VariantFromValue(vb6_VariantFromComResult(…L"hDC"…)))` 在）与 `ga_emitc_handle_not_object_box`（`vb6_VariantFromValue(vb6_GetControlHwnd(…))` 那一形必须绝迹）。三根针都是**先从实际产物里取**再钉：出现次数 NEW 2/1/0、BASE 0/1/7，括号配平与「不含 `[ ] * ?`」（`-like` 会把它们当字符类）逐条核过；`run_tests.ps1` 改完 PSParser 0 错。
+- **顺带办的第二枚夹具**：`tests/ctrlstatusbar` 的 SB0 原来钉的是「`Me.hwnd` 在 Debug.Print 里是空串」那格**已知局限**（runner 的注释就那么写着，期望串 `SB0-HWND= CAP=CtrlStatusBar CL=` 里那个「等号后直接一个空格」就是在钉空）。这一刀之后它不再是局限 ⇒ 期望重述成 `SB0-HWND-NUM=True CAP=CtrlStatusBar CL=`（吃 `SBTF` 那个布尔，**不吃会抖的句柄值**），注释跟着订正。BASE 那台读 `SB0-HWND-NUM=False` ⇒ 换了读法这一格仍然能红，红的就是被修那一处；`CL=` 后面依然什么都不钉（Controls 那一头归 #250 那一族）。
+- **护栏（语料 A/B，本机冷编两台、同一工具链）**：BASE = 把 HEAD（`5ccca69c`）`git archive` 到 `.build/b632_base_k28` 冷编那台（`Release/C3.exe`，`md5 4401bc5ead3e06b850faae50b82da99d`），NEW = `.build/wt_vb/.build/C3.exe`（`md5 e450afd55d21fab5c45b2880170117e1`）⇒ **inputs=400 / same=399 / changed=1 / rc_mismatch=0**（`.build/b636_ab_corpus.txt`）。唯一那份是 `tests/ctrlstatusbar` 的 SB0 那一行，而变的正是被修的那一面（BASE 发 `vb6_CStr(vb6_VariantFromValue(…))`、NEW 发 `vb6_CStrLongLong((int64_t)…)`）⇒ 这刀在**产品**面的暴露就这一处。邻居三枚真跑逐行对形（`geomcache` 32 行 / `modal` 20 行 / `tabwalk` 18 行）：差异只在**已在册的抖动族**（`GC20/GC23/GC26` 的 `raw=` 句柄尾数、`GC16` 的窗位、`M1` 那对句柄、`EX-fr1/EX-f2` 的句柄），判据行逐条同号；`tabwalk` 那两枚 `HexEq` 仍 `eq=Y` / `eqDeep=Y` ⇒ ⑤ 要的那个读数到手：**对象装箱那档没人吃**，换档不会把它们带走。51 道 [STATIC] 全绿（含账 #238 那枚 `check_variant_cmp_boxing` 与账 #231 的 A1..A7），零红。
+- **登记（形状门，第七次走这条自救路）**：门 #487（run 38067894261、head `48e58641`、attempt 1）= 12 条里 11 绿 + 唯一红 `Emit manifest (shape oracle)`，红因是两行还没按 CI 的读数重登记（`ctrlstatusbar` = 发码 + 夹具文本、`geomarr` = 夹具文本），其余 398 行逐字节没动。按 CI 那台自己交的清单登记（`github/ci/emit-manifest`，提交 `1496cac7`、注脚 `head=48e58641`），登记后复算 400/400、`K1..K3` 绿；**另外用本机新编那台把整份清单跑了一遍与 CI 对形：400/400 逐行相同** ⇒ 这一刀的产物没有第二个答案。
+- **门**：源码那一跑 = **#487**（run 38067894261、head `48e58641`、attempt 1）= 11 绿 + 唯一红形状门（不是产品红，是没登记）；登记那一跑 = **#488**（run 38069065264、head `9b76b2e3`、attempt 1）= 12 条 job 全 completed / success、非绿 0（`Emit manifest (shape oracle)` 同绿 = 那两行的新哈希被 CI 那台独立复算证实）。
+
+### B137 控件句柄**装进 Variant 槽**那一路吃类型答案 —— 装箱改按指针宽度走，比较面补上 `VarCmp` 缺的那一档 `VT_I8`（账 #230 第二十九刀，2026-10-11，**已出 —— 门 #489（源码那一跑，12 条里 11 绿 + 唯一红是形状门）+ 门 #490（登记那一跑）**；顺带量出来的那一格另开 §B138）
+
+- **读数（两台同形 ⇒ 这不是第二十八刀带来的，是它没 cover 到的那一格）**：探针 `.build/b633_probe/GAForm.frm` 里 `Dim v7 As Variant: v7 = arrA(0).hwnd`，随后 `VarType(v7)` = **9**（VT_DISPATCH）、`CStr(v7)` = **空串**、`CLng(v7)` = **0** —— 改前（BASE `5ccca69c` 冷编）与改后（第二十八刀）两台**一模一样**。读数在 `.build/b635_new64_run.out` 与 `.build/b635_base64_run.out` 的 `P-v7type` 那一行。VB6 的答复是 `VarType(hWnd)` = 3（vbLong）、`CStr` 打数字。
+- **机理与 §B136 同一条，只是换了消费面**：装箱进 Variant 槽那条路（`boxToVariant`，`src/backend/cgen_util_ctrl.cpp:2443` 起）按 VB 类型只显式改写 Boolean/Byte/Single/Date 四档，其余一律交 `vb6_VariantFromValue` 由 `_Generic` 选 ctor ⇒ 指针（`void*` / `intptr_t`）落那张表的最后一行 `VariantObject`。**它没吃 `controlPropType` 的答案**（那把答案在比较面与 stringify 面已经吃上了 —— 就是第二十八刀）。
+- **为什么这一格不只是「打出来不好看」—— 以及本账原先那句风险陈述怎么被读数换掉**（2026-10-11 第二十九刀订正）：那一档确实是个**假对象**（把 HWND 当 `IDispatch*` 装进 `VT_DISPATCH` 槽），但它**不是野调用**：`vb6_ComAddRefDispatch` 里面的 `vb6_ComIsDispatchable` 有一条 `if (IsWindow((HWND)disp)) return 0;`（`src/rtl/core/vb6com/vb6com_invoke.c:48`，那段注释就是为宿主 `Controls` 枚举塞裸 HWND 这一形写的），AddRef 与 Release 两头都被它挡住 ⇒ 本账上一版写的「任何真去 AddRef/Release 它的路都是发虚调用」**不成立**，代价全在**值面**：`VarType` 答 9、`TypeName` 借 `vb6_Host_TypeNameOf` 答出**控件名**「TextBox」（不是 "Object"，所以比 §B136 那条更像对象、更容易被当成对象用）、`CStr` 交空串、`CLng` 答 0、与任何数比较恒不等。同族的关系仍然成立，只是罪名换了：§B85（账 #256）那一格交出的是**真** VARIANT 的野 Release，这一格交出的是一档**看着像对象、值面全错**的假档案。
+- **暴露已经量过：这一格是潜伏项，不是现场失血**（与 §B134 同型 —— 机制坏，而语料不喂）。全语料 400 份输入的 `--emit-c` 里，`vb6_VariantFromValue(vb6_GetControlHwnd(` / `…Hdc(` 这一形命中 **0 处**（脚本 `.build/b648_box_census.py`、报告 `.build/b648_box_census.txt`；同一条正则在带 `v7 = arrA(0).hwnd` 那枚探针的产物 `.build/b635_emit_new.c` 上命中 2 处 ⇒ 不是正则空跑）。而**全语料 A/B 也说不到它**：两台在这一格发码相同，A/B 只看得见「改前改后有没有差」⇒ 这类格子的优先级只能按口径拍，不能按流量拍。剩下的那一件开工前量：`boxToVariant` 补 LongPtr 一档会不会把**真对象**（C 层也是 `void*`）一起改掉 —— 答案仍在「类型是否已知」这一问上（账 #180 早就因此不肯给 `_Generic` 补 `void*` 档）。
+- **口径要先拍的那一档**：句柄进 Variant 槽该答 VT_I8 / VT_INT（对齐 VB6 那个 Long）还是保持对象档。**别在 `vb6_VariantFromValue` 的 `_Generic` 里给 `void*` 加数值档** —— 真对象引用在 C 层也是 `void*`，那会把所有对象一律打成数字（比 §B136 那一格宽得多，装箱那条路是全场最常走的一条）。
+  **这一档已由第二十九刀拍掉**：按**指针宽度** —— `(intptr_t)` 交 `_Generic` 自己选，x86 落 VT_I4、x64 落 VT_I8（与账 #180「句柄按指针宽度」以及用户对「句柄的本质也是结构体指针，vb6 用 long(x86) 表示指针没问题」那条口径一致）；「保持对象档」那一支被读数否掉（值面全错）。「别在 `_Generic` 里给 `void*` 加数值档」这条约束照办 —— 新档只加在 `boxToVariant` 那一处、按 **VB 类型** 分诊，`_Generic` 那张表一个字没动。
+
+
+**第二十九刀的落地（两条消费面一起接上那张类型表）**：
+
+- **改的两处**：`boxToVariant`（`src/backend/cgen_util_ctrl.cpp:2443` 起）在 Boolean/Byte/Single/Date 之后补第五档 —— `case Vb6Type::LongPtr:` 交 `vb6_VariantFromValue((intptr_t)(…))`，让 `_Generic` 按**指针宽度**自己选档（x86 = `long` → VT_I4，正是 VB6 对 hWnd 的答案；x64 = `long long` → VT_I8，不截断，与 Fix 082 的 VarPtr 档同族）；RTL 的 `vb6_VarToDouble_internal`（`src/rtl/core/vb6rtl/vb6rtl.c:604`，`vb6_VarCmp*` 全族的取数口）补 `case VT_I8`。**函数头那句「需要显式档案的四种」跟着改成五种**，不是新开一张表。
+- **RTL 那一刀不是为本刀新档打的补丁，它自己就是一格现场失血**：`VarCmp` 取数口没有 VT_I8 档 ⇒ 任何 64 位整数档案在比较面被抹成 0.0。读数不靠本刀的新档：**声明过的 LongPtr 今天已经会装成 VT_I8**（`_Generic` 的 `long long` 一支），所以 x64 上 `VarPtr(x) <> 0` 实测答 **False** —— 改前改后两台同形（BASE `5ccca69c` 也答 False），只是取数那一侧（`VariantToLong/ToBoolean/ToDouble/ToIntPtr`）早就有 VT_I8，偏偏比较这一侧漏了。⇒ 这一刀把 §B136 那条「恒相等」的家族在 Variant 槽这一面也端掉了。
+- **第二十八刀那条护栏在这里第二次用上，而且更省事**：`boxToVariant` 头部本来就有两道前返 —— 裸 COM 结果走 `vb6_VariantFromComResult`，以及 `cExprIsVariantCarrier(cExpr)` 为真就恒等直传。所以「类型答 LongPtr 但 C 侧交回来是个 `vb6_VARIANT` 结构体」那一形（属性读没登记具名出口时落 COM 兜底）压根进不了新档 ⇒ 不会重演第二十八刀那次 C2440。这一条是读码 + 装上真编过的，不是推的。
+- **读数（两架构真跑 + 同一份夹具在 BASE 那台对跑，`.build/b663_ga05e/`）**：GA05e 两行 —— NEW x86/x64 都读 `GA05e-notobj=True str=True num=True eq=True ne-other=True` + `GA05e-vp-nz=True obj=True`；BASE 那台两架构都读 `notobj=False str=False num=False eq=False`（装箱面），而 `vp-nz` **只在 x64 红**（BASE x64=False、BASE x86=True）—— 因为 x86 那条地址本来就是 VT_I4。这一记不对称正是 RTL 那一刀的靶子：同一条期望串两架构都吃，两台都必须能红。反面证人两头都在：`Set o8 = soloT` 在四台（含 BASE 两台）都仍答 `9`/「TextBox」⇒ 换档没把真对象带走。探针那台另读到 `P-typename` 在 x86 从「TextBox/9」变成 VB6 的答案 **Long/3**，x64 变 **Variant/20**（名字面与 VB6 分叉，另记 §B138 之后）。
+- **判据**：`tests/geomarr` 长出 GA05e 两行（`$gaExpected` 两条针，两架构都吃）+ 一枚发码形状针 `ga_emitc_handle_variant_box`（钉的是实测产物：`vb6_VariantFromValue((intptr_t)(vb6_GetControlHwnd(vb6_CtrlArr_GetAt(&vb6_arr_arrA, 0))));` 与 `vb6_VariantFromValue((intptr_t)(pv12));`，出现次数 NEW 2 / BASE 0）；反面证人复用第二十八刀那枚 `ga_emitc_handle_not_object_box`（裸的 `VariantFromValue(句柄读)` 必须绝迹），它从这一刀起**同时管比较面与装箱面**。`run_tests.ps1` PSParser 0 错（TOKENS 31210 / ERRORS 0），文件仍是 BOM+CRLF、0 条裸 LF。
+- **哨兵跟着长一条 A8（不是新开一道）**：`check_ctrl_prop_type_authority.ps1` 的 thesis 就是「那张类型表的答案必须被消费掉」，A8 钉三件 —— a) `boxToVariant` 里必须有 `case Vb6Type::LongPtr:` 且经 `(intptr_t)`；b) 这个数值装箱在全 `src/` 里**只许一处发射**（实测 census = `cgen_util_ctrl.cpp=1`，第二处就是又开一条平行装箱路）；c) RTL 的 `vb6_VarToDouble_internal` 体里必须有 `case VT_I8`。三条都过了**能红这一关**：把档名换掉 / 把 `VT_I8` 换掉，同一条正则立刻不命中（`.build/b655_a8_check.py`）。
+- **护栏（语料 A/B，本机冷编两台、同一工具链；报告 `.build/b662_ab_corpus.txt`）**：BASE = `5ccca69c` 冷编那台，NEW = 本刀新编那台（md5 `4d5ef027…`）。**inputs=400 / same=397 / changed=3 / rc_mismatch=0**，三份逐条归因：两份是**本刀自己动的夹具**（`ctrlstatusbar` 的两行 = 第二十八刀那次 SB0 重述在 BASE 上仍读 False；`geomarr` 的 18 行 = GA05e 新增 + 那两行的产物），一份是**产品面**：`tests/VBFlexGridDemo` 的 2 行 —— `VBFlexGrid.ctl:10383 Public Property Get ColImageList(...) As Variant`（手册原文「returns the image list control **or handle**」）里 `ColImageList = .Handle` 那一处装箱换成了数值档；那枚工程在门里是真跑的（`Test-GuiVbp` 的「FlexGridX86」那一枚）。另：语料里 `vb6_VariantFromValue(vb6_GetControl` 那一形 BASE 有 9 份命中、NEW 归零的那部分只在夹具内 —— 其余 8 份是别的指针档（类型表不认识它们），本刀刻意不动。
+- **邻居真跑逐行对形（`.build/b659_k29/report.txt`）**：`geomcache` 32 行 / `modal` 20 行 / `tabwalk` 18 行 / `ctrlstatusbar` 44 行，差异 8 / 2 / 4 / 2 行，全部落在**已在册的抖动族**（`GC20/GC23/GC26` 的 `raw=` 句柄尾数、`GC16` 的窗位、`M1` 那对句柄、`EX-fr1/EX-f2` 的句柄、SB0 那一行本身），判据行逐条同号；`tabwalk` 那两枚 `HexEq` 仍 `eq=Y` / `eqDeep=Y`。51 道 [STATIC] 全绿（含新的 A8），零红；RTL 动过 ⇒ `src/driver/c3rtl.rc` 已 touch 重编，`check_rtl_embedded.ps1` 报 125 份资源与磁盘逐字节相同。
+- **形状门（第八次走这条自救路）**：门 #489（run 38073869124、head `3920dd83`、attempt 1）= 12 条里 11 绿 + 唯一红 `Emit manifest (shape oracle)`，红因是两行还没登记（`geomarr` = 发码 + 夹具文本、`VBFlexGridDemo` = 发码），其余 398 行逐字节没动。按 CI 那台自己交的清单登记（`github/ci/emit-manifest`，提交 `db9c1e01`，注脚 `head=3920dd83`），登记后本机复算 400/400、`K1..K3` 绿；**另用本机新编那台跑了整份清单对形：与 CI 那份 400/400 逐行相同** ⇒ 这一刀的产物没有第二个答案。
+
+### B138 `VarPtr` / `StrPtr` / `ObjPtr` 的**类型答案**是 Long，而它们的 C 侧早在 Fix 082 就成了 `intptr_t` —— x64 一步式进槽把地址折成 32 位（2026-10-11 量；**这一格已由别的分支出了 —— `bebd2083`「VarPtr/StrPtr/ObjPtr 的类型答案改 LongPtr」随 PR #9 合进 dev（合并提交 `226f95c6`），本节的 ① 那条口径就此拍成「答 LongPtr**」；语料两条消费面各数一遍 = 0 处暴露，与 §B134 同型的潜伏项）
+
+- **读数（两台同形，与第二十九刀无关）**：探针 `.build/b633_probe/GAForm.frm` 的 `P-v13-step` 那一行，x64 NEW 读 `types=3/20 strs=-1285887440/1016621361712` —— 左边是**一步式** `v13 = VarPtr(h5a)`（发码 `v13 = vb6_VariantLong((intptr_t)&(h5a));` ⇒ VT_I4，高 32 位没了，还打成负数），右边是**两步式** `pv13 = VarPtr(h5a)` 再进槽（发码 `vb6_VariantFromValue((intptr_t)(pv13))` ⇒ VT_I8，全址）。BASE x64 同形（`-1783634224/298864076496`）。同一条问句（「这枚指针宽度值进 Variant 槽该答什么」）两个答案 —— 而第二十九刀之后这两个答案分属**两张表**：语义层的内置表 vs 类型那一问。
+- **机理那一处就在内置表**：`src/semantics/builtin/builtin_funcs.inc:292-294` 三行 `addBuiltinFunc("VarPtr"|"StrPtr"|"ObjPtr", Vb6Type::Long)`，而 `cgen_expr_call_builtin_pre.inc:109` 起那条 Fix 082 把发的 C 表达式做成 `intptr_t`。**别把这一格当成第二十九刀没修干净**：`boxToVariant` 吃的是 `inferExprType` 的答案，答案给 Long ⇒ 走 `vb6_VariantLong` 一支，与本刀的 LongPtr 档无关。
+- **⚠ 那一格里 `TF(v13 = pv13)` 读到的 True 不是覆盖**：发码是 `vb6_VarCmpLongEq(&v13, pv13)`，而这族 helper 的签名是 `int32_t vb6_VarCmpLongEq(vb6_VARIANT*, int32_t)`（`vb6rtl.c:678`）⇒ 右操作数**也**被折成 32 位，两边一起截断才「相等」。⇒ 第三件已量完（读码）：同一个问句「Variant 与标量怎么比」有 **6 个发码点**（`cgen_expr_binary.cpp:445、448` 显式 `(int32_t)(…)`；`571、582、604、614` 交 `scalarArg158m(…)` 裸传、由形参隐式折），全都汇进同一个 `int32_t` 槽。
+- **暴露两面都数过（`.build/b678_b138_exposure.py`，两架构各一遍）**：书写面 9 份语料文件 / 233 个调用点（VarPtr 114、StrPtr 94、ObjPtr 25；大头 `VBFlexGridDemo` 的 VTableHandle.bas 80 / Common.bas 74 / VisualStyles.bas 37）；**产物面两步都是 0** —— 一步式截断装箱在 12 份相关输入的 emit 里 0 处；`vb6_VarCmpLong*` 那一族虽然多（VBFlexGridDemo 一份 154 处 / 131 行），标量侧全是 `1`、`Col`、`Size.CX`、`LBoundCols` 这类 Long，指针宽度那侧 0 处（最接近的一条是 `GetWindowThreadProcessId(...)`，返回 DWORD，折了不丢）。⇒ **今天只会红在纸面上**。
+- **开工前要拍的两件**：① 口径 —— 这三枚内置在 x64 该答 LongPtr（对齐账 #180「句柄按指针宽度」与第二十九刀那一档）还是守住 VB6 的 Long；拍之前先想清楚改的是**内置表那一行**，它会同时改装箱面、比较面、实参打包面（第二十九刀的 A8 只管到控件属性那一头）。② 护栏 —— 改类型答案要把每个「按类型裸转 C」的分支问一遍实参的 C 形状（`cExprIsVariantCarrier`，§B136/§B137 两次都是这一条）。顺带还有两格同日量到、都归这类：**`TypeName` 对 VT_I8 答「Variant」而 VB6 答「Long」**（x86 这一刀之后就对，x64 不对，`vb6rtl_conv.c:377` 那张 switch 没有 VT_I8 一档）；以及 `vb6_VarCmpLong*` 那 6 处发射该收成一处问话。
+- **【2026-10-11 复核订正】这一格不在本线上做了：核实靠的是 dev 那一份源码树，不是提交信息** —— `git show github/dev:src/semantics/builtin/builtin_funcs.inc` 的 **299-301** 行现在写的是 `addBuiltinFunc("VarPtr"|"StrPtr"|"ObjPtr", Vb6Type::LongPtr)`（293-294 就是这条改动的说明：这三枚交的是地址、宽度随架构，而 `Vb6Type::Long` 在 C 侧是 32 位）；本机 vbe-line 那一份同一处仍是 `Vb6Type::Long)`（292-294）⇒ ① 那条口径由他们拍成「答 LongPtr」（与账 #180「句柄按指针宽度」、第二十九刀那一档同向），② 的护栏跟着他们那一跑的门走。本节尾巴上那两格**没被这一改带走**，仍归本线：`TypeName` 对 VT_I8 答「Variant」而 VB6 答「Long」（`vb6rtl_conv.c:377` 那张 switch 缺 VT_I8 一档，x64 不对）+ `vb6_VarCmpLong*` 那 6 处发射收成一处问话。
+- **【2026-10-11 第三十二刀，账 #305】上面那两格的第一格已出：`TypeName` 的 VT_I8 档补上了，顺手把同一条决定的另外三处漏答一起收**（读数是这一刀的探针打出来的，不是推的）：同一枚 `v = VarPtr(hx)` 在 x64 装 VT_I8(20)、在 x86 装 VT_I4(3)，而 RTL 把「这枚 Variant 算不算数值 / 该报什么类型名 / 打包成什么档」以 `switch (v.vt)` 的形状实现了 **11 遍** —— §B138 那一改（内置答案换 LongPtr）之后 x64 第一次真往这些表里喂 I8，当场四处答错：`vb6_TypeName` 落 default ⇒ "Variant"、`vb6_IsNumeric` ⇒ 假、`vb6_ComPackVariant` 落 default ⇒ **地址静默打包成 VT_EMPTY**（这一处比错名字严重，它是丢数据不报错）、`vb6_ho_variantToLong/ToDouble` ⇒ 读回 0。修法 = 四处各补 `case VT_I8`（档名沿用 SDK 的 `VT_I8`，与那五处早就答了的写法一字同），**判据两头**：`tests/test_variant_boxing.bas`（就是 §B137 那枚装箱哨兵）加五条针 `VB-ptr-tn=Long / -isnum=True / -cbool=True / -selfeq=True / VB-str-tn=Long`，并**新register 一枚 x86 双胞胎** `test_variant_boxing_x86` —— 同一个 `$boxNeedles` 两架构逐字相同，28/28 命中；改之前那一跑（`.build/b944_i8run`，同一支探针）x64 读的是 `typename=Variant / isnumeric=False`。第 53 道哨兵 `check_variant_i8_coverage.ps1` 钉的是**闭合 census**（V1 站点数下限 / V2 每张 vt 表必须在 must 或 exempt 里 / V3 must 里每个函数体必须真有那一条 case / V4 名单里每个名字必须还存在 / V5 名单不许缩），六发假改动各红各的（`.build/b954_negctl_i8_report.txt`：V1..V5 全红过、baseline rc=0）。`vb6_VarCmpLong*` 那 6 处并表**没做**，仍是本账的第二格（见 §B141 与任务）。【2026-10-11 收线】源码那一跑 = **门 #501**（run 38088742545、head `e51fe008`、attempt 1）= 12 条里 **11 绿 + 唯一红是 `Emit manifest (shape oracle)`**；那枚新加的 x86 双胞胎 `test_variant_boxing_x86` 第一次进门禁就在绿的里 —— `Tests (bas #1)`/`Tests (bas #2)` 两片全 green，与 x64 同针同过（28/28 那条针面在两台都命中）。红的 8 行**不是本刀带来的**：按 `ci/emit-manifest` 逐 head 二分，7 行（`tests/Charts 2020` 的 6 份工程 + `tests/test_varptr.bas`）在 `e589b1a3`（§B138b：LongPtr 的位宽按目标架构取档）那一跑第一次变，而 `bebd2083`（§B138 只换类型答案）那一跑这 8 行一字未动 ⇒ **换答案不改发码，加窄化检查才改**；第 8 行 = `tests/test_variant_boxing.bas`，是本刀新增那 5 行读数的源文本进了产物（唯一一处出自本刀）。每行增量都是 13 的整数倍（+442=34×13、+65=5×13 那一档四份、+26=2×13、+13=1×13）= `vb6_ChkLong(` 那一层壳的长度，与本刀的 RTL 四张表无关（RTL 不进发码）。其余 392 行逐字节未动、缺席 0 / 多出 0、rc 两侧全 0。登记按 §B100 那条自救路径取 CI 自己那份（`github/ci/emit-manifest` 的 `ee9ccb9b`），复算 400/400、`check_manifest_coverage` K1..K3 绿，登记跑 = **门 #503**（run 38090841379、head `adc4b61f`、attempt 1）= 12 条全 completed/success、非绿 0 —— 其中 `Emit manifest (shape oracle)` 这一跑就是绿的 ⇒ 登记的那 8 行与 CI 那台自己的复算对齐。【第二格的形状顺手量了一遍，供下一刀】那 6 处不是一个形状：**445/448 两形硬写 `(int32_t)(…)`**，而 571/582/604/614 四形走 `scalarArg158m(…)` —— 同一个「标量操作数怎么窄化进 `vb6_VarCmpLong*` 的参数槽」被答了两遍，且 §B138b 那层 `vb6_ChkLong` 只可能从后一条形状出来（`cgen_util_type.cpp` 的 `narrowCheckAssign` 那条路），前一条在 x64 上仍是**裸截**。可达性按老规矩先问（数的是「比较形」：`If/While/ElseIf … =|<> VarPtr|ObjPtr|StrPtr(…)`）—— 语料 **0 处**：那 46 处指针消费全是赋值形（`.uId = ObjPtr(…)`、`uIdSubclass = vSubclass`），走的是 `narrowCheckAssign` 那条已经被 §B138b 接住的路。⇒ 第二格今天是**纸面缺口**（与 §B134 同型），要合的是「同一个决定答了两遍」这个形状本身，不是救火；判据得自带一枚新针，否则合完仍是零暴露。
+
+
+### B139 tabwalk 相 3 每步只留**恰好一拍**余量去读 post 出去的按键结果 —— 「判据与拍号耦合」这一族的第三处实物，收法是一张登记表（账 #213，2026-10-11 第三十刀，**已出 —— 门 #491（源码那一跑，12 条里 10 绿 + 两红都归完）+ 门 #493（登记那一跑，12/12 全绿、wall 11m04s）**）
+
+- **这一格早就在门上红过一次，当时被归成「夹具节拍余量」**：门 #336 那轮的 `[VBP] tabwalk ... FAIL (output mismatch)`（§B48 末段记着：它的 `--emit-c` 产物在改前基线／手搓版／权威版三份里**逐字节相同**（x86/x64 皆然，27303 字节）⇒ 判成与产品无关，归到已登记的 #213，#337 两片复绿）。**归因当时是对的，只是没人回来把夹具改掉** —— 本刀就是把那格余量还掉，并把这一族第一次写成一张表。
+- **机理 = 同一件事的第四个读数**：VK_DOWN / VK_UP 是 `PostMessage` 交给泵**异步**消化的，而旧代码 `gAkStep` 每拍 +1 ⇒ 每步之间正好只留一拍，读到的是「上一拍发的那一声」的结果；在途 `WM_TIMER` 连着排空时两拍挤在同一瞬间 ⇒ 那一拍看见「还没动」。同族：#162（CI 上已关掉的 Timer 仍报 21 拍）、门 #332（pbsb 五条通知读成全 0，饿机器上到第 8 拍才到齐）、#253（modal `hops=3→1`，§B83）。
+- **本机量不出症状，所以这一刀的立论不是「复现」**（与 #253 同一面）：**改前**那台 C3.exe 编**今天这份夹具**，两架构 ×（空载 + 8 枚忙等压 4 vCPU）各 8 趟 = 32/32 命中 `AK-pre=optA/down=optB/wrap=optA/up=optB/clicks=3`，墙钟 0.9s → 2.4s（`.build/b688_tabwalk/report.txt`）。⇒ 收益全在 CI 那一头；本地能给的只有机理、负控与一张表。
+- **修法（`tests/tabwalk/WalkForm.frm` 相 3）**：三步改成**四步** —— 最后一枚键也要等它自己那一拍（`up=` 由相 4 读，以前同样是固定一拍之后才读，同一格缺陷换个消费面就还在）；每步先问 `WhereIs(GetFocus()) = gAkLast`，没动就 `gAkWait = gAkWait + 1` 并 `Exit Sub`（**不重发** —— 每拍重发会跳站），等满 `AK_WAIT_MAX = 40` 拍就照常读并把 `gAkLate + 1` ⇒ 真丢一条键仍然读成错的、仍然红，只是不再由「队列这一刻排空了几条」决定。四步 × 40 拍 × 50ms ≈ 最坏 8s，仍在 `Invoke-TestExe` 那 60s 之内。
+- **判据一个字没改**：`$twNeedles` 里那条 `AK-…/clicks=3` 原样保留，只**新加** `TW-SETTLE late=0`；`maxwait` 只打不钉（钉死它就是把「本地一拍就到」焊进判据）。读数（`.build/b691_k30_check/report.txt`）：改后两架构 × 空载/2×超订 各 8 趟 = **32/32 全针命中**，`late=0`、`maxwait=0`、`TW-ticks=12`（旧的是 11，多出来那一拍正是新加的「只等不发」那一步）。
+- **负控（这一格不是把判据改成永真）**：`.build/b694_negctl` 那份**拷贝**里把那三步的 post 全关掉（守卫改成 `If gAkStep < -1 Then`），同一份夹具重编真跑 ⇒ x64 `down=optA/wrap=optA/up=other(0)/clicks=0`、`TW-SETTLE late=2/maxwait=40`、125 拍、8.0s；x86 `late=3/maxwait=40`、129 拍、8.5s —— `AK-*` 与 `TW-SETTLE` 两条针**都缺**，而进程**自己在 8 秒退**（`rc=0`）。⇒ 「保险丝有限」的意思就在这儿：没有它，这一趟就是账 #236 那种被 60s 超时杀掉、只剩半截 `.out` 的现场。
+- **收法 = 登记表，不是逐处补 sleep**：第 24 道哨兵 `scripts/check_fixture_timer_close.ps1` 长出第二条问句（原来只管「阈值收线的自增顺序」）。W1 = 凡处理器里出现 `PostMessage(` 的 `*_Timer` **逐枚登记**（现 4 枚：ModalDlg/`t2_Timer`、ModalMain/`tMain_Timer`、PbForm/`tmrStep_Timer`、WalkForm/`tWalk_Timer`），新发 post 却没登记就红；W2 = 每枚带着**自己的** settle 口径，且必须在**被它保护的那次读取之前**（modal 的 `(Timer - gLastBeat) < PHASE_MIN_SEC`、pbsb 的 `ElseIf allIn Or mStep >= 20 Then`、tabwalk 的 `If gAkWait < AK_WAIT_MAX Then Exit Sub`）；唯一刻意不等的那枚（ModalDlg 只 post `WM_CLOSE`）登记成 last-act：post 必须仍是处理器**最后一条语句**，一旦有人在它后面补读法就红；W3 = 每步只自增一次 + 保险丝取 5..100（太小则泵还没消化就放弃，太大直接吃 60s 预算）；W4 = 夹具打的 `TW-SETTLE late=` 必须被 runner 钉住，两头缺一即红（账 #226 那一课：只打不判的读数等于没打）。**七发假改动各红各的**（`.build/b697_neg_report.txt`：baseline rc=0；未登记的新 post / 撤掉 settle 行 / 把 settle 挪到读取之后 / 把 post 挪出每步守卫 / 把 `AK_WAIT_MAX` 改成 400000 / 改掉打印标签 / 给豁免那枚补一句读法 ⇒ 七条不同的 FAIL）。
+- **门上的读数（这一刀的收益确实只在 CI 那一头）**：`Tests (vbp #2)` 与 `Tests (vbp #3)` 两片里的 `TabWalkApp.out` 各打 `TW-SETTLE late=0/maxwait=0`、`TW-ticks=12`、`AK-pre=optA/down=optB/wrap=optA/up=optB/optA=N/optB=Y/clicks=3` ⇒ 两架构的期望串**一字未变**，改的只是「什么时候读」；本机那 32 趟也是 `maxwait=0`（一拍就到）。取读数走的还是工件那条路：`gh run download <run> -n test-logs-vbp-<k>`（本机拿不到 job 日志，工件拿得到）。
+- **同一跑里那条与本刀无关的红（归因照 §B133 那套「缺 `.err` 的就是被超时杀掉的那枚」）**：`Tests (vbp #1)` 红在 `ctrldlg_probe` —— 那片工件里 `DlApp.out` 停在 `DL10` 且**没有 `DlApp.err`**，而上一片全绿的 #490 同一枚是 15 行齐 + `.err` 在（`.build/b706_vbp1` / `b709_prev_vbp1`）。这已是**第二次**（第一次 = 门 #484），而 §B133 那条待办写得很清楚：再红一次就给它一条**具名的逐例墙钟预算**，不放宽判据、也不把全局 60s 抬大 ⇒ 立新账 §B140 去办，别混进本刀那笔登记。
+
+- **护栏**：51 道 `[STATIC]` 本地全 rc=0；语料形状清单本机重算一遍 = **inputs=400 / 未变 399 / 移动 1**，移动的正是 `tests/tabwalk/TabWalkApp.vbp`（两侧 rc=0，无新增/缺失输入，`.build/b699_manifest_k30.txt`）。那一行**按 CI 读数登记** —— 本刀没动 `src/`，除夹具自身之外一行都不该动，动了就是归因没做完。
+- **本刀没做的**：`clicks=3` 与 `AK-up` 读的是**落点**不是通知条数的时刻，那两条口径没动；modal 与 pbsb 的既有等法只是被**登记进同一张表**（它们本来就在答同一问），没有改写；`appqquit` / `combofocus` 那一族（#259 / 门 #403）住的是另一问（进程肯不肯自己退），仍由账 #236 那三道闸管。**下一枚写「post 完再读」的夹具必须先进 W1 那张表**，这条口径才算有权威。
+
+### B142 Decimal 这一档在「往外读」的其余 9 张表里全都没答（2026-10-11 第三十三刀收口时 census 出来，**未开工**）
+
+- **范围（数出来的，不是推的）**：`switch (v.vt)` 那一族共 10 处站点（站名单 = `scripts/check_variant_i8_coverage.ps1` 的 must 名单）里只有 §B141 刚补的 `vb6_TypeName` / `vb6_IsNumeric` 两处答 Decimal，另外 8 处一律落 `default`；再加上 `vb6_Format` 的类型分诊表（`src/rtl/core/vb6rtl/detail/vb6rtl_format_extract.inc:20`，12 档，`VT_DECIMAL` 出现 0 次）= **9 处**。`CLng` / `CDbl` / `CInt` 的 Variant 形（`vb6_CLngV` 等三枚薄壳，`vb6rtl_builtin.h:116-118`）全都转调 `vb6_VariantToDouble` ⇒ 一处漏答同时打掉三条内置函数，实测两架构两台读数全 0。**另一处同表的重罪形状**：`vb6_ComPackVariant`（`vb6rtl_com.c:562-575`）的 `default: pv->vt = VT_EMPTY`，而这张表里不只缺 Decimal —— **Currency 与 Date 也没档**（案例表只到 I2/I4/R4/R8/BSTR/DISPATCH/BOOL/UI1/I8）⇒ 这两档交给 COM 调用时**静默变空值**，与账 #305 里那条「VT_I8 落 default ⇒ 地址变 VT_EMPTY」同一个严重度分级。§B142 开工时这一族要一起数（不是只数 Decimal）。
+- **要先拍的一件事（口径，不是手法）**：各表是各自手换（`VarDecToR8` / `VarDecToInt4` / `VarDecFromR8` 那一族一条条写），还是统一交 oleaut32 的 `VariantChangeType` —— 后者把 Decimal 的语义与它自己的舍入、越界政策一起继承过来（VB6 的 `CLng(2.5)` 与 `CLng(3.5)` 都答 2 那一族政策本来就在 oleaut32 手里），前者要自己把这套政策写第二遍。§B141 里那个候选臂走的是 `VariantChangeType`（无格式串那侧），形状可以复用；**注意它的 x86 臂读出来是堆地址形状，这一格要先分清是臂写错还是槽里的 DECIMAL 真没落地**（写侧至今无实测反证）。
+- **暴露面**：语料里 `CDec` 4 处，全在 VBFlexGrid（`VBFlexGrid.ctl:9613` 的 `RowID = CDec(0)`、`:7740/7757` 的 `VntArr(...) = CDec(Buffer)`、`Common.bas:613`）；**VB6 真语料**（`D:\vb_yqt4qPac`，5623 份工程）里 `CDec(` 有 **21 处 / 14 份文件**：除 VBFlexGrid 两版之外还有 VBSQLite12 的 SQLiteDataSet/SQLiteCursor/SQLiteConnection、ComCtlsDemo 与几份散件 ⇒ 这一档集中在「数据库 / 单元格取数」这一族场景，不是纸面缺口；⇒ 证人可以钉在那枚真工程上，不用只靠 `.bas` 夹具。结构性那一半：`check_variant_i8_coverage.ps1` 那张闭合名单要不要从「VT_I8 一档 × 每表」扩成「每档 × 每张表」的覆盖面（§B141 已经撞过一次，Decimal 这一撞是第二次）。
+- **【2026-10-11 第三十三刀之后又补了三轮临时探针：这一格的口径已经量出来了，不用猜】**（探针是往 `detail/vb6rtl_format_extract.inc` 那张表里插一条带自述的 `VT_DECIMAL` 臂，跑完**已整文件还原**到 HEAD（md5 `5a8335b8b70b`，`git diff` 0 行）并重建了 C3.exe，`check_rtl_embedded` 回到 125/125；日志在 `.build/b1011_probe_run/report.txt`）。**① DECIMAL 本体是好的**：两架构读出的字段逐条对 —— `CDec(5)` 给 `scale=0 sign=0x00 hi=0 lo=5 mid=0`，`CDec("1.25")` 给 `scale=2 lo=125`；x86 那台 `pdecVal` 也不是野指针（`00C89C78` 那类堆地址，提根出来就是上面那五个字段）⇒ 「写侧坏了」这条**正式结案**。**② `VariantChangeType(VT_DECIMAL → VT_BSTR)` 在 scale=0 这一格交空串**：hr=S_OK、vt=8、**len=0**；另一枚 `CDec("1.25")`（它的 scale=2）则交 len=4 的 "1.25"。原地（src==dst）与异地（src≠dst）**两条都红、形状一致** ⇒ 不是别名的问题。所以 `CStr(Decimal)` / 无格式串的 `Format` **不能只靠这一条**；整数型 Decimal（scale=0，也就是 VBFlexGrid 那句 `RowID = CDec(0)`）必须自己拼数字（96 位量 + scale 插小数点，`vb6_CStrLongLong` 那一族就是同形的先例）。**③ `VarDecToR8` / `VarDecToString` / `VarDecToI4` 在这套工具链里够不着**：SDK x64 的 `oleaut32.lib` 按字面 grep —— `VarDecFromR8` 2 处、`VariantChangeType` 有，而这三枚 **0 处**；再用 `ctypes.windll.oleaut32` 按名字取也是 False（`VarDecFromR8` True）⇒ 不是 import lib 漏了，是本机 dll 不按名字导出这一族（多半只按序数）。⇒ 上面那个口径问题的一半直接被消除：**「各表手换 `VarDec*`」这一路出局**，能用的 OLE 出口只有 `VariantChangeType`；而它在**数值档**（→R8/→I4/→I8/→BOOL）面对 scale=0 可靠不可靠**还没量**，这一问留给开工第一发。**④ 顺带一条工具事实**：SDK 的 `tagDEC` 低 64 位联合成员叫 **`lo64`**（不是 .NET 那套的 `loVal`）；写成 `loVal` 在 x86 是 C2039「不是 "tagDEC" 的成员」，而 x64 那台先编过了（那一行住在 `#else` 臂里，本机又是先跑 x64）⇒ 又一条「门只测默认架构，布局/ABI 类刀子必须本机 x86 真编译」的实物
+- **【2026-10-11 同日第四轮探针：上面那条的 ①② 两句作废，根因是一个字节】**（探针是在同一枚 `DECIMAL(5)` 上做 A/B：一枚照 `vb6_CDec` 整数臂的写法**手填**字段，另一枚交给 `VarDecFromStr(L"5")`，然后把两者的 16 自节逐个打印出来对）。**唯一的差异在第一个字节**：`VarDecFromStr` 的那枚是 `0E 00 00 00 00 00 00 00 05 00 ...`，手填的那枚是 `00 00 00 00 00 00 00 00 05 00 ...` —— 也就是 **`DECIMAL.wReserved` 这两字节其实是 oleaut32 自己的 vt 标签（它写 14 = VT_DECIMAL）**，而 `vb6_CDec` 的手填路径把它留成 0。**一旦把这一枚补成 14，两枚就逐字节相同，而且 `VariantChangeType` 的答案从「S_OK 但给 0 / 给空串」变成正确的 `d=5` 与 `len=1`（x64 实测，日志 `.build/b1023_run/report.txt`）**。⇒ **上面 ② 那句「VariantChangeType 在 scale=0 这格交空串」是错的**：不是 oleaut32 的毛病，是我们交出去的 DECIMAL 根本没被它认；`CDec("1.25")` 之所以对，是因为那一档走的是 `VarDecFromStr`，14 是 OLE 自己写的。⇒ **上面 ① 那句「写侧无罪」也要改写**：写侧确实有罪，但罪名不是「字段填错 / 所有权」，而是**少写了 `wReserved` 这一枚 vt 标签**（它的字段值一直是对的：scale/sign/Hi32/Lo32/Mid32 逐条对得上）。**修法因此变小了一半**：① `vb6_CDec` 的整数档与 `VarDecFromR8` 失败时的手填兜底要补这一枚（x64 是内联匿名 struct 的 `wReserved1`、x86 是 `DECIMAL.wReserved`，两份布局各写一处，形状与现在那几行字段赋值同形）；②读表那 9 处照 census 补，而且**不必再自己拼十进制数字**（①修好之后 **x64 实测** →BSTR 与 →R8 都对，可以统一走它；x86 那台还欠一发，见下面那句）。**本轮剩下的一个未量**：x86 那台这一轮打印出 7.6e6 那一类不成形的数（手填与 `VarDecFromStr` 两枚给同一个错答案）—— 这是**探针自己在 x86 的读法问题**（不是产品的，因为它们的字节打印已逐字相同），下一刀不再用打印定性，直接用行为判据（`CStr`/`CLng`/`CDbl` 三条针两台各自对）。探针全部还原：该 `.inc` 回到 HEAD（bytes 3919），C3.exe 重建后 `check_rtl_embedded` 125/125，两台的产品读数回到第三十三刀落地版（tn=Decimal / isnum=True / CStr 与 Format 两台皆空）。
+
+### B141 `CDec` 打在整数上两架构都是空串，而这一刀的探针顺手量出 `CLng(VarPtr(x))` 在 x64 报 6 **是正解**（2026-10-11 量；**第一格已出一半**（`vb6_TypeName` / `vb6_IsNumeric` 两档 = 第三十三刀 `9a6b7a56`，Format 那臂回退、剩余 9 处读表另立 §B142）；第一格是缺陷、第二格是防误修的读数）
+
+- **`CDec` 那一格**：探针同一支里 `Len(CStr(CDec(vp)))` 在 **x64 与 x86 都读 0** ⇒ 不是 §B138 那一档的漏答（那条已在账 #305 收口时把 `vb6_CDec` **写进 exempt**，理由就落在哨兵里），是 `CDec(整数)` 本身交出来的东西`CStr` 不动。开工前先量清是哪一段：`vb6_CDec` 造的那枚 DECIMAL 的 scale/sign/Lo32 三个字段，还是 `vb6_Format`/`CStr` 对 VT_DECIMAL 的读法（`vb6rtl_misc.c:276-281` 那段注释写着 x86 的 DECIMAL 走指针形式 —— 两架构两份布局，正是 §B99② 那族的地形）。**【2026-10-11 量完，读的是源码不是推的】断点在「往外读」那一侧**：`vb6_CStr` 只是 `vb6_Format` 的薄壳（`vb6rtl_conv.c:233-235`），而 `grep -rn DECIMAL src/rtl`（连 `vb6_vtDecimal` 一起数）的全部落点是 `vb6rtl.c:366/415`（两枚按指针读的取数）+ `vb6rtl_com.c:329/460`（往 COM 打包）+ `vb6rtl_misc.c:272/275/316`（`vb6_CDec` 自己）+ `vb6rtl_variant.h:29`（枚举那一格）—— **`vb6rtl_format.c` 一个都没有** ⇒ Format/CStr 那张表上压根没有 Decimal 这一档，两架构都落 default ⇒ 空串。同一枚值 `TypeName` 也答 "Variant"（账 #305 那张 13 档的表里没有 Decimal —— 见 `scripts/check_variant_i8_coverage.ps1` 的 must 名单）。⇒ 要补的是**往外读的那两档**（`vb6_Format` 的 Decimal + `vb6_TypeName` 的 Decimal），不是 `vb6_CDec` 的字段填充；两份布局那条警告照旧有效（x86 走 `pdecVal` 指针、x64 内联），补的时候两条臂都要问。【2026-10-11 落点量准】上面那句「`vb6rtl_format.c` 一个都没有」要精确一层：`vb6_Format` 的函数体在 `vb6rtl_format.c:231`，而那张按类型分诊的表住在 **`src/rtl/core/vb6rtl/detail/vb6rtl_format_extract.inc:20`**（六个 `.inc` 在函数体内被 `#include`，非独立编译单元 —— 所以只 grep `.c` 会看不见这张表）。它现有 **12 档**（Empty/Null/Integer/Long/Double/Single/**VT_I8**/Byte/Currency/Date/BSTR/Boolean），`default:` 一律交空串 ⇒ Decimal 就落在这一格。**同一张表上已有这一族的先例**：`detail/vb6rtl_format_extract.inc:40-42` 那条 `case (vb6_vartype)VT_I8:` 正是 Task #44 补的，形状是「无格式串 ⇒ 走精确十进制出口（`vb6_CStrLongLong`），带格式串才转 double 进通用数值分支」⇒ Decimal 那一档照这个形状写（精确那侧可用 `VarDecToString` 或 `VarDecToR8`，取哪一条要按 VB6 的 `CStr(Decimal)` 口径先量）。两架构两份布局由既有的 `vb6_VARIANT_DECVAL(...)` 宏吃（`vb6rtl_misc.c` 里 `vb6_CDec` 自己就用它写、x86 那半是 `CoTaskMemAlloc` 的指针形），读的时候同一个宏。⇒ 下一刀的三个落点定了：① 那张 `.inc` 表补 Decimal 档（两条臂）② `vb6_TypeName`（`vb6rtl_conv.c:387` 那张表）补 "Decimal" ③ 判据两头：`CStr(CDec(n))` 非空 + 值逐字对，`TypeName(CDec(n))="Decimal"`；并顺手问一句`check_variant_i8_coverage.ps1` 那张闭合名单要不要从「VT_I8 一档」扩成「每档 × 每张表」的覆盖面（§B141 之后每一档都会再撞一次）。【同一天补两句读数】**写侧是好的**：`vb6rtl_misc.c:271-331` 的 `vb6_CDec` 四档都答（Integer/Long/Byte 手填字段、Single/Double/Currency 走 `VarDecFromR8`、**BSTR 走 `VarDecFromStr`**、Decimal 直通），所以「空串」这个罪确实只在读侧。**真暴露面也量完了**：语料里 `CDec` 有 4 处，全在 VBFlexGrid —— `VBFlexGrid.ctl:9613` 的 `RowID = CDec(0)`（属性把 Decimal 交给调用方）、`:7740/7757` 的 `VntArr(...) = CDec(Buffer)`（ExportToArray 那族把单元格文本打成 Decimal 塞进 Variant 数组）、`Common.bas:613`；⇒ 下一刀的证人可以钉在那枚真工程上（VBFlexGridDemo 本来就在门禁里），不用只靠 `.bas` 夹具。
+- **`CLng(VarPtr(x))` 报 6 不是缺陷，别顺手修**：x64 上那枚地址是 12 位十进制、超出 Long 范围，VB6 对越界转换就是错误 6 Overflow ⇒ 探针里这一行**刻意放在最后**（它会把进程终止，前面五条针先打出来），夹具里也刻意**没有**这一行。记一笔是因为它长得太像回归了：`rc=6` + 半截输出，与 §B140 那两枚「被看门狗杀掉」的工件同一形状 —— 分辨法仍是看 `.err` 与最后一条针。
+- **【2026-10-11 第三十三刀，账 #305】上面那句「要补的是往外读的那两档」只出了一档半，范围按读数收窄**：`vb6_TypeName` 补 `case vb6_vtDecimal:` ⇒ "Decimal"（`vb6rtl_conv.c:405`），`vb6_IsNumeric` 把 Decimal 折进那一族返回真值的组（`:356`，与 §B138 尾巴那批 `VT_I8` 同一条口径、同一张表）。**Format 那一臂刻意没发**：把它补上再跑，读数仍然不对（x64 对 `CDec(5)` 仍空、对 `CDec("1.25")` 答 "1.25"；x86 那台读出的是 15643776 那一类堆地址形状）⇒ 单补那张表不成立，臂已回退（`detail/vb6rtl_format_extract.inc` 本刀零改动，候选块与两台读数留在 `.build/b990_format_arm_candidate.inc`）。**判据两头今天只钉得住两条**：`$boxNeedles` 加 `VB-dec-tn=Decimal` / `VB-dec-isnum=True`，x64/x86 两台各自 30/30 全中；CI 上补档前那台（head `e51fe008`）同一夹具这两条都缺 ⇒ 负控成立。`CStr`/`Format` 两条读数照打但**不进针面**（落地版两台都打空 —— 那张表里 Decimal 这一格今天还是没有）。**【本刀的新读数：把「罪在写侧/所有权」这个推论收回】**临时探针（`.build/b997_dec/probe.bas`，不进仓）里 `CDec(5)` / `CDec("1.25")` / `CDec(2.5)` 之后 `VarType` 恒答 14、`TypeName` / `IsNumeric` 答对，而 **`CLng` / `CDbl` / `CInt` 在两台（本机新编 + CI 补档前）×两架构（x64/x86）全读 0** —— 发码一看就明白：这三条发成 `vb6_CLngV` / `vb6_CDblV` / `vb6_CIntV`（`vb6rtl_builtin.h:116-118`），三枚都是薄壳，一律转调 `vb6_VariantToDouble`（`vb6rtl.c:309`），而那张 `switch (v.vt)` 没有 Decimal 档 ⇒ `default: return 0.0`。所以那个 0 是**又一张读表没答**，不是 DECIMAL 本体坏了 —— 写侧至今没有任何针对它的实测证据（`vb6_CDec` 四档的形状照旧成立）。按 `scripts/check_variant_i8_coverage.ps1` 那张站名单复算 Decimal 的覆盖面：**10 处 vt 表里只有 2 处答**（本刀这两处），其余 8 处 —— `vb6_VariantToLong`(`vb6rtl.c:246`) / `ToLongPtr`(`:264`) / `ToBool`(`:287`) / `ToDouble`(`:308`)、`vb6_ComPackVariant`(`vb6rtl_com.c:554`)、`memVariantToI4`(`vb6forms_memberobj.c:257`)、`vb6_ho_variantToLong`(`uc_hostmodel.c:183`) / `ToDouble`(`:194`) —— 加上那张 Format 分诊表（`detail/vb6rtl_format_extract.inc`，`VT_DECIMAL` 出现 **0 次**、12 档里根本没这一格）一起 = **§B142** 的范围。源码那一跑：门 #505（run 38094605541、head 9a6b7a56、attempt 1） = 12 条里 11 绿 + 唯一红是这道形状门；红的那 **1 行** = `tests/test_variant_boxing.bas` 自己（本刀给这枚夹具加了 9 行语句，源文本进了产物 bytes 10000→11333；源注释不进产物，这一点在 out.c 里 grep 过两种编码都是 0 命中），其余 **399 行逐字节未动**、缺席 0 / 多出 0、rc 两侧全 0 ⇒ RTL 的这两档确实不动发码。登记取自 CI 自己那份（`github/ci/emit-manifest` 的 `e0758f7d`，注脚 head=9a6b7a56）= 那一笔 `59e72197`，登记那一跑 = 门 #506（run 38095497701、head 59e72197、attempt 1）= **12 条全 completed/success、非绿 0**，其中 `Emit manifest (shape oracle)` 这一跑就是绿的 ⇒ 登记那一行与 CI 那台自己的复算对齐。改 RTL ⇒ `src/driver/c3rtl.rc` 一并 touch，`check_rtl_embedded` 125/125 逐字节相同（exe sha `7633844cda3d`）。
+
+### B140 `ctrldlg_probe` 撞满 `Invoke-TestExe` 的 60s 全局跑步预算 —— 具名的逐例预算已收成一处权威（账 #304 / 第三十一刀，提交 `3f0b1823` + 入账 `b306ce9e`，2026-10-11 量并落地，**门 #495 全绿**；口径仍是 §B133 那条待办写死的两条规矩：不放宽判据、不把全局 60s 抬大）
+
+- **两次现场，同一形状**：门 #484（attempt 1，`[VBP] ctrldlg_probe ... FAIL (run error)`）与门 #491（`Tests (vbp #1)`，同一格）。
+  两次都是那片工件里 `DlApp.out` 停在 `DL10`、**`DlApp.err` 不存在**（`Invoke-TestExe` 正常退是两枚都写，超时那一支只在 stderr 非空时才写）；
+  而 #484 attempt 2、#490 的同一枚都是 15 行齐（`DL11..DL14` + `CTRLDLG-DONE`）⇒ 判据内容一条没少，缺的是墙钟余量。
+- **为什么它天生吃余量**：`DL11` 那一格是**真弹模态框**（`CommonDialog` / `MsgBox` 那一路），本机空载 2.8s、
+  8 枚忙等压 4 vCPU 下 13.8 / 31.4 / 34.5s（§B133 量过）⇒ 同一枚用例的墙钟能被负载放大 ×11，而预算是全局那一个 `-RunTimeoutSec = 60`。
+- **该办的事（口径不用再拍，§B133 那条待办已经写死）**：给这一枚（以及以后任何「真弹框」的）一条**具名逐例**预算 ——
+  今天 `Invoke-TestExe` 只有全局那一个出口，所以缺的是「按用例给一个数」这条路，不是把 60 抬大；
+  **也不许去放宽判据**（`DL11..DL14` 四条读数一条不能少 —— 少了就等于把真模态那一格判没了）。
+  开工时顺带问一句：这条逐例预算登记在**哪**（runner 里的具名表 = 又一处「每个用例都有的东西」，
+  要一起进 census/哨兵，别在夹具里各写各的 —— §B139 那张表就是这么长出来的）。
+- **落地（一处权威 × 一张具名表 × 两个消费点）**：`tests/run_tests.ps1` 里 `$RunBudgetSec` 是唯一的表（今天一枚：`'DlApp' = 150`，覆盖 `ctrldlg` / `ctrldlg_probe` 两片 × x64/x86），`Get-RunBudgetSec` 是唯一的出口（表里没有就回落全局那一个数）。两条等待路都问它：串行路 `Invoke-TestExe` 用 `$budgetSec`，并行路 `Invoke-BasSetParallel` 在**进 runspace 之前**逐枚把数盖在 `$it.BudgetMs` 上（runspace 够不到脚本函数 —— 同一条规则在上面的读数逻辑里已经踩过一次）。**全局 `[int]$RunTimeoutSec = 60` 一字未动，`DL11..DL14` 四条读数一条未减**。键 = **产物的名**（串行路 `-Name $baseName` 与并行路的源文件基名同一个口径，两边都来自 §B166 收成那一处的 `Resolve-VbpExeBase`）⇒ 同一枚夹具在两条路上必然问到同一个数。
+- **判据 = 配对读数，两头都看得见**（本机、**没有**合成负载 —— 当时另有写者的 C3.exe 在跑，不抢 CPU）：`DlApp.exe` 带 `C3_CDPROBE=1` 空载实测 1.2 / 2.1 / 1.85 / 1.5s；scratch 拷贝里只插一行 `[BUDGET]` 打印，其余不动 ⇒ ① 全局压到 **0s** 而表里 `'DlApp' = 150`：解析成 150，`ctrldlg_probe` **3/3 PASS**；② 同一个全局、只把键改成一个不存在的名字（就是本节最怕的「静默按全局走 = 只接了一半」）：解析成 **1**，**3/3 被看门狗杀掉**，`.out` 停在 `DL10`/`DL13` 且进程 `alive` —— 与门 #484 / #491 那片工件同形。⚠ 顺带钉一条坑：`-RunTimeoutSec 0` **不是**这条路上可用的负控（同一份拷贝两种读数：PASS 与被杀都出现过，纯墙钟余量），要拿负控就把全局压成非零、并让夹具本身跑得比它久（`.build/b916_pairing` / `b914_budget_trace`）。
+- **第 52 道哨兵 `scripts/check_run_budget.ps1`（B1..B6，注册名 `run_budget`）**：B1 权威只一处（解析函数恰被提 3 次 = 定义 + 两个消费点、表名恰 3 次 ⇒ 绕过解析函数直接读表就变数）；B2 每个键必须在**表外**也出现过一次（拼错的键不会报错、只会静默按全局走）；B3 全局那一句必须逐字还在（抬全局 = 本账禁止的那种「修红」）；B4 两个等待点的新形状各恰 1 处、旧的「就地乘全局」两种形状必须 0 处；B5 预算落在 (60, 600]（不大于全局 = 静默收紧，超过 600 会把一整片的墙钟吃掉）；B6 表的适用面非空。八发假改动 + baseline 见 `.build/b911_negctl_report.txt`：**六条规则各被一发打红、baseline rc=0、零误报**。护栏：52 道 [STATIC] 全 rc=0（284s），`check_static_sentinel_registration` 同绿（本刀不改 `src/`，形状门该按 400 行全同过去）。
+- **门 #495（run 38085195428、head `b306ce9e`、attempt 1）= 12 条全 completed/success、非绿 0**。两条与本刀直接相关的读数：`Emit manifest (shape oracle)` 绿 = **400 行一字未动**，正是「本刀不改 `src/`」那个预期；`Tests (vbp #1)`~`#4` 四条绿 = 承载 `ctrldlg` / `ctrldlg_probe` 的那几片本轮没红 —— **这不新增证据**，那两条红本来就是按负载抖的（门 #484 / #491），真判据仍是本机那一对配对读数（表里有键 3/3 过、键拼错 3/3 被杀）。
+
+### B133 OLE 容器 / Picture 那两条单位换算路没有行为面（账 #301，**Picture 那一格已出 —— 第二十六刀，2026-10-10，门 #483（源码那一跑）+ 门 #484 attempt 2（登记那一跑，12/12）；olecon 与 ax_site_ext 两格仍开着**）
+
+并表 §B129 时给搬掉的三处各找一枚判据，结果是三处都没有**行为**读数可拿 —— 形状钉得住，行为钉不住：
+
+- `vb6forms_olecon.c`：`tests/olecon/OleCon.vbp` 在 `tests/run_tests.ps1:5138-5139` 是 **`Test-VbpBuild`**（两架构都只编不跑）
+  ⇒ 它只证"这族 RTL 编得过、链得上"，证不了 `SetExtent`（px→hm 交出去那份尺寸）与 `olcSizeToObject`（hm→px 交给
+  `SetWindowPos` 那份尺寸）这两个决定。本仓没有"运行期真被嵌进容器"的夹具 —— 要补就得有一枚在跑起来的 UI 里被当对象装载的
+  控件，而且 `ScaleMode` 得非默认才看得出单位走错。
+- `vb6forms_picture_prop.c`：那条折算住在**非 Stretch** 那一支（`VB6_Stretch` 为 0 时按图的天然尺寸画）。
+  全 `tests/` 只有三枚 `VB.Image` 盒（`.build/b505_picture_face.py` 数出来的）：`resload/ResAlpha.frm` 与
+  `VbQRCodegen-master/test/Form1.frm` 都写 `Stretch = -1`（走的是另一支），`pbsub/PbForm.frm` 那枚 `Img1`
+  **从来没装过图** ⇒ `GetPropW(hwnd, L"VB6_IPicture")` 那一支压根进不去。**非 Stretch + 真装着图 = 0 覆盖**。
+- `axsite/ax_site_ext.c`：DPI 从写死 96 换成真实 DPI ⇒ **本机就是 96 DPI，这条改动在本地永远不会改变读数**；
+  它要的是一枚高 DPI 下的 ActiveX 容器读数（CI 那台的显示缩放没量过，别假设）。
+
+⇒ 三条现在都只靠 R9 那五条调用点 + 三条墓碑托着。这格不是缺陷，是**覆盖缺口**。要补的话优先级：
+olecon（唯一会把尺寸真交给外部对象的一枚）> 非 Stretch 的 Picture（补法很轻：一枚 `Stretch = 0` + 装图 + 读回画出来的宽）>
+`ax_site_ext`（要换显示缩放，本机无手段，先挂着）。
+
+**第二十六刀的落地（把上面优先级里的第二格办掉了）**：`tests/resload/ResAlpha.frm` 长出一枚 `imgN` —— **不写 `Stretch` 行**（= 0 ⇒ 走 `vb6forms_picture_prop.c` 那条按图的天然尺寸画的支路），盒子 96 x 64 px （1440 x 960 缇），装的是 `alpha.png`（48 x 48，左半红 / 右半全透明）。`tChk` 里 GetDC/GetPixel 沿 y=24 扫 x=0..119，问三件事：红像素（`255`）走到哪、非蓝像素走到哪、白底计数。判据 `NS01` 把红段收在 [18,30]（天然宽 ~23），而**盒子边是 95** —— 这一格钉的正是"按图的尺寸"与"按盒子的尺寸"两种决定的分界。
+
+- 两架构真跑读数**同号同形**：x64 与 x86 都是 `NS01-NATURAL=True / NS01-RAW red=23 nonblue=23 white=0`，  原有的 `PICSET=True`、`PAINTED=True` 一并保住（`$resAlphaNeedles` 长出两条新针）。
+- **负控（这枚针能红，且红的就是被并表那一处）**：把唯一权威 `vb6_HimetricToPxOnDc` 的除数从 `2540` 改成 `254`  （10 倍单位错，正是并表之后只有那一处能犯的错误），在 HEAD 归档出来的源码副本 `.build/b569neg_k26` 里冷编一台   C3.exe，用它重编**同一份夹具** ⇒ `NS01-NATURAL=False / NS01-RAW red=95 nonblue=95 white=0`。  同一份夹具、同一台机器、只有编译器不同 ⇒ 这枚针确实吃那处换算。
+- **一条读法教训（第一版探针把自己骗了）**：先前扫的是"任何非背景色的最后一格"，两台都读回 95 = 盒子边，  看着像"非 Stretch 那一支根本没生效"。真因是画之前还有一步**白底填满整盒**（`Render` 前那句 `FillRect`），  于是"非蓝"数到的是填充而不是图 ⇒ 证人必须认**图自己的颜色**（红），并把白底计数单独打出来当旁证  （`white=0` ⇒ 这一支走的是 RGBA `AlphaBlend`，压根没进白底那条）。**"覆盖了"与"看对了"是两件事**，  判据里带一条 RAW 读数才看得见这种自我欺骗。
+
+**剩下的两格照旧开着**：`vb6forms_olecon.c`（`tests/olecon/OleCon.vbp` 在 `tests/run_tests.ps1:5138-5139` 是 `Test-VbpBuild` ⇒ 只编不跑，要真读数得有一枚被当对象装进跑起来的容器的控件）与 `ax_site_ext.c`（DPI 从写死 96 换成真实 DPI ⇒ 本机就是 96，本地永远不会变读数）。两处现在仍由哨兵 R9 的调用点 + 墓碑托着。
+- **门（第二十六刀）**：源码那一跑 = **#483**（run 38051241817、head `238563d9`、attempt 1）= 12 条 check-run 全 completed、11 绿 + 唯一红 `Emit manifest (shape oracle)` —— 夹具文本进了产物而那一行还没按 CI 的读数重登记，形状门按设计说话；登记那一跑 = **#484**（run 38052053772、head `7a5ca1c2`）attempt 1 = 11 绿 + 唯一红 `Tests (vbp #1)` 里的 `[VBP] ctrldlg_probe ... FAIL (run error)`，**attempt 2（同一枚 head、只重跑失败那片）= 12/12 全绿、非绿 0**。`Emit manifest (shape oracle)` 在 #484 的 attempt 1 就是绿的 ⇒ 第二十六刀那一行的新哈希被 CI 那台独立复算证实。
+- **那一发红的归因（走的是「GUI / 计数类红」那套三步，不是「看着像抖」）**：① 两份 CI 工件对形 —— #483 的 `DlApp.out` 交满 15 行（`DL1..DL14` + `CTRLDLG-DONE`），#484 那份停在 `DL10` ⇒ 卡住的正是真弹框那一格（`DL11` 之前）；而 483→484 之间 `src/` 逐字相同（那一笔只动清单）。**还有一条更硬的对形（下次这类红先问它，不用读日志）**：#483 那片工件里有 `DlApp.err`、#484 里没有 —— `Invoke-TestExe` 的两条出口不一样：正常跑完是 `.out` 与 `.err` **两枚都写**（`tests/run_tests.ps1:412-413`），而超时那一支只在 stderr 非空时才写 `.err`（`:397-399`，它只把被杀前已经流出的那半截 stdout 落盘）⇒ 「`.out` 只剩前 10 行 + `.err` 不存在」这对着就是**超时现场**，而不是崩溃（崩的那支走到 412 两枚都写）。② 拿 **CI 那台自己编的 `C3.exe`**（工件 `c3-exe`）在本机重编同一份 `tests/ctrldlg/DlApp.vbp`、设 `C3_CDPROBE=1` 真跑：空载 2.8s 交 15 行全对；**8 枚忙等压 4 vCPU**（2 倍超订）连跑三趟 13.8 / 31.4 / 34.5s 仍 15 行全对 ⇒ 这条用例的墙钟能被负载放大 ×11，而预算是全局的 `-RunTimeoutSec = 60`（`tests/run_tests.ps1:23` 那条注释本来就在讲「5s 在并行编译下会误杀」这一族）。③ 只重跑失败那片一次。⇒ 定性 = **判据的墙钟余量**，产品那一头四条读数（DL11 取消报 32755 / DL12 取消不改进数 / DL13 模态循环 ≥30ms / DL14 静默返回）一条没少。待办记在这儿：这枚「会真弹框」的用例若**再**红一次，就给它一条具名的逐例墙钟预算（今天 `Invoke-TestExe` 只吃全局那一个数、没有逐例出口），**别去放宽判据、也别把全局 60s 整个抬大**。
+### B129 himetric↔像素/缇 的折算：4 份文件并成 1 份权威（账 #298，**已出 —— 第二十四刀，2026-10-10，门 #480 全绿**）
+
+第十八刀做 `Object.Width` 那一档时顺带数出来的：那时是 `src/rtl` 里含 `2540` 的**非注释行 = 13 行 / 5 份文件**。
+第二十二刀并掉 `axsite/ax_load.c`（那一处现在只转调 `vb6_TwipsToHimetric`，哨兵另钉一条"只许转调 1 次"守住这个条件），
+**第二十四刀并掉剩下的三处调用点** ⇒ 名单收成 **1 份文件 / 5 行**，全在权威本人 `vb6forms.c` 里：公式档
+`vb6_HimetricToPxOnDc(hm, dpi)`、浮点对 `vb6_HimetricToPxF` / `vb6_PxToHimetricF`、缇档一对
+`vb6_TwipsToHimetric` / `vb6_HimetricToTwips`（屏 DPI 那两枚 `vb6_HimetricToPxX/Y` 是转调，本身不含 2540 ⇒ 不进名单）。
+
+搬掉的三处（从前各写各的，`ax_site_ext.c` 那处还把 DPI 写死成 96 —— 与 #184 修 `vb6_TwipToX` 之前同形，
+当时 VBFlexGridDemo 的网格在 120 DPI 下被缩小 20%）：
+
+- `vb6forms_olecon.c` 7 行 → 0：`olcSizeToObject` 交给 `SetWindowPos` 的宽高改问 `vb6_HimetricToPxX/Y`；
+  两枚 `SetExtent` 那四行把 `* 15L * 2540L / 1440L` 换成 `vb6_TwipsToHimetric(vb6_XToTwipX(px))` 那样的三步转调。
+- `vb6forms_picture_prop.c` 3 行 → 0：两枚 `MulDiv(hm, dpi, 2540)` 换成 `vb6_HimetricToPxOnDc(hm, dpi)`，
+  **刻意继续喂 DC 的 DPI**（不是屏 DPI）—— 图进打印机/虚屏 DC 时要跟着那个 DC 缩，这条口径不属于"屏 DPI 一族"。
+- `axsite/ax_site_ext.c` 1 行 → 0：`TransformCoords` 两向 × 两轴改问浮点对，DPI 从 `vb6_DpiX/Y` 拿。
+
+**并表前先量了四条值面**（不是"看着同形就搬"；扫描脚本 = `.build/b500_olecon_rounding.py`）：
+`picture_prop` 搬走的是同一条公式 ⇒ 构造上同值；`olecon` 的 px→hm 两处 96 DPI 下**逐值相同**（1440/96=15 整除），
+顺带把 `px * 15L * 2540L` 那截 32 位溢出消掉（旧写法从 px 56365 起开始漂）；`olecon` 的 hm→px 一处由"两次截断"
+变成"一次就近"，himetric 1..40000 全扫差值只有 **0 或 +1 px**、从没 ≥2；`ax_site_ext` 那条**本机就是 96 DPI ⇒ 只有形状能证**
+（未定罪那一格改记 §B133，别当已验）。
+
+**顺带修的是这条哨兵自己的盲区**：R2 数"非注释行"时从前只剥每行的 `//`，**块注释的续行**因此被当代码数。
+按跨行剥法（账 #278 第十七刀定的那条）重算第二十二刀那台（`.build/wt_k23neg`）= **12 行 / 4 份**，比当时钉着的 14 行少 2 ——
+`vb6forms_olecon.c` 与 `vb6forms_picture_prop.c` 各有一行 `/* … 2540 … */` 的续行被数了进去。
+⇒ "名单只许往下减"这条纪律一直带着两份注释的水分，读数偏高而没人察觉。
+
+**第二十四刀的落地与读数**：
+- **判据**：R2 名单缩成 1 份/5 行，且那 5 行 + 两枚屏 DPI 包装逐行钉死；新增 **R9** 钉的是**调用点**
+  （olecon 2+4+4、picture_prop 2、ax_site_ext 4）外加三条旧形状墓碑（`MulDiv` / `* 15L *` / `const double k` 各 0 处）——
+  并表之后"这一族有几处换算"只剩一个答案，剩下的问题只有"有没有人把旧写法偷偷搬回来"。
+- **负控** = 第二十二刀那棵树：只报 R2（名单/总数/权威本人）+ R9（五条调用点全 0、三条墓碑非 0）+ R8
+  （那台还没第二十三刀），而 R1/R3/R5/R6/R7 照旧绿 ⇒ 新红是特定的。本树 PASS：
+  `himetric sites 5 in 1 files … callers olc=2+4+4 pp=2 axs=4`。
+- **真跑面 = 一台都不许动**（`vb6forms.c` 是所有夹具都链进去的那一枚，这一刀的护栏因此是"读数逐行相同"而不是"读数变好"）：
+  `ctrlstatusbar` / `sbhm` / `sbfont` 三枚**两架构**共六份 run.out 与第二十三刀那台**逐行相同**（44/44、19/19、7/7，
+  `.build/b506_k24_ab.py`），`resload` 七条针 + `resalpha` 两条针全中，`tests/olecon` **x64 与 x86 都编得过**。
+- **RTL 已 touch `c3rtl.rc` 重编**：`check_rtl_embedded` OK（125 份逐字节相同，exe sha `1876e1efc5ed`）。
+- **形状门那一格：一行都没动，所以本刀没有登记动作**：门 #480（run 38041505334、head `35bac8e2`、attempt 1、12 条 check-run 全 completed/success、非绿 0）里 `Emit manifest (shape oracle)` **同绿** ⇒ 398 行逐行相同，这是"纯 RTL + 注释"那一类刀**预期**的形状（发码文本里没有 RTL，清单自然不动），CI 那台因此独立证实了本机那句"这一刀零发码改动"。
 
 ### B131 `Panels(<数字>).Index` 把整数交给 `wchar_t*` 槽 ⇒ 启动期 AV（账 #300，**已出 —— 第十九刀，2026-10-10，门 #464 全绿 = run 38014099324、head `597bd6d1`、attempt 1、12 job 全 completed/success、非绿 0、wall 10m52s；`Emit manifest (shape oracle)` 同绿 => 那行改写被 CI 独立复算证实，`Tests (vbp #1..#4)` 四片全绿 => sbhm 的两头判据两架构真跑过）
 
@@ -2077,13 +2304,13 @@ COM 侧那张 recognizer（`cgen_util_com.cpp` 里按成员名硬拼出口的那
 
 **判据**：崩的那一行要变成一枚真跑夹具（`Panels(1).Index` 与 `Panels("k").Index` **两头**都要钉，
 只钉一头正是这格能活着发货的原因）；负控 = 改前那台在同一份夹具上 AV / 无产物。
-**已出（第十九刀，2026-10-10，门待回填）**：数字/键两条各答各的 —— 新出口 `vb6_StatusBar_GetPanelIndex(hwnd, index)`（面板存在就交回自己的 1 基下标，不存在交 0，与 `*ByKey` 那枚的"未找到=0"同一口径），键下标仍走 `*ByKey`；发码侧只把 `index` 那一条的两个参数改成不同名字，三处同步（header 声明 / RTL 定义 / 发码点，各恰好 1 处，哨兵 R5-TRIPLE 钉住）。
+**已出（第十九刀，2026-10-10，门 #464）**：数字/键两条各答各的 —— 新出口 `vb6_StatusBar_GetPanelIndex(hwnd, index)`（面板存在就交回自己的 1 基下标，不存在交 0，与 `*ByKey` 那枚的"未找到=0"同一口径），键下标仍走 `*ByKey`；发码侧只把 `index` 那一条的两个参数改成不同名字，三处同步（header 声明 / RTL 定义 / 发码点，各恰好 1 处，哨兵 R5-TRIPLE 钉住）。
 **读数**（真跑）：夹具 `tests/sbhm` 加 HM06/HM07 两头 —— 新台两架构 `HM06-INDEX-BOTH-FORMS=True`、`HM07-RAW idx9=0`、9 行跑到 `HM-DONE`、rc=0；**负控就是那枚 AV 本身**：BASE 那台跑**同一份**夹具 `rc=0xC0000005`、只打 6 行、停在 HM05（注意：我那个 .bat 里 `if exist (...)` 块内的 `%ERRORLEVEL%` 是解析期展开的，打出来一片假 `RUN_EXIT=0` —— 退出码要用 python 直接起进程才算数，这是 [[c3-build-test-hazards]] 那条 for 循环课的同一形状）。
 **哨兵**：`check_statusbar_panel_hm.ps1` 长出 R5 两头（三处 `sbFinishByKey` 的两个出口名不凸相同 + 新出口三处同步），各自用一处假改动证红（多一处调用点 → R5-PAIRS=4；发码点改名 → R5-TRIPLE 报 `cgen_util_com.cpp got 0`），植完按 md5 还原（`c64f4f0bcf53`，字节级相同）。R1 也加两条产物面（by-index 恰好 2、by-key 恰好 1），负控直接用 BASE 树 + 同一份夹具就红。
 **可复用的一条**：凡是"两个参数理应不同名字"的函数型式（一个答数字下标、一个答键名），**结构性地**查得出来：数调用点 + 要求两个字面量不相等。这一样的针不靠语义、也不靠记忆，改错就红。
 **刻意没接的一格**：越界那一问（`Panels(9).Index`）在 VB6 是错误 9，本刀只交 0 且只钉前缀 —— 与 #209 那族（动态数组越界裸读→AV）的口径是同一个，要动就一起动。
 
-### B130 `CStr(成员对象的数值成员)` 交出空串（账 #299，开着；第十八刀的夹具撞见）
+### B130 `CStr(成员对象的数值成员)` 交出空串（账 #299，**已出 —— 第二十刀 + 第二十一刀（门 #474）+ 第二十五刀（门 #481 = 源码那一跑，门 #482 = 登记那一跑，收掉四条发射路里的第四条）**；第十八刀的夹具撞见）
 
 `tests/sbhm` 的 HM05 一行里两种写法同时问同一枚属性，两台读数是**定论级**的：
 `bare=100`（`"x=" & Panels(2).Width` 走 memberobj 的真出口 `vb6_StatusBar_GetPanelWidth`）而
@@ -2102,6 +2329,137 @@ COM 侧那张 recognizer（`cgen_util_com.cpp` 里按成员名硬拼出口的那
 **顺带量到两条**（都影响刀形）：① `vb6_ComUnpackBSTR`（`vb6com_pack.c:107`）对非 BSTR 的 VARIANT 会走 `VariantChangeType` ⇒ 真 IDispatch 交回 VT_I4 也读得出 "1200"，所以"数值成员被按字符串取"那一族（#88/#229）**在对象头立起来之后不再是空值的原因**，别顺手去改那一段；② `memColl_Invoke` 的 `Item` 按 Key 那一支的名单里**没有 PANELS**（`else idx = 0`）⇒ 集合对象一旦立起来，`Panels("k")` 会答 Nothing；这是同一条刀要顺手补的第二格，不是新账。
 **刀形（按读数收窄，一处权威 = memberobj 那枚真 IDispatch，第十五刀撤 Data 的同一口径）**：RTL 三格 —— 补 `vb6_StatusBar_Panels(hwnd)` 入口、`Item` 按 Key 补 PANELS 一档、`VB6_MEMD_INDEX` 从 inline `p->index` 改成问 `vb6_StatusBar_GetPanelIndex`（#300 那格留下的**第三份答案**，一起撤）；发码侧两处拦子各补 panels 一条，并且 `statusBarNameOfExpr` 必须认新头 `vb6_ComCallObject(vb6_StatusBar_Panels((void*)vb6_hwnd_X), L"Item", …)` —— 不认就会把链式那 8 条与 `Panels.Add/Remove` 的直译一起打回晚绑定，那是**行为改动**而不是收口，负控要能把它照出来。
 
+**第二十刀已出（落的是一格，量出来的剩两格）**：负控与判据都取同一份夹具、两台编译器 ——
+BASE（dev 头 `4e9d05ff`，不含本刀）在 `For Each` 那一形 **一次都没进循环**
+（`HM08=False`、`fe=0 idx=0 txt=0`），NEW（合完 dev + 本刀）x64 与 x86 两台都是
+`HM08=True`、`fe=3 idx=6 txt=5`（下标之和 6、文本长度之和 5 = "A"+"BB"+"SP"），
+而 HM01..HM07 两台完全一致 ⇒ 这一格是真红的变绿，也不是顺手把邻居推动。
+**没落的三形与它的题面**：产物里 `vb6_ComGetObjectProp(vb6_hwnd_SB1, L"Panels")` 还剩 **8 处**
+（按产物行数的账：HM05 的 CStr 那一路 ×1、`CLng(…)` 三行 ×3、`Set po =` 两形 ×2、
+模块级 `mPo =` ×1、`With` ×1 = 8），
+它们的头是 `cgen_setlet_set_rhs.inc` 那条与 `cgen_with.cpp` 里三处
+`comObjectRefFromCallExpr` 直接拼的，**不经过** `resolveComValue` / `resolveComMarkerForPack`
+这两个拦子 ⇒ 下一刀不许再补第四个拦子，题面是把"集合本体怎么立"收成一处出口，让四条发射路都问它。
+**病名第二次改口（这次是加一格，不是换一格）**：同一枚 `Panels(i).Width` 在
+`For Each` 的对象那一形交回 **157**，而 `CLng(Panels(i).Width)`（实参那一路）交回 **0**
+⇒ #299 至少有两格：(a) 集合对象没立起来（本刀落了），(b) **实参那一步把接收者重解了一遍**
+（现在主要剩这一格，它才是最初"CStr 打空"看到的那张脸）。RAW 行把两个数一起打出来，
+就是为了下一次改 (b) 时能当场看见 157 与 0 合上。
+**这条刀踩过的坑（已写成契约）**：把 `panels` 拦成 `vb6_StatusBar_Panels(...)` 之后，
+"什么算集合对象表达式"这张名单在仓里住**三处**（`cgen_expr_member_generic_access.inc` 两处 +
+`cgen_state.inc` 的 `isControlCollectionExpr` 一处），外加 `statusBarNameOfExpr` 的新头 ——
+只补拦子、名单漏一处的后果是实测的：`Panels.Count = 3` 发成
+`vb6_StatusBar_Panels((void*)vb6_hwnd_SB1).Count` ⇒ cl C2224（void* 上点成员）。
+哨兵 `check_statusbar_panel_hm.ps1` 因此长出 **R6** 六格（产物 obj=1 / ForEach=1 /
+三处名单 2+1+1 / 拦子两处 / RTL 入口+声明+Item 按 Key 各 1 / inline `p->index` 6 处只许降），
+负控不是假针：拿 dev 头那棵树整棵跑一遍，R6 十一条全红而 R1..R5 仍绿。
+**发码清单（这一行现在又是旧的，且是**已知**的旧）**：夹具体改了 ⇒ `tests/sbhm/SbHm.vbp`
+那一行必须按下一次过门时 CI 那台的读数重新登记。本轮顺带把那行**先前**的旧账更正过一笔
+（`4e9d05ff`，原委：他们那批 33 行的登记是在**还没有这枚夹具**的树上算的 —— CI `d206761f`
+那份清单压根没有 tests/sbhm 这一行 —— PR 合并时这一行从我们这边继承了第十九刀之前的哈希；
+逐行对过 CI 两份清单与 dev 的登记，除这一行外 398 行全部相同）。**本刀带 `[skip ci]` 推，
+没有过门**：谁下一次跑 GA，先按 §B73 的口径把这一行登记掉再判形状红。
+
+**第二十一刀已出（落的正是上一轮写下的那道题面：三条发射路改问同一处出口）**：
+- **动了什么**：`src/backend/detail/util/cgen_state.inc` 长出唯一出口 `memberCollectionObjectExpr(hostExpr, memberName)` —— 六族成员集合的创建式（Nodes / Buttons / Panels / ListImages / ListItems / ColumnHeaders）从此只在这一处写。宿主槽按各族自己的事实走：ImageList 无窗口 ⇒ `vb6_com_X` 是实例指针；TreeView / Toolbar / StatusBar 是真窗口 ⇒ `vb6_hwnd_X`；ListView 用 `listViewHwndExprOf`（它还认 With 槽里那枚裸 HWND 变量）；跨窗体 TreeView 查 `externalTreeViewAccs_`。出口只交**串**：三条路的返回语义不一样（值语境要改 `lastExpr_` 与 `isComMarker_`、对象语境直接 return、默认成员下标那一路拼完还得再套一层 Item），语义留在调用点。三份抄本一起撤：`resolveComValue` 里四段（buttons / listitems+columnheaders / nodes / listimages）再加 panels 那一段、`resolveComMarkerForPack` 里五段、`cgen_expr_call_com_bind.inc` 那段四族 if/else。行数 +14/-132、+7/-38、+44/0，`cgen_util_com.cpp` 51906 到 46587 字节。
+- **读数**：夹具 HM09..HM12 从「只打 RAW」升成判据，NEW 的 x64 与 x86 两台四形全 True；A/B 拿第二十刀那枚 exe 编跑同一份夹具，四形全 False 而且 want=0（`HM08-RAW ... want=` 那一格当时留的就是这个数）。HM01..HM08 两台与第二十刀一字不差 ⇒ 不是把邻居推动的。
+- **病名第三次改口（这次是撤掉一格）**：上一轮写的 (b)「实参那一步把接收者重解了一遍」**不是第二个机制**。HM12 钉的正是那张脸（`CStr(Panels(1).Width)` 与 `CLng(Panels(2).Width)`），出口收口之后它直接从空串与 0 变成 57 与 100 —— 与 (a) 同因：默认成员下标那一路的表也缺 panels 这一行。⇒ 本账到此只剩**单位**那一格，它归 §B41 第二格（getter 该交排版后的宽），与 #298/§B129 合批。
+- **零行为改动的证据**：撤掉最后一份重复（com_bind 那四族）前后，7 份工程 `--emit-c` 逐字节相同（TbApp / TvfApp / CtrlImageList / C29ImgObj / C29ListView / SbEvent / SbHm，快照 `.build/b422before` 与 `.build/b423after`）；相对 dev 头，产物变的只有状态条那几行 —— 变的正是本刀要修的那张脸。
+- **哨兵 R6 跟着改形**（`check_statusbar_panel_hm.ps1`）：从「三处名单 + 两处拦子」改成钉出口 —— 定义恰好 1 处且住在 `cgen_state.inc` / 问出口 2+1（值语境与对象语境、下标 binder）/ 认前缀那三张名单 2+1+1（这一张不改：它是第二十一刀的前提而不是收口对象，漏一处就是实测过的 C2224）/ **创建式字面量的代码行 census**：六族 2+1+2+2+2+2 = 11，且只许出现在 `cgen_state.inc`，别处出现即 `R6-ONE-MAP-SITE`（这一格防的就是「表又被抄走一遍」，#234 拿 DC 抄两遍、#235 画笔色两份存储同一族）/ 产物里 `vb6_ComGetObjectProp(vb6_hwnd_StatusBar1, L"Panels")` = 0（墓碑）/ inline `p->index` 小于等于 6 只许降。PASS 行同步长出 onemap=11。
+- **负控**：拿第二十刀**之前**那棵树（`.build/wt_mf @ 4e9d05ff`）整棵跑新哨兵 —— R6 全族红（`R6-ONE-MAP-SITE` 同时点到 `cgen_util_com.cpp` 与 `cgen_expr_call_com_bind.inc` = 那张表从前真住两处；出口定义 0；`R6-THIRD-ANSWER` 读数 7 大于 6），两条 census 防空转的守卫同时红，而 R1..R5 全绿 ⇒ 红得对症，也不是把旧账一起算进这一刀。
+- **清单那一行仍然欠**（`tests/sbhm/SbHm.vbp`）：夹具体与产物都改了，要按过门那台的读数登记。第二十刀带的是 `[skip ci]`、没门；本刀是源码级改动 ⇒ **不带 skip ci**，同一趟把第二十刀那半一起过门。门绿之后按 §B73 的口径登记，再判形状红。
+
+- **门 #471（head `3dc0f6a3`、run 38025387585、attempt 1）= 12 job 里 11 绿、唯一红是 `Emit manifest (shape oracle)`**，而那一红是**已知**的：`tests/sbhm/SbHm.vbp` 那一行记的还是第二十刀之前的产物（第二十刀 + 第二十一刀都改了这枚夹具与它的产物）。同一趟 CI 已把这颗头的新清单发到 `ci/emit-manifest`（`26b7b81b`，`ci: emit manifest head=3dc0f6a3`），**登记取的就是这台 CI 的读数**（§B97：本机冷编那台与 CI 那台的 `bytes/sha256` 会因 include 定序漂，所以只认 CI 那一行）—— `bytes` 13142 到 18905，其余 **398 行逐行相同**（`compare_emit_manifest.ps1` 对本机复算：399/399 相同、哈希不同 0、缺席 0、多出 0；`check_manifest_coverage.ps1`：inputs=399 / registered=399，两套集合相等）。登记那一笔**不带 skip ci**：它要让形状门自己再复算一遍，才算这一批过门。
+
+**两趟门一起补上（第二十刀原带 `[skip ci]`、第二十一刀那趟形状门按预期红）**：**门 #474 = run 38026139882、head `c81bb3d5`、attempt 1、12 job 全 completed/success、非绿 0**，其中 `Emit manifest (shape oracle)` 那一跑**绿** ⇒ 登记的那一行被 CI 那台独立复算证实，`Tests (vbp #1..#4)` 四片全绿 ⇒ `tests/sbhm` 的 HM01..HM12 两架构真跑过 —— 第二十刀与第二十一刀第一次同时过门。同批 `#471`（head `3dc0f6a3`）是**产清单的那一趟**：11 绿 + 形状门红，红因就是当时还没登记的那一行，不是回归。**这条账到此收口**：`vb6_ComGetObjectProp(<HWND>, L"Panels")` 在产物里归零、六形两头对上；剩下的只有一格，且它不属于本账 —— `Panels(i).Width` 交回的仍是**请求值**（单位还是像素那一档），那是 §B41 的第二格，与 #298/§B129（折算住 5 份文件）合批动，别在这里补。
+
+
+**第二十五刀的落地与读数（2026-10-10，门 #481 = run 38045656192、head `12155d3b`、attempt 1 = 11 job 全绿 + 唯一红是形状门那一行；按 CI 读数登记之后门 #482 = run 38046722506、head `ed23f83b`、attempt 1 = 12 job 全 completed/success、非绿 0）= 四条发射路里剩下的那一条：`With` 的头**
+- 上一轮那句"题面是把集合本体怎么立收成一处出口，不再补第四个拦子"照办了：这一刀**没有新增拦子**，
+  只是让 `cgen_with.cpp` 的头去问第二十一刀那处唯一出口（`memberCollectionObjectExpr`，答不出就一字不变）。
+- **病名又改口一次（这次是缩小）**：第二十一刀记的"三形仍读空/读 0"到本刀实测只剩**一形** ——
+  `Set 局部 =` 与模块级 `Set mPo =` 早就交回真集合对象（`local=3 mod=3`，走的是账 #258 那处 `emitSetObjectRhs`
+  之后落到对象语境的出口），`For Each` 也通（`foreach_direct=3`）。**唯一还在坏的是 `With`**。
+- **一形两个症状**（`.build/b351_probe/P308.frm` 的产物 + 两架构真跑）：① 接收者退成宿主 HWND
+  （`void* _vb6_with_1 = (void*)vb6_hwnd_SB1` ⇒ 体内 `.Count` 拿 HWND 当 IDispatch 问，交 **0**）；
+  ② 更坏的一条 —— 那枚没被消费的标记**漏进体内第一条语句**，实测
+  `withN = .Count` 发成 `vb6_ComSetProp(vb6_hwnd_SB1, L"Panels", …)`：**一次属性读变成往控件写属性**
+  （不响、不崩、也不改变任何读数 —— 状态条照旧完好，所以它以前从没露头）。
+- **读数**（同一份夹具两台并排，x64 与 x86 逐行相同）：BASE（第二十四刀那台 `b516_base_k25.exe`）
+  `HM16-RAW with=0 item2=0 item1=0 early=3 foreach=3` ⇒ `HM16-WITH-COLLECTION=False`；
+  NEW `with=3 item2=2 item1=1 early=3 foreach=3` ⇒ True。`HM16-BAR-INTACT` 两台都 True（那一写没写坏东西，
+  所以判据是"体内那条语句必须是读"，不是"数值变好"）。
+- **判据**：`tests/sbhm` 长出 HM16（三形并排钉：块内 `.Count`、`.Item(2).Text` 与 `.Item(1).Text` 的长度，
+  另外两条 `early`/`foreach` 是**跨路对照**——它们与 BASE 同数，所以按 #257 那条口径它们只是反面证人，
+  不当"这一档存在"的证据；存在性由 `with=3 item2=2 item1=1` 这三条在 BASE 上全 0 的钉）。
+  真正独立的证人只有一头：**设计块里那两个 `A`/`BB`**（长度 1/2 由 .frm 决定，不由 RTL 决定）。
+  夹具文本进了产物 ⇒ 形状门那**一行**要按 CI 的读数重登记（本线第四次走 `rebless_emit_manifest.ps1`）。
+- **护栏**：邻居两份夹具一台没动（`ctrlstatusbar` 44/44、`sbfont` 7/7 与第二十四刀那台逐行相同）；
+  **全语料清单本机重算 = 399 行里 398 行逐字节相同、只有 `tests/sbhm` 那一行动**（新旧两台 exe 对同一批输入并排，
+  新增 0 / 缺席 0）⇒ 这一刀在语料里的暴露面就是那枚夹具自己写的这几行，别的工程一个字节都没变；
+  哨兵 `check_statusbar_panel_hm.ps1` 的 R6 长出**第四条发射路**的三格 ——
+  `R6-EXIT-CALLS`（`cgen_with.cpp` 问那处出口恰好 1 次）、`R6-CREATOR-EMIT` 11 → **13**（多出的两处就是两枚 With 头）、
+  `R6-WITH-LEAK-TOMBSTONE`（产物里 `vb6_ComSetProp(vb6_hwnd_StatusBar1, L"Panels"` 必须 0 处）。
+  **四档负控跑在源码副本 `.build/b523neg_k25` 上**（`-Root` 指过去，不碰工作树）：
+  N0 副本基线绿；N1 只把 exe 换成第二十四刀那台 ⇒ 红**恰好两条**（11≠13 + 墓碑 2 处），且**没**碰源码那一格；
+  N2 从源码里撤掉 With 那一问 ⇒ 红恰好一条（EXIT-CALLS got 0）；N3 让它问两次 ⇒ 红恰好一条（got 2）；
+  N4 还原 ⇒ 绿。⇒ 三面各自能红，且红的是自己那一条。
+- **刻意留在本刀之外的一格（另立 §B134 / 账 #302）**：这枚标记在**非集合**那一族里同样没被消费 ——
+  实测 `With SB1.Font : fz = .Size : End With` 发成 `vb6_ComSetProp(vb6_hwnd_SB1, L"Font", …)` 而 `fz` 从头到尾没被赋值。
+  把 With 的头改成"照 Set 那样无条件消费"是同一格的更宽修法，但那是**全语料形状**的改动（`With <对象>.<成员>`
+  在语料里 70 处）⇒ 不能顺手带，先数暴露面再动，写进 §B134。
+
+### B134 `With <对象>.<成员>` 的头从不消费那枚 COM 标记 —— 体内第一条语句会把它当成自己的写目标（账 #302，**开着 —— 第二十五刀量到，只收了六族成员集合那一档**）
+
+第二十五刀把成员集合那一族接上唯一出口之后，剩下的形状实测如下（探针 `.build/b351_probe/P309.frm`，`--emit-c`）：
+
+- `With SB1.Font` → 头 `void* _vb6_with_0 = (void*)vb6_hwnd_SB1  /* With object ref */`（接收者是宿主 HWND，
+  拿它当 IDispatch 问任何一档成员都不会有答案）；
+- 体内第一条 `fz = .Size` → `vb6_ComSetProp(vb6_hwnd_SB1, L"Font", vb6_ComPackValue(… L"Size" …))` ——
+  **一次属性读被发成往控件写属性**，而 `fz` 在产物里只有初值 `fz = (-1)`，从此再没被赋过值。
+  两件事同源：`emitExpr(*node.object)` 交出的是"宿主槽 + 一枚挂着的 `comObjExpr_/comMemberName_` 标记"，
+  Set 那一路会调 `resolveComValue("Object")` 去消费它（账 #255 写明的口径），With 的头**从来没消费**。
+
+**为什么本刀不顺手改掉**：把它改成无条件消费是**一行**（`if (isComMarker_) resolveComValue("Object");`），
+但那会动到语料里 `With <对象>.<成员>` 的 **70 处**（`grep -rc "^\s*With\s+\w+\." tests/**/*.frm,*.bas,*.ctl`）
+—— 里面有多少真的停在"未消费的标记"上、多少已经走宿主结构体/UDT/集合那几条正确分支，**一都没数**。
+这一族的既往教训（#234「拿 DC 抄两遍」、#260「With 里整枚成员读取被丢成对象本体」）都是"先数覆盖面再动权威"，
+所以题面写成两步：
+
+1. **数暴露面**：对全语料跑 `--emit-c`，按两条机器可判的形状筛 —— ① With 头那行等于宿主槽本身
+   （`(void*)vb6_hwnd_<控件名>`）且体内第一条语句刷出 `vb6_ComSetProp(… , L"<成员>"` 的；
+   ② 只看产物里 `/* With object ref */` 与 `/* COM SetProp */` 同块相邻出现的（后者更宽，误报由前者收）。
+   读数出来才有资格说"这一格值不值得动发码"。
+2. **若要动，就一次到位**：With 的头与 Set 的头**共用同一个消费动作**（不许再写第三份前缀判据），
+   并把 §B130 那处唯一出口保持在唯一 —— 消费是"要不要问"，答案仍然只有那一处。
+   判据两头：六族集合那一形（本刀的 HM16）必须照旧 True，非集合那一形要么钉"体内是读不是写"的墓碑、
+   要么钉它交回的**是**成员值 —— 别钉"数值没变"，那正是本账要推翻的形状。
+
+**第一步的读数（2026-10-10，`.build/b543_with_hijack.py`，输入清单 = 形状门那 399 份的同一份）**：
+
+- 判据就按上面 ① 落地：源码侧扫 `With <裸名>.<成员>`，只保留"那枚裸名在产物里确实是 `vb6_hwnd_<裸名>`"的头，
+  再去产物里数 `vb6_ComSetProp(vb6_hwnd_<裸名>, L"<成员>"` 的处数。**全语料 = 73 处这种头，其中接收者真是控件槽的只有 3 处，
+  而被顶掉的体内第一条语句 = 0 处** —— 那 3 处全在 `tests/sbhm` 本线自己那枚夹具里，且第二十五刀之后连那一格也不发写了。
+- 另外 **70 处的接收者不是控件槽**（对象变量 / 窗体 / UC 实例），它们走宿主结构体或真 IDispatch 那两条分支，本刀一行都没动
+  （两台 exe 对同一批输入并排，那一族逐字节相同）。
+- **一条误报的教训（比读数值钱）**：先用的宽判据「ComSetProp 的目标不是 with 临时、而值里含 with 临时」数出 140→138 处，
+  逐行归因后**全是合法写法** —— 例如 `vb6_ComSetProp(TempFont, L"Name", vb6_ComPackBSTR(_vb6_with_97->FontName))`
+  是 `With Me` 体内把 `.FontName` 交给另一枚对象变量。⇒ **「目标不是 with 临时」不等于「目标就是头上漏出来的标记」**；
+  这一族的判据要把**源码那枚头的成员名**对进产物的写入成员名，两头配起来才算数（只看产物分不开）。
+- 破坏面比开账时写得更大：探针 `.build/p340`（把头换成 `With StatusBar1.Font`，体内第一条是**与这枚 With 毫无关系**的
+  `pcZ = 1`）两台都发成 `vb6_ComSetProp(vb6_hwnd_StatusBar1, L"Font", vb6_ComPackInt(1))` —— **被顶掉的是那条语句自己的左值**，
+  于是那条赋值整个消失，还往控件写进一个数。所以这一族要拍的口径不是"读还是写"，是**头的标记必须被消费掉**
+  （消费是一个动作，答案仍然只从 §B130 那处唯一出口拿）。
+
+⇒ 结论：**语料暴露 = 0 ⇒ 本账是潜伏项**，与 #244 同一处置，不当编译阻塞排产；真动手时按上面两步走，
+  第二步要连"控件的成员对象要不要有真 IDispatch 身份"一起拍板 —— 只接发码那一半会把形状从「读丢成写」换成
+  「拿 HWND 当 IDispatch」—— 那一半下面这段本来就写了没量。
+
+**另一头没量的**：接收者就算消费了标记，非集合那一族仍会落到 `vb6_ComGetObjectProp(<HWND>, L"Font")`
+= 拿 HWND 当 IDispatch —— 因为**控件本身不是 IDispatch**（#159/#179 写过的那道墙）。所以本账真正的最后一步
+不在发码层，在"控件的成员对象要不要有真 IDispatch 身份"那格（与 §B130 的第二十/二十一刀同一族，
+只是那一族有 memberobj 可接，`Font` 这一族没有）。**别按名字补**：`Font`/`Picture`/`Icon` 各补一格就是
+第 N 份答案。
 
 ### B125 账 #278 第十四刀已出 = 两枚集合 Clear 与 CommonDialog 那六枚 Show* 进零实参那张表：「拼法只许来自表」在 Show* 这一族落地（另立一条新判据：哨兵的文件头读不成注释就会绿着空转，2026-10-10，门 #456 attempt 1 全绿（run 37995142510、head `3f972622`、12/12 全 completed/success、非绿 0、created→updated 10m22s；**Emit manifest (shape gate) 那一跑同绿** ⇒ 「398 份逐字节相同」被 CI 那台独立复算证实））
 
@@ -2452,6 +2810,8 @@ COM 侧那张 recognizer（`cgen_util_com.cpp` 里按成员名硬拼出口的那
 - **12 处到现在**：本刀清 `TmForm2` ⇒ 累计 **8**（§B107 常量 1 + §B108 `Printers` 1 + §B109 窗体伪成员 5 + 本刀窗体名 1），
   剩 **4 处** = 裸 `Controls` 2 + 裸 `UserControl` 1（§B105，撞在宿主表对 `rtl` 字段的契约上，口径 a/b 待拍）、
   `VK_UP` 1（夹具补一枚 `Private Const`，值回 `winuser.h` 对，别抄记忆里的数 —— §B165/#165 那轮三次栽在抄错常量上）。
+- **【2026-10-11 重算订正】上面那句「剩 4 处」过期了**：全语料 census（`.build/b922_census_now.py` → `b922_census_now.txt`，400 份输入、同一枚 NEW exe）报 VB3001 **10 行**，真缺项那一格 = **0**。**逐行归因**：刻意负例 5（`nopeHere` / `alsoNope` / `nopeHereIsNotAName` / `Hidden1` / `OpenSecret`）+ 拆包自然结果 3（`Form2` / `InitVisualStylesFixes` / `MainForm`）+ 源码 bug 那一条的两个输入（`ucProgressCircular.ctl:931` 的 `Count`，两份 Charts 工程各一次）= 10。少掉的 7 行 = 裸 `Controls` 4 + 裸 `UserControl` 1 + `VK_UP` 1（第六刀）+ `friend_open_ok.vbp` 里那次 `OpenSecret` 1（第九刀的 Friend 名单）。
+  **并排读数（项目模式 `--emit-c`，`.build/b921_b105/`）= 产物本来就是对的**：`Proyecto1.vbp` 两处裸 `Controls` 报 0 条、产物 `vb6_UC_Controls()` ×2；`VBFlexGridDemo.vbp` 裸 `UserControl` 报 0 条、产物 `vb6_UserControl_Extender` + `vb6_UserControl_ParentControls` ×2；`TabWalkApp.vbp` 的 `VK_UP` 报 0 条、产物 `#define VK_UP (38)`。⇒ **§B105 那格等拍的 a/b 口径不再需要**（它被后面的刀顺带清掉了，只是一直没人重算 census）。账 #278 只剩两件事：拆包自然结果那 3 条的口径（§B101 前面那一格，仍在等拍）+ `Count` 这条夹具源码 bug 要不要动。
 - **重算 17 行（同一枚 NEW exe，`.build/b125_census.py` → `b125_census_out.txt`）**：**13 个唯一源码位置 = 17 行**，
   按成因分格：刻意负例 5 位置 / 6 行（`nopeHere`、`alsoNope`、`nopeHereIsNotAName`、`Hidden1`、`OpenSecret` 两输入）、
   拆成单文件编译的自然结果 3（`Form2` / `InitVisualStylesFixes` / `MainForm`）、源码 bug 1 位置 / 2 行
@@ -3057,3 +3417,7 @@ UC 与标准模块走的是同一批序言发射器（`PushInstance` 就在同�
 | 账 #261（提交 `73570cf9` + 台账收线一笔，门 #406 = run 37694019059、head `c4175e64`、attempt 1 = 11 job 全 completed/success、非绿 0） | 浮点交给整数目标这一件事，**目标侧当时也只答一半**：`narrowCheckAssign` 第一道门写着 `target->kind != IdentifierExpr ⇒ 原样返回`，于是成员写入与数组元素写入整片不经取整也不经越界闸 —— 实测六形（`r.Left = 6.73` / `arr(0) = (4*1+3)/4` / `r.Top = r.Left + 0.73` / 模块级 `m_r.Width = 6.73` / `dArr(1) = 6.73` / `ur(0).Left = 6.73`）两架构全按 C 截断（6/1/6/6/6/6），而同一句写成 `CLng(...)` 是 round() ⇒ 一个决定两个答案，#248 那一族的另一半（当时只数了裸标识符的 36 处）。 | 新增唯一出口 `CCodeGen::narrowTargetTypeOf(Expr*)`：「这枚左值是哪档窄整型」只在这里答，只许 Byte / Integer / Long，认不出（Array / UDT 整体 / String / Object / Variant / Boolean）一律 Unknown ⇒ 与改前同形。成员那一档问既有出口 `inferUdtFieldVb6Type`，数组那一档问 `arrayElemTypes_`，裸标识符那串登记表**逐字搬过去**。两条闸都是量出来的：① **空下标 = 整体数组赋值**（Fix 170 的 `dst() = src()`）右边是数组描述符指针 ⇒ 漏闸实测 `test_array.bas` EXIT=0x00000006、四条 `wa-*` 整片不打印（语料里同形还有 11 处/架构，含 VBFlexGrid `Common.bas` 的 `B() = Text` 那条 Fix 170 原始崩溃点）；② **成员数组的整体赋值**（`With x : .Data = baData`）—— `inferUdtFieldVb6Type` 头注释写着「含 Array 标志」而**实测从来不带**（数组性记在 `mi.isArrayDynamic` / `mi.arraySize`，`mi.type` 存的是元素档）⇒ 档位答 Byte ⇒ 发出 `vb6_ChkByte(指针)` ⇒ VbQRCodegen 的 Project1 **BUILD-RC=0 而启动期 Unhandled VB6 Error #6**（BASE 同一份源不报）。收法 = 同一条 udtMembers 走查里用 `outIsArray` 把数组性带回（不开第二张表）+ 订正那句假注释。 | 判据 = `tests/test_f2lng.bas` 从 13 头扩到 **30 头**（F2L14..22 六形新覆盖 + F2L23 成员侧「隐式==显式」不变式【平局方向照 §B77① 不钉答案】+ F2L24..26 不许动的证人 + F2L27/29/30 那两条闸 + **F2L28 刻意留的边界钉成 6，§B90 落地那天必须翻成 7**）；负控 = 本笔父提交冷编那台跑同一份夹具 ⇒ **F2L14..23 十条两架构全 False**（raw=6,7 / 1,2 / 6,7 / 6,8 / 2,3 / 6,7 / 6,7 / 3,4 / 6,7 / 0,-1），改后 30/30 全 True（x64+x86，EXIT=0x0）。发码针 `f2lng_round` 两头扩到 10 必在 / 5 条 BASE 裸形必不在 / 3 条「拆闸才会出现」的形状两侧都必不在（单引号串里括号一律配平，见 §B78 那条 PSParser 坑）。护栏 = 哨兵 `check_float_to_int_round.ps1` 加 S7（定义/声明/被问各恰好一次 + 必须问那两条既有出口 + 必须拒 `fldIsArray` 与 `positional.empty()` + 不许答 Boolean）与 S8（旧闸门计数必须 0 + 无别的消费者），**八处假改动各处证过能红**、每次按 md5 逐字节还原；语料 emit A/B 对本笔父提交那台（judge v2：把所有 `vb6_Chk*(…)` 与 `vb6_FltToLng(…)` 配对拆掉后两侧必须**逐字节相同**）⇒ inputs=394 / captures=788 / 逐字节相同=752 / 只多套检查=36 / **未归因 0** / run-failures=0；新增包裹合计 ChkLong 1894 / ChkInt 528 / ChkByte 440（两架构），其中穿取整出口 1346 ⇒ **每架构 ≈673 处浮点→窄整存储从此 round**，比 #248 那 36 处大一圈——闸门把整片成员/数组目标关在判据面外，A/B 与门都看不见。 | 已过 = 门 **#404**（run 37694019059、head `c4175e64`、branch dev、attempt 1 = 11 job 全 completed/success、非绿 0，wall ≈10m31s；这一扇门的 head 里除了本刀还有账 #262/#263 那笔夹具重形状的续笔 `c4175e64` ⇒ #261 的代码与它同过一次门）。**CI 侧复阅**：bas 两片里 `test_f2lng.out` (job14 x64) 与 `test_f2lng_x86.out` (job16 x86) 各 **30 行、False 零条**、`F2L-DONE` 齐；vbp 两片 `QApp.out` 各两行（`Q-ORDER=unload-inside-doevents` + `Q-DONE`）、配对的 `.err` 全 0 字节 ⇒ 一片都没被 60s 超时杀。另：本轮 #403（head `c62fcf61`）那两片红的归因见 §B88 末条 —— 红的是appqquit 那份夹具的形状（被 90fb8069 的 Timer 不可重入改掉），与本刀无关。**同批把这里记的那条边界收了**：账 #262 落地时 F2L28 从「故意钉 6」翻成 `28-member-array-elem-rounded`=7，夹具扩到 32 头（新增 F2L31/32 = 多维成员的两个相邻格）。**风险记账**：这 36 份捕获从此多一道越界闸（整型源也一样）—— 值真越界时 VB6 本人报 6、我们以前静默截断；若门红在 Charts / VBFlexGrid 的像素或计数读数上，先按这条方向归因（#260 那格「以前没画上→画上」同形），别调宽判据。剩下的边界 = §B90（成员数组的元素与二维成员数组，F2L28 已钉）与 §B77①（平局口径等拍板）。 |
 | 账 #262（提交 `d84dab1f` + 合并 `b334858c`，门 #409 = run 37712639451、head `b334858c`、branch dev、attempt 1 = 11 job 全 completed/success、非绿 0） | UDT 成员的**多维**定长数组：parser 把第 2..N 维「解析并丢弃」，所以 `M(3, 3) As Long` 只发出 `int32_t M[4]`（16 字节而不是 64），而 `m.M(0, 1)` / `m.M(0, 2)` / `m.M(0, 3)` 三句**全发成 `m.M[0]`** ⇒ 三个格子一格内存，不响不崩静默错值。真流量 = Charts 2020 LabelPlus 的 GDI+ 色彩矩阵 `M(0 To 4, 0 To 4) As Single`（GDI+ 从 20 字节的结构体里读 100 字节，而阴影透明度与图片透明度写同一格）；语料全仓**多维成员声明 1 处**、它的 38 处用法全部给两个实参（arity=2 = 38/38）。与 #211（过程内多维 ND）分家的轴是「成员 × 多维」，与 #261（一维成员数组）分家的轴是维数。 | AST `TypeMember` 加 `moreDims`（`arraySize` 恒是第一维上界 ⇒ 一档一源，现有消费者照旧）+ `arrayRank()` 就地算；克隆那趟一起带上（泛型实例化 clone TypeDecl，漏了就悄悄还原）；语义层**只传秩** （`mi.arrayRank = 1 + moreDims.size()`，各维格数留在发码侧，抄第二份就会分家）；`cgen_decl` 每一维过**同一条** `tryEvalConstInt` 折成 `T name[n0][n1]`；下标新增唯一出口 `CCodeGen::udtFixedMemberIndex`（层数只从秩来、步长归 C 算 ⇒ 没有第二张「每行几格」的表；缺的那层补 `[0]`，多给的照发让 C 报错），`obj.M(i,j)` 与 `With : .M(i,j)` 两条路都改问它。同批把 ByRef 数组实参那处的 `sizeof((arg)[0])` 改成按秩剥到底（秩 1 逐字不变）。顺带收了 #261 那条边界：`narrowTargetTypeOf` 的数组档现在也接 callee 是成员访问/With 成员，但**必须问出数组性**才答档位。 | 判据 = 新夹具 `tests/test_memdim.bas`（每条读数写的都是**第一维相同、第二维不同**的格子 = 正是旧折法会并成一格的那一族；`MD-LEN=64/64/16` 钉布局、`MD-ONE=9` 是一维不被带坏的反面证人、`MD-ALIAS=N` 钉不变式）两架构 11 行齐 + EXIT=0x0 + 两边逐字相同；BASE 两台负控分两份源（含 String 成员那份**编不过** = #263 挡在前面；摘掉 String 成员那份答 `33/33/33`、`222/222`、`3/3`、`LEN=16/16` ⇒ 两格读数互不掩盖）。发码针 `memdim_layout` 12 必在 / 8 必不在；护栏 = 新哨兵 `check_udt_member_dims.ps1`（第 33 道 [STATIC]，U1..U8，**八处假改动各处证过能红**、每次按字节原样还原）；语料 emit A/B 对 `C3_base262.exe`。 | 门待回填。**风险记账**：Charts 那枚色彩矩阵从此**真的按 5×5 传给 GDI+**（以前 20 字节里读 100），而 ByRef 那处的逐字不变是靠 A/B 实测出来的（第一版我把它写成 `sizeof(x)[0]` —— 那是给 sizeof 的结果取下标，非法 C，A/B 那 4 行 dbgdlg 差异就是这么被抓出来的）；门若红在 Charts 的颜色/透明度读数上，先按「以前静默错值现在对了」这个方向归因，别调宽判据。多维成员整体交给 ByRef 数组形参那一形**语料 0 处、没实测**，别读成已支持。 |
 | 账 #263（提交 `d84dab1f` + 合并 `b334858c`，门 #409 = run 37712639451、head `b334858c`、branch dev、attempt 1 = 11 job 全 completed/success、非绿 0） | 含所有权元素（String / Variant / 子 UDT）的**定长数组成员**，其自动深拷贝助手把循环头发成 `{ int32_t _n = (int32_t)(sizeof(d->S) / sizeof(d->S[_i])); int32_t _i;` —— `_i` 用在**声明它自己那句话之前** ⇒ C2065，工程编不过（实物：`.build/p262/m265.c` 两条 C2065，一维 `S(3) As String` 与二维 `V(1,1) As String` 都中招）。这是量 #262 时撞出来的，不是找出来的；语料普查 0 处 ⇒ 它比 #262 更早存在却从没响过。 | 逐格改走**扁平元素指针**：`{ ET* _dp = (ET*)&d->X; const ET* _sp = (const ET*)&s->X; int32_t _i; int32_t _n = sizeof(d->X)/sizeof(*_dp);`（ET 由那一档本就分好的三路给：BSTR / vb6_VARIANT / vb6_type_X；认不出就**不动这一格**）。顺手带掉第二条更晚的病：旧写法即便能编，在 `BSTR S[2][3]` 上 `sizeof/sizeof([0])` 数的是**行数**，会少拷四格。 | `tests/test_memdim.bas` 的 `MD-STR=ab/cd` + `MD-STR-COPY=ab/cd`（赋值后才见深拷贝真的逐格 `SysAllocString`）；发码针两头（扁平指针行必须在、`sizeof(d->S[_i])` 与 `d->S[_i]` 必须不在）；哨兵 U6 + 负控 N6。BASE 那台跑同一份夹具 ⇒ BUILD-RC=1、一条 C2065(`_i`)。 | 门待回填。**风险记账**：语料 0 处 ⇒ 门上只该看见新夹具；若看见「以前编不过的工程现在编得过」，那是这一条。旁边没量的一格：元素档是 `As <项目类>` / `As Object` 的定长成员数组走的是 memcpy 快路（两边共享引用 ⇒ 一边 Clear 就悬），这一刀没动它，别读成已修。 |
+| 账 #213（提交 `e0b62a8f` + 入账 `43e18c8e` + 登记 `db824476`，门 #491（源码那一跑 = run 38078861543、head `43e18c8e`、attempt 1 = 12 条里 10 绿 + 两红都归完）+ 门 #493（登记那一跑 = run 38080158814、head `db824476`、attempt 1 = 12 条全 completed/success、非绿 0、wall 11m04s；其中 `Emit manifest (shape oracle)` 这一条绿就是「登记的那一行正是 CI 那台自己交的那一份」的独立复算） | tabwalk 相 3 那三步方向键**每步只留一拍**去读 `PostMessage` 交给泵异步消化的结果 ⇒ 在途 `WM_TIMER` 连着排空时那一拍看见「还没动」，`down=` 打成 optA。这一格在门 #336 真红过一次，当时按「`--emit-c` 产物三份逐字节相同」归成夹具节拍余量（§B48 末段）、#337 复绿，**却没人回来改夹具**；与 #162 / 门 #332（pbsb）/ #253（modal）是同一件事的四个读数。本机两台编译器都量不出症状 （改前那台跑今天这份夹具：两架构 × 空载/2×超订 各 8 趟 = 32/32 命中，墙钟 0.9s→2.4s）⇒ 立论是机理与负控，不是复现。 | 相 3 三步改**四步**（最后一枚键也等自己那一拍，`up=` 因此不再由固定拍号决定）；每步先问 `WhereIs(GetFocus()) = gAkLast`，没动就 `gAkWait + 1` 再 `Exit Sub`（**不重发**，每拍重发会跳站），等满 `AK_WAIT_MAX = 40` 拍照常读并 `gAkLate + 1` ⇒ 真丢键仍然读错仍然红，只是不再看队列这一刻排空几条；最坏 8s，仍在 60s 跑步预算内。**判据一个字没改**，只新加 `TW-SETTLE late=0`；`maxwait` 只打不钉。 | 两架构 × 空载/2×超订 各 8 趟 = 32/32 全针命中、`late=0`、`maxwait=0`、`TW-ticks=12`（旧 11）；负控 = `.build/b694_negctl` 那份拷贝里关掉三步的 post ⇒ x64 `late=2/maxwait=40`、x86 `late=3`，`AK-*` 与 `TW-SETTLE` 两条针都缺，而进程 8s 自己退（`rc=0`）。第 24 道哨兵 `check_fixture_timer_close.ps1` 长出 W1..W4：发过 post 的 `*_Timer` 逐枚登记（4 枚）、各自的 settle 口径必须在被保护的读取**之前**、豁免那枚必须仍是「post = 最后一条语句」、每步一自增 + 保险丝 5..100、证人打了必须有人读 —— 七发假改动各红各的（`.build/b697_neg_report.txt`），baseline rc=0。护栏：51 道 [STATIC] 全 rc=0；形状清单 inputs=400 / 未变 399 / 移动 1（正是 tabwalk 那一行）。 | 源码那一跑 = 门 #491：`Build`/`asm`/`bas ×2`/`compile`/`syntax`/`vbp #2`/`vbp #3`/`vbp #4`/`smoke` 十条绿，两条红都归完 —— 形状门红的正是 tabwalk 那一行（CI 那台自己交的清单 = `ci/emit-manifest` 的 `a4738567`，登记前本机复算 400 份 = 399 同 / 1 异、sha256 逐字相同），另一条红是 `ctrldlg_probe` 第二次撞 60s 跑步预算（那片工件 `DlApp.out` 停在 DL10、`.err` 不存在 = 超时现场；#490 同一枚是 15 行齐）⇒ 与本刀无关，另立 §B140 去办（本刀不改 `src/`，除 tabwalk 两片与那一行清单之外不该有别的读数）。CI 两片 tabwalk 都读 `late=0/maxwait=0`、`TW-ticks=12`、期望串一字未变。 |
+| 账 #304（提交 `3f0b1823` + 入账一笔，门待回填） | 「这一枚用例该给几秒」以前只有全局那一个数，而 GUI 里真弹模态框的那枚天生吃墙钟余量：门 #484 与门 #491 的 `Tests (vbp #1)` 两次红同一形状 —— 那片工件里 `DlApp.out` 停在 `DL10`、`DlApp.err` **不存在**（超时那一支只在 stderr 非空才写 .err，崩溃那支两枚都写）；#490 / #484 attempt 2 同一枚是 15 行齐 ⇒ 判据一条没少，缺的是余量。本机空载 1.2~2.1s、8 枚忙等压 4 vCPU 时 §B133 量到 13.8 / 31.4 / 34.5s（×11 的放大），预算却是全局那一个 60。 | 收成一处：`$RunBudgetSec`（具名表，今天 `'DlApp' = 150` 一枚）+ `Get-RunBudgetSec`（唯一出口，表里没有回落全局）；串行路问 `$budgetSec`、并行路进 runspace 前逐枚盖 `$it.BudgetMs`。**全局 60s 未动、`DL11..DL14` 未减**；键取产物基名（与 §B166 那一处同源），两条路同数。 | 配对读数两头：全局 0s + 表有键 ⇒ 解析 150、`ctrldlg_probe` 3/3 PASS；同一个全局、键拼错 ⇒ 解析成回落值并被杀，3/3 现场停在 `DL10`/`DL13` 且 `alive`（正是门上那次的形状）。第 52 道哨兵 B1..B6 六条规则各被一发假改动打红、baseline rc=0（`.build/b911_negctl_report.txt`）；52 道 [STATIC] 全 rc=0。 | 门 #495（run 38085195428、head `b306ce9e`、attempt 1 = 12 条全 completed/success、非绿 0）；`Emit manifest (shape oracle)` 同绿 = 400 行一字未动（= 「本刀不改 `src/`」的预期读数），`Tests (vbp #1)`~`#4` 四条绿 —— 但那一格的真判据是本机的配对读数（表里有键 3/3 过、键拼错 3/3 被杀），不是门的一次绿（这两枚夹具的红本来就按负载抖）。 |
+| 账 #305（提交 `55e075ae` 源码 + `adc4b61f` 登记，门 #501 源码 / 门 #503（run 38090841379、head adc4b61f、attempt 1）= 12/12 全绿、非绿 0（含这道形状门本身）） | §B138 那一格由别人的分支出了（内置答案改 LongPtr），但它尾巴上那两格没被那一改带走。第一格量完 = RTL 的 `switch (v.vt)` 十一遍实现里**四处漏答 VT_I8**：x64 上 `TypeName(VarPtr)` 报 "Variant"、`IsNumeric` 报假、`vb6_ComPackVariant` 落 default **把地址静默打包成 VT_EMPTY**、UC 宿主两枚取数读回 0（同一枚值 x86 全部答对） | 四处各补 `case VT_I8`（档名用 SDK 的 `VT_I8`，与已答的五处同一写法）+ `c3rtl.rc` 按约定 touch （`check_rtl_embedded` 拿产物字节核，125/125 相同）；**不新造权威**：把「哪些表必须答这一档」写成一张闭合名单 | 判据 = §B137 那枚装箱夹具加五条针 + **新增 x86 双胞胎**（同一份 `$boxNeedles` 两架构逐字相同，真跑 28/28 命中）；改前读数（同一支探针）x64 = `typename=Variant / isnumeric=False`；第 53 道哨兵 V1..V5 五发假改动各红各的、baseline rc=0；本刀不改发码 ⇒ 形状门预期 400 行全同 —— **这句不中**：实际红 8 行，但其中 7 行是本刀之前别人那笔 §B138b（`e589b1a3`）移动的（上一轮登记 `db824476` 早于那一笔，期望清单本来就没吃过它的形状），第 8 行才是本刀自己那枚夹具的源文本；按 `ci/emit-manifest` 逐 head 二分定的案，登记仍按 CI 读数走（§B100） | 源码跑 = **门 #501**（run 38088742545、head `e51fe008`、attempt 1）= 12 条里 11 绿 + 唯一红是这道形状门（红的就是那 8 行，11 片测试全绿，含新加的 `test_variant_boxing_x86` 第一次进门禁）；登记跑 = **门 #503**（run 38090841379、head `adc4b61f`、attempt 1）= 12 条全 completed/success、非绿 0 —— 其中 `Emit manifest (shape oracle)` 这一跑就是绿的 ⇒ 登记的那 8 行与 CI 那台自己的复算对齐 |
+| 账 #305（第三十三刀 = §B141 两档，提交 `9a6b7a56` 源码 + `59e72197` 登记，门 #505（run 38094605541、head 9a6b7a56、attempt 1） 源码那一跑 / 门 #506（run 38095497701、head 59e72197、attempt 1） 登记那一跑 = 12/12 全绿、非绿 0） | `CDec(...)` 交出来的 `VT_DECIMAL` 在「往外读」这一侧只补了两张表：`vb6_TypeName` ⇒ "Decimal"、`vb6_IsNumeric` ⇒ 真；判据两头只钉这两条（两台 30/30，CI 补档前那台两条都缺 = 负控），`CStr`/`Format` 不进针面。**Format 那一臂实测补上仍不对 ⇒ 回退，连同其余 8 处 vt 表另立 §B142**；同一批读数把「写侧坏了」这个推论收回（`CLng`/`CDbl`/`CInt` 的 0 来自 `vb6_VariantToDouble` 的 `default`，不是 DECIMAL 本体） |
