@@ -214,7 +214,7 @@
                 std::string packFn = comPackExpr(*node.positional[i]);
                 emitExpr(*node.positional[i]);
                 { std::string resolved = resolveComMarkerForPack(packFn); if (!resolved.empty()) lastExpr_ = resolved; }
-                packedArgs.push_back(packFn + "(" + lastExpr_ + ")");
+                packedArgs.push_back(packArgValue(packFn, lastExpr_));
             }
             int32_t argc = (int32_t)packedArgs.size();
             std::string argsArray = "(void*[]){";
@@ -249,7 +249,7 @@
                 std::string packFn = comPackExpr(*node.positional[i]);
                 emitExpr(*node.positional[i]);
                 { std::string resolved = resolveComMarkerForPack(packFn); if (!resolved.empty()) lastExpr_ = resolved; }
-                packedArgs.push_back(packFn + "(" + lastExpr_ + ")");
+                packedArgs.push_back(packArgValue(packFn, lastExpr_));
             }
             int32_t argc = (int32_t)packedArgs.size();
             std::string argsArray = "(void*[]){";

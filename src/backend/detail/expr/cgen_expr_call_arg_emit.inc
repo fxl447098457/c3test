@@ -108,6 +108,25 @@
         }
         std::string argVal = std::move(lastExpr_);
 
+        // Fix 265: 宿主伪**结构体全局** (`UserControl.Extender` / `UserControl.Ambient`,
+        // RTL 侧是结构体**值**而非指针) 交付给**指针形参** (`As Object` / `VB.Control`
+        // 等 → void*) 时必须取地址 —— 裸结构体进 void* 槽 = C2172 "实参不是指针"。
+        //   实测 ComCtlsDemo SysInfo.ctl:238/245
+        //   `SysInfoName = ProperControlName(UserControl.Extender)`
+        //   (Common.bas:828 `Function ProperControlName(ByVal Control As VB.Control)`,
+        //    SysInfo.c 362/372)。
+        // ⚠ **只在指针槽取地址**: 无条件包 `(&…)` 会把 `UserControl.Extender.<字段>`
+        //   打成 C2231 "….*** 的左侧必须指向类/结构/联合" (Fix 256 实测 20 个文件 ×32 条)。
+        if (i < calleeParams.size()
+            && (argVal == "vb6_UserControl_Extender" || argVal == "vb6_UserControl_Ambient")) {
+            const std::string ct265 = calleeParams[i].typeRefName.empty()
+                ? std::string()
+                : cTypeForDeclaredTypeName(calleeParams[i].typeRefName);
+            const bool ptrSlot265 = calleeParams[i].type == Vb6Type::Object
+                || ct265 == "void*" || (!ct265.empty() && ct265.back() == '*');
+            if (ptrSlot265) argVal = "(&" + argVal + ")";
+        }
+
         // Fix 161b-decl-out: Declare A 版 String 出参回写 —— 判断实参是否为"可赋值左值"。
         // 变量 / 成员访问 / With 成员 = 左值; IndexOrCallExpr 要再分: callee 是**数组变量**
         // 才可赋值, 是 Sub/Function/Declare*/Property 则是函数调用 (如 `String$(256, 0)`),

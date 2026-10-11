@@ -31,6 +31,30 @@
             const auto& wm = static_cast<const WithMemberExpr&>(*objAst);
             return classMemberReturnsAsObject(hostCls, wm.memberName);
         }
+        // Fix 262: **窗体的控件属性读**里也有返回对象的那几枚 —— 最典型是
+        // `Picture` (`vb6_GetControlPicture(hwnd)` → void*, 即 IPictureDisp 的 C 面)。
+        //   `ImagePicture.Picture.Handle` 的 node.object 是
+        //   MemberAccessExpr(ImagePicture, Picture): 宿主不是类, 上面各分支都捡不到
+        //   ⇒ 落 `obj + "." + member` → `vb6_GetControlPicture(hwnd).Handle`
+        //   ⇒ C2224 "左侧必须具有结构/联合类型"。
+        //   返回 true 后下游改发 `vb6_ComGetProp(<getter>, L"Handle")`
+        //   (RTL 的 vb6_ComGetProp 对 HWND/宿主对象有专档, 见 vb6com_invoke.c:409)。
+        //   实测 ComCtlsDemo PPStatusBarPanels.pag:1182/1323
+        //   (`If Not ImagePicture.Picture Is Nothing Then If ImagePicture.Picture.Handle <> 0`),
+        //   PPStatusBarPanels.c 1362/1548。
+        if (objAst->kind == ASTNodeKind::MemberAccessExpr) {
+            const auto& maC262 = static_cast<const MemberAccessExpr&>(*objAst);
+            if (maC262.object && maC262.object->kind == ASTNodeKind::IdentifierExpr) {
+                const std::string ctrlName262 = Symbol::toLower(
+                    static_cast<const IdentifierExpr&>(*maC262.object).name);
+                auto itC262 = knownFormControls_.find(ctrlName262);
+                if (itC262 != knownFormControls_.end()
+                    && getControlPropReadFn(itC262->second, maC262.memberName)
+                           == "vb6_GetControlPicture") {
+                    return true;
+                }
+            }
+        }
         return false;
     };
 

@@ -708,6 +708,21 @@ std::string CCodeGen::comMarkerValueForWrite(const std::string& packFn,
     return lastExpr_;
 }
 
+std::string CCodeGen::packArgValue(const std::string& packFn,
+                                   const std::string& expr) const {
+    // ⚠ 长度字面量必须与整串长度相等 —— `std::string::compare(pos, count, str)` 拿
+    // [pos, pos+count) 去比**整条** str, count 小于 str.size() 时恒不相等 (静默恒假)。
+    // 这里直接用 rfind(..., 0) 前缀判定, 不数长度。
+    const bool isVarValue = expr.rfind("vb6_VariantFromComResult(", 0) == 0
+                         || expr.rfind("vb6_VariantFromValue(", 0) == 0;
+    if (!isVarValue) return packFn + "(" + expr + ")";
+    if (packFn == "vb6_ComPackDouble") return "vb6_ComPackDouble(vb6_VariantToDouble(" + expr + "))";
+    if (packFn == "vb6_ComPackInt")    return "vb6_ComPackInt(vb6_VariantToLong(" + expr + "))";
+    if (packFn == "vb6_ComPackBool")   return "vb6_ComPackBool(vb6_VariantToBool(" + expr + "))";
+    if (packFn == "vb6_ComPackBSTR")   return "vb6_ComPackBSTR(vb6_VariantToString(" + expr + "))";
+    return packFn + "(" + expr + ")";
+}
+
 std::string CCodeGen::resolveComMarkerForPack(const std::string& packFnHint) {
     // P26: vb6_ComPackVariant / Fix 030: vb6_ComPackValue 需要把 COM 调用返回的
     // VARIANT* 转成 vb6_VARIANT (即使 isComMarker_ 已被消费, lastExpr_ 仍可能是 COM 调用结果).

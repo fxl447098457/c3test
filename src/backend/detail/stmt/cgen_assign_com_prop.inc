@@ -34,7 +34,7 @@
                         std::string packFn = comPackExpr(*callTarget.positional[i]);
                         emitExpr(*callTarget.positional[i]);
                         { std::string resolved = resolveComMarkerForPack(packFn); if (!resolved.empty()) lastExpr_ = resolved; }
-                        packedIdxArgs.push_back(packFn + "(" + lastExpr_ + ")");
+                        packedIdxArgs.push_back(packArgValue(packFn, lastExpr_));
                     }
                     int32_t idxArgc = (int32_t)packedIdxArgs.size();
                     std::string idxArgsArray = "(void*[]){";
@@ -308,7 +308,26 @@
                             suppressDefaultProp_ = savedSuppressDef143;
                             std::string argExpr = std::move(lastExpr_);
                             std::string oneDef;
-                            if (pi.type == Vb6Type::Variant) {
+                            // Fix 264: `p.type == Variant` 有**两种**槽 —— 真 Variant 槽,
+                            // 和**工程类槽** (类名被折成 Variant, 真名只留在 typeRefName,
+                            // 类模块发的是 vb6_cls_X*)。后者装箱成 vb6_VARIANT 与形参声明的
+                            // vb6_cls_X* ABI 不符 ⇒ C2440 "无法从 vb6_VARIANT 转换为 vb6_cls_X*"。
+                            // 判据用 cParamClassPtrType (走 mapTypeRef, 与定义侧同一份映射),
+                            // 与 Fix 251 (cgen_util_comwrite.cpp 的同一格) 同口径、同一理由。
+                            //   实测 ComCtlsDemo LvwListItem.cls:345
+                            //   `ShadowListView.FListItemGroup(PropIndex) = Value`
+                            //   (`Property Let Group(ByVal Value As LvwGroup)`, LvwListItem.c:501)。
+                            const std::string clsSlotDef264 = cParamClassPtrType(pi);
+                            if (!clsSlotDef264.empty()) {
+                                if (pi.isByVal) {
+                                    oneDef = deliverToClassSlot(clsSlotDef264, argExpr);
+                                } else {
+                                    std::string tv = tmpDef + std::to_string(slotDef++);
+                                    c_.emitLine(clsSlotDef264 + " " + tv + " = "
+                                                + deliverToClassSlot(clsSlotDef264, argExpr) + ";");
+                                    oneDef = "&" + tv;
+                                }
+                            } else if (pi.type == Vb6Type::Variant) {
                                 if (pi.isByVal) {
                                     // 同上: 装箱走 boxToVariant 权威
                                     oneDef = boxToVariant(argNode, argExpr);

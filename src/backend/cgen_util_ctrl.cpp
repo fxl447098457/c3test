@@ -1547,6 +1547,17 @@ std::string CCodeGen::controlZeroArgMethod(FrmControlType ctrlType,
     }
     if (memberLower == "clearsel" && ctrlType == FrmControlType::Slider)
         return controlExit("vb6_Slider_ClearSel", 1, outArgc);
+    // Fix 263: `.Cls` —— 画得上去的那两枚 (Form / PictureBox) 的清屏。出口与两条
+    // COM 码头共用 `controlCanvasMethod` 背后的同一张表 (cls → vb6_ControlCls(void* hwnd),
+    // 见 vb6forms_ctrl.c:945)。
+    // 为什么必须登记: `With PictureDraw : .Cls` 的 With 分支 (cgen_expr_with.cpp 的
+    // FormControl 臂) 先问 zeroArg/oneArg/scale 三张表, 都没登记就落"未知控制属性"
+    // 兜底发 `_vb6_with_N.Cls()` —— HWND 是结构体指针, 取成员 = C2039
+    // "Cls 不是 HWND__ 的成员" (实测 ComCtlsDemo PPStatusBarPanels.pag:1163。
+    // 带实参的 `.Print`/`.Line` 由 COM 标记那条路接走, 与本表无关)。
+    if (memberLower == "cls"
+        && (ctrlType == FrmControlType::Form || ctrlType == FrmControlType::PictureBox))
+        return controlExit("vb6_ControlCls", 1, outArgc);
     // 账 #192: ListBox / ComboBox 的 Clear。VB6 里它是方法而不是属性，且只有这两枚
     // 有清空语义（TreeView/ListView 的清是各自那一族，另有出口）。
     if (memberLower == "clear"

@@ -169,7 +169,7 @@
                 std::string packFn = comPackExpr(*node.positional[i]);
                 emitExpr(*node.positional[i]);
                 { std::string resolved = resolveComMarkerForPack(packFn); if (!resolved.empty()) lastExpr_ = resolved; }
-                packedArgs.push_back(packFn + "(" + lastExpr_ + ")");
+                packedArgs.push_back(packArgValue(packFn, lastExpr_));
             }
             int32_t argc = (int32_t)packedArgs.size();
             std::string argsArray = "(void*[]){";
@@ -591,7 +591,7 @@
                         && isKnownObjectVarName(lastExpr_)) {
                         packedArgs.push_back("vb6_ComPackObjectRef((void**)&" + lastExpr_ + ")");
                     } else {
-                        packedArgs.push_back(packFn + "(" + lastExpr_ + ")");
+                        packedArgs.push_back(packArgValue(packFn, lastExpr_));
                     }
                 }
                 for (auto& named : node.named) {
@@ -603,7 +603,7 @@
                         && isKnownObjectVarName(lastExpr_)) {
                         packedArgs.push_back("vb6_ComPackObjectRef((void**)&" + lastExpr_ + ")");
                     } else {
-                        packedArgs.push_back(packFn + "(" + lastExpr_ + ")");
+                        packedArgs.push_back(packArgValue(packFn, lastExpr_));
                     }
                 }
                 int32_t argc = (int32_t)packedArgs.size();
@@ -634,7 +634,29 @@
             auto emitComArg = [&](const ExprPtr& argExpr) {
                 std::string packFn = comPackExpr(*argExpr);
                 emitExpr(*argExpr);
+                // Fix 266: 打包器的**型**与 marker 解析的**型**不同源。
+                // comPackExpr 按 AST 推的型给出 typed 打包器 (ComPackDouble/Int/Bool/BSTR),
+                // 而 resolveComMarkerForPack 交回的是**无型** VARIANT 取值
+                // `vb6_VariantFromComResult(vb6_ComGetProp(obj, L"m"))` ⇒
+                // `vb6_ComPackDouble(vb6_VARIANT)` = C2440 "无法从 vb6_VARIANT 转换为 double"。
+                // marker 还在时改走 comMarkerValueForWrite (P25 那处出口: 按 packFn 选 hint
+                // 再 resolveComValue) —— 它会给出**同型** getter
+                // (vb6_ComGetDoubleProp / GetIntProp / GetStringProp)，
+                // 与下游 typed 打包器对齐。实测 ComCtlsDemo Pager.ctl 的
+                // `With PagerBuddyControl : .Move .Left, .Top, ...` (Pager.c 2079/2080)。
+                // 只对数值/串这四档介入: 对象档 (ComPackObject) 与 Variant 档
+                // (ComPackValue) 由下面两句各自的原路径处理 (见 653 行的 argIsVariantPtr)。
+                if (isComMarker_
+                    && (packFn == "vb6_ComPackDouble" || packFn == "vb6_ComPackInt"
+                        || packFn == "vb6_ComPackBool" || packFn == "vb6_ComPackBSTR")) {
+                    lastExpr_ = comMarkerValueForWrite(packFn, lastExpr_);
+                }
                 { std::string resolved = resolveComMarkerForPack(packFn); if (!resolved.empty()) lastExpr_ = resolved; }
+                // marker 在 emitExpr 期间就已消费掉时上面那条补不了 —— 交回的是**无型**
+                // VARIANT (`vb6_VariantFromComResult(vb6_ComGetProp(..))`), 与 typed 打包器
+                // 错位。这一格已收口到 packArgValue (见下方 packedArgs.push_back 那一行,
+                // 与 callee_ident/callee_member/prelude 三个片段共用同一处),
+                // 不再在这里单独抄一份。
                 // Fix <vbeclipse>: 实参表达式本身已返回**堆 VARIANT*** (ComGetProp /
                 // ComCall / ComGetObjectProp … 返回 void* 承载一个 COM VARIANT) 时, 它
                 // 已经是 ComCall 形参数组要的东西, 不能再包一层 vb6_ComPackObject —— 那会
@@ -653,7 +675,7 @@
                 if (argIsVariantPtr && packFn == "vb6_ComPackObject") {
                     packedArgs.push_back(lastExpr_);   // 已是 VARIANT*, 直接作实参 (ComCall 会 VariantClear+free)
                 } else {
-                    packedArgs.push_back(packFn + "(" + lastExpr_ + ")");
+                    packedArgs.push_back(packArgValue(packFn, lastExpr_));
                 }
             };
             for (size_t pos = 0; pos < node.positional.size(); pos++) {
@@ -911,7 +933,7 @@
                     std::string packFn86 = comPackExpr(*node.positional[i]);
                     emitExpr(*node.positional[i]);
                     { std::string resolved86 = resolveComMarkerForPack(packFn86); if (!resolved86.empty()) lastExpr_ = resolved86; }
-                    packedArgs86.push_back(packFn86 + "(" + lastExpr_ + ")");
+                    packedArgs86.push_back(packArgValue(packFn86, lastExpr_));
                 }
                 int32_t argc86 = (int32_t)packedArgs86.size();
                 std::string argsArray86 = "(void*[]){";
