@@ -5487,7 +5487,7 @@ if ($Category -in @("all", "run", "vbp")) {
         # 字节搬了个来回，所以它钉的是"改成借用之后没把 Decimal 读丢"，能红的是前两条。
         "CALL=AMT hr=0x00000000 resultvt=14 dec_cy=12345670000 dec_i8=1234567",
         "CALL=QUARTER hr=0x00000000 resultvt=14 dec_cy=12500 dec_i8=1",
-        "CALL=ECHO hr=0x00000000 resultvt=14 dec_cy=50000 dec_i8=5",
+        "CALL=ECHO hr=0x00000000 resultvt=14 dec_cy=50000 dec_i8=5") @(
         "CALL=ADD") "{F5CEF988-3217-6173-94B7-BB99C4B8CB81}"
     # ai/022 B16: 同一批断言在 x86 上再真跑一遍 —— 这是布局改动（vtable 槽 + 库里的偏移 +
     # 调用约定）唯一的 x86 侧端到端读数：x86 探针按库里那形状直调槽 3/4，
