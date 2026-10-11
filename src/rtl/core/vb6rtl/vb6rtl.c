@@ -316,6 +316,11 @@ static int vb6_DecimalAsVariant(vb6_VARIANT v, VARIANT *out) {
      * 直接赋值是 C2440「无法从”转换为“DECIMAL”」(报错里源类型是
      * 空的) —— 与台账 §B141 那段记的是同一条事实。所以这里按字节拷。 */
     memcpy(&out->decVal, &v.decVal, sizeof(DECIMAL));
+    /* 标签在这里也补一次，与下面 x86 那臂同形：槽里可能住着「没带标签的 DECIMAL」
+     * (浮点臂的 VarDecFromR8、或别处复制进来的) —— 不补 oleaut32 就静默答 0。
+     * ⚠ 成员名按**这一侧的类型**写：`out->decVal` 是 SDK 的真 DECIMAL，标签叫 `wReserved`；
+     * `vb6_DEC_VT` 那枚宏是给槽里那份同布局匿名 struct 用的(那里叫 `wReserved1`)，两头不许互套。 */
+    out->decVal.wReserved = vb6_vtDecimal;
     return 1;
 #else
     if (!v.pdecVal) return 0;

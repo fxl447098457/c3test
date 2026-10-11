@@ -121,5 +121,18 @@ Public Sub Main()
     Debug.Print "VB-dec-fmt=[" & Format(vd2, "0.00") & "]"
     Debug.Print "VB-dec-clng="; CLng(vd2)
     Debug.Print "VB-dec-cdbl="; CDbl(vd3)
+    ' Acct #305 para-B142 cell 2 (the float arm's tag). Comments here stay ASCII: C3 reads
+    ' sources as ANSI/GBK, so UTF-8 Chinese lines round-trip as mojibake in the product.
+    ' CDec(2.5) takes the VarDecFromR8 arm, and that DECIMAL comes back with wReserved = 0
+    ' (only VarDecFromStr writes 14). Knife 34 tagged just the two hand-filled arms, so on
+    ' x64 CStr(CDec(2.5)) printed empty and CDbl gave 0, while x86 was saved by the inline
+    ' overlay on the read side -- an arch asymmetry. Deliberately NOT pinning
+    ' CLng(CDec(2.5)): oleaut32 rounds 2.5 to 2 (banker's, = VB6), we currently answer 3
+    ' (it goes through the double converter), and that half-way caliber is still unowned.
+    Dim vd4 As Variant
+    vd4 = CDec(2.5)
+    Debug.Print "VB-decf-tn="; TypeName(vd4)
+    Debug.Print "VB-decf-cstr=[" & CStr(vd4) & "]"
+    Debug.Print "VB-decf-cdbl="; CDbl(vd4)
     Debug.Print "VB-DONE"
 End Sub

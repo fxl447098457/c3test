@@ -88,6 +88,19 @@ typedef struct vb6_VARIANT {
 #else
   #define vb6_VARIANT_DECVAL(v) (*(v).pdecVal)
 #endif
+/* 账 #305 §B142(第三十五刀): 给槽里那枚 DECIMAL 补上 oleaut32 的 vt 标签，**只在这里写一遍**。
+ * 实测(纯 C 探针)：`VarDecFromR8` 造的那枚这两字节是 **0**，只有 `VarDecFromStr` 会写 14 ⇒ 「OLE
+ * 自己造的一定带标签」这句错了，标签必须在**造出来的那一步末尾**统一补，不许散在 case 里。
+ * x86 那侧要判空：`CDec` 的 default 臂刚把 pdecVal 释放掉，槽还算 Decimal 但没有悬体。 */
+static inline void vb6_DecSetTag(vb6_VARIANT v) {
+    if (v.vt != vb6_vtDecimal) return;
+#ifdef _WIN64
+    vb6_DEC_VT(vb6_VARIANT_DECVAL(v)) = vb6_vtDecimal;
+#else
+    if (v.pdecVal) vb6_DEC_VT(vb6_VARIANT_DECVAL(v)) = vb6_vtDecimal;
+#endif
+}
+
 
 // Variant构造
 static inline vb6_VARIANT vb6_VariantEmpty(void) {

@@ -2534,7 +2534,8 @@ if ($Category -in @("all", "run", "bas")) {
         # ⇒ 只填指针时 oleaut32 把那枚地址当数值答出来(读数 = 堆地址形状)。
         # 唯一照打不钉的是 VB-dec-fmt: 带小数点的格式串随区域设置变(与上面 AR-fmt2 同一口径)。
         "VB-dec-tn=Decimal", "VB-dec-isnum=True", "VB-dec-cstr=[5]", "VB-dec2-cstr=[1.25]",
-        "VB-dec-clng=5", "VB-dec-cdbl=1.25", "VB-DONE")
+        "VB-dec-clng=5", "VB-dec-cdbl=1.25",
+        "VB-decf-tn=Decimal", "VB-decf-cstr=[2.5]", "VB-decf-cdbl=2.5", "VB-DONE")
     # ⚠ 这里曾经是字面 TAB: `"$Tests<TAB>est_variant_boxing.bas"`。
     # PowerShell 的 "" 里 **`\t` 不是转义**（转义是反引号），所以只要有人把 `\t` 写成真 TAB,
     # 路径就变成 `tests` + TAB + `est_...` —— 门里读到的是 `error VB1006: 无法打开文件`,
