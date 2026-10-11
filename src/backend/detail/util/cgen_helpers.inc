@@ -74,6 +74,18 @@
     std::string cProcName(const std::string& procName, AccessLevel access,
                           const std::string& sourceModule = "") const;
 
+    // Fix 269: 类属性 C 函数名的**成员段** (即 `vb6_<Cls>_` 之后那一段)。
+    // 属性前缀 (prop_get_/prop_let_/prop_set_) 是函数名的一部分, 所以关键字/特殊
+    // 字符判定必须对 **prefix + member 整串** 做 —— 与定义侧
+    // makePropertySignature 的 `cProcName(prefix + node.name, …)` (内部就是
+    // `cIdent(prefix + node.name)`) 逐字对齐。
+    // 反例: 成员名 `Default`。定义侧拿整串 "prop_get_Default" 判 ⇒ 不是 C 关键字
+    // ⇒ 发 `vb6_ComboBoxW_prop_get_Default`; 调用侧若对成员名单独 cIdent ⇒
+    // "default" 命中关键字表 ⇒ 发 `..._prop_get_vb6_Default` ⇒ 调用/定义错位,
+    // 链接期 LNK2019 (实测 ComCtlsDemo 11 个 .ctl 的 Default 属性全中, 22 条)。
+    std::string propFnSegment(const std::string& prefix,
+                              const std::string& member) const;
+
     // ---- 表达式求值 ----
 
     // 生成C表达式字符串, 存入lastExpr_

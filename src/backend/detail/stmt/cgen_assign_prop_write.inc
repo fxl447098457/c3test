@@ -520,10 +520,12 @@
                         }
                         if (!matches) continue;
                         if (sym->kind == SymbolKind::PropertyLet) {
-                            letFn = "vb6_" + cIdent(canonicalClassName) + "_prop_let_" + cIdent(wmExpr.memberName);
+                            letFn = "vb6_" + cIdent(canonicalClassName) + "_"
+                                  + propFnSegment("prop_let_", wmExpr.memberName);
                             letPropSym = sym.get();
                         } else if (sym->kind == SymbolKind::PropertySet) {
-                            setFn = "vb6_" + cIdent(canonicalClassName) + "_prop_set_" + cIdent(wmExpr.memberName);
+                            setFn = "vb6_" + cIdent(canonicalClassName) + "_"
+                                  + propFnSegment("prop_set_", wmExpr.memberName);
                             setPropSym = sym.get();
                         }
                     }
@@ -660,8 +662,8 @@
                             val090h = packLetValueArg(clsParams090h.back(),
                                                       node.value.get(), val090h);
                         }
-                        c_.emitLine("vb6_" + cIdent(canonCls090h) + "_prop_let_"
-                                    + cIdent(wmExpr.memberName) + "(" + tempVar + ", "
+                        c_.emitLine("vb6_" + cIdent(canonCls090h) + "_"
+                                    + propFnSegment("prop_let_", wmExpr.memberName) + "(" + tempVar + ", "
                                     + val090h + ");  /* With class prop_let_ (Fix 090h) */");
                         return;
                     }
@@ -719,8 +721,8 @@
                                 canonCls090c = clsIt090c->second->name;
                         }
                         emitExpr(*node.value);
-                        c_.emitLine("vb6_" + cIdent(canonCls090c) + "_prop_let_"
-                                    + cIdent(wmExpr.memberName) + "(" + tempVar + ", "
+                        c_.emitLine("vb6_" + cIdent(canonCls090c) + "_"
+                                    + propFnSegment("prop_let_", wmExpr.memberName) + "(" + tempVar + ", "
                                     + lastExpr_ + ");  /* With class prop_let_ direct (vbeclipse) */");
                         return;
                     }

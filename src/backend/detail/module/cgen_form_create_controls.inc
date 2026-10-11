@@ -344,15 +344,15 @@
                     if (!fontName119) continue;
                     std::string canonF = canonicalClassMemberName(ctlClass, blk.blockName);
                     if (canonF.empty()) canonF = blk.blockName;
-                    std::string setterF = "vb6_" + cIdent(ctlClass)
-                                        + (isSet119 ? "_prop_set_" : "_prop_let_") + cIdent(canonF);
+                    std::string setterF = "vb6_" + cIdent(ctlClass) + "_"
+                                        + propFnSegment(isSet119 ? "prop_set_" : "prop_let_", canonF);
                     emitFrmFontObj(blk, "_vb6_f119");
                     if (isSet119) {
                         // Fix 128: Property Set 型**不调用**其 Set 实现体 (内含 Refresh,
                         // 会在数据未就绪时刷新并把图表永久置空)。改用该控件自己的
                         // Property Get 取到内部字体对象, 原地覆写字段。
-                        std::string getterF = "vb6_" + cIdent(ctlClass)
-                                            + "_prop_get_" + cIdent(canonF);
+                        std::string getterF = "vb6_" + cIdent(ctlClass) + "_"
+                                            + propFnSegment("prop_get_", canonF);
                         c_.emitLine("    vb6_UC_FontAssign((void*)" + getterF
                                   + "((vb6_cls_" + cIdent(ctlClass) + "*)vb6_UC_InstanceOf("
                                   + hwndExpr + ")), _vb6_f119);");
@@ -375,7 +375,8 @@
                     // 属性名拼写按 .ctl 内声明规范化 (VB6 大小写不敏感), 否则 LNK2019
                     std::string canonPn = canonicalClassMemberName(ctlClass, pn);
                     if (canonPn.empty()) canonPn = pn;
-                    std::string setter = "vb6_" + cIdent(ctlClass) + "_prop_let_" + cIdent(canonPn);
+                    std::string setter = "vb6_" + cIdent(ctlClass) + "_"
+                                       + propFnSegment("prop_let_", canonPn);
                     const ParameterInfo& p114 = wp114.back();
                     // Fix 243c: 是否"真" Variant 形参 —— 判据是 typeRefName 为空**或**就叫
                     // "Variant"。ParameterInfo::type 对源码里写了类型名的形参 (尤其

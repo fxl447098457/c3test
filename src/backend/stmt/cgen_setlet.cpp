@@ -144,8 +144,8 @@ void CCodeGen::visit(LetStmt& node) {
                         && !wp132.empty()) {
                         std::string canon132 = canonicalClassMemberName(itUC132->second, maExpr.memberName);
                         if (canon132.empty()) canon132 = maExpr.memberName;
-                        std::string setter132 = "vb6_" + cIdent(itUC132->second)
-                                              + "_prop_let_" + cIdent(canon132);
+                        std::string setter132 = "vb6_" + cIdent(itUC132->second) + "_"
+                                              + propFnSegment("prop_let_", canon132);
                         std::string hwndArg132 = makeCtrlHwndArg(objLower, itCtrl->second);
                         std::string meExpr132 = "(vb6_cls_" + cIdent(itUC132->second)
                                               + "*)vb6_UC_InstanceOf(" + hwndArg132 + ")";
