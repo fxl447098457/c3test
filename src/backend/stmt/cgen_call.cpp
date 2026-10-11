@@ -457,6 +457,37 @@ void CCodeGen::visit(CallStmt& node) {
                 if (builtinGlobalObjCS) {
                     calleeIsBuiltin = true;
                 } else {
+                // Fix 254: **类感知优先** —— 接收者的类推断得出来时, 该类的成员签名
+                // 压过 lookupModule(memberName); 类感知拿不到才退回模块作用域。
+                // 反例 (本 Fix 修的那一格): ComCtlsDemo 里 12 个集合类各有一枚 `Add`,
+                // 模块作用域 `lookupModule("add")` 交回的是注册最早的那一份
+                // (CbrBands.Add, 7 形参), 而 StatusBar.ctl:518 `Me.Panels.Add` /
+                // TabStrip.ctl:654 `Me.Tabs.Add` 是无括号无实参的语句调用 → 按
+                // CbrBands 的 7 参补齐 = 1(链对象) + 7 默认值 + 7 _has_ 标志 = 15 实参,
+                // 其中 `Visible As Boolean = True` 的 -1 与两枚 vb6_VariantEmpty()
+                // 顶到 SbrPanels_Add 的 (int32_t Style, int _has_*) 槽
+                // ⇒ C2440 "vb6_VARIANT → int32_t" / "vb6_VARIANT → int"
+                //    (StatusBar.c 766 ×2)、"vb6_VARIANT → int" (TabStrip.c 1105)。
+                // 判据就交给既有唯一出口 findClassMemberCallParams (与 Fix 033/042b 同源),
+                // 不另立一套尺; 它答不出 (成员不属于该类 / 接收者不是工程类) 时逐字回落原路径。
+                bool byClassCS254 = false;
+                if (maExpr.object) {
+                    std::string chainClass254 = inferClassTypeOfExpr(*maExpr.object);
+                    if (!chainClass254.empty()) {
+                        std::vector<ParameterInfo> clsParams254;
+                        bool clsBuiltin254 = false;
+                        if (findClassMemberCallParams(chainClass254, maExpr.memberName,
+                                                      clsParams254, clsBuiltin254)) {
+                            calleeParams = clsParams254;
+                            calleeIsBuiltin = clsBuiltin254;
+                            byClassCS254 = true;
+                        }
+                    }
+                }
+                // Fix 084y-3 (原逻辑): 链式调用对象方法时 (X.Y(args).Z) 取类方法签名 ——
+                // 类感知已在上面先跑, 此处只剩"类推得出来但该类没这枚成员"的兜底,
+                // 以及"接收者不是 IdentifierExpr/推断不出类"时的原 lookupModule 行为。
+                if (!byClassCS254) {
                 Symbol* sym = symTab_.lookupModule(maExpr.memberName);
                 if (sym && (sym->kind == SymbolKind::Sub || sym->kind == SymbolKind::Function
                     || sym->kind == SymbolKind::PropertyGet || sym->kind == SymbolKind::PropertyLet
@@ -464,23 +495,6 @@ void CCodeGen::visit(CallStmt& node) {
                     calleeParams = sym->params;
                     calleeIsBuiltin = sym->isBuiltin;
                 }
-                // Fix 084y-3: 链式调用对象方法时 (X.Y(args).Z), .Z 是类方法而非
-                // 模块成员, lookupModule 必然失败 → calleeParams 为空 → 不填充
-                // Optional 默认值 → C2198 参数太少 (如 Exec(Optional RecordsAffected,
-                // Optional Options As Long = -1) 声明5参却只传对象1参).
-                // 用 inferClassTypeOfExpr 推断对象类 (X.Y(args) → cDataBase),
-                // 再按类方法签名取形参表.
-                if (calleeParams.empty() && maExpr.object) {
-                    std::string chainClass = inferClassTypeOfExpr(*maExpr.object);
-                    if (!chainClass.empty()) {
-                        std::vector<ParameterInfo> clsParams;
-                        bool clsBuiltin = false;
-                        if (findClassMemberCallParams(chainClass, maExpr.memberName,
-                                                      clsParams, clsBuiltin)) {
-                            calleeParams = clsParams;
-                            calleeIsBuiltin = clsBuiltin;
-                        }
-                    }
                 }
                 }
             }
