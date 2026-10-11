@@ -882,7 +882,7 @@ int32_t vb6_Slider_TickPresent(void* hwnd);
 // 0/1/2 三档靠 chan.top 的相对高低分。四条读数实测于 .build/slprobe/slmeasure12.c。
 int32_t vb6_Slider_GetTickStyle(void* hwnd);
 void    vb6_Slider_SetTickStyle(void* hwnd, int32_t tickStyle);
-int32_t vb6_Slider_GetNumTicks(void* hwnd);
+int32_t vb6_intrSlider_GetNumTicks(void* hwnd);
 int32_t vb6_Slider_ChannelTop(void* hwnd);
 // C29-SL-i：类型库读出来的 VB6 选区面 —— **SelStart + SelLength**（dispid 0x0007/0x0008，两条 VT_I4）
 // 与方法 ClearSel（0x000e，文档原话"Sets the SelLength to 0"）。VB6 那一面**没有 SelEnd 这个名字**，
@@ -891,7 +891,7 @@ int32_t vb6_Slider_ChannelTop(void* hwnd);
 // ⇒ 终点比起点小，所以 SelLength 一律折成 0；远端超量程由控件夹住；CLEARSEL 之后两端都答 -1。
 int32_t vb6_Slider_GetSelLength(void* hwnd);
 void    vb6_Slider_SetSelLength(void* hwnd, int32_t len);
-void    vb6_Slider_ClearSel(void* hwnd);
+void    vb6_intrSlider_ClearSel(void* hwnd);
 // C29-SL-k：VB6 的 `Text`（0x0010，BSTR —— 文档原话"滑块位置变化时那颗 ToolTip 里显示的串"）与
 // `TextPosition`（0x0011，枚举 sldAboveLeft=0 / sldBelowRight=1）。走的是我们自己持的一枚
 // TRACK 型 tooltip（轨道条自带那枚 TBS_TOOLTIPS 服务不了自定义串，而且只在创建时才建 ——

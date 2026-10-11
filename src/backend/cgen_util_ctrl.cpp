@@ -654,7 +654,7 @@ std::string CCodeGen::getControlPropReadFn(FrmControlType ctrlType, const std::s
         if (propLower == "selend") return "vb6_Slider_GetSelEnd";
         // C29-SL-h: TickStyle 四档 + GetNumTicks（VB6 只读那一面），加一条判据证人 ChannelTop。
         if (propLower == "tickstyle") return "vb6_Slider_GetTickStyle";
-        if (propLower == "getnumticks") return "vb6_Slider_GetNumTicks";
+        if (propLower == "getnumticks") return "vb6_intrSlider_GetNumTicks";
         if (propLower == "channeltop") return "vb6_Slider_ChannelTop";
         // 账 #148 的判据证人（**不是 VB6 属性**）：tooltip 宿主里到底有没有这枚控件的工具。
         if (propLower == "tooltipregistered") return "vb6_ToolTipRegistered";
@@ -1546,7 +1546,7 @@ std::string CCodeGen::controlZeroArgMethod(FrmControlType ctrlType,
         }
     }
     if (memberLower == "clearsel" && ctrlType == FrmControlType::Slider)
-        return controlExit("vb6_Slider_ClearSel", 1, outArgc);
+        return controlExit("vb6_intrSlider_ClearSel", 1, outArgc);
     // ⚠ `.Cls` **不登记在本表**：它属于画布家族 (Cls / Print / Line)，出口名只许出自
     // src/common/canvas_drawing.hpp 那张表 (哨兵 form_draw_state S9 + rtl_proto_arity
     // R3/R5 都钉着这一条)。With 块里的 `.Cls` 走 `controlCanvasMethod`，见
