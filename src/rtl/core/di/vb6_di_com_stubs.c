@@ -12,7 +12,7 @@
 // types while preserving the register/memory passing class of every argument.
 //
 // generated from: a C3 compile session (pass -SessionDir to regenerate)
-// date: 2026-10-11 16:16
+// date: 2026-10-11 16:40
 //
 // Hand-maintained special cases stay in vb6_di_stubs.c (ordinals, msvbvm60 runtime,
 // dynamically loaded DLLs). Re-run the generator after a build exposes new symbols.
@@ -69,8 +69,8 @@ intptr_t __stdcall vb6_di_SysReAllocString(intptr_t pbString, intptr_t pszStrPtr
 }
 
 /* VarDecFromI8 */
-intptr_t __stdcall vb6_di_VarDecFromI8(double i64In, vb6_VARIANT* pDecOut) {
-    return ((intptr_t (WINAPI *)(double, vb6_VARIANT*))VarDecFromI8)(i64In, pDecOut);
+intptr_t __stdcall vb6_di_VarDecFromI8(double i64In, void* pDecOut) {
+    return ((intptr_t (WINAPI *)(double, void*))VarDecFromI8)(i64In, pDecOut);
 }
 
 /* OleTranslateColor */
@@ -79,18 +79,18 @@ intptr_t __stdcall vb6_di_OleTranslateColor(intptr_t Color, intptr_t hPal, int32
 }
 
 /* OleLoadPicture */
-intptr_t __stdcall vb6_di_OleLoadPicture(vb6_ComIface_IUnknown* pStream, intptr_t lSize, intptr_t fRunmode, void* riid, vb6_ComIface_IPicture** pIPicture) {
-    return ((intptr_t (WINAPI *)(vb6_ComIface_IUnknown*, intptr_t, intptr_t, void*, vb6_ComIface_IPicture**))OleLoadPicture)(pStream, lSize, fRunmode, riid, pIPicture);
+intptr_t __stdcall vb6_di_OleLoadPicture(void* pStream, intptr_t lSize, intptr_t fRunmode, void* riid, void** pIPicture) {
+    return ((intptr_t (WINAPI *)(void*, intptr_t, intptr_t, void*, void**))OleLoadPicture)(pStream, lSize, fRunmode, riid, pIPicture);
 }
 
 /* OleLoadPicturePath */
-intptr_t __stdcall vb6_di_OleLoadPicturePath(intptr_t lpszPath, intptr_t pUnkCaller, intptr_t dwReserved, intptr_t ClrReserved, void* riid, vb6_ComIface_IPicture** pIPicture) {
-    return ((intptr_t (WINAPI *)(intptr_t, intptr_t, intptr_t, intptr_t, void*, vb6_ComIface_IPicture**))OleLoadPicturePath)(lpszPath, pUnkCaller, dwReserved, ClrReserved, riid, pIPicture);
+intptr_t __stdcall vb6_di_OleLoadPicturePath(intptr_t lpszPath, intptr_t pUnkCaller, intptr_t dwReserved, intptr_t ClrReserved, void* riid, void** pIPicture) {
+    return ((intptr_t (WINAPI *)(intptr_t, intptr_t, intptr_t, intptr_t, void*, void**))OleLoadPicturePath)(lpszPath, pUnkCaller, dwReserved, ClrReserved, riid, pIPicture);
 }
 
 /* CreateStreamOnHGlobal */
-intptr_t __stdcall vb6_di_CreateStreamOnHGlobal(intptr_t hGlobal, intptr_t fDeleteOnRelease, vb6_ComIface_IUnknown** pStream) {
-    return ((intptr_t (WINAPI *)(intptr_t, intptr_t, vb6_ComIface_IUnknown**))CreateStreamOnHGlobal)(hGlobal, fDeleteOnRelease, pStream);
+intptr_t __stdcall vb6_di_CreateStreamOnHGlobal(intptr_t hGlobal, intptr_t fDeleteOnRelease, void** pStream) {
+    return ((intptr_t (WINAPI *)(intptr_t, intptr_t, void**))CreateStreamOnHGlobal)(hGlobal, fDeleteOnRelease, pStream);
 }
 
 /* CommDlgExtendedError */
@@ -149,8 +149,8 @@ intptr_t __stdcall vb6_di_RevokeDragDrop(intptr_t hWnd) {
 }
 
 /* OleCreatePropertyFrame */
-intptr_t __stdcall vb6_di_OleCreatePropertyFrame(intptr_t hWndOwner, intptr_t X, intptr_t Y, intptr_t lpszCaption, intptr_t cObjects, vb6_ComIface_IUnknown** pUnk, intptr_t cPages, void* pPageCLSID, intptr_t LCID, intptr_t dwReserved, intptr_t pvReserved) {
-    return ((intptr_t (WINAPI *)(intptr_t, intptr_t, intptr_t, intptr_t, intptr_t, vb6_ComIface_IUnknown**, intptr_t, void*, intptr_t, intptr_t, intptr_t))OleCreatePropertyFrame)(hWndOwner, X, Y, lpszCaption, cObjects, pUnk, cPages, pPageCLSID, LCID, dwReserved, pvReserved);
+intptr_t __stdcall vb6_di_OleCreatePropertyFrame(intptr_t hWndOwner, intptr_t X, intptr_t Y, intptr_t lpszCaption, intptr_t cObjects, void** pUnk, intptr_t cPages, void* pPageCLSID, intptr_t LCID, intptr_t dwReserved, intptr_t pvReserved) {
+    return ((intptr_t (WINAPI *)(intptr_t, intptr_t, intptr_t, intptr_t, intptr_t, void**, intptr_t, void*, intptr_t, intptr_t, intptr_t))OleCreatePropertyFrame)(hWndOwner, X, Y, lpszCaption, cObjects, pUnk, cPages, pPageCLSID, LCID, dwReserved, pvReserved);
 }
 
 /* CLSIDFromString */
@@ -159,33 +159,33 @@ intptr_t __stdcall vb6_di_CLSIDFromString(intptr_t lpszProgID, void* pCLSID) {
 }
 
 /* CoCreateInstance */
-intptr_t __stdcall vb6_di_CoCreateInstance(void* rclsid, intptr_t pUnkOuter, intptr_t dwClsContext, void* riid, vb6_ComIface_IUnknown** ppv) {
-    return ((intptr_t (WINAPI *)(void*, intptr_t, intptr_t, void*, vb6_ComIface_IUnknown**))CoCreateInstance)(rclsid, pUnkOuter, dwClsContext, riid, ppv);
+intptr_t __stdcall vb6_di_CoCreateInstance(void* rclsid, intptr_t pUnkOuter, intptr_t dwClsContext, void* riid, void** ppv) {
+    return ((intptr_t (WINAPI *)(void*, intptr_t, intptr_t, void*, void**))CoCreateInstance)(rclsid, pUnkOuter, dwClsContext, riid, ppv);
 }
 
 /* StgCreateDocfile */
-intptr_t __stdcall vb6_di_StgCreateDocfile(intptr_t pwcsName, intptr_t grfMode, intptr_t Reserved, vb6_ComIface_IStorage** ppStgOpen) {
-    return ((intptr_t (WINAPI *)(intptr_t, intptr_t, intptr_t, vb6_ComIface_IStorage**))StgCreateDocfile)(pwcsName, grfMode, Reserved, ppStgOpen);
+intptr_t __stdcall vb6_di_StgCreateDocfile(intptr_t pwcsName, intptr_t grfMode, intptr_t Reserved, void** ppStgOpen) {
+    return ((intptr_t (WINAPI *)(intptr_t, intptr_t, intptr_t, void**))StgCreateDocfile)(pwcsName, grfMode, Reserved, ppStgOpen);
 }
 
 /* OleSetContainedObject */
-intptr_t __stdcall vb6_di_OleSetContainedObject(vb6_ComIface_IUnknown* pUnknown, intptr_t fContained) {
-    return ((intptr_t (WINAPI *)(vb6_ComIface_IUnknown*, intptr_t))OleSetContainedObject)(pUnknown, fContained);
+intptr_t __stdcall vb6_di_OleSetContainedObject(void* pUnknown, intptr_t fContained) {
+    return ((intptr_t (WINAPI *)(void*, intptr_t))OleSetContainedObject)(pUnknown, fContained);
 }
 
 /* OleCreateFromFile */
-intptr_t __stdcall vb6_di_OleCreateFromFile(void* pCLSID, intptr_t lpszFileName, void* riid, intptr_t RenderOpt, intptr_t lpFormatEtc, vb6_ComIface_IOleClientSite* pClientSite, vb6_ComIface_IStorage* pStg, vb6_ComIface_IOleObject** ppvObj) {
-    return ((intptr_t (WINAPI *)(void*, intptr_t, void*, intptr_t, intptr_t, vb6_ComIface_IOleClientSite*, vb6_ComIface_IStorage*, vb6_ComIface_IOleObject**))OleCreateFromFile)(pCLSID, lpszFileName, riid, RenderOpt, lpFormatEtc, pClientSite, pStg, ppvObj);
+intptr_t __stdcall vb6_di_OleCreateFromFile(void* pCLSID, intptr_t lpszFileName, void* riid, intptr_t RenderOpt, intptr_t lpFormatEtc, void* pClientSite, void* pStg, void** ppvObj) {
+    return ((intptr_t (WINAPI *)(void*, intptr_t, void*, intptr_t, intptr_t, void*, void*, void**))OleCreateFromFile)(pCLSID, lpszFileName, riid, RenderOpt, lpFormatEtc, pClientSite, pStg, ppvObj);
 }
 
 /* OleCreateLinkToFile */
-intptr_t __stdcall vb6_di_OleCreateLinkToFile(intptr_t lpszFileName, void* riid, intptr_t RenderOpt, intptr_t lpFormatEtc, vb6_ComIface_IOleClientSite* pClientSite, vb6_ComIface_IStorage* pStg, vb6_ComIface_IOleObject** ppvObj) {
-    return ((intptr_t (WINAPI *)(intptr_t, void*, intptr_t, intptr_t, vb6_ComIface_IOleClientSite*, vb6_ComIface_IStorage*, vb6_ComIface_IOleObject**))OleCreateLinkToFile)(lpszFileName, riid, RenderOpt, lpFormatEtc, pClientSite, pStg, ppvObj);
+intptr_t __stdcall vb6_di_OleCreateLinkToFile(intptr_t lpszFileName, void* riid, intptr_t RenderOpt, intptr_t lpFormatEtc, void* pClientSite, void* pStg, void** ppvObj) {
+    return ((intptr_t (WINAPI *)(intptr_t, void*, intptr_t, intptr_t, void*, void*, void**))OleCreateLinkToFile)(lpszFileName, riid, RenderOpt, lpFormatEtc, pClientSite, pStg, ppvObj);
 }
 
 /* OleCreateStaticFromData */
-intptr_t __stdcall vb6_di_OleCreateStaticFromData(vb6_ComIface_IDataObject* pSrcDataObject, void* riid, intptr_t RenderOpt, intptr_t lpFormatEtc, vb6_ComIface_IOleClientSite* pClientSite, vb6_ComIface_IStorage* pStg, vb6_ComIface_IOleObject** ppvObj) {
-    return ((intptr_t (WINAPI *)(vb6_ComIface_IDataObject*, void*, intptr_t, intptr_t, vb6_ComIface_IOleClientSite*, vb6_ComIface_IStorage*, vb6_ComIface_IOleObject**))OleCreateStaticFromData)(pSrcDataObject, riid, RenderOpt, lpFormatEtc, pClientSite, pStg, ppvObj);
+intptr_t __stdcall vb6_di_OleCreateStaticFromData(void* pSrcDataObject, void* riid, intptr_t RenderOpt, intptr_t lpFormatEtc, void* pClientSite, void* pStg, void** ppvObj) {
+    return ((intptr_t (WINAPI *)(void*, void*, intptr_t, intptr_t, void*, void*, void**))OleCreateStaticFromData)(pSrcDataObject, riid, RenderOpt, lpFormatEtc, pClientSite, pStg, ppvObj);
 }
 
 /* SysAllocString */

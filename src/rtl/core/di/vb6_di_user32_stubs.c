@@ -12,7 +12,7 @@
 // types while preserving the register/memory passing class of every argument.
 //
 // generated from: a C3 compile session (pass -SessionDir to regenerate)
-// date: 2026-10-11 16:16
+// date: 2026-10-11 16:40
 //
 // Hand-maintained special cases stay in vb6_di_stubs.c (ordinals, msvbvm60 runtime,
 // dynamically loaded DLLs). Re-run the generator after a build exposes new symbols.
@@ -479,7 +479,7 @@ intptr_t __stdcall vb6_di_ImageList_Add(intptr_t hImageList, intptr_t hBmpImage,
 
 /* ImageList_AddIcon */
 intptr_t __stdcall vb6_di_ImageList_AddIcon(intptr_t hImageList, intptr_t hIcon) {
-    return ((intptr_t (WINAPI *)(intptr_t, intptr_t))ImageList_AddIcon)(hImageList, hIcon);
+    return ((intptr_t (WINAPI *)(intptr_t, intptr_t, int))ImageList_Add)(hImageList, hIcon, 0);
 }
 
 /* ImageList_Destroy */
@@ -713,8 +713,8 @@ intptr_t __stdcall vb6_di_GetTextMetricsW(intptr_t hDC, void* lpMetrics) {
 }
 
 /* EnumFontFamiliesExW */
-intptr_t __stdcall vb6_di_EnumFontFamiliesExW(intptr_t hDC, intptr_t lpLF, intptr_t lpEnumFontFamExProc, vb6_ivref_ISubclass* lParam, intptr_t dwFlags) {
-    return ((intptr_t (WINAPI *)(intptr_t, intptr_t, intptr_t, vb6_ivref_ISubclass*, intptr_t))EnumFontFamiliesExW)(hDC, lpLF, lpEnumFontFamExProc, lParam, dwFlags);
+intptr_t __stdcall vb6_di_EnumFontFamiliesExW(intptr_t hDC, intptr_t lpLF, intptr_t lpEnumFontFamExProc, void* lParam, intptr_t dwFlags) {
+    return ((intptr_t (WINAPI *)(intptr_t, intptr_t, intptr_t, void*, intptr_t))EnumFontFamiliesExW)(hDC, lpLF, lpEnumFontFamExProc, lParam, dwFlags);
 }
 
 /* ExcludeClipRect */
@@ -784,7 +784,7 @@ intptr_t __stdcall vb6_di_ImageList_Replace(intptr_t hImageList, intptr_t ImgInd
 
 /* ImageList_ReplaceIcon */
 intptr_t __stdcall vb6_di_ImageList_ReplaceIcon(intptr_t hImageList, intptr_t ImgIndex, intptr_t hIcon) {
-    return ((intptr_t (WINAPI *)(intptr_t, intptr_t, intptr_t))ImageList_ReplaceIcon)(hImageList, ImgIndex, hIcon);
+    return ((intptr_t (WINAPI *)(intptr_t, intptr_t, intptr_t))ImageList_Replace)(hImageList, ImgIndex, hIcon);
 }
 
 /* ImageList_AddMasked */

@@ -12,7 +12,7 @@
 // types while preserving the register/memory passing class of every argument.
 //
 // generated from: a C3 compile session (pass -SessionDir to regenerate)
-// date: 2026-10-11 16:16
+// date: 2026-10-11 16:40
 //
 // Hand-maintained special cases stay in vb6_di_stubs.c (ordinals, msvbvm60 runtime,
 // dynamically loaded DLLs). Re-run the generator after a build exposes new symbols.
@@ -103,8 +103,8 @@ intptr_t __stdcall vb6_di_StrCmpLogicalW(intptr_t lpString1, intptr_t lpString2)
 }
 
 /* SHCreateDataObject */
-intptr_t __stdcall vb6_di_SHCreateDataObject(intptr_t pIDLFolder, intptr_t cIDL, intptr_t apIDL, void* pDataInner, void* riid, vb6_ComIface_IDataObject** ppDataObject) {
-    return ((intptr_t (WINAPI *)(intptr_t, intptr_t, intptr_t, void*, void*, vb6_ComIface_IDataObject**))SHCreateDataObject)(pIDLFolder, cIDL, apIDL, pDataInner, riid, ppDataObject);
+intptr_t __stdcall vb6_di_SHCreateDataObject(intptr_t pIDLFolder, intptr_t cIDL, intptr_t apIDL, void* pDataInner, void* riid, void** ppDataObject) {
+    return ((intptr_t (WINAPI *)(intptr_t, intptr_t, intptr_t, void*, void*, void**))SHCreateDataObject)(pIDLFolder, cIDL, apIDL, pDataInner, riid, ppDataObject);
 }
 
 /* InitNetworkAddressControl */

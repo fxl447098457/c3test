@@ -100,6 +100,14 @@ foreach ($f in $headers) {
         $name = $m.Groups[2].Value
         if ($protos.ContainsKey($name)) { continue }
         $ret = $m.Groups[1].Value.Trim()
+        # project-generated return types (vb6_*): pointer -> void*, by-value -> intptr_t
+        # (ABI: pointer-sized). The RTL cannot name them, and returning void*/intptr_t is fine
+        # because __stdcall decoration depends only on arg bytes, not the return type.
+        if ($ret -match 'vb6_[A-Za-z0-9_]*\s*\*') {
+            $ret = [regex]::Replace($ret, 'vb6_[A-Za-z0-9_]*\s*\*', 'void*')
+        } elseif ($ret -match 'vb6_[A-Za-z0-9_]*') {
+            $ret = 'intptr_t'
+        }
         $pOpen = $buf.IndexOf('(', $m.Index + $m.Length - 1)
         $pClose = $buf.LastIndexOf(')')
         if ($pOpen -lt 0 -or $pClose -le $pOpen) { continue }
@@ -154,6 +162,16 @@ $badUdt = New-Object System.Collections.Generic.List[string]
 $seen = @{}
 $counts = @{}
 
+# commctrl macros that wrap a real function: they cannot be used as a function-pointer cast
+# target (the identifier is undeclared -> C2065). key = Declare alias; fn = real function to
+# call; extra = literal args appended after the original ones.
+#   ImageList_AddIcon(himl,hicon)     -> ImageList_Add(himl,hicon,0)
+#   ImageList_ReplaceIcon(himl,i,hicon) -> ImageList_Replace(himl,i,hicon)
+$macroMap = @{
+    'ImageList_AddIcon'     = @{ fn = 'ImageList_Add';     extra = @('0') }
+    'ImageList_ReplaceIcon' = @{ fn = 'ImageList_Replace'; extra = @() }
+}
+
 foreach ($s in $order) {
     if ($seen.ContainsKey($s)) { continue }
     $seen[$s] = 1
@@ -187,11 +205,14 @@ foreach ($s in $order) {
             $ptype = $pt
         }
         if ($ptype -eq '') { $ptype = 'intptr_t' }
-        # VB UDTs (vb6_type_xxx) are project-generated structs the RTL cannot see.
-        # Every occurrence here is by-pointer, so void* is ABI-identical.
-        if ($ptype -match 'vb6_type_[A-Za-z0-9_]*\s*\*') {
-            $ptype = [regex]::Replace($ptype, 'vb6_type_[A-Za-z0-9_]*\s*\*', 'void*')
-        } elseif ($ptype -match 'vb6_type_[A-Za-z0-9_]*') {
+        # VB UDTs / project interfaces / VARIANT (vb6_type_*, vb6_ivref_*, vb6_ComIface_*,
+        # vb6_VARIANT*) are project-generated types the RTL cannot see. Every Declare passes
+        # them by pointer, so void* is ABI-identical. A by-value vb6_* type is not representable
+        # here -> skip the stub (badUdt) rather than emit an undeclared type (which cascades into
+        # C2143/C2081/C2370 for the whole TU and breaks the SHARED rtl for every project).
+        if ($ptype -match 'vb6_[A-Za-z0-9_]*\s*\*') {
+            $ptype = [regex]::Replace($ptype, 'vb6_[A-Za-z0-9_]*\s*\*', 'void*')
+        } elseif ($ptype -match 'vb6_[A-Za-z0-9_]*') {
             $udtBad = $true
         }
         $declParts += ($ptype + ' ' + $pname)
@@ -221,6 +242,18 @@ foreach ($s in $order) {
 
     $out = $bodies[$bodyKey]
     $out.Add('/* ' + ($s -replace '^vb6_di_', '') + ' */')
+    # commctrl macro aliases cannot be cast-to-function-pointer; route them through the real
+    # underlying function with any literal args the macro injects.
+    $targetFn = $api
+    $callTypes = $types
+    $callArgs = $args
+    if ($macroMap.ContainsKey($api)) {
+        $targetFn = $macroMap[$api].fn
+        if ($macroMap[$api].extra.Count -gt 0) {
+            $callTypes = $(if ($types -eq '' -or $types -eq 'void') { 'int' } else { $types + ', int' })
+            $callArgs = $(if ($args -eq '') { '0' } else { $args + ', ' + ($macroMap[$api].extra -join ', ') })
+        }
+    }
     if ($dyn) {
         if ($ret -eq 'void') {
             $out.Add('void __stdcall ' + $s + '(' + $decl + ') {')
@@ -252,11 +285,11 @@ foreach ($s in $order) {
         }
     } elseif ($ret -eq 'void') {
         $out.Add('void __stdcall ' + $s + '(' + $decl + ') {')
-        $out.Add('    ((void (WINAPI *)(' + $types + '))' + $api + ')(' + $args + ');')
+        $out.Add('    ((' + 'void (WINAPI *)(' + $callTypes + '))' + $targetFn + ')(' + $callArgs + ');')
         $out.Add('}')
     } else {
         $out.Add($ret + ' __stdcall ' + $s + '(' + $decl + ') {')
-        $out.Add('    return ((' + $ret + ' (WINAPI *)(' + $types + '))' + $api + ')(' + $args + ');')
+        $out.Add('    return ((' + $ret + ' (WINAPI *)(' + $callTypes + '))' + $targetFn + ')(' + $callArgs + ');')
         $out.Add('}')
     }
     $out.Add('')
