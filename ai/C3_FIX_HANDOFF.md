@@ -2198,7 +2198,7 @@ marker、重编，之后 `check_rtl_embedded` 报 **125/125 逐字节相同**。
 - **判据（本机，全语料 400 份逐行）**：BASE = CI 在 dev head `c8adb814` 的那枚 exe（含第三十六刀 + oracle 补课 + dev 的 Fix 254-268），NEW = 本刀两格之后的本机 exe（`.build/b1147_k37/report.txt`）。**移动的行 = 54，且 54 行全是族二回到 BASE 形状**（`vb6_ChkByte(vb6_FltToLng(vb6_Num_Div(...)))` 这类回来了）；`lost-FltToLng` = **0**；routed 那一族相对 BASE **一行没动**（VBFlexGridDemo 与 test_paramarray / test_varcmp_scalar 都是 -0/+0）。真编译两台：Charts 2020 两台 COMPILE-RC=0 且出 `Proyecto1.exe`、VBFlexGridDemo 两台出 `VBFlexGridDemo.exe`；`test_variant_boxing` 两台 **56/56 零 miss**（本刀新加三枚行为针：`arv / 2` 进 Long 与进 Byte、定长 Byte 数组元素 `cad(1) / 2` 进 Byte —— 都钉 4，回归那台交 3；两台都不碰 §B77① 的平局口径）；`check_rtl_embedded` 125/125（exe sha `db90d808965e`）、`check_variant_i8_coverage` violations=0。
 - **处置**：门 #522 的 10 行**不登记**。等第三十七刀之后按 CI 那一跑自己的读数一次性归因（那时族二应当回到 BASE 形状或变成「交出槽 + 提取 + 检查」三件套，族一按运算符逐行对上）。 ⇒ **订正（同一刀之内）**：族二已由上面两格消掉，本机全语料逐行验过（54 行全是回到 BASE 的那一族），所以登记改到「这一跑的 CI 读数」上做 —— 那时清单里属于 dev 的 Fix 254-268 那一批行也会一起进来（他们的形状门红了没登记），逐行归因要按两个 head 分开对：dev 的账归他们，本线只认自己那 54 行 + routed 族。 **收线数字**：登记后那跑（head `41bce27a` = **门 #528**）十二个 job 全绿；本刀在全语料上的净效果 = 清单从「第三十六刀移动 10 行」收到「只剩 5 行」，而那 5 行逐行都带运行期出口；dev 的 Fix 254-268 在同一口径下移动 **0 行**。
 
-### B146 内联 `CDec(...)` 参与的算术两架构都编不过：`error C2088`「`+` 对 struct 非法」（2026-10-11 第三十六刀的 H 族探针顺手量到；**已出 = 第三十九刀**（提交 <待回填 sha>，门 待回填；那张手抄前缀表从此与 RTL 逐名对账 = 第 54 道哨兵 `check_builtin_slot_returns.ps1`））
+### B146 内联 `CDec(...)` 参与的算术两架构都编不过：`error C2088`「`+` 对 struct 非法」（2026-10-11 第三十六刀的 H 族探针顺手量到；**已出 = 第三十九刀**（提交 `87107920` 本体 + `217b2f91` 按 CI 读数登记形状门那 4 行；门 **#536**（head `87107920`）= 12 job 里 11 绿、唯一红是形状门 ⇒ 登记后 **门 #537**（head `217b2f91`，attempt 1）十二 job 全 completed/success；那张手抄前缀表从此与 RTL 逐名对账 = 第 54 道哨兵 `check_builtin_slot_returns.ps1`））
 
 - **读数**（`.build/b1095_arith/probe6.bas`，两台同一份错误形状：三条 `error C2088` 落在 `probe6.c(18)/(21)/(24)`，另两条 `C2198` 是它们的下游）：`CStr(CDec("1.25") + 1)`、`TypeName(CDec("1.25") + 1)`、`v = CDec("1.25") + 1` 三形全红，而同一份探针里的 H 族（Variant 盒参与的标量目标 / 比较 / 数组下标 / 数值形参）两台都编得过 ⇒ 坏的只有**内联那一形**。
 - **发码**：`vb6_DebugWriteBSTR(vb6_CStr(vb6_VariantFromValue((vb6_CDec(vb6_VariantFromValue(vb6_VariantFromValue(vb6_BSTR_FromStr(L"1.25")))) + 1))));` —— `vb6_CDec` 的返回类型是 `vb6_VARIANT`（`vb6rtl_builtin.h:403`），而它**不在** `cExprIsVariant` 那张前缀表里（HEAD 与本刀之后都不在，`git show HEAD:src/backend/cgen_util_type.cpp | grep -c` = 0），于是 Fix 086 的提取不 fire，C 的 `+` 直接落在 struct 上。
@@ -2216,7 +2216,7 @@ marker、重编，之后 `check_rtl_embedded` 报 **125/125 逐字节相同**。
   - **第 54 道哨兵 `scripts/check_builtin_slot_returns.ps1`**（登记在 `run_tests.ps1` 的 `[STATIC] builtin_slot_returns`）：R1 表→RTL（死名/错档）、R2 (RTL 槽 ∩ 后端字面量)→表（漏登记）、R3 指针返回（`vb6_VARIANT *f(`）一律不许进表、R4 census 不许读空。实到 `table=32 rtlSlot=33 rtlPtr=1 rtlMacro=25 emittedNames=1264 (RTL槽∩emit)=30` ⇒ 两个方向同时零漂移。两条负控真红（表里塞 `vb6_VariantBogus(` ⇒ R1 红；撤 `vb6_CDec(` ⇒ R2 红），按 md5 还原后复绿。踩到的坑记两条：① 后端字面量那把针原先要求**紧跟 `(`**，于是 `{"cdec","vb6_CDec"}` 那张内置名表整个读空（R4 当场报「扫描读空」—— 没有 R4 就是一道绿着的坏哨兵）；② 「发射面」必须扫**字符串字面量**而不是全文，否则注释里提一句就把名字算成活的。
 
 
-### B148 单模块（非多模块）发码时，工程自己的 Variant 过程直接赋给非 Variant 目标 = 整只槽进 `vb6_ChkLong`（2026-10-11 第三十九刀归因 `vb6_DispCallByVtbl` 那一行时顺手量到，**未开工**）
+### B148 单模块（非多模块）发码时，工程自己的 Variant 过程直接赋给非 Variant 目标 = 整只槽进 `vb6_ChkLong`（2026-10-11 第三十九刀归因 `vb6_DispCallByVtbl` 那一行时顺手量到；**覆盖面已量 = 存量 0 处**，所以这一格按纸面缺口押后，不在 §B147 那条口径之前）
 
 - **读数**（`.build/b1241_single/SPro.bas`，两台 BASE/NEW **同形**，所以不是本刀引入的）：
   ```
@@ -2228,13 +2228,27 @@ marker、重编，之后 `check_rtl_embedded` 报 **125/125 逐字节相同**。
   ⇒ `h = vb6_ChkLong(vb6_MakeDec());`（`vb6_ChkLong` 的形参是 `int64_t`，`vb6rtl_builtin.h:392`）—— 真编就是 C2440。
 - **成因**：「这枚 C 表达式是不是槽」的 AST 那一半（`inferExprType` / `variantOperandAST`）认得出工程过程的返回类型，所以算术那一族两台都对（同文件 `MakeDec() + 1` 正确走 `vb6_VarAddV`）；**赋值那一族的消费点问的是文本前缀表**，而单模块发码把工程过程拼成裸 `vb6_<proc>`（`cProcName`：只有 `isMultiModule_` 才拼模块名），`variantReturnFuncs_` 里登记的却是 `vb6_<模块>_<proc>` 与 `vb6_pv_<proc>` ⇒ 名字对不上，表里就只有靠人手工钉的那一枚（`vb6_DispCallByVtbl`）。
 - **修法形状（开工前先量覆盖面）**：让预扫描在单模块模式下也登记**裸名**那一形，或者让赋值那一族改问 AST 那半（§B147 的「改道 = AST ∪ 文本」正是这条口径，只是赋值消费点还没吃它）。⚠ 前者不能无条件做：`cProcName` 的注释本身就写着「单模块的裸名会撞 RTL 函数名（用户 `Private Sub ErrRaise` ⇒ `vb6_ErrRaise`）」⇒ 把裸名塞进「返回槽」那张集合，撞到 RTL 同名符号时是**按名字**答 Variant，会把 RTL 那枚真调用一起吞了。先数语料里这个形状有多少处（存量只从 `--emit-c` 就能数，不必真编），再定哪一侧。
-- **暴露面**：全语料 400 份里唯一有人踩到的那一枚靠表里的钉住了；本账的实物是**纸面缺口 + 一枚幸存的钉子**，所以不是急件，但它是 §B147 那条口径（一条判据两头吃）还没铺到的**第三个消费点**。
+- **暴露面已量（2026-10-11，两把 census 相互独立，都零编译）**：`.build/b1263_b148_census.py` 扫 400 份 `--emit-c` 产物，找 `= vb6_Chk*(vb6_X(` 且 `X` 在**同一份产物里**声明返回 `vb6_VARIANT` ⇒ **0 处**；`.build/b1264_chknames.py` 把定义假设也撤掉，只数 `= vb6_Chk*(vb6_X(` 的全部内层名（1754 处，全是 `FltToLng` / `IntDiv` / `IIfLong` / `Screen_Width` 那一族标量出口）⇒ 里面**没有一枚**是工程自己的过程。结论：这一族今天在语料里 0 处，实物只有 §B146 里那枚幸存的钉子（`vb6_DispCallByVtbl`）+ 本账的复现探针 `.build/b1241_single/SPro.bas`。所以它是 §B147 那条口径（一条判据两头吃）还没铺到的**第三个消费点**，等下一份真语料撞上它再动，别为一形去改一片。
 
-### B149 `GetAllSettings` 与 VB6 差两层：缺键时该答 Null 而它答一枚裸 Variant，真键该交二维 Variant 数组而它交一维交替表（2026-10-11 第三十九刀写针面时读 RTL 读到，**未开工**）
+### B149 `GetAllSettings` 今天交出的形状**谁都读不出**：VarType 答 12、UBound 答 0、元素读回空，而缺键那一档该答 Null（2026-10-11 第三十九刀写针面时读 RTL 读到，第四十刀开格前量完；**未开工**）
 
-- **发码/RTL 现场**：`src/rtl/core/vb6rtl/vb6rtl_registry.c:113` 顶上就写着 `/* VB6 returns a 2D Variant array, but we simplify to 1D with alternating key/value */`，而缺键那条路径 `memset(&result,0,…)` 之后 `result.vt = (vb6_vtVariant)` 直接交回 ⇒ 真跑读数 `VarType(GetAllSettings("C3NoSuchApp146","Sec"))` = **12**、`IsNull(...)` = **False**（两台相同，已钉在 `test_variant_boxing` 的 `VB-b146-reg-*` 两枚针上，钉的是**形状**不是 VB6 口径）。
-- **VB6 那一面**：文档口径是「应用没有 `SaveSettings` 条目 ⇒ 返回 Null」+「返回的是 1×N 还是 2-D Variant 数组（section 名 + 键 + 值）」——**这一格今天没有外部读数**：`D:\vb_yqt4qPac` 那批真语料里 `GetAllSettings(` 的实到形状还没数（下一步第一件事），而 `SaveSettings`/`GetSetting` 那两条是否已经写进注册表也要一起量，否则修完对不上账。
-- **口径待拍**：`SaveSettings` 写侧现在是什么形状（有没有对称的存储），以及要不要按 VB6 交真二维 SAFEARRAY（交出去之后 `For i = LBound(a,2) To UBound(a,2)` 那形才可能通）。定完再动 RTL，别只把 Null 那一档补上就结帐。
+- **真跑读数**（探针 `.build/b1265_nd/t149.bas`，x64 新台，`SaveSetting` 两枚键之后）：
+  ```
+  vt=12 isnull=False        <- VB6: VarType=8204 (vbArray+vbVariant), IsNull=False
+  ub1=0                     <- VB6: UBound(a,1)=1 (两枚键, 0..1)
+  ub2=0                     <- VB6: UBound(a,2)=2 (第二维 1..2)
+  cell02=                   <- VB6: a(0,2) = "V1"; 这里交**空串**
+  miss-vt=12 miss-isnull=False   <- VB6: 应用没有条目时交 Null (VarType=1, IsNull=True)
+  ```
+  五读全部**静默**（rc=0、没有一声诊断），也就是这条 API 现在等于交不出东西。
+- **发码现场把三格分开**（`.build/b1265_nd/e.txt`）：
+  - ① **标签**：`vb6rtl_registry.c:113` 造了一枚 1×2N 的 `vb6_SafeArray1D` 交替表，却把 `result.vt` 留在 `vb6_vtVariant` 上、只写 `result.parray` ⇒ 既不是数组档也不是 Null（`vb6rtl_variant.h:172` 那行现成的正确拼法是 `vb6_vtArray | vb6_vtVariant` = 8204，正是 VB6 的 VarType 答案）。这一格**只改 RTL**，且缺键那一档一起补（交 `VT_NULL`）。
+  - ② **二维本体 + 晚绑定的第二下标**：`v(0, 2)` 发成 `vb6_VariantArrayGet(&v, 0)` ⇒ **第二个下标整块被丢**，静默拿第 0 格；而同一份产物里 `UBound(v, 2)` 走的是 `vb6_UBoundND((vb6_SafeArrayND*)(vb6_VariantToSafeArray1D(v)), 2)` —— 两条路对同一枚槽的**维数**判断不一致（一边按 ND 问，一边按 1D 取）。补它要造真 2-D（`vb6_SafeArrayCreateND(variant, 2, bounds)`，dim1 = 0..n-1 / dim2 = **1..2**）并给晚绑定元素读补 ND 那一臂；第三十九刀 §B144 那条口径在这里同样管用：**先问谁拥有这枚描述符**，别在发码侧再拼一份。
+  - ③ **`DeleteSetting` 的参数个数**：RTL 是 `vb6_DeleteSetting(BSTR,BSTR,BSTR)`（`vb6rtl_class_com.h:57`）三枚全必填，而 VB6 是 1/2/3 参三形（删键 / 删节 / 删应用）⇒ 本探针写两参时 `error C2198 用于调用的参数太少`（第一次跑就是这么红的）。这一格与 `check_rtl_proto_arity`（1282 对签名）同族但不同问题：那条钉「头与体一致」，这里是「**可选形参**的默认档没人补」。
+- **外部口径读数**（VB6 真语料 `D:\vb_yqt4qPac`，按 API 逐个数）：`GetAllSettings` **9 行 / 6 份**，其中 4 行是**同名成员**（`eControl.GetAllSettings()`、`clrDepth.GetAllSettings`）与 1 行关键字清单字符串，真正的内置函数消费者只有 1 份：`文件/多窗口的文件编辑器.../mdoceditor/E-Type/Main.bas:269`，它写的形状就是那张二维表的证人 —— `varFiles = GetAllSettings(ThisApp, ThisKey)` 之后 `For i = 0 To UBound(varFiles, 1)` 且取 `varFiles(i, 1)`（第二维下标从 **1** 起，列 1 = 键名 / 列 2 = 值 ⇒ 与 MSDN 的「first column 键名、second column 值」对得上）。同一族的 `SaveSetting` 1151 行 / 293 份、`GetSetting` 1178 行 / 307 份 —— 写侧与单键读侧被大量真代码用着，而**我们的写侧走的是 VB6 标准路径** `HKCU\Software\VB and VBA Program Settings\<app>\<section>`（`vb6_RegBuildKey`），所以判据可以做**真往返**（SaveSetting → GetAllSettings → DeleteSetting 收尾），不必靠假注册表。
+- **判据形状（等开工时照这个）**：新建 `tests/test_registry_settings.bas`，两台各钉「两枚键 → vt=8204 / ub1=1 / ub2=2 / `v(0,2)`="V1"」"
+  "+「缺键应用 → VarType=1 且 IsNull=True」+「`DeleteSetting` 两参与三参都编得过」；负控 = BASE 那台跑**同一份**新夹具（今天五读全错，四条针必红）。"
+  "⚠ 动 RTL 必 touch `c3rtl.rc` + 重编 C3.exe + `check_rtl_embedded`（第三十七刀那条：不然测的是旧 RTL 而 trace 一行都不打印）。
 
 ### B145 Decimal 的精确算术：Variant 参与 `+ - * /` 时**不该在编译期猜数值档**（2026-10-11 第三十六刀 **已出** = 提交 `b142d338` + 补课 `67f03217`；口径是用户当场拍的「要做精确的 decimal 算数」；门 #517 一台真红已归因修掉（补课 `67f03217`）；下一跑 = **门 #522**（head `67f03217`，12 job 里 11 绿、唯一红是形状门）。**注意**：#522 那次的形状门报的 10 行里有 5 行是静默回归（**§B147**），已在第三十七刀修掉，清单最终只登记五行（门 #527 / 登记 `41bce27a` / 收线 #528））
 
