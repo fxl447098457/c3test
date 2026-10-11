@@ -1,4 +1,19 @@
 // c3rtl.rc - RTL runtime library embedded as resources
+// 账 #305 §B142(第三十四刀): Decimal 这一档的两处根因都是「格式」不是「数值」。
+//   ① `DECIMAL.wReserved` 这两字节其实是 oleaut32 自己的 vt 标签(它造的那些也写 14 = VT_DECIMAL)。
+//   vb6_CDec 的**手填字段**那两路以前把它留成 0 —— 字段值全对、格式不对, 于是 oleaut32 不报错地
+//   把这枚 DECIMAL 当无效: VariantChangeType 返回 S_OK 却交 0 / 交空串(逐字节对照见台账)。
+//   本刀从唯一出口 vb6_DEC_VT 补这一枚(两份布局各一处, 不在调用点抄 #ifdef)。
+//   ② x86 的 VARIANT 装 VT_DECIMAL 时**不走 pdecVal 指针**: 那 16 字节整个被一枚 DECIMAL 盖住
+//   (wReserved ↔ vt、scale/sign/Hi32 ↔ 三枚没用的 wReserved、lo64 ↔ 数据区)。只填指针时 oleaut32
+//   把那枚地址当数值答出来(前一轮那个「堆地址」读数就是这一条) —— ① 那枚标签的来历也在这里。
+//   读侧两枚出口: vb6_DecimalToBSTR(无格式串那侧) 与 vb6_DecimalToR8(Format 带格式串那侧 +
+//   vb6_VariantToDouble 的 Decimal 档 —— 后者一漏同时打掀 CLng/CDbl/CInt 三条内置函数, 它们全是
+//   转调它的薄壳)。两台实测六针全对(TypeName/IsNumeric/CStr 两条/CLng/CDbl)。
+//   选 VariantChangeType 不是取其方便: 在这套工具链里 `VarDecToR8`/`VarDecToString`/`VarDecToI4`
+//   根本没有可链接的名字(SDK 的 x64 oleaut32.lib 里没有, dll 也不按名字导出)。
+//   剩下的 7 处 vt 读表(ToLong/ToLongPtr/ToBool/ComPackVariant/memVariantToI4/
+//   vb6_ho_variantToLong·ToDouble)不在本刀里, 照 census 一起收在下一刀。
 // 账 #305 §B141: CDec(...) 交出来的 VT_DECIMAL 这一档, 两张 VB-facing 读表从来没答过 —— 
 //   vb6_TypeName 落 default 答 "Variant"、vb6_IsNumeric 落 default 答假(两架构同错, 实测)。
 //   本刀补这两档(与 §B138 尾巴那批 VT_I8 同一族决定: 问的是「这枚 Variant 里是什么类型 / 算不算数」。
@@ -6,6 +21,8 @@
 // ⚠ 同一批读数把「往外读」的第二张表(vb6_Format 的类型分诊, detail/vb6rtl_format_extract.inc)量成
 //   另一格: 那一臂补上去之后 x86 把 DECIMAL 读成堆地址、x64 对 CDec(整数) 读出 0 ⇒ 罪在写侧/所有权,
 //   另立 §B142(候选块与四台读数留在 .build/b990_format_arm_candidate.inc)。
+//   【2026-10-11 第三十四刀订正】上面两句作废: 写侧的罪是**少写了一枚 vt 标签**(字段值一直是对的), 
+//   而那个「堆地址」形状是 x86 的 VARIANT 把 VT_DECIMAL 内联盖住、不走指针(见上方 §B142 ②)。
 //   过程里量到两条工具事实: ① vb6_VARIANT 在 x64 内联的 decVal 是**同布局的匿名 struct**, 不是 DECIMAL
 //   类型(直接赋值 C2440, 报错里源类型是空的); ② 本 TU 里调 VarDecToR8 只有 C4013 隐式声明,
 //   x86 真名是 _VarDecToR8@16 ⇒ LNK2019 **只在 x86 炸**(x64 不装饰反而过)。

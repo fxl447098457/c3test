@@ -2526,11 +2526,15 @@ if ($Category -in @("all", "run", "bas")) {
         "VB-sin-cdbl=1.5", "VB-sin-clng=2",
         "VB-ptr-tn=Long", "VB-ptr-isnum=True", "VB-ptr-cbool=True", "VB-ptr-selfeq=True",
         "VB-str-tn=Long",
-        # 账 #305 §B141: Decimal 这一档「往外读」的类型名与数值性两针 —— CDec 不是位数问题(两架构同一
-        # 份表), 故由下面那枚 x86 双胞胎同针同过。⚠ CStr/Format 两条读数照打但**今天不钉**: 本刀只补两张表,
-        # 那一格还没补 ⇒ 两台都打空; 补上之后实测 x64 对 CDec(整数) 交 0、x86 把 DECIMAL 读成堆地址
-        # ⇒ 罪在写侧/所有权, 另立 §B142。那一刀修好后把这两条针补上就是它的判据。
-        "VB-dec-tn=Decimal", "VB-dec-isnum=True", "VB-DONE")
+        # 账 #305 §B141 + §B142: Decimal 这一档「往外读」的针面。CDec 不是位数问题(两架构同一
+        # 份表), 故由下面那枚 x86 双胞胎同针同过。第三十四刀之后两台实测全对, 根因两处都是
+        # **格式**不是数值: ① DECIMAL.wReserved 其实是 oleaut32 自己的 vt 标签(它写 14), 手填字段那两路
+        # 以前留 0 ⇒ 数据全对而 OLE 不认, VariantChangeType 返回 S_OK 却交 0 / 交空串;
+        # ② x86 的 VARIANT 装 VT_DECIMAL 不走 pdecVal 指针, 是整枚 16 字节 DECIMAL 内联盖住 VARIANT
+        # ⇒ 只填指针时 oleaut32 把那枚地址当数值答出来(读数 = 堆地址形状)。
+        # 唯一照打不钉的是 VB-dec-fmt: 带小数点的格式串随区域设置变(与上面 AR-fmt2 同一口径)。
+        "VB-dec-tn=Decimal", "VB-dec-isnum=True", "VB-dec-cstr=[5]", "VB-dec2-cstr=[1.25]",
+        "VB-dec-clng=5", "VB-dec-cdbl=1.25", "VB-DONE")
     # ⚠ 这里曾经是字面 TAB: `"$Tests<TAB>est_variant_boxing.bas"`。
     # PowerShell 的 "" 里 **`\t` 不是转义**（转义是反引号），所以只要有人把 `\t` 写成真 TAB,
     # 路径就变成 `tests` + TAB + `est_...` —— 门里读到的是 `error VB1006: 无法打开文件`,

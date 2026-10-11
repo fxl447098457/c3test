@@ -68,6 +68,16 @@ typedef struct vb6_VARIANT {
 
 #undef vb6_VARIANT  /* 取消Windows vb6_VARIANT, 使用VB6简化版 */
 
+/* 账 #305 §B142: **`DECIMAL.wReserved` 不是「保留」—— oleaut32 拿它当 vt 标签用**(它自己写的那枚是 14 = VT_DECIMAL)。
+ * 手填字段造 DECIMAL 时漏这一枚, OLE 不报错: 它返回 S_OK 却给 0 / 给空串(实测,
+ * 见台账 §B142 第四轮那段的字节对照)。两份布局字段名不同(内联匿名 struct 叫 wReserved1、
+ * 真 DECIMAL 叫 wReserved), 所以统一从这个宏进, 不许在调用点再把 #ifdef 抄第二遍。 */
+#ifdef _WIN64
+  #define vb6_DEC_VT(d)  ((d).wReserved1)
+#else
+  #define vb6_DEC_VT(d)  ((d).wReserved)
+#endif
+
 /* Fix <vbeclipse> rev11 配套: DECIMAL 访问统一宏。
  * x64: decVal 内联在 union 里, 直接成员访问。
  * x86: union 保持 8 字节 (对齐 OLE VARIANT), decVal 只能以 DECIMAL* pdecVal
@@ -265,6 +275,13 @@ double vb6_VariantToDouble(vb6_VARIANT v);
 void vb6_VariantSetI4(vb6_VARIANT* v, int32_t x);   // Fix 133: Declare 标量 ByRef 出参回写
 void vb6_VariantSetI8(vb6_VARIANT* v, intptr_t x);  // Fix 133x: LongPtr 出参回写 (VT_I8, x64 指针不截断)
 BSTR vb6_VariantToString(vb6_VARIANT v);
+
+/* 账 #305 §B142: Decimal 在「往外读」这一侧的**唯一两个换算出口**。都走 oleaut32
+ * 的 `VariantChangeType` —— 不是选的, 是本机只够得着它: `VarDecToR8` / `VarDecToString` /
+ * `VarDecToI4` 在 SDK x64 的 oleaut32.lib 里根本没有(台账 §B142 ③)。
+ * 成功返回真; 失败给 0 / 空串, 不抛错(与其它读表的 default 同形)。 */
+BSTR vb6_DecimalToBSTR(vb6_VARIANT v);
+int vb6_DecimalToR8(vb6_VARIANT v, double *out);
 // Fix 029: Variant → SafeArray extraction (variant holding array).
 // 用于调用点反向强制: callee 期望 vb6_SafeArray1D* 但实参是 vb6_VARIANT.
 struct vb6_SafeArray1D* vb6_VariantToSafeArray1D(vb6_VARIANT v);

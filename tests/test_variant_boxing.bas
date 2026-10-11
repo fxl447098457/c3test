@@ -101,12 +101,14 @@ Public Sub Main()
     Debug.Print "VB-ptr-cbool="; CBool(vp)
     Debug.Print "VB-ptr-selfeq="; (vp = vp)
     Debug.Print "VB-str-tn="; TypeName(vs2)
-    ' 账 #305 (§B141): CDec 造出来的那一档 (VT_DECIMAL=14) 从来没人在「往外读」这一侧答过 ——
-    ' 两张表原先都落进 default: vb6_TypeName 答 "Variant"、vb6_IsNumeric 答假, 而且两架构同错
-    ' (这一档不像 VT_I8, 它不是位数问题, 是那张表根本没有这一格)。本刀只补这两张表。
-    ' 只钉两条: CStr/Format 那两条读数照打但**不进针面** —— 今天两台都打空(vb6_Format 里那一
-    ' 格没补); 把读侧那臂补上之后实测 x64 对 CDec(整数) 交 0、x86 把 DECIMAL 读成堆地址
-    ' ⇒ 罪在写侧/所有权, 另立 §B142(候选臂与四台读数留在 .build/b990_format_arm_candidate.inc)
+    ' 账 #305 (§B141 + §B142): CDec 造出来的那一档 (VT_DECIMAL=14) 在「往外读」这一侧的判据。
+    ' §B141 补的是两张表的格子(TypeName / IsNumeric), 第三十四刀补的是**换算本体与写侧的一枚标签**,
+    ' 于是 CStr / CLng / CDbl 一起对上。两处根因都是「格式」不是「数值」:
+    ' ① DECIMAL.wReserved 其实是 oleaut32 自己的 vt 标签(它写 14), 手填字段那两路以前留 0 ——
+    '    数据全对而 OLE 不认, VariantChangeType 返回 S_OK 却交 0 / 交空串;
+    ' ② x86 的 VARIANT 装 VT_DECIMAL 不走 pdecVal 指针, 是整枚 16 字节 DECIMAL 内联盖住 VARIANT
+    '    —— 只填指针时 oleaut32 把那枚地址当数值答出来(此前那个「堆地址」读数就是这一条)。
+    ' Format 那条读数照打但不进针面: 带小数点的格式串随区域设置变(与 AR-fmt2 同口径)。
     ' 刻意不钉 CDec 的算术/比较面: 那要另一族出口 (VarDec* 一族), 与本格的「读出来」无关。
     Dim vd2 As Variant
     Dim vd3 As Variant
@@ -117,5 +119,7 @@ Public Sub Main()
     Debug.Print "VB-dec2-cstr=[" & CStr(vd3) & "]"
     Debug.Print "VB-dec-isnum="; IsNumeric(vd2)
     Debug.Print "VB-dec-fmt=[" & Format(vd2, "0.00") & "]"
+    Debug.Print "VB-dec-clng="; CLng(vd2)
+    Debug.Print "VB-dec-cdbl="; CDbl(vd3)
     Debug.Print "VB-DONE"
 End Sub
