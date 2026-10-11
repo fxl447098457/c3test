@@ -10,6 +10,8 @@
 #include <windows.h>
 #include <oleauto.h>
 #include <olectl.h>
+#include <vfw.h>
+#include <oledlg.h>
 #include <stdint.h>
 
 // Use static CRT to match the generated code linkage

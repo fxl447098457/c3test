@@ -346,6 +346,10 @@ function New-Banner([string]$family, [string[]]$libs, [bool]$needDynamic, [int]$
     $b += '#include <ole2.h>'
     $b += '#include <oleauto.h>'
     $b += '#include <olectl.h>'
+    # unknown family also pulls msvfw32 (vfw.h: MCIWndRegisterClass) and oledlg
+    # (oledlg.h: OleUIPasteSpecialW); neither is declared by windows.h's prelude.
+    $b += '#include <vfw.h>'
+    $b += '#include <oledlg.h>'
     $b += '/* NOTE: gdiplus.h is C++-only (class Gdiplus...). The GDI+ flat API is'
     $b += ' * resolved with GetProcAddress instead - see below. */'
     $b += ''
