@@ -241,11 +241,13 @@ Public Sub Main()
     b6v = CVErr(11)
     Debug.Print "VB-b146-err-vt="; VarType(b6v)
     Debug.Print "VB-b146-err-iserr="; IsError(b6v)
-    ' Fifth exit (GetAllSettings): reachability witness only. VB6 answers Null here (the
-    ' app has no SaveSettings key) while our RTL stub returns a bare Variant instead
-    ' (vb6rtl_registry.c:113, comment 'simplified: not true 2D array'), so the two lines
-    ' below pin the SHAPE a slot-returning builtin reaches a Variant target with -- not
-    ' VB6 parity. The parity gap is registered as an open item (para-B149).
+    ' Fifth exit (GetAllSettings): a shape witness that turned out to be load-bearing.
+    ' Since para-B149 cells 1+2 shipped (knife 40) our RTL answers like VB6: an app/section
+    ' with no entries is Null -- VarType 1, IsNull True. Before that knife these two lines
+    ' read vt=12 / isnull=False, and gate #538 turned them red the moment the product started
+    ' answering correctly, which is the proof the needles are pinned to a real reading.
+    ' The two-entry round trip (the 8204 two-dimensional shape) lives in its own fixture,
+    ' tests/test_registry_settings.bas (para-B149/B150).
     Debug.Print "VB-b146-reg-vt="; VarType(GetAllSettings("C3NoSuchApp146", "Sec"))
     Debug.Print "VB-b146-reg-isnull="; IsNull(GetAllSettings("C3NoSuchApp146", "Sec"))
     Debug.Print "VB-DONE"

@@ -2591,13 +2591,15 @@ if ($Category -in @("all", "run", "bas")) {
         #   .c(344) C2440 vb6_VARIANT -> int32_t = IIf(True, CDec(1), CDec(2)) + 1
         # 所以前四枚针是「编不过就整条夹具红」那一类，红面在编译而不是读数。CVErr/GetAllSettings
         # 那三条在 BASE 上编得过 (VarType 的形参本来就是槽)，它们是**读数证人**：vt=10 是
-        # VT_ERROR、IsError 答 True，与 VB6 同档；reg-vt=12 / reg-isnull=False 只钉「内置出口
-        # 交出的槽能走到 Variant 目标」这个形状 —— VB6 这里答 Null，RTL 的简化实现答 12
-        # (vb6rtl_registry.c:113)，那条口径差另立在 §B149 的开放项里，不在本格。
+        # VT_ERROR、IsError 答 True，与 VB6 同档。reg-* 两条原本只钉「内置出口交出的槽能走到
+        # Variant 目标」这个形状 —— 那时 RTL 交 12/False，与 VB6 的 Null 差一层，记在 §B149。
+        # 第四十刀把 §B149 格①② 修成 VB6 口径之后，**门 #538 正是把这两枚针打红的** ⇒ 它们从来
+        # 不只是形状证人，而是把当时的错答钉死的判据 (这一格顺带证明「证人会红」)。现在按真跑
+        # 读数改钉 Null 那一档：vt=1 / isnull=True，两台逐行相同 (.build/b1306_box/r6.txt / r3.txt)。
         "VB-b146-dec-add=1234568", "VB-b146-dec-vt=14", "VB-b146-dec-tn=Decimal",
         "VB-b146-dec-dbl=2.5", "VB-b146-iif=2",
         "VB-b146-err-vt=10", "VB-b146-err-iserr=True",
-        "VB-b146-reg-vt=12", "VB-b146-reg-isnull=False", "VB-DONE")
+        "VB-b146-reg-vt=1", "VB-b146-reg-isnull=True", "VB-DONE")
     # ⚠ 这里曾经是字面 TAB: `"$Tests<TAB>est_variant_boxing.bas"`。
     # PowerShell 的 "" 里 **`\t` 不是转义**（转义是反引号），所以只要有人把 `\t` 写成真 TAB,
     # 路径就变成 `tests` + TAB + `est_...` —— 门里读到的是 `error VB1006: 无法打开文件`,
