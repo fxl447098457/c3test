@@ -25,6 +25,23 @@
 #       vb6_SaNdElemFail 声明 1 + 定义 1, 定义体真的抛 9
 #   A7  发码侧 4 秩以上那一条: 发 VB6_SA_ND_ATN, 下标实参按 `((const int32_t[]){` 拼(最外层括号
 #       不是装饰, 少了它就是 cl C4002), 且不再手拼 `(int[]){` / 不再直接发 vb6_SafeArrayND_Offset(
+
+# --- A8..A11（账 #305 §B154，第四十二刀）：一枚被 ReDim 重建的描述符「按哪一档分配」只许有一处答案 ---
+# 旧形状 = cgen_redim.cpp 只问 ReDim 语句自己的 As 子句，没写 As 就回落 vb6_sa_variant；而**访问侧**
+# （VB6_SA_AT / VB6_SA_ND_AT2）问的是声明表 arrayElemTypes_。同一枚描述符两个答案：造出来 24 字节
+# 一步、写进去 8 字节一步，直接读写自己一致所以看着是好的，而凡信描述符自己那一档的消费方
+# （Destroy / Erase / 装箱后的元素读）全走错步长 —— tests/test_redim_elem.bas 的 R3/R4 两枚 box-cell
+# 在修前读回**空串**（两台同形，读数 .build/b1373_fix/{rnb6,rf6,rf3}.txt）。
+#   A8  唯一出口 resolveReDimElemType：定义 1、声明 1、在 cgen_redim.cpp 被叫 1 次以上，函数体两头都
+#       要问（As 子句 + arrayElemTypes_）；cgen_redim.cpp 里不许再出现「声明处只问 As」那一行。
+#   A9  src/backend 非注释里 vb6_sa_variant 的字面量恰好 3 处：分档表的 Variant 档、它的 default 档、
+#       以及 Variant 槽那一枚**刻意写死**的 Preserve（那一支的档是权威，不是猜）。第四处 = 又有人在
+#       某个调用点手写兜底档。
+#   A10 多维描述符投进 _Generic 装箱：装箱里那一层投影恰好 1 处；反向的「强转盖住装箱」恰好 0 处
+#       （那是 BASE 上 cl C2440 的形状；裸递 ND 描述符则掉进 _Generic 的 default = vb6_VariantObject，
+#        槽的 vt 成了 DISPATCH，Set/GetND 只认 vt & vtArray ⇒ 一声不响地既不写也不读）。
+#   A11 声明表自己不许空转：写档站点 >= 8、.find 站点 >= 3、.erase 站点 == 1（过程开始清表那一条还在；
+#       撤掉它，上一个过程的元素档会漏给下一个过程）。
 #
 # 用法:  pwsh -File scripts\check_sa_access.ps1
 # 退出码: 0 = 全绿; 1 = 红
@@ -194,12 +211,85 @@ if ($offsetEmit -ne 0) {
 }
 
 
+# A8: ReDim 的元素档只问一处出口
+$beFiles = @(Get-ChildItem -LiteralPath $beDir -Recurse -File | Where-Object { $_.Extension -in ".cpp", ".inc", ".hpp" })
+$rdDef = 0; $rdDecl = 0; $rdCall = 0; $rdAsOnly = 0; $rdBodyBoth = 0
+foreach ($f in $beFiles) {
+    $txt = [System.IO.File]::ReadAllText($f.FullName)
+    foreach ($line in (Lines $f.FullName)) {
+        $t = $line.Trim()
+        if ($t.StartsWith("//")) { continue }
+        if ($t -match '^Vb6Type\s+CCodeGen::resolveReDimElemType\s*\(') { $rdDef++ }
+        if ($f.Name -eq "cgen_helpers.inc" -and $t -match '^Vb6Type\s+resolveReDimElemType\s*\(') { $rdDecl++ }
+        if ($f.Name -eq "cgen_redim.cpp") {
+            if ($t.Contains("resolveReDimElemType(")) { $rdCall++ }
+            if ($t -match '^Vb6Type\s+elemType\s*=\s*resolveArrayElemType\s*\(') { $rdAsOnly++ }
+        }
+    }
+    if ($f.Name -eq "cgen_expr_array.cpp") {
+        $blk = [regex]::Match($txt, 'Vb6Type\s+CCodeGen::resolveReDimElemType[\s\S]{0,900}?\r?\n\}')
+        if ($blk.Value -match 'resolveArrayElemType\(\s*typeRef\s*\)' -and $blk.Value -match 'arrayElemTypes_\.find') { $rdBodyBoth++ }
+    }
+}
+if ($rdDef -ne 1) { $bad += ("A8 resolveReDimElemType 定义 = " + $rdDef + " (要求 1；两处定义 = 第二份答案)") }
+if ($rdDecl -ne 1) { $bad += ("A8 resolveReDimElemType 声明(cgen_helpers.inc) = " + $rdDecl + " (要求 1)") }
+if ($rdCall -lt 1) { $bad += "A8 cgen_redim.cpp 不再调 resolveReDimElemType（ReDim 的元素档又回到只问 As 子句）" }
+if ($rdAsOnly -ne 0) { $bad += ("A8 cgen_redim.cpp 里「声明处只问 As」的老形状 = " + $rdAsOnly + " 处 (要求 0；那正是本刀改掉的那一行)") }
+if ($rdDef -eq 1 -and $rdBodyBoth -ne 1) { $bad += "A8 resolveReDimElemType 的体里没同时问 As 子句与 arrayElemTypes_（只剩一头 = 修前的形状）" }
+
+# A9: 字面量兜底档的名单恰好三条
+$saVariant = @()
+foreach ($f in $beFiles) {
+    $ln = 0
+    foreach ($line in (Lines $f.FullName)) {
+        $ln++
+        $t = $line.Trim()
+        if ($t.StartsWith("//")) { continue }
+        if ($line.Contains("vb6_sa_variant")) { $saVariant += ($f.Name + ":" + $ln) }
+    }
+}
+if ($saVariant.Count -ne 3) {
+    $bad += ("A9 src/backend 非注释里的 vb6_sa_variant 字面量 = " + $saVariant.Count +
+             " (恰好 3: 分档表 Variant 档 + default 档 + Variant 槽的 Preserve) -> " + ($saVariant -join " | "))
+}
+$slotKeep = 0
+foreach ($s in $saVariant) { if ($s.StartsWith("cgen_redim.cpp")) { $slotKeep++ } }
+if ($slotKeep -ne 1) { $bad += ("A9 Variant 槽那枚刻意写死的档不在 cgen_redim.cpp 里了 = " + $slotKeep + " (要求 1)") }
+
+# A10: 多维描述符装箱的投影方向
+$boxCast = 0; $castBox = 0
+foreach ($f in $beFiles) {
+    foreach ($line in (Lines $f.FullName)) {
+        $t = $line.Trim()
+        if ($t.StartsWith("//")) { continue }
+        if ($line.Contains("vb6_VariantFromValue((vb6_SafeArray1D*)")) { $boxCast++ }
+        if ($line.Contains("(vb6_SafeArray1D*)vb6_VariantFromValue")) { $castBox++ }
+    }
+}
+if ($boxCast -ne 1) { $bad += ("A10 装箱里那一层投影 = " + $boxCast + " 处 (恰好 1；0 = 又把 ND 描述符裸递给 _Generic，它落 default 的 vb6_VariantObject)") }
+if ($castBox -ne 0) { $bad += ("A10 强转盖住装箱的写法 = " + $castBox + " 处 (要求 0；BASE 上这一形实测 cl C2440)") }
+
+# A11: 声明表的供给面与清理面
+$tblWrite = 0; $tblFind = 0; $tblErase = 0
+foreach ($f in $beFiles) {
+    foreach ($line in (Lines $f.FullName)) {
+        $t = $line.Trim()
+        if ($t.StartsWith("//")) { continue }
+        if ($line.Contains("arrayElemTypes_[")) { $tblWrite++ }
+        if ($line.Contains("arrayElemTypes_.find")) { $tblFind++ }
+        if ($line.Contains("arrayElemTypes_.erase")) { $tblErase++ }
+    }
+}
+if ($tblWrite -lt 8) { $bad += ("A11 往 arrayElemTypes_ 写档的站点 = " + $tblWrite + " (下限 8；声明路被摘掉就没人给 ReDim 答档)") }
+if ($tblFind -lt 3) { $bad += ("A11 问 arrayElemTypes_ 的站点 = " + $tblFind + " (下限 3：访问侧/类型汇总/ReDim 至少各一处)") }
+if ($tblErase -ne 1) { $bad += ("A11 arrayElemTypes_.erase = " + $tblErase + " (恰好 1：过程开始的清表只许一处)") }
+
 if ($bad.Count -eq 0) {
     Write-Host ("PASS SA element access: macro " + $macroDefs.Count +
                 " / inline " + $defs.Count +
                 " / cold-path decl " + $decl + " def " + $defn +
                 " / backend raw-data lines " + $rawData.Count +
-                " / raw-index shape " + $shape + " / ND macros " + $ndMacros.Count + " / ND inline " + $ndDefs.Count + " / ATN emit " + $atnEmit + " / ATN literal " + $atnLiteral) -ForegroundColor Green
+                " / raw-index shape " + $shape + " / ND macros " + $ndMacros.Count + " / ND inline " + $ndDefs.Count + " / ATN emit " + $atnEmit + " / ATN literal " + $atnLiteral + " / redim helper def " + $rdDef + " call " + $rdCall + " / sa_variant lit " + $saVariant.Count + " / box cast " + $boxCast + " / table w " + $tblWrite + " f " + $tblFind + " e " + $tblErase) -ForegroundColor Green
     exit 0
 }
 foreach ($b in $bad) { Write-Host ("FAIL " + $b) -ForegroundColor Red }

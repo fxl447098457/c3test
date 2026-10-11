@@ -89,7 +89,11 @@ void CCodeGen::visit(ReDimStmt& node) {
             cName = withObjectVars_.back() + "->" + cIdent(memberName);
         }
     }
-    Vb6Type elemType = resolveArrayElemType(node.asType.get());
+    // 账 #305 §B154 (第四十二刀): 元素档改问 resolveReDimElemType —— 写了 As 子句照旧优先,
+    // 没写时**问声明** (arrayElemTypes_, 与访问侧 VB6_SA_AT / VB6_SA_ND_AT2 同一张表)。
+    // 旧写法只问 asType, 于是裸写 `ReDim a(5)` 的标量/字符串/对象数组一律造出
+    // vb6_sa_variant 而访问按声明的 C 类型步进 —— 只有 UDT 那一族有回退 (:109)。
+    Vb6Type elemType = resolveReDimElemType(lowerVar, node.asType.get());
     // Fix 192: `ReDim a(1) As Circle` 的元素类名登记 (与声明侧 `Dim a() As C` 对称).
     // 这是本缺口**最初被发现的形状** (`ReDim ... As <类名>`), 但实测静态数组
     // `Dim s(1) As C` 一样坏 —— 根因在访问侧推断, 不在 ReDim。此处登记是让
@@ -204,7 +208,15 @@ void CCodeGen::visit(ReDimStmt& node) {
         std::string wrapBack = "";
         if (isVariantArrayVar(cName)) {
             redimArg = "vb6_VariantToSafeArray1D(" + cName + ")";
-            wrapBack = "vb6_VariantFromValue(";
+            // 账 #305 §B154 第二格: 装箱那一层**必须先把 ND 描述符投成 vb6_SafeArray1D***。
+            // vb6_VariantFromValue 是 _Generic, 名单里只有 `vb6_SafeArray1D*` 这一档 (没有
+            // SafeArrayND 的 arm), 递一枚 vb6_SafeArrayND* 进去会掉进 default = vb6_VariantObject
+            // ⇒ 槽的 vt 成了 DISPATCH, 而 vb6_VariantArraySet/GetND 开头只认 vt & vb6_vtArray
+            // ⇒ 一声不响地不写也不读 (实测 `Dim x As Variant` + `ReDim x(1, 2)` + x(1,1)="S"
+            // 读回**空串**)。仓里对多维描述符的既有约定本来就是「1D 指针当载体, 用时再投回 ND」
+            // (见上面 (vb6_SafeArrayND*)redimArg 与下面 DestroyND 那两枚强转), 所以补的是这**一层
+            // 投影**, 不是给 _Generic 开新档。
+            wrapBack = "vb6_VariantFromValue((vb6_SafeArray1D*)";
         }
         if (node.preserve) {
             std::string res;
@@ -215,7 +227,12 @@ void CCodeGen::visit(ReDimStmt& node) {
                 res = "vb6_SafeArrayReDimPreserveND((vb6_SafeArrayND*)" + redimArg + ", " + std::to_string(dimCount) + ", " + boundsVar + ")";
             }
             if (!wrapBack.empty()) res = wrapBack + res + ")";
-            c_.emitLine(cName + " = (vb6_SafeArray1D*)" + res + ";");
+            // 账 #305 §B154 第二格: 那枚 (vb6_SafeArray1D*) 强转**只在该槽是数组指针时**才成立。
+            // wrapBack 非空时右值已经是 vb6_VARIANT (Dim x As Variant + ReDim x(1, 2)), 强转
+            // 就把装箱盖住了 —— BASE 上这一形实测 cl C2440「无法从 vb6_VARIANT 转换为
+            // vb6_SafeArray1D*」, 也就是多维的 Variant 槽那一条从没能编过 (一维那条没有强转,
+            // 见上面 dimCount==1 的 newVal, 所以只有多维红 —— 又是一个同一件事两处写法不同形)。
+            c_.emitLine(cName + " = " + (wrapBack.empty() ? "(vb6_SafeArray1D*)" : "") + res + ";");
         } else {
             std::string destroyArg = redimArg;
             c_.emitLine("vb6_SafeArrayDestroyND((vb6_SafeArrayND*)" + destroyArg + ");");
@@ -227,7 +244,9 @@ void CCodeGen::visit(ReDimStmt& node) {
                 newVal = "vb6_SafeArrayReDimND(" + saElemType + ", " + std::to_string(dimCount) + ", " + boundsVar + ")";
             }
             if (!wrapBack.empty()) newVal = wrapBack + newVal + ")";
-            c_.emitLine(cName + " = (vb6_SafeArray1D*)" + newVal + ";");
+            // 与上面 Preserve 那一支同一个决定 (账 #305 §B154 第二格): wrapBack 在场就是
+            // vb6_VARIANT, 那枚指针强转会把装箱盖住 (BASE 实测 cl C2440)。
+            c_.emitLine(cName + " = " + (wrapBack.empty() ? "(vb6_SafeArray1D*)" : "") + newVal + ";");
         }
 
         // 鏇存柊鏁扮粍缁村害淇℃伅

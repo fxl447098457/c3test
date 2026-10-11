@@ -1047,6 +1047,8 @@
     std::string mapSaElemCType(Vb6Type type) const;
     // 从ArrayTypeRef或asType获取元素Vb6Type
     Vb6Type resolveArrayElemType(ASTNode* typeRef) const;
+    // 账 #305 §B154: ReDim 那一问的元素档 —— 写了 As 子句按 As, **没写就问声明**
+    Vb6Type resolveReDimElemType(const std::string& lowerVar, ASTNode* typeRef) const;
     // Fix 055: 从ArrayTypeRef获取UDT元素C类型名 (如"vb6_type_RECT"), 非UDT返回空串
     std::string resolveArrayUdtElemCType(ASTNode* typeRef) const;
     // Fix 192: 从ArrayTypeRef/asType获取元素**类名** (如"ShapeAct"), 非项目类返回空串

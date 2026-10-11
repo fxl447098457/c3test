@@ -2652,6 +2652,28 @@ if ($Category -in @("all", "run", "bas")) {
         "RS-DONE")
     Add-BasTest "test_registry_settings" "$Tests\test_registry_settings.bas" $rsSetNeedles
     Add-BasTest "test_registry_settings_x86" "$Tests\test_registry_settings.bas" $rsSetNeedles -Arch "x86"
+    # <vbeclipse> 账 #305 §B154（第四十二刀）：ReDim 重建一枚动态数组时，元素档**问声明**，不是问 ReDim 自己
+    # 的 As 子句。修前 cgen_redim.cpp 只问 asType，没写 As 就交 vb6_sa_variant，而访问侧（VB6_SA_AT /
+    # VB6_SA_ND_AT2）问的是声明表 arrayElemTypes_ —— 同一枚描述符两个答案：造出来 24 字节一步（x64），
+    # 写进去 8 字节一步，于是直接读写自己一致（看着是好的），而凡信描述符自己那一档的消费方（Destroy /
+    # Erase / 装箱后的元素读）全走错步长。R3/R4 那两枚 box-cell 就是这个的读数：修前 `v = a` 再 `v(2, 3)`
+    # 与 `v = b` 再 `v(2, 3)` 都读回**空串**（BASE 真跑 .build/b1373_fix/rnb6.txt），修后交 X 与 200。
+    # 负控两形：① 同一份夹具去掉 R8 那一对（BASE 编不过的那条）在 BASE 上真跑 ⇒ 两枚 box-cell 红；
+    # ② 整份夹具在 BASE 上压根编不过（R8 那条 `ReDim x(1, 2)` 打到装箱外的强转 ⇒ cl C2440，
+    # .build/b1373_fix/b6.log）。多维的 Variant 槽那一支（R8）在 BASE 上是**响的**缺陷、在修前从未编过，
+    # 所以它的读数只有 NEW 一台能给 —— 两台（x64/x86）修后逐行相同（.build/b1373_fix/{rf6,rf3}.txt）。
+    # 三枚 *-label-* 钉的是**今天**的 VarType/TypeName（8204 / "Variant"）。VB6 该答 8200 / "String()"：
+    # 装箱那一句 vb6_VariantArray 把 vt 写死成 vb6_vtArray | vb6_vtVariant、从不问描述符，而 vb6_TypeName
+    # 没有数组分支 —— 那一格记在 §B155，谁把标签修对这三枚就会红，那是**成功**信号不是回归。
+    $reNeedles = @("R1-cell=A",
+        "R1-label-vt=8204 tn=Variant",
+        "R2-preserve-cell=A ub=6",
+        "R3-cell=X", "R3-ub2=4 lb2=1", "R3-box-cell=X", "R3-label-vt=8204 tn=Variant",
+        "R4-cell=200", "R4-box-cell=200",
+        "R5-cell=77", "R5-ub1=2 ub2=2", "R5-label-vt=8204 tn=Variant",
+        "R6-ub2=2", "R7-cell=V vt=8204", "R8-cell=S", "R9-cell=Z", "RE-DONE")
+    Add-BasTest "test_redim_elem" "$Tests\test_redim_elem.bas" $reNeedles
+    Add-BasTest "test_redim_elem_x86" "$Tests\test_redim_elem.bas" $reNeedles -Arch "x86"
     # <vbeclipse>: vbTextCompare 六个入口对表 (InStr 两形/InStrRev/Replace/Split/Filter/
     # StrComp)。修复前 RTL 5 处 (void)compare + InStr 第 4 参被截、三参"字符串优先"形
     # 错接槽位 (实测段错误)；另修 Debug.Print StrComp(...) 被 "vb6_Str" 前缀误判成 BSTR
