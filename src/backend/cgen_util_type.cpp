@@ -235,8 +235,19 @@ Vb6Type CCodeGen::inferExprType(Expr& expr) const {
                 return TypeSystem::bitwiseResult(inferExprType(*bin.left),
                                                   inferExprType(*bin.right));
             }
-            // 浮点除法 → Double
-            if (bin.op == BinaryOp::Div) return Vb6Type::Double;
+            // 浮点除法 → Double。**但有一侧是 Variant 时必须答 Variant**（账 #305 §B145）：
+            // 那一族的发码自第三十六刀起交运行期出口 vb6_VarDivV(...)，C 表达式的类型是整只
+            // vb6_VARIANT；这里再答 Double 就是「oracle 与 C 表达式的型不一致」，实物 = 门 #517
+            // 唯一那条真红：Charts 2020 ClsResizer.cls 的 COM 实参打包按 inferExprType 选型 ⇒
+            // `vb6_ComPackDouble(一枚槽)` ⇒ C2440，两架构同形。口径与下面 promote 那句
+            // 「Variant: 结果总是 Variant」是同一条，只是 Div 以前抄了个特例。
+            if (bin.op == BinaryOp::Div) {
+                Vb6Type ld28 = inferExprType(*bin.left);
+                Vb6Type rd28 = inferExprType(*bin.right);
+                if (ld28 == Vb6Type::Variant || rd28 == Vb6Type::Variant)
+                    return Vb6Type::Variant;
+                return Vb6Type::Double;
+            }
 
             // 移位 Shl/Shr: 结果类型 = **左操作数**类型, 窄整型抬到 32 位。
             // MSDN 的移位表就是"把移位当一元运算作用在左操作数上" —— 右操作数只是
