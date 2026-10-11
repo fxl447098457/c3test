@@ -3631,13 +3631,13 @@ if ($Category -in @("all", "run", "vbp")) {
         'vb6_Slider_SetTickStyle(vb6_hwnd_sld3, 2);',
         'vb6_Slider_SetTickStyle(vb6_hwnd_sld3, 9);',
         'vb6_CStrLong(vb6_Slider_GetTickStyle(vb6_hwnd_sld3',
-        'vb6_Slider_GetNumTicks(vb6_hwnd_sld3',
+        'vb6_intrSlider_GetNumTicks(vb6_hwnd_sld3',
         'vb6_Slider_ChannelTop(vb6_hwnd_sld3',
         # 容器里那枚滑杆的创建参数: 1342177280(BASE, 一位不挂) + 0x5 = TBS_AUTOTICKS|TBS_TOP
         '1342242821L, 0L,',
         # C29-SL-i: 三条 Sel 面各钉一枚形状，外加设计期那一对折出来的 Init 参数
         # （BASE 上那一条第 9 参是 -999 —— SelLength 整条被丢，读回来是空区段）。
-        'vb6_Slider_ClearSel((void*)vb6_hwnd_sld4)',
+        'vb6_intrSlider_ClearSel((void*)vb6_hwnd_sld4)',
         'vb6_Slider_SetSelLength(vb6_hwnd_sld4, 10)',
         'vb6_CStrLong(vb6_Slider_GetSelLength(vb6_hwnd_sld4',
         'vb6_Slider_Init((void*)vb6_hwnd_sld6, -999, -999, -999, 1L, -999, -999, 25L, 40L, -1L);',
@@ -3653,10 +3653,10 @@ if ($Category -in @("all", "run", "vbp")) {
         # C29-SL-l: 两条码头共用一张表 ⇒ 带括号与不带括号都发同一条专桩（裸形多一条注释）。
         'vb6_SetControlFocus((void*)vb6_hwnd_sld5);  /* setfocus */',
         'vb6_SetControlFocus((void*)vb6_hwnd_sld6);',
-        'vb6_Slider_ClearSel((void*)vb6_hwnd_sld4);  /* clearsel */',
+        'vb6_intrSlider_ClearSel((void*)vb6_hwnd_sld4);  /* clearsel */',
         # C29-SL-m: With 那一帧的接收者就是入口那枚 HWND（两形都走 pendingChainObj_ 协议）。
         'vb6_SetControlFocus((void*)_vb6_with_0);',
-        'vb6_Slider_ClearSel((void*)_vb6_with_2);',
+        'vb6_intrSlider_ClearSel((void*)_vb6_with_2);',
         # C29-SL-o（账 #83 的 Slider 半边）: 容器子控件那条创建路以前**压根不发这一条**
         # ⇒ 这里没有可禁的反面形状（BASE 的 emit 里 sld7 只有 CreateControl 那一行），
         # 红的是这一条正向针 + 三条真跑读数（A/B 实测见 029 那格）。第 9 参是 35L：
