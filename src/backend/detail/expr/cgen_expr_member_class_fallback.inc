@@ -9,11 +9,53 @@
     // 走 inferClassTypeOfExpr(它的 object) = "View", 成员名 = "View"。
     // ⚠ node.object 是 ExprPtr (智能指针), 不是裸指针 —— lambda 形参用 ExprPtr。
     auto objIsAsObjectMemberV8 = [this](const ExprPtr& objAst) -> bool {
-        if (!objAst || objAst->kind != ASTNodeKind::MemberAccessExpr) return false;
-        const auto& maV8 = static_cast<const MemberAccessExpr&>(*objAst);
-        if (!maV8.object) return false;
-        return classMemberReturnsAsObject(inferClassTypeOfExpr(*maV8.object),
-                                         maV8.memberName);
+        if (!objAst) return false;
+        if (objAst->kind == ASTNodeKind::MemberAccessExpr) {
+            const auto& maV8 = static_cast<const MemberAccessExpr&>(*objAst);
+            if (!maV8.object) return false;
+            return classMemberReturnsAsObject(inferClassTypeOfExpr(*maV8.object),
+                                             maV8.memberName);
+        }
+        // Fix 246c: **With 块内的 `.X` 是 WithMemberExpr, 不是 MemberAccessExpr** ——
+        //   上面那条一个 kind 判断就把整族挡在门外, 于是 `.Picture.Handle` 在
+        //   `With Button.ButtonMenus(i)` 里永远走不到 rev8 的 `vb6_ComGetProp` 分支,
+        //   掉到最后的 `obj + "." + member` ⇒ C2224 "左侧必须具有结构/联合类型"。
+        //   实测 ComCtlsDemo ToolBar.c 7147/7151/7153/7198/7202/7204 共 6 条
+        //   (TbrButtonMenu.cls:137 `Property Get Picture() As IPictureDisp`)。
+        //   宿主类改从 With 栈顶取 —— 与 inferClassTypeOfExpr 的 WithMemberExpr
+        //   分支同一个来源, 不另立一套。
+        if (objAst->kind == ASTNodeKind::WithMemberExpr) {
+            if (withObjectInfoStack_.empty()) return false;
+            const std::string& hostCls = withObjectInfoStack_.back().className;
+            if (hostCls.empty()) return false;
+            const auto& wm = static_cast<const WithMemberExpr&>(*objAst);
+            return classMemberReturnsAsObject(hostCls, wm.memberName);
+        }
+        // Fix 262: **窗体的控件属性读**里也有返回对象的那几枚 —— 最典型是
+        // `Picture` (`vb6_GetControlPicture(hwnd)` → void*, 即 IPictureDisp 的 C 面)。
+        //   `ImagePicture.Picture.Handle` 的 node.object 是
+        //   MemberAccessExpr(ImagePicture, Picture): 宿主不是类, 上面各分支都捡不到
+        //   ⇒ 落 `obj + "." + member` → `vb6_GetControlPicture(hwnd).Handle`
+        //   ⇒ C2224 "左侧必须具有结构/联合类型"。
+        //   返回 true 后下游改发 `vb6_ComGetProp(<getter>, L"Handle")`
+        //   (RTL 的 vb6_ComGetProp 对 HWND/宿主对象有专档, 见 vb6com_invoke.c:409)。
+        //   实测 ComCtlsDemo PPStatusBarPanels.pag:1182/1323
+        //   (`If Not ImagePicture.Picture Is Nothing Then If ImagePicture.Picture.Handle <> 0`),
+        //   PPStatusBarPanels.c 1362/1548。
+        if (objAst->kind == ASTNodeKind::MemberAccessExpr) {
+            const auto& maC262 = static_cast<const MemberAccessExpr&>(*objAst);
+            if (maC262.object && maC262.object->kind == ASTNodeKind::IdentifierExpr) {
+                const std::string ctrlName262 = Symbol::toLower(
+                    static_cast<const IdentifierExpr&>(*maC262.object).name);
+                auto itC262 = knownFormControls_.find(ctrlName262);
+                if (itC262 != knownFormControls_.end()
+                    && getControlPropReadFn(itC262->second, maC262.memberName)
+                           == "vb6_GetControlPicture") {
+                    return true;
+                }
+            }
+        }
+        return false;
     };
 
     // Fix 010r-10: 类实例变量的成员访问 fallback

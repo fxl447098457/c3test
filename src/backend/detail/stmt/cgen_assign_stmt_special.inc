@@ -96,6 +96,46 @@
         }
     }
 
+    // Fix 257: 控件**可索引属性**的写入 —— `ListVirtualDisabledInfos.Selected(i) = True`
+    // (ComCtlsDemo PPListViewGeneral.pag:739)。LHS 是
+    // IndexOrCallExpr{callee=MemberAccess(控件, Selected), args=[i]}。
+    // 读方向有 P13.3b 的专门拦截 (cgen_expr_call_callee_withm.inc:215-222 ⇒
+    // vb6_GetSelected(hwnd, i)), 写方向没有 ⇒ 通用路径把**读函数当左值**:
+    //   vb6_GetSelected((void*)vb6_hwnd_ListVirtualDisabledInfos, i) = (-1);
+    // ⇒ C2106 "左操作数必须为左值" ×2 (PPListViewGeneral.c 623/629)。
+    // 正确形态 = RTL 里那对写函数 (getControlPropWriteFn 对 ListBox/ComboBox 已登记
+    // Selected/List/ItemData 的 vb6_Set*), 首参 hwnd、中间的索引原样、末参值 ——
+    // 与上面 Fix 110b 的控件数组默认属性写入同模板, 只多一层"属性名由 LHS 自己带"。
+    if (node.target->kind == ASTNodeKind::IndexOrCallExpr) {
+        auto& ipP = static_cast<IndexOrCallExpr&>(*node.target);
+        if (ipP.callee && ipP.callee->kind == ASTNodeKind::MemberAccessExpr
+            && !ipP.positional.empty()) {
+            auto& ipMa = static_cast<MemberAccessExpr&>(*ipP.callee);
+            if (ipMa.object && ipMa.object->kind == ASTNodeKind::IdentifierExpr) {
+                auto& ipId = static_cast<IdentifierExpr&>(*ipMa.object);
+                const std::string ipLower = Symbol::toLower(ipId.name);
+                auto itIp = knownFormControls_.find(ipLower);
+                if (itIp != knownFormControls_.end()) {
+                    std::string writeFnIp = getControlPropWriteFn(itIp->second, ipMa.memberName);
+                    if (!writeFnIp.empty()) {
+                        const std::string origIp = knownFormControlOriginalNames_.count(ipLower)
+                            ? knownFormControlOriginalNames_[ipLower] : ipId.name;
+                        std::string callIp = writeFnIp + "((void*)vb6_hwnd_" + cIdent(origIp);
+                        for (auto& aIp : ipP.positional) {
+                            emitExpr(*aIp);
+                            callIp += ", " + std::move(lastExpr_);
+                        }
+                        emitExpr(*node.value);
+                        std::string valIp = std::move(lastExpr_);
+                        valIp = controlPropValueExpr(writeFnIp, valIp, *node.value);
+                        c_.emitLine(callIp + ", " + valIp + ");  /* indexed ctrl prop write */");
+                        return;
+                    }
+                }
+            }
+        }
+    }
+
     // P22: LSet/RSet statement (LSet strVar = expr / RSet strVar = expr)
     if (node.isLSet || node.isRSet) {
         if (node.target->kind == ASTNodeKind::IdentifierExpr) {

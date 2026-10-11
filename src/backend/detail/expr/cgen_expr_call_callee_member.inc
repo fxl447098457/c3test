@@ -40,7 +40,11 @@
                             emitExpr(*node.positional[i]);
                             { std::string r245c = resolveComMarkerForPack(packFn245c);
                               if (!r245c.empty()) lastExpr_ = r245c; }
-                            packed245c.push_back(packFn245c + "(" + lastExpr_ + ")");
+                            // Fix 266: 打包器按 AST 推的型 (ComPackDouble), 而 marker 解析交回
+                            // 的可能是**无型** VARIANT ⇒ 交 packArgValue 一处收口
+                            // (Pager.ctl:1249 `PropBuddyControl.Move .Left, .Top` 的两个
+                            //  vb6_ComPackDouble(vb6_VARIANT) 就是这里发出的)。
+                            packed245c.push_back(packArgValue(packFn245c, lastExpr_));
                         }
                         int32_t argc245c = (int32_t)packed245c.size();
                         std::string argsArr245c = "(void*[]){";
@@ -199,10 +203,35 @@
             }
             if (!hwndMV.empty()) {
                 std::string aMV[4] = {"0", "0", "0", "0"};
+                // Fix 261: 实参是**值上下文**, 必须清掉 asCallCallee_ 再发射。
+                // 本段是从 callee 解析路径进来的 —— 语句级 `X.Move a,b,c,d` 由
+                // visit(CallStmt) 把 asCallCallee_ 置 true 后才 emitExpr(callee),
+                // 落到这里时它仍是 true。于是实参里的成员访问 (如 `ToolBar1.Height`)
+                // 被 emitUcInstanceMemberExpr / 类成员路径当成"要接实参的 callee",
+                // 交付**裸函数名** + pendingChainObj_, 而实参位没人消费 pendingChainObj_
+                // ⇒ 裸名泄漏成实参 (接收者丢失)。
+                // 实测 ComCtlsDemo: RichTextBoxForm.frm:165
+                //   `RichTextBox1.Move 0, ToolBar1.Height, .ScaleWidth, .ScaleHeight - ToolBar1.Height`
+                // 生成 `vb6_ControlMove(vb6_hwnd_RichTextBox1, 0, vb6_ToolBar_prop_get_Height, ...)`
+                // ⇒ C2440×2 (float(__cdecl*)(vb6_cls_ToolBar*) / void* → double) +
+                //    C2113 (指针减法) + C2198 (vb6_ControlMove 实参太少)。共 4 条。
+                bool savedCcMV = asCallCallee_;
+                asCallCallee_ = false;
                 for (size_t i = 0; i < node.positional.size(); i++) {
                     emitExpr(*node.positional[i]);
+                    // Fix 261b: 实参里的 COM 成员读要**就地消费标记** —— 这里原来只
+                    // 搬走 lastExpr_, 标记留在原地, 于是 `With Me` 块里的 `.ScaleWidth`
+                    // 交出的是 With 入口那枚裸 HWND (void*) ⇒
+                    // C2440 "void* → double" (vb6_ControlMove 的四个 double 槽)。
+                    // vb6_ControlMove 清一色 double ⇒ 按 Double 档取值。
+                    // 实测 ComCtlsDemo RichTextBoxForm.frm:165
+                    //   `RichTextBox1.Move 0, ToolBar1.Height, .ScaleWidth, .ScaleHeight - ToolBar1.Height`
+                    if (isComMarker_) {
+                        lastExpr_ = resolveComValue("Double");
+                    }
                     aMV[i] = std::move(lastExpr_);
                 }
+                asCallCallee_ = savedCcMV;
                 int maskMV = (1 << (int)node.positional.size()) - 1;
                 lastExpr_ = "{ vb6_ControlMove(" + hwndMV + ", " + aMV[0] + ", "
                           + aMV[1] + ", " + aMV[2] + ", " + aMV[3] + ", "
@@ -236,7 +265,7 @@
                 emitExpr(*node.positional[i]);
                 { std::string resolvedPar = resolveComMarkerForPack(packFnPar);
                   if (!resolvedPar.empty()) lastExpr_ = resolvedPar; }
-                packedPar.push_back(packFnPar + "(" + lastExpr_ + ")");
+                packedPar.push_back(packArgValue(packFnPar, lastExpr_));
             }
             int32_t argcPar = (int32_t)packedPar.size();
             std::string argsArrayPar = "NULL";
@@ -350,7 +379,7 @@
                                         emitExpr(*node.positional[i]);
                                         { std::string resolved = resolveComMarkerForPack(packFn);
                                           if (!resolved.empty()) lastExpr_ = resolved; }
-                                        packedArgs.push_back(packFn + "(" + lastExpr_ + ")");
+                                        packedArgs.push_back(packArgValue(packFn, lastExpr_));
                                     }
                                     int32_t argc = (int32_t)packedArgs.size();
                                     std::string argsArray = "(void*[]){";
@@ -411,7 +440,7 @@
                                 emitExpr(*node.positional[i]);
                                 { std::string resolved = resolveComMarkerForPack(packFn);
                                   if (!resolved.empty()) lastExpr_ = resolved; }
-                                packedArgs.push_back(packFn + "(" + lastExpr_ + ")");
+                                packedArgs.push_back(packArgValue(packFn, lastExpr_));
                             }
                             int32_t argc = (int32_t)packedArgs.size();
                             std::string argsArray = "(void*[]){";
@@ -445,7 +474,7 @@
 
                                             { std::string resolved = resolveComMarkerForPack(packFn);
                                               if (!resolved.empty()) lastExpr_ = resolved; }
-                                            packedArgs.push_back(packFn + "(" + lastExpr_ + ")");
+                                            packedArgs.push_back(packArgValue(packFn, lastExpr_));
                                         }
                                         int32_t argc = (int32_t)packedArgs.size();
                                         std::string argsArray = "(void*[]){";

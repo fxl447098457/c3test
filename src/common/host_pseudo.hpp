@@ -83,6 +83,13 @@ inline const HostPseudoRow kHostPseudoRows[] = {
     {"UserControl", "asyncread",       "AsyncRead",       Vb6Type::Unknown,  HPF_BARE | HPF_METHOD},
     {"UserControl", "autoredraw",      "AutoRedraw",      Vb6Type::Boolean,  HPF_NONE},
     {"UserControl", "backcolor",       "BackColor",       Vb6Type::Long,     HPF_NONE},
+    // Fix 255: `UserControl.BackStyle` (ComCtlsDemo LabelW.ctl:936/942 ——
+    // `BackStyle = UserControl.BackStyle` 与 `UserControl.BackStyle = Value`)。
+    // 表里此前没有这一行, 而发码侧 hostPseudoRtlSymbol 在表里查不到就不再挡,
+    // 直接按 `vb6_<对象>_<成员名>` 拼出 vb6_UserControl_BackStyle —— RTL 没这枚
+    // 全局 ⇒ C2065 ×2 (LabelW.c 1608/1618)。补行 + 补 RTL 声明与定义 (int32_t/Long,
+    // 与同一族的 BackColor/ForeColor 逐字同款, 也满足 check_host_pseudo_table 的类型配对)。
+    {"UserControl", "backstyle",       "BackStyle",       Vb6Type::Long,     HPF_NONE},
     {"UserControl", "cancelasyncread", "CancelAsyncRead", Vb6Type::Unknown,  HPF_METHOD},
     {"UserControl", "cls",             "Cls",             Vb6Type::Unknown,  HPF_METHOD},
     {"UserControl", "containedcontrols", "ContainedControls", Vb6Type::Unknown, HPF_NONE},

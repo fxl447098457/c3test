@@ -362,11 +362,41 @@
             // WM_COMMAND/1815（0x0717，SDK 头里没有这枚码）；裸码读数 .build\rtdmin_out\tr_*.txt。
             // 两条 arm 都接上，事件才谈得上"会来"；一条事件双发会让计数变 2 当场翻红，所以
             // 双发不可能被这两条 arm 一起放过。判据用 vb6_RTB_SimNotify 各钉一条。
-            if (symTab_.lookup(ctrl.controlName + "_SelChange")) {
+            if (auto* rtbSelSym258 = symTab_.lookup(ctrl.controlName + "_SelChange")) {
                 std::string rtbSelFn = eventHandlerFn(ctrl.controlName, "_SelChange");
                 c_.emitLine("if (id == " + std::to_string(ctrlId) + " && code == 1815) {");
                 c_.indent();
-                c_.emitLine("{ extern void " + rtbSelFn + "(); " + rtbSelFn + "(); }");
+                // Fix 258: 实参个数按**处理器自己的形参表**交。
+                // 事件声明 (RichTextBox.ctl:332) 是三个 ByVal
+                //   (ByVal SelType As Integer, ByVal SelStart As Long, ByVal SelEnd As Long),
+                // 而 VB6 允许处理器**一个形参都不写** (夹具 tests/ctrlrichtextbox/RtfForm.frm:560
+                // 的 `Private Sub rt3_SelChange()` 就是这一形, 且它一直是既有针的形状)。
+                // 所以这里不能照事件写死 3 个 —— 以前一律 0 个, 于是 ComCtlsDemo 那枚
+                // 真正声明了 3 个形参的处理器就吃 C2198 ×2 (RichTextBoxForm.c 88/97)。
+                // 零参那一形逐字发回原形状 (夹具的 EMITC-SHAPE 针原样成立)。
+                // 选区从 RTL 取 (vb6_RTB_GetSelStart/GetSelLength, 与 .SelStart 属性同源);
+                // SelType 交 0 (原生 EN_SELCHANGE 的 seltyp 在 C 侧没有出口, VB6 常规取值即 0)。
+                const size_t nSel258 = rtbSelSym258->params.size();
+                const std::string rtbHwnd258 = isArrayCtrl
+                    ? ("vb6_CtrlArr_GetAt(&vb6_arr_" + cIdent(ctrl.controlName) + ", 0)")
+                    : ("vb6_hwnd_" + cIdent(ctrl.controlName));
+                if (nSel258 == 0) {
+                    c_.emitLine("{ extern void " + rtbSelFn + "(); " + rtbSelFn + "(); }");
+                } else {
+                    std::string selArgs258 = "(int16_t)0";
+                    std::string selPre258;
+                    if (nSel258 >= 2) {
+                        selPre258 = "int32_t vb6_rtbSelS258 = vb6_RTB_GetSelStart((void*)"
+                                     + rtbHwnd258 + "); ";
+                        selArgs258 += ", vb6_rtbSelS258";
+                    }
+                    if (nSel258 >= 3) {
+                        selArgs258 += ", (int32_t)(vb6_rtbSelS258 + vb6_RTB_GetSelLength((void*)"
+                                      + rtbHwnd258 + "))";
+                    }
+                    c_.emitLine("{ extern void " + rtbSelFn + "(); " + selPre258
+                                + rtbSelFn + "(" + selArgs258 + "); }");
+                }
                 c_.dedent();
                 c_.emitLine("}");
             }

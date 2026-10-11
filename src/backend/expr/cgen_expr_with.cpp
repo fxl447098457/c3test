@@ -108,6 +108,29 @@ void CCodeGen::visit(WithMemberExpr& node) {
             lastExpr_ = scFnW;
             return;
         }
+        // Fix 263: With 块里的**画布动词** `.Cls`（Form / PictureBox 的清屏）。
+        // 出口问 `controlCanvasMethod` —— 名字只许出自 src/common/canvas_drawing.hpp
+        // 那张表（哨兵 form_draw_state S9 与 rtl_proto_arity R3/R5 钉着这条；
+        // 写进零实参表 `controlZeroArgMethod` 会同时踩 R3 的"行数恰好 23"）。
+        // 为什么必须有: 三张方法表都没登记就落下面那条"未知控制属性"兜底，
+        // 发 `_vb6_with_N.Cls()` —— HWND 是结构体指针，取成员 = C2039
+        // "Cls 不是 HWND__ 的成员"（实测 ComCtlsDemo PPStatusBarPanels.pag:1163
+        // `With PictureDraw : .Cls`）。这一形**不吃接收者句柄**吗？
+        // 吃 —— 与两条 COM 码头同形（`vb6_ControlCls((void*)hwnd)`）。
+        std::string cvFnW263 = (memLower == "cls") ? controlCanvasMethod(info.ctrlType, memLower)
+                                                   : std::string();
+        if (!cvFnW263.empty()) {
+            pendingChainObj_.clear();
+            if (asCallCallee_) {
+                // 带括号的 `.Cls()`: 交裸名 + pendingChainObj_，由调用点把 With 入口
+                // 那枚 HWND 拼进实参表（同上面零实参那条 Fix 090s 协议）。
+                pendingChainObj_ = "(void*)" + tempVar;
+                lastExpr_ = cvFnW263;
+            } else {
+                lastExpr_ = cvFnW263 + "((void*)" + tempVar + ")  /* With ctrl .Cls */";
+            }
+            return;
+        }
         diag_.warn(DiagnosticID::CodeGenUnsupportedFeature, SourceLocation{},
             std::string("P17.1: Unknown control property '.'") + node.memberName + "' in With block");
         lastExpr_ = tempVar + "." + cIdent(node.memberName);

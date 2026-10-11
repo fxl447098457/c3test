@@ -68,6 +68,22 @@ void CCodeGen::visit(RaiseEventStmt& node) {
             else if (pCType.rfind("vb6_cls_", 0) == 0 && cExprIsVariant(argVal)) {
                 argVal = "(" + pCType + ")vb6_VariantToObjectVal(" + argVal + ")";
             }
+            // Fix 267: 事件实参槽是**具体标量**而实参是**无型**的晚绑定 COM 调用
+            // (`vb6_ComCall` 返回 void*) 时, 按目标槽选同型出口 —— 否则
+            // C2440 "void* → float"。
+            // 来时路: `With Me` 里的 `.ScaleY(...)` 在 UserControl 上落到通用 COM 方法
+            // 调用 (comTypedCallExpr 的兜底: 签名表里没有 ScaleX/ScaleY ⇒ 发 vb6_ComCall),
+            // 而同文件里 `Me.ScaleY(...)` 走 host-pseudo 表发出的是 vb6_UserControl_ScaleY。
+            // 实测 ComCtlsDemo Pager.ctl `RaiseEvent Scroll(..., vb6_ComCall(...), ...)`
+            // (Pager.c 2202/2208, typedef 第 4/6 位形参是 float)。
+            else if (argVal.compare(0, 12, "vb6_ComCall(") == 0) {
+                if (pCType == "float" || pCType == "double")
+                    argVal = "vb6_ComCallDouble(" + argVal.substr(12);
+                else if (pCType == "int32_t" || pCType == "int16_t" || pCType == "intptr_t")
+                    argVal = "vb6_ComCallInt(" + argVal.substr(12);
+                else if (pCType == "BSTR")
+                    argVal = "vb6_ComCallBSTR(" + argVal.substr(12);
+            }
         }
         call += ", " + argVal;
     }

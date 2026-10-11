@@ -341,7 +341,20 @@
                     std::transform(curName.begin(), curName.end(), curName.begin(), ::tolower);
                     std::string tgtName = tgtId.name;
                     std::transform(tgtName.begin(), tgtName.end(), tgtName.begin(), ::tolower);
-                    if (curName == tgtName &&
+                    // Fix 260: VB6 类型声明后缀 (`Function Command$()` 的 `$`, 以及
+                    // `% & ! # @`) 只留在**过程名**上 —— 标识符引用侧早被 parseVariableDecl
+                    // 剥掉, 两侧直接比必然失配 (`command$` vs `command`) ⇒ 函数体内对自身
+                    // 名字的赋值 (VB6 语义 = 设置返回值) 被误判成调用全局同名属性过程。
+                    // 实测 ComCtlsDemo: Common.bas `Public Function Command$()` 体内
+                    // `Command$ = LTrim$(Command$)` 生成 `vb6_MCIWnd_prop_let_Command(<值>)`
+                    // (MCIWnd.ctl 的 `Property Let Command`, 缺 me ⇒ C2198×2, Common.c 549/551)。
+                    // 与 cgen_expr_ident_dispatch.inc 的 stripSuffixForProcMatch 同口径。
+                    auto stripProcSuffix = [](const std::string& s) -> std::string {
+                        if (!s.empty() && std::string("$&%!#@").find(s.back()) != std::string::npos)
+                            return s.substr(0, s.size() - 1);
+                        return s;
+                    };
+                    if (stripProcSuffix(curName) == stripProcSuffix(tgtName) &&
                         (currentProc_->kind == SymbolKind::Function ||
                          currentProc_->kind == SymbolKind::PropertyGet ||
                          currentProc_->kind == SymbolKind::PropertyLet ||

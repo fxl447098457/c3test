@@ -613,6 +613,23 @@ bool CCodeGen::classMemberReturnsAsObject(const std::string& className,
         const std::string l = Symbol::toLower(n);
         return l == "object" || l == "variant" || l == "empty" || l == "null";
     };
+    // Fix 246b: 判据必须也认 **COM 接口名**。
+    //   `Property Get Picture() As IPictureDisp` 记下来的返回类型名就是
+    //   "IPictureDisp" —— 它不是 "object"/"variant" 那几个字面量, 于是 Fix 246
+    //   对 ComCtlsDemo ToolBar.ctl:4194/4200 的 `.Picture.Handle` / `.Picture.Type`
+    //   **一直没生效** (ToolBar.c 7147/7151/7153/7198/7202/7204 六条 C2223 至今还在)。
+    //   这里改用与定义侧同一份映射: 名字映射成 `vb6_ComIface_*` 或以 "void*" 收场
+    //   (typelib 注入的接口在当前模块查不到时 mapTypeRef 的兜底) 都算"对象型"。
+    //   注意工程类是 "vb6_cls_*", 不在此列 —— 真返回工程类仍走原生 `->` 路径。
+    auto isComIfaceName = [this](const std::string& n) {
+        if (n.empty()) return false;
+        const std::string ct =
+            const_cast<CCodeGen*>(this)->cTypeForDeclaredTypeName(n);
+        return ct == "void*" || ct.compare(0, 12, "vb6_ComIface_") == 0;
+    };
+    auto isObjectishEx = [&](const std::string& n) {
+        return isObjectish(n) || isComIfaceName(n);
+    };
     // ① 类符号的 memberReturnTypes
     for (const auto& [ck, cs] : symTab_.moduleScope()->symbols()) {
         if (cs->kind != SymbolKind::Class) continue;
@@ -621,19 +638,24 @@ bool CCodeGen::classMemberReturnsAsObject(const std::string& className,
             : (Symbol::toLower(cs->name) == classLower);
         if (!clsHit) continue;
         auto it = cs->memberReturnTypes.find(memberLower);
-        if (it != cs->memberReturnTypes.end() && isObjectish(it->second)) return true;
+        if (it != cs->memberReturnTypes.end() && isObjectishEx(it->second)) return true;
         break;
     }
     // ② 成员符号本体
     for (const auto& [k, s] : symTab_.moduleScope()->symbols()) {
         if (s->lowerName != memberLower) continue;
+        // Fix 246b: 原来非 external 只认"成员属于**当前编译模块**"
+        // (isClassModule_ && moduleName_ == classLower), 于是 **跨模块**的类成员
+        // 一律 continue —— 编 ToolBar 时找 TbrButtonMenu.Picture 永远匹配不上。
+        // 按 sourceModule 定位成员的归属类才是这条本来想问的事。
         const bool clsHit = s->isExternal
             ? (Symbol::toLower(s->sourceModule) == classLower)
-            : (isClassModule_ && Symbol::toLower(moduleName_) == classLower);
+            : (Symbol::toLower(s->sourceModule) == classLower
+               || (isClassModule_ && Symbol::toLower(moduleName_) == classLower));
         if (!clsHit) continue;
         if (s->kind != SymbolKind::PropertyGet && s->kind != SymbolKind::Function) continue;
         if (s->type != Vb6Type::Object) continue;
-        if (!s->variableTypeName.empty() && !isObjectish(s->variableTypeName)
+        if (!s->variableTypeName.empty() && !isObjectishEx(s->variableTypeName)
             && isClassName(s->variableTypeName))
             return false;               // 真的返回工程类 → 走原生路径
         return true;

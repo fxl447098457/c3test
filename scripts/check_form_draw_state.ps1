@@ -378,15 +378,20 @@ foreach ($want in @('canvas_drawing.hpp', 'canvasMethodEntry(', 'FrmControlType:
     }
 }
 
-# S9.3 调用点名单钉死: 定义 1 + 声明 1 + 码头 5 (表达式形 3 / 打标记 1 / 语句形 1)
+# S9.3 调用点名单钉死: 定义 1 + 声明 1 + 码头 6
+# (表达式形 3 / 打标记 1 / 语句形 1 / **With 控件臂 1**)
+# 第七个码头 = Fix 263 在 cgen_expr_with.cpp 的 FormControl 臂补上的 `.Cls`
+# (`With PictureDraw : .Cls`)。为什么不能走 `controlZeroArgMethod`: 那一张表的
+# 行数被 rtl_proto_arity 的 R3 钉死 (恰好 23), 加一行就红; 而把出口名直接拼进
+# 发码侧又会踩 S9.1 (名字只许出自 canvas_drawing.hpp)。
 $callTotal = 0
 foreach ($f in Get-SrcFiles $beDir) {
     $code = Get-CodeText ([System.IO.File]::ReadAllText($f.FullName))
     $callTotal += [regex]::Matches($code, 'controlCanvasMethod\s*\(').Count
 }
-if ($callTotal -ne 7) {
-    $bad += ("S9 call sites of the canvas table = " + $callTotal + " (want exactly 7:" +
-             " 1 definition + 1 declaration + 5 docks)")
+if ($callTotal -ne 8) {
+    $bad += ("S9 call sites of the canvas table = " + $callTotal + " (want exactly 8:" +
+             " 1 definition + 1 declaration + 6 docks)")
 }
 
 # S9.4 打标记那一路只许问表: 那张 PictureBox 判据起 400 字符内必须调用 controlCanvasMethod，
