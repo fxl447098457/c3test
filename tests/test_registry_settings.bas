@@ -24,8 +24,12 @@
 ' vb6_VariantArrayGet(&v, i) -- the second index was dropped at the emission site --
 ' while UBound(v, 2) on that very slot already asked the runtime.
 '
-' VB6's DeleteSetting has three shapes (key / section / app); our exit only accepts the
-' three-argument one today (para-B149 cell 3), so every call below spells all three out.
+' VB6's DeleteSetting has three shapes (key / section / app). The two-argument shape
+' (delete a whole section) is pinned by R6 below -- acct #305 para-B149 cell 3, knife 41.
+' The one-argument shape (delete a whole app) is deliberately NOT padded: the RTL exit
+' returns immediately when section is empty (vb6rtl_registry.c:97), so filling that slot
+' with an empty string would turn "delete the app" into a silent no-op; it stays a loud
+' C2198 instead. Three-argument calls below spell all three out.
 Option Explicit
 
 Private Const RS_APP As String = "C3ProbeB149"
@@ -77,6 +81,18 @@ Public Sub Main()
     v = GetAllSettings(RS_APP, "Sec")
     Debug.Print "R4-after-delete-vt="; VarType(v)
     Debug.Print "R4-after-delete-isnull="; IsNull(v)
+
+    ' R6 (para-B149 cell 3): the two-argument shape = delete the whole section. Before this
+    ' knife the emitted call carried two arguments against a three-parameter RTL exit, so a
+    ' program using VB6's own spelling did not compile at all (error C2198: too few
+    ' arguments) -- that is the negative control for this row (BASE compiler, same fixture).
+    SaveSetting RS_APP, "Sec6", "K1", "V1"
+    v = GetAllSettings(RS_APP, "Sec6")
+    Debug.Print "R6-before-vt="; VarType(v)
+    DeleteSetting RS_APP, "Sec6"
+    v = GetAllSettings(RS_APP, "Sec6")
+    Debug.Print "R6-two-arg-delete-vt="; VarType(v)
+    Debug.Print "R6-two-arg-delete-isnull="; IsNull(v)
 
     Debug.Print "RS-DONE"
 End Sub

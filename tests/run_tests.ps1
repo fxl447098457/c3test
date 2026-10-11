@@ -802,6 +802,23 @@ function Test-BuiltinSlotReturns {
         $out | Select-Object -First 8 | ForEach-Object { Write-Host "  $_" }
     }
 }
+# 账 #305 §B153 (第四十一刀): 「内置出口省略实参时补哪一档」那张表与 RTL / 语义名单逐名对账。
+# 收表之前这个决定在发码侧有 28 位主人, 而答案住在 VB6 形参表与 RTL 的 C 声明里 —— 三份从不汇合:
+# 少一档 = C2198 (实物: §B149 的 DeleteSetting 两参形), 多一档 = 位置错接 (§B121 那格实测段错误),
+# 补错值 = 静默答错 (Mid 省略 length 补 0 曾让 czUI 整屏颜色错)。四个方向都要问, 所以单独一道。
+function Test-BuiltinOptDefaults {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] builtin_opt_defaults ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\check_builtin_opt_defaults.ps1" 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        $out | Select-Object -First 8 | ForEach-Object { Write-Host "  $_" }
+    }
+}
 # 账 #240: RTL 的头与体必须同一张签名（参数个数）。本机那台 cl 在 C 模式下不诊断「实参过多」，
 # 头追不上体的缺陷只有 runner 上新 cl 才报 error C2197 ⇒ 判据不能靠真编，只能对着源码比。
 # 账 #278 §B72 把同一把针往外接两头：发码那几张控件方法表（名字 + 实参个数, 恰好 23 行 =
@@ -2614,8 +2631,11 @@ if ($Category -in @("all", "run", "bas")) {
     # 改前的四档全错而一声不响 (VarType=12 / IsNull=False / UBound 两维都答 0 / 元素读回空串,
     # 见 .build/b1265_nd/r6.txt) => 负控 = 拿 BASE 那台跑同一份新夹具, R1/R2/R4 那几条必红。
     # R3 两枚钉的是「回来的是快照」: 写槽不写注册表 (VB6 同形), 也是「写侧真接到了 ND 落点」的证人。
-    # ⚠ VB6 的 DeleteSetting 有 1/2/3 参三形, 我们那枚出口今天只认三参 (§B149 第三格, 未修),
-    #   所以夹具里四条删除一律写全 —— 少写一个参数不是省事, 是把整条夹具打成 C2198。
+    # VB6 的 DeleteSetting 有 1/2/3 参三形。第四十一刀 (账 #305 §B149 格③) 接上了**两参那档**:
+    #   发码按缺省表把 key 补成空串 → RTL 走 RegDeleteKeyW 删整节。一参那档刻意不补 ——
+    #   RTL 在 section 为空时直接 return, 补空串等于把「删应用」静默变成什么都不做 (§B153)。
+    #   R6 三枚钉这个两参形状; 负控 = 同一份夹具在 BASE 那台压根编不过 (C2198 参数太少,
+    #   .build/b1337_r6/b6/c3-error.log 第 87 行)。R6 的读数在 .build/b1337_r6 (两台逐行相同)。
     # R5 两枚钉的是**同一枚元素的地址**那一形: 发码侧「认这串 C 是不是槽元素读」原先按老名
     # 比文本, 新那枚多维的名字不认 → VarPtr(v(0,1)) 退成复合字面量 (C2440) 或临时盒 (静默)。
     # BASE 上这一条实测交 False (地址没找到) ⇒ 针面能红。
@@ -2627,7 +2647,9 @@ if ($Category -in @("all", "run", "bas")) {
         "R2-cell01=K1", "R2-cell02=V1", "R2-cell12=V2",
         "R3-slot-after-write=W2", "R3-registry-unchanged=V2",
         "R5-elemptr-nonzero=True", "R5-cell01-still=K1",
-        "R4-after-delete-vt=1", "R4-after-delete-isnull=True", "RS-DONE")
+        "R4-after-delete-vt=1", "R4-after-delete-isnull=True",
+        "R6-before-vt=8204", "R6-two-arg-delete-vt=1", "R6-two-arg-delete-isnull=True",
+        "RS-DONE")
     Add-BasTest "test_registry_settings" "$Tests\test_registry_settings.bas" $rsSetNeedles
     Add-BasTest "test_registry_settings_x86" "$Tests\test_registry_settings.bas" $rsSetNeedles -Arch "x86"
     # <vbeclipse>: vbTextCompare 六个入口对表 (InStr 两形/InStrRev/Replace/Split/Filter/
@@ -5754,6 +5776,7 @@ if ($Category -in @("all", "compile")) {
     Test-RtlNakedNames
     Test-RtlResourceIds
     Test-BuiltinSlotReturns
+    Test-BuiltinOptDefaults
     Test-RtlProtoArity
     Test-RsRecordsetShape
     Test-SbPanelHm
