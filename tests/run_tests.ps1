@@ -2537,7 +2537,20 @@ if ($Category -in @("all", "run", "bas")) {
         "VB-dec-clng=5", "VB-dec-cdbl=1.25",
         "VB-decf-tn=Decimal", "VB-decf-cstr=[2.5]", "VB-decf-cdbl=2.5",
         "VB-dec-i4=5", "VB-dec-lp=5", "VB-dec-bb=True",
-        "VB-dec-if=True", "VB-dec-add=6", "VB-dec-eq=True", "VB-DONE")
+        "VB-dec-if=True", "VB-dec-add=6", "VB-dec-eq=True",
+        # 账 #305 §B145 (第三十六刀): Variant 参与 + - * / 的**精确**读数。改前发码层替运行期
+        # 猜了一档整数(Variant 操作数一律发成 vb6_VariantToLong)，BASE 两台逐行同形(探针
+        # .build/b1095_arith/probe5.bas，同一枚 exe 修的也就是那一句): Double 盒 1.5+1 答 **3**、
+        # 1.5*2 答 **4**、1.5-1 答 **1**；Decimal 盒 1.25+1 答 **2**、1.25*2 答 **2**、
+        # 0.1+0.2 答 **0**、TypeName 答 **Long**。现在四处都交 RTL 那一族运行期出口
+        # (vb6_VarAddV/SubV/MulV/DivV -> oleaut32 的 VarAdd 一族 = VB6 本人的 Variant 算术)，
+        # 数值档由运行期的 vt 决定：Decimal 走 96 位精确，Double 保小数，Long 目标仍按 round。
+        # 0.1+0.2 = 0.3 与 0.1*0.2 = 0.02 就是这个功能存在的理由(浮点那两条永远答不精确)；
+        # 针面刻意不钉任何平局答案(2.5/3.5 属 §B77① 未拍的口径)，长整目标那条用 5.75+1=6.75->7。
+        "VB-ar-dbl-add=2.5", "VB-ar-dbl-mul=3", "VB-ar-dbl-sub=0.5",
+        "VB-ar-dec-add=2.25", "VB-ar-dec-mul=2.5", "VB-ar-dec-tn=Decimal",
+        "VB-ar-exact=0.3", "VB-ar-exact-mul=0.02",
+        "VB-ar-target-long=7", "VB-ar-if=True", "VB-DONE")
     # ⚠ 这里曾经是字面 TAB: `"$Tests<TAB>est_variant_boxing.bas"`。
     # PowerShell 的 "" 里 **`\t` 不是转义**（转义是反引号），所以只要有人把 `\t` 写成真 TAB,
     # 路径就变成 `tests` + TAB + `est_...` —— 门里读到的是 `error VB1006: 无法打开文件`,

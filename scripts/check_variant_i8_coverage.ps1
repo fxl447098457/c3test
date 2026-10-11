@@ -12,11 +12,16 @@
 #   V2  闭合性：每一处站点的宿主函数必须**要么在 must、要么在 exempt**；两边都没有 ⇒ 红
 #   V3  must 名单里每个函数体必须真有 VT_I8 档（挂了名字没写档 = 静默漏答，正是本账的实物）
 #   V4  名单（must + exempt + decMust + decExempt）里每个名字都必须在 src\rtl 里真的存在（拼错的名字会让规则断电）
-#   V5  must 名单不许空着或缩水到 < 11；decMust 不许缩水到 < 7
+#   V5  must 名单不许空着或缩水到 < 11；decMust 不许缩水到 < 8 (§B145 把 Decimal 的名单加到 8 枚)
 #   D1  decMust 里每个函数体必须真有 VT_DECIMAL 档 —— 与 V3 同形，只是问的是另一档
 #   D2  闭合性按**档**算：每一处站点的宿主函数在 Decimal 这一档也必须二选一（decMust 或 decExempt）
 #   D3  decExempt 的每条理由不许是空话（少于 12 字 ⇒ 红），豁免必须说清「为什么不答这一档」
 #
+# 账 #305 §B145 之后「槽 -> 真 VARIANT」那一族只有一张表(vb6_VariantPackBorrow)：出站打包(V3 名单里
+# 原来是 vb6_ComPackVariant)与 Variant 算术都读它，所以名单换名不换数量——两处各写一遍的那些年，
+# 就是这张表连漏 Decimal/Currency/Date 三档的来历。
+# 站点匹配前会剥掉注释(§B145: 引用了 `switch (v.vt)` 的那句注释自己变成一个站点，
+# 还被算给上一个函数 —— phantom 站点比漏站点更坏，因为它凭空造出一格「要豁免」。
 # 口径从「一档 × 每表」换成「每档 × 每表」的来历（账 #305 §B143）：VT_I8 那一撞之后 Decimal 是第二次，
 # 而两次都只钉了一档 —— 补了 I8 的表照样可以漏 Decimal。现在同一张表要答两档，名单各列各的。
 # ⚠ 站点正则今天只认接收者叫 `v` 的写法（可带强转）。**换成别的变量名就看不见**，实测这类还有 7 处：
@@ -38,7 +43,7 @@ $bad = @()
 
 $must = @(
     "vb6_VariantToLong", "vb6_VariantToLongPtr", "vb6_VariantToBool", "vb6_VariantToDouble",
-    "vb6_TypeName", "vb6_IsNumeric", "vb6_ComPackVariant", "memVariantToI4",
+    "vb6_TypeName", "vb6_IsNumeric", "vb6_VariantPackBorrow", "memVariantToI4",
     "vb6_ho_variantToLong", "vb6_ho_variantToDouble", "vb6_VarToDouble_internal"
 )
 $exempt = @{
@@ -49,10 +54,13 @@ $exempt = @{
 # Decimal 这一档（§B143）：同一张表要答两档，所以名单也列两份。
 $decMust = @(
     "vb6_VariantToLong", "vb6_VariantToLongPtr", "vb6_VariantToBool", "vb6_VariantToDouble",
-    "vb6_TypeName", "vb6_IsNumeric", "vb6_VarToDouble_internal"
+    "vb6_TypeName", "vb6_IsNumeric", "vb6_VarToDouble_internal",
+    # 账 #305 §B145: 「槽 -> 真 VARIANT」那张表唯一的住处(出站打包与 Variant 算术都读它)。
+    "vb6_VariantPackBorrow"
 )
 $decExempt = @{
-    "vb6_ComPackVariant" = "往 COM 交参数，Decimal 那一档要按 x86 内联/x64 指针两套写法走，问的不是「VB 侧怎么取数」"
+    # 账 #305 §B145: 这一格撤掉——那张 vt 表整个搬进 vb6_VariantPackBorrow(它现在两档都答)，
+    # vb6_ComPackVariant 只剩「借用 -> 带权」那一行升级，自己不再有 switch。
     "memVariantToI4" = "UC 宿主模型的取数口，全仓 0 个 Decimal 调用点（§B143 量过），要补先证明可达"
     "vb6_ho_variantToLong" = "UC 宿主模型的取数口，全仓 0 个 Decimal 调用点（§B143 量过），要补先证明可达"
     "vb6_ho_variantToDouble" = "UC 宿主模型的取数口，全仓 0 个 Decimal 调用点（§B143 量过），要补先证明可达"
@@ -80,9 +88,16 @@ foreach ($f in $files) {
     $lines = $text -split "`r?`n"
     $cur   = ""
     for ($i = 0; $i -lt $lines.Count; $i++) {
-        $m = $fnRe.Match($lines[$i])
+        # 账 #305 §B145: 注释里**引用**的形状不是站点。第三十六刀往 vb6rtl_com.c 写了一句
+        # 「接收者叫 v 的 switch (v.vt) 是这道哨兵认的形状」，于是那句注释自己变成了一个
+        # 站点，还被算给上一个函数(vb6_VariantToObject)—— phantom 站点会把闭合 census 变成
+        # 一份凭空的豁免名单，所以先把注释剥掉再匹配。
+        $ln = ($lines[$i] -replace '/\*.*?\*/', '')
+        $t = $ln.TrimStart()
+        if ($t.StartsWith('*') -or $t.StartsWith('//') -or $t.StartsWith('/*')) { continue }
+        $m = $fnRe.Match($ln)
         if ($m.Success) { $cur = $m.Groups[1].Value }
-        if ($switchRe.IsMatch($lines[$i])) {
+        if ($switchRe.IsMatch($ln)) {
             $sites += [pscustomobject]@{ File = $f.FullName.Substring($root.Length + 1)
                                          Line = $i + 1; Fn = $cur }
         }
@@ -110,7 +125,7 @@ if ($sites.Count -lt 13) {
 # ---------- 每一档各问一遍：闭合 census + 名单自己 ----------
 $arms = @(
     [pscustomobject]@{ Tag = "V2/V3"; Arm = "VT_I8";      Must = $must;    Exempt = $exempt;    Floor = 11; Re = $armRe.I8 },
-    [pscustomobject]@{ Tag = "D1/D2"; Arm = "VT_DECIMAL"; Must = $decMust; Exempt = $decExempt; Floor = 7;  Re = $armRe.DEC }
+    [pscustomobject]@{ Tag = "D1/D2"; Arm = "VT_DECIMAL"; Must = $decMust; Exempt = $decExempt; Floor = 8;  Re = $armRe.DEC }
 )
 foreach ($a in $arms) {
     # 闭合性：每张 vt 表都要在这一档二选一(答它 / 写明为什么不答)

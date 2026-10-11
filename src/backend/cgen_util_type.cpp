@@ -813,6 +813,13 @@ bool CCodeGen::cExprIsVariant(const std::string& cExpr) const {
         //   不会走 vb6_VariantToString / wrapVariantValue, 直接 C2440
         //   (ClsResizer.AddControlFont 的 `.PropFont = PropFont(i)`)。
         "vb6_PA_GetVariant(",
+        // 账 #305 §B145: Variant 参与 + - * / 的四枚运行期出口（vb6rtl_com.c），返回整只
+        //   vb6_VARIANT。不登记在这里 = 下游的解包/装箱/比较全按「C 原生标量」发
+        //   (int32_t)(...) ⇒ C2440/C2088；登记之后它们一律走 Variant 那一条路。
+        "vb6_VarAddV(",
+        "vb6_VarSubV(",
+        "vb6_VarMulV(",
+        "vb6_VarDivV(",
     };
     for (const auto& prefix : variantPrefixes) {
         if (cExpr.compare(start, prefix.size(), prefix) == 0) return true;

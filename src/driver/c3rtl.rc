@@ -558,3 +558,9 @@
 /* 账 #298 第二十四刀 (§B129 并表收尾): vb6forms.c 长出公式的唯一住处 (OnDc + 一对 float)，
  * vb6forms_olecon.c / vb6forms_picture_prop.c / axsite/ax_site_ext.c / 头文件都改成只转调 ——
  * DPI 不许再写死成 96。本行是那次 touch, 让 rc.exe 重跑并把新 RTL 嵌进 C3.exe。 */
+
+/* 账 #305 §B145 第三十六刀 (精确 Decimal 算数 / Variant 算术不再替运行期猜档): vb6rtl_com.c 长出
+ * 「槽 → 真 VARIANT」那张 vt 表的唯一一份 (vb6_VariantPackBorrow，补 Decimal/Currency/Date 三格)
+ * 与四枚运行期算术出口 (vb6_VarAddV / SubV / MulV / DivV)；vb6rtl.c 的 vb6_DecimalAsVariant 从
+ * static 出来；vb6rtl_variant.h 加声明；两条「往里读」的 x86 Decimal 臂一起改从结构体的头铺。
+ * 本行是那次 touch, 让 rc.exe 重跑并把新 RTL 嵌进 C3.exe。 */

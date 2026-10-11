@@ -160,5 +160,36 @@ Public Sub Main()
     vsum = vd2 + 1
     Debug.Print "VB-dec-add="; vsum
     Debug.Print "VB-dec-eq="; (vd2 = 5)
+    ' Acct #305 para-B145: exact arithmetic. Codegen used to unwrap a Variant operand
+    ' through vb6_VariantToLong for + - * -- it picked the numeric arm at compile time --
+    ' so the BASE readings were the same on BOTH arches (probe .build/b1095_arith):
+    '   Double box:  1.5+1 -> 3,  1.5*2 -> 4,  1.5-1 -> 1
+    '   Decimal box: 1.25+1 -> 2, 1.25*2 -> 2, 0.1+0.2 -> 0, TypeName -> Long
+    ' The four operators now go through one runtime exit in the RTL, which boxes both
+    ' operands and hands them to oleaut32's VarAdd/VarSub/VarMul/VarDiv -- the engine
+    ' VB6's own Variant arithmetic is built on -- so the arm comes from the value's vt
+    ' at run time. Nothing here pins a tie answer (2.5/3.5 belong to the unowned
+    ' para-B77-1 rounding caliber), and 1.5+1.5=3 is used where a Long target is asked.
+    Dim ar1 As Variant
+    Dim ar2 As Variant
+    Dim ar3 As Variant
+    Dim arx As Variant
+    Dim arl As Long
+    ar1 = 1.5
+    Debug.Print "VB-ar-dbl-add="; ar1 + 1
+    Debug.Print "VB-ar-dbl-mul="; ar1 * 2
+    Debug.Print "VB-ar-dbl-sub="; ar1 - 1
+    ar2 = CDec("1.25")
+    Debug.Print "VB-ar-dec-add="; CStr(ar2 + 1)
+    Debug.Print "VB-ar-dec-mul="; CStr(ar2 * 2)
+    Debug.Print "VB-ar-dec-tn="; TypeName(ar2 + 1)
+    ar3 = CDec("0.1")
+    ar2 = CDec("0.2")
+    Debug.Print "VB-ar-exact="; CStr(ar3 + ar2)
+    Debug.Print "VB-ar-exact-mul="; CStr(ar3 * ar2)
+    arx = CDec("5.75")
+    arl = arx + 1
+    Debug.Print "VB-ar-target-long="; arl
+    Debug.Print "VB-ar-if="; CBool(ar3 + ar2)
     Debug.Print "VB-DONE"
 End Sub

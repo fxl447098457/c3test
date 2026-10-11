@@ -295,6 +295,23 @@ BSTR vb6_VariantToString(vb6_VARIANT v);
  * 成功返回真; 失败给 0 / 空串, 不抛错(与其它读表的 default 同形)。 */
 BSTR vb6_DecimalToBSTR(vb6_VARIANT v);
 int vb6_DecimalToR8(vb6_VARIANT v, double *out);
+
+/* 账 #305 §B142/§B145: 槽里那枚 Decimal 变成合法 OLE VARIANT 的**唯一出口**(见 vb6rtl.c)。
+ * 返回 0 = 槽不是 Decimal; 返回 1 = out 已铺好(带 oleaut32 的 vt 标签、且是副本)。 */
+int vb6_DecimalAsVariant(vb6_VARIANT v, VARIANT *out);
+
+/* 账 #305 §B145: 槽 → 真 VARIANT 的那张 vt 表，**只答「数值住在哪一格」**，一律借用语义
+ * (不复制 BSTR、不 AddRef)。需要带权副本的出站那一族自己补下面那一步。 */
+void vb6_VariantPackBorrow(vb6_VARIANT v, VARIANT *out);
+
+/* 账 #305 §B145: Variant 参与 + - * / 的唯一运行期出口(定义在 vb6rtl_com.c)。
+ * 两侧都装箱成真 VARIANT 后交 oleaut32 的 VarAdd/VarSub/VarMul/VarDiv —— VB6 本人的
+ * Variant 算术引擎，于是 Decimal 的 96 位精确、Double 的小数、Null 传播、Date 加天数
+ * 与它自己的舍入/越界政策一起继承，发码层不再替运行期猜档。 */
+vb6_VARIANT vb6_VarAddV(vb6_VARIANT a, vb6_VARIANT b);
+vb6_VARIANT vb6_VarSubV(vb6_VARIANT a, vb6_VARIANT b);
+vb6_VARIANT vb6_VarMulV(vb6_VARIANT a, vb6_VARIANT b);
+vb6_VARIANT vb6_VarDivV(vb6_VARIANT a, vb6_VARIANT b);
 // Fix 029: Variant → SafeArray extraction (variant holding array).
 // 用于调用点反向强制: callee 期望 vb6_SafeArray1D* 但实参是 vb6_VARIANT.
 struct vb6_SafeArray1D* vb6_VariantToSafeArray1D(vb6_VARIANT v);

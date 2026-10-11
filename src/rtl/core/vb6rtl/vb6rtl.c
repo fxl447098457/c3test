@@ -315,8 +315,10 @@ int16_t vb6_VariantToBool(vb6_VARIANT v) {
 }
 
 /* 账 #305 §B142: 槽里的 Decimal 先变成一枚合法的 OLE VARIANT(两份布局只在这里分岔)。
- * 交出去的是**副本**, 槽自己那块 CoTaskMem 谁也不借用, 所以调用侧的 VariantClear 不会碰它。 */
-static int vb6_DecimalAsVariant(vb6_VARIANT v, VARIANT *out) {
+ * 交出去的是**副本**, 槽自己那块 CoTaskMem 谁也不借用, 所以调用侧的 VariantClear 不会碰它。
+ * 账 #305 §B145: 这枚出口从 static 出来 —— 「往外读」那一族(出站的 vt 表) 与
+ * 「Variant 算术」都要读同一份布局知识，第二份实现就是第二次踩同一个坑。 */
+int vb6_DecimalAsVariant(vb6_VARIANT v, VARIANT *out) {
     if (v.vt != vb6_vtDecimal) return 0;
 #ifdef _WIN64
     out->vt = VT_DECIMAL;
