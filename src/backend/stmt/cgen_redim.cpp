@@ -224,7 +224,11 @@ void CCodeGen::visit(ReDimStmt& node) {
                 // Bug4-Fix Udt Preserve: 多维 UDT 数组传入元素尺寸
                 res = "vb6_SafeArrayReDimPreserveND_Udt((int32_t)sizeof(" + udtCType + "), (vb6_SafeArrayND*)" + redimArg + ", " + std::to_string(dimCount) + ", " + boundsVar + ")";
             } else {
-                res = "vb6_SafeArrayReDimPreserveND((vb6_SafeArrayND*)" + redimArg + ", " + std::to_string(dimCount) + ", " + boundsVar + ")";
+                // 账 #305 §B155 格④ (第四十三刀): 这一枚也要**把档递下去** —— 上面
+                // 不带 Preserve 的那一支 (:244) 一直递 saElemType, Preserve 这一支却递了
+                // 空手, 于是「首次分配就走 Preserve」的形状在 RTL 里回落 vb6_sa_empty
+                // (4 字节一步) 而访问按声明档走 —— 同一件事两处写法不同形, 第三例。
+                res = "vb6_SafeArrayReDimPreserveND(" + saElemType + ", (vb6_SafeArrayND*)" + redimArg + ", " + std::to_string(dimCount) + ", " + boundsVar + ")";
             }
             if (!wrapBack.empty()) res = wrapBack + res + ")";
             // 账 #305 §B154 第二格: 那枚 (vb6_SafeArray1D*) 强转**只在该槽是数组指针时**才成立。

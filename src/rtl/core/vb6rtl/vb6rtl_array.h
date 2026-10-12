@@ -152,8 +152,15 @@ vb6_SafeArrayND* vb6_SafeArrayReDimND(vb6_safearray_elemtype elemType,
     int32_t dimCount, vb6_SafeArrayBound bounds[]);
 vb6_SafeArrayND* vb6_SafeArrayReDimND_Udt(int32_t elemSize,
     int32_t dimCount, vb6_SafeArrayBound bounds[]);
-vb6_SafeArrayND* vb6_SafeArrayReDimPreserveND(vb6_SafeArrayND* arr,
-    int32_t dimCount, vb6_SafeArrayBound newBounds[]);
+/* 账 #305 §B155 格④ (第四十三刀): 这一枚也**收 elemType**, 与上面一维那条 _T 同一个决定。
+   此前形参表里没有它, arr==NULL (首次分配就写 Preserve) 时只能按 vb6_sa_empty 建 ——
+   尺寸表对 empty 给 default 档 4 字节, 而访问侧按声明档步进:
+     `Dim p() As String` + `ReDim Preserve p(1 To 2, 1 To 3)` 在 x64 上造 4 字节一步、
+     写 8 字节一步 ⇒ 堆越界 (实测旧编译器 0xC0000374 堆损坏、新编译器 0xC0000005,
+     两条都是响的; Variant 档 24/4 同形)。
+   UDT 不在这一枚 (它走下面的 _Udt, 元素尺寸由调用方的 sizeof 给)。 */
+vb6_SafeArrayND* vb6_SafeArrayReDimPreserveND(vb6_safearray_elemtype elemType,
+    vb6_SafeArrayND* arr, int32_t dimCount, vb6_SafeArrayBound newBounds[]);
 
 // UDT版ReDim Preserve(多维): elemSize由调用方提供
 vb6_SafeArrayND* vb6_SafeArrayReDimPreserveND_Udt(int32_t elemSize,

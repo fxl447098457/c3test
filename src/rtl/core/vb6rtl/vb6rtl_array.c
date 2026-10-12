@@ -587,9 +587,18 @@ vb6_SafeArrayND* vb6_SafeArrayReDimND_Udt(int32_t elemSize,
     return arr;
 }
 
-vb6_SafeArrayND* vb6_SafeArrayReDimPreserveND(vb6_SafeArrayND* arr,
-    int32_t dimCount, vb6_SafeArrayBound newBounds[]) {
-    if (!arr) return vb6_SafeArrayCreateND(vb6_sa_empty, dimCount, newBounds);
+/* 账 #305 §B155 格④ (第四十三刀): 收 elemType —— 「一枚多维描述符按哪一档分配」这个
+   决定从此与一维那条 (_T) 同源, 也由调用方 (发码侧知道声明档) 给答案, 运行时不猜。
+   三条出口都与一维同形: udt 档这里答不了 → 回落 variant; arr 为空 → 按调用方给的档建;
+   档与描述符自己身上的不符 (旧编译器按 empty 分配过) → 数据不可保留, 按正确的重建。 */
+vb6_SafeArrayND* vb6_SafeArrayReDimPreserveND(vb6_safearray_elemtype elemType,
+    vb6_SafeArrayND* arr, int32_t dimCount, vb6_SafeArrayBound newBounds[]) {
+    if (elemType == vb6_sa_udt) elemType = vb6_sa_variant;
+    if (!arr) return vb6_SafeArrayReDimND(elemType, dimCount, newBounds);
+    if (arr->elemType != vb6_sa_udt && arr->elemType != elemType) {
+        vb6_SafeArrayDestroyND(arr);
+        return vb6_SafeArrayReDimND(elemType, dimCount, newBounds);
+    }
 
     int32_t newTotal = 1;
     for (int32_t d = 0; d < dimCount; d++) {

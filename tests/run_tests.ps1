@@ -2665,13 +2665,31 @@ if ($Category -in @("all", "run", "bas")) {
     # 三枚 *-label-* 钉的是**今天**的 VarType/TypeName（8204 / "Variant"）。VB6 该答 8200 / "String()"：
     # 装箱那一句 vb6_VariantArray 把 vt 写死成 vb6_vtArray | vb6_vtVariant、从不问描述符，而 vb6_TypeName
     # 没有数组分支 —— 那一格记在 §B155，谁把标签修对这三枚就会红，那是**成功**信号不是回归。
+    # 同一段落的第四十三刀（§B155 格④）在末尾接上 R10..R14：多维数组**首次分配就走 Preserve** 那一形。
+    # vb6_SafeArrayReDimPreserveND 的形参表里原本压根没有 elemType，arr==NULL 时只能按 vb6_sa_empty 建
+    # （尺寸表对 empty 答 default 4 字节），而访问侧按声明档走步长（x64：String 8、Variant 24）⇒ 写出去
+    # 就在块外。这一族是**响**的：只含这一形的探针 .build/b1395_k43/pr2.bas 两台并排跑，修前那台
+    # 0xC0000005 且一个字都没打印（rpb2.txt = 0 字节），修后 exit 0 并把 Y11-box-cell=six 打出来；
+    # 更早那份 z.bas 探针在修前还见过 0xC0000374（堆损坏）与一次侥幸跑完 —— 三种死法同族，不钉死数。
+    # **R10/R11/R12/R14 这四枚直接读写不是分辨针**：修前那边写与读用的是同一枚错步长，自己一致，
+    # 实测在修前的编译器上照样打出同样的值（drive3.log 的 BASE 段）；它们钉的是「本刀不许把已对的形状
+    # 改坏」，分辨只靠 R13-box-c23 那一枚（装箱后的元素读问的是描述符自己的档）。
+    # 还有一格没修、只是绕开：同一过程里对同一枚数组发第二条多维 ReDim，会把同名的
+    # _redim_bounds_<数组> 临时量发两遍 ⇒ cl C2374「重定义」（两台同形，.build/b1395_k43/n6/c3-error.log），
+    # 所以 R14 的两句分在 Main 与 GrowMp 两个过程里。
     $reNeedles = @("R1-cell=A",
         "R1-label-vt=8204 tn=Variant",
         "R2-preserve-cell=A ub=6",
         "R3-cell=X", "R3-ub2=4 lb2=1", "R3-box-cell=X", "R3-label-vt=8204 tn=Variant",
         "R4-cell=200", "R4-box-cell=200",
         "R5-cell=77", "R5-ub1=2 ub2=2", "R5-label-vt=8204 tn=Variant",
-        "R6-ub2=2", "R7-cell=V vt=8204", "R8-cell=S", "R9-cell=Z", "RE-DONE")
+        "R6-ub2=2", "R7-cell=V vt=8204", "R8-cell=S", "R9-cell=Z",
+        # 第四十三刀 R10..R14 的读数是 .build/b1395_k43/{rn6,rn3}.txt 两台逐行量出来的
+        # (两架构输出 diff 为空)；只有 R13-box-c23 在修前的编译器上红，其余四枚是防改坏的钉。
+        "R10-c11=one c23=six", "R10-ub2=3 lb2=1",
+        "R11-c11=v11 c22=v22", "R12-c12=7 c23=200",
+        "R13-box-c23=six", "R14-kept=keep grown=later", "R14-ub2=6",
+        "RE-DONE")
     Add-BasTest "test_redim_elem" "$Tests\test_redim_elem.bas" $reNeedles
     Add-BasTest "test_redim_elem_x86" "$Tests\test_redim_elem.bas" $reNeedles -Arch "x86"
     # <vbeclipse>: vbTextCompare 六个入口对表 (InStr 两形/InStrRev/Replace/Split/Filter/

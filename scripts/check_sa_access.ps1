@@ -42,6 +42,18 @@
 #        槽的 vt 成了 DISPATCH，Set/GetND 只认 vt & vtArray ⇒ 一声不响地既不写也不读）。
 #   A11 声明表自己不许空转：写档站点 >= 8、.find 站点 >= 3、.erase 站点 == 1（过程开始清表那一条还在；
 #       撤掉它，上一个过程的元素档会漏给下一个过程）。
+# --- A12/A13（账 #305 §B155 格④，第四十三刀）：多维 Preserve 那枚出口自己也得收档 ---
+# vb6_SafeArrayReDimPreserveND 的形参表里原本压根没有 elemType，于是 arr==NULL（首次分配就走 Preserve）
+# 只能按 vb6_sa_empty 建 —— 尺寸表对 empty 答 default 4 字节，而访问侧按声明档走步长（x64：String 8、
+# Variant 24），写出去就落在只有 1/2 到 1/6 大小的块外面。这一族是**响**的：探针 z.bas 修前实测
+# 0xC0000374 与 0xC0000005 两种死法、另有一次侥幸跑完（读数 .build/b1382_preserve/ 与 .build/b1395_k43/），
+# 而**直接读与直接写用的是同一枚错步长**，所以两者一致、看着是好的 —— 能分辨修前的只有「信描述符自己
+# 那一档的消费方」（装箱后的元素读）那一条，判据就按那条钉。
+#   A12 这一枚出口的头与体都收 elemType（各恰好 1；头追不上体在 runner 上是 cl C2197，见账 #240）；
+#       体内首次分配那一条必须按调用方给的档建，vb6_sa_empty 那枚兜底不许再出现，udt 那一挡也还得在
+#       （尺寸表对 udt 答 0 ⇒ calloc(n, 0) 给一枚非空的零长指针，写进去就是纯堆越界）。
+#   A13 后端发这一枚的行恰好 1 处，且那一处把 saElemType 递了进去（0 处 = RTL 有形参而后端不递：C 里
+#       实参不足只报 warning 照编，于是「运行时自己猜档」原地复活）。
 #
 # 用法:  pwsh -File scripts\check_sa_access.ps1
 # 退出码: 0 = 全绿; 1 = 红
@@ -284,12 +296,37 @@ if ($tblWrite -lt 8) { $bad += ("A11 往 arrayElemTypes_ 写档的站点 = " + $
 if ($tblFind -lt 3) { $bad += ("A11 问 arrayElemTypes_ 的站点 = " + $tblFind + " (下限 3：访问侧/类型汇总/ReDim 至少各一处)") }
 if ($tblErase -ne 1) { $bad += ("A11 arrayElemTypes_.erase = " + $tblErase + " (恰好 1：过程开始的清表只许一处)") }
 
+
+# A12: 多维 Preserve 这一枚自己收档 (账 #305 §B155 格④, 第四十三刀)
+$ndPresDeclH = @([regex]::Matches($h, 'vb6_SafeArrayReDimPreserveND\s*\(\s*vb6_safearray_elemtype\s+elemType')).Count
+$ndPresDefC = @([regex]::Matches($csrc, 'vb6_SafeArrayND\*\s+vb6_SafeArrayReDimPreserveND\s*\(\s*vb6_safearray_elemtype\s+elemType')).Count
+if ($ndPresDeclH -ne 1) { $bad += ("A12 vb6_SafeArrayReDimPreserveND 的声明收 elemType = " + $ndPresDeclH + " 处 (恰好 1；0 = 形参表又回到没有档，NULL 描述符只能猜)") }
+if ($ndPresDefC -ne 1) { $bad += ("A12 vb6_SafeArrayReDimPreserveND 的定义收 elemType = " + $ndPresDefC + " 处 (恰好 1；头/体个数不一致在 runner 上是 cl C2197)") }
+$ndPresHead = [regex]::Match($csrc, 'vb6_SafeArrayND\*\s+vb6_SafeArrayReDimPreserveND\s*\(\s*vb6_safearray_elemtype[\s\S]{0,900}')
+if ($ndPresHead.Value -notmatch 'vb6_SafeArrayReDimND\(\s*elemType') { $bad += "A12 首次分配那一条不再按调用方给的档建（回到 empty = 尺寸表 default 4 字节）" }
+if ($ndPresHead.Value -match 'vb6_sa_empty') { $bad += "A12 多维 Preserve 里又出现 vb6_sa_empty 兜底（那正是本刀撤掉的那一行）" }
+if ($ndPresHead.Value -notmatch 'elemType == vb6_sa_udt') { $bad += "A12 多维 Preserve 不再挡 udt 档（尺寸表对 udt 答 0 ⇒ calloc(n,0) 是非空零长指针）" }
+
+# A13: 发码侧把档递进去
+$ndPresEmit = 0; $ndPresTyped = 0
+foreach ($f in $beFiles) {
+    foreach ($line in (Lines $f.FullName)) {
+        $t = $line.Trim()
+        if ($t.StartsWith("//")) { continue }
+        if ($t.Contains("vb6_SafeArrayReDimPreserveND(")) {
+            $ndPresEmit++
+            if ($t -match 'vb6_SafeArrayReDimPreserveND\("\s*\+\s*saElemType') { $ndPresTyped++ }
+        }
+    }
+}
+if ($ndPresEmit -ne 1) { $bad += ("A13 后端发 vb6_SafeArrayReDimPreserveND 的行 = " + $ndPresEmit + " (恰好 1)") }
+if ($ndPresTyped -ne 1) { $bad += ("A13 那一行把 saElemType 递进去的写法 = " + $ndPresTyped + " 处 (恰好 1；0 = RTL 有形参而后端不递)") }
 if ($bad.Count -eq 0) {
     Write-Host ("PASS SA element access: macro " + $macroDefs.Count +
                 " / inline " + $defs.Count +
                 " / cold-path decl " + $decl + " def " + $defn +
                 " / backend raw-data lines " + $rawData.Count +
-                " / raw-index shape " + $shape + " / ND macros " + $ndMacros.Count + " / ND inline " + $ndDefs.Count + " / ATN emit " + $atnEmit + " / ATN literal " + $atnLiteral + " / redim helper def " + $rdDef + " call " + $rdCall + " / sa_variant lit " + $saVariant.Count + " / box cast " + $boxCast + " / table w " + $tblWrite + " f " + $tblFind + " e " + $tblErase) -ForegroundColor Green
+                " / raw-index shape " + $shape + " / ND macros " + $ndMacros.Count + " / ND inline " + $ndDefs.Count + " / ATN emit " + $atnEmit + " / ATN literal " + $atnLiteral + " / redim helper def " + $rdDef + " call " + $rdCall + " / sa_variant lit " + $saVariant.Count + " / box cast " + $boxCast + " / table w " + $tblWrite + " f " + $tblFind + " e " + $tblErase + " / ndPres decl " + $ndPresDeclH + " def " + $ndPresDefC + " emit " + $ndPresEmit + " typed " + $ndPresTyped) -ForegroundColor Green
     exit 0
 }
 foreach ($b in $bad) { Write-Host ("FAIL " + $b) -ForegroundColor Red }

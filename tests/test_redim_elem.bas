@@ -30,6 +30,9 @@ Type TRElem
     i As Long
 End Type
 
+' Module-level so Main and GrowMp share one descriptor (R14 spans two procedures).
+Private mp() As String
+
 Public Sub Main()
     Dim s1() As String
     Dim a2() As String
@@ -40,6 +43,9 @@ Public Sub Main()
     Dim x7 As Variant
     Dim s8() As String
     Dim v As Variant
+    Dim p0() As String
+    Dim w1() As Variant
+    Dim b1() As Byte
 
     ' R1: 1-D String, bare ReDim. cell = direct round trip (worked before too -
     ' direct write and direct read use the same stride); label = the open B155 cell.
@@ -99,5 +105,66 @@ Public Sub Main()
     s8(1) = "Z"
     Debug.Print "R9-cell="; s8(1)
 
+    ' ---- R10..R14: knife 43 = section B155 cell 4 --------------------------
+    ' The FIRST allocation of a multi-dimensional array done as a ReDim Preserve.
+    ' vb6_SafeArrayReDimPreserveND had no elemType parameter at all, so a NULL
+    ' descriptor could only be created as vb6_sa_empty - which the size table answers
+    ' with its default 4 bytes - while the access side walks the DECLARED stride
+    ' (x64: String 8, Variant 24). The write runs off the end of a block a sixth of
+    ' the size the accesses assume. This one is LOUD, not silent: the pre-knife
+    ' binary dies with 0xC0000374 (heap corruption) having printed NOTHING (reading
+    ' .build/b1382_preserve/rzb6.txt = 0 bytes).
+    '
+    ' One ND ReDim statement per array per procedure below, and that is not a style
+    ' choice: a SECOND ND ReDim of the same array in the same scope is its own open
+    ' cell - the generated bounds temp is named after the ARRAY (_redim_bounds_<name>),
+    ' so it is declared twice inside one C function = cl C2374 (redefinition; multiple
+    ' initialization).
+    ' Measured on both binaries (.build/b1395_k43/{n6,b6}/c3-error.log), so it is
+    ' older than both knives; R14 uses two procedures to work around it.
+    ReDim Preserve p0(1 To 2, 1 To 3)
+    p0(1, 1) = "one"
+    p0(2, 3) = "six"
+    Debug.Print "R10-c11="; CStr(p0(1, 1)); " c23="; CStr(p0(2, 3))
+    Debug.Print "R10-ub2="; UBound(p0, 2); " lb2="; LBound(p0, 2)
+
+    ' R11: Variant elements - 24 bytes walked inside a 4-byte block (x64).
+    ReDim Preserve w1(1 To 2, 1 To 2)
+    w1(1, 1) = "v11"
+    w1(2, 2) = "v22"
+    Debug.Print "R11-c11="; CStr(w1(1, 1)); " c22="; CStr(w1(2, 2))
+
+    ' R12: Byte - the other half of the same mistake: 1 byte walked inside a 4-byte
+    ' block, so it never overflowed and only the descriptor's own consumers (Destroy,
+    ' the boxed element read) walked wrong.
+    ReDim Preserve b1(1 To 2, 1 To 3)
+    b1(1, 2) = 7
+    b1(2, 3) = 200
+    Debug.Print "R12-c12="; b1(1, 2); " c23="; b1(2, 3)
+
+    ' R13: the box path over a Preserve-created descriptor - knife 42's second cell
+    ' and knife 43's first one have to agree, or the value lands in a slot nobody
+    ' reads back.
+    v = p0
+    Debug.Print "R13-box-c23="; CStr(v(2, 3))
+
+    ' R14: Preserve must actually PRESERVE. The two statements sit in DIFFERENT
+    ' procedures (see the C2374 note): Main allocates and writes mp(1,1), GrowMp grows
+    ' the LAST dimension - the direction VB6 allows under Preserve - and writes
+    ' mp(1,3). Reading both back here is the witness that the copy loop moved the old
+    ' elements into the new block instead of dropping them.
+    ReDim Preserve mp(1 To 2, 1 To 3)
+    mp(1, 1) = "keep"
+    GrowMp
+    Debug.Print "R14-kept="; CStr(mp(1, 1)); " grown="; CStr(mp(1, 3))
+    Debug.Print "R14-ub2="; UBound(mp, 2)
+
     Debug.Print "RE-DONE"
+End Sub
+
+' R14's second half: lives in its own scope so the ND bounds temp of this array is
+' emitted once per function (see the C2374 note in Main).
+Private Sub GrowMp()
+    ReDim Preserve mp(1 To 2, 1 To 6)
+    mp(1, 3) = "later"
 End Sub
