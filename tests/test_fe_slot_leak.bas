@@ -56,6 +56,8 @@ Sub Main()
     Dim t As Variant
     Dim sum As Long
     Dim bad As Long
+    Dim keep As Variant
+    Dim k As Long
     Dim s As String
 
     Set gColl = New Collection
@@ -139,6 +141,17 @@ Sub Main()
         s = CStr(e)
     Next e
     Debug.Print "B164-held=" & Len(s) & "/" & Len(e)
+    ' Station 4's other half: a slot-to-slot assignment (keep = e) used to emit the _Generic
+    ' identity = a shallow copy, so two slots shared one buffer. Adding the Clear in the For
+    ' Each station turned that quiet alias into a double free (measured: test_host_decimal on
+    ' x86 died 0xC0000374 in 7 of 12 runs with only the Clear added; BASE 0 of 12 because it
+    ' never released the old value at all). That shape now goes through the deep copy.
+    For k = 1 To 300
+        For Each e In gColl
+            keep = e
+        Next e
+    Next k
+    Debug.Print "B164-alias=" & Len(keep) & "/" & Len(e)
     Debug.Print "B164-bad=" & bad
     Debug.Print "B164-DONE"
 End Sub

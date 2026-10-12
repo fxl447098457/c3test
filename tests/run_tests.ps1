@@ -2692,16 +2692,20 @@ if ($Category -in @("all", "run", "bas")) {
     # 另一半句在本轮实测里现过形: 数组那一站(VB6_SA_AT 裸读)交出去的是**数组自己**那只 BSTR, 槽只是
     # 借用; 只补 Clear 就会把数组还活着的串 free 掉 —— 实测 arr-sum 从 820 变 813/815。故出口按右值
     # 是否自有分两路: 自有 = 清+搬(集合/ParamArray 那三站), 借用 = vb6_VariantAssign(清+深拷贝, 数组站)。
+    # 同一问问到普通赋值那一站才算清: `keep = e` 两边都是 Variant 槽时, wrapVariantValue 发的是
+    # identity 浅拷贝 ⇒ 两枚槽共用一只缓冲; 上面那声 Clear 一加, 共用就变成二次 free(实测
+    # test_host_decimal 的 x86 台 12 次里 7 次 0xC0000374, 补上深拷贝之后 0/14)。B164-alias 就是这一针。
     $b164Needles = @("B164-stores=20000", "B164-api=1/1/1/1", "B164-coll-ok=Y", "B164-arr-ok=Y",
         "B164-sum=820", "B164-last-len=40", "B164-arr-sum=820", "B164-dec=12/14/Decimal",
-        "B164-held=40/40", "B164-bad=0", "B164-DONE")
+        "B164-held=40/40", "B164-alias=40/40", "B164-bad=0", "B164-DONE")
     Add-BasTest "test_fe_slot_leak" "$Tests\test_fe_slot_leak.bas" $b164Needles
     Add-BasTest "test_fe_slot_leak_x86" "$Tests\test_fe_slot_leak.bas" $b164Needles -Arch "x86"
     # 发码形状针: 这一对行就是那枚出口的产物, 缺任何一行都是有人把「先清再搬」这个决定又改回一份。
     Test-EmitcShape "b164_slot_store_shape" @("$Tests\test_fe_slot_leak.bas") @(
         'vb6_VariantClear(&e);',
         'e = vb6_VariantFromStackVARIANT(&_fe_var_0);',
-        'vb6_VariantAssign(&e, vb6_VariantFromValue(VB6_SA_AT(BSTR, gArr, _fe_i5)));'
+        'vb6_VariantAssign(&e, vb6_VariantFromValue(VB6_SA_AT(BSTR, gArr, _fe_i5)));',
+        'vb6_VariantAssign(&keep, vb6_VariantFromValue(e));'
     )
     # 账 #305 §B149 + §B150 (第四十刀): 注册表家族的真往返 + 晚绑定槽的二维元素读写。
     # 读数来源 = .build/b1280_rs (新 exe, x64 与 x86 **逐行相同**, 故同针同过); 外部口径证人 =

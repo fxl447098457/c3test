@@ -361,7 +361,20 @@
             // "把内联临时值赋给目标" 的转移语义一致。
             emitVariantSlotStore(target, wrappedValue, true, true);  /* §B164 站⑤ 自指右值: 先收临时量再清+搬(形状不变) */
         } else {
-            emitVariantSlotStore(target, wrappedValue, true);  /* §B164 站④ 普通赋值: wrapVariantValue 交的是内联临时值 */
+            // §B164 站④ 的第二半句要问一句: 右值**本身是不是一枚活着的槽**。
+            // `last = e2`(两边都是 Variant)经 wrapVariantValue 发的是 `vb6_VariantFromValue(e2)`，
+            // 而 _Generic 对 vb6_VARIANT 是 identity **浅拷贝** ⇒ 两枚槽共用同一只 BSTR / 同一个
+            // x86 DECIMAL 缓冲(与 Rev16 那格数组元素同一个成因)。第五十五刀给 For Each 那一站补上
+            // 「先清旧值」之后，这份共用从「静默别名」变成**二次 free**: 实测 test_host_decimal 的 x86
+            // 台 12 次跑里 7 次 0xC0000374(BASE 那台 0/12 —— 它只是把每一轮的旧值漏掉，谁也没 free 两次)。
+            // 函数返回/集合取回那些是**内联临时量**(按值交回来)，仍走清+搬，不许多拷一次。
+            bool rhsIsLiveSlot164 = false;
+            if (node.value && node.value->kind == ASTNodeKind::IdentifierExpr) {
+                rhsIsLiveSlot164 =
+                    knownVariantVars_.count(Symbol::toLower(
+                        static_cast<IdentifierExpr&>(*node.value).name)) > 0;
+            }
+            emitVariantSlotStore(target, wrappedValue, !rhsIsLiveSlot164);
         }
     } else if (target.compare(0, 10, "vb6_PA_Get") == 0) {
         // Fix 091c: ParamArray 元素赋值 OutVars(i) = value — vb6_PA_GetXxx 是取值
