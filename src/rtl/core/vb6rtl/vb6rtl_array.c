@@ -70,14 +70,16 @@ int32_t vb6_SaVtFromElemType(vb6_safearray_elemtype t) {
 }
 
 // 装箱那一句的落点（声明在 vb6rtl_variant.h —— 那边看不见两套描述符）。手里只有 void*，先认载体:
-// 一维的首字段是魔数 0x5A1D、多维的首字段是秩数 1..16，魔数落不进 1..16 —— 这一问与
-// vb6rtl_string.c / vb6rtl_com.c 里靠魔数认载体的那几处同形。NULL（从没 ReDim / 已被 Erase）
-// 与认不出的载体都交回改前的答案 (vtArray|vtVariant)，不猜。
+// 1D 描述符由 `vb6_SaIs1D` 认（cDims==1 + fFeatures==VB6_SA1D_FFEATURES，见 vb6rtl_array.h），
+// ND 描述符首字段是秩数 1..16。⚠ 首字段**不再是**魔数 0x5A1D（那条口径已随 `signature`
+// 字段一起撤掉），判载体必须走 `vb6_SaIs1D`，与 vb6rtl_string.c / vb6rtl_com.c 同形。
+// NULL（从没 ReDim / 已被 Erase）与认不出的载体都交回改前的答案 (vtArray|vtVariant)，不猜。
 int32_t vb6_SaVtOfArrayPtr(const void* arrV) {
     if (!arrV) return (int32_t)(vb6_vtArray | vb6_vtVariant);
-    const vb6_SafeArray1D* a1 = (const vb6_SafeArray1D*)arrV;
-    if (a1->signature == 0x5A1D)
+    if (vb6_SaIs1D(arrV)) {
+        const vb6_SafeArray1D* a1 = (const vb6_SafeArray1D*)arrV;
         return (int32_t)(vb6_vtArray | vb6_SaVtFromElemType(a1->elemType));
+    }
     const vb6_SafeArrayND* nd = (const vb6_SafeArrayND*)arrV;
     if (nd->dimCount >= 1 && nd->dimCount <= 16)
         return (int32_t)(vb6_vtArray | vb6_SaVtFromElemType(nd->elemType));

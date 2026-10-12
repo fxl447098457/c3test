@@ -426,9 +426,10 @@
                                 for (auto& mi44 : udtSym44->udtMembers) {
                                     if (Symbol::toLower(mi44.name) != memWrap44) continue;
                                     if (mi44.arraySize > 0) {
-                                        // 字段序: signature, elemType, elemSize,
-                                        // lBound, uBound, count, data, isDynamic
-                                        // (vb6rtl_array.h vb6_SafeArray1D)。
+                                        // 字段序: cDims, fFeatures, elemSize, elemType,
+                                        // data, count, lBound, uBound, isDynamic
+                                        // (vb6rtl_array.h vb6_SafeArray1D；首字段已由
+                                        //  magic `signature` 换成 OLE 兼容的 cDims)。
                                         // 个数用 sizeof(数组)/sizeof(元素) 由 C 编译器
                                         // 自算 —— 语义层 UdtMemberInfo.arraySize 目前
                                         // 只是"是定长数组"的占位 (=1), 不是元素个数。
