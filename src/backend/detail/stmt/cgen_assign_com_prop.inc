@@ -509,6 +509,43 @@
                 default: break;   // 其余 (Empty/Null/Date/Currency/…/Unknown) 维持原默认
             }
         }
+        // Fix <vbeclipse> 2026-10-12 (账 #257 第八层): 上面两轮都没答案时问 inferExprType。
+        // 前两轮的覆盖面是「knownXxxVars_ 里登记过的局部/模块变量」与「UDT 字段」,
+        // 而 **本过程的返回变量** (`Function Count() As Long` 里的 `Count = o.Count` →
+        // C 侧 `vb6_ret_Count`) 两边都不在 —— 前两轮都答空, 空串传到 resolveComValue
+        // 会落到最后的 else 默认档 **BSTR**:
+        //   int32_t vb6_ret_Count = vb6_ComGetStringProp(me->PropListImage, L"Count");
+        // 即把 BSTR **指针**当整数 (实际值 0 转出来是 "0" 这个非空指针) ⇒ 截断成大整数
+        // ⇒ `If ListImages.Count > 0` 恒真 ⇒ 误触发 Err.Raise 35611
+        // ("Property is read-only if image list contains images") ⇒ 未处理 ⇒ 进程退出。
+        // 实测 (ImageList.ctl 的 Property Let ImageWidth/ImageHeight; 同族还有
+        // SbrPanels_prop_get_Count)。最小复现 3 行 (.temp/tof/t4.bas):
+        //   Public Function Cnt(o As Object) As Long : Cnt = o.Count
+        // 探针实测: target=[vb6_ret_Cnt] hint=[] udtFld=Unknown inferExpr=Long(3)。
+        // 只接能明确映射的那几档到 hint 表 (342-353) 认得的字面; 其余 (含 Unknown /
+        // Date / Currency / Empty) 维持原默认 —— 猜错会把 void* 目标发成
+        // vb6_ComGetDoubleProp 那种 C2440, 而不检查只是保持今天的形状。
+        // ⚠ 只对 **IdentifierExpr 目标** 开这一轮: inferExprType 的 MemberAccessExpr 支
+        // 有一条按成员**裸名** lookupModule 的兜底 (cgen_util_type.cpp:354 的注释正警告
+        // 它), 拿它当类字段的类型会被同名模块级/内置符号顶掉 ⇒ 这里刻意不收成员目标;
+        // 成员字段那一族要接也该走 Fix 092m 的 classFieldComUnpackHint, 那是另一刀。
+        if (unpackHint.empty() && node.target
+            && node.target->kind == ASTNodeKind::IdentifierExpr) {
+            switch (inferExprType(*node.target)) {
+                case Vb6Type::String:                       unpackHint = "BSTR";    break;
+                case Vb6Type::Long:
+                case Vb6Type::Byte:
+                case Vb6Type::Error:                        unpackHint = "Long";    break;
+                case Vb6Type::Integer:
+                case Vb6Type::Boolean:                      unpackHint = "Int";     break;
+                case Vb6Type::Single:                       unpackHint = "Single";  break;
+                case Vb6Type::Double:                       unpackHint = "Double";  break;
+                case Vb6Type::LongPtr:                      unpackHint = "LongPtr"; break;
+                case Vb6Type::Object:                       unpackHint = "Object";  break;
+                case Vb6Type::Variant:                      unpackHint = "Variant"; break;
+                default: break;
+            }
+        }
         resolveComValue(unpackHint);
     }
     std::string value = std::move(lastExpr_);
