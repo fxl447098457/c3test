@@ -1737,7 +1737,7 @@ function Test-Vbp {
         }
     }
     # 编译失败则标记 FAIL (compile); 生成物缺失标记 FAIL (no exe)
-    $run = Invoke-TestExe -ExePath $exePath -WorkDir $OutDir -Name $baseName -EnvVars $envMap
+    $run = Invoke-TestExe -ExePath $exePath -WorkDir $OutDir -Name $baseName -LogName $Name -EnvVars $envMap
     if (-not $run.Ok) {
         $script:fail++
         Write-Host "FAIL (run error)" -ForegroundColor Red
