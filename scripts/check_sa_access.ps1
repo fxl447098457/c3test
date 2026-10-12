@@ -83,7 +83,7 @@
 # vb6rtl_com.c 那两条 VT_ARRAY 进口各自折一枚三元表达式（BSTR/VARIANT 之外一律答 vtLong ⇒
 # VT_ARRAY|VT_I2 进来标签答 Long，而载体是 int16 —— 标签与描述符两个答案，拿着错标签交回
 # COM 就是错档）。TypeName 那边压根没有数组分支，8204 落 default 答 "Variant"。
-#   A17 新表 vb6_SaVtFromElemType 声明 1 / 定义 1 / 调用恰好 6（array.h 的 UDT 字节装箱 1 + com.c 两
+#   A17 新表 vb6_SaVtFromElemType 声明 1 / 定义 1 / 调用恰好 5（array.h 的 UDT 字节装箱 1 + com.c 那
 #       条进口 2 + array.c 自己那枚认载体的出口 2 + 出站白名单 1，第五十刀）；反向表 vb6_SaElemTypeFromVt
 #       声明 1 / 定义 1 / 调用恰好 3（com.c 那两条 VT_ARRAY 进口 + §B162 入站那一臂），手抄的元素 switch 回到 0 处；认载体那一问 vb6_SaVtOfArrayPtr 声明 1 / 定义 1 /
 #       调用恰好 2（装箱 + GetAllSettings）；写死的 vb6_vtArray|vb6_vtVariant 恰好 2 且**只能在**
@@ -446,8 +446,8 @@ $vtfDef  = @([regex]::Matches($vC, '(?m)^int32_t\s+vb6_SaVtFromElemType\s*\(')).
 $vtfAll  = @([regex]::Matches($vH + $vC + $vCom, 'vb6_SaVtFromElemType\s*\(')).Count
 if ($vtfDecl -ne 1) { $bad += ("A17 vb6_SaVtFromElemType 的声明(array.h) = " + $vtfDecl + " (恰好 1；0 = 表还在但没人能问)") }
 if ($vtfDef -ne 1)  { $bad += ("A17 vb6_SaVtFromElemType 的定义(array.c) = " + $vtfDef + " (恰好 1；>1 = 第二张档表)") }
-if ($vtfAll - $vtfDecl - $vtfDef -ne 6) {
-    $bad += ("A17 问这张表的地方 = " + ($vtfAll - $vtfDecl - $vtfDef) + " 处 (恰好 6：UDT 字节装箱 1 + COM 两条进口 2 + 认载体出口 2 + 出站白名单 1；少一处 = 那一位又自己折一档)")
+if ($vtfAll - $vtfDecl - $vtfDef -ne 5) {
+    $bad += ("A17 问这张表的地方 = " + ($vtfAll - $vtfDecl - $vtfDef) + " 处 (恰好 5：UDT 字节装箱 1 + COM 进口 1 + 认载体出口 2 + 出站白名单 1；少一处 = 那一位又自己折一档。第五十三刀 §B142 把 COM 那**两条进口**并成一枚核，所以 6 -> 5 —— 是少了一张手抄表，不是少了一次问)")
 }
 
 $vtPackDecl = @([regex]::Matches($vVar, '(?m)^int32_t\s+vb6_SaVtOfArrayPtr\s*\(')).Count
@@ -471,8 +471,8 @@ $stiDef  = @([regex]::Matches($vC, '(?m)^vb6_safearray_elemtype\s+vb6_SaElemType
 $stiAll  = @([regex]::Matches($vH + $vC + $vCom, 'vb6_SaElemTypeFromVt\s*\(')).Count
 if ($stiDecl -ne 1) { $bad += ("A17 vb6_SaElemTypeFromVt 的声明(array.h) = " + $stiDecl + " (恰好 1；0 = 反向表还在但没人能问)") }
 if ($stiDef -ne 1)  { $bad += ("A17 vb6_SaElemTypeFromVt 的定义(array.c) = " + $stiDef + " (恰好 1；>1 = 第二张反向表)") }
-if ($stiAll - $stiDecl - $stiDef -ne 3) {
-    $bad += ("A17 问反向表的地方 = " + ($stiAll - $stiDecl - $stiDef) + " 处 (恰好 3：com.c 那两条 VT_ARRAY 进口 + 入站那一臂 (§B162)；少一处 = 有一条进口又自己抄了一份元素 switch)")
+if ($stiAll - $stiDecl - $stiDef -ne 2) {
+    $bad += ("A17 问反向表的地方 = " + ($stiAll - $stiDecl - $stiDef) + " 处 (恰好 2：COM 进口那一枚核 1 + 入站那一臂 (§B162) 1；第五十三刀 §B142 把 com.c 那两条进口并成一枚核，所以 3 -> 2。多一处 = 又有人自己抄了一份元素 switch)")
 }
 $stiHand = @([regex]::Matches($vCom, 'case\s+VT_BSTR\s*:\s*et\s*=')).Count
 if ($stiHand -ne 0) { $bad += ("A17 手抄的元素 switch (case VT_BSTR: et =) = " + $stiHand + " 处 (要求 0：第五十刀把它并进反向表；回来就是两份答案)") }

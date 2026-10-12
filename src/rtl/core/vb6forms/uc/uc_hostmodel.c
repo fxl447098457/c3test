@@ -264,23 +264,17 @@ void vb6_Host_ToWinVariant(const void* inV, void* outV) {
     VARIANT* out = (VARIANT*)outV;
     VariantInit(out);
     if (!in) return;
-    switch (in->vt) {
-        case vb6_vtInteger:  V_VT(out) = VT_I2; V_I2(out) = (short)in->iVal; break;
-        case vb6_vtLong:     V_VT(out) = VT_I4; V_I4(out) = in->lVal; break;
-        case vb6_vtBoolean:  V_VT(out) = VT_BOOL; V_BOOL(out) = in->boolVal; break;
-        case vb6_vtByte:     V_VT(out) = VT_UI1; V_UI1(out) = in->bVal; break;
-        case vb6_vtSingle:   V_VT(out) = VT_R4; V_R4(out) = in->fltVal; break;
-        case vb6_vtDouble:   V_VT(out) = VT_R8; V_R8(out) = in->dblVal; break;
-        case vb6_vtBSTR:     V_VT(out) = VT_BSTR; V_BSTR(out) = SysAllocString(in->bstrVal); break;
-        // Fix <vbeclipse> rev14: 缺这一条时 `.Item(...)` 返回的对象变体落 default →
-        // VT_EMPTY, vb6_ComCallObject 取不到 pdispVal → `Set x = Controls.Item(...)`
-        // 恒为 NULL。宿主对象 (UC 实例/HWND/集合) 不是真 IDispatch, 这里只透传指针;
-        // 释放侧由 vb6_ComIsDispatchable 守卫, 不会对裸指针调 Release。
-        case vb6_vtDispatch: V_VT(out) = VT_DISPATCH; V_DISPATCH(out) = (IDispatch*)in->pdispVal; break;
-        case vb6_vtEmpty:    V_VT(out) = VT_EMPTY; break;
-        case vb6_vtNull:     V_VT(out) = VT_NULL; break;
-        default:             V_VT(out) = VT_EMPTY; break;
-    }
+    /* 账 #305 §B142 (第五十三刀): 这一格原来是一张十档的手抄表，Decimal / LongLong(VT_I8) /
+       Currency / Date 一律落到 default ⇒ VT_EMPTY。实测 `c.Add CDec(5)` 之后 `VarType(c(1))` 与
+       `For Each` 读回来都是 0/Empty，x64 与 x86 两台逐行相同(`.build/k53_p/x64b.out` / `x86b.out`)，
+       而同一枚值直接装箱读是 14/Decimal ⇒ 罪就在这一格，不在写侧。
+       「这枚槽的数值住在真 VARIANT 的哪一格」§B145 已经收成一枚权威(vb6_VariantPackBorrow，
+       十四档 + 数组那一问都答)，这里改问它，只补它刻意不做的那一步: 宿主管道交出去的串是
+       **带权副本**(调用方随后 Host_ClearVariant 会放掉它)。**对象那一档照旧不 AddRef** ——
+       与改前一字不差：反向的 FromWinVariant 借来的指针不计数，Clear 也只放串，
+       这里给一次 AddRef 就成双份(§B144 记的那条收支)。 */
+    vb6_VariantPackBorrow(*in, out);
+    if (out->vt == VT_BSTR && out->bstrVal) out->bstrVal = SysAllocString(out->bstrVal);
 }
 
 void vb6_Host_FromWinVariant(const void* inV, void* outV) {
