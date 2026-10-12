@@ -3,6 +3,12 @@
 // 由 vb6rtl.h 伞头 include；生成代码不要直接 include 本文件
 #include "vb6rtl_base.h"
 
+#ifdef _WIN32
+#include <stdio.h>
+#include <stdlib.h>
+#include <intrin.h>   /* 越界探针: _ReturnAddress 取发码调用点 */
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -111,7 +117,17 @@ void  vb6_SafeArrayPutElem(vb6_SafeArray1D* arr, int32_t index, void* value);
 void vb6_SaElemFail(void* arr, int32_t idx);  // 必抛 9, 不返回
 static inline void* vb6_SaElemPtr(void* arrV, int32_t idx, int32_t elemSize) {
     vb6_SafeArray1D* arr = (vb6_SafeArray1D*)arrV;
-    if (!arr || idx < arr->lBound || idx > arr->uBound) vb6_SaElemFail(arrV, idx);
+    if (!arr || idx < arr->lBound || idx > arr->uBound) {
+#ifdef _WIN32
+        if (getenv("C3_SA_TRACE")) {
+            /* 定位用: 这里打的是**发码调用点**的绝对返回地址 (本函数在 Debug 下是独立
+               函数, 未内联), 与 vb6_SaElemFail 里打的 base 相减即得可符号化的 RVA。 */
+            fprintf(stderr, "[SA]   site ret=%p\n", _ReturnAddress());
+            fflush(stderr);
+        }
+#endif
+        vb6_SaElemFail(arrV, idx);
+    }
     return (char*)arr->data + (ptrdiff_t)(idx - arr->lBound) * (ptrdiff_t)elemSize;
 }
 #define VB6_SA_AT(type, arr, idx) \

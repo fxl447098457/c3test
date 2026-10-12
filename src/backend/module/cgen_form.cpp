@@ -333,6 +333,11 @@ void CCodeGen::emitDesignerControlDecls(const FrmFormDesc& frmDesc, DocumentKind
             c_.emitLine("}");
         }
         c_.emitLine("static void vb6_" + ctl + "_ucHostInit(void* me) {");
+        // Fix <vbeclipse> 2026-10-12 (账 #257 第十二层): 入口消费"跳过 InitProperties"标志。
+        // 必须放在**函数第一句**(设计子控件创建之前): 标志是给"本实例"的, 而本函数随后
+        // 会为设计子控件再调 vb6_UC_CreateDesign*→HostCreate, 那些实例要按原行为跑
+        // InitProperties (Fix 112d: ucProgressCircular 的 m_PF_Colors 等靠它 ReDim)。
+        c_.emitLine("    int vb6_uc_skipIP = vb6_UC_SkipInitPropsConsume();");
         // czUI fix: 设计器子控件 (.ctl 设计面上的 TextBox 等) 属于每个实例 —
         // 逐实例创建真实子窗口 (此前 vb6_hwnd_txtEmbed 恒为 NULL, TextBox 内容
         // 与占位文本全部丢失)。必须在 Initialize/InitProperties **之前**创建:
@@ -397,7 +402,12 @@ void CCodeGen::emitDesignerControlDecls(const FrmFormDesc& frmDesc, DocumentKind
             }
         }
         if (hasInit) c_.emitLine("    vb6_" + ctl + "_UserControl_Initialize((vb6_cls_" + ctl + "*)me);");
-        if (hasInitProps) c_.emitLine("    vb6_" + ctl + "_UserControl_InitProperties((vb6_cls_" + ctl + "*)me);");
+        // Fix <vbeclipse> 第十二层: 由窗体创建方(带 bag 的加载路径)决定是否跳过 —— 见 uc_host.c。
+        if (hasInitProps) {
+            c_.emitLine("    if (!vb6_uc_skipIP) vb6_" + ctl + "_UserControl_InitProperties((vb6_cls_" + ctl + "*)me);");
+        } else {
+            c_.emitLine("    (void)vb6_uc_skipIP;");
+        }
         c_.emitLine("}");
         c_.emitLine("static void vb6_" + ctl + "_ucHostPaint(void* me) {");
         if (hasPaint) c_.emitLine("    vb6_" + ctl + "_UserControl_Paint((vb6_cls_" + ctl + "*)me);");

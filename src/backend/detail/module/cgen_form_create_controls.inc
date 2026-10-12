@@ -253,9 +253,23 @@
                 c_.emitLine("  } }");
             }
             bool ucIsArr = knownControlArrays_.count(ctlLower) != 0;
+            // Fix <vbeclipse> 2026-10-12 (账 #257 第十二层): 该 .ctl 有
+            // UserControl_ReadProperties ⇒ 这条 HostCreate 走的是**加载路径**(本函数稍后
+            // 会把 bag 交给 ReadProps), 按 VB6 语义不得跑 InitProperties —— 否则控件会先按
+            // 硬编码默认值把派生结构建好(如 VBFlexGrid 的 `VBFlexGridCells.Rows(0 To 1)` 与
+            // VBFlexGridCellsInit=True), ReadProperties 只改私有字段, 那条 `Call
+            // CreateVBFlexGrid` 又被 `VBFlexGridHandle <> NULL_PTR` 挡掉 ⇒ 数组停在默认尺寸
+            // 而 PropRows=150 ⇒ SetCellText 读 Rows(2) 错误 9 ⇒ 窗口 5s 内不出现。
+            // 设计子控件(本实例内部再 HostCreate)看到的标志在 ucHostInit 入口已被消费清零,
+            // 仍按原行为跑它们的 InitProperties (Fix 112d 依赖)。
+            bool ucSkipInitProps = false;
+            if (const FrmFile* spInitProps = findUserControlSpec(ctlClass))
+                ucSkipInitProps = Symbol::toLower(spInitProps->codeSection)
+                                      .find("sub usercontrol_readproperties") != std::string::npos;
             std::string hwndExpr;
             if (ucIsArr) {
                 int idx = ctrl.index >= 0 ? ctrl.index : 0;
+                if (ucSkipInitProps) c_.emitLine("vb6_UC_SetSkipInitProps(1);");
                 c_.emitLine("{ void* vb6_uc_h = vb6_UC_HostCreate(\"" + ctlClass + "\", "
                     + std::to_string(ucL) + ", " + std::to_string(ucT) + ", "
                     + std::to_string(ucW) + ", " + std::to_string(ucH)
@@ -263,6 +277,7 @@
                     + "\", " + std::to_string(idx) + ");");
                 c_.emitLine("  vb6_CtrlArr_SetAt(&vb6_arr_" + cIdent(ctrl.controlName) + ", "
                            + std::to_string(idx) + ", vb6_uc_h); }");
+                if (ucSkipInitProps) c_.emitLine("vb6_UC_SetSkipInitProps(0);");
                 hwndExpr = "vb6_CtrlArr_GetAt(&vb6_arr_" + cIdent(ctrl.controlName) + ", "
                          + std::to_string(idx) + ")";
             } else {
@@ -282,10 +297,12 @@
                 std::string slot220 = (ctrl.controlType == FrmControlType::ImageList
                                        ? "vb6_com_" : "vb6_hwnd_")
                                     + cIdent(ctrl.controlName);
+                if (ucSkipInitProps) c_.emitLine("vb6_UC_SetSkipInitProps(1);");
                 c_.emitLine(slot220 + " = vb6_UC_HostCreate(\""
                     + ctlClass + "\", " + std::to_string(ucL) + ", " + std::to_string(ucT) + ", "
                     + std::to_string(ucW) + ", " + std::to_string(ucH)
                     + ", hwnd, hInstance, \"" + ctrl.controlName + "\", -1);");
+                if (ucSkipInitProps) c_.emitLine("vb6_UC_SetSkipInitProps(0);");
                 hwndExpr = slot220;
             }
 
@@ -305,6 +322,31 @@
                     "Font", "IconFont", "TitleFont", "Caption1_Font", "Caption2_Font",
                     "Images", "ListImages", "MouseIcon"};
                 c_.emitLine("vb6_UC_Enter(" + hwndExpr + ");  /* Fix 112: 换入宿主状态 */");
+                // Fix <vbeclipse> 2026-10-12 (账 #257 第九层): 下面这一轮的**直接 prop_let
+                // 回放**不得覆盖「该 .ctl 的 UserControl_ReadProperties 会消费」的属性。
+                //
+                // 为什么要收: 这两条路是**同一批**属性 (都取 ctrl.properties、同一份
+                // kSkip 表), 但时序错了 —— 直发在 `vb6_UC_ReadProps(&_bag)` **之前**,
+                // 那时控件还停在 InitProperties 的原始默认值上 (它的 .frm 配置一个都还没
+                // 读进来)。于是**任何跨属性的设计期守卫都会误触发**:
+                //   · ComboBoxW.ctl:1178 `Property Let Style` 判 `ComboBoxDesignMode`
+                //     ⇒ Err.Raise 382 "read-only at run time" (未处理 ⇒ ExitProcess);
+                //   · UpDown.ctl:837 `Property Let BuddyProperty` 判 `GetBuddyControl()`
+                //     ⇒ MsgBox "BuddyControl property must be set first";
+                //   · DTPicker.ctl:1484 `Property Let Value` 判 MinDate/MaxDate (还没读进来)
+                //     ⇒ MsgBox "A date was specified that does not fall within ...".
+                // 三条都是同一条机制 (实测 ComCtlsDemo 启动期逐个弹框/退进程, 窗口永不出现)。
+                //
+                // VB6 里这些属性**只有一条**设计期应用通道 = `ReadProperties(PropBag)`,
+                // 控件作者正是按「字段直写、顺序自定」写的 ReadProperties, 公开 Property Let
+                // 只服务运行期用户代码 (所以它们才敢在 Let 里放 382/35754/35773 这类守卫)。
+                // ⇒ 该 ReadProperties 会读的属性交给 bag 那条路 (它本来也装了同一批),
+                // 判据 = .ctl 代码段里是否存在 `.ReadProperty("<名>"`。
+                // 不在 ReadProperties 里的 (本工程只余 Align/Bindings 这类 Extender 转发属性)
+                // 保持原样直发 —— 它们没有"先读别的属性"的依赖。
+                std::string ucRpCodeLower;
+                if (const FrmFile* spRp = findUserControlSpec(ctlClass))
+                    ucRpCodeLower = Symbol::toLower(spRp->codeSection);
                 // Fix 119: 字体类复合属性块 (Caption1_Font / Caption2_Font / TitleFont /
                 // IconFont / Font ...) — 若 .ctl 有同名属性写方向, 构造字体对象后调用之。
                 // 例: 三个 ucProgressCircular 的 Caption1_Font=14.25 此前完全没生效。
@@ -344,15 +386,15 @@
                     if (!fontName119) continue;
                     std::string canonF = canonicalClassMemberName(ctlClass, blk.blockName);
                     if (canonF.empty()) canonF = blk.blockName;
-                    std::string setterF = "vb6_" + cIdent(ctlClass)
-                                        + (isSet119 ? "_prop_set_" : "_prop_let_") + cIdent(canonF);
+                    std::string setterF = "vb6_" + cIdent(ctlClass) + "_"
+                                        + propFnSegment(isSet119 ? "prop_set_" : "prop_let_", canonF);
                     emitFrmFontObj(blk, "_vb6_f119");
                     if (isSet119) {
                         // Fix 128: Property Set 型**不调用**其 Set 实现体 (内含 Refresh,
                         // 会在数据未就绪时刷新并把图表永久置空)。改用该控件自己的
                         // Property Get 取到内部字体对象, 原地覆写字段。
-                        std::string getterF = "vb6_" + cIdent(ctlClass)
-                                            + "_prop_get_" + cIdent(canonF);
+                        std::string getterF = "vb6_" + cIdent(ctlClass) + "_"
+                                            + propFnSegment("prop_get_", canonF);
                         c_.emitLine("    vb6_UC_FontAssign((void*)" + getterF
                                   + "((vb6_cls_" + cIdent(ctlClass) + "*)vb6_UC_InstanceOf("
                                   + hwndExpr + ")), _vb6_f119);");
@@ -367,6 +409,15 @@
                     bool skip = false;
                     for (const char* sk : kSkip) if (_stricmp(pn.c_str(), sk) == 0) { skip = true; break; }
                     if (skip) continue;
+                    // 该 .ctl 的 UserControl_ReadProperties 会读这条属性 ⇒ 由下面那条
+                    // bag 路径应用 (见本块开头 Fix <vbeclipse> 的说明: 直发跑在 bag 之前,
+                    // 控件还停在 InitProperties 默认值上, 会误触 382 / BuddyProperty /
+                    // MinMax 那三类设计期守卫)。
+                    if (!ucRpCodeLower.empty()
+                        && ucRpCodeLower.find(".readproperty(\"" + Symbol::toLower(pn) + "\"")
+                               != std::string::npos) {
+                        continue;
+                    }
                     // Fix 114: 跨模块查询 .ctl 类的 Property Let 形参表 (driver 已注入
                     // 外部 Class 符号 → Phase B 可命中 memberLetParams).
                     std::vector<ParameterInfo> wp114;
@@ -375,7 +426,8 @@
                     // 属性名拼写按 .ctl 内声明规范化 (VB6 大小写不敏感), 否则 LNK2019
                     std::string canonPn = canonicalClassMemberName(ctlClass, pn);
                     if (canonPn.empty()) canonPn = pn;
-                    std::string setter = "vb6_" + cIdent(ctlClass) + "_prop_let_" + cIdent(canonPn);
+                    std::string setter = "vb6_" + cIdent(ctlClass) + "_"
+                                       + propFnSegment("prop_let_", canonPn);
                     const ParameterInfo& p114 = wp114.back();
                     // Fix 243c: 是否"真" Variant 形参 —— 判据是 typeRefName 为空**或**就叫
                     // "Variant"。ParameterInfo::type 对源码里写了类型名的形参 (尤其
@@ -512,6 +564,12 @@
                         c_.emitLine("vb6_UC_PropBagFree(_bag); }");
                     }
                 }
+                // Fix <vbeclipse> 2026-10-12 (第十二层): 加载路径的 Show/Resize 在这里补齐。
+                // 上面 HostCreate 已把本实例的 Show/Resize 挂起(pendingActivate), 因为 VB6 的
+                // 顺序是 Initialize → ReadProperties → Show/Resize; 不补齐的话 Resize 会读
+                // 未恢复的设计期属性 (实测 czUI: m_ControlType 未恢复 = 0 = czTitleBar ⇒ AV)。
+                // 放在 bag 块**之外**: 即使用 C3_NO_BAG 关掉 bag 也必须激活, 否则实例永不 Show。
+                if (ucSkipInitProps) c_.emitLine("vb6_UC_ActivateHost(" + hwndExpr + ");");
             }
             ctrlId++;
             continue;

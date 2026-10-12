@@ -490,6 +490,9 @@
             // With 外同一句一直是对的 (Fix 110i)，所以这是"同一决定抄了两遍、第三遍漏了"
             // 那一族 —— 问的是同一个出口 comMarkerValueForWrite。
             valExpr = comMarkerValueForWrite(packFn, valExpr);
+            // Fix <vbeclipse> 2026-10-12: 右值整枚是 COM 调用结果 ⇒ 先经
+            // vb6_VariantFromComResult 拆掉堆 VARIANT* (见 comUnpackForPack)。
+            valExpr = comUnpackForPack(packFn, valExpr);
             c_.emitLine("vb6_ComSetProp(" + tempVar + ", L\"" + wmExpr.memberName + "\", " +
                          packFn + "(" + valExpr + "));  /* With COM SetProp */");
             return;
@@ -520,10 +523,12 @@
                         }
                         if (!matches) continue;
                         if (sym->kind == SymbolKind::PropertyLet) {
-                            letFn = "vb6_" + cIdent(canonicalClassName) + "_prop_let_" + cIdent(wmExpr.memberName);
+                            letFn = "vb6_" + cIdent(canonicalClassName) + "_"
+                                  + propFnSegment("prop_let_", wmExpr.memberName);
                             letPropSym = sym.get();
                         } else if (sym->kind == SymbolKind::PropertySet) {
-                            setFn = "vb6_" + cIdent(canonicalClassName) + "_prop_set_" + cIdent(wmExpr.memberName);
+                            setFn = "vb6_" + cIdent(canonicalClassName) + "_"
+                                  + propFnSegment("prop_set_", wmExpr.memberName);
                             setPropSym = sym.get();
                         }
                     }
@@ -660,8 +665,8 @@
                             val090h = packLetValueArg(clsParams090h.back(),
                                                       node.value.get(), val090h);
                         }
-                        c_.emitLine("vb6_" + cIdent(canonCls090h) + "_prop_let_"
-                                    + cIdent(wmExpr.memberName) + "(" + tempVar + ", "
+                        c_.emitLine("vb6_" + cIdent(canonCls090h) + "_"
+                                    + propFnSegment("prop_let_", wmExpr.memberName) + "(" + tempVar + ", "
                                     + val090h + ");  /* With class prop_let_ (Fix 090h) */");
                         return;
                     }
@@ -719,8 +724,8 @@
                                 canonCls090c = clsIt090c->second->name;
                         }
                         emitExpr(*node.value);
-                        c_.emitLine("vb6_" + cIdent(canonCls090c) + "_prop_let_"
-                                    + cIdent(wmExpr.memberName) + "(" + tempVar + ", "
+                        c_.emitLine("vb6_" + cIdent(canonCls090c) + "_"
+                                    + propFnSegment("prop_let_", wmExpr.memberName) + "(" + tempVar + ", "
                                     + lastExpr_ + ");  /* With class prop_let_ direct (vbeclipse) */");
                         return;
                     }
@@ -771,6 +776,9 @@
             emitExpr(*node.value);
             std::string valExpr = std::move(lastExpr_);
             std::string packFn = comPackExpr(*node.value);
+            // Fix <vbeclipse> 2026-10-12: 同 `/* COM SetProp */` 那一支 —— 右值是
+            // COM 调用结果时先拆堆 VARIANT* (见 comUnpackForPack)。
+            valExpr = comUnpackForPack(packFn, valExpr);
             c_.emitLine("vb6_ComSetProp(" + tempVar + ", L\"" + wmExpr.memberName + "\", " +
                          packFn + "(" + valExpr + "));  /* With class .unknown COM SetProp */");
             return;

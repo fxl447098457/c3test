@@ -56,6 +56,35 @@
 
     std::string obj = std::move(lastExpr_);
 
+    // 账 #257 第十四层: 对象表达式若是以「裸函数名 + pendingChainObj_」协议交付的,
+    // 这里必须**把 this 补回去**。
+    //
+    // 协议本身没问题 (emitUcInstanceMemberExpr / class_fallback / voidptr_com 的
+    // asCallCallee_ 分支都按它交付: lastExpr_ = 裸函数名, pendingChainObj_ = this 实参),
+    // 问题在**谁算消费者**: 上面 `emitExpr(*node.object)` 发射的是**对象**, 是值上下文;
+    // 而 `asCallCallee_` 是从外层 CallStmt/IndexOrCallExpr 一路带下来的, 于是对象也被
+    // 按 callee 交付了裸名。此后 obj 便是"一个函数名"而不是值 ——
+    // 下游 class_fallback 的 `thisArg088c = "(void*)" + obj` / generic_access 自己的
+    // `"(void*)" + objExpr` 都把它当对象交出去 ⇒ **接收者丢失**, 编译期完全看不见。
+    //
+    // 实测 ComCtlsDemo MainForm.frm:474 `ListView1.ColumnHeaders.Add , , "Col1"`:
+    //   内层 `ListView1.ColumnHeaders` 交 裸名 vb6_ListView_prop_get_ColumnHeaders
+    //   + pendingChainObj_ = (vb6_cls_ListView*)vb6_UC_InstanceOf(vb6_hwnd_ListView1);
+    //   外层（本节点, member="Add"）经 Fix 088c 认出接收者类 LvwColumnHeaders,
+    //   发 `vb6_LvwColumnHeaders_Add((void*)vb6_ListView_prop_get_ColumnHeaders, ...)`
+    //   ⇒ `me` 是**代码地址** 0x4BB2A0, `me->ShadowObjectPointer`([me+4]) 读到的是
+    //   指令字节 0x45C724EC ⇒ objset 的 IsRealComObject 当场 AV
+    //   (av read target=0x45c724ec, 与反汇编 [0x4BB2A4..0x4BB2A7] 逐字节吻合)。
+    //   同形共 76 处 (ListView.ListItems/ColumnHeaders/Groups/SelectedItem,
+    //   TreeView.Nodes, ImageCombo.ComboItems, ToolBar.ButtonMenus,
+    //   ImageList.ListImages, LvwListItem.ListSubItems …)。
+    //
+    // 与 Fix 261 (实参位同样要清 asCallCallee_/消费协议) 是同一条纪律的两个位置。
+    if (!pendingChainObj_.empty()) {
+        obj += "(" + pendingChainObj_ + ")";
+        pendingChainObj_.clear();
+    }
+
     // Fix 090af: Variant 数组元素 (VB6_SA_AT(vb6_VARIANT, arr, i)) 的对象成员访问.
     // VB6: Dim d() As Variant ... If TypeOf d(0) Is cJson Then Set d(0) = d(0).Root
     // d(0) 持有对象时 .member 是后期绑定调用 (同 knownVariantVars_ 标识符路径
@@ -170,8 +199,11 @@
         // rev14: `vb6_UserControl_Controls` 是恒 NULL 的"编译先行"空桩, 改用 RTL 真实
         // 集合单例 vb6_UC_Controls() (按当前 UC 实例回落 formHwnd); 否则 Controls.Item/Add
         // 恒返回 NULL → ucFolder_AddView(NULL) 崩溃。
-        std::string ctlObjExpr = (obj == "vb6_UserControl_Controls")
-                                     ? "vb6_UC_Controls()" : obj;
+        // 账 #257: ParentControls 同样不该退回恒 NULL 的空桩 —— 换真实访问器
+        // (父容器的集合), 与 Controls 同一口径。
+        std::string ctlObjExpr = obj;
+        if (obj == "vb6_UserControl_Controls")            ctlObjExpr = "vb6_UC_Controls()";
+        else if (obj == "vb6_UserControl_ParentControls") ctlObjExpr = "vb6_UC_ParentControls()";
         comObjExpr_ = "(void*)" + ctlObjExpr;
         comMemberName_ = node.memberName;
         isComMarker_ = true;

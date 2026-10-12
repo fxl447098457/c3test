@@ -18,6 +18,7 @@
 #include <oleauto.h>
 #include <olectl.h>
 #include <windows.h>
+#include <intrin.h>   /* _ReturnAddress (越界探针: 打印调用点 RVA, 可对 -g 的 .map 符号化) */
 #endif
 
 // P24-08: MessageBoxW (user32) + GetConsoleWindow (kernel32)
@@ -463,36 +464,59 @@ int32_t vb6_LBound(vb6_SafeArray1D* safeArray, int32_t dimension) {
     return safeArray->lBound;
 }
 
+// 越界读数 (C3_SA_TRACE)。刻意抽成独立函数: 下面两条冷路径必须保持"函数头到
+// vb6_ErrRaise(9 的距离很短"的形状 —— `scripts/check_sa_access.ps1` 的 A3/A6
+// 是在固定窗口里匹配 `vb6_ErrRaise(\s*9` 来钉"冷路径真的抛 9"的, 探针内联进来
+// 会把窗口撑爆 (实测 A3 变红)。
+static void vb6_SaElemTrace(void* arr, int32_t idx) {
+    if (!getenv("C3_SA_TRACE")) return;   // 与 vb6_UBound rev4 同一个开关
+    vb6_SafeArray1D* a = (vb6_SafeArray1D*)arr;
+    fprintf(stderr, "[SA] elem access out of range: arr=%p idx=%d lb=%d ub=%d\n",
+            (void*)a, (int)idx,
+            a ? (int)a->lBound : -999, a ? (int)a->uBound : -999);
+    if (a) {
+        fprintf(stderr, "[SA]   desc: sig=0x%X elemType=%d elemSize=%d n=%d dyn=%d\n",
+                (unsigned)a->signature, (int)a->elemType, (int)a->elemSize,
+                (int)a->count, (int)a->isDynamic);
+        if (a->data) {
+            const unsigned char* p = (const unsigned char*)a->data;
+            fprintf(stderr, "[SA]   slots:");
+            for (int k = 0; k < 4; k++)
+                fprintf(stderr, " %p", *(const void**)(const void*)(p + (size_t)k * 4));
+            fprintf(stderr, "\n");
+        }
+    }
+    fflush(stderr);
+}
+
 // 账 #209: VB6_SA_AT 的冷路径 —— 未分配的动态数组或下标越界。口径与上面
 // vb6_UBound/vb6_LBound 的 rev2 完全一致 (用户在真 VB6 实测: 都是错误 9,
 // 有 On Error 走处理器, 没有就报错退出), 这里只多带一条越界读数便于定位。
 void vb6_SaElemFail(void* arr, int32_t idx) {
-    vb6_SafeArray1D* a = (vb6_SafeArray1D*)arr;
-    if (getenv("C3_SA_TRACE")) {  // 与 vb6_UBound rev4 同一个开关
-        fprintf(stderr, "[SA] elem access out of range: arr=%p idx=%d lb=%d ub=%d\n",
-                (void*)a, (int)idx,
-                a ? (int)a->lBound : -999, a ? (int)a->uBound : -999);
-        fflush(stderr);
-    }
+    vb6_SaElemTrace(arr, idx);
     vb6_ErrRaise(9, vb6_BSTR_FromStr(L"VBA.Information"),
                  vb6_BSTR_FromStr(L"Subscript out of range"));
     exit(9);  /* 不可达: vb6_ErrRaise 必 longjmp 或 ExitProcess */
 }
 
+// 多维越界读数 (C3_SA_TRACE)。同样抽成独立函数以保住 A6 的匹配窗口 (见上面 vb6_SaElemTrace)。
+static void vb6_SaNdElemTrace(void* arr, const int32_t* idx, int32_t rank) {
+    if (!getenv("C3_SA_TRACE")) return;  // 与 vb6_UBound rev4 / vb6_SaElemFail 同一个开关
+    vb6_SafeArrayND* a = (vb6_SafeArrayND*)arr;
+    fprintf(stderr, "[SA] ND elem access out of range: arr=%p rank=%d dimCount=%d",
+            (void*)a, (int)rank, a ? (int)a->dimCount : -999);
+    for (int32_t d = 0; a && d < rank && d < 16; d++) {
+        fprintf(stderr, " d%d=%d[lb=%d n=%d]", (int)d, (int)idx[d],
+                (int)a->bounds[d].lBound, (int)a->bounds[d].cElements);
+    }
+    fprintf(stderr, "\n");
+    fflush(stderr);
+}
+
 // 账 #209 同族: 多维那一支的冷路径。口径与上面那条一模一样 (VB6 的越界就是错误 9),
 // 只是把秩数与逐维下标带出来 —— 多维最容易犯的错是"某一维抄错上下界", 光一个 idx 说不清。
 void vb6_SaNdElemFail(void* arr, const int32_t* idx, int32_t rank) {
-    vb6_SafeArrayND* a = (vb6_SafeArrayND*)arr;
-    if (getenv("C3_SA_TRACE")) {  // 与 vb6_UBound rev4 / vb6_SaElemFail 同一个开关
-        fprintf(stderr, "[SA] ND elem access out of range: arr=%p rank=%d dimCount=%d",
-                (void*)a, (int)rank, a ? (int)a->dimCount : -999);
-        for (int32_t d = 0; a && d < rank && d < 16; d++) {
-            fprintf(stderr, " d%d=%d[lb=%d n=%d]", (int)d, (int)idx[d],
-                    (int)a->bounds[d].lBound, (int)a->bounds[d].cElements);
-        }
-        fprintf(stderr, "\n");
-        fflush(stderr);
-    }
+    vb6_SaNdElemTrace(arr, idx, rank);
     vb6_ErrRaise(9, vb6_BSTR_FromStr(L"VBA.Information"),
                  vb6_BSTR_FromStr(L"Subscript out of range"));
     exit(9);  /* 不可达 */

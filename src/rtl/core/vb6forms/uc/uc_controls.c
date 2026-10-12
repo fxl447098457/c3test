@@ -52,6 +52,30 @@ void* vb6_UC_ControlsOwnHwnd(void* coll) {
     return f;
 }
 
+// 账 #257: UserControl.ParentControls 的**进程级单例** —— 与 vb6_UC_Controls() 同族但
+// 指向**父容器**, 不能共用同一枚单例(会互相踩 formHwnd)。
+//
+// VB6 语义: UC 上写 `UserControl.ParentControls` 拿的是**所在容器**(窗体/Frame/PictureBox)
+// 的控件集合 —— ComCtlsDemo 里全是这个用法:
+//   StatusBar.ctl:481   If UserControl.ParentControls.Count = 0 Then StatusBarAlignable = ...
+//   CheckBoxW.ctl:1267  For Each ControlEnum In UserControl.ParentControls
+// 所以归属窗口 = GetParent(当前 UC 宿主窗口); 没有父(顶层/未装填)时留 NULL ⇒ 集合为空,
+// 与 `Container`/`Parent` 那一档"顶层窗体无容器"同口径(uc_hostmodel_getprop.inc)。
+//
+// 以前这一路发的是恒 NULL 的全局 vb6_UserControl_ParentControls ⇒
+// `UserControl.ParentControls.Count` 变成 vb6_ComGetIntProp((void*)NULL, L"Count"),
+// 实测崩在 vb6_ComUnpackInt (StatusBar 创建期 100%, MainForm.Show 因此静默失败)。
+static vb6_UCControls g_uc_parentControlsSingleton = { VB6_UC_CONTROLS_TAG, NULL };
+
+void* vb6_UC_ParentControls(void) {
+    void* ucHwnd = NULL;
+    if (vb6_ucCurrent) ucHwnd = (void*)vb6_ucCurrent->hwnd;
+    if (!ucHwnd) ucHwnd = vb6_UserControl_hWnd;
+    void* parentHwnd = ucHwnd ? (void*)GetParent((HWND)ucHwnd) : NULL;
+    g_uc_parentControlsSingleton.formHwnd = parentHwnd;
+    return (void*)&g_uc_parentControlsSingleton;
+}
+
 // 收集某窗体上的全部子控件 HWND (含 UserControl 宿主窗口)
 static int32_t vb6_uc_collectChildren(void* formHwnd, void** out, int32_t max) {
     // 宿主窗口未知时直接返回 0 —— 不能让 GetWindow((HWND)0, GW_CHILD) 去枚举桌面

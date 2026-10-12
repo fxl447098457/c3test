@@ -237,6 +237,7 @@ extern void*   vb6_Extender_DragIcon;    // Set 对象 (Picture)
 void vb6_UserControl_OLEDrag(void);
 void vb6_Extender_Drag(vb6_VARIANT* Action, int _has_Action);
 void vb6_Extender_SetFocus(void);
+void vb6_UserControl_SetFocus(void);
 void vb6_Extender_ZOrder(vb6_VARIANT* Position, int _has_Position);
 
 // Fix 133u: czUI.ctl 用到 Extender 的 Visible / Height

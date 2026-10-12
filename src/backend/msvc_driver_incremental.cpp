@@ -1,4 +1,4 @@
-#include "backend/msvc_driver.hpp"
+﻿#include "backend/msvc_driver.hpp"
 #include "common/encoding.hpp"
 
 #include <iostream>
@@ -147,7 +147,7 @@ std::string compileFlagsFor(bool isRtl, const MsvcDriverOptions& o,
             case 2: c << " /O2"; break;
             case 3: c << " /Ox"; break;
         }
-        if (o.debugInfo) c << " /Zi";
+        if (o.debugInfo) c << " /Zi /FS";
     }
     c << " /std:c11 /DUNICODE /D_UNICODE /utf-8 /D_CRT_SECURE_NO_WARNINGS"
          " /D_CRT_NONSTDC_NO_WARNINGS /W3";

@@ -35,6 +35,7 @@
 // ============================================================
 extern void* vb6_CreateObject(const wchar_t* progId);
 extern void* vb6_NewBuiltinObject(const wchar_t* className);
+extern void* vb6_UC_PropBagCreate(void);   /* VB6 内建 PropertyBag (vb6forms_uc/uc_propbag.c) */
 extern void* vb6_GetObject(const wchar_t* pathName, const wchar_t* progId);
 extern int32_t vb6_IsNothing(void* obj);
 extern void vb6_ReleaseObject(void** objPtr);
@@ -480,6 +481,17 @@ void* vb6_NewObject(const wchar_t* className) {
     // Fix 112: StdFont → RTL 内建字体对象 (With m_TitleFont: .Size/.Bold 直接写结构体)
     if (className && _wcsicmp(className, L"StdFont") == 0) {
         return vb6_UC_NewFont();
+    }
+    // Fix <vbeclipse> 2026-10-12: **PropertyBag 同样是 VB6 内建类** (ProgID "PropertyBag",
+    // 由 VB 运行时内部实现, 从不注册) ⇒ CLSIDFromProgID 必失败 → 429。
+    // 工程标准手法 —— `With New PropertyBag` + `.Contents = PropBag.ReadProperty("InitX", 0)`
+    // + `.ReadProperty("InitXCount", 0)` —— 出现在 ComCtlsDemo StatusBar / CoolBar /
+    // ToolBar / TabStrip / ImageList 的 `UserControl_ReadProperties` 里; 该处 429
+    // **未被 On Error 兜住** (只有 `.Contents =` 那一行在 Resume Next 里) ⇒
+    // 直接"未处理错误"结束进程 (实测 EXIT=0x1AD)。
+    // 复用 uc_propbag.c 那枚轻量 IDispatch bag (与外层 PropBag 同族, 同一张 vtbl)。
+    if (className && _wcsicmp(className, L"PropertyBag") == 0) {
+        return vb6_UC_PropBagCreate();
     }
     // 对于未知类名，尝试通过COM创建 (Dim x As New ClassName，className不在已知类中)
     // VB6中如果className不是项目内的类模块，则尝试COM创建

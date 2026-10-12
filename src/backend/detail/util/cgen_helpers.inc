@@ -74,6 +74,18 @@
     std::string cProcName(const std::string& procName, AccessLevel access,
                           const std::string& sourceModule = "") const;
 
+    // Fix 269: 类属性 C 函数名的**成员段** (即 `vb6_<Cls>_` 之后那一段)。
+    // 属性前缀 (prop_get_/prop_let_/prop_set_) 是函数名的一部分, 所以关键字/特殊
+    // 字符判定必须对 **prefix + member 整串** 做 —— 与定义侧
+    // makePropertySignature 的 `cProcName(prefix + node.name, …)` (内部就是
+    // `cIdent(prefix + node.name)`) 逐字对齐。
+    // 反例: 成员名 `Default`。定义侧拿整串 "prop_get_Default" 判 ⇒ 不是 C 关键字
+    // ⇒ 发 `vb6_ComboBoxW_prop_get_Default`; 调用侧若对成员名单独 cIdent ⇒
+    // "default" 命中关键字表 ⇒ 发 `..._prop_get_vb6_Default` ⇒ 调用/定义错位,
+    // 链接期 LNK2019 (实测 ComCtlsDemo 11 个 .ctl 的 Default 属性全中, 22 条)。
+    std::string propFnSegment(const std::string& prefix,
+                              const std::string& member) const;
+
     // ---- 表达式求值 ----
 
     // 生成C表达式字符串, 存入lastExpr_
@@ -704,6 +716,17 @@
     // （Fix 110i / P25b 原先各抄一份，其中一份还漏了 Integer 那一档）。
     std::string comMarkerValueForWrite(const std::string& packFn,
                                        const std::string& valExpr);
+
+    // Fix <vbeclipse> 2026-10-12: **写侧值位**上「右值整枚就是 COM 调用结果」的唯一收口。
+    // `vb6_ComCall` / `vb6_ComCallByDispid` / `vb6_ComGetProp` 的返回契约是
+    // **一枚堆 VARIANT\***（vb6com_invoke.c 里 `return (void*)result` / `(void*)eres`），
+    // 不是对象也不是标量。要 Variant 的打包器必须先经 `vb6_VariantFromComResult`
+    // 拆成 `vb6_VARIANT` 值 —— 否则 `vb6_ComPackValue(void*)` 的 `_Generic` 会落到
+    // `vb6_VariantObject(void*)`，把**堆 VARIANT 当 IDispatch** 去 AddRef（拿它的 `vt`
+    // 字段当 vtable）⇒ AV。判据前缀与 `resolveComMarkerForPack` 同源，只接管
+    // ComPackValue / ComPackVariant 两档；标量档由 packArgValue 管，这里不动。
+    std::string comUnpackForPack(const std::string& packFn,
+                                 const std::string& valExpr) const;
 
     // Fix 266: 「打包器要标量、实参却是**无型** VARIANT」这一格的唯一收口。
     // comPackExpr 按 AST 推的型给出 typed 打包器 (ComPackDouble/Int/Bool/BSTR),

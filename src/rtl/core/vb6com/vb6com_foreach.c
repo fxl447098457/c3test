@@ -25,6 +25,37 @@ typedef struct vb6_ForEachState {
     int32_t fetchedCount;  // how many items we've returned to caller (non-empty)
 } vb6_ForEachState;
 
+// 账 #257 第十五层: `For Each x In <项目类集合>` —— 集合表达式的 C 面是**裸工程类实例**
+// (结构体首字段是 `__comObj` back-ptr 且常为 NULL, 没有真 vtable), 不是 IDispatch。
+// vb6_ForEach_Init 会按 IDispatch 走 GetIDsOfNames(L"Count") ⇒ 读 `[NULL+0x14]` 当场 AV。
+// 实测 ComCtlsDemo ListView.ctl:7223 RebuildListItems
+//   `For Each ListItem In Me.ListItems`
+//   → vb6_ForEach_Init(vb6_ListView_prop_get_ListItems((void*)me))
+//   → av read target=0x14 @ vb6_ComGetIdsOfNames+0x87 (函数尾那一族同名类集合 6 处同形)。
+// VB6 对工程类的 For Each 要的是它的 `NewEnum` 成员 (VB_UserMemId = -4)。
+// 本入口直接接那一枚接口, 不再经过 IDispatch。
+//   · QI 优先 —— 手写 vtable 的 IEnumVARIANT (VTableHandle 那族) 也实现了 IID_IEnumVARIANT;
+//   · QI 不解时按声明类型直接当接口用 (自加一次引用), 保证不因缺 QI 而静默退化成空枚举。
+void* vb6_ForEach_InitFromEnumIface(void* pEnumRaw) {
+    if (!pEnumRaw) return NULL;
+    IEnumVARIANT* pEnum = NULL;
+    IUnknown* pUnk = (IUnknown*)pEnumRaw;
+    HRESULT hr = pUnk->lpVtbl->QueryInterface(pUnk, &IID_IEnumVARIANT, (void**)&pEnum);
+    if (FAILED(hr) || !pEnum) {
+        pEnum = (IEnumVARIANT*)pEnumRaw;
+        pEnum->lpVtbl->AddRef(pEnum);
+    }
+    vb6_ForEachState* state = (vb6_ForEachState*)calloc(1, sizeof(vb6_ForEachState));
+    if (!state) {
+        pEnum->lpVtbl->Release(pEnum);
+        return NULL;
+    }
+    state->pEnum = pEnum;
+    state->totalCount = -1;   /* 计数由枚举器自身负责 (NewEnum 已把长度带进去了) */
+    state->fetchedCount = 0;
+    return (void*)state;
+}
+
 // For Each Init: Call _NewEnum (DISPID -4) on collection object to get IEnumVARIANT
 // Also reads Count property for safety limit (works around buggy IEnumVARIANT)
 // Returns vb6_ForEachState* (or NULL on failure)

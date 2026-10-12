@@ -112,7 +112,11 @@ std::string CCodeGen::resolveClassMemberCall(const std::string& className,
                 std::string canonFix = classCanonFix.empty() ? canonicalClassName : classCanonFix;
                 switch (itKindFix->second) {
                     case ProcKind::PropertyGet:
-                        return "vb6_" + cIdent(canonFix) + "_prop_get_" + cIdent(memberCanon);
+                        // Fix 269: 前缀与成员名要**一起**过 cIdent —— 与定义侧
+                        // makePropertySignature 同口径 (成员名 `Default` 单独过会
+                        // 变 "vb6_Default", 定义侧却是 "prop_get_Default")。
+                        return "vb6_" + cIdent(canonFix) + "_"
+                             + propFnSegment("prop_get_", memberCanon);
                     case ProcKind::Function:
                     case ProcKind::Sub:
                         return "vb6_" + cIdent(canonFix) + "_" + cIdent(memberCanon);
@@ -195,7 +199,8 @@ std::string CCodeGen::resolveClassMemberCall(const std::string& className,
                             cIdent(classCanonName).c_str(), prefix.c_str(),
                             cIdent(mn).c_str());
                     }
-                    return "vb6_" + cIdent(classCanonName) + "_" + prefix + cIdent(mn);                }
+                    return "vb6_" + cIdent(classCanonName) + "_"
+                         + propFnSegment(prefix, mn);                }
             }
         }
         if (dbg159) {
@@ -220,7 +225,8 @@ std::string CCodeGen::resolveClassMemberCall(const std::string& className,
                      cIdent(canonicalClassName).c_str(), prefix.c_str(),
                      cIdent(memberCanon).c_str(), (int)chosen->kind);
     }
-    return "vb6_" + cIdent(canonicalClassName) + "_" + prefix + cIdent(memberCanon);
+    return "vb6_" + cIdent(canonicalClassName) + "_"
+         + propFnSegment(prefix, memberCanon);
 }
 
 

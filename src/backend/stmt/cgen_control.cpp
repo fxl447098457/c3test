@@ -404,7 +404,28 @@ void CCodeGen::visit(ForEachStmt& node) {
                  && node.collection && isDefinitelyVariantExpr(*node.collection)) {
             collExpr = "vb6_VariantToObjectVal(" + collExpr + ")";
         }
-        c_.emitLine("void* " + enumVar + " = vb6_ForEach_Init(" + collExpr + ");");
+        // 账 #257 第十五层: 集合表达式是**工程类实例**时, 它不是 IDispatch
+        // (结构体首字段 `__comObj` 是 back-ptr 且常为 NULL) —— Fix 247 那句
+        // "本身是类实例指针 (void* 兼容), vb6_ForEach_Init 直接接收" 只在**类型**上成立,
+        // 运行期不行: ForEach_Init 按 IDispatch 走 GetIDsOfNames(L"Count") ⇒ 读
+        // `[NULL+0x14]` 当场 AV。
+        // 实测 ComCtlsDemo ListView.ctl:7223 RebuildListItems
+        //   `For Each ListItem In Me.ListItems`
+        //   → vb6_ForEach_Init(vb6_ListView_prop_get_ListItems((void*)me))
+        //   → av read target=0x14 @ vb6_ComGetIdsOfNames+0x87。
+        // VB6 里工程类的 For Each 走的是它自己的 `NewEnum` 成员 (VB_UserMemId = -4):
+        // 有这一枚就直调, 把 IEnumVARIANT 交给 vb6_ForEach_InitFromEnumIface。
+        // 没有 NewEnum 的 (或推不出类的) 保持原样 —— 那种集合本来就是真 IDispatch。
+        std::string feInitFn = "vb6_ForEach_Init";
+        if (collIsProjectClass247) {
+            const std::string cls247 = inferClassTypeOfExpr(*node.collection);
+            const std::string newEnumFn247 = resolveClassMemberCall(cls247, "NewEnum");
+            if (!newEnumFn247.empty()) {
+                feInitFn = "vb6_ForEach_InitFromEnumIface";
+                collExpr = "(void*)" + newEnumFn247 + "(" + collExpr + ")";
+            }
+        }
+        c_.emitLine("void* " + enumVar + " = " + feInitFn + "(" + collExpr + ");");
         c_.emitLine("VARIANT " + feVar + ";");
         c_.emitLine("if (" + enumVar + ") {");
         c_.indent();

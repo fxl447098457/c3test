@@ -1508,6 +1508,13 @@ void vb6_Extender_SetFocus(void) {
     if (vb6_UserControl_hWnd) SetFocus((HWND)vb6_UserControl_hWnd);
 }
 
+// 族4a: UserControl.SetFocus —— 与 vb6_Extender_SetFocus 同形 (ComCtls ListView.ctl 的
+// FColumnHeaderEditFilter 经 `vb6_UserControl_SetFocus()` 把焦点交还宿主 UserControl)。
+// 旧日志装饰名 _vb6_UserControl_SetFocus@0 印证 0 实参。
+void vb6_UserControl_SetFocus(void) {
+    if (vb6_UserControl_hWnd) SetFocus((HWND)vb6_UserControl_hWnd);
+}
+
 void vb6_Extender_ZOrder(vb6_VARIANT* Position, int _has_Position) {
     (void)Position; (void)_has_Position;
     (void)0;

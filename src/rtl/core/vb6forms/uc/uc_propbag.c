@@ -55,6 +55,7 @@ static HRESULT STDMETHODCALLTYPE Vb6Bag_GetIDsOfNames(IDispatch* self, REFIID ri
     buf[i] = 0;
     if (wcscmp(buf, L"readproperty") == 0)  { *out = 1; return S_OK; }
     if (wcscmp(buf, L"writeproperty") == 0) { *out = 2; return S_OK; }
+    if (wcscmp(buf, L"contents") == 0)      { *out = 3; return S_OK; }
     return DISP_E_UNKNOWNNAME;
 }
 static Vb6BagItem* Vb6Bag_Find(Vb6PropBag* bag, const wchar_t* name) {
@@ -63,6 +64,7 @@ static Vb6BagItem* Vb6Bag_Find(Vb6PropBag* bag, const wchar_t* name) {
     }
     return NULL;
 }
+static void vb6_BagPut(Vb6PropBag* bag, const wchar_t* name, const VARIANT* v);  /* 定义在下方 */
 static HRESULT STDMETHODCALLTYPE Vb6Bag_Invoke(IDispatch* self, DISPID id, REFIID riid, LCID lcid,
         WORD flags, DISPPARAMS* pd, VARIANT* result, EXCEPINFO* ei, UINT* argErr) {
     (void)riid; (void)lcid; (void)flags; (void)ei; (void)argErr;
@@ -104,6 +106,26 @@ static HRESULT STDMETHODCALLTYPE Vb6Bag_Invoke(IDispatch* self, DISPID id, REFII
         VariantInit(&it->val);
         VariantCopy(&it->val, (VARIANT*)vValue);
         return S_OK;
+    }
+    if (id == 3) { /* Contents —— 序列化 blob 的读写槽。
+                      VB6 语义: Contents 是整块序列化字节, ReadProperty 从中解字段。
+                      本实现不做真序列化 —— 当成普通项存取, 于是**没写过时就查不到任何
+                      字段**, ReadProperty 一律回调用方给的默认值 (与"外层 PropBag 里
+                      没有这条持久化记录"的运行期实际完全一致, 见 uc_propbag.c 抬头注释)。
+                      工程里 `.Contents = PropBag.ReadProperty("InitX", 0)` 读回的就是
+                      那个默认值 0/Nothing, 落在这里也只当一项存着。 */
+        int c = (int)pd->cArgs;
+        if (result && c == 0) {   /* Property Get */
+            Vb6BagItem* it = Vb6Bag_Find(bag, L"Contents");
+            VariantInit(result);
+            if (it) return VariantCopy(result, &it->val);
+            return S_OK;
+        }
+        if (c >= 1) {             /* Property Let / Set (rgvarg[0] 是值, 可能带命名参数) */
+            vb6_BagPut(bag, L"Contents", (const VARIANT*)&pd->rgvarg[0]);
+            return S_OK;
+        }
+        return DISP_E_BADPARAMCOUNT;
     }
     return DISP_E_MEMBERNOTFOUND;
 }

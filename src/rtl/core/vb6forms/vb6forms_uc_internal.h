@@ -89,6 +89,12 @@ typedef struct vb6_UCRec {
     int32_t index;        // 控件数组下标, -1=非数组
     wchar_t ctrlName[VB6_UC_NAME_LEN];
     BSTR    displayNameBstr;   // Fix 116: Ambient.DisplayName 缓存 (控件实例名)
+    // Fix <vbeclipse> 2026-10-12 (账 #257 第十二层): "加载路径"的 Show/Resize 推迟标记。
+    // VB6 的顺序是 Initialize → ReadProperties → Show/Resize, 而 C3 的 ReadProps 在
+    // HostCreate 之后调用 ⇒ 不推迟就会让 Resize 读到还没恢复的设计期属性
+    // (实测 czUI: m_ControlType 未恢复 = 0 = czTitleBar ⇒ 走错分支 ⇒ AV)。
+    // 见 uc_host_create.inc 的 vb6_uc_activate 与 vb6_UC_ActivateHost。
+    int32_t pendingActivate;
 } vb6_UCRec;
 
 // UserControl 宿主状态快照（push/pop 用）
@@ -251,6 +257,9 @@ vb6_UCControls* vb6_uc_newControls(void* formHwnd);  // uc_controls.c
 // --- Fix <vbeclipse> rev14: Controls 集合 (Add/Item/Remove/Count) ---
 // 单例 + 归属窗口 + 对象形态查找 + 动态增删, 定义见 uc_controls.c
 void* vb6_UC_Controls(void);
+// 账 #257: UserControl.ParentControls —— VB6 语义是**容器**(父)的控件集合, 不是本 UC 自己
+// 的子控件。单例的 formHwnd 每次取用时现算成 GetParent(当前 UC 宿主窗口)。
+void* vb6_UC_ParentControls(void);
 void* vb6_UC_ControlsOwnHwnd(void* coll);
 void* vb6_UC_ControlsItemObj(void* coll, int32_t index);
 void* vb6_UC_ControlsItemObjByName(void* coll, const wchar_t* name);

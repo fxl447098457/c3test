@@ -375,6 +375,15 @@ std::string CCodeGen::cProcName(const std::string& procName, AccessLevel access,
     return "vb6_" + cIdent(procName);
 }
 
+// Fix 269: 类属性 C 函数名的成员段。见 cgen_helpers.inc 的说明 ——
+// 关键是**整串** cIdent, 与 makePropertySignature 的 cProcName(prefix + name) 同口径。
+// 非关键字成员逐字节不变 ("prop_get_Text" → "prop_get_Text"), 只有成员名本身
+// 撞 C 关键字 (如 `Default`) 时才会与旧的分段写法分道扬镳。
+std::string CCodeGen::propFnSegment(const std::string& prefix,
+                                    const std::string& member) const {
+    return cIdent(prefix + member);
+}
+
 // 重载变体的 C 名后缀 (O2): 非变体/裸键 head 返回空串 —— 零重载工程产出一字不变.
 // 变体: "_ov" + 指纹消毒串 (非字母数字→'_') 并截断, 保证组内唯一 (fp 本身组内唯一).
 static std::string ovlSanitizeFp(const std::string& fp) {
