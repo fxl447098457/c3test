@@ -2426,7 +2426,7 @@ marker、重编，之后 `check_rtl_embedded` 报 **125/125 逐字节相同**。
   - **VB6 的「数组按引用传」那一半刻意不做**：回写与 §B160/§B161 的 ByRef 回写是同一条口径，补的时候两头一起补。
   - **真跑读数（两台同形，已进门）**：`CALL=ECHOARR hr=0x00000000 resultvt=8195 arrvt=8195 dims=1 lo=0 hi=2 arrsum=60` —— 一枚真 `VT_ARRAY|VT_I4`（元素 10/20/30，界 0..2）进服务端、被 `EchoVal` 原样交回、客户端按真 SAFEARRAY 读出界与元素和。`arrsum` 只能来自入站那份**拷贝**的元素（出站那一步是新建 SAFEARRAY + 搬自己的 `data`）⇒ 这一条同时是「描述符真的可用」的证人，不只是「指针活着回来了」。
 
-### B163 `Dim v As Variant: v = <数组名>`：赋值那一站没装箱，槽读回来是 3 / "Long"（VB6 交 8195 / "Long()"）（2026-10-12 第五十刀的量撞见；**第五十一刀已出** = 提交 `0a7f508c`，门待回填）
+### B163 `Dim v As Variant: v = <数组名>`：赋值那一站没装箱，槽读回来是 3 / "Long"（VB6 交 8195 / "Long()"）（2026-10-12 第五十刀的量撞见；**第五十一刀已出** = 提交 `0a7f508c`，门 **#568**（run 38250433179，head `0a7f508c`，attempt 1）= 12 job 里 11 绿、唯一红 = 形状门（就是本刀那一行登记）⇒ 按 CI 那台读数登记 = 提交 `411aa223` ⇒ 验证轮 **#569**（head `411aa223`）attempt 1 唯一红 = `Tests (vbp #4)` 的 `ctrldlg_probe … FAIL (run error)` —— 同一片在 #568 刚绿过、这一笔只动了期望清单没动任何测试输入 ⇒ 墙钟余量那一族（§B140 给的那枚 `DlApp = 150` 具名预算，与门 #484 同一形状）；**attempt 2 复跑后 12 job 全 completed/success**）
 
 - **读数**（`.build/k50probe/run_base_*.txt` 与 `run_fix2_*.txt`，两台逐行相同）：模块级 `Private b159L() As Long`（已 `ReDim`、元素有值）赋给 `b159Va As Variant` 之后把这枚 Variant 递过 COM，对端读回 **3/"Long"**、`UBound` 交错误 9 —— 第五十刀把出站的表补好了，可这一形在**发码**那一步就把数组折成了元素档，压根没带着数组标签走到表跟前去。同一份探针里的 `nd`（多维）也是 3/"Long"，但那是 §B151 的形状，别混进本格。
 - **与同族的关系 + 站点已量到（2026-10-12 第五十刀收线那一趟顺手量的，探针 `.build/k51probe/`）**：§B160/§B161 修的是**实参位**（发码在调用那一站装箱，判据 = `isArrayCarrierArgName`）；本格是**赋值**那一站，站点 = `CCodeGen::wrapVariantValue`（`src/backend/cgen_util_ctrl.cpp:2336`，里面那张只留四档的小表问 `inferExprType`，而 `inferExprType` 对数组名答的是**元素**档 ⇒ 与 §B161 同一个病、不同的一站）。**上面那句「赋值走的是 AssignMove 那一路」是猜的，实测不作数**：这一路今天就是走 `wrapVariantValue`。
