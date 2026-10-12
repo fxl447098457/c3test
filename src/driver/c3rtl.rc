@@ -583,3 +583,10 @@
  *   vb6rtl_registry.c 里 GetAllSettings 填两格时递给的步长, 原先手写 sizeof(vb6_VARIANT),
  *   换成问 vb6_SaElemSize(vb6_sa_variant) —— 「一枚槽数组一格多宽」由 vb6rtl_array.c 那张表单独回答,
  *   与上面那两条 ND 出口读的是同一份。touch 本文件 = 让 125 份 RCDATA 重嵌一次 (§B99②)。 */
+
+/* 账 #305 §B155 格①②（2026-10-12 第四十六刀）：「这枚数组是哪一档」第一次有了一张表 ——
+ *   vb6_SaVtFromElemType（vb6rtl_array.c）与上面那枚 vb6_SaElemSize 并排住；四个消费点
+ *   （vb6_VariantArray / vb6_VariantFromUdtBytes / vb6rtl_com.c 的两条 VT_ARRAY 进口）一起改问它；
+ *   装箱那一档新增唯一出口 vb6_SaVtOfArrayPtr（认载体：一维魔数 0x5A1D / 多维秩数 1..16）。
+ *   vb6_TypeName 的标量名单抽成 vb6_TypeNameScalar，数组那一支按 VB6 拼「元素名()」。
+ *   touch 本文件 = 让 125 份 RCDATA 重嵌一次（§B99②）。 */

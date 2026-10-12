@@ -43,7 +43,9 @@ $bad = @()
 
 $must = @(
     "vb6_VariantToLong", "vb6_VariantToLongPtr", "vb6_VariantToBool", "vb6_VariantToDouble",
-    "vb6_TypeName", "vb6_IsNumeric", "vb6_VariantPackBorrow", "memVariantToI4",
+    # 账 #305 §B155 第四十六刀: 名单随表走 —— TypeName 那张表整个住在 vb6_TypeNameScalar 里了
+    # (数组那一支现在也拼同一串元素名)，vb6_TypeName 自己不再有 switch，挂着它的名字等于挂一条死规则。
+    "vb6_TypeNameScalar", "vb6_IsNumeric", "vb6_VariantPackBorrow", "memVariantToI4",
     "vb6_ho_variantToLong", "vb6_ho_variantToDouble", "vb6_VarToDouble_internal"
 )
 $exempt = @{
@@ -54,7 +56,7 @@ $exempt = @{
 # Decimal 这一档（§B143）：同一张表要答两档，所以名单也列两份。
 $decMust = @(
     "vb6_VariantToLong", "vb6_VariantToLongPtr", "vb6_VariantToBool", "vb6_VariantToDouble",
-    "vb6_TypeName", "vb6_IsNumeric", "vb6_VarToDouble_internal",
+    "vb6_TypeNameScalar", "vb6_IsNumeric", "vb6_VarToDouble_internal",
     # 账 #305 §B145: 「槽 -> 真 VARIANT」那张表唯一的住处(出站打包与 Variant 算术都读它)。
     "vb6_VariantPackBorrow"
 )
@@ -71,7 +73,10 @@ $decExempt = @{
 $fnRe     = [regex]'^[A-Za-z_][A-Za-z0-9_ \*]*?([A-Za-z_][A-Za-z0-9_]*)\s*\([^;]*\)\s*\{\s*$'
 # 接收者叫 v 的 vt switch，**允许带强转**：`switch ((vb6_vartype)v->vt)` 与 `switch (v.vt)` 是同一族表。
 # 以前这条正则不认强转写法，于是「比较走哪个数值」那一口(vb6_VarToDouble_internal)整个不在 census 里。
-$switchRe = [regex]'switch\s*\(\s*(?:\([^)]*\)\s*)?(?:v\.vt|v->vt)\s*\)'
+# 账 #305 §B155 第四十六刀: 再认一枚**裸形参** `switch (vt)` —— vb6_TypeName 那张名单抽成了 static
+# 出口 vb6_TypeNameScalar(数组那一支要与标量拼同一个答案)，表还在、只是不再带 `v.` 前缀。不放宽的话
+# census 静默少一张表(V1 的站点数 13 -> 12)，而「站点少了」正是这道哨兵唯一看得见名单断电的途径。
+$switchRe = [regex]'switch\s*\(\s*(?:\([^)]*\)\s*)?(?:v\.vt|v->vt|(?<![\w.])vt(?![\w.]))\s*\)'
 # 档的写法有两种拼法：SDK 名与 vb6_ 前缀名，且可能带强转 ⇒ 按同一个模式认。
 $armRe = @{
     I8  = [regex]'case\s+(?:\([^)]*\)\s*)?(?:VT_I8|vb6_vtI8)\s*:'

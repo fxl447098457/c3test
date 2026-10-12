@@ -167,9 +167,15 @@ static inline vb6_VARIANT vb6_VariantBool(int16_t val) {
 }
 
 // Variant containing a SafeArray (VB6: a = Array(1,2,3))
+// 账 #305 §B155 格①（第四十六刀）: 标签不再写死成 vtArray|vtVariant —— 它问描述符自己那一档。
+// 改前任何 typed 数组装箱后 VarType 一律答 8204、TypeName 一律答 "Variant"（VB6: String 数组是
+// 8200 / "String()"）；而且拿着 VT_ARRAY|VT_VARIANT 的标签去指一枚 BSTR 载体，交回 COM 就是错档。
+// 为什么声明在本文件、定义在 vb6rtl_array.c: 伞头里 variant.h 排在 array.h **之前**（那边的
+// vb6_VariantFromUdtBytes 注释记着这条顺序），这里看不见 elemtype 枚举与两套描述符。
+int32_t vb6_SaVtOfArrayPtr(const void* arr);
 static inline vb6_VARIANT vb6_VariantArray(void* _arr) {
     vb6_VARIANT v; memset(&v, 0, sizeof(v));
-    v.vt = vb6_vtArray | vb6_vtVariant; v.parray = (struct vb6_SafeArray1D*)_arr; return v;
+    v.vt = (vb6_vartype)vb6_SaVtOfArrayPtr(_arr); v.parray = (struct vb6_SafeArray1D*)_arr; return v;
 }
 
 // Fix 024: Variant containing a Byte (VT_UI1)

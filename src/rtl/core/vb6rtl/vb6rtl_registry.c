@@ -205,7 +205,8 @@ vb6_VARIANT vb6_GetAllSettings(BSTR appName, BSTR section) {
     free(dataBuf);
     RegCloseKey(hKey);
 
-    result.vt = vb6_vtArray | vb6_vtVariant;   /* VarType = 8204 = vbArray + vbVariant */
+    /* 账 #305 §B155 格①（第四十六刀）: 问描述符而不是写死；这一枚是 variant 档 ⇒ 仍 8204 = vbArray + vbVariant */
+    result.vt = (vb6_vartype)vb6_SaVtOfArrayPtr(nd);
     result.parray = (struct vb6_SafeArray1D*)nd;
     return result;
 }

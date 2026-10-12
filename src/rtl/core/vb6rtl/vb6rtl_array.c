@@ -48,6 +48,41 @@ int32_t vb6_SaElemSize(vb6_safearray_elemtype t) {
     }
 }
 
+// 账 #305 §B155 格①（第四十六刀）: 「这枚数组是哪一档」。上面那张表答「一格多宽」，这张答
+// 「VB6 叫它什么」—— 两张表并排住，是因为它们吃同一个枚举、也必须同一时刻一起改。
+// 认不出的档回落 variant：empty = 没建过（改前所有档位也都答 variant），udt = VB6 那一侧没有
+// 「把 UDT 数组装进 Variant」的可抄口径（§B159 记着）。ptr 交 vtDispatch = VB6 的 vbObject(9)。
+int32_t vb6_SaVtFromElemType(vb6_safearray_elemtype t) {
+    switch (t) {
+        case vb6_sa_bool:     return (int32_t)vb6_vtBoolean;     /* 11 */
+        case vb6_sa_byte:     return (int32_t)vb6_vtByte;        /* 17 */
+        case vb6_sa_int:      return (int32_t)vb6_vtInteger;     /* 2  */
+        case vb6_sa_long:     return (int32_t)vb6_vtLong;        /* 3  */
+        case vb6_sa_single:   return (int32_t)vb6_vtSingle;      /* 4  */
+        case vb6_sa_double:   return (int32_t)vb6_vtDouble;      /* 5  */
+        case vb6_sa_bstr:     return (int32_t)vb6_vtBSTR;        /* 8  */
+        case vb6_sa_variant:  return (int32_t)vb6_vtVariant;     /* 12 */
+        case vb6_sa_ptr:      return (int32_t)vb6_vtDispatch;    /* 9  = VB6 的 vbObject */
+        case vb6_sa_currency: return (int32_t)vb6_vtCurrency;    /* 6  */
+        default:              return (int32_t)vb6_vtVariant;     /* empty / udt */
+    }
+}
+
+// 装箱那一句的落点（声明在 vb6rtl_variant.h —— 那边看不见两套描述符）。手里只有 void*，先认载体:
+// 一维的首字段是魔数 0x5A1D、多维的首字段是秩数 1..16，魔数落不进 1..16 —— 这一问与
+// vb6rtl_string.c / vb6rtl_com.c 里靠魔数认载体的那几处同形。NULL（从没 ReDim / 已被 Erase）
+// 与认不出的载体都交回改前的答案 (vtArray|vtVariant)，不猜。
+int32_t vb6_SaVtOfArrayPtr(const void* arrV) {
+    if (!arrV) return (int32_t)(vb6_vtArray | vb6_vtVariant);
+    const vb6_SafeArray1D* a1 = (const vb6_SafeArray1D*)arrV;
+    if (a1->signature == 0x5A1D)
+        return (int32_t)(vb6_vtArray | vb6_SaVtFromElemType(a1->elemType));
+    const vb6_SafeArrayND* nd = (const vb6_SafeArrayND*)arrV;
+    if (nd->dimCount >= 1 && nd->dimCount <= 16)
+        return (int32_t)(vb6_vtArray | vb6_SaVtFromElemType(nd->elemType));
+    return (int32_t)(vb6_vtArray | vb6_vtVariant);
+}
+
 vb6_SafeArray1D* vb6_SafeArrayCreate1D(vb6_safearray_elemtype elemType,
     int32_t lBound, int32_t uBound) {
     vb6_SafeArray1D* arr = (vb6_SafeArray1D*)calloc(1, sizeof(vb6_SafeArray1D));

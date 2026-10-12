@@ -76,6 +76,19 @@
 #       次调用：旧格位与新格位）；oldStrides/newStrides 那两份表各恰好 0（它们就是第二套算术）；
 #       丢弃旧元素那一段的下标枚举回到降序（`for (d = arr->dimCount - 1; ... d--)`）就报红 ——
 #       枚举序就是线性格位序，降序枚举算出来的 indices 与 linear 那枚格位不是同一套对应关系。
+# --- A17（账 #305 §B155 格①②，第四十六刀）：「这枚数组是哪一档」只许一处答 ---
+# 改前「这枚数组是哪一档」说了四遍，每一遍都不问描述符：vb6_VariantArray 把 vt 写死成
+# vb6_vtArray|vb6_vtVariant（于是一切 typed 数组装箱后 VarType 一律 8204、TypeName 一律
+# "Variant"，而 VB6 是 8200/"String()" 这一族）、vb6_VariantFromUdtBytes 写死 BYTE、
+# vb6rtl_com.c 那两条 VT_ARRAY 进口各自折一枚三元表达式（BSTR/VARIANT 之外一律答 vtLong ⇒
+# VT_ARRAY|VT_I2 进来标签答 Long，而载体是 int16 —— 标签与描述符两个答案，拿着错标签交回
+# COM 就是错档）。TypeName 那边压根没有数组分支，8204 落 default 答 "Variant"。
+#   A17 新表 vb6_SaVtFromElemType 声明 1 / 定义 1 / 调用恰好 5（array.h 的 UDT 字节装箱 1 + com.c 两
+#       条进口 2 + array.c 自己那枚认载体的出口 2）；认载体那一问 vb6_SaVtOfArrayPtr 声明 1 / 定义 1 /
+#       调用恰好 2（装箱 + GetAllSettings）；写死的 vb6_vtArray|vb6_vtVariant 恰好 2 且**只能在**
+#       vb6_SaVtOfArrayPtr 的两条兜底里（NULL 与认不出载体）；旧的三元折档形状 `vb6_vtArray | (baseVt`
+#       恰好 0。TypeName 那一张标量名单只许一份：`case vb6_vtEmpty:` 在 vb6rtl_conv.c 恰好 1，
+#       抽出来的 vb6_TypeNameScalar 定义 1 / 调用恰好 2（数组那一支 + 标量那一条）。
 
 #
 # 用法:  pwsh -File scripts\check_sa_access.ps1
@@ -389,12 +402,62 @@ foreach ($f in $beFiles) {
 }
 if ($ndPresEmit -ne 1) { $bad += ("A13 后端发 vb6_SafeArrayReDimPreserveND 的行 = " + $ndPresEmit + " (恰好 1)") }
 if ($ndPresTyped -ne 1) { $bad += ("A13 那一行把 saElemType 递进去的写法 = " + $ndPresTyped + " 处 (恰好 1；0 = RTL 有形参而后端不递)") }
+
+# A17: 「这枚数组是哪一档」只许一处答 (账 #305 §B155 格①②, 第四十六刀)
+# 先剥注释再数 —— 这一族的名字太容易被注释里的引用数成一枚站点（§B145 那一刀的哨兵就是被自己
+# 写进注释的一句 `switch (v.vt)` 打红的），而这里比的是**名字**，注释里提一次就多一次。
+function Strip-Cmt([string]$s) {
+    $s = [regex]::Replace($s, '/\*[\s\S]*?\*/', '')
+    $s = [regex]::Replace($s, '(?m)//[^\r\n]*', '')
+    return $s
+}
+$vH = Strip-Cmt ([System.IO.File]::ReadAllText($arrH))
+$vC = Strip-Cmt ([System.IO.File]::ReadAllText($arrC))
+$vCom = Strip-Cmt ([System.IO.File]::ReadAllText((Join-Path $root "src\rtl\core\vb6rtl\vb6rtl_com.c")))
+$vConv = Strip-Cmt ([System.IO.File]::ReadAllText((Join-Path $root "src\rtl\core\vb6rtl\vb6rtl_conv.c")))
+$vVar = Strip-Cmt ([System.IO.File]::ReadAllText((Join-Path $root "src\rtl\core\vb6rtl\vb6rtl_variant.h")))
+$vReg = Strip-Cmt ([System.IO.File]::ReadAllText((Join-Path $root "src\rtl\core\vb6rtl\vb6rtl_registry.c")))
+
+$vtfDecl = @([regex]::Matches($vH, '(?m)^int32_t\s+vb6_SaVtFromElemType\s*\(')).Count
+$vtfDef  = @([regex]::Matches($vC, '(?m)^int32_t\s+vb6_SaVtFromElemType\s*\(')).Count
+$vtfAll  = @([regex]::Matches($vH + $vC + $vCom, 'vb6_SaVtFromElemType\s*\(')).Count
+if ($vtfDecl -ne 1) { $bad += ("A17 vb6_SaVtFromElemType 的声明(array.h) = " + $vtfDecl + " (恰好 1；0 = 表还在但没人能问)") }
+if ($vtfDef -ne 1)  { $bad += ("A17 vb6_SaVtFromElemType 的定义(array.c) = " + $vtfDef + " (恰好 1；>1 = 第二张档表)") }
+if ($vtfAll - $vtfDecl - $vtfDef -ne 5) {
+    $bad += ("A17 问这张表的地方 = " + ($vtfAll - $vtfDecl - $vtfDef) + " 处 (恰好 5：UDT 字节装箱 1 + COM 两条进口 2 + 认载体出口 2；少一处 = 那一位又自己折一档)")
+}
+
+$vtPackDecl = @([regex]::Matches($vVar, '(?m)^int32_t\s+vb6_SaVtOfArrayPtr\s*\(')).Count
+$vtPackDef  = @([regex]::Matches($vC, '(?m)^int32_t\s+vb6_SaVtOfArrayPtr\s*\(')).Count
+$vtPackAll  = @([regex]::Matches($vC + $vVar + $vReg, 'vb6_SaVtOfArrayPtr\s*\(')).Count
+if ($vtPackDecl -ne 1) { $bad += ("A17 vb6_SaVtOfArrayPtr 的声明(variant.h) = " + $vtPackDecl + " (恰好 1)") }
+if ($vtPackDef -ne 1)  { $bad += ("A17 vb6_SaVtOfArrayPtr 的定义(array.c) = " + $vtPackDef + " (恰好 1)") }
+if ($vtPackAll - $vtPackDecl - $vtPackDef -ne 2) {
+    $bad += ("A17 手里只有裸指针时问这一枚的地方 = " + ($vtPackAll - $vtPackDecl - $vtPackDef) + " 处 (恰好 2：装箱 + GetAllSettings)")
+}
+
+$hardTag = @([regex]::Matches($vH + $vC + $vCom + $vVar + $vReg, 'vb6_vtArray\s*\|\s*vb6_vtVariant')).Count
+if ($hardTag -ne 2) { $bad += ("A17 写死的 vb6_vtArray|vb6_vtVariant = " + $hardTag + " 处 (恰好 2：只许在 vb6_SaVtOfArrayPtr 的 NULL 与认不出载体那两条兜底里；多一处 = 有人又开始替数组猜档)") }
+$ternTag = @([regex]::Matches($vCom, 'vb6_vtArray\s*\|\s*\(\s*baseVt')).Count
+if ($ternTag -ne 0) { $bad += ("A17 旧的三元折档形状 vb6_vtArray|(baseVt …) = " + $ternTag + " 处 (要求 0：它把 I2/R8/R4 进来一律答成 Long)") }
+
+$tnEmpty = @([regex]::Matches($vConv, 'case\s+vb6_vtEmpty\s*:')).Count
+$tnScalarDef = @([regex]::Matches($vConv, '(?m)^static const wchar_t\*\s+vb6_TypeNameScalar\s*\(')).Count
+$tnScalarAll = @([regex]::Matches($vConv, 'vb6_TypeNameScalar\s*\(')).Count
+if ($tnEmpty -ne 1) { $bad += ("A17 TypeName 的标量名单里 case vb6_vtEmpty: = " + $tnEmpty + " 处 (恰好 1；2 = 名单被抄了两份，改一档就会漏另一档)") }
+if ($tnScalarDef -ne 1) { $bad += ("A17 vb6_TypeNameScalar 的定义 = " + $tnScalarDef + " (恰好 1)") }
+if ($tnScalarAll - $tnScalarDef -ne 2) {
+    $bad += ("A17 问那张名单的地方 = " + ($tnScalarAll - $tnScalarDef) + " 处 (恰好 2：数组那一支的元素名 + 标量那一条；数组分支被摘掉就只剩 1)")
+}
 if ($bad.Count -eq 0) {
     Write-Host ("PASS SA element access: macro " + $macroDefs.Count +
                 " / inline " + $defs.Count +
                 " / cold-path decl " + $decl + " def " + $defn +
                 " / backend raw-data lines " + $rawData.Count +
-                " / raw-index shape " + $shape + " / ND macros " + $ndMacros.Count + " / ND inline " + $ndDefs.Count + " / ATN emit " + $atnEmit + " / ATN literal " + $atnLiteral + " / redim helper def " + $rdDef + " call " + $rdCall + " / sa_variant lit " + $saVariant.Count + " / box cast " + $boxCast + " / table w " + $tblWrite + " f " + $tblFind + " e " + $tblErase + " / ndPres decl " + $ndPresDeclH + " def " + $ndPresDefC + " emit " + $ndPresEmit + " typed " + $ndPresTyped + " / nb call " + $nbCall + " lit " + $nbLit + " / seq " + $nbSeq + " fix " + $fxBounds + " / slot def " + $slotDef + " all " + $slotAll + " strideTab " + ($oldStr + $newStr) + " desc " + $descIdx) -ForegroundColor Green
+                " / raw-index shape " + $shape + " / ND macros " + $ndMacros.Count + " / ND inline " + $ndDefs.Count + " / ATN emit " + $atnEmit + " / ATN literal " + $atnLiteral + " / redim helper def " + $rdDef + " call " + $rdCall + " / sa_variant lit " + $saVariant.Count + " / box cast " + $boxCast + " / table w " + $tblWrite + " f " + $tblFind + " e " + $tblErase + " / ndPres decl " + $ndPresDeclH + " def " + $ndPresDefC + " emit " + $ndPresEmit + " typed " + $ndPresTyped + " / nb call " + $nbCall + " lit " + $nbLit + " / seq " + $nbSeq + " fix " + $fxBounds + " / slot def " + $slotDef + " all " + $slotAll + " strideTab " + ($oldStr + $newStr) + " desc " + $descIdx +
+                " / vt-flavor decl " + $vtfDecl + " def " + $vtfDef + " call " + ($vtfAll - $vtfDecl - $vtfDef) +
+                " / pack-of-ptr " + ($vtPackAll - $vtPackDecl - $vtPackDef) + " hard tag " + $hardTag + " tern " + $ternTag +
+                " / TypeName list " + $tnEmpty + " scalar " + ($tnScalarAll - $tnScalarDef)) -ForegroundColor Green
     exit 0
 }
 foreach ($b in $bad) { Write-Host ("FAIL " + $b) -ForegroundColor Red }

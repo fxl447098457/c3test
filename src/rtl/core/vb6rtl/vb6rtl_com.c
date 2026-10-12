@@ -405,7 +405,10 @@ vb6_VARIANT vb6_VariantFromComResult(void* variant_ptr) {
                     // Numeric types: direct memcpy
                     memcpy(arr->data, srcData, (size_t)count * esz);
                 }
-                result.vt = (vb6_vartype)(vb6_vtArray | (baseVt == VT_BSTR ? vb6_vtBSTR : baseVt == VT_VARIANT ? vb6_vtVariant : vb6_vtLong));
+                /* 账 #305 §B155 格①（第四十六刀）: 这一支以前自己折了一回（BSTR/VARIANT 之外一律答
+                   Long），于是 VT_ARRAY|VT_I2 进来、标签出去 8195 —— 载体明明是 int16 档。现在与描述符
+                   同问一张表：et 就是上面那枚 switch 刚定下来的档。 */
+                result.vt = (vb6_vartype)(vb6_vtArray | vb6_SaVtFromElemType(et));
                 result.parray = arr;
             }
             // Null out the SAFEARRAY pointer before VariantClear
@@ -527,7 +530,10 @@ vb6_VARIANT vb6_VariantFromStackVARIANT(VARIANT* pv) {
                 } else {
                     memcpy(arr->data, srcData, (size_t)count * esz);
                 }
-                result.vt = (vb6_vartype)(vb6_vtArray | (baseVt == VT_BSTR ? vb6_vtBSTR : baseVt == VT_VARIANT ? vb6_vtVariant : vb6_vtLong));
+                /* 账 #305 §B155 格①（第四十六刀）: 这一支以前自己折了一回（BSTR/VARIANT 之外一律答
+                   Long），于是 VT_ARRAY|VT_I2 进来、标签出去 8195 —— 载体明明是 int16 档。现在与描述符
+                   同问一张表：et 就是上面那枚 switch 刚定下来的档。 */
+                result.vt = (vb6_vartype)(vb6_vtArray | vb6_SaVtFromElemType(et));
                 result.parray = arr;
             }
             break;

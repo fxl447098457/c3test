@@ -19,11 +19,11 @@
 ' is the answer this knife hands to the dynamic path too:
 '   Dim f(5) As String   ->  vb6_SafeArrayCreate1D(vb6_sa_bstr, 0, 5)
 '
-' R1-label / R3-label / R5-label pin VarType + TypeName as they measure TODAY
-' (8204 / "Variant"). VB6 answers 8200 / "String()" there: the box tag in
-' vb6_VariantArray is a hardcoded vb6_vtArray | vb6_vtVariant and never asks the
-' descriptor, and vb6_TypeName has no array branch. That is section B155 - these
-' three needles are the shape witnesses, and they turn RED when B155 lands.
+' R1-label / R3-label / R5-label pinned VarType + TypeName as knife 42 MEASURED them
+' (8204 / "Variant" for every flavor) and said out loud that VB6 answers
+' 8200 / "String()" there. Knife 46 (section B155 cells 1 and 2) fixed the tag, so
+' those three now read the declared flavor - which is what R17 below pins for EVERY
+' arm of the new table. See the R17 block for the two arms still not VB6's answer.
 Option Explicit
 
 Type TRElem
@@ -48,6 +48,17 @@ Public Sub Main()
     Dim w1() As Variant
     Dim b1() As Byte
     Dim n1() As String
+    Dim q0b() As Boolean
+    Dim q0y() As Byte
+    Dim q0i() As Integer
+    Dim q0l() As Long
+    Dim q0s() As Single
+    Dim q0d() As Double
+    Dim q0c() As Currency
+    Dim q0t() As Date
+    Dim q0o() As Object
+    Dim q0u() As TRElem
+    Dim q0n() As String
 
     ' R1: 1-D String, bare ReDim. cell = direct round trip (worked before too -
     ' direct write and direct read use the same stride); label = the open B155 cell.
@@ -201,6 +212,62 @@ Public Sub Main()
     Debug.Print "R16-keep=" & CStr(n1(1, 1)) & "/" & CStr(n1(1, 2)) & "/" & CStr(n1(1, 3))
     Debug.Print "R16-keep2=" & CStr(n1(2, 1)) & "/" & CStr(n1(2, 2)) & "/" & CStr(n1(2, 3))
     Debug.Print "R16-new=" & CStr(n1(1, 4)) & "|" & CStr(n1(2, 6)) & " ub2=" & CStr(UBound(n1, 2))
+
+    ' ---- R17: knife 46 = section B155 cells 1 and 2 --------------------------
+    ' "Which flavor is this array" now has ONE table (vb6_SaVtFromElemType in
+    ' vb6rtl_array.c), sitting next to the element-size table it must move with.
+    ' Before this knife the box tag was a hardcoded vb6_vtArray|vb6_vtVariant at all
+    ' four consumer points, so every typed array answered VarType=8204 and TypeName
+    ' fell through vb6_TypeName's scalar-only switch to "Variant". VB6 answers
+    ' vbArray + <element vt> and "<element name>()", so each arm of the new table is
+    ' pinned here - a table row nobody prints is a row nobody keeps honest.
+    ' The two arms that are NOT VB6's answer yet are printed on purpose too and are
+    ' booked as section B159: Date has no arm in this enum (a Date array stores a
+    ' double, so it reads 8197/"Double()"), and a UDT array falls back to the
+    ' pre-knife answer because VB6 has no copyable convention for boxing one.
+    ReDim q0b(1)
+    Debug.Print "R17-bool-vt="; VarType(q0b); " tn="; TypeName(q0b)
+    ReDim q0y(1)
+    Debug.Print "R17-byte-vt="; VarType(q0y); " tn="; TypeName(q0y)
+    ReDim q0i(1)
+    Debug.Print "R17-int-vt="; VarType(q0i); " tn="; TypeName(q0i)
+    ReDim q0l(1)
+    q0l(0) = 4242
+    Debug.Print "R17-long-vt="; VarType(q0l); " tn="; TypeName(q0l)
+    ReDim q0s(1)
+    Debug.Print "R17-sing-vt="; VarType(q0s); " tn="; TypeName(q0s)
+    ReDim q0d(1)
+    Debug.Print "R17-dbl-vt="; VarType(q0d); " tn="; TypeName(q0d)
+    ReDim q0c(1)
+    Debug.Print "R17-cur-vt="; VarType(q0c); " tn="; TypeName(q0c)
+    ReDim q0t(1)
+    Debug.Print "R17-date-vt="; VarType(q0t); " tn="; TypeName(q0t)
+    ReDim q0o(1)
+    Debug.Print "R17-obj-vt="; VarType(q0o); " tn="; TypeName(q0o)
+    ReDim q0u(1)
+    Debug.Print "R17-udt-vt="; VarType(q0u); " tn="; TypeName(q0u)
+
+    ' R17-boxed: the same descriptor through the OTHER consumer (vb6_VariantArray,
+    ' the box a Variant slot takes). Label and descriptor must agree here, so this
+    ' line asks three things of one array: VarType of the slot, TypeName of the slot,
+    ' and the element read back out of the slot (that last one is knife 42's
+    ' descriptor-trusting consumer, so the two answers are pinned together).
+    v = q0l
+    Debug.Print "R17-boxed-vt="; VarType(v); " tn="; TypeName(v); " cell="; CStr(v(0))
+
+    ' R17-boxw: the same slot, now WRITTEN through. vb6_VariantArraySet / SetND start
+    ' with `if (elemType != vb6_sa_variant) return;`, so a write into a typed array's
+    ' box is a SILENT NO-OP - section B155 cell 3, still open. Measured on both arches
+    ' (.build/k46run2_both.txt): the cell still reads 4242, the value the box was made
+    ' from, and 99 never lands. Whoever fixes cell 3 turns this needle red, and that is
+    ' the success signal, not a regression.
+    v(0) = 99
+    Debug.Print "R17-boxw="; CStr(v(0))
+
+    ' R17-undim: never dimensioned (descriptor is NULL) - vb6_SaVtOfArrayPtr refuses
+    ' to guess and hands back the pre-knife answer. VB6 raises "Array not even
+    ' dimensioned" here; that difference is booked in B159, not fixed by this knife.
+    Debug.Print "R17-undim-vt="; VarType(q0n); " tn="; TypeName(q0n)
 
     Debug.Print "RE-DONE"
 End Sub

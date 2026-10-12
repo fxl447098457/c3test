@@ -399,32 +399,46 @@ vb6_VARIANT vb6_CVErr(int32_t errorNumber) {
 int32_t vb6_VarType(vb6_VARIANT v) { return (int32_t)v.vt; }
 
 // P8.4: TypeName - 返回Variant类型的VB6类型名
+// 账 #305 §B155 格②（第四十六刀）: 这张标量名单以前内联在 vb6_TypeName 里；数组那一支
+// ("<元素名>()") 也要问同一串名字，所以抽成一枚 static 出口。别再开第二份名单。
+static const wchar_t* vb6_TypeNameScalar(int32_t vt) {
+    switch (vt) {
+        case vb6_vtEmpty:    return L"Empty";
+        case vb6_vtNull:     return L"Null";
+        case vb6_vtInteger:  return L"Integer";
+        case vb6_vtLong:     return L"Long";
+        case vb6_vtSingle:   return L"Single";
+        case vb6_vtDouble:   return L"Double";
+        case vb6_vtCurrency: return L"Currency";
+        case vb6_vtDate:     return L"Date";
+        case vb6_vtBSTR:     return L"String";
+        case vb6_vtDispatch: return L"Object";
+        case vb6_vtError:    return L"Error";
+        case vb6_vtBoolean:  return L"Boolean";
+        case vb6_vtByte:     return L"Byte";
+        case VT_I8:          return L"Long";      /* 账 #305: 与 vb6_IsNumeric 同一条口径 */
+        case vb6_vtDecimal:  return L"Decimal";  /* 账 #305 §B141: 此前落 default 答 "Variant" */
+        default:             return L"Variant";
+    }
+}
+
 BSTR vb6_TypeName(vb6_VARIANT v) {
-    const wchar_t* name = L"Empty";
     /* Fix 112: 宿主对象 (窗体/控件 HWND, Controls 集合, Font) 返回 VB6 类型名 */
     if (v.vt == vb6_vtDispatch && v.pdispVal) {
         const wchar_t* hostName = vb6_Host_TypeNameOf(v.pdispVal);
         if (hostName) return vb6_BSTR_FromStr(hostName);
     }
-    switch (v.vt) {
-        case vb6_vtEmpty:    name = L"Empty"; break;
-        case vb6_vtNull:     name = L"Null"; break;
-        case vb6_vtInteger:  name = L"Integer"; break;
-        case vb6_vtLong:     name = L"Long"; break;
-        case vb6_vtSingle:   name = L"Single"; break;
-        case vb6_vtDouble:   name = L"Double"; break;
-        case vb6_vtCurrency: name = L"Currency"; break;
-        case vb6_vtDate:     name = L"Date"; break;
-        case vb6_vtBSTR:     name = L"String"; break;
-        case vb6_vtDispatch: name = L"Object"; break;
-        case vb6_vtError:    name = L"Error"; break;
-        case vb6_vtBoolean:  name = L"Boolean"; break;
-        case vb6_vtByte:     name = L"Byte"; break;
-        case VT_I8:        name = L"Long"; break;   /* 账 #305: 与 vb6_IsNumeric 同一条口径 */
-        case vb6_vtDecimal: name = L"Decimal"; break;   /* 账 #305 §B141: 此前落 default 答 "Variant" */
-        default:             name = L"Variant"; break;
+    /* 账 #305 §B155 格②（第四十六刀）: 数组那一支以前压根没有 —— 8204 落 default 答 "Variant"。
+       VB6 答 "<元素名>()"（String 数组 "String()"、Variant 数组 "Variant()"）。元素名问上面那张表。 */
+    if (v.vt & vb6_vtArray) {
+        const wchar_t* elem = vb6_TypeNameScalar((int32_t)(v.vt & ~(int32_t)vb6_vtArray));
+        size_t n = wcslen(elem);
+        wchar_t buf[40];   /* 名单里最长的是 "Currency"，加 "()" 与结尾符还剩得下 */
+        wmemcpy(buf, elem, n);
+        buf[n] = L'('; buf[n + 1] = L')'; buf[n + 2] = L'\0';
+        return vb6_BSTR_FromStr(buf);
     }
-    return vb6_BSTR_FromStr(name);
+    return vb6_BSTR_FromStr(vb6_TypeNameScalar((int32_t)v.vt));
 }
 
 // ============================================================

@@ -2691,11 +2691,11 @@ if ($Category -in @("all", "run", "bas")) {
     # 色（R16-keep=a11/a12/ 与 R16-keep2=b21// 与 R16-new=b22| ub2=6），其余 26 行逐字不动，
     # 读数 .build/b1405_k45build/rng6.txt；两台修后读数 .build/b1405_k45build/{rk5n6,rk5n3}.txt。
     $reNeedles = @("R1-cell=A",
-        "R1-label-vt=8204 tn=Variant",
+        "R1-label-vt=8200 tn=String()",
         "R2-preserve-cell=A ub=6",
-        "R3-cell=X", "R3-ub2=4 lb2=1", "R3-box-cell=X", "R3-label-vt=8204 tn=Variant",
+        "R3-cell=X", "R3-ub2=4 lb2=1", "R3-box-cell=X", "R3-label-vt=8200 tn=String()",
         "R4-cell=200", "R4-box-cell=200",
-        "R5-cell=77", "R5-ub1=2 ub2=2", "R5-label-vt=8204 tn=Variant",
+        "R5-cell=77", "R5-ub1=2 ub2=2", "R5-label-vt=8195 tn=Long()",
         "R6-ub2=2", "R7-cell=V vt=8204", "R8-cell=S", "R9-cell=Z",
         # 第四十三刀 R10..R14 的读数是 .build/b1395_k43/{rn6,rn3}.txt 两台逐行量出来的
         # (两架构输出 diff 为空)；只有 R13-box-c23 在修前的编译器上红，其余四枚是防改坏的钉。
@@ -2707,6 +2707,17 @@ if ($Category -in @("all", "run", "bas")) {
         # 上是唯一会红的三枚 —— R14/R15 在那台上照样绿。
         "R15-kept=g11 ub2=5", "R15-cell=g24",
         "R16-keep=a11/a12/a13", "R16-keep2=b21/b22/b23", "R16-new=| ub2=6",
+        # 第四十六刀（§B155 格①②）把上面三枚 *-label-* 从 8204/"Variant" 翻成声明那一档
+        # （读数 .build/k46run_both.txt，两台 42 行逐行相同）。R17 一族是新针：一张表每一档
+        # 都要有人读，没人读的那一档下次改表时没人拦。R17-date 交 8197/"Double()"（枚举里
+        # 压根没有 Date 档）、R17-udt 与 R17-undim 回落 8204/"Variant()" —— 这三格刻意不
+        # 假装对，记在 §B159。R17-boxed 是「标签与描述符必须同一张表」的那枚证人。
+        "R17-bool-vt=8203 tn=Boolean()", "R17-byte-vt=8209 tn=Byte()",
+        "R17-int-vt=8194 tn=Integer()", "R17-long-vt=8195 tn=Long()",
+        "R17-sing-vt=8196 tn=Single()", "R17-dbl-vt=8197 tn=Double()",
+        "R17-cur-vt=8198 tn=Currency()", "R17-date-vt=8197 tn=Double()",
+        "R17-obj-vt=8201 tn=Object()", "R17-udt-vt=8204 tn=Variant()",
+        "R17-boxed-vt=8195 tn=Long() cell=4242", "R17-boxw=4242", "R17-undim-vt=8204 tn=Variant()",
         "RE-DONE")
     Add-BasTest "test_redim_elem" "$Tests\test_redim_elem.bas" $reNeedles
     Add-BasTest "test_redim_elem_x86" "$Tests\test_redim_elem.bas" $reNeedles -Arch "x86"

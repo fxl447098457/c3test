@@ -171,6 +171,11 @@ void* vb6_SafeArrayND_GetPtr(vb6_SafeArrayND* arr, ...);
 // 账 #305 §B150: elemType → 单元素字节数 (UDT 档不在这里答, 由描述符自己的 elemSize 说话)。
 int32_t vb6_SaElemSize(vb6_safearray_elemtype t);
 
+// 账 #305 §B155 格①（第四十六刀）: elemType → VB6 的 VarType **元素**码（vbArray 那一位由调用方 OR 上）。
+// 与上面那张尺寸表同一族 —— 「这枚数组是哪一档」只许一处答。认不出的档（empty / udt）回落 variant：
+// 那就是改前每一档的答案。Date 档在这枚枚举里根本没有（数组里的 Date 存成 double），那一格记在 §B159。
+int32_t vb6_SaVtFromElemType(vb6_safearray_elemtype t);
+
 int32_t vb6_UBoundND(vb6_SafeArrayND* arr, int32_t dimension);
 int32_t vb6_LBoundND(vb6_SafeArrayND* arr, int32_t dimension);
 
@@ -193,7 +198,7 @@ static inline vb6_VARIANT vb6_VariantFromUdtBytes(const void* src, int32_t nByte
     vb6_SafeArray1D* arr = vb6_SafeArrayCreate1D(vb6_sa_byte, 0, nBytes - 1);
     if (!arr) { v.vt = vb6_vtEmpty; return v; }
     memcpy(arr->data, src, (size_t)nBytes);
-    v.vt = vb6_vtArray | vb6_vtByte;    // VT_ARRAY | VT_UI1
+    v.vt = (vb6_vartype)(vb6_vtArray | vb6_SaVtFromElemType(vb6_sa_byte));   /* VT_ARRAY|VT_UI1，问表不写死 */
     v.parray = arr;
     return v;
 }
