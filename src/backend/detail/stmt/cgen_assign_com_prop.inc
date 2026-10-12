@@ -61,6 +61,9 @@
                     // 故先算 packer 再解封。
                     const std::string packFnVal = comPackExpr(*node.value);
                     std::string valExpr = comMarkerValueForWrite(packFnVal, std::move(lastExpr_));
+                    // Fix <vbeclipse> 2026-10-12: 与 SetProp 同一格 —— 右值整枚是
+                    // COM 调用结果时先拆堆 VARIANT* (见 comUnpackForPack)。
+                    valExpr = comUnpackForPack(packFnVal, valExpr);
                     c_.emitLine("vb6_ComSetPropArg(" + objExpr + ", L\"" + memberName + "\", " +
                                  idxArgsArray + ", " + std::to_string(idxArgc) + ", " +
                                  packFnVal + "(" + valExpr + "));  /* COM SetPropArg */");
@@ -434,6 +437,10 @@
         // 解封类型」的表收进 comMarkerValueForWrite 一处 (With 那一支以前没问它,
         // 就是同一格只接了一半)。
         valExpr = comMarkerValueForWrite(packFn, valExpr);
+        // Fix <vbeclipse> 2026-10-12: 右值整枚是 COM 调用结果时先拆堆 VARIANT* (见
+        // comUnpackForPack 的说明) —— 不拆则 vb6_ComPackValue(void*) 会把堆 VARIANT
+        // 当 IDispatch 去 AddRef ⇒ AV。
+        valExpr = comUnpackForPack(packFn, valExpr);
         c_.emitLine("vb6_ComSetProp(" + objExpr + ", L\"" + memberName + "\", " +
                      packFn + "(" + valExpr + "));  /* COM SetProp */");
         return;

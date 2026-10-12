@@ -490,6 +490,9 @@
             // With 外同一句一直是对的 (Fix 110i)，所以这是"同一决定抄了两遍、第三遍漏了"
             // 那一族 —— 问的是同一个出口 comMarkerValueForWrite。
             valExpr = comMarkerValueForWrite(packFn, valExpr);
+            // Fix <vbeclipse> 2026-10-12: 右值整枚是 COM 调用结果 ⇒ 先经
+            // vb6_VariantFromComResult 拆掉堆 VARIANT* (见 comUnpackForPack)。
+            valExpr = comUnpackForPack(packFn, valExpr);
             c_.emitLine("vb6_ComSetProp(" + tempVar + ", L\"" + wmExpr.memberName + "\", " +
                          packFn + "(" + valExpr + "));  /* With COM SetProp */");
             return;
@@ -773,6 +776,9 @@
             emitExpr(*node.value);
             std::string valExpr = std::move(lastExpr_);
             std::string packFn = comPackExpr(*node.value);
+            // Fix <vbeclipse> 2026-10-12: 同 `/* COM SetProp */` 那一支 —— 右值是
+            // COM 调用结果时先拆堆 VARIANT* (见 comUnpackForPack)。
+            valExpr = comUnpackForPack(packFn, valExpr);
             c_.emitLine("vb6_ComSetProp(" + tempVar + ", L\"" + wmExpr.memberName + "\", " +
                          packFn + "(" + valExpr + "));  /* With class .unknown COM SetProp */");
             return;

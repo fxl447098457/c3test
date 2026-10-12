@@ -708,6 +708,38 @@ std::string CCodeGen::comMarkerValueForWrite(const std::string& packFn,
     return lastExpr_;
 }
 
+// Fix <vbeclipse> 2026-10-12: 写侧值位「右值整枚是 COM 调用结果」的收口。
+//
+// 起因 (ComCtlsDemo StatusBar_UserControl_ReadProperties, 页堆下 AV):
+//   With New PropertyBag
+//       .Contents = PropBag.ReadProperty("InitPanels", 0)
+//   发射成
+//       vb6_ComSetProp(_vb6_with_2, L"Contents",
+//                      vb6_ComPackValue(vb6_ComCall((*PropBag), L"ReadProperty", ...)))
+//   于是 vb6_ComPackValue(void*) 的 _Generic 落到 **vb6_VariantObject(void*)** ——
+//   把 vb6_ComCall 交回的**堆 VARIANT** 当 IDispatch 去 AddRef, 读它的 `vt` 字段
+//   (实测 = 3 = VT_I4) 当 vtable ⇒ 崩在 vb6_ComIsDispatchable 里 (av read target=0x8)。
+//   最小复现 (3 行, `--emit-c` 秒出): .temp/tof/t3.bas
+//       With inner : .CompareMode = bag.Item("z")
+//   同一形态全工程 22 处 (17 处 `/* COM SetProp */` + 5 处 `/* With COM SetProp */`)。
+//
+// 正解: 这三枚出口的契约是**堆 VARIANT\*** (vb6com_invoke.c: `return (void*)result` /
+// `(void*)eres`), 要 Variant 的打包器必须先把所有权交给 vb6_VariantFromComResult
+// (它消耗掉那枚指针) 换出 vb6_VARIANT 值, 再打包 —— 这正是 resolveComMarkerForPack
+// 早就写下的口径, 只是这几个写侧出口没接。判据前缀与它同源。
+// 只接管 ComPackValue / ComPackVariant 两档: 标量档要的是数值, 那条路由 packArgValue
+// 的 vb6_VariantToXxx 链负责, 在这里提前拆会把型定死。
+std::string CCodeGen::comUnpackForPack(const std::string& packFn,
+                                       const std::string& valExpr) const {
+    if (packFn != "vb6_ComPackValue" && packFn != "vb6_ComPackVariant") return valExpr;
+    if (valExpr.rfind("vb6_ComCall(", 0) == 0
+        || valExpr.rfind("vb6_ComCallByDispid(", 0) == 0
+        || valExpr.rfind("vb6_ComGetProp(", 0) == 0) {
+        return "vb6_VariantFromComResult(" + valExpr + ")";
+    }
+    return valExpr;
+}
+
 std::string CCodeGen::packArgValue(const std::string& packFn,
                                    const std::string& expr) const {
     // ⚠ 长度字面量必须与整串长度相等 —— `std::string::compare(pos, count, str)` 拿

@@ -699,6 +699,17 @@
     std::string comMarkerValueForWrite(const std::string& packFn,
                                        const std::string& valExpr);
 
+    // Fix <vbeclipse> 2026-10-12: **写侧值位**上「右值整枚就是 COM 调用结果」的唯一收口。
+    // `vb6_ComCall` / `vb6_ComCallByDispid` / `vb6_ComGetProp` 的返回契约是
+    // **一枚堆 VARIANT\***（vb6com_invoke.c 里 `return (void*)result` / `(void*)eres`），
+    // 不是对象也不是标量。要 Variant 的打包器必须先经 `vb6_VariantFromComResult`
+    // 拆成 `vb6_VARIANT` 值 —— 否则 `vb6_ComPackValue(void*)` 的 `_Generic` 会落到
+    // `vb6_VariantObject(void*)`，把**堆 VARIANT 当 IDispatch** 去 AddRef（拿它的 `vt`
+    // 字段当 vtable）⇒ AV。判据前缀与 `resolveComMarkerForPack` 同源，只接管
+    // ComPackValue / ComPackVariant 两档；标量档由 packArgValue 管，这里不动。
+    std::string comUnpackForPack(const std::string& packFn,
+                                 const std::string& valExpr) const;
+
     // Fix 266: 「打包器要标量、实参却是**无型** VARIANT」这一格的唯一收口。
     // comPackExpr 按 AST 推的型给出 typed 打包器 (ComPackDouble/Int/Bool/BSTR),
     // 而 marker 解析交回的是 vb6_VariantFromComResult(...) / vb6_VariantFromValue(...)

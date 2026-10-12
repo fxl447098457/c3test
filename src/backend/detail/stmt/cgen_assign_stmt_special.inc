@@ -533,6 +533,10 @@
                 emitExpr(*node.value);
                 std::string valExpr = std::move(lastExpr_);
                 std::string packFn = comPackExpr(*node.value);
+                // Fix <vbeclipse> 2026-10-12: 右值整枚是 COM 调用结果时先拆堆 VARIANT*
+                // (见 comUnpackForPack) —— 不拆则 vb6_ComPackValue(void*) 会把堆
+                // VARIANT 当 IDispatch 去 AddRef ⇒ AV。
+                valExpr = comUnpackForPack(packFn, valExpr);
                 c_.emitLine("vb6_ComSetProp((void*)" + currentReturnVar_ + ", L\""
                             + maExpr.memberName + "\", " + packFn + "(" + valExpr
                             + "));  /* FnRetObj COM SetProp */");
