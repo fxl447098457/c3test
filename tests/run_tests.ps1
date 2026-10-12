@@ -374,13 +374,19 @@ function Invoke-TestExe {
         [string]$ExePath,
         [string]$WorkDir,
         [string]$Name,
-        [hashtable]$EnvVars = @{}   # 显式注入子进程环境 (不依赖宿主进程级变量)
+        [hashtable]$EnvVars = @{},  # 显式注入子进程环境 (不依赖宿主进程级变量)
+        [string]$LogName = ''       # 现场文件的名字 = **用例名** (不给就退回产物名)
     )
 
     # 日志统一写入 output 目录: 使用 Open ... For Output 追加写入同一日志文件
     # (scores.txt / test_output.txt / *.dat 等), 不同进程写入不同实时文件
-    $stdoutFile = Join-Path $WorkDir "$Name.out"
-    $stderrFile = Join-Path $WorkDir "$Name.err"
+    # 账 #305 §B157: 现场文件名与预算键是**两个身份** —— 预算按产物名问 (§B140 规矩③, 那张表
+    # 的键就是产物名), 现场按用例名落盘。改前两者合成一个 $Name(=产物名): 四枚 ctrldlg 用例共用
+    # 产物名 DlApp ⇒ 同一 job 里后跑的把先跑的 .out 盖掉, 门红了看不出究竟是哪一枚的现场。
+    $logBase = $Name
+    if ($LogName) { $logBase = $LogName }
+    $stdoutFile = Join-Path $WorkDir "$logBase.out"
+    $stderrFile = Join-Path $WorkDir "$logBase.err"
     # #44: 逐条判存在再删, 不依赖 Remove-Item 对"路径不存在"的宽容度。
     # 实证: 某些宿主(带 safe-delete 钩子的沙箱)把 Remove-Item 换成 fail-closed 版本,
     # 目标不存在时抛**终止**异常 —— 客户进程因此一次都没跑, 表现为"零输出、
@@ -1430,7 +1436,7 @@ function Test-Run {
             [Environment]::SetEnvironmentVariable($pp[0], $pp[1])   # 兜底
         }
     }
-    $run = Invoke-TestExe -ExePath $exePath -WorkDir $OutDir -Name $baseName -EnvVars $envMap
+    $run = Invoke-TestExe -ExePath $exePath -WorkDir $OutDir -Name $baseName -LogName $Name -EnvVars $envMap
     foreach ($k in $savedEnv.Keys) {
         [Environment]::SetEnvironmentVariable($k, $savedEnv[$k])
     }
