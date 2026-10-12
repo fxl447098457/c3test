@@ -2662,9 +2662,10 @@ if ($Category -in @("all", "run", "bas")) {
     # ② 整份夹具在 BASE 上压根编不过（R8 那条 `ReDim x(1, 2)` 打到装箱外的强转 ⇒ cl C2440，
     # .build/b1373_fix/b6.log）。多维的 Variant 槽那一支（R8）在 BASE 上是**响的**缺陷、在修前从未编过，
     # 所以它的读数只有 NEW 一台能给 —— 两台（x64/x86）修后逐行相同（.build/b1373_fix/{rf6,rf3}.txt）。
-    # 三枚 *-label-* 钉的是**今天**的 VarType/TypeName（8204 / "Variant"）。VB6 该答 8200 / "String()"：
-    # 装箱那一句 vb6_VariantArray 把 vt 写死成 vb6_vtArray | vb6_vtVariant、从不问描述符，而 vb6_TypeName
-    # 没有数组分支 —— 那一格记在 §B155，谁把标签修对这三枚就会红，那是**成功**信号不是回归。
+    # 三枚 *-label-* 在第四十二刀钉的是**当时**的 VarType/TypeName（8204 / "Variant"）：装箱那一句
+    # vb6_VariantArray 把 vt 写死成 vb6_vtArray | vb6_vtVariant、从不问描述符，而 vb6_TypeName 没有
+    # 数组分支（§B155 格①②）。第四十六刀把这两处改成问那张新档表，于是这三枚翻成声明那一档
+    # （String 数组 8200/"String()"、Long 数组 8195/"Long()"）—— 当时的红就是本刀的判据。
     # 同一段落的第四十三刀（§B155 格④）在末尾接上 R10..R14：多维数组**首次分配就走 Preserve** 那一形。
     # vb6_SafeArrayReDimPreserveND 的形参表里原本压根没有 elemType，arr==NULL 时只能按 vb6_sa_empty 建
     # （尺寸表对 empty 答 default 4 字节），而访问侧按声明档走步长（x64：String 8、Variant 24）⇒ 写出去
