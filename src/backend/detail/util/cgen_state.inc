@@ -44,6 +44,11 @@
     std::string currentReturnCType_; // Fix 054: 当前函数返回值的C类型名 (如 "vb6_type_QRCodegenSegment")
     int labelCounter_ = 0;           // 标签计数器 (避免C标签冲突)
     int tempCounter_ = 0;            // 临时变量计数器
+    // 账 #305 §B156 (第四十四刀): 多维 ReDim 的界数组临时量以前**按数组名**拼
+    // (_redim_bounds_<名>), 同一过程里第二条多维 ReDim 就在同一个 C 函数里把定义发两遍
+    // ⇒ cl C2374「重定义；多次初始化」。这一枚计数器给的是「同一模块内第几条多维 ReDim」,
+    // 与 tempCounter_ 同生同灭 (同处复位), 使名字在同一过程内必然唯一。
+    int ndBoundsSeq_ = 0;             // 多维 ReDim 界数组临时量的序号
 
     // 表达式求值结果 (累加器模式: 每个emitExpr调用设置lastExpr_)
     std::string lastExpr_;           // 最近一次表达式生成的C代码字符串

@@ -159,7 +159,7 @@
             && target.find(".") == std::string::npos
             && target.find("[") == std::string::npos
             && target.find("VB6_SA_AT(") != 0
-            && target.find("vb6_VariantArrayGet(") != 0
+            && !isVariantSlotElemRead(target)
             && target.find("vb6_PA_Get") != 0
             && target.find("prop_get_") == std::string::npos
             && target.find("prop_let_") == std::string::npos

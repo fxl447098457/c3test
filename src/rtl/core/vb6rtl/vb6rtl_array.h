@@ -235,8 +235,15 @@ vb6_SafeArrayND* vb6_SafeArrayReDimND(vb6_safearray_elemtype elemType,
     int32_t dimCount, vb6_SafeArrayBound bounds[]);
 vb6_SafeArrayND* vb6_SafeArrayReDimND_Udt(int32_t elemSize,
     int32_t dimCount, vb6_SafeArrayBound bounds[]);
-vb6_SafeArrayND* vb6_SafeArrayReDimPreserveND(vb6_SafeArrayND* arr,
-    int32_t dimCount, vb6_SafeArrayBound newBounds[]);
+/* 账 #305 §B155 格④ (第四十三刀): 这一枚也**收 elemType**, 与上面一维那条 _T 同一个决定。
+   此前形参表里没有它, arr==NULL (首次分配就写 Preserve) 时只能按 vb6_sa_empty 建 ——
+   尺寸表对 empty 给 default 档 4 字节, 而访问侧按声明档步进:
+     `Dim p() As String` + `ReDim Preserve p(1 To 2, 1 To 3)` 在 x64 上造 4 字节一步、
+     写 8 字节一步 ⇒ 堆越界 (实测旧编译器 0xC0000374 堆损坏、新编译器 0xC0000005,
+     两条都是响的; Variant 档 24/4 同形)。
+   UDT 不在这一枚 (它走下面的 _Udt, 元素尺寸由调用方的 sizeof 给)。 */
+vb6_SafeArrayND* vb6_SafeArrayReDimPreserveND(vb6_safearray_elemtype elemType,
+    vb6_SafeArrayND* arr, int32_t dimCount, vb6_SafeArrayBound newBounds[]);
 
 // UDT版ReDim Preserve(多维): elemSize由调用方提供
 vb6_SafeArrayND* vb6_SafeArrayReDimPreserveND_Udt(int32_t elemSize,
@@ -244,6 +251,13 @@ vb6_SafeArrayND* vb6_SafeArrayReDimPreserveND_Udt(int32_t elemSize,
 
 int32_t vb6_SafeArrayND_Offset(vb6_SafeArrayND* arr, int32_t dimCount, int32_t indices[]);
 void* vb6_SafeArrayND_GetPtr(vb6_SafeArrayND* arr, ...);
+// 账 #305 §B150: elemType → 单元素字节数 (UDT 档不在这里答, 由描述符自己的 elemSize 说话)。
+int32_t vb6_SaElemSize(vb6_safearray_elemtype t);
+
+// 账 #305 §B155 格①（第四十六刀）: elemType → VB6 的 VarType **元素**码（vbArray 那一位由调用方 OR 上）。
+// 与上面那张尺寸表同一族 —— 「这枚数组是哪一档」只许一处答。认不出的档（empty / udt）回落 variant：
+// 那就是改前每一档的答案。Date 档在这枚枚举里根本没有（数组里的 Date 存成 double），那一格记在 §B159。
+int32_t vb6_SaVtFromElemType(vb6_safearray_elemtype t);
 
 int32_t vb6_UBoundND(vb6_SafeArrayND* arr, int32_t dimension);
 int32_t vb6_LBoundND(vb6_SafeArrayND* arr, int32_t dimension);
@@ -267,7 +281,7 @@ static inline vb6_VARIANT vb6_VariantFromUdtBytes(const void* src, int32_t nByte
     vb6_SafeArray1D* arr = vb6_SafeArrayCreate1D(vb6_sa_byte, 0, nBytes - 1);
     if (!arr) { v.vt = vb6_vtEmpty; return v; }
     memcpy(arr->data, src, (size_t)nBytes);
-    v.vt = vb6_vtArray | vb6_vtByte;    // VT_ARRAY | VT_UI1
+    v.vt = (vb6_vartype)(vb6_vtArray | vb6_SaVtFromElemType(vb6_sa_byte));   /* VT_ARRAY|VT_UI1，问表不写死 */
     v.parray = arr;
     return v;
 }

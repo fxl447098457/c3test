@@ -81,7 +81,7 @@ bool CCodeGen::isScalarImplicitStr159(Vb6Type t) {
 std::string CCodeGen::wrapToBSTR(const std::string& expr, Expr& node) {
     // P24-01: 后期绑定COM调用返回VARIANT*, 需解包为BSTR(必须在vb6_BSTR检查之前)
     // P24-02: Variant数组索引返回vb6_VARIANT, 需转BSTR
-    if (expr.find("vb6_VariantArrayGet") == 0) {
+    if (isVariantSlotElemRead(expr)) {
         return "vb6_VariantToString(" + expr + ")";
     }
     if (expr.find("vb6_ComCall(") == 0 || expr.find("vb6_ComCallByDispid(") == 0) {

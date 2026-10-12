@@ -802,6 +802,23 @@ function Test-BuiltinSlotReturns {
         $out | Select-Object -First 8 | ForEach-Object { Write-Host "  $_" }
     }
 }
+# 账 #305 §B153 (第四十一刀): 「内置出口省略实参时补哪一档」那张表与 RTL / 语义名单逐名对账。
+# 收表之前这个决定在发码侧有 28 位主人, 而答案住在 VB6 形参表与 RTL 的 C 声明里 —— 三份从不汇合:
+# 少一档 = C2198 (实物: §B149 的 DeleteSetting 两参形), 多一档 = 位置错接 (§B121 那格实测段错误),
+# 补错值 = 静默答错 (Mid 省略 length 补 0 曾让 czUI 整屏颜色错)。四个方向都要问, 所以单独一道。
+function Test-BuiltinOptDefaults {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] builtin_opt_defaults ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\check_builtin_opt_defaults.ps1" 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        $out | Select-Object -First 8 | ForEach-Object { Write-Host "  $_" }
+    }
+}
 # 账 #240: RTL 的头与体必须同一张签名（参数个数）。本机那台 cl 在 C 模式下不诊断「实参过多」，
 # 头追不上体的缺陷只有 runner 上新 cl 才报 error C2197 ⇒ 判据不能靠真编，只能对着源码比。
 # 账 #278 §B72 把同一把针往外接两头：发码那几张控件方法表（名字 + 实参个数, 恰好 23 行 =
@@ -2591,13 +2608,39 @@ if ($Category -in @("all", "run", "bas")) {
         #   .c(344) C2440 vb6_VARIANT -> int32_t = IIf(True, CDec(1), CDec(2)) + 1
         # 所以前四枚针是「编不过就整条夹具红」那一类，红面在编译而不是读数。CVErr/GetAllSettings
         # 那三条在 BASE 上编得过 (VarType 的形参本来就是槽)，它们是**读数证人**：vt=10 是
-        # VT_ERROR、IsError 答 True，与 VB6 同档；reg-vt=12 / reg-isnull=False 只钉「内置出口
-        # 交出的槽能走到 Variant 目标」这个形状 —— VB6 这里答 Null，RTL 的简化实现答 12
-        # (vb6rtl_registry.c:113)，那条口径差另立在 §B149 的开放项里，不在本格。
+        # VT_ERROR、IsError 答 True，与 VB6 同档。reg-* 两条原本只钉「内置出口交出的槽能走到
+        # Variant 目标」这个形状 —— 那时 RTL 交 12/False，与 VB6 的 Null 差一层，记在 §B149。
+        # 第四十刀把 §B149 格①② 修成 VB6 口径之后，**门 #538 正是把这两枚针打红的** ⇒ 它们从来
+        # 不只是形状证人，而是把当时的错答钉死的判据 (这一格顺带证明「证人会红」)。现在按真跑
+        # 读数改钉 Null 那一档：vt=1 / isnull=True，两台逐行相同 (.build/b1306_box/r6.txt / r3.txt)。
         "VB-b146-dec-add=1234568", "VB-b146-dec-vt=14", "VB-b146-dec-tn=Decimal",
         "VB-b146-dec-dbl=2.5", "VB-b146-iif=2",
         "VB-b146-err-vt=10", "VB-b146-err-iserr=True",
-        "VB-b146-reg-vt=12", "VB-b146-reg-isnull=False", "VB-DONE")
+        "VB-b146-reg-vt=1", "VB-b146-reg-isnull=True",
+        # 账 #305 §B160 (第四十八刀): 一枚**数组变量**递给 ByRef Variant 形参。改前发码交的是
+        # `&arr` = 描述符指针的地址, 而被调方按 vb6_VARIANT* 解析 = 静默垃圾 (BASE 真跑读数
+        # VarType 40320 / TypeName "Variant"; 探针 .build/k47probe/p47proj —— 而且 cl 只给一条
+        # 不兼容指针的警告, BUILD-RC=0、一个错误都不打印, 所以这一族以前"看着是好的"。现在落
+        # 一枚具名临时槽, 装箱仍走第四十六刀那枚载体出口 ⇒ 标签问描述符自己: Byte()=8209 /
+        # Long()=8195, 固定一维与多维折叠 (ND 描述符投成 1D 载体) 两形同样答对。
+        # byte-evt=2 **不是** VB6 的答案 (那一档该 17/Byte): 元素读那张表
+        # (vb6_VariantElemFromSlotData, vb6rtl_com.c) 把 vb6_sa_byte 折成 VT_I2, 已按 §B159 的
+        # 口径另记一格。这一枚针是形状证人、不是认可 —— 谁修那张表这一行就该红 (val=65 一直对,
+        # 坏的只有档名)。
+        "VB-b160-byte=8209/Byte()", "VB-b160-byte-evt=2", "VB-b160-byte-val=65",
+        "VB-b160-long=8195/Long()", "VB-b160-long-evt=3", "VB-b160-long-val=300",
+        "VB-b160-fixed=8195/Long()", "VB-b160-fixed-evt=3", "VB-b160-fixed-val=77",
+        "VB-b160-nd=8195/Long()",
+# 第四十九刀 (§B161): 同样五条针, 但数组是**模块级**的 —— 那一族以前被 inferExprType
+# 答成元素档, 于是分箱走标量臂、把描述符指针塞进标量槽: 实测 m-long=3/"Long"、
+# m-byte=17/"Byte"、m-str=8/"String" (String() 那一臂连 cast 都没有), 而元素读静默答
+# evt=0 val=0 —— 语料里 VBHacks.IsArrayInitialized 那类「摸 SAFEARRAY 指针」的写法因此
+# 一律答「数组没初始化」, 整条分支静默走另一头。修法是「这枚实参是不是数组」那一问提到
+# 分档 switch 之前, 两条臂都落到同一枚装箱出口 ⇒ 模块级也答数组档, String()=8200。
+        "VB-b160-m-long=8195/Long()", "VB-b160-m-byte=8209/Byte()",
+        "VB-b160-m-str=8200/String()", "VB-b160-m-fix=8195/Long()",
+        "VB-b160-m-elem=8195/Long()", "VB-b160-m-elem-evt=3", "VB-b160-m-elem-val=210",
+        "VB-DONE")
     # ⚠ 这里曾经是字面 TAB: `"$Tests<TAB>est_variant_boxing.bas"`。
     # PowerShell 的 "" 里 **`\t` 不是转义**（转义是反引号），所以只要有人把 `\t` 写成真 TAB,
     # 路径就变成 `tests` + TAB + `est_...` —— 门里读到的是 `error VB1006: 无法打开文件`,
@@ -2606,6 +2649,103 @@ if ($Category -in @("all", "run", "bas")) {
     Add-BasTest "test_variant_boxing" "$Tests\test_variant_boxing.bas" $boxNeedles
     # 账 #305: 上面那五条 VB-ptr-*/VB-str-tn 是**两架构同一个答案**那一类, 所以 x86 必须同针同过
     Add-BasTest "test_variant_boxing_x86" "$Tests\test_variant_boxing.bas" $boxNeedles -Arch "x86"
+    # 账 #305 §B149 + §B150 (第四十刀): 注册表家族的真往返 + 晚绑定槽的二维元素读写。
+    # 读数来源 = .build/b1280_rs (新 exe, x64 与 x86 **逐行相同**, 故同针同过); 外部口径证人 =
+    # VB6 真语料 mdoceditor/E-Type/Main.bas:269 (`For i = 0 To UBound(varFiles, 1)` + `varFiles(i, 1)`)。
+    # 改前的四档全错而一声不响 (VarType=12 / IsNull=False / UBound 两维都答 0 / 元素读回空串,
+    # 见 .build/b1265_nd/r6.txt) => 负控 = 拿 BASE 那台跑同一份新夹具, R1/R2/R4 那几条必红。
+    # R3 两枚钉的是「回来的是快照」: 写槽不写注册表 (VB6 同形), 也是「写侧真接到了 ND 落点」的证人。
+    # VB6 的 DeleteSetting 有 1/2/3 参三形。第四十一刀 (账 #305 §B149 格③) 接上了**两参那档**:
+    #   发码按缺省表把 key 补成空串 → RTL 走 RegDeleteKeyW 删整节。一参那档刻意不补 ——
+    #   RTL 在 section 为空时直接 return, 补空串等于把「删应用」静默变成什么都不做 (§B153)。
+    #   R6 三枚钉这个两参形状; 负控 = 同一份夹具在 BASE 那台压根编不过 (C2198 参数太少,
+    #   .build/b1337_r6/b6/c3-error.log 第 87 行)。R6 的读数在 .build/b1337_r6 (两台逐行相同)。
+    # R5 两枚钉的是**同一枚元素的地址**那一形: 发码侧「认这串 C 是不是槽元素读」原先按老名
+    # 比文本, 新那枚多维的名字不认 → VarPtr(v(0,1)) 退成复合字面量 (C2440) 或临时盒 (静默)。
+    # BASE 上这一条实测交 False (地址没找到) ⇒ 针面能红。
+    # ⚠ 变量名刻意不叫 $rsNeedles —— 那名字在下面 rawstr 那一族已经有人用了 (同名后写会盖掉
+    #   前写, PSParser 0 错也照样把针换掉, 见 022 记的「PSParser 0 错而绑定已变」那一族)。
+    $rsSetNeedles = @("R1-miss-vt=1", "R1-miss-isnull=True",
+        "R2-vt=8204", "R2-isnull=False",
+        "R2-lb1=0", "R2-ub1=1", "R2-lb2=1", "R2-ub2=2",
+        "R2-cell01=K1", "R2-cell02=V1", "R2-cell12=V2",
+        "R3-slot-after-write=W2", "R3-registry-unchanged=V2",
+        "R5-elemptr-nonzero=True", "R5-cell01-still=K1",
+        "R4-after-delete-vt=1", "R4-after-delete-isnull=True",
+        "R6-before-vt=8204", "R6-two-arg-delete-vt=1", "R6-two-arg-delete-isnull=True",
+        "RS-DONE")
+    Add-BasTest "test_registry_settings" "$Tests\test_registry_settings.bas" $rsSetNeedles
+    Add-BasTest "test_registry_settings_x86" "$Tests\test_registry_settings.bas" $rsSetNeedles -Arch "x86"
+    # <vbeclipse> 账 #305 §B154（第四十二刀）：ReDim 重建一枚动态数组时，元素档**问声明**，不是问 ReDim 自己
+    # 的 As 子句。修前 cgen_redim.cpp 只问 asType，没写 As 就交 vb6_sa_variant，而访问侧（VB6_SA_AT /
+    # VB6_SA_ND_AT2）问的是声明表 arrayElemTypes_ —— 同一枚描述符两个答案：造出来 24 字节一步（x64），
+    # 写进去 8 字节一步，于是直接读写自己一致（看着是好的），而凡信描述符自己那一档的消费方（Destroy /
+    # Erase / 装箱后的元素读）全走错步长。R3/R4 那两枚 box-cell 就是这个的读数：修前 `v = a` 再 `v(2, 3)`
+    # 与 `v = b` 再 `v(2, 3)` 都读回**空串**（BASE 真跑 .build/b1373_fix/rnb6.txt），修后交 X 与 200。
+    # 负控两形：① 同一份夹具去掉 R8 那一对（BASE 编不过的那条）在 BASE 上真跑 ⇒ 两枚 box-cell 红；
+    # ② 整份夹具在 BASE 上压根编不过（R8 那条 `ReDim x(1, 2)` 打到装箱外的强转 ⇒ cl C2440，
+    # .build/b1373_fix/b6.log）。多维的 Variant 槽那一支（R8）在 BASE 上是**响的**缺陷、在修前从未编过，
+    # 所以它的读数只有 NEW 一台能给 —— 两台（x64/x86）修后逐行相同（.build/b1373_fix/{rf6,rf3}.txt）。
+    # 三枚 *-label-* 在第四十二刀钉的是**当时**的 VarType/TypeName（8204 / "Variant"）：装箱那一句
+    # vb6_VariantArray 把 vt 写死成 vb6_vtArray | vb6_vtVariant、从不问描述符，而 vb6_TypeName 没有
+    # 数组分支（§B155 格①②）。第四十六刀把这两处改成问那张新档表，于是这三枚翻成声明那一档
+    # （String 数组 8200/"String()"、Long 数组 8195/"Long()"）—— 当时的红就是本刀的判据。
+    # 同一段落的第四十三刀（§B155 格④）在末尾接上 R10..R14：多维数组**首次分配就走 Preserve** 那一形。
+    # vb6_SafeArrayReDimPreserveND 的形参表里原本压根没有 elemType，arr==NULL 时只能按 vb6_sa_empty 建
+    # （尺寸表对 empty 答 default 4 字节），而访问侧按声明档走步长（x64：String 8、Variant 24）⇒ 写出去
+    # 就在块外。这一族是**响**的：只含这一形的探针 .build/b1395_k43/pr2.bas 两台并排跑，修前那台
+    # 0xC0000005 且一个字都没打印（rpb2.txt = 0 字节），修后 exit 0 并把 Y11-box-cell=six 打出来；
+    # 更早那份 z.bas 探针在修前还见过 0xC0000374（堆损坏）与一次侥幸跑完 —— 三种死法同族，不钉死数。
+    # **R10/R11/R12/R14 这四枚直接读写不是分辨针**：修前那边写与读用的是同一枚错步长，自己一致，
+    # 实测在修前的编译器上照样打出同样的值（drive3.log 的 BASE 段）；它们钉的是「本刀不许把已对的形状
+    # 改坏」，分辨只靠 R13-box-c23 那一枚（装箱后的元素读问的是描述符自己的档）。
+    # 同一段落的第四十四刀（§B156）把上面那句「绕开」取消了。那枚界临时量以前按**数组名**拼，
+    # 于是同一过程里对同一枚数组发第二条多维 ReDim 就把同一个 C 标识符声明两遍 ⇒ cl C2374
+    # 「重定义」（两台同形，.build/b1395_k43/n6/c3-error.log；独立探针 pr3.bas 在修前的编译器上
+    # 也压根编不过，.build/b1403_k44probe/pb3/c3-error.log）。修法 = 按**语句**唯一化：两个发码点
+    # （plain 与 complex target）都问同一枚出口 nextNDBoundsTemp（cgen_redim.cpp），序号跟
+    # tempCounter_ 一起在过程头复位。R15 就是这一形 —— 修前编不过、修后两台真跑。
+    # 第四十五刀（§B158）是 R14/R15 都看不见的那一格：两枚多维 Preserve 搬旧元素用的下标算术跟
+    # 访问侧那两套**反着**（它按「最后一维最快」，而 vb6_SaNdElemPtr 与 vb6_SafeArrayND_Offset 按
+    # 「第 0 维最快」），于是「长一格」把两套算术不同意的那些格搬到别处去。R14/R15 只读 (1, 1) 或
+    # 只读增长**之后**才写下的那一格 —— 恰好落在两套算术一致的地方，所以它们在修前也全绿、什么
+    # 都没测。分辨针是 R16：六格全在增长之前写、之后逐格读回来。同一形状的单发探针 pr4.bas 给两头
+    # 读数（修前 .build/b1403_k44probe/rpn4_pre45.txt：POST-1-3 是空的、r2c2 跑到 POST-1-4、r2c3 跑到
+    # POST-1-5、r1c3 跑到 POST-2-4；修后 .build/b1405_k45build/{rk5b6,rk5b3}.txt 两台一致，且与 BASE
+    # 那台 rpb4.txt 逐行相同）。负控 = 一枚只差第四十五刀 RTL 的编译器：整份夹具只有 R16 那三行改
+    # 色（R16-keep=a11/a12/ 与 R16-keep2=b21// 与 R16-new=b22| ub2=6），其余 26 行逐字不动，
+    # 读数 .build/b1405_k45build/rng6.txt；两台修后读数 .build/b1405_k45build/{rk5n6,rk5n3}.txt。
+    $reNeedles = @("R1-cell=A",
+        "R1-label-vt=8200 tn=String()",
+        "R2-preserve-cell=A ub=6",
+        "R3-cell=X", "R3-ub2=4 lb2=1", "R3-box-cell=X", "R3-label-vt=8200 tn=String()",
+        "R4-cell=200", "R4-box-cell=200",
+        "R5-cell=77", "R5-ub1=2 ub2=2", "R5-label-vt=8195 tn=Long()",
+        "R6-ub2=2", "R7-cell=V vt=8204", "R8-cell=S", "R9-cell=Z",
+        # 第四十三刀 R10..R14 的读数是 .build/b1395_k43/{rn6,rn3}.txt 两台逐行量出来的
+        # (两架构输出 diff 为空)；只有 R13-box-c23 在修前的编译器上红，其余四枚是防改坏的钉。
+        "R10-c11=one c23=six", "R10-ub2=3 lb2=1",
+        "R11-c11=v11 c22=v22", "R12-c12=7 c23=200",
+        "R13-box-c23=six", "R14-kept=keep grown=later", "R14-ub2=6",
+        # 第四十四/四十五刀接上 R15..R16：读数同样是两台逐行量出来的（上面那段的工件路径），
+        # 两架构 diff 为空。R15 在修前的编译器上是硬错误（编不过），R16 在只差第四十五刀的那台
+        # 上是唯一会红的三枚 —— R14/R15 在那台上照样绿。
+        "R15-kept=g11 ub2=5", "R15-cell=g24",
+        "R16-keep=a11/a12/a13", "R16-keep2=b21/b22/b23", "R16-new=| ub2=6",
+        # 第四十六刀（§B155 格①②）把上面三枚 *-label-* 从 8204/"Variant" 翻成声明那一档
+        # （读数 .build/k46run_both.txt，两台 42 行逐行相同）。R17 一族是新针：一张表每一档
+        # 都要有人读，没人读的那一档下次改表时没人拦。R17-date 交 8197/"Double()"（枚举里
+        # 压根没有 Date 档）、R17-udt 与 R17-undim 回落 8204/"Variant()" —— 这三格刻意不
+        # 假装对，记在 §B159。R17-boxed 是「标签与描述符必须同一张表」的那枚证人。
+        "R17-bool-vt=8203 tn=Boolean()", "R17-byte-vt=8209 tn=Byte()",
+        "R17-int-vt=8194 tn=Integer()", "R17-long-vt=8195 tn=Long()",
+        "R17-sing-vt=8196 tn=Single()", "R17-dbl-vt=8197 tn=Double()",
+        "R17-cur-vt=8198 tn=Currency()", "R17-date-vt=8197 tn=Double()",
+        "R17-obj-vt=8201 tn=Object()", "R17-udt-vt=8204 tn=Variant()",
+        "R17-boxed-vt=8195 tn=Long() cell=4242", "R17-boxw=4242", "R17-undim-vt=8204 tn=Variant()",
+        "RE-DONE")
+    Add-BasTest "test_redim_elem" "$Tests\test_redim_elem.bas" $reNeedles
+    Add-BasTest "test_redim_elem_x86" "$Tests\test_redim_elem.bas" $reNeedles -Arch "x86"
     # <vbeclipse>: vbTextCompare 六个入口对表 (InStr 两形/InStrRev/Replace/Split/Filter/
     # StrComp)。修复前 RTL 5 处 (void)compare + InStr 第 4 参被截、三参"字符串优先"形
     # 错接槽位 (实测段错误)；另修 Debug.Print StrComp(...) 被 "vb6_Str" 前缀误判成 BSTR
@@ -5730,6 +5870,7 @@ if ($Category -in @("all", "compile")) {
     Test-RtlNakedNames
     Test-RtlResourceIds
     Test-BuiltinSlotReturns
+    Test-BuiltinOptDefaults
     Test-RtlProtoArity
     Test-RsRecordsetShape
     Test-SbPanelHm

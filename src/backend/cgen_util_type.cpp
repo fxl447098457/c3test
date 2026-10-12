@@ -793,6 +793,9 @@ bool CCodeGen::cExprIsVariant(const std::string& cExpr) const {
     //   指针返回也不进表: vb6_VariantArrayElemPtr 交回 vb6_VARIANT*(槽的地址), 不是槽。
     static const std::vector<std::string> variantPrefixes = {
         "vb6_VariantArrayGet(",
+        // 账 #305 §B150: 秩 ≥ 2 的晚绑定槽元素读走这一枚新出口 (variantSlotElemRead 按实参
+        //   个数二选一)。不登记 = 表只认识单下标那一形, 新出口发出去下游按裸标量读它。
+        "vb6_VariantArrayGetND(",
         "vb6_VariantFromComResult(",
         "vb6_VariantFromStackVARIANT(",
         "vb6_VariantFromValue(",
@@ -1438,4 +1441,76 @@ std::string CCodeGen::narrowCheckAssign(Expr* target, Expr* value,
     return std::string(fn) + "(" + cValue + ")";
 }
 
+// ============================================================
+// 账 #305 §B150 (第四十刀): 晚绑定槽 (Variant 变量 / 形参 / 字段) 的元素读与写
+// ============================================================
+// 秩数由**实参个数**决定: 一枚走 vb6_VariantArrayGet/Set (既有语义, 存量产物逐字节不变),
+// 两枚及以上走 GetND/SetND —— 那两枚出口把下标一次交全, 上下界与错误 9 由 RTL 里唯一一枚
+// vb6_SaNdElemPtr 管 (账 #209 那一族的口径)。
+std::string CCodeGen::variantSlotElemRead(const std::string& slotArg,
+                                          const std::vector<ExprPtr>& positional) {
+    std::vector<std::string> idxs;
+    for (const auto& e : positional) {
+        if (!e) continue;
+        emitExpr(*e);
+        // Fix 084o: 索引为 Variant 时转 Long (这些出口的形参都是 int32_t)
+        idxs.push_back(toLongIfVariant(std::move(lastExpr_), e.get()));
+    }
+    if (idxs.size() <= 1) {
+        return "vb6_VariantArrayGet(" + slotArg + ", " + (idxs.empty()
+                          ? std::string("") : idxs[0]) + ")";
+    }
+    std::string call = "vb6_VariantArrayGetND(" + slotArg + ", " +
+                       std::to_string(idxs.size());
+    for (const auto& s : idxs) call += ", " + s;
+    return call + ")";
+}
+
+// 账 #305 §B150 (下半): 一张表管「槽元素读」的三种名 —— 读、取址、写。参数形态三者
+// 完全同形 (槽 [, 秩数] , 秩数个下标 [, 末尾一枚盒]) —— 秩数那格就是为「只换函数名」
+// 这一件事设计的 (GetND/SetND 的形参表见 vb6rtl_com.c)。发码侧凡是
+// 拿**已发出的 C 文本**问「这是不是一枚槽元素读」的地方一律进这张表: 以前六处各抄一遍,
+// 而两种抄法 (带不带尾括号) 对本刀的新名答案相反 ⇒ 同一形在 VarPtr 路是 C2440, 在 Set
+// 路是整条赋值被静默丢掉。取址那条越界交错误 9 (vb6_SaNdElemPtr 的口径, 账 #209 那一族),
+// 与一维那枚返 NULL 的既有语义刻意不同 —— 一维那条不在本格。
+namespace {
+struct SlotElemForms {
+    const char* get;
+    const char* addr;
+    const char* set;
+};
+const SlotElemForms kSlotElemForms[] = {
+    { "vb6_VariantArrayGet(",   "vb6_VariantArrayElemPtr(",   "vb6_VariantArraySet("   },
+    { "vb6_VariantArrayGetND(", "vb6_VariantArrayElemPtrND(", "vb6_VariantArraySetND(" },
+};
+} // namespace
+
+bool CCodeGen::isVariantSlotElemRead(const std::string& text) const {
+    for (const auto& f : kSlotElemForms)
+        if (text.compare(0, std::char_traits<char>::length(f.get), f.get) == 0) return true;
+    return false;
+}
+
+std::string CCodeGen::variantSlotElemAddrRead(const std::string& text) const {
+    for (const auto& f : kSlotElemForms) {
+        const size_t n = std::char_traits<char>::length(f.get);
+        if (text.compare(0, n, f.get) != 0) continue;
+        if (text.size() <= n || text.back() != ')') return std::string();
+        return std::string(f.addr) + text.substr(n, text.size() - n - 1) + ")";
+    }
+    return std::string();
+}
+
+bool CCodeGen::variantSlotAssignLine(const std::string& target, const std::string& boxedValue,
+                                     std::string& outLine) const {
+    for (const auto& f : kSlotElemForms) {
+        const size_t n = std::char_traits<char>::length(f.get);
+        if (target.compare(0, n, f.get) != 0) continue;
+        if (target.size() <= n || target.back() != ')') return false;
+        outLine = std::string(f.set) + target.substr(n, target.size() - n - 1)
+                  + ", " + boxedValue + ")";
+        return true;
+    }
+    return false;
+}
 } // namespace vb6c3

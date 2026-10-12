@@ -363,10 +363,8 @@
                                     // vb6_VariantArrayGet(&obj.field, idx)
                                     emitExpr(*node.callee);  // emits "obj.field"
                                     std::string fieldExpr = std::move(lastExpr_);
-                                    emitExpr(*node.positional[0]);
-                                    // Fix 084o: 索引为 Variant 时转 Long
-                                    std::string idx = toLongIfVariant(std::move(lastExpr_), node.positional[0].get());
-                                    lastExpr_ = "vb6_VariantArrayGet(&" + fieldExpr + ", " + idx + ")";
+                                                                        // 账 #305 §B150: 秩数 = 实参个数, 这一问只在 variantSlotElemRead 一处答。
+                                    lastExpr_ = variantSlotElemRead("&" + fieldExpr, node.positional);
                                     handled = true;
                                 } else if (mi.type == Vb6Type::Object) {
                                     // Pattern H: UDT void* (Object) 字段 (持有 COM 对象) →
@@ -413,10 +411,8 @@
                         || classVariantMembers_.count(memLowerM)) {
                         emitExpr(*node.callee);  // emits "obj->member  /* class var .X field */"
                         std::string fieldExpr = std::move(lastExpr_);
-                        emitExpr(*node.positional[0]);
-                        // Fix 084o: 索引为 Variant 时转 Long
-                        std::string idx = toLongIfVariant(std::move(lastExpr_), node.positional[0].get());
-                        lastExpr_ = "vb6_VariantArrayGet(&" + fieldExpr + ", " + idx + ")";
+                                                // 账 #305 §B150: 秩数 = 实参个数, 这一问只在 variantSlotElemRead 一处答。
+                        lastExpr_ = variantSlotElemRead("&" + fieldExpr, node.positional);
                         handled = true;
                     } else {
                         // Pattern D: void* COM 字段 → vb6_ComCall(obj->member, L"Item", args, argc)
