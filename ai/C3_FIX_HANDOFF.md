@@ -2372,14 +2372,28 @@ marker、重编，之后 `check_rtl_embedded` 报 **125/125 逐字节相同**。
     - ② **真 COM 实参 = 15 行 / 11 份，而且确认都吃 PackBorrow**：`PropBag.WriteProperty("ImageData", m_ImageData)` 那族 **8 行 / 8 份**（`GDI+透明控件` 三枚 .ctl + `vbalImageList` + `ctlNewTab` + `Charts 2020` 的 LabelPlus/FontMemRes），以及 `oPC.AddPaletteColors m_PF_Colors` 那族 **7 行 / 3 份**（`oPC` = `Dim oPC As Object` + `Controls.Add(App.Title & ".ucProgressCircular", …)`）。PropertyBag 那一族不是纸面推测 —— C3 的 PropertyBag 是 `src/rtl/core/vb6forms/uc/uc_propbag.c` 里一枚**原生 IDispatch**，调用点照发 `vb6_ComCall(bag, L"WriteProperty", …)`，臂里直接读 `pd->rgvarg` ⇒ 「设计期存图」那一格今天静默丢负载（写进去是 Empty，读回来是默认值）。
     - ③ **74 行 / 42 份** 接收者是外部类型库对象（DirectX7 / DAO / ADO / DirectInput）—— 形状正是本格，但那批工程吃的类型库 C3 今天不支持 ⇒ **不可达**，按「先证明可达」不入靶子。
     - ④ **假阳性累计约 115 行**（1887→1772），全部由上面那四轮收紧逐轮交出，没有一轮是凭形状猜的。
-  - **结论与下一步**：可达性已证、暴露面从「1887 行待归因」收成「**15 行真 COM + 33 行 §B160**」。修本格的出口要新写「`vb6_SafeArray1D/ND` → 真 SAFEARRAY」的换算（RTL 里今天只有 `vb6rtl_paramarray.c` 一处建真数组，而且用完就 `SafeArrayDestroy`），所有权按 §B144 那条口径（交出去的那份归对端 `VariantClear`）—— 面不小；**同族里更响也更便宜的是 §B160**，下一刀先做它。
+  - **结论与下一步**：可达性已证、暴露面从「1887 行待归因」收成「**15 行真 COM + 33 行 §B160**（那 33 行后来在第四十九刀分成两档：过程内 Dim 的落 §B160、模块级与形参数组落新格 §B161）」。修本格的出口要新写「`vb6_SafeArray1D/ND` → 真 SAFEARRAY」的换算（RTL 里今天只有 `vb6rtl_paramarray.c` 一处建真数组，而且用完就 `SafeArrayDestroy`），所有权按 §B144 那条口径（交出去的那份归对端 `VariantClear`）—— 面不小；**同族里更响也更便宜的是 §B160**，下一刀先做它。
 
-### B160 把数组递给一枚 `As Variant` 形参：发码交的是**描述符指针的地址**，被调方按槽去读 ⇒ 静默答 40320 / "Variant"（2026-10-12 第四十七刀的探针撞见；**未开工**）
+### B160 把数组递给一枚 `As Variant` 形参：发码交的是**描述符指针的地址**，被调方按槽去读 ⇒ 静默答 40320 / "Variant"（2026-10-12 第四十七刀的探针撞见；**档① 已出** = 第四十八刀 `cc7a35a9`，门 #558 十二 job 里十一绿、唯一红是形状门那一行登记（`da2868e0`）；**但本格只覆盖了 33 行暴露面里「过程内 Dim 的数组」那一档，语料主体那一档是新格 §B161**）
 
 - **读数**（探针 `.build/k47probe/p47proj/` = `Main.bas` + `Sink.cls`，x64 真跑 `.build/k47run_proj/P47Proj.exe`）：工程类 `Public Sub TakeArr(v As Variant)` 被调用点 `s.TakeArr b`（`b` 是 `Long()`）发成 `vb6_Sink_TakeArr(s, &b)`，而形参的 C 型是 `vb6_VARIANT*` ⇒ 被调方 `VarType(v)` 交 **40320**、`TypeName(v)` 交 **"Variant"**；VB6 那一侧交 8195 / "Long()"。**同一枚探针里的对照组就是正解**：把已经装好箱的 `v = a` 递进同一个形参，被调方答 **8209 / "Byte()"** —— 装箱那一路第四十六刀已经通了，缺的只有「数组实参 → Variant 形参」这一步的装箱。cl 侧只给一条不兼容指针的**警告**：BUILD-RC=0、exe 照跑、一个错误都不打印。
 - **暴露面**（`.build/k47_attr7.txt` 的 `callee` 那一栏，判据 = 按实参下标去查被调方那一枚形参的声明）：**33 行 / 12 份**。其中 **26 行是同一枚帮助函数** `VBHacks.IsArrayInitialized(ByRef arr As Variant)`（PhotoDemon 整族在用；它按 `VarPtr(arr) + 8` 去摸 SAFEARRAY 指针，拿到我们描述符指针的地址之后**答「数组没初始化」** —— 不是崩，是整条分支静默走另一头）。**另有 5 行是 `File:=pngBytes` 那形具名实参 ⇒ 我的下标算术吃不下它，这 5 行还没逐行复核**，动针面之前先重数一遍（§B147 那条「认槽」的判据现成）。
 - **同族三格别混**：§B155 格③ = 往盒里**写下标**；§B159 = **出 COM** 那张表没有数组臂；本格 = **进过程**那一步没装箱。三格合起来才是「数组当值用」的整条路。
+- **档① 的覆盖面订正（第四十九刀量到，别拿这一格当整个暴露面）**：探针矩阵 `.build/k48probe/P49Main.bas` 十六枚调用点逐条归因（发码侧 stderr 探针，三处候选站点全打上标记再跑）⇒ **过程内 `Dim` 的数组**（动态、固定一维、多维 ND 三形）确实落到 `cgen_expr_call_arg_emit.inc` 那条 switch 的 `default`，第四十八刀那条判据打到了；而**模块级数组与数组形参**被 `inferExprType` 答成**元素**档，走的是同一张 switch 的标量那几臂 —— 那几臂把描述符指针直接塞进标量字段，本刀的装箱压根没被问过。⇒ 上面那 26 行 `IsArrayInitialized` 在第四十八刀之后**仍是坏的**，归 §B161。
 - **修法（口径先写死再动手）**：数组实参进 `As Variant` / 不带类型那形时，发码改交**一枚临时槽**（`vb6_VARIANT _t = vb6_VariantFromValue(arr); f(me, &_t);`），装箱仍问第四十六刀那枚 `vb6_VariantArray` 载体出口 ⇒ `VarType` / `TypeName` / 元素读回三处一起对上；所有权 = 临时槽与载体都归调用方（借来的视图，与 §B155 那条一致）。**ByRef 回写那一档刻意先不做**：暴露面里 26/33 是只读判断，回写的口径（改完数组要不要搬回调用方描述符）单独定，别在这一刀里顺手猜。
+- **门与判据（档①）**：门 #558（head `cc7a35a9`）—— 十二 job 十一绿，唯一红 = 形状门，差异只有 `tests/test_variant_boxing.bas` 一行（就是这一刀新加 b160 四条针的那份夹具），其余 401 行逐行相同；CI 那台交回的 sha256（`b4082bd1…` → `f625bbfa…`）与本机 `.build/C3.exe` 的 `--emit-c` 重算值一致 ⇒ 已按 CI 读数登记（`da2868e0`），登记后复算绿、覆盖哨兵 K1..K3 绿。判据 = `tests/test_variant_boxing.bas` 里 b160 四条（本地动态 Byte / 本地动态 Long / 本地固定 Long / 本地多维 ND）两台逐行相同；哨兵 = `check_sa_access.ps1` 的 A18（第四十九刀已把那条判据的位置也钉进去）。
+
+### B161 同一形第二档：**模块级数组 / 数组形参**递进 `ByRef As Variant` 时，被按**元素档**分箱 —— 描述符指针塞进标量字段，两台静默答 3/"Long"、17/"Byte"、8/"String"（2026-10-12 第四十九刀；**已出**，门待回填）
+
+- **怎么撞见的**：第四十八刀收线之前拿真语料那一形做 A/B（`.build/k48probe/P49.vbp` = 一枚 `IsArrayInitialized(ByRef arr As Variant)` + 八枚数组形状），发码里**一处装箱都没有** ⇒ 那一刀没打到病人。于是把三处候选站点（`cgen_expr_call_arg_emit.inc` 的两条 switch、`cgen_expr_call_arg_variant.inc` 的 Fix 113j）都插上 stderr 探针重编一台复算 ⇒ **只有站点 A 那一条 switch 被走到**，113j 与第二条 switch 零命中；臂的选择由 `inferExprType(实参)` 决定。
+- **读数**（同一枚探针矩阵，x64/x86 两台逐行相同，`.build/k49base_both.txt`）：
+  - 模块级 `Private mLg() As Long` ⇒ 发 `.vt=VT_I4, .lVal=(int32_t)(mLg)`，被调方 `VarType` 答 **3**、`TypeName` 答 **"Long"**（VB6 交 8195 / "Long()"）；`mBy() As Byte` 答 **17/"Byte"**（该 8209/"Byte()"）；`mSt() As String` 答 **8/"String"**（该 8200/"String()"，且那一臂**连 cast 都没有** —— 裸描述符指针进 BSTR 槽）；模块级固定 `mFx(1 To 3) As Long` 同 3/"Long"。
+  - **元素读静默答空**：被调方 `v(1)` 交 `VarType=0` / `CLng=0`（不是错误 9、也不 AV）⇒ `IsArrayInitialized` 那一族按 `VarPtr(arr)+8` 摸 SAFEARRAY 指针时拿到的是截断过的整数，一律答「数组没初始化」，整条分支静默走另一头。这一形 cl 也不报错（BUILD-RC=0）。
+  - 对照：过程内 `Dim` 的动态/固定/多维三形走 `default` ⇒ 第四十八刀的装箱生效、两台答 8209/8195。
+- **修法（收成一处，两处都归它答）**：把「这枚实参是不是数组本体」那一问**提到分档 switch 之前**（判据仍 = 数组声明表 `knownArrays_`，与元素访问 `VB6_SA_AT` 同一张；排除晚绑定对象 / 工程类实例 / 类数组 / 已是槽的表达式），装箱仍走外面那层 `vb6_VariantFromValue`（第四十六刀的载体出口），发在分档之后、吃的是**进 switch 之前那枚原样名**（`arrRaw92y`）⇒ 两条臂一起落到同一枚具名临时槽 `_vb6_arrarg_N`。第四十八刀住在 `default` 里的那条判据同时**撤掉**（同一问不许住两处）。ByRef 回写仍刻意不做（§B160 口径）。
+- **修后读数**（`.build/k49fix_both.txt`，两台逐行相同）：`m-long=8195/Long()`、`m-byte=8209/Byte()`、`m-str=8200/String()`、`m-fix=8195/Long()`、`m-elem=8195/Long()` 且 `m-elem-evt=3`、`m-elem-val=210` —— 标签与元素读一起对上；b160 原有四条针不动。
+- **判据**：`tests/test_variant_boxing.bas` 加模块级四枚数组（动态 Long / 动态 Byte / 动态 String / 固定 Long）+ 一枚带元素读的针，`tests/run_tests.ps1` 的 b160 名单尾附七条；负控 = 把那条判据的 `> 0` 改成 `> 99` 重编一台 ⇒ 两台退回 BASE 形状（本地那四条也塌回 `16368/Variant()` 一族的垃圾、x86 第二行就断）⇒ 针面真咬着。哨兵 `check_sa_access.ps1` A18 改成钉「一处定义 / 一处使用 / 问数组表一处 / `_vb6_arrarg_` 一处 / `arrRaw92y` 两处 / `argIsArr92y` 零处 / **定义在 switch 之前、装箱在 switch 之后**」，四条假改动逐条报红、复原后绿（`.build/k49_negsent_out.txt`）。
+- **顺带记一笔工具坑**（同族第三次的同一个坑）：哨兵里那条「只剥行注释」的正则写成**真换行**时，PS 的 `[^<NL>]` 会把 CRLF 行尾的 `\r` 当作仍在类内，于是每条 `//` 注释连**下一整行**一起吞掉 ⇒ 站点数被压成 0（这次是 `$beAll` 重建时才发现）。写成字面 `\r\n` 才是对的。
 - **门待回填。**
 
 ### B151 把真二维数组赋给 Variant 槽，槽读回来是 VarType=9 / "Object" 而不是 8204 —— 自家多维描述符被折成一维（2026-10-12 第四十刀量到；**未开工**）
