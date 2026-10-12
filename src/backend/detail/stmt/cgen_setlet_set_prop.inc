@@ -614,13 +614,37 @@
                     // 于是 `ObjPtr(<接口变量>)` 拿到的正是薄指针 (已知 Fix 108c-3 的 `.obj`
                     // 改写只针对 legacy 的 `knownIfaceVars_`, 不碰 ivref), 而 Fix 158e 已把
                     // `PtrToObj` 认成返回 void* 的转换助手 ⇒ 两边是同一个值, 圆回来了。
-                    // 所以只需把裸指针贴回接口指针类型: 没有偏移问题 (不是 &me->__iv_I),
-                    // 也没有引用计数变动 —— 存进去的那 1 次引用在存入时就记在调用方头上,
-                    // 取回只是把同一枚指针还原成变量, 与 B04/B05 的 AddRef/Release 不重叠。
+                    // 所以只需把裸指针贴回接口指针类型: 没有偏移问题 (不是 &me->__iv_I)。
                     // 注意放在上面 `isClassVar || isNewExpr` 之后: 真类实例 / New 仍走
                     // 那条带 AddRef 的路, 这里只兜"裸指针往返"这一种形态。
-                    c_.emitLine(target + " = (vb6_ivref_" + cIdent(v->name) + "*)" + value +
-                                ";  /* tB Interface: PtrToObj/ObjPtr 裸指针往返 (Fix 215) */");
+                    //
+                    // ⚠ 更正 (2026-10-12): 原先这里**既不 AddRef 也不 Release**, 依据是
+                    // "存进去的那 1 次引用在存入时就记在调用方头上, 与 B04/B05 的
+                    // AddRef/Release 不重叠" —— **该前提不成立**。存入侧是
+                    // `ObjPtr(<ByVal 接口形参>)` + `SetWindowSubclass`, 两条都恒等、
+                    // 都不 AddRef, 而那个 ByVal 形参自带的 1 次引用在 SetSubclass 返回时
+                    // 就放掉了; 槽里只剩一枚**借用**指针。
+                    // 而本函数声明出的局部 ivref 变量在 decl 时就被**无条件**登记
+                    // (cgen_localdecl.cpp trackIvrefLocalForRelease / B05), 出过程必发
+                    // `This->vt->Release(This)` ⇒ 净 −1: 第一条子类化消息就把
+                    // `__refcount` 从 1 打到 0 → `vb6_cls_<C>_Destroy(me)`, 而创建方
+                    // (`vb6_StatusBar_CreateStatusBar` 等) 还在栈上用 me ⇒ use-after-free。
+                    // 实测 ComCtlsDemo StatusBar UC: 无页堆 = 事后 0xC0000374 堆损坏
+                    // (fail-fast, 拿不到栈); 挂 IFEO 全堆页堆后当场 AV ——
+                    // `This = &me->__iv_ISubclass` 读**已释放**块 (av read target=0x98b4f38
+                    // = me+8, 与 offsetof(__iv_ISubclass)=8 完全吻合)。
+                    // 计数口径照 B05 兄弟分支: 存旧值 → 覆盖 → AddRef 新 → Release 旧。
+                    const std::string ivCType215 = "vb6_ivref_" + cIdent(v->name) + "*";
+                    const std::string ivOld215 = "__ivold" + std::to_string(ivrefSetSeq_++);
+                    c_.emitLine("{  /* tB Interface B05: Set " + target +
+                                " = PtrToObj/ObjPtr 往返 (Fix 215) */");
+                    c_.indent();
+                    c_.emitLine(ivCType215 + " " + ivOld215 + " = " + target + ";");
+                    c_.emitLine(target + " = (vb6_ivref_" + cIdent(v->name) + "*)" + value + ";");
+                    c_.emitLine("if (" + target + ") " + target + "->vt->AddRef(" + target + ");");
+                    c_.emitLine("if (" + ivOld215 + ") " + ivOld215 + "->vt->Release(" + ivOld215 + ");");
+                    c_.dedent();
+                    c_.emitLine("}");
                     return;
                 } else {
                     // Fix 215b: `Set <接口变量> = <返回项目类实例的表达式>` —— VB6 语义是
