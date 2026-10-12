@@ -41,6 +41,8 @@ BSTR vb6_Spc(int32_t count);
 
 // P22-11: For Each COM collection (IEnumVARIANT) - cgen uses these via void*
 void* vb6_ForEach_Init(void* disp);
+// 账 #257 第十五层: 集合是**工程类实例**时 (不是 IDispatch) 用它的 NewEnum 接口直接建枚举
+void* vb6_ForEach_InitFromEnumIface(void* pEnumRaw);
 int32_t vb6_ForEach_Next(void* enumPtr, void* outVar);  // outVar is VARIANT*
 void vb6_ForEach_Release(void* enumPtr);
 
