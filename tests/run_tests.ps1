@@ -1319,6 +1319,20 @@ function Test-VariantI8Coverage {
         $out | Select-Object -First 6 | ForEach-Object { Write-Host "  $_" }
     }
 }
+function Test-VariantSlotStore {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] variant_slot_store ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\check_variant_slot_store.ps1" 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        $out | Select-Object -First 6 | ForEach-Object { Write-Host "  $_" }
+    }
+}
+
 function Test-RunBudget {
     $script:total++
     Write-Host -NoNewline "  [STATIC] run_budget ... "
@@ -2669,6 +2683,26 @@ if ($Category -in @("all", "run", "bas")) {
         "B165-arr=0|Empty", "B165-DONE")
     Add-BasTest "test_host_decimal" "$Tests\test_host_decimal.bas" $b165Needles
     Add-BasTest "test_host_decimal_x86" "$Tests\test_host_decimal.bas" $b165Needles -Arch "x86"
+    # 账 #305 §B164 形④ (第五十五刀): For Each 的循环变量是一枚 vb6_VARIANT 槽。「把值收进槽」这个
+    # 决定原先只发了一半 —— 站点发「e = <带权值>」却少发普通赋值那条路每次都发的「先清槽」, 于是每
+    # 遍历一个元素就把上一轮那只 BSTR 忘了(实测 BASE 每元素漏 82/71 字节: x64 1,642,496、x86 1,425,408
+    # ÷ 20,000 次)。判据问**每次的增量**, 且四次读数必须都真取到(api=1/1/1/1) —— 缺这条正控, delta
+    # 就可能是"自己减自己"的假零。两个计时窗刻意让循环体一句都不分配(只问 VarType), 否则量进来的是
+    # 形⑤(换算临时串), 两笔账会互相顶包。
+    # 另一半句在本轮实测里现过形: 数组那一站(VB6_SA_AT 裸读)交出去的是**数组自己**那只 BSTR, 槽只是
+    # 借用; 只补 Clear 就会把数组还活着的串 free 掉 —— 实测 arr-sum 从 820 变 813/815。故出口按右值
+    # 是否自有分两路: 自有 = 清+搬(集合/ParamArray 那三站), 借用 = vb6_VariantAssign(清+深拷贝, 数组站)。
+    $b164Needles = @("B164-stores=20000", "B164-api=1/1/1/1", "B164-coll-ok=Y", "B164-arr-ok=Y",
+        "B164-sum=820", "B164-last-len=40", "B164-arr-sum=820", "B164-dec=12/14/Decimal",
+        "B164-held=40/40", "B164-bad=0", "B164-DONE")
+    Add-BasTest "test_fe_slot_leak" "$Tests\test_fe_slot_leak.bas" $b164Needles
+    Add-BasTest "test_fe_slot_leak_x86" "$Tests\test_fe_slot_leak.bas" $b164Needles -Arch "x86"
+    # 发码形状针: 这一对行就是那枚出口的产物, 缺任何一行都是有人把「先清再搬」这个决定又改回一份。
+    Test-EmitcShape "b164_slot_store_shape" @("$Tests\test_fe_slot_leak.bas") @(
+        'vb6_VariantClear(&e);',
+        'e = vb6_VariantFromStackVARIANT(&_fe_var_0);',
+        'vb6_VariantAssign(&e, vb6_VariantFromValue(VB6_SA_AT(BSTR, gArr, _fe_i5)));'
+    )
     # 账 #305 §B149 + §B150 (第四十刀): 注册表家族的真往返 + 晚绑定槽的二维元素读写。
     # 读数来源 = .build/b1280_rs (新 exe, x64 与 x86 **逐行相同**, 故同针同过); 外部口径证人 =
     # VB6 真语料 mdoceditor/E-Type/Main.bas:269 (`For i = 0 To UBound(varFiles, 1)` + `varFiles(i, 1)`)。
@@ -5946,6 +5980,7 @@ if ($Category -in @("all", "compile")) {
     Test-VariantCmpBoxing
     Test-RunBudget
     Test-VariantI8Coverage
+    Test-VariantSlotStore
     Test-EventHandlerNames
     Test-UcInstanceExit
     Test-StaticSentinelRegistration

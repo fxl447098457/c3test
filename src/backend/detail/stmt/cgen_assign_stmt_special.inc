@@ -509,8 +509,10 @@
                             c_.emitLine(fieldAccess084o + " = " + valExpr084o + ";  /* FnRetUdt." + maExpr.memberName + " */");
                             return;
                         case Vb6Type::Variant:
-                            c_.emitLine("vb6_VariantClear(&" + fieldAccess084o + ");");
-                            c_.emitLine(fieldAccess084o + " = vb6_VariantFromValue(" + valExpr084o + ");  /* FnRetUdt." + maExpr.memberName + " */");
+                            // §B164 站⑥: UDT 的 Variant 成员也是一枚槽, 这两行与普通赋值那一站是
+                            // 同一个决定 —— 抄在这里就少一位主人。发码逐字节沿用「清 + 搬」(flag=true)；
+                            // 「这里的右值是不是借来的」按 Fix 232 那一问还没拍(台账 §B164 形⑥)。
+                            emitVariantSlotStore(fieldAccess084o, "vb6_VariantFromValue(" + valExpr084o + ")", true);
                             return;
                         default:
                             c_.emitLine(fieldAccess084o + " = " + valExpr084o + ";  /* FnRetUdt." + maExpr.memberName + " */");

@@ -59,6 +59,20 @@
     // 例如: 整数字面量→vb6_VariantLong, 浮点→vb6_VariantDouble, BSTR→vb6_VariantString
     std::string wrapVariantValue(ASTNode* valueNode, const std::string& cExpr) const;
 
+    // 账 #305 §B164 (第五十五刀): 「把一枚值收进 Variant 槽」这一问的唯一出口。两半句
+    // 是一个决定: ① 放掉槽里原来那份(不放就没人回收)，② 槽对新值必须自己持有(照抄借来的
+    // 指针 = 别人一释放这槽就悬垂)。rhsOwnsValue 答第②问:
+    //   true  右值是这一句刚 mint 的带权值(vb6_VariantFromStackVARIANT / vb6_VariantLong
+    //         那一路) —— 所有权随结构体拷贝移交，Clear + 直赋即可，不必再拷一遍；
+    //   false 右值是借来的(vb6_VariantFromValue(VB6_SA_AT(...)) 交的是**数组自己**那只
+    //         BSTR) —— 走 vb6_VariantAssign(Clear + 深拷贝)。
+    // 少一半会怎样，本轮两台实测都在案: 只有②没有① = 每遍历一个元素漏 81/71 字节；
+    // 只有①没有② = 把数组还活着的串 free 掉(实测 arr-sum 820 变 813/815)。
+    // viaTemp: 右值里出现目标自己(`v = CDate(v)`) —— 先清目标会把右值要读的自己清成 0，
+    // 故先把右值收进栈上临时量再走同一对清+搬。发码形状与第五十四刀那台逐字节相同。
+    void emitVariantSlotStore(const std::string& target, const std::string& expr,
+                              bool rhsOwnsValue, bool viaTemp = false);
+
     // Fix 198: 装箱点上的布尔口径修正. `As Boolean` 在 C 层就是 int16_t (与 Integer
     // 同型), 布尔字面量又是裸 (-1) (int) → 交给 _Generic vb6_VariantFromValue 会分别
     // 选到 short:/int: 分支, 装箱成 VT_I2 / VT_I4: 实测 VarType(b)=2、

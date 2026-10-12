@@ -2333,6 +2333,27 @@ CCodeGen::CtrlDefaultProp CCodeGen::ctrlDefaultPropOf(const std::string& lower) 
 // P8.4: Variant值包装 - 根据表达式类型推断Variant构造函数
 // ============================================================
 
+// 账 #305 §B164 (第五十五刀): 「把一枚值收进 Variant 槽」收成这一枚 —— 清旧值 + 交接新值
+// 是一个决定的两半句，站点不许再各自抄。两半都要: 只抄第二半(裸赋值)每遍历一个元素漏
+// 81/71 字节；只补第一半(Clear)而右值其实是借来的(数组元素那一路)就是把别人还活着的
+// BSTR free 掉。两条都在本轮实测里现过形(台账 §B164 形④)。
+void CCodeGen::emitVariantSlotStore(const std::string& target, const std::string& expr,
+                                    bool rhsOwnsValue, bool viaTemp) {
+    if (!rhsOwnsValue) {
+        c_.emitLine("vb6_VariantAssign(&" + target + ", " + expr + ");");
+        return;
+    }
+    if (viaTemp) {
+        const std::string tmp = "_vc_" + std::to_string(tempCounter_++);
+        c_.emitLine("{ vb6_VARIANT " + tmp + " = " + expr + ";");
+        c_.emitLine("  vb6_VariantClear(&" + target + ");");
+        c_.emitLine("  " + target + " = " + tmp + "; }");
+        return;
+    }
+    c_.emitLine("vb6_VariantClear(&" + target + ");");
+    c_.emitLine(target + " = " + expr + ";");
+}
+
 std::string CCodeGen::wrapVariantValue(ASTNode* valueNode, const std::string& cExpr) const {
     if (!valueNode) return "vb6_VariantEmpty()";
     

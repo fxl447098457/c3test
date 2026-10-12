@@ -359,13 +359,9 @@
             // 修法: 先把 RHS 收进栈上临时量, 再清目标并接管。**临时量刻意不 Clear** ——
             // `target = tmp` 是浅拷贝, BSTR/Dispatch 的所有权随拷贝交给目标, 与原来
             // "把内联临时值赋给目标" 的转移语义一致。
-            const std::string tmp = "_vc_" + std::to_string(tempCounter_++);
-            c_.emitLine("{ vb6_VARIANT " + tmp + " = " + wrappedValue + ";");
-            c_.emitLine("  vb6_VariantClear(&" + target + ");");
-            c_.emitLine("  " + target + " = " + tmp + "; }");
+            emitVariantSlotStore(target, wrappedValue, true, true);  /* §B164 站⑤ 自指右值: 先收临时量再清+搬(形状不变) */
         } else {
-            c_.emitLine("vb6_VariantClear(&" + target + ");");
-            c_.emitLine(target + " = " + wrappedValue + ";");
+            emitVariantSlotStore(target, wrappedValue, true);  /* §B164 站④ 普通赋值: wrapVariantValue 交的是内联临时值 */
         }
     } else if (target.compare(0, 10, "vb6_PA_Get") == 0) {
         // Fix 091c: ParamArray 元素赋值 OutVars(i) = value — vb6_PA_GetXxx 是取值

@@ -306,7 +306,7 @@ void CCodeGen::visit(ForEachStmt& node) {
                 // vb6_VariantFromStackVARIANT (P24-03, 不释放源).
                 // rev37: 槽位已是 vb6_VARIANT 而该函数收 VARIANT* —— 同布局,
                 // 显式转回指针 (改 RTL 签名会波及 vb6rtl_com.c:396 的内部调用).
-                c_.emitLine(varAcc + " = vb6_VariantFromStackVARIANT((VARIANT*)&" + paTmp092q + ");");
+                emitVariantSlotStore(varAcc, "vb6_VariantFromStackVARIANT((VARIANT*)&" + paTmp092q + ")", true);  /* §B164 站① ParamArray: 栈 VARIANT 带权副本 = 自己持有 */
             } else if (elemCType == "BSTR") {
                 c_.emitLine(varAcc + " = vb6_PA_GetBSTR(" + arrRef091f + ", " + idxVar + ");");
             } else if (elemCType == "double") {
@@ -315,8 +315,11 @@ void CCodeGen::visit(ForEachStmt& node) {
                 c_.emitLine(varAcc + " = vb6_PA_GetLong(" + arrRef091f + ", " + idxVar + ");");
             }
         } else if (feVarIsVariant) {
-            c_.emitLine(varAcc + " = vb6_VariantFromValue(VB6_SA_AT(" + elemCType + ", "
-                        + arrRef091f + ", " + idxVar + "));");
+            // §B164 站②: VB 数组元素 —— VB6_SA_AT 是裸读，交出去的是**数组自己**那只
+            // BSTR(借用)，故按「右值不持有」走 Clear+深拷贝。第五十四刀那台在此既不清旧值
+            // 也不复制，于是两种半句各缺一半: 漏一只 BSTR，或把数组的串 free 掉。
+            emitVariantSlotStore(varAcc, "vb6_VariantFromValue(VB6_SA_AT(" + elemCType + ", "
+                                 + arrRef091f + ", " + idxVar + "))", false);
         } else {
             c_.emitLine(varAcc + " = VB6_SA_AT(" + elemCType + ", " + arrRef091f + ", " + idxVar + ");");
         }
@@ -445,7 +448,7 @@ void CCodeGen::visit(ForEachStmt& node) {
             // (ucTabStrip.c 301/353/394). 本过程的 Dim 已把名字登记进 knownVariantVars_,
             // C 侧声明就是 vb6_VARIANT, 故先判它.
             if (knownVariantVars_.count(lower)) {
-                c_.emitLine(varAcc + " = vb6_VariantFromStackVARIANT(&" + feVar + ");  /* P24-05: For Each Variant: VARIANT→vb6_VARIANT */");
+                emitVariantSlotStore(varAcc, "vb6_VariantFromStackVARIANT(&" + feVar + ")", true);  /* §B164 站③ COM 集合: 栈 VARIANT 带权副本 = 自己持有(改前只赋不清, 每元素漏 81/71 B) */
             } else if (knownObjectVars_.count(lower) || knownTypedComVars_.count(lower)) {
                 c_.emitLine(varAcc + " = vb6_ComUnpackObject(&" + feVar + ");  /* P24-05: For Each Object: VARIANT→IDispatch* */");
             } else if (knownClassVars_.count(lower)) {
@@ -455,7 +458,7 @@ void CCodeGen::visit(ForEachStmt& node) {
                 c_.emitLine(varAcc + " = (vb6_cls_" + cIdent(knownClassVars_[lower])
                             + "*)vb6_ComUnpackObject(&" + feVar + ");  /* P24-05: For Each 项目类: VARIANT→IDispatch*→类指针 */");
             } else {
-                c_.emitLine(varAcc + " = vb6_VariantFromStackVARIANT(&" + feVar + ");  /* P24-05: For Each Variant: VARIANT→vb6_VARIANT */");
+                emitVariantSlotStore(varAcc, "vb6_VariantFromStackVARIANT(&" + feVar + ")", true);  /* §B164 站③ COM 集合: 栈 VARIANT 带权副本 = 自己持有(改前只赋不清, 每元素漏 81/71 B) */
             }
         }
         emitStmtList(node.body);
