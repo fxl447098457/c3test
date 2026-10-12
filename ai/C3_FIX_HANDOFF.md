@@ -2365,7 +2365,7 @@ marker、重编，之后 `check_rtl_embedded` 报 **125/125 逐字节相同**。
 - **UDT 数组**：档表对 `vb6_sa_udt` 回落 variant（8204/"Variant()"，实测就是 `R17-udt` 那一条）。VB6 那一侧「把 UDT 数组装进 Variant」没有可抄的口径：`TypeName` 打的是 UDT 自己的名字，而 UDT 名字从没进运行期 —— 与 §B81/#252「控件创建时没记 VB 名/型」同族，**先要有名字，才谈得上打名字**。
 - **Object / LongPtr 数组**：两者都落 `vb6_sa_ptr` ⇒ 8201/"Object()"。VB6 对工程类数组是按对象自己的类型名答（`Dim c() As CommandButton` 打 `CommandButton()`），要的还是元素的名字、不是数组的名字。LongPtr 那一档是 Fix 191 为伪 vtable 特意加进 `vb6_sa_ptr` 的（步长必须是指针宽度），它的 VarType 该答什么本身要先拍口径。
 - **从没 ReDim 的数组**：描述符是 NULL ⇒ 回落 8204/"Variant()"（`R17-undim` 钉的就是这一形）。VB6 在这里是运行时错误「Array not even dimensioned」，与 §B154 末尾那条「`Erase a` 之后 `UBound(a,1)` 交 0」是同一族没拍的口径。
-- **相邻但不同的一格（响度更高）：数组当 COM 实参交出去压根没有那一档 —— 归因已完成（2026-10-12 第四十七刀）**。
+- **相邻但不同的一格（响度更高）：数组当 COM 实参交出去压根没有那一档 —— 归因已完成（2026-10-12 第四十七刀）；**已出 = 第五十刀**。
   - **真跑读数**（探针 `.build/k47probe/p47com.bas`，两台逐行相同，`.build/k47run_both.txt`）：拿 `Scripting.Dictionary` 当对端，五形数组实参**全部交回 0 / "Empty"** —— 装箱进 Variant 槽的那一枚（`v = a`）、裸递的 `Long()`、`String()`、多维 `ReDim nd(1 To 2, 1 To 3)`、以及 ND 折成一维指针那一形，一律静默交空。两条证人钉住「读回那一路本身是通的」：`N5 scalar=3 val=42`、`N6 str=8 val=hello`、`N7 count=6`；同一片里 `N8 boxedvt=8209 directvt=8195` ⇒ **槽里那一档第四十六刀已经答对，丢的是出站的表**（`vb6_VariantPackBorrow` 无数组臂 ⇒ `default: VT_EMPTY`）。
   - **语料归因**（`.build/k47_attr7.txt`；脚本 v3→v7 收紧了四轮，每一轮的判据都先用正控验过）：**实参位上递数组**的形状 = 1887（粗筛 按行）→ 1815（要求数组落在那条调用的实参跨度内）→ 1806（撤掉 `HDTF.pszText = StrPtr(Buffer)` 那形属性写左值）→ **1772**（遮掉字符串字面量：`PropBag.ReadProperty("InitBands", 0)`、`Debug.Print "…pal"`、`DDSBack.DrawText … "ARMA "` 匹配到的都是**字面量里的名字**）。
     - ① **in-project 调用 = 1598 行（90%，接收者是本工程类/模块/`Me`）**。再看被调方那一枚形参声明成什么：**1516 行本来就写成 `As T()`**（VB6 递数组的正格），实测发码 = 直调 `vb6_<类>_<方法>(me, &arr)` 对 `T**` 形参 —— 形状本来就对，**不打进本格的靶子**（这一族是 §B160 的对照组，不是它的病人）。
@@ -2380,6 +2380,16 @@ marker、重编，之后 `check_rtl_embedded` 报 **125/125 逐字节相同**。
   - **入站（真 VARIANT → 我们的槽）另开一格 §B162**：`m_PF_Colors` 那 7 行的接收者 `oPC` 是 `Controls.Add(App.Title & ".ucProgressCircular", …)` 造出来的   **自家 UC** ⇒ 那一趟的对端是我们自己的 IDispatch 服务端，走 `vb6_VariantBorrowIntoSlot`(:640) —— 体里既无 `VT_ARRAY` 也无 `vb6_vtArray`。   那一半还带一条未决口径（借 vs 拷：借来的描述符指向对端的 `pvData`，存活期只有这一趟 `Invoke`），所以分开做、别混在这一刀里。
   - **可达元素的宽度**（15 行的元素档一次数完，判据不用猜）：`m_ImageData()` 六行**全是 `As Byte`**（`GDI+透明控件` 的 QQButton/QQImage/UserControl1 各一份 + 一份旧拷贝），   `m_PF_Colors()` 七行**全是 `As Long`**（`ucProgressCircular.ctl:248`）⇒ 两档都是 **blittable、一维、动态 `ReDim`、非 NULL**。   v1 只接 Byte→VT_UI1 / Long→VT_I4（同宽度的 Integer/Single/Double 顺手，反正表里现成）；**String() / Variant() / UDT 元素的深拷贝刻意不做**，   那一档继续答 VT_EMPTY、另记一格（照 §B144「不知道就别说知道」的口径）。多维真语料 0 处，但 `SAFEARRAYBOUND[]` 本来就吃秩数，两支一起发不额外冒险。
   - **档表仍只问一处**：新建 SAFEARRAY 的 `vt` 只能问第四十六刀那两枚 `vb6_SaVtOfArrayPtr` / `vb6_SaVtFromElemType`（§B155 格①②），   哨兵 A17 已经把「又自己折一档」钉红。动 RTL ⇒ 必须 touch `c3rtl.rc` 再重编 C3.exe（§B156 那条：只改 `src\rtl` 不 touch rc，探针测的是旧 RTL 而且看着完全正常）。
+
+- **已出（2026-10-12 第五十刀 = 出站那一臂 + 发码那一半 + 回程元素表；门待回填）**：上面那条「修法前置读数」里两条口径都被实测推翻，先订正再记账。
+  - **订正①「只补出站那一臂…这一半自成一刀、可验」是错的：还缺发码那一半**。`comPackExpr`（`src/backend/cgen_util_com.cpp` 的 IdentifierExpr 臂）替数组实参挑打包器时问的是 `inferExprType` ⇒ 模块级 `mL()` 发成 `vb6_ComPackInt(mL)`、`mSt()` 发成 `vb6_ComPackBSTR(mSt)`（描述符指针进 BSTR 槽 = 越界读），与 §B161 那形住过的是同一张 switch。这一刀把「这枚实参是不是数组本体」改问**单一权威** `CCodeGen::isArrayCarrierArgName`（`cgen_util_type.cpp` 新函数 = `knownArrays_` 减 `knownObjectVars_`/`knownVariantVars_`/`arrayClassElemTypes_` 减 `cExprIsVariant`；第四十九刀那一站同时改读它），**秩数护栏 `arrayDimCounts_ <= 1` 只加在 COM 这一站** —— `vb6_VariantFromValue` 的 `_Generic` 压根没有 `vb6_SafeArrayND*` 那一档，ND 会落 `vb6_VariantObject` = 对描述符发一次 VT_DISPATCH 的野 Release（§B85 那一族），多维继续归 §B151。
+  - **订正②「回程不用新代码」是错的：那张元素表只认六档**。两条进口各自手抄过一份元素 switch（`case VT_BSTR: et =` 那形），认不出的档回落 `vb6_sa_variant`、**步长跟着按 `sizeof(VARIANT)`** ⇒ 一枚真 `VT_ARRAY|VT_UI1` 进来被按 24 字节步长 memcpy = **堆越界读**，标签还答 8204/"Variant()"（Byte 那一档实测）。修法 = 在 `vb6rtl_array.c` 里与 `vb6_SaElemSize`/`vb6_SaVtFromElemType` 同处补**反向表** `vb6_SaElemTypeFromVt`（VARENUM→元素档，认不出答 `vb6_sa_variant` = 改前行为），两份手抄撤掉，`VT_ARRAY|VT_UI1`/`VT_ARRAY|VT_BOOL` 补进两条 case 表 ⇒ 哨兵 A17 现在钉「问反向表 3 处 / 手抄 0 处」。
+  - **出站那一臂**：`vb6_ComPackArrayOut`（认 1D 魔数 0x5A1D 或 ND 秩数、要求 `elemSize == vb6_SaElemSize(et)`，`SafeArrayCreate` + `SafeArrayAccessData` + 整块 memcpy）+ `vb6_VariantPackBorrow` 里**数组那一问排在 switch 之前**（改前那枚 `vb6_vtArray|元素码` 的标签对不上任何一条 case ⇒ 一路落 `default: VT_EMPTY`，数组静默变空值）+ 唯一那张可搬白名单 `vb6_ComSaVtBlittable`（bool/int/byte/long/single/double 六档，**出入站同一张表**；串 / Variant / ptr / 货币 / UDT 一律答 0 = 不猜，§B161 记着深拷贝那条没拍的口径）。所有权照上面那条 §B144 的口径，没新拍。
+  - **顺带关掉的漏口**：`vb6_VarArith` 为两枚实参新建的那份真数组，在借用契约里禁 `VariantClear` ⇒ 补显式 `SafeArrayDestroy`（否则 `arr + 1` 每跑一次漏一整条 SAFEARRAY）。
+  - **判据（两台逐行相同）**：夹具 `tests/test_com_latebound.bas` 九条 `VB-b159-*` + 探针 `tests/tools/disp_probe.c` 那条 `CALL=ECHOARR`（两架构各钉一次，见 §B162）。BASE 读数（`.build/k50probe/run_base_*.txt`）：`l`/`by`/`fx`/`nd`/`va` 交 **3/"Long"**、`st` 交 **8/"String"**、`lo` 交 **0/"Empty"**；修后（`run_fix2_*.txt`）`l=8195/Long()`、`by=8209/Byte()`、`bl=8203/Boolean()`、`sg=8196/Single()`、`fx=8195/Long()`、`lo=8195/Long()` 且元素读回 7100、`st=0/Empty`（白名单外那一档改交空值，不再交指针）。
+  - **两条行为负控都真红**（`.build/k50_neg2.py` 撤→重编→复测→按 md5 复原）：白名单里抽掉 `case vb6_sa_byte:` ⇒ `VB-b159-mb` 从 `8209/Byte()/2/66` 变 `0/Empty/-1(e9)` 而其余八条一字不动；抽掉 §B162 那条入站臂 ⇒ 探针整个进程死在 `ECHOARR` 那一趟 `Invoke` 里（0xC000041D，`CALL=ECHOARR` 那行根本没打印，同一片 AMT/QUARTER/ECHO 全正常）。静态那头四种假改动也逐条报红（`.build/k50_negsent_out.txt`：白名单与反向表不对称 / 数组那一问删掉 / 那一问排到已知变量型之后 / 手抄 switch 回来）。
+  - **语料 A/B 逐行归因**（关改道 vs 开改道两台 `--emit-c` 对行，`.build/k50_row_attrib_u8.txt`）：三份能编的真工程里动的行 = root Charts **14** / ucProgressCircular **10** / ucTreeMaps **2**，每一行都是同一批调用点上打包器换了名字（`WriteProperty` 的 `m_Caption`/`m_PictureArr`/`c_bvData` + `oPC.AddPaletteColors` 的 `m_PF_Colors`）⇒ 打的正是本格那 15 行里的真 COM 那一族，没有旁落。
+  - **刻意留下的一格**：`Dim v As Variant: v = arr`（赋值那一站没装箱）两台仍 **3/"Long"**，读数已钉成 `VB-b159-va`，另开 **§B163**。
 
 ### B160 把数组递给一枚 `As Variant` 形参：发码交的是**描述符指针的地址**，被调方按槽去读 ⇒ 静默答 40320 / "Variant"（2026-10-12 第四十七刀的探针撞见；**档① 已出** = 第四十八刀 `cc7a35a9`，门 #558 十二 job 里十一绿、唯一红是形状门那一行登记（`da2868e0`）；**但本格只覆盖了 33 行暴露面里「过程内 Dim 的数组」那一档，语料主体那一档是新格 §B161**）
 
@@ -2403,11 +2413,25 @@ marker、重编，之后 `check_rtl_embedded` 报 **125/125 逐字节相同**。
 - **顺带记一笔工具坑**（同族第三次的同一个坑）：哨兵里那条「只剥行注释」的正则写成**真换行**时，PS 的 `[^<NL>]` 会把 CRLF 行尾的 `\r` 当作仍在类内，于是每条 `//` 注释连**下一整行**一起吞掉 ⇒ 站点数被压成 0（这次是 `$beAll` 重建时才发现）。写成字面 `\r\n` 才是对的。
 - **门**：门 **#560**（head `2e5c07b3`）十二 job 十一绿，唯一红 = 形状门，差异只有 `tests/test_variant_boxing.bas` 一行（正是这一刀加 b161 七条针的那份夹具），其余 401 行逐行相同 ⇒ 按 CI 那台的读数登记（`f2ebf8bf`：`f625bbfa…` → `f7bd0d50…`，与本机 `--emit-c` 重算值一致）；验证轮 **#561**（head `f2ebf8bf`）**十二 job 全绿** ⇒ 登记后的清单与 CI 那台逐行相同。同一轮也顺带复算证实了第四十八刀那次登记（`da2868e0`，那一笔带 `[skip ci]` 没单独跑门）。
 
-### B162 真 SAFEARRAY **递进我们自己的 IDispatch 服务端**时折不回描述符：`vb6_VariantBorrowIntoSlot` 没有数组臂（2026-10-12 第五十刀的量撞见；**未开工**）
+### B162 真 SAFEARRAY **递进我们自己的 IDispatch 服务端**时折不回描述符：`vb6_VariantBorrowIntoSlot` 没有数组臂（2026-10-12 第五十刀的量撞见，**已出 = 同第五十刀**，门待回填）
 
 - **读数**：`vb6rtl_com.c:640` 整条体扫过 —— `VT_ARRAY` / `vb6_vtArray` 各 0 处 ⇒ 入站只搬标量档 + `VT_DECIMAL` + 串/对象，数组递进来落它自己的兜底档。
 - **暴露面**：`oPC.AddPaletteColors m_PF_Colors` 那 **7 行 / 3 份**（`Charts 2020\ucProgressCircular`，`m_PF_Colors()` = `Dim … As Long` 在 `ucProgressCircular.ctl:248`）  —— 接收者是 `Controls.Add` 造出来的自家 UC ⇒ 必走服务端那一半。与 §B159 是同一条往返的两位主人，**别混刀**（§B160/§B161 就是这么分开的）。
 - **未决口径（开工前先拍）**：借 还是 拷 —— 借的那一形描述符直接指对端的 `psa->pvData`，存活期 = 这一趟 `Invoke`（与 `BorrowIntoSlot` 「谁也不接管」的契约一致，  也与 §B155 的载体口径最近），但服务端过程里一编辑元素就是写回对端的数组，且 `VT_ARRAY|VT_BSTR` 借过来编辑串会越界；拷的那一形要有人拆（建一份自己的描述符 + 逐元素搬，  回程 `VariantClear` 归对端）。VB6 语义是数组按引用传（服务端改元素，调用方看得见）⇒ 借才是对的一档，但要钉死「blittable 才借」。
+
+- **已出（2026-10-12 第五十刀，与 §B159 的出站同批；门待回填）**：口径拍成**拷**，理由是实读出来的，不是挑的。
+  - **改前不是「静默空值」而是崩**：撤掉那一臂再跑探针，进程在 `ECHOARR` 那一趟 `Invoke` 里返回 0xC000041D，`CALL=ECHOARR` 那行根本没打印出来（同一片里 AMT/QUARTER/ECHO 全正常 ⇒ 崩在这一格自己）。于是本格从「可押后」变成**本批的承重墙**：§B159 的发码改道若单独上线，语料那 7 行 `oPC.AddPaletteColors` 就从「静默空值」升级成「崩」。
+  - **为什么不能借**：服务端这一趟结束就 `CoTaskMemFree(coercedArgs)`（`vb6comserver_obj.c`，槽阵列是 calloc 的、逐槽清空后释放），而 VB 代码会把这枚 Variant 存进变量、带出这次调用 ⇒ 借来的 `psa->pvData` 在那之后就是悬垂的。
+  - **落的形状**：`vb6_VariantArrayIntoSlot`（白名单与出站**同一张表**；元素档认不出、认出来的档与真数组的 vt 不是同一档、或秩数 >1 ⇒ 一律交回 `vb6_vtEmpty`）+ 导出的 `vb6_VariantSlotRelease(void*)`，在服务端那句 `CoTaskMemFree` 之前逐槽调用。`vb6_VariantClear` 不碰数组标签（第四十六刀定下的非拥有先例）⇒ 不会双释放。
+  - **VB6 的「数组按引用传」那一半刻意不做**：回写与 §B160/§B161 的 ByRef 回写是同一条口径，补的时候两头一起补。
+  - **真跑读数（两台同形，已进门）**：`CALL=ECHOARR hr=0x00000000 resultvt=8195 arrvt=8195 dims=1 lo=0 hi=2 arrsum=60` —— 一枚真 `VT_ARRAY|VT_I4`（元素 10/20/30，界 0..2）进服务端、被 `EchoVal` 原样交回、客户端按真 SAFEARRAY 读出界与元素和。`arrsum` 只能来自入站那份**拷贝**的元素（出站那一步是新建 SAFEARRAY + 搬自己的 `data`）⇒ 这一条同时是「描述符真的可用」的证人，不只是「指针活着回来了」。
+
+### B163 `Dim v As Variant: v = <数组名>`：赋值那一站没装箱，槽读回来是 3 / "Long"（VB6 交 8195 / "Long()"）（2026-10-12 第五十刀的量撞见；**未开工**）
+
+- **读数**（`.build/k50probe/run_base_*.txt` 与 `run_fix2_*.txt`，两台逐行相同）：模块级 `Private b159L() As Long`（已 `ReDim`、元素有值）赋给 `b159Va As Variant` 之后把这枚 Variant 递过 COM，对端读回 **3/"Long"**、`UBound` 交错误 9 —— 第五十刀把出站的表补好了，可这一形在**发码**那一步就把数组折成了元素档，压根没带着数组标签走到表跟前去。同一份探针里的 `nd`（多维）也是 3/"Long"，但那是 §B151 的形状，别混进本格。
+- **与同族的关系**：§B160/§B161 修的是**实参位**（发码在调用那一站装箱，判据 = `isArrayCarrierArgName`）；本格是**赋值**那一站。修法大概率还是同一问 —— 但要先量「`v = arr` 的发码路今天由谁答」（赋值走的是 AssignMove 那一路，不在 `cgen_expr_call_arg_emit.inc` 那条 switch 里），别照 §B161 的形状抄。
+- **判据已经先钉上了**：`VB-b159-va=3/Long/-1(e9)` 钉的是**还没修**的读数 —— 谁修了它这一行会红，那时按新读数重钉并回来本格收线。同一形状旁边另有 `mu`（从没 ReDim = NULL 载体）与 `ms`（String() = 白名单外）两条，那两条读数是对的，不许顺手改。
+- **开工前先量的覆盖面**：真语料里「先赋给 Variant 再递过 COM」那一形（PropertyBag 那族有没有绕这一路的）没数过；§B149/§B150 讲的是**晚绑定槽元素**读写，与本格的整枚数组赋值不同形。
 
 ### B151 把真二维数组赋给 Variant 槽，槽读回来是 VarType=9 / "Object" 而不是 8204 —— 自家多维描述符被折成一维（2026-10-12 第四十刀量到；**未开工**）
 
