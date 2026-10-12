@@ -2655,6 +2655,20 @@ if ($Category -in @("all", "run", "bas")) {
     Add-BasTest "test_variant_boxing" "$Tests\test_variant_boxing.bas" $boxNeedles
     # 账 #305: 上面那五条 VB-ptr-*/VB-str-tn 是**两架构同一个答案**那一类, 所以 x86 必须同针同过
     Add-BasTest "test_variant_boxing_x86" "$Tests\test_variant_boxing.bas" $boxNeedles -Arch "x86"
+    # 账 #305 §B165 (第五十四刀): 宿主存值腿(Host + 内建 Collection 那五站)以前是一张九档手抄表,
+    # Date/Currency/I8/Decimal 全落 default => Empty —— 实测 c.Add CDec(5) 之后取回 0|Empty,
+    # 两台逐行相同(.build/k54_p/x64b.out / x86b.out)。改后问那两枚权威(布局 = BorrowIntoSlot,
+    # 所有权 = ValueCopy), 两台都答 14|Decimal|5; x86 那一台借用回来是一枚悬空指针,
+    # 读回 2066035336255469780997 那一类数 —— B165-two 钉的就是「两枚 Decimal 各拿一份」。
+    # B165-arr 是刻意不收的那一形(数组归 §B159/§B161), 读数与改前同为 0|Empty = 反面证人;
+    # B165-str / B165-long / B165-rem 是「别把串那档与释放侧的收支改坏」的证人。
+    $b165Needles = @("B165-box=14|Decimal|5", "B165-coll=14|Decimal|5", "B165-two=5/7",
+        "B165-fe-1=14|Decimal|5", "B165-fe-2=14|Decimal|7", "B165-str=8|String|abc",
+        "B165-long=3|42", "B165-rem=3/7/42",
+        "B165-elem=5/7", "B165-whole=5/7/5",
+        "B165-arr=0|Empty", "B165-DONE")
+    Add-BasTest "test_host_decimal" "$Tests\test_host_decimal.bas" $b165Needles
+    Add-BasTest "test_host_decimal_x86" "$Tests\test_host_decimal.bas" $b165Needles -Arch "x86"
     # 账 #305 §B149 + §B150 (第四十刀): 注册表家族的真往返 + 晚绑定槽的二维元素读写。
     # 读数来源 = .build/b1280_rs (新 exe, x64 与 x86 **逐行相同**, 故同针同过); 外部口径证人 =
     # VB6 真语料 mdoceditor/E-Type/Main.bas:269 (`For i = 0 To UBound(varFiles, 1)` + `varFiles(i, 1)`)。

@@ -16,6 +16,9 @@
 #   D1  decMust 里每个函数体必须真有 VT_DECIMAL 档 —— 与 V3 同形，只是问的是另一档
 #   D2  闭合性按**档**算：每一处站点的宿主函数在 Decimal 这一档也必须二选一（decMust 或 decExempt）
 #   D3  decExempt 的每条理由不许是空话（少于 12 字 ⇒ 红），豁免必须说清「为什么不答这一档」
+#   C1  「往里读」那一族的核只许一枚 switch，两枚公开薄壳的体里不许再出现 switch
+#   C2  值档(BSTR + x86 DECIMAL)的「谁分配谁释放」只许住 vb6_VariantValueFree / ValueCopy 这一对;
+#       宿主环那五站(取回/清值/存集合/取一份/删)必须转问它们，且体里不许再出现自己的 vt 表
 #
 # 账 #305 §B145 之后「槽 -> 真 VARIANT」那一族只有一张表(vb6_VariantPackBorrow)：出站打包(V3 名单里
 # 原来是 vb6_ComPackVariant)与 Variant 算术都读它，所以名单换名不换数量——两处各写一遍的那些年，
@@ -29,6 +32,11 @@
 #   分诊表就住在 detail/*.inc 里，改前压根不在 census 眼皮底下)。放宽之后站点 13 -> 19，
 #   每一张都重新逐张归过因(must 里 13 名 / exempt 里 9 名)，V1 的下限跟着钉成 19。
 #   ⚠ 放宽正则之后**再写一张新表就一定红**：它必须在某一档上二选一(答它 / 写明为什么不答)。
+# 账 #305 §B165 (第五十四刀): 上面那 19 张里有一张是宿主存值腿(vb6_Host_FromWinVariant)的九档表,
+#   它当年进 exempt 是因为 x86 的 Decimal 槽里装的是一枚指针、借用回来存进集合就悬空(实测读回
+#   2066035336255469780997 那一类数)。本刀撤了那张表(改问 §B144 的布局权威 + 本刀新立的所有权出口),
+#   站点 19 -> **18**，两条豁免随表一起撤;「这一格从此怎么办」由新规则 C2 钉住 ——
+#   环上五站转问那一对出口, 谁再手写一档(或再养一张自己的 vt 表)就红。
 #
 # 用法:  powershell -File scripts\check_variant_i8_coverage.ps1
 # 退出码: 0 = 全绿; 1 = 红
@@ -59,8 +67,8 @@ $exempt = @{
     # 账 #305 §B142 (第五十三刀): 放宽正则之后新见光的三张，逐张归因如下。
     "vb6_EnumNext" = "IEnumVARIANT 取元素那一族，全仓(src + backend + 哨兵)0 个调用者的死码；真 For Each 走 vb6_ForEach_Next。撤不撤由用户拍，先别给它写档"
     "vb6_SaElemTypeFromVt" = "这不是槽表，是 SAFEARRAY 的**元素档**表(§B159 与尺寸表/标签表同族三张)；I8/Decimal 那两档枚举里本来没有，回落 variant 是 §B155 写死的口径"
+# 账 #305 §B165 (第五十四刀): vb6_Host_FromWinVariant 那两条豁免随它那张九档表一起撤了。
     "pb_Read" = "ActiveX 属性包(IPropertyBag::Read)只交回**设计期存过的属性**，写侧那几档由 C3 自己的下发决定；语料里 I8/Decimal 走到属性包的读数 0 处，要补先证明可达"
-    "vb6_Host_FromWinVariant" = "往里读那一族的宿主存值腿：x86 的 DECIMAL 槽里装的是一枚指针，借用回来的指针存进集合/属性就是悬空(实测读回 2066035336255469780997 那一类数) ⇒ 要连着四站一起改，见 §B165"
 }
 
 # Decimal 这一档（§B143）：同一张表要答两档，所以名单也列两份。
@@ -83,7 +91,7 @@ $decExempt = @{
     # 账 #305 §B142 (第五十三刀): 同一批新见光的三张(理由与 I8 名单那三条同形，逐条写不合并)。
     "vb6_EnumNext" = "IEnumVARIANT 取元素那一族，全仓 0 个调用者的死码(§B142 ⑤ 量的)，死码上不写档"
     "vb6_SaElemTypeFromVt" = "SAFEARRAY 元素档表而不是槽表：枚举里没有 Decimal 那一档，回落 variant 是 §B155 写死的口径"
-    "vb6_Host_FromWinVariant" = "宿主存值腿的 x86 DECIMAL 是一枚指针，改问借用权威就悬空 ⇒ 四站(取/存/读/清)一起改才收支对称，见 §B165"
+# 账 #305 §B165 (第五十四刀): 同上 —— 宿主存值腿不再有表, 它的收支由 C2 那五条锚点钉住。
     "pb_Read" = "ActiveX 属性包(IPropertyBag::Read)只把**设计期存过的属性**交回容器，写侧那几档由 C3 自己的下发决定；语料里 Decimal/I8 走到属性包的读数 0 处，要补先证明可达"
 }
 
@@ -110,7 +118,13 @@ $files = @(Get-ChildItem -LiteralPath $rtl -Recurse -File -Include *.c, *.inc)
 $sites = @()
 $bodies = @{}
 $allNames = @($must + $decMust + @($exempt.Keys) + @($decExempt.Keys) + 
-               @('vb6_VariantFromComResult', 'vb6_VariantFromStackVARIANT')) | Select-Object -Unique
+               @('vb6_VariantFromComResult', 'vb6_VariantFromStackVARIANT',
+                 # 账 #305 §B165 (第五十四刀): C2 要读这一对出口与宿主环五站的体 —— 名字不在这张表里
+                 # 就进不了 $bodies, C2 会红在「函数不存在」上(那是假红, 不是发现)。
+                 'vb6_VariantValueFree', 'vb6_VariantValueCopy',
+                 'vb6_Host_FromWinVariant', 'vb6_Host_ClearVariant',
+                 'vb6_coll_push', 'vb6_coll_itemCopy',
+                 'vb6_Collection_Remove')) | Select-Object -Unique
 foreach ($f in $files) {
     $text  = [System.IO.File]::ReadAllText($f.FullName)
     $lines = $text -split "`r?`n"
@@ -164,8 +178,10 @@ foreach ($f in $files) {
 }
 
 # ---------- V1: 覆盖面 ----------
-if ($sites.Count -lt 19) {
-    $bad += ("V1 only " + $sites.Count + " vt switches found under src\rtl (floor 19) -> the glob or the " +
+# 账 #305 §B165 (第五十四刀): 19 -> 18。少的那一张是宿主存值腿的九档表, 它整个撤了 —— 不是漏数:
+# V2/D2 若看见「无人认领」的表会另报红, 而那条环的五个站点由 C2 钉着。
+if ($sites.Count -lt 18) {
+    $bad += ("V1 only " + $sites.Count + " vt switches found under src\rtl (floor 18) -> the glob or the " +
              "regex broke; the closure checks below would be checking almost nothing")
 }
 
@@ -244,10 +260,56 @@ foreach ($shell in @('vb6_VariantFromComResult', 'vb6_VariantFromStackVARIANT'))
     }
 }
 
+# ---------- C2: 值档的「谁分配谁释放」只许住那一对出口 (账 #305 §B165 第五十四刀) ----------
+# 改前这一问住两遍(vb6_VariantClear 里的 rev11 三行 + vb6_VariantAssign 里的 rev16 一段)，而夹在中间的
+# vb6_VariantCopy 压根不认 Decimal ⇒ 任何「只 Copy 不 Assign」的路径在 x86 上都是把 src 那 16 字节的
+# 指针搬进 dst，两边各 Clear 一次 = 二次 free。这一条按形状还能推出两处调点(数组整赋 / ArraySetVariant)
+# 也坏，但 A/B 量不出来(§B165 那一格的六行读数两台相同)；量到真坏的是宿主环那五站 —— 摘掉这一对里的
+# DECIMAL 分配，x86 当场 0xC0000374。五站今天全部转问这一对出口。
+$pairMust = [ordered]@{
+    'vb6_VariantValueFree' = @('vb6_vtBSTR', 'CoTaskMemFree')
+    'vb6_VariantValueCopy' = @('vb6_vtBSTR', 'CoTaskMemAlloc')
+}
+foreach ($fn in @($pairMust.Keys)) {
+    if (-not $bodies.ContainsKey($fn)) {
+        $bad += ('C2 value-ownership authority ' + $fn + ' has no body in src\rtl -> the pair collapsed')
+        continue
+    }
+    foreach ($tok in $pairMust[$fn]) {
+        if ($bodies[$fn] -notmatch [regex]::Escape($tok)) {
+            $bad += ('C2 ' + $fn + ': body lacks ' + $tok + ' -> the BSTR/DECIMAL ownership question is ' +
+                     'being hand-copied somewhere again (that is the shape this knife closed)')
+        }
+    }
+}
+$ringStations = [ordered]@{
+    'vb6_Host_FromWinVariant' = 'vb6_VariantValueCopy'
+    'vb6_Host_ClearVariant'   = 'vb6_VariantValueFree'
+    'vb6_coll_push'           = 'vb6_VariantValueCopy'
+    'vb6_coll_itemCopy'       = 'vb6_VariantValueCopy'
+    'vb6_Collection_Remove'   = 'vb6_VariantValueFree'
+}
+foreach ($fn in @($ringStations.Keys)) {
+    $ask = $ringStations[$fn]
+    if (-not $bodies.ContainsKey($fn)) {
+        $bad += ('C2 host-ring station ' + $fn + ' has no body in src\rtl -> this ring calls it by name ' +
+                 'from five places; check before deleting')
+        continue
+    }
+    if ($bodies[$fn] -notmatch [regex]::Escape($ask)) {
+        $bad += ('C2 ' + $fn + ' no longer asks ' + $ask + ' -> a value 档 is being copied by hand a ' +
+                 'second time; the ring has exactly one authority for alloc/free')
+    }
+    if ($bodies[$fn] -match 'switch\s*\(') {
+        $bad += ('C2 ' + $fn + ' owns a switch again -> the host ring must not keep its own vt table ' +
+                 '(that table is what dropped Date/Currency/I8/Decimal into default)')
+    }
+}
+
 if ($bad.Count -eq 0) {
     Write-Host ("PASS variant_i8_coverage: switches " + $sites.Count + " I8 must " + $must.Count +
                 " exempt " + $exempt.Count + " | DEC must " + $decMust.Count + " exempt " +
-                $decExempt.Count + " | inbound core 1 | violations 0") -ForegroundColor Green
+                $decExempt.Count + " | inbound core 1 | value pair 2 ring 5 | violations 0") -ForegroundColor Green
     exit 0
 }
 foreach ($b in $bad) { Write-Host ("FAIL " + $b) -ForegroundColor Red }

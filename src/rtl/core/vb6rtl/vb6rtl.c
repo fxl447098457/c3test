@@ -441,37 +441,68 @@ void* vb6_VariantToObjectVal(vb6_VARIANT v) {
     return NULL;
 }
 
-// P8.4: Variant清理 - 释放内含BSTR等资源
-void vb6_VariantClear(vb6_VARIANT* v) {
+// 账 #305 §B165 (第五十四刀): 「这一格里哪些档是**带权的**、谁分配谁释放」—— 值档的那一对出口。
+// 改前这一问住两遍(Clear 里 rev11 那三行 + Assign 里 rev16 那一段)，而夹在中间的
+// vb6_VariantCopy 压根不认 Decimal 那一档 ⇒ 任何「只 Copy 不 Assign」的路径在 x86 上都是把
+// src 那 16 字节的**指针**搬进 dst，两边各 Clear 一次就是二次 free。这一刀把两遍合成一遍。
+// 按这一条还能推出另两处调点也坏(vb6rtl_array.c 的 Variant 数组整体赋值、vb6rtl_date.c 的
+// vb6_ArraySetVariant)，但 A/B 量不出来: 改前(k52 那台)与改后 x64/x86 四份读数逐字节相同(§B165)
+// —— 它们是纸面隐患，不是本刀的靶子。量到真坏的是宿主环: 摘掉这一对里的 DECIMAL
+// 分配，x86 当场 0xC0000374(负控 B)。
+// ⚠ 对象那一档刻意不在这对出口里: 加减引用是下面两枚的事(Copy 加 / Clear 放，两枚都用
+// vb6_ComIsDispatchable 判据，裸 HWND 与伪 vtable 一律跳过)。宿主环只问这一对，于是它存的
+// 对象照旧借用不计数 —— 与改前一字不差，见 vb6_Host_FromWinVariant。
+void vb6_VariantValueFree(vb6_VARIANT* v) {
     if (!v) return;
-    // 释放BSTR
     if (v->vt == vb6_vtBSTR && v->bstrVal) {
         vb6_BSTR_Free(v->bstrVal);
         v->bstrVal = NULL;
     }
-    // 释放IDispatch指针
-    if (v->vt == vb6_vtDispatch && v->pdispVal) {
-        vb6_ReleaseObject(&v->pdispVal);
-        v->pdispVal = NULL;
-    }
 #ifndef _WIN64
-    // Fix <vbeclipse> rev11: x86 的 DECIMAL 由 pdecVal 指向外部缓冲, 需释放
+    /* x86 的 DECIMAL 由 pdecVal 指向外部缓冲, 需释放 (原 rev11 住在这里) */
     if (v->vt == vb6_vtDecimal && v->pdecVal) {
         CoTaskMemFree(v->pdecVal);
         v->pdecVal = NULL;
     }
 #endif
+}
+
+// src 的值档拷进 dst: BSTR 另分配一只、x86 的 DECIMAL 另分配一只。**不动 dst 的旧值**
+// (既有契约: vb6rtl_array.c 明写「必须清空(而非 Clear)后再 VariantCopy」)，对象档只搬指针。
+void vb6_VariantValueCopy(vb6_VARIANT* dst, const vb6_VARIANT* src) {
+    if (!dst || !src) return;
+    *dst = *src;  // 浅拷贝
+    if (src->vt == vb6_vtBSTR && src->bstrVal) {
+        dst->bstrVal = vb6_BSTR_FromBSTR(src->bstrVal);
+    }
+#ifndef _WIN64
+    /* x86 的 DECIMAL 由 pdecVal 指向外部缓冲: 上面只搬了指针, 这里必须另分配一只,
+       否则 src 的宿主释放时会把 dst 手里的同一块 free 掉 (二次 free)。
+       账 #305 §B165: 这一段原本只住在 vb6_VariantAssign 里, 现在住在这一问的唯一出口。 */
+    if (src->vt == vb6_vtDecimal && src->pdecVal) {
+        DECIMAL* p = (DECIMAL*)CoTaskMemAlloc(sizeof(DECIMAL));
+        if (p) { *p = *src->pdecVal; dst->pdecVal = p; }
+        else   { dst->vt = vb6_vtEmpty; dst->pdecVal = NULL; }
+    }
+#endif
+}
+
+// P8.4: Variant清理 - 释放内含BSTR等资源
+void vb6_VariantClear(vb6_VARIANT* v) {
+    if (!v) return;
+    vb6_VariantValueFree(v);   /* 值档: BSTR + (x86)DECIMAL —— 口径只住那一枚出口 (§B165) */
+    // 释放IDispatch指针
+    if (v->vt == vb6_vtDispatch && v->pdispVal) {
+        vb6_ReleaseObject(&v->pdispVal);
+        v->pdispVal = NULL;
+    }
     v->vt = vb6_vtEmpty;
 }
 
 // P8.4: Variant深拷贝 - 复制BSTR等需要独立所有权的资源
 void vb6_VariantCopy(vb6_VARIANT* dst, const vb6_VARIANT* src) {
     if (!dst || !src) return;
-    *dst = *src;  // 浅拷贝
-    // BSTR需要深拷贝
-    if (src->vt == vb6_vtBSTR && src->bstrVal) {
-        dst->bstrVal = vb6_BSTR_FromBSTR(src->bstrVal);
-    }
+    vb6_VariantValueCopy(dst, src);   /* 值档: BSTR/(x86)DECIMAL 另分配 (§B165) */
     // Dispatch需要AddRef
     if (src->vt == vb6_vtDispatch && src->pdispVal) {
         // Fix <vbeclipse>: 原先注释自认 "COM AddRef would go here; just copy pointer" ——
@@ -501,16 +532,7 @@ void vb6_VariantCopy(vb6_VARIANT* dst, const vb6_VARIANT* src) {
 void vb6_VariantAssign(vb6_VARIANT* dst, vb6_VARIANT src) {
     if (!dst) return;
     vb6_VariantClear(dst);        /* 释放旧值 (BSTR / Dispatch / x86 DECIMAL) */
-    vb6_VariantCopy(dst, &src);   /* *dst = src + BSTR 另分配 / Dispatch AddRef */
-#ifndef _WIN64
-    /* x86 的 DECIMAL 由 pdecVal 指向外部缓冲: 上面 Copy 只搬了指针, 这里必须另分配
-       一只, 否则 src 的宿主释放时会把 dst 手里的同一块 free 掉 (二次 free)。 */
-    if (src.vt == vb6_vtDecimal && src.pdecVal) {
-        DECIMAL* p = (DECIMAL*)CoTaskMemAlloc(sizeof(DECIMAL));
-        if (p) { *p = *src.pdecVal; dst->pdecVal = p; }
-        else   { dst->vt = vb6_vtEmpty; dst->pdecVal = NULL; }
-    }
-#endif
+    vb6_VariantCopy(dst, &src);   /* *dst = src + BSTR 另分配 / Dispatch AddRef / x86 DECIMAL 另分配 */
 }
 
 // ============================================================

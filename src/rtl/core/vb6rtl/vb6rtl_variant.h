@@ -364,6 +364,11 @@ void vb6_VariantCopy(vb6_VARIANT* dst, const vb6_VARIANT* src);
 // 实测 tests/ve_list (工程内 List.cls 形态): idx=0/1/2 全答 "Gamma";
 // 真工程 play78: Folder.Views.Item(0) 取回 1 字符垃圾 → m_Views.Item(<垃圾>) 落空。
 void vb6_VariantAssign(vb6_VARIANT* dst, vb6_VARIANT src);
+// 账 #305 §B165 (第五十四刀): 值档(BSTR + x86 那一台的 DECIMAL)所有权的一对出口。
+// Clear/Copy/Assign 与宿主环(Host_* 与内建 Collection 五站)都问它们 —— 「谁分配谁释放」
+// 只许住这一处; 对象那一档不在这对里(加减引用归 Copy/Clear 自己问 vb6_ComIsDispatchable)。
+void vb6_VariantValueFree(vb6_VARIANT* v);
+void vb6_VariantValueCopy(vb6_VARIANT* dst, const vb6_VARIANT* src);
 
 #ifdef __cplusplus
 }
