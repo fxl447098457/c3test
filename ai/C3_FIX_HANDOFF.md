@@ -2429,7 +2429,9 @@ marker、重编，之后 `check_rtl_embedded` 报 **125/125 逐字节相同**。
 ### B163 `Dim v As Variant: v = <数组名>`：赋值那一站没装箱，槽读回来是 3 / "Long"（VB6 交 8195 / "Long()"）（2026-10-12 第五十刀的量撞见；**未开工**）
 
 - **读数**（`.build/k50probe/run_base_*.txt` 与 `run_fix2_*.txt`，两台逐行相同）：模块级 `Private b159L() As Long`（已 `ReDim`、元素有值）赋给 `b159Va As Variant` 之后把这枚 Variant 递过 COM，对端读回 **3/"Long"**、`UBound` 交错误 9 —— 第五十刀把出站的表补好了，可这一形在**发码**那一步就把数组折成了元素档，压根没带着数组标签走到表跟前去。同一份探针里的 `nd`（多维）也是 3/"Long"，但那是 §B151 的形状，别混进本格。
-- **与同族的关系**：§B160/§B161 修的是**实参位**（发码在调用那一站装箱，判据 = `isArrayCarrierArgName`）；本格是**赋值**那一站。修法大概率还是同一问 —— 但要先量「`v = arr` 的发码路今天由谁答」（赋值走的是 AssignMove 那一路，不在 `cgen_expr_call_arg_emit.inc` 那条 switch 里），别照 §B161 的形状抄。
+- **与同族的关系 + 站点已量到（2026-10-12 第五十刀收线那一趟顺手量的，探针 `.build/k51probe/`）**：§B160/§B161 修的是**实参位**（发码在调用那一站装箱，判据 = `isArrayCarrierArgName`）；本格是**赋值**那一站，站点 = `CCodeGen::wrapVariantValue`（`src/backend/cgen_util_ctrl.cpp:2336`，里面那张只留四档的小表问 `inferExprType`，而 `inferExprType` 对数组名答的是**元素**档 ⇒ 与 §B161 同一个病、不同的一站）。**上面那句「赋值走的是 AssignMove 那一路」是猜的，实测不作数**：这一路今天就是走 `wrapVariantValue`。
+- **发码读数**（`.build/k51probe/p51_emit.txt`，x64、RC=0，四枚对照）：模块级 `Private mL() As Long` ⇒ `v1 = vb6_VariantLong(mL);`；模块级 `mB() As Byte` ⇒ `v2 = vb6_VariantByte((uint8_t)(mB));`（**整枚描述符指针被截成一字节**）；过程内 `ReDim loc(0 To 1) As Long` ⇒ `v3 = vb6_VariantLong(loc);`；对照组 `v4 = 5` 那条一字未动 ⇒ 这一站对非数组是对的，缺的**只**是数组那一问。
+- **修法形状（按读数收窄，不用再造一站）**：全仓 13 处引用（声明 + 定义 + 约十处调用）⇒ 赋值/形参/属性返回那几路**已经只走这一枚出口**，不像第四十九刀那条内联 switch；所以修法 = 在 `wrapVariantValue` 开头问同一枚 `isArrayCarrierArgName`、装箱仍交 `vb6_VariantFromValue`（第四十六刀的载体出口）、秩数护栏照旧 `<= 1`（ND 仍归 §B151，同一理由：`_Generic` 没有 ND 那一档）。哨兵那头 A18 现在钉的是「这条权威被问两次」，落地之后要改成**三次**并逐形归因（别把站点数当免费判据白送）。
 - **判据已经先钉上了**：`VB-b159-va=3/Long/-1(e9)` 钉的是**还没修**的读数 —— 谁修了它这一行会红，那时按新读数重钉并回来本格收线。同一形状旁边另有 `mu`（从没 ReDim = NULL 载体）与 `ms`（String() = 白名单外）两条，那两条读数是对的，不许顺手改。
 - **开工前先量的覆盖面**：真语料里「先赋给 Variant 再递过 COM」那一形（PropertyBag 那族有没有绕这一路的）没数过；§B149/§B150 讲的是**晚绑定槽元素**读写，与本格的整枚数组赋值不同形。
 
