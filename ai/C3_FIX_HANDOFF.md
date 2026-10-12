@@ -2365,7 +2365,22 @@ marker、重编，之后 `check_rtl_embedded` 报 **125/125 逐字节相同**。
 - **UDT 数组**：档表对 `vb6_sa_udt` 回落 variant（8204/"Variant()"，实测就是 `R17-udt` 那一条）。VB6 那一侧「把 UDT 数组装进 Variant」没有可抄的口径：`TypeName` 打的是 UDT 自己的名字，而 UDT 名字从没进运行期 —— 与 §B81/#252「控件创建时没记 VB 名/型」同族，**先要有名字，才谈得上打名字**。
 - **Object / LongPtr 数组**：两者都落 `vb6_sa_ptr` ⇒ 8201/"Object()"。VB6 对工程类数组是按对象自己的类型名答（`Dim c() As CommandButton` 打 `CommandButton()`），要的还是元素的名字、不是数组的名字。LongPtr 那一档是 Fix 191 为伪 vtable 特意加进 `vb6_sa_ptr` 的（步长必须是指针宽度），它的 VarType 该答什么本身要先拍口径。
 - **从没 ReDim 的数组**：描述符是 NULL ⇒ 回落 8204/"Variant()"（`R17-undim` 钉的就是这一形）。VB6 在这里是运行时错误「Array not even dimensioned」，与 §B154 末尾那条「`Erase a` 之后 `UBound(a,1)` 交 0」是同一族没拍的口径。
-- **相邻但不同的一格（响度更高）**：数组当 COM 实参交出去**压根没有那一档** —— `vb6_VariantPackBorrow` 那张唯一的「槽 → 真 VARIANT」表不含数组分支，8204/8200 都落 `default: VT_EMPTY` ⇒ 「把数组传给 COM 方法」今天静默交出空值（两架构同形；第四十六刀读码确认，**没有真跑读数**）。真语料的**粗筛已过一遍**（零编译、GBK 解码，`.build/k47_com_array_census.txt`）：带括号与不带括号两形加起来 **1887 行 / 401 份**文件里有「把一枚声明过的数组递进 `对象.方法` 的实参位」的形状，其中含明确的 PropertyBag 那一族（`Charts 2020` 的 `LabelPlus.ctl` / `FontMemRes.ctl` 把 `Byte()` 递给 `WriteProperty`）。**这一串数还没逐行归因**（已知两类假阳性：`Me.Min(…) = …` 那形是左值下标写、续行拼出来的半条调用），所以本格只作为「下一刀的先手」登记，开工第一步是把这 1887 行按 真 COM 实参 / in-project 调用 / 假阳性 分三类数清楚，再谈写出口。
+- **相邻但不同的一格（响度更高）：数组当 COM 实参交出去压根没有那一档 —— 归因已完成（2026-10-12 第四十七刀）**。
+  - **真跑读数**（探针 `.build/k47probe/p47com.bas`，两台逐行相同，`.build/k47run_both.txt`）：拿 `Scripting.Dictionary` 当对端，五形数组实参**全部交回 0 / "Empty"** —— 装箱进 Variant 槽的那一枚（`v = a`）、裸递的 `Long()`、`String()`、多维 `ReDim nd(1 To 2, 1 To 3)`、以及 ND 折成一维指针那一形，一律静默交空。两条证人钉住「读回那一路本身是通的」：`N5 scalar=3 val=42`、`N6 str=8 val=hello`、`N7 count=6`；同一片里 `N8 boxedvt=8209 directvt=8195` ⇒ **槽里那一档第四十六刀已经答对，丢的是出站的表**（`vb6_VariantPackBorrow` 无数组臂 ⇒ `default: VT_EMPTY`）。
+  - **语料归因**（`.build/k47_attr7.txt`；脚本 v3→v7 收紧了四轮，每一轮的判据都先用正控验过）：**实参位上递数组**的形状 = 1887（粗筛 按行）→ 1815（要求数组落在那条调用的实参跨度内）→ 1806（撤掉 `HDTF.pszText = StrPtr(Buffer)` 那形属性写左值）→ **1772**（遮掉字符串字面量：`PropBag.ReadProperty("InitBands", 0)`、`Debug.Print "…pal"`、`DDSBack.DrawText … "ARMA "` 匹配到的都是**字面量里的名字**）。
+    - ① **in-project 调用 = 1598 行（90%，接收者是本工程类/模块/`Me`）**。再看被调方那一枚形参声明成什么：**1516 行本来就写成 `As T()`**（VB6 递数组的正格），实测发码 = 直调 `vb6_<类>_<方法>(me, &arr)` 对 `T**` 形参 —— 形状本来就对，**不打进本格的靶子**（这一族是 §B160 的对照组，不是它的病人）。
+    - ② **真 COM 实参 = 15 行 / 11 份，而且确认都吃 PackBorrow**：`PropBag.WriteProperty("ImageData", m_ImageData)` 那族 **8 行 / 8 份**（`GDI+透明控件` 三枚 .ctl + `vbalImageList` + `ctlNewTab` + `Charts 2020` 的 LabelPlus/FontMemRes），以及 `oPC.AddPaletteColors m_PF_Colors` 那族 **7 行 / 3 份**（`oPC` = `Dim oPC As Object` + `Controls.Add(App.Title & ".ucProgressCircular", …)`）。PropertyBag 那一族不是纸面推测 —— C3 的 PropertyBag 是 `src/rtl/core/vb6forms/uc/uc_propbag.c` 里一枚**原生 IDispatch**，调用点照发 `vb6_ComCall(bag, L"WriteProperty", …)`，臂里直接读 `pd->rgvarg` ⇒ 「设计期存图」那一格今天静默丢负载（写进去是 Empty，读回来是默认值）。
+    - ③ **74 行 / 42 份** 接收者是外部类型库对象（DirectX7 / DAO / ADO / DirectInput）—— 形状正是本格，但那批工程吃的类型库 C3 今天不支持 ⇒ **不可达**，按「先证明可达」不入靶子。
+    - ④ **假阳性累计约 115 行**（1887→1772），全部由上面那四轮收紧逐轮交出，没有一轮是凭形状猜的。
+  - **结论与下一步**：可达性已证、暴露面从「1887 行待归因」收成「**15 行真 COM + 33 行 §B160**」。修本格的出口要新写「`vb6_SafeArray1D/ND` → 真 SAFEARRAY」的换算（RTL 里今天只有 `vb6rtl_paramarray.c` 一处建真数组，而且用完就 `SafeArrayDestroy`），所有权按 §B144 那条口径（交出去的那份归对端 `VariantClear`）—— 面不小；**同族里更响也更便宜的是 §B160**，下一刀先做它。
+
+### B160 把数组递给一枚 `As Variant` 形参：发码交的是**描述符指针的地址**，被调方按槽去读 ⇒ 静默答 40320 / "Variant"（2026-10-12 第四十七刀的探针撞见；**未开工**）
+
+- **读数**（探针 `.build/k47probe/p47proj/` = `Main.bas` + `Sink.cls`，x64 真跑 `.build/k47run_proj/P47Proj.exe`）：工程类 `Public Sub TakeArr(v As Variant)` 被调用点 `s.TakeArr b`（`b` 是 `Long()`）发成 `vb6_Sink_TakeArr(s, &b)`，而形参的 C 型是 `vb6_VARIANT*` ⇒ 被调方 `VarType(v)` 交 **40320**、`TypeName(v)` 交 **"Variant"**；VB6 那一侧交 8195 / "Long()"。**同一枚探针里的对照组就是正解**：把已经装好箱的 `v = a` 递进同一个形参，被调方答 **8209 / "Byte()"** —— 装箱那一路第四十六刀已经通了，缺的只有「数组实参 → Variant 形参」这一步的装箱。cl 侧只给一条不兼容指针的**警告**：BUILD-RC=0、exe 照跑、一个错误都不打印。
+- **暴露面**（`.build/k47_attr7.txt` 的 `callee` 那一栏，判据 = 按实参下标去查被调方那一枚形参的声明）：**33 行 / 12 份**。其中 **26 行是同一枚帮助函数** `VBHacks.IsArrayInitialized(ByRef arr As Variant)`（PhotoDemon 整族在用；它按 `VarPtr(arr) + 8` 去摸 SAFEARRAY 指针，拿到我们描述符指针的地址之后**答「数组没初始化」** —— 不是崩，是整条分支静默走另一头）。**另有 5 行是 `File:=pngBytes` 那形具名实参 ⇒ 我的下标算术吃不下它，这 5 行还没逐行复核**，动针面之前先重数一遍（§B147 那条「认槽」的判据现成）。
+- **同族三格别混**：§B155 格③ = 往盒里**写下标**；§B159 = **出 COM** 那张表没有数组臂；本格 = **进过程**那一步没装箱。三格合起来才是「数组当值用」的整条路。
+- **修法（口径先写死再动手）**：数组实参进 `As Variant` / 不带类型那形时，发码改交**一枚临时槽**（`vb6_VARIANT _t = vb6_VariantFromValue(arr); f(me, &_t);`），装箱仍问第四十六刀那枚 `vb6_VariantArray` 载体出口 ⇒ `VarType` / `TypeName` / 元素读回三处一起对上；所有权 = 临时槽与载体都归调用方（借来的视图，与 §B155 那条一致）。**ByRef 回写那一档刻意先不做**：暴露面里 26/33 是只读判断，回写的口径（改完数组要不要搬回调用方描述符）单独定，别在这一刀里顺手猜。
+- **门待回填。**
 
 ### B151 把真二维数组赋给 Variant 槽，槽读回来是 VarType=9 / "Object" 而不是 8204 —— 自家多维描述符被折成一维（2026-10-12 第四十刀量到；**未开工**）
 
