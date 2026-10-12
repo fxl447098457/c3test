@@ -24,6 +24,8 @@
 #       探针少了第三个参数 ⇒ 整段薄指针/契约槽读数(EXTRA_IID/QI_EXTRA/CREATE_IFACE/VTBL_*)安静不出现,
 #       而 `[Parser]::ParseFile` 报 0 错。这一格盯的就是那一种红。
 #
+#   H6  注册语句不许被**行首注释**吃掉 (账 #305 §B163, 第五十一刀的实测坑): 把新写的注释拼到最后一行时如果把语句一起拼在 `#` 那一行的行尾, 它整条变成注释 —— 而 `[Parser]::ParseFile` 仍报 0 错 (与门 #532 那次同一族: 红不在语法, 在绑定)。
+#       判据 = AST 给的每个注册调用点必须是它那行第一个非空 token（行前只许空白）——不是数出现次数，因为注释里合法可以提这个名字。
 # 用法: powershell -File scripts/check_test_helper_integrity.ps1   (PASS => exit 0)
 
 $ErrorActionPreference = 'Stop'
@@ -165,11 +167,41 @@ foreach ($c in $ds) {
 }
 
 }
+# ---- H6: 注册语句必须自成一行，也不许整条变成注释 (账 #305 §B163, 第五十一刀的实测坑) ----
+# 形状: 把新写的注释拼到最后一行时，若连语句一起拼在 `#` 那行的行尾，它整条变成注释;
+#       [Parser]::ParseFile 仍报 0 错，那枚夹具安静不跑（与门 #532 同一族: 红不在语法，在绑定）。
+# 两条判据: ① 剥掉注释后的 token 文本里「名字 + 空白 + 引号或括号」的调用形出现几次，AST 就必须找到几个调用点
+#           (少了 = 有一条被注释吃掉了，那种情形 AST 里根本不存在，只靠②盯不住);
+#           ② 每个调用点必须是它那一行第一个非空 token（行前只许空白）。
+if ($ast5) {
+    $txt6 = [System.IO.File]::ReadAllText($rt)
+    $code6 = (($tok5 | Where-Object { $_.GetType().Name -ne 'CommentToken' } | ForEach-Object { $_.Text }) -join ' ')
+    foreach ($fn6 in @('Add-BasTest', 'Test-DispatchInvoke')) {
+        $txt6n = @([regex]::Matches($code6, ($fn6 + '[ \t]+["\(]'))).Count
+        $cs6 = @($ast5.FindAll({ param($n)
+            $n -is [System.Management.Automation.Language.CommandAst] -and
+            $n.GetCommandName() -eq $fn6 }, $true))
+        if ($txt6n -ne $cs6.Count) {
+            $fails += ('H6 ' + $fn6 + ': 剥注释后的调用形 ' + $txt6n + ' 处, AST 调用点 ' + $cs6.Count +
+                       ' 处 —— 差的那几条整行变成了注释（语法不响，夹具安静不跑）')
+        }
+        foreach ($c6 in $cs6) {
+            $st6 = $c6.Extent.StartOffset
+            $ls6 = $txt6.LastIndexOf("`n", $st6 - 1)
+            if ($ls6 -lt 0) { $ls6 = -1 }
+            if ($txt6.Substring($ls6 + 1, $st6 - $ls6 - 1) -notmatch '^[ \t]*$') {
+                $ln6 = [regex]::Matches($txt6.Substring(0, $st6), "`n").Count + 1
+                $fails += ('H6 ' + $fn6 + ' 第 ' + $ln6 + ' 行的注册不是那行的开头'+ ' —— 排在注释行行尾的语句只是注释，夹具安静不跑')
+            }
+        }
+    }
+}
+
 if ($fails.Count -gt 0) {
     $fails | ForEach-Object { Write-Host "FAIL $_" }
     exit 1
 }
-Write-Host ('OK check_test_helper_integrity: H1..H5 (functions=' + $defs.Count +
+Write-Host ('OK check_test_helper_integrity: H1..H6 (functions=' + $defs.Count +
              ' Test-* helpers=' + @($defs.Keys | Where-Object { $_ -like 'Test-*' }).Count +
              ' no shadowing, all reachable)')
 exit 0

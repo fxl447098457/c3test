@@ -536,6 +536,9 @@ $a18Known = @([regex]::Matches($beAll, 'knownArrays_\s*\.\s*count\s*\(\s*lowerNa
 $a18AuthDef = @([regex]::Matches($beAll, '(?m)^bool CCodeGen::isArrayCarrierArgName\s*\(')).Count
 $a18AuthAll = @([regex]::Matches($beAll, 'isArrayCarrierArgName\s*\(')).Count
 $a18AuthDecl = @([regex]::Matches($beAll, '(?m)^\s*bool\s+isArrayCarrierArgName\s*\(')).Count
+$a18AsnTxt = Strip-LineCmt ([System.IO.File]::ReadAllText((Join-Path $beDir 'cgen_util_ctrl.cpp')))
+$a18AsnQ = $a18AsnTxt.IndexOf('isArrayCarrierArgName(lowerB163, cExpr)')
+$a18AsnT = $a18AsnTxt.IndexOf('Vb6Type vtype = inferExprType(static_cast<Expr&>(*valueNode));')
 $a18ComQ = $a18ComTxt.IndexOf('isArrayCarrierArgName(lower, id.name)')
 $a18ComV = $a18ComTxt.IndexOf('if (knownVariantVars_.count(lower)) return')
 $a18Temp  = @([regex]::Matches($beAll, '"_vb6_arrarg_"')).Count
@@ -551,8 +554,14 @@ if ($a18All - $a18Decl -ne 1) {
 }
 if ($a18Known -ne 1) { $bad += ("A18 出口里问数组表 knownArrays_ 的地方 = " + $a18Known + " 处 (恰好 1，且必须住在 isArrayCarrierArgName 里；0 = 判据换成了别的表，2 = 又抄了一份)") }
 if ($a18AuthDef -ne 1) { $bad += ("A18 那条唯一出口的定义 = " + $a18AuthDef + " (恰好 1)") }
-if ($a18AuthAll - $a18AuthDef - $a18AuthDecl -ne 2) { $bad += ("A18 问那条出口的地方 = " + ($a18AuthAll - $a18AuthDef - $a18AuthDecl) + " 处 (恰好 2：ByRef Variant 实参 + COM 实参打包；少一处 = 有一个消费者又开始自己答)") }
+if ($a18AuthAll - $a18AuthDef - $a18AuthDecl -ne 3) { $bad += ("A18 问那条出口的地方 = " + ($a18AuthAll - $a18AuthDef - $a18AuthDecl) + " 处 (恰好 3：ByRef Variant 实参 + COM 实参打包；少一处 = 有一个消费者又开始自己答)") }
 if ($a18ComQ -lt 0 -or $a18ComV -lt 0) { $bad += "A18 COM 打包那一格的锚点找不到（数组那一问或 knownVariantVars_ 那条链被改形了）" }
+if ($a18AsnQ -lt 0 -or $a18AsnT -lt 0) {
+    $bad += ("A18 赋值站（wrapVariantValue）那两行锚点找不到 (asn=" + $a18AsnQ + " tbl=" + $a18AsnT + ") —— 第五十一刀那一问或那张类型表被改形了")
+}
+elseif ($a18AsnQ -gt $a18AsnT) {
+    $bad += ("A18 赋值站的数组那一问排到了 inferExprType 那张表之后 —— 模块级数组与撞内在函数名的数组会先被折成标量档（账 #305 §B163，第五十一刀）")
+}
 elseif ($a18ComQ -gt $a18ComV) { $bad += "A18 COM 实参的数组那一问排到了已知变量型那串之后 —— 模块级数组会先被 knownLongVars_/knownBstrVars_ 折成标量档（实测交出去是 3/Long、8/String）" }
 if ($a18Temp -ne 1) { $bad += ("A18 临时量前缀 _vb6_arrarg_ = " + $a18Temp + " 处 (恰好 1)") }
 if ($a18Raw -ne 2) { $bad += ("A18 arrRaw92y (装箱吃的那枚原样名) = " + $a18Raw + " 处 (恰好 2：定义 + 装箱表达式；1 = 装箱又去吃分档之后的 argVal)") }

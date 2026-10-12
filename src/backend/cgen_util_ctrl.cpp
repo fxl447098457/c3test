@@ -2368,6 +2368,30 @@ std::string CCodeGen::wrapVariantValue(ASTNode* valueNode, const std::string& cE
         return "vb6_VariantArray((void*)" + cExpr + ")";
     }
     
+    // 账 #305 §B163 (第五十一刀): **裸数组名当右值**（`Dim v As Variant: v = mL`，无括号那一形）。
+    // 这一问必须排在下面那张 inferExprType 表之前：它对同一个名字答的是**元素**档
+    // （模块级数组登记在 knownLongVars_/knownBstrVars_ 里），于是发出来的是
+    // `vb6_VariantLong(mL)` —— 描述符指针截进
+    // int32、cl 一声不响（实测两台 3/"Long"，VB6 该 8195/"Long()"）。
+    // 第二个成因是**名字撞上 VB 内在函数**：同一份语句把数组从 `loc` 改名 `loc2` 就正常装箱，
+    // 叫 `loc` 就折 —— `Loc` 是返回 Long 的内在函数，inferExprType 先答了它
+    // （P51E→P51H 的对照，与 §B217/#219 那族同源）。两条成因共用这一问就一起治。
+    // 判据与第四十九/五十刀同一条权威 isArrayCarrierArgName（读的是 knownArrays_ 那张**名字表**，
+    // 所以对撞名免疫），装箱仍走末尾 boxToVariant 已经在用的 vb6_VariantFromValue
+    // （_Generic 认 vb6_SafeArray1D* 那一档，标签问描述符自己 = 第四十六刀）。
+    // ⚠ 与 COM 那站同一道秩护栏：`vb6_VariantFromValue` 的 _Generic 没有 vb6_SafeArrayND* 那一档，
+    //   多维载体落 default = vb6_VariantObject ⇒ 对一枚描述符发 Release = 野 Release 堆损坏
+    //   （§B85 那一族；ND 归 §B151，补法是给 _Generic 加 ND 档，不是在这里绕）。
+    if (valueNode->kind == ASTNodeKind::IdentifierExpr) {
+        auto& idB163 = static_cast<IdentifierExpr&>(*valueNode);
+        std::string lowerB163 = Symbol::toLower(idB163.name);
+        if (isArrayCarrierArgName(lowerB163, cExpr)) {
+            auto itB163 = arrayDimCounts_.find(lowerB163);
+            if (itB163 != arrayDimCounts_.end() && itB163->second <= 1)
+                return "vb6_VariantFromValue(" + cExpr + ")";
+        }
+    }
+
     // 使用inferExprType推断表达式类型
     if (valueNode->kind == ASTNodeKind::BinaryExpr ||
         valueNode->kind == ASTNodeKind::UnaryExpr ||

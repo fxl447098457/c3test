@@ -2915,9 +2915,11 @@ if ($Category -in @("all", "run", "bas")) {
     # ml/mb/mx/bl/sg = 模块级数组五档; loc = 过程内动态数组 (改前那一档答 0/Empty, 缺的是运行期的臂);
     # mu 从没 ReDim (NULL 载体), ms 是 String() —— 两条都是刻意留在门上的「还没答」: 前者不许崩、
     # 后者是白名单外的档, 改前实测 8/String (描述符指针被当 BSTR 交出去 = 越界读), 现在交空值;
-    # va 是「数组赋给 Variant 槽」那一格 (§B163, 发码侧的赋值没装箱), 它现在钉的是**还没修**的读数,
-    # 谁修了它这行会红, 那时按新读数重钉并去 §B163 收线。
-    Add-BasTest "test_com_latebound" "$Tests\test_com_latebound.bas" @("LB-1:OK", "LB-2:OK", "LB-3:OK", "LB-4:OK", "LB-5:OK", "P24-10b: 5/5", "VB-b159-ml=8195/Long()/3/7002", "VB-b159-mb=8209/Byte()/2/66", "VB-b159-mx=8195/Long()/3/7022", "VB-b159-bl=8203/Boolean()/1/True", "VB-b159-sg=8196/Single()/1/1.25", "VB-b159-loc=8195/Long()/1/7100", "VB-b159-mu=0/Empty/-1(e9)", "VB-b159-ms=0/Empty/-1(e9)", "VB-b159-va=3/Long/-1(e9)")
+    # va 是同一枚数组**先赋给 Variant 槽**再递出去的那一形（§B163）：第五十一刀之前两台都答
+    # 3/"Long"（描述符指针被折进标量档），现在与 ml 同形 8195/"Long()"。两条负控都跑过：
+    # 把那条秩数护栏从 <= 1 改成 <= 0（等于关掉这一问）⇒ 这一条退回 3/"Long"；
+    # 把这一问挪到那张 inferExprType 表之后 ⇒ 哨兵 A18 新加的「赋值站顺序」那条报红。
+    Add-BasTest "test_com_latebound" "$Tests\test_com_latebound.bas" @("LB-1:OK", "LB-2:OK", "LB-3:OK", "LB-4:OK", "LB-5:OK", "P24-10b: 5/5", "VB-b159-ml=8195/Long()/3/7002", "VB-b159-mb=8209/Byte()/2/66", "VB-b159-mx=8195/Long()/3/7022", "VB-b159-bl=8203/Boolean()/1/True", "VB-b159-sg=8196/Single()/1/1.25", "VB-b159-loc=8195/Long()/1/7100", "VB-b159-mu=0/Empty/-1(e9)", "VB-b159-ms=0/Empty/-1(e9)", "VB-b159-va=8195/Long()/3/7002")
     Add-BasTest "test_com_optional" "$Tests\test_com_optional.bas" @("OP-1:OK", "OP-4:OK", "P24-11: 4/4")
     # 账 #245/§B94 的行为针（夹具 tests/test_com_variant_prop.bas）。类型库属性 Get 的返回档落在
     # mapType 的「未知」桶（这里是 VARIANT）时，唯一合法读法是 Variant 兜底 —— 不许按右值上下文猜成
