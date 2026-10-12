@@ -250,5 +250,41 @@ Public Sub Main()
     ' tests/test_registry_settings.bas (para-B149/B150).
     Debug.Print "VB-b146-reg-vt="; VarType(GetAllSettings("C3NoSuchApp146", "Sec"))
     Debug.Print "VB-b146-reg-isnull="; IsNull(GetAllSettings("C3NoSuchApp146", "Sec"))
+    ' Acct #305 para-B160 (knife 48): an array variable handed to a ByRef Variant
+    ' formal. Before this knife codegen emitted &arr -- the ADDRESS OF THE DESCRIPTOR
+    ' POINTER -- while the callee parameter is a vb6_VARIANT*, so the callee read a
+    ' slot out of 4/8 bytes of pointer. BASE readings (probe .build/k47probe/p47proj,
+    ' x64 real run) were VarType 40320 / TypeName "Variant"; cl only warned about the
+    ' mismatched pointer type, BUILD-RC=0 and nothing was printed. VB6 answers the
+    ' element flavor (8195 / "Long()"). The boxing now goes through the same carrier
+    ' exit as the assignment v = a (8209 / "Byte()"), so the label comes from the
+    ' descriptor itself. Deliberately read-only: ByRef write-back through a Variant
+    ' formal is a separate caliber (para-B160).
+    Dim b160ba() As Byte
+    Dim b160lg() As Long
+    Dim b160fx(1 To 3) As Long
+    Dim b160nd() As Long
+    ReDim b160ba(0 To 2)
+    ReDim b160lg(1 To 4)
+    ReDim b160nd(1 To 2, 1 To 3)
+    b160ba(0) = 65
+    b160lg(2) = 300
+    b160fx(2) = 77
+    b160nd(2, 3) = 512
+    Call B160Take("byte", b160ba, 0)
+    Call B160Take("long", b160lg, 2)
+    Call B160Take("fixed", b160fx, 2)
+    Call B160Take("nd", b160nd, -1)
     Debug.Print "VB-DONE"
+End Sub
+
+' Acct #305 para-B160: a ByRef Variant formal. The callee must see the array flavor,
+' not the address of the descriptor pointer. ix below zero means label only -- a two-
+' dimensional box has no single-index element to read.
+Private Sub B160Take(ByVal tag As String, ByRef v As Variant, ByVal ix As Long)
+    Debug.Print "VB-b160-" & tag & "="; VarType(v); "/"; TypeName(v)
+    If ix >= 0 Then
+        Debug.Print "VB-b160-" & tag & "-evt="; VarType(v(ix))
+        Debug.Print "VB-b160-" & tag & "-val="; CLng(v(ix))
+    End If
 End Sub

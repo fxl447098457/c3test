@@ -89,6 +89,16 @@
 #       vb6_SaVtOfArrayPtr 的两条兜底里（NULL 与认不出载体）；旧的三元折档形状 `vb6_vtArray | (baseVt`
 #       恰好 0。TypeName 那一张标量名单只许一份：`case vb6_vtEmpty:` 在 vb6rtl_conv.c 恰好 1，
 #       抽出来的 vb6_TypeNameScalar 定义 1 / 调用恰好 2（数组那一支 + 标量那一条）。
+# --- A18（账 #305 §B160，第四十八刀）：数组递给 ByRef Variant 形参时「先装箱」只许一处答 ---
+# 改前那一支只认两种实参：晚绑定对象 (void*) 与工程类实例，其余一律落 `&arr` ——
+# 数组变量的 C 表示是描述符指针，`&arr` 就是「描述符指针的地址」，而被调方按
+# vb6_VARIANT* 解析 ⇒ 静默垃圾（真跑读数 VarType 40320 / TypeName "Variant"，VB6 交
+# 8195 / "Long()"；cl 只给一条不兼容指针的警告，BUILD-RC=0）。判据吃数组表 knownArrays_
+# （与元素访问 VB6_SA_AT 同一张），装箱仍走外面那一层 vb6_VariantFromValue。
+#   A18 新谓词 argIsArr92y 定义恰好 1 / 使用恰好 3（进 if、临时量名前缀、装箱表达式），
+#       knownArrays_.count(argLs92y) 恰好 1，`"_vb6_arrarg_"` 恰好 1，
+#       而**改前那条只看两档的形状** `if ((isObjVar92y || !argCls92y.empty())` 恰好 0。
+#       站点计数全在 src/backend 里数（剥注释），第二处答案 = 有人又替数组猜了一次。
 
 #
 # 用法:  pwsh -File scripts\check_sa_access.ps1
@@ -449,6 +459,29 @@ if ($tnScalarDef -ne 1) { $bad += ("A17 vb6_TypeNameScalar 的定义 = " + $tnSc
 if ($tnScalarAll - $tnScalarDef -ne 2) {
     $bad += ("A17 问那张名单的地方 = " + ($tnScalarAll - $tnScalarDef) + " 处 (恰好 2：数组那一支的元素名 + 标量那一条；数组分支被摘掉就只剩 1)")
 }
+# A18: 数组 -> ByRef Variant 形参的装箱只许一处答 (账 #305 §B160, 第四十八刀)
+$beAll = ''
+# 这里只剥**行注释**：这一族的名字都在代码行上，而 A17 那个 Strip-Cmt 还剥块注释 ——
+# 后端这些 .inc 里到处是 `"  /* ... */"` 这种**字符串字面量里的 /* */**（发码时写给 cl 看的），
+# 拿 Strip-Cmt 扫整目录会把真代码整段吃掉（实测 argIsArr92y 4 -> 0，判据假红）。
+function Strip-LineCmt([string]$s) { return [regex]::Replace($s, '(?m)//[^
+]*', '') }
+foreach ($f in (Get-ChildItem -LiteralPath $beDir -Recurse -File | Where-Object { $_.Extension -in '.cpp', '.inc', '.hpp' })) {
+    $beAll += (Strip-LineCmt ([System.IO.File]::ReadAllText($f.FullName)))
+}
+$a18Decl = @([regex]::Matches($beAll, '(?m)const bool\s+argIsArr92y\s*=')).Count
+$a18All  = @([regex]::Matches($beAll, 'argIsArr92y')).Count
+$a18Known = @([regex]::Matches($beAll, 'knownArrays_\s*\.\s*count\s*\(\s*argLs92y')).Count
+$a18Temp  = @([regex]::Matches($beAll, '"_vb6_arrarg_"')).Count
+$a18Old   = @([regex]::Matches($beAll, 'if\s*\(\s*\(\s*isObjVar92y\s*\|\|\s*!argCls92y\.empty\(\)\s*\)')).Count
+if ($a18Decl -ne 1) { $bad += ("A18 argIsArr92y 的定义 = " + $a18Decl + " (恰好 1；0 = 装箱那一档又没人问了)") }
+if ($a18All - $a18Decl -ne 3) {
+    $bad += ("A18 argIsArr92y 的使用 = " + ($a18All - $a18Decl) + " 处 (恰好 3：进 if + 临时量前缀 + 装箱表达式；多一处 = 第二份判据)")
+}
+if ($a18Known -ne 1) { $bad += ("A18 问数组表 knownArrays_ 的地方 = " + $a18Known + " 处 (恰好 1；0 = 判据换成了别的表，第二处 = 抄了两份)") }
+if ($a18Temp -ne 1) { $bad += ("A18 临时量前缀 _vb6_arrarg_ = " + $a18Temp + " 处 (恰好 1)") }
+if ($a18Old -ne 0) { $bad += ("A18 改前那条只看两档的形状 = " + $a18Old + " 处 (要求 0：它把数组漏成 &arr = 描述符指针的地址)") }
+
 if ($bad.Count -eq 0) {
     Write-Host ("PASS SA element access: macro " + $macroDefs.Count +
                 " / inline " + $defs.Count +
@@ -457,7 +490,8 @@ if ($bad.Count -eq 0) {
                 " / raw-index shape " + $shape + " / ND macros " + $ndMacros.Count + " / ND inline " + $ndDefs.Count + " / ATN emit " + $atnEmit + " / ATN literal " + $atnLiteral + " / redim helper def " + $rdDef + " call " + $rdCall + " / sa_variant lit " + $saVariant.Count + " / box cast " + $boxCast + " / table w " + $tblWrite + " f " + $tblFind + " e " + $tblErase + " / ndPres decl " + $ndPresDeclH + " def " + $ndPresDefC + " emit " + $ndPresEmit + " typed " + $ndPresTyped + " / nb call " + $nbCall + " lit " + $nbLit + " / seq " + $nbSeq + " fix " + $fxBounds + " / slot def " + $slotDef + " all " + $slotAll + " strideTab " + ($oldStr + $newStr) + " desc " + $descIdx +
                 " / vt-flavor decl " + $vtfDecl + " def " + $vtfDef + " call " + ($vtfAll - $vtfDecl - $vtfDef) +
                 " / pack-of-ptr " + ($vtPackAll - $vtPackDecl - $vtPackDef) + " hard tag " + $hardTag + " tern " + $ternTag +
-                " / TypeName list " + $tnEmpty + " scalar " + ($tnScalarAll - $tnScalarDef)) -ForegroundColor Green
+                " / TypeName list " + $tnEmpty + " scalar " + ($tnScalarAll - $tnScalarDef) +
+                " / a18 box site " + $a18Decl + " uses " + ($a18All - $a18Decl) + " known " + $a18Known + " old " + $a18Old) -ForegroundColor Green
     exit 0
 }
 foreach ($b in $bad) { Write-Host ("FAIL " + $b) -ForegroundColor Red }

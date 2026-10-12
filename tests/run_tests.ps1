@@ -2616,7 +2616,21 @@ if ($Category -in @("all", "run", "bas")) {
         "VB-b146-dec-add=1234568", "VB-b146-dec-vt=14", "VB-b146-dec-tn=Decimal",
         "VB-b146-dec-dbl=2.5", "VB-b146-iif=2",
         "VB-b146-err-vt=10", "VB-b146-err-iserr=True",
-        "VB-b146-reg-vt=1", "VB-b146-reg-isnull=True", "VB-DONE")
+        "VB-b146-reg-vt=1", "VB-b146-reg-isnull=True",
+        # 账 #305 §B160 (第四十八刀): 一枚**数组变量**递给 ByRef Variant 形参。改前发码交的是
+        # `&arr` = 描述符指针的地址, 而被调方按 vb6_VARIANT* 解析 = 静默垃圾 (BASE 真跑读数
+        # VarType 40320 / TypeName "Variant"; 探针 .build/k47probe/p47proj —— 而且 cl 只给一条
+        # 不兼容指针的警告, BUILD-RC=0、一个错误都不打印, 所以这一族以前"看着是好的"。现在落
+        # 一枚具名临时槽, 装箱仍走第四十六刀那枚载体出口 ⇒ 标签问描述符自己: Byte()=8209 /
+        # Long()=8195, 固定一维与多维折叠 (ND 描述符投成 1D 载体) 两形同样答对。
+        # byte-evt=2 **不是** VB6 的答案 (那一档该 17/Byte): 元素读那张表
+        # (vb6_VariantElemFromSlotData, vb6rtl_com.c) 把 vb6_sa_byte 折成 VT_I2, 已按 §B159 的
+        # 口径另记一格。这一枚针是形状证人、不是认可 —— 谁修那张表这一行就该红 (val=65 一直对,
+        # 坏的只有档名)。
+        "VB-b160-byte=8209/Byte()", "VB-b160-byte-evt=2", "VB-b160-byte-val=65",
+        "VB-b160-long=8195/Long()", "VB-b160-long-evt=3", "VB-b160-long-val=300",
+        "VB-b160-fixed=8195/Long()", "VB-b160-fixed-evt=3", "VB-b160-fixed-val=77",
+        "VB-b160-nd=8195/Long()", "VB-DONE")
     # ⚠ 这里曾经是字面 TAB: `"$Tests<TAB>est_variant_boxing.bas"`。
     # PowerShell 的 "" 里 **`\t` 不是转义**（转义是反引号），所以只要有人把 `\t` 写成真 TAB,
     # 路径就变成 `tests` + TAB + `est_...` —— 门里读到的是 `error VB1006: 无法打开文件`,

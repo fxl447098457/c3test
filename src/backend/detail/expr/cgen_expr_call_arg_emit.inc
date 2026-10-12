@@ -941,7 +941,20 @@
                                 // (VBFlexGrid.c prop_set_CellTag / prop_let_CellText 等 6 处)。
                                 // BASE(8c3e981) 发的是 `&Value` (形参本身可寻址), 这里补上
                                 // knownVariantVars_ 判据后正好回到那条 else 分支。
-                                if ((isObjVar92y || !argCls92y.empty())
+                                // 账 #305 §B160 (第四十八刀): **数组变量本体**也在这一档装箱。
+                                // C 侧它是描述符指针 (vb6_SafeArray1D*), 下面那条 else 发的 &arr
+                                // 交出去的是「描述符指针的地址」, 而被调方按 vb6_VARIANT* 解析 ——
+                                // 实测被调方 VarType 答 40320 / TypeName 答 "Variant" (VB6 交
+                                // 8195 / "Long()"), cl 只给一条不兼容指针的警告: 编得过、跑得完、
+                                // 一声不响。真语料 33 行里 26 行是 VBHacks.IsArrayInitialized,
+                                // 它按 VarPtr(arr)+8 去摸 SAFEARRAY 指针 ⇒ 判成「数组没初始化」,
+                                // 整条分支静默走另一头。判据用数组表 knownArrays_ (与元素访问
+                                // VB6_SA_AT 同一张表); 装箱仍走外面那一层 vb6_VariantFromValue —
+                                // _Generic 认 vb6_SafeArray1D* 那一档 = 第四十六刀的载体出口,
+                                // 标签问描述符自己。ByRef 回写刻意不做 (§B160 口径)。
+                                const bool argIsArr92y = knownArrays_.count(argLs92y) > 0
+                                                         && !isObjVar92y && argCls92y.empty();
+                                if ((argIsArr92y || isObjVar92y || !argCls92y.empty())
                                     && !cExprIsVariant(argVal)
                                     && !knownVariantVars_.count(argLs92y)) {
                                     // 落一个**具名** Variant 临时再传址 ——
@@ -950,12 +963,15 @@
                                     // (类型 vb6_vartype) → C2440 "无法从 vb6_VARIANT 转换为
                                     // vb6_vartype" (实测 Perspective.c:115 等 7 处)。
                                     // 具名临时也正是 VB6 语义 (非 Variant 实参拷进临时 Variant)。
-                                    std::string tmp92y = "_vb6_vararg_" +
+                                    std::string tmp92y = std::string(argIsArr92y ? "_vb6_arrarg_"
+                                                                                 : "_vb6_vararg_") +
                                         std::to_string(ansiCounter_++);
-                                    std::string boxed92y = isObjVar92y
+                                    std::string boxed92y = argIsArr92y
+                                        ? argVal   // 数组: 原样交描述符指针, 由外面那层 _Generic 装箱
+                                        : (isObjVar92y
                                         ? ("(void*)(" + argVal + ")")
-                                        : ("(void*)vb6_ComObject_FromInstance(vb6_FindCoClassDesc(\""
-                                           + argCls92y + "\"), (void*)(" + argVal + "))");
+                                           : ("(void*)vb6_ComObject_FromInstance(vb6_FindCoClassDesc(\""
+                                              + argCls92y + "\"), (void*)(" + argVal + "))"));
                                     c_.emitLine("vb6_VARIANT " + tmp92y
                                         + " = vb6_VariantFromValue(" + boxed92y
                                         + ");  /* Fix <vbeclipse>: ByRef Variant 实参装箱 */");
