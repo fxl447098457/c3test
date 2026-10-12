@@ -870,11 +870,9 @@
                         // 分档那几臂对数组答的是元素档, 那个结果一律丢掉 —— 装箱吃的是**进来那一枚** argVal,
                         // 所以这里先把原样存下。
                         const std::string arrRaw92y = argVal;
-                        const bool arrArg92y = knownArrays_.count(arrLs92y) > 0
-                            && !knownObjectVars_.count(arrLs92y)
-                            && !knownVariantVars_.count(arrLs92y)
-                            && !arrayClassElemTypes_.count(arrLs92y)
-                            && !cExprIsVariant(argVal);
+                        // 第五十刀: 这一问收进唯一出口 isArrayCarrierArgName (cgen_util_type.cpp) ——
+                        // COM 实参打包那一格问的是同一句话, 两处各写一遍就是下一次漏档的现场。
+                        const bool arrArg92y = isArrayCarrierArgName(arrLs92y, argVal);
                         Vb6Type argVbType92y = inferExprType(*node.positional[i]);
                         switch (argVbType92y) {
                             case Vb6Type::String:

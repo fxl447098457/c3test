@@ -2910,7 +2910,14 @@ if ($Category -in @("all", "run", "bas")) {
     # P24-10b: 后期绑定 COM 默认属性 obj(args) — Dim o As Object (无类型库签名) 走
     # vb6_ComCallByDispid(o, 0, ...) 的 DISPID_VALUE 路径。与 test_com_default_prop
     # (前期绑定 CLSID 签名路径) 互补。断言蒸馏自真实输出 (首次红 = 编译期 C2440)。
-    Add-BasTest "test_com_latebound" "$Tests\test_com_latebound.bas" @("LB-1:OK", "LB-2:OK", "LB-3:OK", "LB-4:OK", "LB-5:OK", "P24-10b: 5/5")
+    # 账 #305 §B159 (第五十刀): 数组本体过 COM 的往返。判据读的是「写进 Scripting.Dictionary 再读回来」
+    # 那一枚 Variant 槽 (vt/元素名/UBound/元素值四段), 两台实读数逐字对上 (x64/x86 同形, 见 k50ft_fix_*)。
+    # ml/mb/mx/bl/sg = 模块级数组五档; loc = 过程内动态数组 (改前那一档答 0/Empty, 缺的是运行期的臂);
+    # mu 从没 ReDim (NULL 载体), ms 是 String() —— 两条都是刻意留在门上的「还没答」: 前者不许崩、
+    # 后者是白名单外的档, 改前实测 8/String (描述符指针被当 BSTR 交出去 = 越界读), 现在交空值;
+    # va 是「数组赋给 Variant 槽」那一格 (§B163, 发码侧的赋值没装箱), 它现在钉的是**还没修**的读数,
+    # 谁修了它这行会红, 那时按新读数重钉并去 §B163 收线。
+    Add-BasTest "test_com_latebound" "$Tests\test_com_latebound.bas" @("LB-1:OK", "LB-2:OK", "LB-3:OK", "LB-4:OK", "LB-5:OK", "P24-10b: 5/5", "VB-b159-ml=8195/Long()/3/7002", "VB-b159-mb=8209/Byte()/2/66", "VB-b159-mx=8195/Long()/3/7022", "VB-b159-bl=8203/Boolean()/1/True", "VB-b159-sg=8196/Single()/1/1.25", "VB-b159-loc=8195/Long()/1/7100", "VB-b159-mu=0/Empty/-1(e9)", "VB-b159-ms=0/Empty/-1(e9)", "VB-b159-va=3/Long/-1(e9)")
     Add-BasTest "test_com_optional" "$Tests\test_com_optional.bas" @("OP-1:OK", "OP-4:OK", "P24-11: 4/4")
     # 账 #245/§B94 的行为针（夹具 tests/test_com_variant_prop.bas）。类型库属性 Get 的返回档落在
     # mapType 的「未知」桶（这里是 VARIANT）时，唯一合法读法是 Variant 兜底 —— 不许按右值上下文猜成
@@ -5661,7 +5668,15 @@ if ($Category -in @("all", "run", "vbp")) {
         # 字节搬了个来回，所以它钉的是"改成借用之后没把 Decimal 读丢"，能红的是前两条。
         "CALL=AMT hr=0x00000000 resultvt=14 dec_cy=12345670000 dec_i8=1234567",
         "CALL=QUARTER hr=0x00000000 resultvt=14 dec_cy=12500 dec_i8=1",
-        "CALL=ECHO hr=0x00000000 resultvt=14 dec_cy=50000 dec_i8=5") @(
+        "CALL=ECHO hr=0x00000000 resultvt=14 dec_cy=50000 dec_i8=5",
+        # Acct #305 SB159/SB162 (knife 50): a real SAFEARRAY that comes IN to our own IDispatch
+        # server must be readable and must come back OUT. EchoVal only hands its argument back,
+        # so arrsum=60 can only come from the elements the inbound arm **copied** (10+20+30) and
+        # lo/hi only from SafeArrayGetLBound/UBound on our own descriptor.
+        # Negative controls, both run: drop the SB162 arm -> the probe dies inside that Invoke
+        # (measured 0xC000041D, the CALL=ECHOARR line never prints); drop the Byte row of the
+        # whitelist -> VB-b159-mb in test_com_latebound turns 0/Empty.
+        "CALL=ECHOARR hr=0x00000000 resultvt=8195 arrvt=8195 dims=1 lo=0 hi=2 arrsum=60") @(
         "CALL=ADD") "{F5CEF988-3217-6173-94B7-BB99C4B8CB81}"
     # ai/022 B16: 同一批断言在 x86 上再真跑一遍 —— 这是布局改动（vtable 槽 + 库里的偏移 +
     # 调用约定）唯一的 x86 侧端到端读数：x86 探针按库里那形状直调槽 3/4，
@@ -5682,6 +5697,14 @@ if ($Category -in @("all", "run", "vbp")) {
         "CALL=AMT hr=0x00000000 resultvt=14 dec_cy=12345670000 dec_i8=1234567",
         "CALL=QUARTER hr=0x00000000 resultvt=14 dec_cy=12500 dec_i8=1",
         "CALL=ECHO hr=0x00000000 resultvt=14 dec_cy=50000 dec_i8=5",
+        # Acct #305 SB159/SB162 (knife 50): a real SAFEARRAY that comes IN to our own IDispatch
+        # server must be readable and must come back OUT. EchoVal only hands its argument back,
+        # so arrsum=60 can only come from the elements the inbound arm **copied** (10+20+30) and
+        # lo/hi only from SafeArrayGetLBound/UBound on our own descriptor.
+        # Negative controls, both run: drop the SB162 arm -> the probe dies inside that Invoke
+        # (measured 0xC000041D, the CALL=ECHOARR line never prints); drop the Byte row of the
+        # whitelist -> VB-b159-mb in test_com_latebound turns 0/Empty.
+        "CALL=ECHOARR hr=0x00000000 resultvt=8195 arrvt=8195 dims=1 lo=0 hi=2 arrsum=60",
         "DONE") @(
         "CALL=ADD") "{F5CEF988-3217-6173-94B7-BB99C4B8CB81}" "x86"
 

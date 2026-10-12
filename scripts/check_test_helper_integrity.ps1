@@ -129,9 +129,10 @@ if ($err5.Count -gt 0) {
 if ($ast5) {
     $wantD = @{
     # 名字 = @(位置实参个数, Needles 针数, Absent 针数) —— 加针/加调用点要同时改这张名单
+    # 账 #305 §B159/§B162 (第五十刀): 两台各加一条 CALL=ECHOARR (真 SAFEARRAY 进服务端、再交回客户端)。
     'ax_dll_dispatch_invoke'         = @(6, 6, 1)
-    'cc_dll_dispatch_iface_only'     = @(7, 10, 1)
-    'cc_dll_dispatch_iface_only_x86' = @(8, 10, 1)
+    'cc_dll_dispatch_iface_only'     = @(7, 11, 1)
+    'cc_dll_dispatch_iface_only_x86' = @(8, 11, 1)
 }
 $ds = @($ast5.FindAll({ param($n)
     $n -is [System.Management.Automation.Language.CommandAst] -and

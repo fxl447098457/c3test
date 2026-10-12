@@ -53,6 +53,25 @@ int32_t vb6_SaElemSize(vb6_safearray_elemtype t) {
 // 「VB6 叫它什么」—— 两张表并排住，是因为它们吃同一个枚举、也必须同一时刻一起改。
 // 认不出的档回落 variant：empty = 没建过（改前所有档位也都答 variant），udt = VB6 那一侧没有
 // 「把 UDT 数组装进 Variant」的可抄口径（§B159 记着）。ptr 交 vtDispatch = VB6 的 vbObject(9)。
+// 账 #305 §B159（第五十刀）：上面那张表的方向反过来 —— Windows 的 VARENUM → 我们的元素枚举。
+// 与尺寸表、档表同一族：三张表吃同一个枚举，改一档要三张一起改，而且只许在这里改。
+// 认不出的档回落 vb6_sa_variant（= 改前 vb6rtl_com.c 那两份手抄 switch 的 default 答案，
+// 行为不动）；元素宽度一律交回 vb6_SaElemSize，不在这里第二次答「一格多宽」。
+vb6_safearray_elemtype vb6_SaElemTypeFromVt(VARTYPE comVt) {
+    switch (comVt) {
+        case VT_BOOL:    return vb6_sa_bool;
+        case VT_UI1:     return vb6_sa_byte;
+        case VT_I2:      return vb6_sa_int;
+        case VT_I4:      return vb6_sa_long;
+        case VT_R4:      return vb6_sa_single;
+        case VT_R8:      return vb6_sa_double;
+        case VT_BSTR:    return vb6_sa_bstr;
+        case VT_VARIANT: return vb6_sa_variant;
+        case VT_I8:      return vb6_sa_variant;   /* 枚举里没有 64 位整数档 (§B155 记着) */
+        default:         return vb6_sa_variant;
+    }
+}
+
 int32_t vb6_SaVtFromElemType(vb6_safearray_elemtype t) {
     switch (t) {
         case vb6_sa_bool:     return (int32_t)vb6_vtBoolean;     /* 11 */

@@ -1175,6 +1175,19 @@ bool CCodeGen::isWholeArrayRef(const Expr* e) const {
     return isDynamicArrayMemberCallee(n.callee.get(), nullptr);
 }
 
+// 账 #305 §B161/§B159 (第五十刀): 数组载体实参这一问的唯一主人 (声明处记着四个排除项)。
+// 刻意**不看** inferExprType: 它对模块级数组答的是**元素**档 (Long/Byte/String), 那两个消费者要的
+// 恰恰是「别按元素档处置」—— 第四十九刀的实读数 (3/"Long"、17/"Byte"、8/"String") 就是照着它抄的结果。
+bool CCodeGen::isArrayCarrierArgName(const std::string& lowerName,
+                                     const std::string& cExpr) const {
+    if (knownArrays_.count(lowerName) == 0) return false;
+    if (knownObjectVars_.count(lowerName)) return false;
+    if (knownVariantVars_.count(lowerName)) return false;
+    if (arrayClassElemTypes_.count(lowerName)) return false;
+    if (cExprIsVariant(cExpr)) return false;
+    return true;
+}
+
 // Fix 178: callee 是「UDT 的动态数组成员」(`.Cols` / `Default.Cols`) 时返回 true,
 // 并按需带出元素 UDT 的 C 类型 (元素是标量类型时保持原值)。
 bool CCodeGen::isDynamicArrayMemberCallee(const Expr* callee, std::string* elemUdt) const {

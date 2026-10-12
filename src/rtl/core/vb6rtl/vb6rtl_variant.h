@@ -323,6 +323,7 @@ DECIMAL *vb6_DecimalPtrFromVariant(const VARIANT *v);
  * 它原来那句「槽布局前 16 字节与 OLE VARIANT 内容一致」正是 §B144 静默错的根因。 */
 void vb6_VariantPackCopyInto(const void *slot, VARIANT *out);    /* 槽 → 对端 VARIANT(带权副本) */
 void vb6_VariantBorrowIntoSlot(const VARIANT *src, void *slot);  /* 对端 VARIANT → 槽(借用) */
+void vb6_VariantSlotRelease(void *slot);  /* 账 #305 §B162: 回收上面那臂造出的描述符 */
 
 /* 账 #305 §B145: 槽 → 真 VARIANT 的那张 vt 表，**只答「数值住在哪一格」**，一律借用语义
  * (不复制 BSTR、不 AddRef)。需要带权副本的出站那一族自己补下面那一步。 */

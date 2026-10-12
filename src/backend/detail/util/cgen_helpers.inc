@@ -1099,6 +1099,16 @@
     std::string rewriteByteArrayValue(const std::string& value) const;
     // Fix 170: `A()` 空括号整体数组引用判定 (无实参 + callee 是已知/模块级数组变量)
     bool isWholeArrayRef(const Expr* e) const;
+    // 账 #305 §B161/§B159 (第五十刀): 「这个名字交出去的是不是一枚**数组载体**」只许一处问。
+    // 第四十九刀把它写在 ByRef Variant 实参那一格 (cgen_expr_call_arg_emit.inc), 第五十刀 COM 实参
+    // 打包那一格 (comPackExpr) 也要它 —— 「同一个问句抄两遍」正是这张表历次漏档的来历, 所以收成一条。
+    // 读的是 knownArrays_ (与 VB6_SA_AT 元素访问、isWholeArrayRef 同一张表), 四个「不算」各有主人:
+    //   knownObjectVars_     晚绑定对象/控件 —— 交对象档
+    //   knownVariantVars_    本来就是槽 —— 不需要再装箱
+    //   arrayClassElemTypes_ 元素是工程类的数组 —— 走 deliverToClassSlot 那一格
+    //   cExprIsVariant       表达式已经是槽
+    bool isArrayCarrierArgName(const std::string& lowerName,
+                               const std::string& cExpr) const;
     // Fix 178: callee 是 UDT 的动态数组成员 (`.Cols()`) 时为 true, 顺带取元素 UDT
     bool isDynamicArrayMemberCallee(const Expr* callee, std::string* elemUdt) const;
     // Fix 170: 整体数组赋值右侧收口 —— 新建载体直接赋, 其余深拷贝避免别名

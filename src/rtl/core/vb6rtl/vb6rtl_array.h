@@ -192,6 +192,13 @@ int32_t vb6_SaElemSize(vb6_safearray_elemtype t);
 // 那就是改前每一档的答案。Date 档在这枚枚举里根本没有（数组里的 Date 存成 double），那一格记在 §B159。
 int32_t vb6_SaVtFromElemType(vb6_safearray_elemtype t);
 
+// 账 #305 §B159（第五十刀）：与上面那张表并排住的**反向**表 —— Windows 的 VARENUM → 我们的元素枚举。
+// 「哪一档对应哪一档」第二次有了唯一答案：改前 vb6rtl_com.c 里两条进口各抄了一份元素 switch，
+// 两份都只认 6 档、默认回落 variant；于是 COM 交回一枚 Byte 数组时按 24 字节步长 memcpy 一枚
+// 1 字节/元素的源 = **越界读**，而标签答 8204/"Variant()"。认不出的档照旧回落 variant
+//（= 改前那两条的答案，行为不动），元素宽度一律交回上面那张尺寸表答。
+vb6_safearray_elemtype vb6_SaElemTypeFromVt(VARTYPE comVt);
+
 int32_t vb6_UBoundND(vb6_SafeArrayND* arr, int32_t dimension);
 int32_t vb6_LBoundND(vb6_SafeArrayND* arr, int32_t dimension);
 
