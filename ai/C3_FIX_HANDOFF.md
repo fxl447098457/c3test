@@ -2433,7 +2433,10 @@ marker、重编，之后 `check_rtl_embedded` 报 **125/125 逐字节相同**。
 - **发码读数**（`.build/k51probe/p51_emit.txt`，x64、RC=0，四枚对照）：模块级 `Private mL() As Long` ⇒ `v1 = vb6_VariantLong(mL);`；模块级 `mB() As Byte` ⇒ `v2 = vb6_VariantByte((uint8_t)(mB));`（**整枚描述符指针被截成一字节**）；过程内 `ReDim loc(0 To 1) As Long` ⇒ `v3 = vb6_VariantLong(loc);`；对照组 `v4 = 5` 那条一字未动 ⇒ 这一站对非数组是对的，缺的**只**是数组那一问。
 - **修法形状（按读数收窄，不用再造一站）**：全仓 13 处引用（声明 + 定义 + 约十处调用）⇒ 赋值/形参/属性返回那几路**已经只走这一枚出口**，不像第四十九刀那条内联 switch；所以修法 = 在 `wrapVariantValue` 开头问同一枚 `isArrayCarrierArgName`、装箱仍交 `vb6_VariantFromValue`（第四十六刀的载体出口）、秩数护栏照旧 `<= 1`（ND 仍归 §B151，同一理由：`_Generic` 没有 ND 那一档）。哨兵那头 A18 现在钉的是「这条权威被问两次」，落地之后要改成**三次**并逐形归因（别把站点数当免费判据白送）。
 - **判据已经先钉上了**：`VB-b159-va=3/Long/-1(e9)` 钉的是**还没修**的读数 —— 谁修了它这一行会红，那时按新读数重钉并回来本格收线。同一形状旁边另有 `mu`（从没 ReDim = NULL 载体）与 `ms`（String() = 白名单外）两条，那两条读数是对的，不许顺手改。
-- **开工前先量的覆盖面**：真语料里「先赋给 Variant 再递过 COM」那一形（PropertyBag 那族有没有绕这一路的）没数过；§B149/§B150 讲的是**晚绑定槽元素**读写，与本格的整枚数组赋值不同形。
+- **覆盖面已数（2026-10-12 第五十刀收线那一趟顺手做的，屏具 = `.build/k51_census.py`，读数 = `.build/k51_b163_census.txt`）**：真语料 `D:\vb_yqt4qPac` 的 10110 份 .bas/.cls/.frm/.ctl/.pag 里 **命中 36 份 / 41 行**（判据 = 一枚 Variant 档的名字被赋以同文件声明的**裸数组名**）。逐行看：绝大多数是**函数返回变量**那一形（VbEclipse 那族 20 份 `IIterator_items = m_ArgumentList` 之类 + SQLiteCursor/SQLiteDataSet 的 `GetRows = ArrRows` 4 行 + 三份 cRegistry 的 `vValue = abData` + 三份 MListViewEx 的 `LVGetColOrder = cols`），少量是普通赋值 ⇒ 本格**不是纸面缺口**（与 §B151 那形「命中 0」不同）；但**语料主体走的是返回那一站，不是 P51 探针那种局部赋值**。
+- **两站同一问，覆盖面不一样**（探针 `.build/k51self/P51B.vbp`，`--emit-c` 实测，RC=0）：返回站 `RetLocal = a`（过程内 `Dim a() As Long`）已经发成 `vb6_VariantFromValue(a)` —— 第四十八刀那批装箱吃的正是它；而 `RetModule = mArr`（模块级数组）仍发 `vb6_VariantLong(mArr)`。赋值站（`wrapVariantValue`）两种都坏：P51 里 `v1 = vb6_VariantLong(mL)` 与 `v3 = vb6_VariantLong(loc);` （过程内数组在赋值站也折）。⇒ 缺的还是**同一问**「这枚名字是不是一维数组本体」，要落两处：`wrapVariantValue` 开头 + 返回站那一臂里模块级数组那一档；秩数护栏照旧、ND 仍归 §B151。
+- **屏具那条坑（同族第四次，值得记）**：这条屏第一次跑打印的是「命中文件 0 / 命中行 0」—— 而**它是假的**：`RE_ASSIGN` 只认 `:` 注释，VB 源里行尾注释绝大多数是 `'` 起头 ⇒ 每一条带注释的赋值都静默不匹配。第二版加了内建正控（一份合成文件必须恰好命中那两行、元素读与标量那两行不许命中），第一次跑就把这个假零顶红了 ⇒ 修完才是上面那 36/41。**census 之前先给屏喂一份已知答案的样本**，别拿「0 命中」当结论 （与 §B151 那条 0 命中不同：那一条当时也这么读，但正控证明过屏能命中别的形状）。
+- **与 §B149/§B150 的关系**：那两格讲的是**晚绑定槽元素**读写，与本格的整枚数组赋值不同形，别并做一格。
 
 ### B151 把真二维数组赋给 Variant 槽，槽读回来是 VarType=9 / "Object" 而不是 8204 —— 自家多维描述符被折成一维（2026-10-12 第四十刀量到；**未开工**）
 
