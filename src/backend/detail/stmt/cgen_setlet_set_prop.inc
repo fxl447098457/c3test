@@ -439,22 +439,12 @@
     suppressVirtDispatch_ = savedVirtLhs;
     std::string target = std::move(lastExpr_);
 
-    // 账 #257 第十九层: `Set .Picture = .Image` (With UserControl / PropertyPage 体内)
-    // —— 与上方 Nothing 那一档同一问: 撞名的内建成员写 RTL 全局, 不走 COM 派发
-    // (派发命中控件自己的 Property Set ⇒ DrawFrame 互递归 ⇒ 栈溢出)。
-    if (node.target->kind == ASTNodeKind::WithMemberExpr && !withObjectInfoStack_.empty()) {
-        auto& hpWm19b = static_cast<WithMemberExpr&>(*node.target);
-        std::string hpRtl19b;
-        if (withHostPseudoIntrinsic(withObjectInfoStack_.back().hostPseudoObj,
-                                    hpWm19b.memberName, hpRtl19b)) {
-            emitSetObjectRhs(node.value);
-            if (isComMarker_) resolveComValue("Object");
-            std::string hpVal19b = std::move(lastExpr_);
-            hpVal19b = comObjectRefFromCallExpr(hpVal19b);
-            c_.emitLine(hpRtl19b + " = " + hpVal19b + ";  /* With host pseudo Set */");
-            return;
-        }
-    }
+    // 账 #257 第十九层 · 注: `Set .Picture = .Image` 这一形**不在这里另开分支** ——
+    // 上面 WithMemberExpr 的读取已经把 target 交成内建全局 (且不打 COM 标记),
+    // 于是下方 isComMarker_ 为假, 自然落到本函数末尾那条通用的 `target = value;`
+    // 路径, 发出的就是 `vb6_UserControl_Picture = vb6_ComGetObjectProp(...)`。
+    // 刻意不再调 emitSetObjectRhs: scripts/check_set_rhs_object_context.ps1 钉着
+    // "emitSetObjectRhs 调用点恰好 7 处", 新增一处即红 (实测踩到过)。
 
     // COM属性SetRef: Set obj.Property = objRef → vb6_ComSetRef(obj, L"Property", objRef)
     if (isComMarker_) {
