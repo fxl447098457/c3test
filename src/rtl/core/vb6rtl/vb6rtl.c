@@ -623,8 +623,14 @@ void vb6_ErrRaise(int32_t errNum, BSTR source, BSTR description) {
     // 未处理错误: 显示消息并退出
     // 定位调用点用: C3_COM_TRACE 下打印返回地址 (RVA 可对 -g 产出的 .map 符号化)
     if (GetEnvironmentVariableA("C3_COM_TRACE", NULL, 0) > 0) {
-        fprintf(stderr, "[C3_ERR] unhandled raise %d from %p\n",
-                (int)errNum, _ReturnAddress());
+        /* 定位调用点用: 打**绝对返回地址**与**本模块基址** —— 两者相减才是 RVA,
+           可对 `-g` 产出的 .map 符号化。以前只打绝对地址, 而 exe 开着 ASLR
+           (首选基址 0x400000 与实际加载基址无关), 拿不到 RVA 就无从符号化
+           (实测踩过: 先按 "基址 = 0xB10000" 猜, 反推出的 RVA 落在 **资源段**)。 */
+        HMODULE hSelfDbg = GetModuleHandleA(NULL);
+        fprintf(stderr, "[C3_ERR] unhandled raise %d from %p base=%p rva=0x%lx\n",
+                (int)errNum, _ReturnAddress(), (void*)hSelfDbg,
+                (unsigned long)((char*)_ReturnAddress() - (char*)hSelfDbg));
         fflush(stderr);
     }
     fwprintf(stderr, L"Unhandled error %d", (int)errNum);
@@ -711,6 +717,21 @@ static double vb6_VarToDouble_internal(vb6_VARIANT* v) {
         case (vb6_vartype)VT_DECIMAL: { double dv = 0.0; vb6_DecimalToR8(*v, &dv); return dv; }
         case (vb6_vartype)VT_R4: return (double)v->fltVal;
         case (vb6_vartype)VT_R8: return v->dblVal;
+        /* 账 #257 第十一层: **VT_DATE 以前没有档** ⇒ 落 default 交 0.0 —— 与上面 VT_I8
+         * (账 #230 §B137)、VT_DECIMAL (账 #305 §B143) 是**同一个坑的第三处**: 每缺一档,
+         * 该档的 Variant 在比较面上就被整体抹成 0。VT_DATE 与 VT_R8 同存 dblVal
+         * (vb6_VariantDate 就是这么装的), 所以这一格直接取 dblVal。
+         *
+         * 实测 (ComCtlsDemo DTPicker.ctl 的 `Property Let Value`):
+         *     If DateValue >= Me.MinDate And DateValue <= Me.MaxDate Then ...
+         * DateValue 经上面那句 `DateValue = CDate(DateValue)` 已是 **VT_DATE**,
+         * 而 `Me.MinDate` 被包成 VT_R8 的 2.0 ⇒ 左边读成 0.0 ⇒ `0.0 >= 2.0` **恒假**
+         * ⇒ 误 Err.Raise 35773 "A date was specified that does not fall within the
+         * MinDate and MaxDate properties" ⇒ 未处理 ⇒ 启动即退。
+         * 注意同一文件里 `Property Let MinDate` 的同类守卫 `If Value > Me.MaxDate` 走的是
+         * **裸 double 比较** (两边都是 double, 不经 Variant), 所以它一直是好的 ——
+         * 这也是为什么这个坑只在这一处暴露。 */
+        case (vb6_vartype)vb6_vtDate: return v->dblVal;
         case (vb6_vartype)VT_BOOL: return v->boolVal ? -1.0 : 0.0;
         case (vb6_vartype)VT_BSTR: {
             if (!v->bstrVal) return 0.0;
