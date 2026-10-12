@@ -25,26 +25,28 @@ typedef struct vb6_ForEachState {
     int32_t fetchedCount;  // how many items we've returned to caller (non-empty)
 } vb6_ForEachState;
 
-// 账 #257 第十五层: `For Each x In <项目类集合>` —— 集合表达式的 C 面是**裸工程类实例**
-// (结构体首字段是 `__comObj` back-ptr 且常为 NULL, 没有真 vtable), 不是 IDispatch。
+// 账 #257 第十五层 / #269 第十七层: `For Each x In <项目类集合>` —— 集合表达式的 C 面是**裸
+// 工程类实例** (结构体首字段是 `__comObj` back-ptr 且常为 NULL, 没有真 vtable), 不是 IDispatch。
 // vb6_ForEach_Init 会按 IDispatch 走 GetIDsOfNames(L"Count") ⇒ 读 `[NULL+0x14]` 当场 AV。
 // 实测 ComCtlsDemo ListView.ctl:7223 RebuildListItems
 //   `For Each ListItem In Me.ListItems`
 //   → vb6_ForEach_Init(vb6_ListView_prop_get_ListItems((void*)me))
 //   → av read target=0x14 @ vb6_ComGetIdsOfNames+0x87 (函数尾那一族同名类集合 6 处同形)。
-// VB6 对工程类的 For Each 要的是它的 `NewEnum` 成员 (VB_UserMemId = -4)。
-// 本入口直接接那一枚接口, 不再经过 IDispatch。
-//   · QI 优先 —— 手写 vtable 的 IEnumVARIANT (VTableHandle 那族) 也实现了 IID_IEnumVARIANT;
-//   · QI 不解时按声明类型直接当接口用 (自加一次引用), 保证不因缺 QI 而静默退化成空枚举。
+// VB6 对工程类的 For Each 要的是它的 `NewEnum` 成员 (VB_UserMemId = -4)。发码侧
+// (cgen_control.cpp L424) 直接生成 `vb6_ForEach_InitFromEnumIface((void*)vb6_<Cls>_NewEnum(<coll>))`,
+// 把 NewEnum 返回的 **已合法构造的 IEnumVARIANT 接口指针** 喂进来 —— 它本来就是 IEnumVARIANT, 不必再 QI。
+//
+// 第十七层坑: 工程类 NewEnum 是 VTableHandle 版 IEnumVARIANT, 其 QueryInterface 体期望 `IID`
+// 参数是「带 Data1 属性的 VB IID 对象」(生成码 vb6_ComGetIntProp((*IID), L"Data1")==132100),
+// 而**不是**裸 GUID 指针 &IID_IEnumVARIANT。若拿 &IID_IEnumVARIANT 去 QI, 它会把 GUID 当 COM
+// 对象解引用 → 读 0x20404 (IID_IEnumVARIANT.Data1=132100) → vb6_ComIsDispatchable 撞 NULL+0x404 崩
+// (崩溃栈: ForEach_InitFromEnumIface+0x36 → VTableHandle_IEnumVARIANT_QueryInterface →
+//  ComGetIntProp → ComGetProp → getDispid → ComIsDispatchable)。
+// 既然 NewEnum 已经把合法 IEnumVARIANT 交出来了, 这里只 AddRef 接管即可, 绝不二次 QI。
 void* vb6_ForEach_InitFromEnumIface(void* pEnumRaw) {
     if (!pEnumRaw) return NULL;
-    IEnumVARIANT* pEnum = NULL;
-    IUnknown* pUnk = (IUnknown*)pEnumRaw;
-    HRESULT hr = pUnk->lpVtbl->QueryInterface(pUnk, &IID_IEnumVARIANT, (void**)&pEnum);
-    if (FAILED(hr) || !pEnum) {
-        pEnum = (IEnumVARIANT*)pEnumRaw;
-        pEnum->lpVtbl->AddRef(pEnum);
-    }
+    IEnumVARIANT* pEnum = (IEnumVARIANT*)pEnumRaw;
+    pEnum->lpVtbl->AddRef(pEnum);
     vb6_ForEachState* state = (vb6_ForEachState*)calloc(1, sizeof(vb6_ForEachState));
     if (!state) {
         pEnum->lpVtbl->Release(pEnum);

@@ -22,6 +22,21 @@
     if (node.value->kind == ASTNodeKind::LiteralExpr) {
         auto& lit = static_cast<LiteralExpr&>(*node.value);
         if (lit.literalKind == LiteralKind::Nothing) {
+            // 账 #257 第十九层: `Set .Picture = Nothing` (With UserControl / PropertyPage
+            // 体内) —— 内建成员置空直接写 RTL 全局, **不能**走 COM 派发: 派发会命中控件
+            // 自己声明的同名 Property Set, 而它末尾 `Call DrawFrame` ⇒ DrawFrame 又
+            // `Set .Picture` ⇒ 无限互递归 (ComCtlsDemo FrameW 实测栈溢出 0xC00000FD,
+            // 随后被 ntdll 报成堆损坏 0xC000037D)。
+            if (node.target->kind == ASTNodeKind::WithMemberExpr
+                && !withObjectInfoStack_.empty()) {
+                auto& hpWm19 = static_cast<WithMemberExpr&>(*node.target);
+                std::string hpRtl19;
+                if (withHostPseudoIntrinsic(withObjectInfoStack_.back().hostPseudoObj,
+                                            hpWm19.memberName, hpRtl19)) {
+                    c_.emitLine(hpRtl19 + " = NULL;  /* With host pseudo Set Nothing */");
+                    return;
+                }
+            }
             // 左值求值期间关掉虚表派发 (ai/022 B08e-4 站点⑭: Pattern C/D2 要对这段文本做
                 // `prop_get_` -> `prop_let_` 的字符串级改写, 派发表达式会被换成表里不存在的槽字段)
             const bool savedVirtLhs = suppressVirtDispatch_;
@@ -423,6 +438,23 @@
     emitExpr(*node.target);
     suppressVirtDispatch_ = savedVirtLhs;
     std::string target = std::move(lastExpr_);
+
+    // 账 #257 第十九层: `Set .Picture = .Image` (With UserControl / PropertyPage 体内)
+    // —— 与上方 Nothing 那一档同一问: 撞名的内建成员写 RTL 全局, 不走 COM 派发
+    // (派发命中控件自己的 Property Set ⇒ DrawFrame 互递归 ⇒ 栈溢出)。
+    if (node.target->kind == ASTNodeKind::WithMemberExpr && !withObjectInfoStack_.empty()) {
+        auto& hpWm19b = static_cast<WithMemberExpr&>(*node.target);
+        std::string hpRtl19b;
+        if (withHostPseudoIntrinsic(withObjectInfoStack_.back().hostPseudoObj,
+                                    hpWm19b.memberName, hpRtl19b)) {
+            emitSetObjectRhs(node.value);
+            if (isComMarker_) resolveComValue("Object");
+            std::string hpVal19b = std::move(lastExpr_);
+            hpVal19b = comObjectRefFromCallExpr(hpVal19b);
+            c_.emitLine(hpRtl19b + " = " + hpVal19b + ";  /* With host pseudo Set */");
+            return;
+        }
+    }
 
     // COM属性SetRef: Set obj.Property = objRef → vb6_ComSetRef(obj, L"Property", objRef)
     if (isComMarker_) {

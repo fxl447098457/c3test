@@ -692,6 +692,11 @@ auto& idExpr = static_cast<IdentifierExpr&>(*callExpr.callee);
             const std::string hpObj160w = Symbol::toLower(hid160w.name);
             if (hpObj160w == "usercontrol" || hpObj160w == "propertypage") {
                 lastExpr_ = hostPseudoRtlSymbol(hid160w.name, "hwnd");
+                // 账 #257 第十九层: 记下"这一帧的 With 对象是宿主伪对象", 体内 `.成员`
+                // 才能按内建成员解析 (而不是按 COM 派发命中控件自己的同名公开属性)。
+                if (!withObjectInfoStack_.empty()) {
+                    withObjectInfoStack_.back().hostPseudoObj = hid160w.name;
+                }
             }
         }
         // Fix 038: C2440 修复 — UDT 同类型转换和 UDT/VARIANT → void* 转换

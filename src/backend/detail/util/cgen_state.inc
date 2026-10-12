@@ -71,6 +71,11 @@
         // 已知时优先通过 resolveClassMemberCall 精确解析该类的成员方法/属性,
         // 并把 tempType 设为 vb6_cls_<className>* (避免 void* 上的 .member/->member 错误)
         std::string className;
+        // 账 #257 第十九层: With 目标是**宿主伪对象** (UserControl / PropertyPage) 时,
+        // 记下源码里那份拼法 (PascalCase 由 hostPseudoRtlSymbol 归一); 空串 = 不是。
+        // 体内 `.成员` 是 VB6 的**内建**成员, 与控件自己声明的同名公开属性是两个东西
+        // (见 CCodeGen::withHostPseudoIntrinsic)。
+        std::string hostPseudoObj;
     };
     std::vector<WithObjInfo> withObjectInfoStack_;
     bool suppressDefaultProp_ = false;  // P17.1: With对象表达式时抑制默认属性读取

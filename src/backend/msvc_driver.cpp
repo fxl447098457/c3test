@@ -284,7 +284,9 @@ bool MsvcDriver::compileAndLink(const MsvcDriverOptions& options) {
 
     // P24-09: x86 RTL libraries are built with /MT (static CRT); match it to avoid LNK2038
     if (options.arch == "x86") {
-        cmd << " /MT";
+        // 账 #257 第十八层后: C3_DEBUG_CRT=1 ⇒ 静态调试 CRT (/MTd + /D_DEBUG), 让 CRT 调试堆
+        // (_CRTDBG_CHECK_ALWAYS_DF + RTL report hook) 抓堆越界/坏释放。默认仍 /MT。
+        cmd << (getenv("C3_DEBUG_CRT") ? " /MTd /D_DEBUG" : " /MT");
     }
 
     // Output file and .obj directory (P11.2: intermediates go to objDir)

@@ -371,7 +371,7 @@ vb6_VARIANT vb6_VariantFromComResult(void* variant_ptr) {
                     default:         et = vb6_sa_variant;  esz = sizeof(VARIANT); break;
                 }
                 vb6_SafeArray1D* arr = (vb6_SafeArray1D*)calloc(1, sizeof(vb6_SafeArray1D));
-                arr->signature = 0x5A1D;  /* Fix 082g */
+                vb6_Sa1DInit(arr);  /* cDims/fFeatures, 见 vb6rtl_array.h (原 0x5A1D 魔数) */
                 arr->elemType = et;
                 arr->elemSize = esz;
                 arr->lBound = lBound;
@@ -505,7 +505,7 @@ vb6_VARIANT vb6_VariantFromStackVARIANT(VARIANT* pv) {
                     default:         et = vb6_sa_variant;  esz = sizeof(VARIANT); break;
                 }
                 vb6_SafeArray1D* arr = (vb6_SafeArray1D*)calloc(1, sizeof(vb6_SafeArray1D));
-                arr->signature = 0x5A1D;  /* Fix 082g */
+                vb6_Sa1DInit(arr);  /* cDims/fFeatures, 见 vb6rtl_array.h (原 0x5A1D 魔数) */
                 arr->elemType = et;
                 arr->elemSize = esz;
                 arr->lBound = lBound;

@@ -156,7 +156,7 @@ std::string compileFlagsFor(bool isRtl, const MsvcDriverOptions& o,
     c << C3_V6_VERSION_DEFS;
     // P10 恢复: RTL 源码直接编译, /Gy 函数级链接配合 /OPT:REF 剔除未引用 RTL 代码
     c << " /Gy";
-    if (o.arch == "x86") c << " /MT";
+    if (o.arch == "x86") c << (getenv("C3_DEBUG_CRT") ? " /MTd /D_DEBUG" : " /MT");
     return c.str();
 }
 
