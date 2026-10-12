@@ -253,9 +253,23 @@
                 c_.emitLine("  } }");
             }
             bool ucIsArr = knownControlArrays_.count(ctlLower) != 0;
+            // Fix <vbeclipse> 2026-10-12 (账 #257 第十二层): 该 .ctl 有
+            // UserControl_ReadProperties ⇒ 这条 HostCreate 走的是**加载路径**(本函数稍后
+            // 会把 bag 交给 ReadProps), 按 VB6 语义不得跑 InitProperties —— 否则控件会先按
+            // 硬编码默认值把派生结构建好(如 VBFlexGrid 的 `VBFlexGridCells.Rows(0 To 1)` 与
+            // VBFlexGridCellsInit=True), ReadProperties 只改私有字段, 那条 `Call
+            // CreateVBFlexGrid` 又被 `VBFlexGridHandle <> NULL_PTR` 挡掉 ⇒ 数组停在默认尺寸
+            // 而 PropRows=150 ⇒ SetCellText 读 Rows(2) 错误 9 ⇒ 窗口 5s 内不出现。
+            // 设计子控件(本实例内部再 HostCreate)看到的标志在 ucHostInit 入口已被消费清零,
+            // 仍按原行为跑它们的 InitProperties (Fix 112d 依赖)。
+            bool ucSkipInitProps = false;
+            if (const FrmFile* spInitProps = findUserControlSpec(ctlClass))
+                ucSkipInitProps = Symbol::toLower(spInitProps->codeSection)
+                                      .find("sub usercontrol_readproperties") != std::string::npos;
             std::string hwndExpr;
             if (ucIsArr) {
                 int idx = ctrl.index >= 0 ? ctrl.index : 0;
+                if (ucSkipInitProps) c_.emitLine("vb6_UC_SetSkipInitProps(1);");
                 c_.emitLine("{ void* vb6_uc_h = vb6_UC_HostCreate(\"" + ctlClass + "\", "
                     + std::to_string(ucL) + ", " + std::to_string(ucT) + ", "
                     + std::to_string(ucW) + ", " + std::to_string(ucH)
@@ -263,6 +277,7 @@
                     + "\", " + std::to_string(idx) + ");");
                 c_.emitLine("  vb6_CtrlArr_SetAt(&vb6_arr_" + cIdent(ctrl.controlName) + ", "
                            + std::to_string(idx) + ", vb6_uc_h); }");
+                if (ucSkipInitProps) c_.emitLine("vb6_UC_SetSkipInitProps(0);");
                 hwndExpr = "vb6_CtrlArr_GetAt(&vb6_arr_" + cIdent(ctrl.controlName) + ", "
                          + std::to_string(idx) + ")";
             } else {
@@ -282,10 +297,12 @@
                 std::string slot220 = (ctrl.controlType == FrmControlType::ImageList
                                        ? "vb6_com_" : "vb6_hwnd_")
                                     + cIdent(ctrl.controlName);
+                if (ucSkipInitProps) c_.emitLine("vb6_UC_SetSkipInitProps(1);");
                 c_.emitLine(slot220 + " = vb6_UC_HostCreate(\""
                     + ctlClass + "\", " + std::to_string(ucL) + ", " + std::to_string(ucT) + ", "
                     + std::to_string(ucW) + ", " + std::to_string(ucH)
                     + ", hwnd, hInstance, \"" + ctrl.controlName + "\", -1);");
+                if (ucSkipInitProps) c_.emitLine("vb6_UC_SetSkipInitProps(0);");
                 hwndExpr = slot220;
             }
 

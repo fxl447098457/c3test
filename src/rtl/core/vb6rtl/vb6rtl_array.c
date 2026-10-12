@@ -18,6 +18,7 @@
 #include <oleauto.h>
 #include <olectl.h>
 #include <windows.h>
+#include <intrin.h>   /* _ReturnAddress (越界探针: 打印调用点 RVA, 可对 -g 的 .map 符号化) */
 #endif
 
 // P24-08: MessageBoxW (user32) + GetConsoleWindow (kernel32)
@@ -435,6 +436,27 @@ void vb6_SaElemFail(void* arr, int32_t idx) {
         fprintf(stderr, "[SA] elem access out of range: arr=%p idx=%d lb=%d ub=%d\n",
                 (void*)a, (int)idx,
                 a ? (int)a->lBound : -999, a ? (int)a->uBound : -999);
+        if (a) {
+            fprintf(stderr, "[SA]   desc: sig=0x%X elemType=%d elemSize=%d n=%d dyn=%d\n",
+                    (unsigned)a->signature, (int)a->elemType, (int)a->elemSize,
+                    (int)a->count, (int)a->isDynamic);
+            if (a->data) {
+                const unsigned char* p = (const unsigned char*)a->data;
+                fprintf(stderr, "[SA]   slots:");
+                for (int k = 0; k < 4; k++)
+                    fprintf(stderr, " %p", *(const void**)(const void*)(p + (size_t)k * 4));
+                fprintf(stderr, "\n");
+            }
+        }
+#ifdef _WIN32
+        {
+            /* 定位调用点: 绝对返回地址与本模块基址一起打, 两者相减才是可符号化的 RVA */
+            HMODULE hb = GetModuleHandleA(NULL);
+            void* rp = _ReturnAddress();
+            fprintf(stderr, "[SA]   caller rva=0x%lx base=%p\n",
+                    (unsigned long)((char*)rp - (char*)hb), (void*)hb);
+        }
+#endif
         fflush(stderr);
     }
     vb6_ErrRaise(9, vb6_BSTR_FromStr(L"VBA.Information"),
@@ -454,6 +476,14 @@ void vb6_SaNdElemFail(void* arr, const int32_t* idx, int32_t rank) {
                     (int)a->bounds[d].lBound, (int)a->bounds[d].cElements);
         }
         fprintf(stderr, "\n");
+#ifdef _WIN32
+        {
+            HMODULE hb = GetModuleHandleA(NULL);
+            void* rp = _ReturnAddress();
+            fprintf(stderr, "[SA]   ND caller rva=0x%lx base=%p\n",
+                    (unsigned long)((char*)rp - (char*)hb), (void*)hb);
+        }
+#endif
         fflush(stderr);
     }
     vb6_ErrRaise(9, vb6_BSTR_FromStr(L"VBA.Information"),

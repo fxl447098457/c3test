@@ -44,6 +44,33 @@ void vb6_UC_SetPendingFont(void* f) {
     vb6_ucPendingFont = (vb6_ComIface_Font*)f;
 }
 
+// Fix <vbeclipse> 2026-10-12 (账 #257 第十二层): 加载路径不得跑 UserControl_InitProperties。
+//
+// VB6 语义: InitProperties 只在"新实例被放到窗体上(无持久化数据)"时触发; 从 .frm
+// **加载**已存在的控件实例时只调 ReadProperties —— 作者正是按这个前提写 ReadProperties
+// 的 (每一项都带 `.ReadProperty("X", <默认值>)` 兜底)。
+// 而 C3 两条路都走: HostCreate 里先跑 InitProperties(按硬编码默认值把派生状态建起来),
+// 之后窗体创建代码再把 bag 交给 ReadProperties —— 此时 ReadProperties 只写**私有字段**,
+// 那些"由公开 Property Let 维护的派生结构"就永远停在 InitProperties 的默认尺寸上:
+//   VBFlexGrid.ctl:2482 InitProperties 末尾 `Call CreateVBFlexGrid` → InitFlexGridCells
+//   按 PropRows/PropCols = 2 建 `VBFlexGridCells.Rows(0 To 1) As TCOLS` 并置
+//   VBFlexGridCellsInit = True; ReadProperties 里 `PropRows = .ReadProperty("Rows", 2)`
+//   = 150 只改字段, 末尾的 `Call CreateVBFlexGrid` 因 `VBFlexGridHandle <> NULL_PTR`
+//   直接 Exit Sub ⇒ 数组仍是 2 行而 PropRows = 150 ⇒ SetCellText 读 Rows(2) 错误 9。
+// (此前不显形是因为 cgen 还会把 .frm 的设计期属性直接发给公开 Property Let, `Rows = 150`
+//  走 Property Let Rows 的 ReDim Preserve 把数组补上了; 第九层掐掉这条旁路后就露出来了。)
+//
+// 用法: 窗体创建方(带 bag 的顶层 UC)在 vb6_UC_HostCreate 之前置位; ucHostInit 入口
+// **消费**(读后清零)该标志, 于是本实例跳过 InitProperties, 而它在里面创建的设计子控件
+// (更靠后的 HostCreate) 看到的已清零 ⇒ 仍按原行为跑自己的 InitProperties (Fix 112d 依赖)。
+static int vb6_uc_skipInitProps = 0;
+void vb6_UC_SetSkipInitProps(int v) { vb6_uc_skipInitProps = v; }
+int  vb6_UC_SkipInitPropsConsume(void) {
+    int v = vb6_uc_skipInitProps;
+    vb6_uc_skipInitProps = 0;
+    return v;
+}
+
 // Fix 122: VB6 的 z 序规则 —— .frm 中**先声明**的控件在**最上层**。
 // cgen 按 .frm 顺序创建子窗口, 而 Win32 是"后创建者在上" → 顺序恰好相反:
 // Form2 里 LabelPlus1 (最后声明) 于是盖住了先声明的三个 ucProgressCircular 圆环,

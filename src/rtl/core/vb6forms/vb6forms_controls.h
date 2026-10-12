@@ -272,6 +272,11 @@ int32_t vb6_Host_Call(void* obj, const wchar_t* name, int32_t argc,
 void* vb6_UC_NewFont(void);
 // Fix 119: 在 vb6_UC_HostCreate 之前设定该实例的字体 (.frm BeginProperty Font 块)
 void  vb6_UC_SetPendingFont(void* f);
+// Fix <vbeclipse> 2026-10-12 (账 #257 第十二层): 加载路径(带 bag 的顶层 UC)不跑
+// UserControl_InitProperties —— 见 uc_host.c 的说明。置位方 = 窗体创建代码;
+// ucHostInit 入口消费(读后清零), 由 cgen 生成的 ucHostInit 读取。
+void  vb6_UC_SetSkipInitProps(int v);
+int   vb6_UC_SkipInitPropsConsume(void);
 // ---- czUI fix: 设计器子控件实例化 (.ctl 设计面上的 TextBox 等属于每个实例) ----
 // 在 ucHostInit (宿主实例初始化) 期间调用, 以当前 UC 宿主窗口为父创建真实子窗口。
 // left/top/width/height 单位为缇。返回子窗口句柄 (NULL = 失败)。
