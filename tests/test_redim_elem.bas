@@ -44,8 +44,10 @@ Public Sub Main()
     Dim s8() As String
     Dim v As Variant
     Dim p0() As String
+    Dim g1() As String
     Dim w1() As Variant
     Dim b1() As Byte
+    Dim n1() As String
 
     ' R1: 1-D String, bare ReDim. cell = direct round trip (worked before too -
     ' direct write and direct read use the same stride); label = the open B155 cell.
@@ -115,13 +117,14 @@ Public Sub Main()
     ' binary dies with 0xC0000374 (heap corruption) having printed NOTHING (reading
     ' .build/b1382_preserve/rzb6.txt = 0 bytes).
     '
-    ' One ND ReDim statement per array per procedure below, and that is not a style
-    ' choice: a SECOND ND ReDim of the same array in the same scope is its own open
-    ' cell - the generated bounds temp is named after the ARRAY (_redim_bounds_<name>),
-    ' so it is declared twice inside one C function = cl C2374 (redefinition; multiple
-    ' initialization).
-    ' Measured on both binaries (.build/b1395_k43/{n6,b6}/c3-error.log), so it is
-    ' older than both knives; R14 uses two procedures to work around it.
+    ' R10..R14 keep one ND ReDim statement per array per procedure on purpose: that
+    ' used to be a HARD limit, not a style choice - the generated bounds temp was named
+    ' after the ARRAY, so a second ND ReDim of the same array in the same scope declared
+    ' it twice inside one C function = cl C2374 (redefinition; multiple initialization),
+    ' measured on both binaries (.build/b1395_k43/{n6,b6}/c3-error.log). Knife 44
+    ' (section B156) fixed that by naming the temp per STATEMENT through one helper;
+    ' R15 below is the shape that would not compile before it, while R14 stays as the
+    ' cross-procedure witness (module-level array, two procedures).
     ReDim Preserve p0(1 To 2, 1 To 3)
     p0(1, 1) = "one"
     p0(2, 3) = "six"
@@ -148,22 +151,64 @@ Public Sub Main()
     v = p0
     Debug.Print "R13-box-c23="; CStr(v(2, 3))
 
-    ' R14: Preserve must actually PRESERVE. The two statements sit in DIFFERENT
-    ' procedures (see the C2374 note): Main allocates and writes mp(1,1), GrowMp grows
-    ' the LAST dimension - the direction VB6 allows under Preserve - and writes
-    ' mp(1,3). Reading both back here is the witness that the copy loop moved the old
-    ' elements into the new block instead of dropping them.
+    ' R14: Preserve across TWO procedures. Main allocates and writes mp(1, 1); GrowMp grows
+    ' the LAST dimension (the direction VB6 allows under Preserve) and writes mp(1, 3). The
+    ' split used to be forced, not chosen - see the C2374 note above; knife 44 lifted it and
+    ' R15 is the same-procedure shape. What R14 does NOT witness: both of its reads land
+    ' where the RTL's two index conventions agree (cell (1, 1) is the one slot they share,
+    ' and mp(1, 3) was written AFTER the growth), so it printed exactly this on the
+    ' pre-knife-45 compiler too (.build/b1405_k45build/rng6.txt). R16 is the needle that
+    ' tests "preserve" instead of merely reading the slot both conventions agree on.
     ReDim Preserve mp(1 To 2, 1 To 3)
     mp(1, 1) = "keep"
     GrowMp
     Debug.Print "R14-kept="; CStr(mp(1, 1)); " grown="; CStr(mp(1, 3))
     Debug.Print "R14-ub2="; UBound(mp, 2)
 
+    ' R15 (knife 44 = section B156): TWO multi-dim ReDim statements for the SAME array
+    ' in ONE procedure - plain first, then a Preserve that grows the last dimension.
+    ' Before that knife this file would not even compile (cl C2374), which is why this
+    ' is the discriminating shape: exit code + the two cells are the witness, and
+    ' R15-kept proves the growth kept what the FIRST statement wrote.
+    ReDim g1(1 To 2, 1 To 3)
+    g1(1, 1) = "g11"
+    ReDim Preserve g1(1 To 2, 1 To 5)
+    Debug.Print "R15-kept="; CStr(g1(1, 1)); " ub2="; UBound(g1, 2)
+    g1(2, 4) = "g24"
+    Debug.Print "R15-cell="; CStr(g1(2, 4))
+
+    ' R16 (knife 45 = section B158): a Preserve growth must not MOVE anything. The copy
+    ' loop used to walk the LAST dimension fastest while the access side (vb6_SaNdElemPtr,
+    ' and vb6_SafeArrayND_Offset next to it) walks the FIRST one fastest, so growing
+    ' (1 To 2, 1 To 3) into (1 To 2, 1 To 6) teleported the cells that the two arithmetic
+    ' disagree on. Measured on a compiler that has knives 42-44 but not 45
+    ' (.build/b1405_k45build/rng6.txt): six cells written BEFORE the growth, three of them
+    ' still there afterwards, and the three missing ones reappearing in the fresh columns -
+    ' this line read "a11/a12/", that one read "b21//", and b22 turned up as n1(1, 4). The
+    ' standalone probe pr4.bas tells the same story cell by cell
+    ' (.build/b1403_k44probe/rpn4_pre45.txt), and after the knife it prints byte-for-byte
+    ' what the BASE compiler prints (.build/b1405_k45build/{rk5b6,rk5b3}.txt, x64 and x86
+    ' identical). R14/R15 cannot see any of this: both read the (1, 1) cell, the one slot
+    ' the two conventions agree on.
+    ReDim n1(1 To 2, 1 To 3)
+    n1(1, 1) = "a11"
+    n1(1, 2) = "a12"
+    n1(1, 3) = "a13"
+    n1(2, 1) = "b21"
+    n1(2, 2) = "b22"
+    n1(2, 3) = "b23"
+    ReDim Preserve n1(1 To 2, 1 To 6)
+    Debug.Print "R16-keep=" & CStr(n1(1, 1)) & "/" & CStr(n1(1, 2)) & "/" & CStr(n1(1, 3))
+    Debug.Print "R16-keep2=" & CStr(n1(2, 1)) & "/" & CStr(n1(2, 2)) & "/" & CStr(n1(2, 3))
+    Debug.Print "R16-new=" & CStr(n1(1, 4)) & "|" & CStr(n1(2, 6)) & " ub2=" & CStr(UBound(n1, 2))
+
     Debug.Print "RE-DONE"
 End Sub
 
-' R14's second half: lives in its own scope so the ND bounds temp of this array is
-' emitted once per function (see the C2374 note in Main).
+' R14's second half: kept in its OWN procedure on purpose - R14 is the cross-procedure
+' witness for Preserve (module-level array, shared descriptor), R15 is the same-
+' procedure one. Both shapes matter: the first walks the module global, the second
+' walks two generated bounds temps in one C function.
 Private Sub GrowMp()
     ReDim Preserve mp(1 To 2, 1 To 6)
     mp(1, 3) = "later"

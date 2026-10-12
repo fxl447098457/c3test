@@ -2674,9 +2674,22 @@ if ($Category -in @("all", "run", "bas")) {
     # **R10/R11/R12/R14 这四枚直接读写不是分辨针**：修前那边写与读用的是同一枚错步长，自己一致，
     # 实测在修前的编译器上照样打出同样的值（drive3.log 的 BASE 段）；它们钉的是「本刀不许把已对的形状
     # 改坏」，分辨只靠 R13-box-c23 那一枚（装箱后的元素读问的是描述符自己的档）。
-    # 还有一格没修、只是绕开：同一过程里对同一枚数组发第二条多维 ReDim，会把同名的
-    # _redim_bounds_<数组> 临时量发两遍 ⇒ cl C2374「重定义」（两台同形，.build/b1395_k43/n6/c3-error.log），
-    # 所以 R14 的两句分在 Main 与 GrowMp 两个过程里。
+    # 同一段落的第四十四刀（§B156）把上面那句「绕开」取消了。那枚界临时量以前按**数组名**拼，
+    # 于是同一过程里对同一枚数组发第二条多维 ReDim 就把同一个 C 标识符声明两遍 ⇒ cl C2374
+    # 「重定义」（两台同形，.build/b1395_k43/n6/c3-error.log；独立探针 pr3.bas 在修前的编译器上
+    # 也压根编不过，.build/b1403_k44probe/pb3/c3-error.log）。修法 = 按**语句**唯一化：两个发码点
+    # （plain 与 complex target）都问同一枚出口 nextNDBoundsTemp（cgen_redim.cpp），序号跟
+    # tempCounter_ 一起在过程头复位。R15 就是这一形 —— 修前编不过、修后两台真跑。
+    # 第四十五刀（§B158）是 R14/R15 都看不见的那一格：两枚多维 Preserve 搬旧元素用的下标算术跟
+    # 访问侧那两套**反着**（它按「最后一维最快」，而 vb6_SaNdElemPtr 与 vb6_SafeArrayND_Offset 按
+    # 「第 0 维最快」），于是「长一格」把两套算术不同意的那些格搬到别处去。R14/R15 只读 (1, 1) 或
+    # 只读增长**之后**才写下的那一格 —— 恰好落在两套算术一致的地方，所以它们在修前也全绿、什么
+    # 都没测。分辨针是 R16：六格全在增长之前写、之后逐格读回来。同一形状的单发探针 pr4.bas 给两头
+    # 读数（修前 .build/b1403_k44probe/rpn4_pre45.txt：POST-1-3 是空的、r2c2 跑到 POST-1-4、r2c3 跑到
+    # POST-1-5、r1c3 跑到 POST-2-4；修后 .build/b1405_k45build/{rk5b6,rk5b3}.txt 两台一致，且与 BASE
+    # 那台 rpb4.txt 逐行相同）。负控 = 一枚只差第四十五刀 RTL 的编译器：整份夹具只有 R16 那三行改
+    # 色（R16-keep=a11/a12/ 与 R16-keep2=b21// 与 R16-new=b22| ub2=6），其余 26 行逐字不动，
+    # 读数 .build/b1405_k45build/rng6.txt；两台修后读数 .build/b1405_k45build/{rk5n6,rk5n3}.txt。
     $reNeedles = @("R1-cell=A",
         "R1-label-vt=8204 tn=Variant",
         "R2-preserve-cell=A ub=6",
@@ -2689,6 +2702,11 @@ if ($Category -in @("all", "run", "bas")) {
         "R10-c11=one c23=six", "R10-ub2=3 lb2=1",
         "R11-c11=v11 c22=v22", "R12-c12=7 c23=200",
         "R13-box-c23=six", "R14-kept=keep grown=later", "R14-ub2=6",
+        # 第四十四/四十五刀接上 R15..R16：读数同样是两台逐行量出来的（上面那段的工件路径），
+        # 两架构 diff 为空。R15 在修前的编译器上是硬错误（编不过），R16 在只差第四十五刀的那台
+        # 上是唯一会红的三枚 —— R14/R15 在那台上照样绿。
+        "R15-kept=g11 ub2=5", "R15-cell=g24",
+        "R16-keep=a11/a12/a13", "R16-keep2=b21/b22/b23", "R16-new=| ub2=6",
         "RE-DONE")
     Add-BasTest "test_redim_elem" "$Tests\test_redim_elem.bas" $reNeedles
     Add-BasTest "test_redim_elem_x86" "$Tests\test_redim_elem.bas" $reNeedles -Arch "x86"

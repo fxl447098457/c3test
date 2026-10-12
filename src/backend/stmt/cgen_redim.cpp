@@ -30,6 +30,16 @@ std::string CCodeGen::resolveUdtMemberArrayCType(const std::string& lowerVar) co
     return udtFieldObjCType(it->second, lowerVar.substr(dot + 1));
 }
 
+// 账 #305 §B156 (第四十四刀): 多维 ReDim 的界数组临时量以前**按数组名**拼
+// (`_redim_bounds_<名>`)，于是同一过程里第二条指向同一枚数组的多维 ReDim 会把同一条
+// `vb6_SafeArrayBound <名>[] = {…};` 在同一个 C 函数里发两遍 ⇒ cl C2374「重定义；多次初始化」
+// (两台同形，旧的那台也红 —— 读数 .build/b1395_k43/{n6,b6}/c3-error.log)。
+// 这一枚是**唯一拼法**出口：名字自带语句序号，visit(ReDimStmt) 与 emitReDimComplexTarget
+// 两条发码路都问它（以前两各路各拼一份，是「同一件事两处写法不同形」的又一例）。
+std::string CCodeGen::nextNDBoundsTemp(const std::string& base) {
+    return "_redim_bounds_" + base + "_" + std::to_string(ndBoundsSeq_++);
+}
+
 void CCodeGen::visit(ReDimStmt& node) {
     // Fix 100: 复杂目标 (带下标的成员链, 如 ReDim m_Serie(i).PT(n))。
     // node.targetExpr 非空时直接发射左值表达式 (VB6_SA_AT(vb6_type_tSerie, m_Serie, i).PT),
@@ -188,7 +198,8 @@ void CCodeGen::visit(ReDimStmt& node) {
         if (isClassModule_ && classMemberVars_.count(lowerVar) && !knownLocalVars_.count(lowerVar)) {
             rawCName = "me_" + rawCName;
         }
-        std::string boundsVar = "_redim_bounds_" + rawCName;
+        // 账 #305 §B156 (第四十四刀): 界数组临时量走唯一出口，名字带语句序号
+        std::string boundsVar = nextNDBoundsTemp(rawCName);
         c_.emitLine("vb6_SafeArrayBound " + boundsVar + "[] = {");
         c_.indent();
         for (int d = 0; d < dimCount; d++) {
@@ -362,11 +373,15 @@ void CCodeGen::emitReDimComplexTarget(ReDimStmt& node) {
             c_.emitLine(cName + " = " + newVal + ";");
         }
     } else {
-        // 多维 ReDim: bounds 局部数组名由目标左值净化得到 (仅需 C 标识符合法)
-        std::string boundsVar = "_redim_bounds";
+        // 多维 ReDim: bounds 局部数组名由目标左值净化得到 (仅需 C 标识符合法)。
+        // 账 #305 §B156 (第四十四刀): 拼法改问同一枚出口 —— 以前这里也按名字裸拼
+        // (`_redim_bounds` + 净化后的左值)，同一过程里两条指向同一目标的多维 ReDim
+        // 一样撞 C2374。序号由出口统一给，两条路不再各写一份。
+        std::string boundsSuffix;
         for (char ch : cName) {
-            if (isalnum((unsigned char)ch) || ch == '_') boundsVar += ch;
+            if (isalnum((unsigned char)ch) || ch == '_') boundsSuffix += ch;
         }
+        std::string boundsVar = nextNDBoundsTemp(boundsSuffix);
         c_.emitLine("vb6_SafeArrayBound " + boundsVar + "[] = {");
         c_.indent();
         for (int d = 0; d < dimCount; d++) {

@@ -1056,6 +1056,9 @@
 
     // Fix 100: ReDim complex target (member chain with subscript)
     void emitReDimComplexTarget(ReDimStmt& node);
+    // 账 #305 §B156 (第四十四刀): 多维 ReDim 的界数组临时量的**唯一**拼法出口 —— 两条发码路
+    // (visit(ReDimStmt) 与 emitReDimComplexTarget) 都问它, 名字自带语句序号。
+    std::string nextNDBoundsTemp(const std::string& base);
     // Fix 100: resolve element type of a complex ReDim target
     void resolveReDimComplexElemType(const ReDimStmt& node, Vb6Type& outType,
                                      std::string& outUdtCType) const;

@@ -54,6 +54,29 @@
 #       （尺寸表对 udt 答 0 ⇒ calloc(n, 0) 给一枚非空的零长指针，写进去就是纯堆越界）。
 #   A13 后端发这一枚的行恰好 1 处，且那一处把 saElemType 递了进去（0 处 = RTL 有形参而后端不递：C 里
 #       实参不足只报 warning 照编，于是「运行时自己猜档」原地复活）。
+# --- A14/A15（账 #305 §B156，第四十四刀）：多维 ReDim 的界数组临时量只许一处拼法、且按语句唯一 ---
+# 旧形状 = 两条发码路各按**名字**裸拼一条 C 局部数组（visit(ReDimStmt) 用 _redim_bounds_<数组名>，
+# emitReDimComplexTarget 用 _redim_bounds<净化后的左值>）。名字里没有语句序号，于是同一过程里
+# 第二条指向同一目标的多维 ReDim 就在同一个 C 函数里把 `vb6_SafeArrayBound <名>[] = {…};` 发两遍
+# ⇒ cl C2374「重定义；多次初始化」（两台同形、比第四十二/四十三两刀都老，读数 .build/b1395_k43/）。
+# 真语料那一形 43 份文件起步（按文件计的上界），门禁语料两份**恰好都分在不同过程** ⇒ 门一直不红。
+#   A14 拼法只许一处：nextNDBoundsTemp 声明 1（cgen_helpers.inc）/ 定义 1（cgen_redim.cpp）/ 被叫恰好 2
+#       （两条发码路都在）；`"_redim_bounds` 这枚字面量在 src/backend 非注释里恰好 1（就在出口里），
+#       旧的 `std::string boundsVar = "_redim_bounds` 裸拼形状恰好 0。
+#   A15 序号与 tempCounter_ 同生同灭：ndBoundsSeq_ 声明 1、`ndBoundsSeq_ = 0` 恰好 1（在 prologue 里，
+#       与 tempCounter_ 那一处同处）；固定数组那条 `_bounds_` 仍恰好 2 处 —— 它按声明名，而 VB 不许
+#       同过程重名声明，所以**不在**这条权威里（把它卷进来 = 第二份答案）。
+# --- A16（账 #305 §B158，第四十五刀）：多维数组「第几格」只许一套算术 ---
+# 访问侧那两套（头里的 vb6_SaNdElemPtr 与体里的 vb6_SafeArrayND_Offset）写的是同一件事：
+# off = Σ (idx[d]-lb[d])*stride[d]，stride[0]=1、stride[d]=stride[d-1]*cnt[d-1] —— **第 0 维最快**。
+# 而两枚 Preserve(多维) 搬旧元素时各自另写了一份 stride[d]=stride[d+1]*cnt[d+1]（最后一维最快），
+# 两套算术一致的那一格只有 (1,1)；其余格在「长一格」时被搬到别处（实测：2×3 长成 2×6 之后
+# POST-1-3 读回空、r2c2 出现在 POST-1-4、r1c3 出现在 POST-2-4，.build/b1403_k44probe/rpn4_pre45.txt）。
+#   A16 收成一枚 static 出口 vb6_SaNdSlot：定义恰好 1、出现（定义+调用）恰好 5（两枚 Preserve 各 2
+#       次调用：旧格位与新格位）；oldStrides/newStrides 那两份表各恰好 0（它们就是第二套算术）；
+#       丢弃旧元素那一段的下标枚举回到降序（`for (d = arr->dimCount - 1; ... d--)`）就报红 ——
+#       枚举序就是线性格位序，降序枚举算出来的 indices 与 linear 那枚格位不是同一套对应关系。
+
 #
 # 用法:  pwsh -File scripts\check_sa_access.ps1
 # 退出码: 0 = 全绿; 1 = 红
@@ -297,6 +320,51 @@ if ($tblFind -lt 3) { $bad += ("A11 问 arrayElemTypes_ 的站点 = " + $tblFind
 if ($tblErase -ne 1) { $bad += ("A11 arrayElemTypes_.erase = " + $tblErase + " (恰好 1：过程开始的清表只许一处)") }
 
 
+# A14/A15: 多维 ReDim 界数组临时量的唯一出口 (账 #305 §B156, 第四十四刀)
+$nbDecl = 0; $nbDef = 0; $nbCall = 0; $nbLit = 0; $nbOld = 0; $nbSeq = 0; $nbReset = 0; $fxBounds = 0
+foreach ($f in $beFiles) {
+    $ln = 0
+    foreach ($line in (Lines $f.FullName)) {
+        $ln++
+        $t = $line.Trim()
+        if ($t.StartsWith("//")) { continue }
+        if ($f.Name -eq "cgen_helpers.inc" -and $t -match '^std::string\s+nextNDBoundsTemp\s*\(') { $nbDecl++ }
+        if ($f.Name -eq "cgen_redim.cpp" -and $t -match '^std::string\s+CCodeGen::nextNDBoundsTemp\s*\(') { $nbDef++ }
+        if ($f.Name -eq "cgen_redim.cpp" -and $t.Contains("nextNDBoundsTemp(") -and $t -notmatch '^std::string\s+CCodeGen::') { $nbCall++ }
+        if ($t.Contains('"_redim_bounds')) { $nbLit++ }
+        if ($t.Contains('std::string boundsVar = "_redim_bounds')) { $nbOld++ }
+        if ($t.Contains("ndBoundsSeq_")) { $nbSeq++ }
+        if ($t -match '^ndBoundsSeq_\s*=\s*0;') { $nbReset++ }   # 声明行(int ...)不算复位
+        if ($t.Contains('"_bounds_"')) { $fxBounds++ }
+    }
+}
+if ($nbDecl -ne 1) { $bad += ("A14 nextNDBoundsTemp 的声明(cgen_helpers.inc) = " + $nbDecl + " (恰好 1；0 = 出口撤了，两条路又各拼一份)") }
+if ($nbDef -ne 1)  { $bad += ("A14 nextNDBoundsTemp 的定义(cgen_redim.cpp) = " + $nbDef + " (恰好 1；>1 = 第二份答案)") }
+if ($nbCall -ne 2) { $bad += ("A14 两条发码路叫这一枚出口 = " + $nbCall + " (恰好 2；1 = 另一条路回到裸拼，那条就是 C2374 的现场)") }
+if ($nbLit -ne 1)  { $bad += ("A14 后端非注释里 _redim_bounds 那枚前缀字面量 = " + $nbLit + " (恰好 1；>1 = 名字格式有了第二处写法)") }
+if ($nbOld -ne 0)  { $bad += ("A14 旧的 boundsVar 裸拼形状 = " + $nbOld + " 处 (要求 0；那正是本刀撤掉的两行)") }
+if ($nbReset -ne 1){ $bad += ("A15 ndBoundsSeq_ 的复位点 = " + $nbReset + " (恰好 1；0 = 序号跨模块漂，产物就不确定了)") }
+if ($nbSeq -lt 3)  { $bad += ("A15 提到 ndBoundsSeq_ 的行 = " + $nbSeq + " (下限 3：声明/复位/使用各一)") }
+if ($fxBounds -ne 2){ $bad += ("A15 固定数组那条的 _bounds_ 前缀字面量 = " + $fxBounds + " (恰好 2：两条声明路；把它卷进这枚出口=第二份答案)") }
+
+# A16: 多维 Preserve 的下标算术只许访问侧那一套 (账 #305 §B158, 第四十五刀)
+$slotDef = @([regex]::Matches($csrc, 'static int32_t vb6_SaNdSlot\s*\(')).Count
+$slotAll = @([regex]::Matches($csrc, 'vb6_SaNdSlot\s*\(')).Count
+$oldStr = @([regex]::Matches($csrc, 'oldStrides')).Count
+$newStr = @([regex]::Matches($csrc, 'newStrides')).Count
+$descIdx = @([regex]::Matches($csrc, 'for\s*\(\s*d\s*=\s*arr->dimCount - 1;\s*d >= 0;\s*d--\)')).Count
+if ($slotDef -ne 1) { $bad += ("A16 vb6_SaNdSlot 的定义 = " + $slotDef + " (恰好 1；0 = 两枚 Preserve 又各自写一遍下标算术)") }
+if ($slotAll -ne 5) { $bad += ("A16 vb6_SaNdSlot 的定义+调用 = " + $slotAll + " 处 (恰好 5：1 定义 + 两枚 Preserve 各 2 次)") }
+if ($oldStr + $newStr -ne 0) { $bad += ("A16 oldStrides/newStrides = " + ($oldStr + $newStr) + " 处 (要求 0：那两份表就是与访问侧相反的第二套算术)") }
+if ($descIdx -ne 0) { $bad += ("A16 丢弃旧元素那一段的下标枚举是降序 = " + $descIdx + " 处 (要求 0：枚举序即线性格位序，降序算出的 indices 与 linear 不是同一套对应)") }
+foreach ($sigA16 in @('vb6_SafeArrayND\* vb6_SafeArrayReDimPreserveND\(vb6_safearray_elemtype',
+                      'vb6_SafeArrayND\* vb6_SafeArrayReDimPreserveND_Udt\(int32_t elemSize')) {
+    $mA16 = [regex]::Match($csrc, $sigA16 + '[\s\S]{0,3000}')
+    if (-not $mA16.Success) { $bad += ("A16 找不到这一枚 Preserve 的定义：" + $sigA16); continue }
+    $useA16 = @([regex]::Matches($mA16.Value, 'vb6_SaNdSlot\s*\(')).Count
+    if ($useA16 -ne 2) { $bad += ("A16 这一枚 Preserve 里调用唯一出口 = " + $useA16 + " 处 (恰好 2：旧格位与新格位各一次)") }
+}
+
 # A12: 多维 Preserve 这一枚自己收档 (账 #305 §B155 格④, 第四十三刀)
 $ndPresDeclH = @([regex]::Matches($h, 'vb6_SafeArrayReDimPreserveND\s*\(\s*vb6_safearray_elemtype\s+elemType')).Count
 $ndPresDefC = @([regex]::Matches($csrc, 'vb6_SafeArrayND\*\s+vb6_SafeArrayReDimPreserveND\s*\(\s*vb6_safearray_elemtype\s+elemType')).Count
@@ -326,7 +394,7 @@ if ($bad.Count -eq 0) {
                 " / inline " + $defs.Count +
                 " / cold-path decl " + $decl + " def " + $defn +
                 " / backend raw-data lines " + $rawData.Count +
-                " / raw-index shape " + $shape + " / ND macros " + $ndMacros.Count + " / ND inline " + $ndDefs.Count + " / ATN emit " + $atnEmit + " / ATN literal " + $atnLiteral + " / redim helper def " + $rdDef + " call " + $rdCall + " / sa_variant lit " + $saVariant.Count + " / box cast " + $boxCast + " / table w " + $tblWrite + " f " + $tblFind + " e " + $tblErase + " / ndPres decl " + $ndPresDeclH + " def " + $ndPresDefC + " emit " + $ndPresEmit + " typed " + $ndPresTyped) -ForegroundColor Green
+                " / raw-index shape " + $shape + " / ND macros " + $ndMacros.Count + " / ND inline " + $ndDefs.Count + " / ATN emit " + $atnEmit + " / ATN literal " + $atnLiteral + " / redim helper def " + $rdDef + " call " + $rdCall + " / sa_variant lit " + $saVariant.Count + " / box cast " + $boxCast + " / table w " + $tblWrite + " f " + $tblFind + " e " + $tblErase + " / ndPres decl " + $ndPresDeclH + " def " + $ndPresDefC + " emit " + $ndPresEmit + " typed " + $ndPresTyped + " / nb call " + $nbCall + " lit " + $nbLit + " / seq " + $nbSeq + " fix " + $fxBounds + " / slot def " + $slotDef + " all " + $slotAll + " strideTab " + ($oldStr + $newStr) + " desc " + $descIdx) -ForegroundColor Green
     exit 0
 }
 foreach ($b in $bad) { Write-Host ("FAIL " + $b) -ForegroundColor Red }
