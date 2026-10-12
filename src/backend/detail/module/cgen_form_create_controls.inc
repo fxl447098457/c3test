@@ -305,6 +305,31 @@
                     "Font", "IconFont", "TitleFont", "Caption1_Font", "Caption2_Font",
                     "Images", "ListImages", "MouseIcon"};
                 c_.emitLine("vb6_UC_Enter(" + hwndExpr + ");  /* Fix 112: 换入宿主状态 */");
+                // Fix <vbeclipse> 2026-10-12 (账 #257 第九层): 下面这一轮的**直接 prop_let
+                // 回放**不得覆盖「该 .ctl 的 UserControl_ReadProperties 会消费」的属性。
+                //
+                // 为什么要收: 这两条路是**同一批**属性 (都取 ctrl.properties、同一份
+                // kSkip 表), 但时序错了 —— 直发在 `vb6_UC_ReadProps(&_bag)` **之前**,
+                // 那时控件还停在 InitProperties 的原始默认值上 (它的 .frm 配置一个都还没
+                // 读进来)。于是**任何跨属性的设计期守卫都会误触发**:
+                //   · ComboBoxW.ctl:1178 `Property Let Style` 判 `ComboBoxDesignMode`
+                //     ⇒ Err.Raise 382 "read-only at run time" (未处理 ⇒ ExitProcess);
+                //   · UpDown.ctl:837 `Property Let BuddyProperty` 判 `GetBuddyControl()`
+                //     ⇒ MsgBox "BuddyControl property must be set first";
+                //   · DTPicker.ctl:1484 `Property Let Value` 判 MinDate/MaxDate (还没读进来)
+                //     ⇒ MsgBox "A date was specified that does not fall within ...".
+                // 三条都是同一条机制 (实测 ComCtlsDemo 启动期逐个弹框/退进程, 窗口永不出现)。
+                //
+                // VB6 里这些属性**只有一条**设计期应用通道 = `ReadProperties(PropBag)`,
+                // 控件作者正是按「字段直写、顺序自定」写的 ReadProperties, 公开 Property Let
+                // 只服务运行期用户代码 (所以它们才敢在 Let 里放 382/35754/35773 这类守卫)。
+                // ⇒ 该 ReadProperties 会读的属性交给 bag 那条路 (它本来也装了同一批),
+                // 判据 = .ctl 代码段里是否存在 `.ReadProperty("<名>"`。
+                // 不在 ReadProperties 里的 (本工程只余 Align/Bindings 这类 Extender 转发属性)
+                // 保持原样直发 —— 它们没有"先读别的属性"的依赖。
+                std::string ucRpCodeLower;
+                if (const FrmFile* spRp = findUserControlSpec(ctlClass))
+                    ucRpCodeLower = Symbol::toLower(spRp->codeSection);
                 // Fix 119: 字体类复合属性块 (Caption1_Font / Caption2_Font / TitleFont /
                 // IconFont / Font ...) — 若 .ctl 有同名属性写方向, 构造字体对象后调用之。
                 // 例: 三个 ucProgressCircular 的 Caption1_Font=14.25 此前完全没生效。
@@ -367,6 +392,15 @@
                     bool skip = false;
                     for (const char* sk : kSkip) if (_stricmp(pn.c_str(), sk) == 0) { skip = true; break; }
                     if (skip) continue;
+                    // 该 .ctl 的 UserControl_ReadProperties 会读这条属性 ⇒ 由下面那条
+                    // bag 路径应用 (见本块开头 Fix <vbeclipse> 的说明: 直发跑在 bag 之前,
+                    // 控件还停在 InitProperties 默认值上, 会误触 382 / BuddyProperty /
+                    // MinMax 那三类设计期守卫)。
+                    if (!ucRpCodeLower.empty()
+                        && ucRpCodeLower.find(".readproperty(\"" + Symbol::toLower(pn) + "\"")
+                               != std::string::npos) {
+                        continue;
+                    }
                     // Fix 114: 跨模块查询 .ctl 类的 Property Let 形参表 (driver 已注入
                     // 外部 Class 符号 → Phase B 可命中 memberLetParams).
                     std::vector<ParameterInfo> wp114;
