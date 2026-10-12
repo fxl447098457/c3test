@@ -2426,7 +2426,7 @@ marker、重编，之后 `check_rtl_embedded` 报 **125/125 逐字节相同**。
   - **VB6 的「数组按引用传」那一半刻意不做**：回写与 §B160/§B161 的 ByRef 回写是同一条口径，补的时候两头一起补。
   - **真跑读数（两台同形，已进门）**：`CALL=ECHOARR hr=0x00000000 resultvt=8195 arrvt=8195 dims=1 lo=0 hi=2 arrsum=60` —— 一枚真 `VT_ARRAY|VT_I4`（元素 10/20/30，界 0..2）进服务端、被 `EchoVal` 原样交回、客户端按真 SAFEARRAY 读出界与元素和。`arrsum` 只能来自入站那份**拷贝**的元素（出站那一步是新建 SAFEARRAY + 搬自己的 `data`）⇒ 这一条同时是「描述符真的可用」的证人，不只是「指针活着回来了」。
 
-### B163 `Dim v As Variant: v = <数组名>`：赋值那一站没装箱，槽读回来是 3 / "Long"（VB6 交 8195 / "Long()"）（2026-10-12 第五十刀的量撞见；**未开工**）
+### B163 `Dim v As Variant: v = <数组名>`：赋值那一站没装箱，槽读回来是 3 / "Long"（VB6 交 8195 / "Long()"）（2026-10-12 第五十刀的量撞见；**第五十一刀已出** = 提交 `0a7f508c`，门待回填）
 
 - **读数**（`.build/k50probe/run_base_*.txt` 与 `run_fix2_*.txt`，两台逐行相同）：模块级 `Private b159L() As Long`（已 `ReDim`、元素有值）赋给 `b159Va As Variant` 之后把这枚 Variant 递过 COM，对端读回 **3/"Long"**、`UBound` 交错误 9 —— 第五十刀把出站的表补好了，可这一形在**发码**那一步就把数组折成了元素档，压根没带着数组标签走到表跟前去。同一份探针里的 `nd`（多维）也是 3/"Long"，但那是 §B151 的形状，别混进本格。
 - **与同族的关系 + 站点已量到（2026-10-12 第五十刀收线那一趟顺手量的，探针 `.build/k51probe/`）**：§B160/§B161 修的是**实参位**（发码在调用那一站装箱，判据 = `isArrayCarrierArgName`）；本格是**赋值**那一站，站点 = `CCodeGen::wrapVariantValue`（`src/backend/cgen_util_ctrl.cpp:2336`，里面那张只留四档的小表问 `inferExprType`，而 `inferExprType` 对数组名答的是**元素**档 ⇒ 与 §B161 同一个病、不同的一站）。**上面那句「赋值走的是 AssignMove 那一路」是猜的，实测不作数**：这一路今天就是走 `wrapVariantValue`。
@@ -2439,6 +2439,17 @@ marker、重编，之后 `check_rtl_embedded` 报 **125/125 逐字节相同**。
 - **两枚已上线的站点不受这个撞名影响（P51I 实测，同一份 `Dim loc() As Long`）**：第四十九刀那一站发 `vb6_VARIANT _vb6_arrarg_0 = vb6_VariantFromValue(loc);` 再 `vb6_TakesV(&_vb6_arrarg_0)`，第五十刀那一站发 `vb6_ComCall(o, L"Add", {vb6_ComPackBSTR(…L"k"), vb6_ComPackValue(loc)})` —— 因为 `isArrayCarrierArgName` 问的是 `knownArrays_` 那张**名字表**，不是 `inferExprType`。⇒ 这条也是「单一权威」那次收成的红利：新站照抄同一问就一起免疫。
 - **屏具那条坑（同族第四次，值得记）**：这条屏第一次跑打印的是「命中文件 0 / 命中行 0」—— 而**它是假的**：`RE_ASSIGN` 只认 `:` 注释，VB 源里行尾注释绝大多数是 `'` 起头 ⇒ 每一条带注释的赋值都静默不匹配。第二版加了内建正控（一份合成文件必须恰好命中那两行、元素读与标量那两行不许命中），第一次跑就把这个假零顶红了 ⇒ 修完才是上面那 36/41。**census 之前先给屏喂一份已知答案的样本**，别拿「0 命中」当结论 （与 §B151 那条 0 命中不同：那一条当时也这么读，但正控证明过屏能命中别的形状）。
 - **与 §B149/§B150 的关系**：那两格讲的是**晚绑定槽元素**读写，与本格的整枚数组赋值不同形，别并做一格。
+
+- **落地**（一处发码 + 一条顺序判据 + 一枚新哨兵）：`wrapVariantValue` 在 Fix 170 那个「整枚数组引用」块之后、`inferExprType` 那张表之前问同一枚 `isArrayCarrierArgName`（`src/backend/cgen_util_ctrl.cpp:2371`），命中且 `arrayDimCounts_` 给的秩数 `<= 1` 才交 `vb6_VariantFromValue(cExpr)`；ND 仍归 §B151（`_Generic` 没有 ND 那一档 ⇒ 落 `default` = `vb6_VariantObject` = 对一枚描述符发 Release，§B85 那一族）。装箱没有另造一站 —— 这一站全仓 13 处引用本来就是赋值/返回几条路的共同出口。
+- **上面那句「两站」要订正成「一站两形」**：函数/属性**返回变量**那一路（发码里的 `vb6_ret_<名> = ...`）吃的就是同一枚 `wrapVariantValue` —— VB6 的 `F = arr` 本来就是给返回变量赋值，`cgen_assign_value_sem.inc:305` 那唯一一处真实调用点两条路共用。真语料 A/B 动的那 5 行全是 `vb6_ret_` 那一形，就是这个原因。
+- **判据**：`VB-b159-va` 从 `3/Long/-1(e9)` 重钉成 `8195/Long()/3/7002`（与 `ml` 同形），x64+x86 两台各 9/9 命中、其余八条针逐字节未动；`.build/k51_check.py` 那九份探针 RC 全 0 ⇒ `v1/v2/v3/vb6_ret_RetModule/mv` 全改走 `vb6_VariantFromValue`，而三条标量对照组（`v4 = vb6_VariantLong(5)`、`vb6_ret_FLocal = vb6_VariantLong(1)`、`fv = vb6_VariantLong(2)`）一字未动。
+- **两条负控都真跑了**（不是预告）：① 秩数护栏 `<= 1` 改 `<= 0`（等于关掉这一问）⇒ 冷编一台真跑，`va` 退回 `3/Long/-1(e9)`，其余八条不变（`.build/k51_negbeh.py`，还原按 md5 核过、重编后两台复验）；② 把那一问挪到 `inferExprType` 表之后 ⇒ 哨兵 A18 新加的「赋值站顺序」那条当场红（exit 1，`.build/k51_negctrl.py`，undo 后 md5 对上）。
+- **哨兵跟着改**：`check_sa_access.ps1` 的 A18「问那条出口的地方」2→3，并新增一条**顺序**判据（赋值站那一问的锚点必须排在 `Vb6Type vtype = inferExprType(...)` 之前，锚点找不到也报红）；55 道哨兵在最终树上全绿。
+- **覆盖面 = 同一台机器、只换 C3.exe 的 A/B**（第四十九刀那条教训的正面执行，不拿自己的夹具当语料）：
+  - 清单那 402 行登记语料（`.build/k51_base_C3.exe` vs `.build/k51_new_C3.exe`，两份清单逐行按末段 relpath 对）⇒ **只动 1 行** = `tests/test_com_latebound.bas`，`bytes 10519→10524`（+5 正好是 `vb6_VariantLong(`→`vb6_VariantFromValue(` 的字数差），其余 401 行逐字节相同。
+  - 真语料 `D:\vb_yqt4qPac` 那 36 份命中文件全部 `--emit-c` 两台对打（`.build/k51_corpus_ab.py`）⇒ **动 4 份 / 5 行**：`GetWindows = WindowName`、`IIterator_items = m_EnumList`、`Lines = m_Lines`、`Values = m_Values` + `Keys = m_Keys`。五条 BASE 全是 `vb6_Variant{Long,String}(载体)`、NEW 全是 `vb6_VariantFromValue(载体)`，载体类型逐条核过都是 `vb6_SafeArray1D*`（`_Generic` 认那一档 ⇒ 不是 §B85 那种野 Release 形状），**零条旁溢**。
+- **H6 那一格是本刀自己撞出来的坑，单独记**：改针面时把新写的注释拼到最后一行，结果整条 `Add-BasTest "test_com_latebound" ...` 被拼在 `#` 那行的行尾 ⇒ 那枚夹具**从注册表里整个消失**，而 `[Parser]::ParseFile` 报 0 错、当时 55 道哨兵**无一红**（只有 `Add-BasTest` 的调用数从 114 掉到 113，没人盯它）。补了 `check_test_helper_integrity.ps1` 的 **H6**：① 剥掉注释后的 token 文本里「名字 + 空白 + 引号或括号」的调用形次数必须等于 AST 找到的调用点数（少了 = 有一条被注释吃掉），② 每个调用点必须是它那一行第一个非空 token。负控跑过：把那一行重新拼回注释行尾 ⇒ `FAIL H6 Add-BasTest: 剥注释后的调用形 114 处, AST 调用点 113 处`，还原后绿。
+- **刻意不动的那两条仍在门上**：`mu`（从没 `ReDim` = NULL 载体）与 `ms`（`String()`）读数一字未改 —— `String()` 那一形现在在赋值站也发 `vb6_VariantFromValue`（真语料那三行 `m_Lines/m_Values/WindowName` 就是它），但过 COM 出站仍按 §B161 的白名单拒发 ⇒ 针面上的 `0/Empty/-1(e9)` 是 §B161 那条还没拍的深拷口径，不是本刀欠的。
 
 ### B151 把真二维数组赋给 Variant 槽，槽读回来是 VarType=9 / "Object" 而不是 8204 —— 自家多维描述符被折成一维（2026-10-12 第四十刀量到；**未开工**）
 
