@@ -281,8 +281,15 @@ jobs:
           # 其中 26 个带原因（FAIL (compile) / FAIL rc=… / FAIL: a | b），另有几个计票点压根不打 FAIL 字样、
           # 只打一行 DarkGray 读数 —— 所以判据是「用了例行的排版、且收尾不是 PASS/SKIP」，读数原样带进注解（它比 FAIL 五个字值钱）。
           $rx = [regex] "^\s*\[(.+?)\]\s+(.+?)\s*\.\.\.\s*(.*)$"
+          # 第二种排版（门 #538 的实物）：并行那条路（jobs>1 的汇总分支）打的不是 `<名字> ... <判定>`，
+          # 而是 `  [RUN] <用例名>: <原因>`（run_tests.ps1 的 $details 六条：compile FAIL / no exe /
+          # run timeout / run error / output mismatch / 编译无 error C 行）。那两条 test_variant_boxing
+          # 就是这么「数得着、点不出名」的 —— 自救面在最需要它的时候哑了一次。
+          # 所以这里问的是**同一条判据的第二种拼法**（名字与原因之间是冒号），而不是往 $named 里再手抄一份名单。
+          $rx2 = [regex] "^\s*\[(.+?)\]\s+([^:\[\]]+?):\s+(.+)$"
           $named = @($clean | ForEach-Object {
               $m = $rx.Match($_)
+              if (-not $m.Success) { $m = $rx2.Match($_) }
               if (-not $m.Success) { return }
               $tail = $m.Groups[3].Value.Trim()
               if ($tail -match "^(PASS|SKIP)") { return }

@@ -568,3 +568,25 @@
  *   vb6_VariantBorrowIntoSlot / vb6_VariantPackCopyInto (新在 vb6rtl_com.c)，另把
  *   「DECIMAL 住在 VARIANT 的哪一字节」收成 vb6_DecimalPtrFromVariant (vb6rtl.c)。
  *   touch 本文件 = 让 125 份 RCDATA 重嵌一次 (§B99② 那道哨兵盯的就是这一格)。 */
+
+/* 账 #305 §B150 (2026-10-11 第四十刀): 晚绑定槽的多维元素读写。
+ *   vb6rtl_com.c 把「这枚数组槽的第 off 格是什么档」那张表从 vb6_VariantArrayGet 的体里提出来
+ *   (vb6_VariantElemFromSlotData) 并新发两枚出口 vb6_VariantArrayGetND / SetND；vb6rtl_array.c 的
+ *   elemType→尺寸 那张表 (vb6_sa_elem_size → vb6_SaElemSize) 同时 public 化 —— 步长由元素类型决定
+ *   这一件事不许有第二份答案。下标检查仍走唯一一枚 vb6_SaNdElemPtr (账 #209 那一族)。
+ *   再补一枚 vb6_VariantArrayElemPtrND：发码侧「整枚元素引用交址」两路 (As Any ByRef / VarPtr)
+ *   原先按老前缀比文本，新名不认就静默退化成临时盒 —— 认文本那一问也收成一张表。
+ *   touch 本文件 = 让 125 份 RCDATA 重嵌一次 (§B99② 那道哨兵盯的就是这一格)。 */
+
+
+/* 账 #305 §B150 收尾 (2026-10-12 第四十刀, 同一批的第二次 RTL 改动):
+ *   vb6rtl_registry.c 里 GetAllSettings 填两格时递给的步长, 原先手写 sizeof(vb6_VARIANT),
+ *   换成问 vb6_SaElemSize(vb6_sa_variant) —— 「一枚槽数组一格多宽」由 vb6rtl_array.c 那张表单独回答,
+ *   与上面那两条 ND 出口读的是同一份。touch 本文件 = 让 125 份 RCDATA 重嵌一次 (§B99②)。 */
+
+/* 账 #305 §B155 格①②（2026-10-12 第四十六刀）：「这枚数组是哪一档」第一次有了一张表 ——
+ *   vb6_SaVtFromElemType（vb6rtl_array.c）与上面那枚 vb6_SaElemSize 并排住；四个消费点
+ *   （vb6_VariantArray / vb6_VariantFromUdtBytes / vb6rtl_com.c 的两条 VT_ARRAY 进口）一起改问它；
+ *   装箱那一档新增唯一出口 vb6_SaVtOfArrayPtr（认载体：一维魔数 0x5A1D / 多维秩数 1..16）。
+ *   vb6_TypeName 的标量名单抽成 vb6_TypeNameScalar，数组那一支按 VB6 拼「元素名()」。
+ *   touch 本文件 = 让 125 份 RCDATA 重嵌一次（§B99②）。 */

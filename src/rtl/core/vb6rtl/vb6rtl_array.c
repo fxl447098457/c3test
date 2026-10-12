@@ -30,7 +30,9 @@
 // ============================================================
 
 // 安全数组元素大小表
-static int32_t vb6_sa_elem_size(vb6_safearray_elemtype t) {
+// 账 #305 §B150 (第四十刀): 这张表以前是 array.c 的内部细节, 现在**晚绑定槽的多维读**也要问它
+// —— 步长由元素类型决定这一件事不允许有第二份答案。改名 (vb6_sa_ → vb6_Sa_) 与 public 化一次做完。
+int32_t vb6_SaElemSize(vb6_safearray_elemtype t) {
     switch (t) {
         case vb6_sa_bool:    return (int32_t)sizeof(int16_t);
         case vb6_sa_byte:    return (int32_t)sizeof(uint8_t);
@@ -47,13 +49,48 @@ static int32_t vb6_sa_elem_size(vb6_safearray_elemtype t) {
     }
 }
 
+// 账 #305 §B155 格①（第四十六刀）: 「这枚数组是哪一档」。上面那张表答「一格多宽」，这张答
+// 「VB6 叫它什么」—— 两张表并排住，是因为它们吃同一个枚举、也必须同一时刻一起改。
+// 认不出的档回落 variant：empty = 没建过（改前所有档位也都答 variant），udt = VB6 那一侧没有
+// 「把 UDT 数组装进 Variant」的可抄口径（§B159 记着）。ptr 交 vtDispatch = VB6 的 vbObject(9)。
+int32_t vb6_SaVtFromElemType(vb6_safearray_elemtype t) {
+    switch (t) {
+        case vb6_sa_bool:     return (int32_t)vb6_vtBoolean;     /* 11 */
+        case vb6_sa_byte:     return (int32_t)vb6_vtByte;        /* 17 */
+        case vb6_sa_int:      return (int32_t)vb6_vtInteger;     /* 2  */
+        case vb6_sa_long:     return (int32_t)vb6_vtLong;        /* 3  */
+        case vb6_sa_single:   return (int32_t)vb6_vtSingle;      /* 4  */
+        case vb6_sa_double:   return (int32_t)vb6_vtDouble;      /* 5  */
+        case vb6_sa_bstr:     return (int32_t)vb6_vtBSTR;        /* 8  */
+        case vb6_sa_variant:  return (int32_t)vb6_vtVariant;     /* 12 */
+        case vb6_sa_ptr:      return (int32_t)vb6_vtDispatch;    /* 9  = VB6 的 vbObject */
+        case vb6_sa_currency: return (int32_t)vb6_vtCurrency;    /* 6  */
+        default:              return (int32_t)vb6_vtVariant;     /* empty / udt */
+    }
+}
+
+// 装箱那一句的落点（声明在 vb6rtl_variant.h —— 那边看不见两套描述符）。手里只有 void*，先认载体:
+// 一维的首字段是魔数 0x5A1D、多维的首字段是秩数 1..16，魔数落不进 1..16 —— 这一问与
+// vb6rtl_string.c / vb6rtl_com.c 里靠魔数认载体的那几处同形。NULL（从没 ReDim / 已被 Erase）
+// 与认不出的载体都交回改前的答案 (vtArray|vtVariant)，不猜。
+int32_t vb6_SaVtOfArrayPtr(const void* arrV) {
+    if (!arrV) return (int32_t)(vb6_vtArray | vb6_vtVariant);
+    const vb6_SafeArray1D* a1 = (const vb6_SafeArray1D*)arrV;
+    if (a1->signature == 0x5A1D)
+        return (int32_t)(vb6_vtArray | vb6_SaVtFromElemType(a1->elemType));
+    const vb6_SafeArrayND* nd = (const vb6_SafeArrayND*)arrV;
+    if (nd->dimCount >= 1 && nd->dimCount <= 16)
+        return (int32_t)(vb6_vtArray | vb6_SaVtFromElemType(nd->elemType));
+    return (int32_t)(vb6_vtArray | vb6_vtVariant);
+}
+
 vb6_SafeArray1D* vb6_SafeArrayCreate1D(vb6_safearray_elemtype elemType,
     int32_t lBound, int32_t uBound) {
     vb6_SafeArray1D* arr = (vb6_SafeArray1D*)calloc(1, sizeof(vb6_SafeArray1D));
     if (!arr) return NULL;
     arr->signature = 0x5A1D;  /* Fix 082g: 1D array magic */
     arr->elemType = elemType;
-    arr->elemSize = vb6_sa_elem_size(elemType);
+    arr->elemSize = vb6_SaElemSize(elemType);
     arr->lBound = lBound;
     arr->uBound = uBound;
     arr->count = uBound - lBound + 1;
@@ -498,7 +535,7 @@ vb6_SafeArrayND* vb6_SafeArrayCreateND(vb6_safearray_elemtype elemType,
 
     arr->dimCount = dimCount;
     arr->elemType = elemType;
-    arr->elemSize = vb6_sa_elem_size(elemType);
+    arr->elemSize = vb6_SaElemSize(elemType);
 
     int32_t total = 1;
     for (int32_t d = 0; d < dimCount; d++) {
@@ -609,9 +646,37 @@ vb6_SafeArrayND* vb6_SafeArrayReDimND_Udt(int32_t elemSize,
     return arr;
 }
 
-vb6_SafeArrayND* vb6_SafeArrayReDimPreserveND(vb6_SafeArrayND* arr,
-    int32_t dimCount, vb6_SafeArrayBound newBounds[]) {
-    if (!arr) return vb6_SafeArrayCreateND(vb6_sa_empty, dimCount, newBounds);
+/* 账 #305 §B155 格④ (第四十三刀): 收 elemType —— 「一枚多维描述符按哪一档分配」这个
+   决定从此与一维那条 (_T) 同源, 也由调用方 (发码侧知道声明档) 给答案, 运行时不猜。
+   三条出口都与一维同形: udt 档这里答不了 → 回落 variant; arr 为空 → 按调用方给的档建;
+   档与描述符自己身上的不符 (旧编译器按 empty 分配过) → 数据不可保留, 按正确的重建。 */
+/* 账 #305 §B158 (第四十五刀): 多维数组「第几格」这一件事只许一套算术。
+   权威就是访问侧那一枚 (vb6_SaNdElemPtr 与 vb6_SafeArrayND_Offset 同一写法)：
+       off = Σ (idx[d] - lb[d]) * stride[d],  stride[0] = 1, stride[d] = stride[d-1] * cnt[d-1]
+   —— **第 0 维变化最快**。下面两枚 Preserve(多维) 以前各自另写了一份
+   stride[d] = stride[d+1] * cnt[d+1] (最后一维最快) 的搬运算术，于是「增长一格」
+   把块里除第一列以外的元素全搬到别的格：2×3 长成 2×6 的实测读数见
+   .build/b1403_k44probe/{rpn4,rpb4}.txt（修后一台、修前一台）。
+   这里收成一枚 static 出口 + 两个消费点，枚举顺序也一起改成同样的「第 0 维最快」。 */
+static int32_t vb6_SaNdSlot(const vb6_SafeArrayBound* bounds, int32_t rank,
+                            const int32_t* ordinal) {
+    int32_t off = 0;
+    int32_t stride = 1;
+    for (int32_t d = 0; d < rank; d++) {
+        off += ordinal[d] * stride;
+        stride *= bounds[d].cElements;
+    }
+    return off;
+}
+
+vb6_SafeArrayND* vb6_SafeArrayReDimPreserveND(vb6_safearray_elemtype elemType,
+    vb6_SafeArrayND* arr, int32_t dimCount, vb6_SafeArrayBound newBounds[]) {
+    if (elemType == vb6_sa_udt) elemType = vb6_sa_variant;
+    if (!arr) return vb6_SafeArrayReDimND(elemType, dimCount, newBounds);
+    if (arr->elemType != vb6_sa_udt && arr->elemType != elemType) {
+        vb6_SafeArrayDestroyND(arr);
+        return vb6_SafeArrayReDimND(elemType, dimCount, newBounds);
+    }
 
     int32_t newTotal = 1;
     for (int32_t d = 0; d < dimCount; d++) {
@@ -631,8 +696,6 @@ vb6_SafeArrayND* vb6_SafeArrayReDimPreserveND(vb6_SafeArrayND* arr,
         int32_t copyCounts[16];
         int32_t oldCounts[16];
         int32_t newCounts[16];
-        int32_t oldStrides[16];
-        int32_t newStrides[16];
 
         for (int32_t d = 0; d < dimCount; d++)
             newCounts[d] = newBounds[d].cElements;
@@ -644,33 +707,28 @@ vb6_SafeArrayND* vb6_SafeArrayReDimPreserveND(vb6_SafeArrayND* arr,
         for (int32_t d = 0; d < dimCount; d++)
             copyCounts[d] = (oldCounts[d] < newCounts[d]) ? oldCounts[d] : newCounts[d];
 
-        oldStrides[minDims - 1] = 1;
-        for (int32_t d = minDims - 2; d >= 0; d--)
-            oldStrides[d] = oldStrides[d + 1] * arr->bounds[d + 1].cElements;
-
-        newStrides[dimCount - 1] = 1;
-        for (int32_t d = dimCount - 2; d >= 0; d--)
-            newStrides[d] = newStrides[d + 1] * newBounds[d + 1].cElements;
-
         int32_t iterMax = 1;
         for (int32_t d = 0; d < minDims; d++)
             iterMax *= copyCounts[d];
 
+        /* 账 #305 §B158: 枚举顺序与格位算术一起改成「第 0 维最快」—— 与访问侧
+           vb6_SaNdSlot / vb6_SaNdElemPtr 同一套。秩数变化时高位维取 0 (与改前同语义)。 */
         for (int32_t linear = 0; linear < iterMax; linear++) {
+            int32_t idx[16];
+            for (int32_t z = 0; z < 16; z++) idx[z] = 0;
             int32_t tmp = linear;
-            int32_t oldOff = 0, newOff = 0;
             int32_t bounds_check = 1;
-            for (int32_t d = minDims - 1; d >= 0; d--) {
-                int32_t idx = tmp % copyCounts[d];
+            for (int32_t d = 0; d < minDims; d++) {
+                idx[d] = tmp % copyCounts[d];
                 tmp /= copyCounts[d];
-                if (idx >= oldCounts[d] || idx >= newCounts[d]) {
+                if (idx[d] >= oldCounts[d] || idx[d] >= newCounts[d]) {
                     bounds_check = 0;
                     break;
                 }
-                oldOff += idx * oldStrides[d];
-                newOff += idx * newStrides[d];
             }
             if (bounds_check) {
+                int32_t oldOff = vb6_SaNdSlot(arr->bounds, minDims, idx);
+                int32_t newOff = vb6_SaNdSlot(newBounds, dimCount, idx);
                 memcpy((char*)newData + newOff * arr->elemSize,
                        (char*)arr->data + oldOff * arr->elemSize,
                        (size_t)arr->elemSize);
@@ -684,7 +742,7 @@ vb6_SafeArrayND* vb6_SafeArrayReDimPreserveND(vb6_SafeArrayND* arr,
             int32_t tmp = linear;
             int32_t indices[16];
             int32_t d;
-            for (d = arr->dimCount - 1; d >= 0; d--) {
+            for (d = 0; d < arr->dimCount; d++) {   /* 账 #305 §B158: 与访问侧同序 */
                 indices[d] = tmp % arr->bounds[d].cElements;
                 tmp /= arr->bounds[d].cElements;
             }
@@ -748,8 +806,6 @@ vb6_SafeArrayND* vb6_SafeArrayReDimPreserveND_Udt(int32_t elemSize,
         int32_t copyCounts[16];
         int32_t oldCounts[16];
         int32_t newCounts[16];
-        int32_t oldStrides[16];
-        int32_t newStrides[16];
 
         for (int32_t d = 0; d < dimCount; d++)
             newCounts[d] = newBounds[d].cElements;
@@ -761,33 +817,28 @@ vb6_SafeArrayND* vb6_SafeArrayReDimPreserveND_Udt(int32_t elemSize,
         for (int32_t d = 0; d < dimCount; d++)
             copyCounts[d] = (oldCounts[d] < newCounts[d]) ? oldCounts[d] : newCounts[d];
 
-        oldStrides[minDims - 1] = 1;
-        for (int32_t d = minDims - 2; d >= 0; d--)
-            oldStrides[d] = oldStrides[d + 1] * arr->bounds[d + 1].cElements;
-
-        newStrides[dimCount - 1] = 1;
-        for (int32_t d = dimCount - 2; d >= 0; d--)
-            newStrides[d] = newStrides[d + 1] * newBounds[d + 1].cElements;
-
         int32_t iterMax = 1;
         for (int32_t d = 0; d < minDims; d++)
             iterMax *= copyCounts[d];
 
+        /* 账 #305 §B158: 枚举顺序与格位算术一起改成「第 0 维最快」—— 与访问侧
+           vb6_SaNdSlot / vb6_SaNdElemPtr 同一套。秩数变化时高位维取 0 (与改前同语义)。 */
         for (int32_t linear = 0; linear < iterMax; linear++) {
+            int32_t idx[16];
+            for (int32_t z = 0; z < 16; z++) idx[z] = 0;
             int32_t tmp = linear;
-            int32_t oldOff = 0, newOff = 0;
             int32_t bounds_check = 1;
-            for (int32_t d = minDims - 1; d >= 0; d--) {
-                int32_t idx = tmp % copyCounts[d];
+            for (int32_t d = 0; d < minDims; d++) {
+                idx[d] = tmp % copyCounts[d];
                 tmp /= copyCounts[d];
-                if (idx >= oldCounts[d] || idx >= newCounts[d]) {
+                if (idx[d] >= oldCounts[d] || idx[d] >= newCounts[d]) {
                     bounds_check = 0;
                     break;
                 }
-                oldOff += idx * oldStrides[d];
-                newOff += idx * newStrides[d];
             }
             if (bounds_check) {
+                int32_t oldOff = vb6_SaNdSlot(arr->bounds, minDims, idx);
+                int32_t newOff = vb6_SaNdSlot(newBounds, dimCount, idx);
                 memcpy((char*)newData + newOff * elemSize,
                        (char*)arr->data + oldOff * elemSize,
                        (size_t)elemSize);

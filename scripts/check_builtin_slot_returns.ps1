@@ -18,6 +18,13 @@
 #   R3 指针返回（vb6_VARIANT *f(...)）一律不许进表。
 #   R4 census must not read empty: table >=25, rtlSlot >=25, backend literal names >=50,
 #      少一个就报「扫描没匹配到东西」（红比 vacuous PASS 好）。
+#   R5 「这串已发出的 C 是不是晚绑定槽的元素读」只许在 cgen_util_type.cpp 的那张
+#      kSlotElemForms 里答: src/backend 任何别的文件在**字符串字面量**里拼
+#      vb6_VariantArray(Get|GetND|Set|SetND|ElemPtr|ElemPtrND)( 就红。实物（第四十刀开格前
+#      量到）: 那一问原先由六处手写字符串比较各答一遍, 抄的还是两种前缀 (带尾括号 / 不带),
+#      于是新增多维那枚名进去之后带括号那四处对它一律答 false —— VarPtr(v(1,2)) 退成
+#      复合字面量 (C2440)、Set v(1,2) = x 退成整条赋值被丢掉 (静默)。钉的是「不许有第二份
+#      抄法」, 不是「抄了几处」; 剥注释 + 只看字面量, 与 §B145 那条课同口径。
 # 用法: powershell -File scripts\check_builtin_slot_returns.ps1   (PASS = exit 0)
 
 $ErrorActionPreference = 'Stop'
@@ -94,15 +101,32 @@ foreach ($n in @($rtlPtr.Keys | Sort-Object)) {
     if ($tbl.ContainsKey($n)) { $viol += ('R3 指针返回被登记成槽: ' + $n + '(') }
 }
 
+# ---- 5) R5: 槽元素读的「认文本」那一问只许住在权威那张文件里 ----
+$slotLit = 'vb6_VariantArray(?:Get|GetND|Set|SetND|ElemPtr|ElemPtrND)\('
+$typeFull = (Resolve-Path -LiteralPath $typeCpp).Path
+$authHits = 0
+$litRe = '"(?:[^"\\]|\\.)*"'
+foreach ($f in $beFiles) {
+    $t = Strip-CComments ([IO.File]::ReadAllText($f.FullName))
+    foreach ($lit in [regex]::Matches($t, $litRe)) {
+        if (-not [regex]::IsMatch($lit.Value, $slotLit)) { continue }
+        if ($f.FullName -eq $typeFull) { $authHits++; continue }
+        $viol += ('R5 第二份抄法: ' + (Split-Path -Leaf $f.FullName) + ' 的字面量里拼了 ' + $lit.Value +
+                  ' —— 认文本那一问只在 cgen_util_type.cpp 的 kSlotElemForms 里答 (把这段改写换成问那两个出口)')
+    }
+}
+if ($authHits -lt 3) { Write-Host ('FAIL R5: 权威文件里只数出 ' + $authHits + ' 处槽元素读字面量 (<3) —— 扫描读空, R5 是一条绿着的假判据'); exit 1 }
+
 Write-Host ('census: table=' + $tableNames.Count + ' rtlSlot=' + $rtlSlot.Keys.Count +
             ' rtlPtr=' + $rtlPtr.Keys.Count + ' rtlMacro=' + $rtlMacro.Keys.Count +
             ' emittedNames=' + $emitted.Keys.Count +
-            ' (RTL 槽 ∩ emit) = ' + (@($rtlSlot.Keys | Where-Object { $emitted.ContainsKey($_) }).Count))
+            ' (RTL 槽 ∩ emit) = ' + (@($rtlSlot.Keys | Where-Object { $emitted.ContainsKey($_) }).Count) +
+            ' slotReadLit=' + $authHits)
 
 if ($viol.Count -gt 0) {
     foreach ($v in $viol) { Write-Host ('  ' + $v) }
     Write-Host ('FAIL builtin_slot_returns: ' + $viol.Count + ' 条违规 —— 修法是把表与 RTL 对账 (补名/撤名), 不是往白名单里加名字; 真要走例外请连带写清理由并重跑 §B146 那把 400 份 A/B')
     exit 1
 }
-Write-Host 'PASS builtin_slot_returns (R1..R4)'
+Write-Host 'PASS builtin_slot_returns (R1..R5)'
 exit 0

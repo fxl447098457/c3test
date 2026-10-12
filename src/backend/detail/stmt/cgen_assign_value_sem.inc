@@ -414,16 +414,12 @@
         } else {
             c_.emitLine(target + " = " + value + ";");
         }
-    } else if (target.find("vb6_VariantArrayGet(") == 0) {
-        // Fix 038 Group 2: vb6_VariantArrayGet(&arr, idx) = value
-        //   → vb6_VariantArraySet(&arr, idx, vb6_VariantFromValue(value))
-        // VariantArrayGet 返回右值, 不能赋值; 改写为 VariantArraySet.
-        size_t argStart = target.find('(');
-        size_t argEnd = target.rfind(')');
-        if (argStart != std::string::npos && argEnd != std::string::npos && argEnd > argStart) {
-            std::string args = target.substr(argStart + 1, argEnd - argStart - 1);
-            c_.emitLine("vb6_VariantArraySet(" + args + ", "
-                        + boxToVariant(node.value.get(), value) + ");");
+    } else if (isVariantSlotElemRead(target)) {
+        // Fix 038 Group 2 + 账 #305 §B150: 槽元素读改写成那一**对**写出口 —— 一维 Get->Set,
+        //   多维 GetND->SetND, 装箱后的值追加在参数表末尾。参数拼法只在 variantSlotAssignLine 一处。
+        std::string slotLine;
+        if (variantSlotAssignLine(target, boxToVariant(node.value.get(), value), slotLine)) {
+            c_.emitLine(slotLine + ";");
         } else {
             c_.emitLine(target + " = " + value + ";");
         }

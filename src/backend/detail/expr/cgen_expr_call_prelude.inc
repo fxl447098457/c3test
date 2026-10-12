@@ -167,9 +167,7 @@
         std::string vLower = vIdent.name;
         std::transform(vLower.begin(), vLower.end(), vLower.begin(), ::tolower);
         if (knownVariantVars_.count(vLower)) {
-            emitExpr(*node.positional[0]);
-            // Fix 084o: 索引为 Variant 时转 Long (vb6_VariantArrayGet 第二参是 int32_t)
-            std::string vIndex = toLongIfVariant(std::move(lastExpr_), node.positional[0].get());
+            // 账 #305 §B150: 索引交给 variantSlotElemRead 发 (秩数 = 实参个数), 这里只算槽表达式。
             // Fix 091k: ByRef Variant 参数在 C 侧已是 vb6_VARIANT* (cgen_util 参数映射
             // ByRef→指针), 再取址会传 vb6_VARIANT** → C4047/C4024 warning 且语义错
             // (cToolsArray prop_let_Extend/DeArray 的 Vars(i)/Arr(i)).
@@ -185,7 +183,7 @@
                     break;
                 }
             }
-            lastExpr_ = "vb6_VariantArrayGet(" + vArg + ", " + vIndex + ")";
+            lastExpr_ = variantSlotElemRead(vArg, node.positional);
             return;
         }
     // P24-10: COM默认属性调用 — obj(args) 其中obj是COM变量, 等价于 obj.DefaultMember(args)
