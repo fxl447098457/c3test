@@ -321,6 +321,48 @@
             || targetIsUdtVariantField232;
         if (targetIsVariantArraySlot) {
             c_.emitLine("vb6_VariantAssign(&" + target + ", " + wrappedValue + ");");
+        } else if ([&] {
+                       // Fix <vbeclipse> 2026-10-12: RHS 文本里是否出现目标自身 (独立标识符)。
+                       // 目标不以标识符字符开头 (如 `(*o)` / `VB6_SA_AT(...)`) 时按原样走 ——
+                       // 那一族要么已由上面的"槽位"分支接管, 要么不是本缺陷的形态。
+                       const std::string& hay = wrappedValue;
+                       const std::string& ndl = target;
+                       if (ndl.empty()) return false;
+                       auto idc = [](char c) {
+                           return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+                                  || (c >= '0' && c <= '9') || c == '_';
+                       };
+                       if (!idc(ndl.front())) return false;
+                       size_t p = 0;
+                       while ((p = hay.find(ndl, p)) != std::string::npos) {
+                           size_t e = p + ndl.size();
+                           bool lb = (p == 0) || !idc(hay[p - 1]);
+                           bool rb = (e >= hay.size()) || !idc(hay[e]);
+                           if (lb && rb) return true;
+                           p = e;
+                       }
+                       return false;
+                   }()) {
+            // Fix <vbeclipse> 2026-10-12: RHS 里出现目标自己时 (`v = CDate(v)`) 不能
+            // 「先 Clear 目标再赋值」—— 那样 RHS 读到的是**已被清空的目标** (VT_EMPTY),
+            // 静默变成 0。实测 (ComCtlsDemo DTPicker.ctl 的 Property Let Value):
+            //   Select Case VarType(DateValue)
+            //     Case vbLong, vbInteger, vbByte, vbDouble, vbSingle
+            //       DateValue = CDate(DateValue)
+            // 原发成
+            //   vb6_VariantClear(&DateValue);
+            //   DateValue = vb6_VariantDate(vb6_CDate(vb6_VariantFromValue(DateValue)));  ← 读 Empty ⇒ 0
+            // 于是 CreateDTPicker 结尾的 `Me.Value = PropValue` 把日期变成 0 (1899-12-30),
+            // 落到 MinDate (#1/1/1900# = 2.0) 之下 ⇒ 误报
+            // Err.Raise 35773 "A date was specified that does not fall within the
+            // MinDate and MaxDate properties" (实测页堆下启动即退, RC=189=35773-256×139)。
+            // 修法: 先把 RHS 收进栈上临时量, 再清目标并接管。**临时量刻意不 Clear** ——
+            // `target = tmp` 是浅拷贝, BSTR/Dispatch 的所有权随拷贝交给目标, 与原来
+            // "把内联临时值赋给目标" 的转移语义一致。
+            const std::string tmp = "_vc_" + std::to_string(tempCounter_++);
+            c_.emitLine("{ vb6_VARIANT " + tmp + " = " + wrappedValue + ";");
+            c_.emitLine("  vb6_VariantClear(&" + target + ");");
+            c_.emitLine("  " + target + " = " + tmp + "; }");
         } else {
             c_.emitLine("vb6_VariantClear(&" + target + ");");
             c_.emitLine(target + " = " + wrappedValue + ";");
