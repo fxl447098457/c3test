@@ -89,16 +89,23 @@
 #       vb6_SaVtOfArrayPtr 的两条兜底里（NULL 与认不出载体）；旧的三元折档形状 `vb6_vtArray | (baseVt`
 #       恰好 0。TypeName 那一张标量名单只许一份：`case vb6_vtEmpty:` 在 vb6rtl_conv.c 恰好 1，
 #       抽出来的 vb6_TypeNameScalar 定义 1 / 调用恰好 2（数组那一支 + 标量那一条）。
-# --- A18（账 #305 §B160，第四十八刀）：数组递给 ByRef Variant 形参时「先装箱」只许一处答 ---
+# --- A18（账 #305 §B160/§B161，第四十八刀 + 第四十九刀）：数组递给 ByRef Variant 形参时
+#     「这是不是一枚数组」那一问只许一处答, 而且必须答在按 VB 类型分档的那条 switch 之前 ---
 # 改前那一支只认两种实参：晚绑定对象 (void*) 与工程类实例，其余一律落 `&arr` ——
 # 数组变量的 C 表示是描述符指针，`&arr` 就是「描述符指针的地址」，而被调方按
 # vb6_VARIANT* 解析 ⇒ 静默垃圾（真跑读数 VarType 40320 / TypeName "Variant"，VB6 交
-# 8195 / "Long()"；cl 只给一条不兼容指针的警告，BUILD-RC=0）。判据吃数组表 knownArrays_
-# （与元素访问 VB6_SA_AT 同一张），装箱仍走外面那一层 vb6_VariantFromValue。
-#   A18 新谓词 argIsArr92y 定义恰好 1 / 使用恰好 3（进 if、临时量名前缀、装箱表达式），
-#       knownArrays_.count(argLs92y) 恰好 1，`"_vb6_arrarg_"` 恰好 1，
-#       而**改前那条只看两档的形状** `if ((isObjVar92y || !argCls92y.empty())` 恰好 0。
-#       站点计数全在 src/backend 里数（剥注释），第二处答案 = 有人又替数组猜了一次。
+# 8195 / "Long()"；cl 只给一条不兼容指针的警告，BUILD-RC=0）。第四十八刀把装箱补在
+# switch 的 default 里, 只打到了过程内 Dim 的数组; **模块级**数组被 inferExprType 答成元素档,
+# 走的是标量那几臂 —— 实测 m-long=3/"Long"、m-byte=17/"Byte"、m-str=8/"String",
+# 元素读静默答 evt=0 val=0（探针矩阵 .build/k48probe/P49Main.bas 八条形状全录在案）。
+# 第四十九刀把这一问提到 switch 之前, 判据吃数组表 knownArrays_（与元素访问 VB6_SA_AT 同一张）,
+# 装箱仍走外面那一层 vb6_VariantFromValue。
+#   A18 谓词 arrArg92y 定义恰好 1 / 使用恰好 1（那条 if）；问数组表 knownArrays_.count(arrLs92y)
+#       恰好 1；临时量前缀 "_vb6_arrarg_" 恰好 1；装箱吃的那枚原样名 arrRaw92y 恰好 2（定义 + 装箱）；
+#       第四十八刀那条住在 switch 里的 argIsArr92y 恰好 0（同一问不许住两处）；
+#       顺序两条：定义行在 switch (argVbType92y) **之前**，装箱那一条在它**之后**。
+#       站点计数全在 src/backend 里数（只剥行注释；后端 .inc 的字面量里有 /* */，
+#       剥块注释会把真代码整段吃掉 —— 第四十八刀那条假红就是这么来的）。
 
 #
 # 用法:  pwsh -File scripts\check_sa_access.ps1
@@ -459,28 +466,36 @@ if ($tnScalarDef -ne 1) { $bad += ("A17 vb6_TypeNameScalar 的定义 = " + $tnSc
 if ($tnScalarAll - $tnScalarDef -ne 2) {
     $bad += ("A17 问那张名单的地方 = " + ($tnScalarAll - $tnScalarDef) + " 处 (恰好 2：数组那一支的元素名 + 标量那一条；数组分支被摘掉就只剩 1)")
 }
-# A18: 数组 -> ByRef Variant 形参的装箱只许一处答 (账 #305 §B160, 第四十八刀)
+# A18: 数组 -> ByRef Variant 形参的装箱只许一处答, 且必须问在分档 switch 之前 (账 #305 §B161, 第四十九刀)
+# $beAll 只剥**行注释**：正则里的 \r\n 必须是字面反斜杠（.NET 自己解释），写成**真换行**会
+# 把注释行的下一整行一起吃掉 —— 后端这些文件是 CRLF，那正是上一版 Strip-LineCmt 把站点数
+# 打成 0 的原因。块注释更剥不得：后端 .inc 里到处是发码字符串字面量中的 /* */。
 $beAll = ''
-# 这里只剥**行注释**：这一族的名字都在代码行上，而 A17 那个 Strip-Cmt 还剥块注释 ——
-# 后端这些 .inc 里到处是 `"  /* ... */"` 这种**字符串字面量里的 /* */**（发码时写给 cl 看的），
-# 拿 Strip-Cmt 扫整目录会把真代码整段吃掉（实测 argIsArr92y 4 -> 0，判据假红）。
-function Strip-LineCmt([string]$s) { return [regex]::Replace($s, '(?m)//[^
-]*', '') }
+function Strip-LineCmt([string]$s) { return [regex]::Replace($s, '(?m)//[^\r\n]*', '') }
 foreach ($f in (Get-ChildItem -LiteralPath $beDir -Recurse -File | Where-Object { $_.Extension -in '.cpp', '.inc', '.hpp' })) {
     $beAll += (Strip-LineCmt ([System.IO.File]::ReadAllText($f.FullName)))
 }
-$a18Decl = @([regex]::Matches($beAll, '(?m)const bool\s+argIsArr92y\s*=')).Count
-$a18All  = @([regex]::Matches($beAll, 'argIsArr92y')).Count
-$a18Known = @([regex]::Matches($beAll, 'knownArrays_\s*\.\s*count\s*\(\s*argLs92y')).Count
+$a18Txt = [System.IO.File]::ReadAllText((Join-Path $beDir 'detail\expr\cgen_expr_call_arg_emit.inc'))
+$a18Decl = @([regex]::Matches($beAll, '(?m)const bool\s+arrArg92y\s*=')).Count
+$a18All  = @([regex]::Matches($beAll, 'arrArg92y')).Count
+$a18Known = @([regex]::Matches($beAll, 'knownArrays_\s*\.\s*count\s*\(\s*arrLs92y')).Count
 $a18Temp  = @([regex]::Matches($beAll, '"_vb6_arrarg_"')).Count
-$a18Old   = @([regex]::Matches($beAll, 'if\s*\(\s*\(\s*isObjVar92y\s*\|\|\s*!argCls92y\.empty\(\)\s*\)')).Count
-if ($a18Decl -ne 1) { $bad += ("A18 argIsArr92y 的定义 = " + $a18Decl + " (恰好 1；0 = 装箱那一档又没人问了)") }
-if ($a18All - $a18Decl -ne 3) {
-    $bad += ("A18 argIsArr92y 的使用 = " + ($a18All - $a18Decl) + " 处 (恰好 3：进 if + 临时量前缀 + 装箱表达式；多一处 = 第二份判据)")
+$a18Raw   = @([regex]::Matches($beAll, 'arrRaw92y')).Count
+$a18K48   = @([regex]::Matches($beAll, 'argIsArr92y')).Count
+$a18Sw    = $a18Txt.IndexOf('switch (argVbType92y)')
+$a18DefI  = $a18Txt.IndexOf('const bool arrArg92y')
+$a18BoxI  = $a18Txt.IndexOf('if (arrArg92y) {')
+if ($a18Sw -lt 0 -or $a18DefI -lt 0 -or $a18BoxI -lt 0) { $bad += ("A18 那三行锚点找不到 (switch=" + $a18Sw + " def=" + $a18DefI + " box=" + $a18BoxI + ") —— 分档那条 switch 或这一问被改形了") }
+if ($a18Decl -ne 1) { $bad += ("A18 arrArg92y 的定义 = " + $a18Decl + " (恰好 1；0 = 装箱那一档又没人问了)") }
+if ($a18All - $a18Decl -ne 1) {
+    $bad += ("A18 arrArg92y 的使用 = " + ($a18All - $a18Decl) + " 处 (恰好 1：那条 if；多一处 = 判据又搬回 switch 里面，或抄了第二份)")
 }
 if ($a18Known -ne 1) { $bad += ("A18 问数组表 knownArrays_ 的地方 = " + $a18Known + " 处 (恰好 1；0 = 判据换成了别的表，第二处 = 抄了两份)") }
 if ($a18Temp -ne 1) { $bad += ("A18 临时量前缀 _vb6_arrarg_ = " + $a18Temp + " 处 (恰好 1)") }
-if ($a18Old -ne 0) { $bad += ("A18 改前那条只看两档的形状 = " + $a18Old + " 处 (要求 0：它把数组漏成 &arr = 描述符指针的地址)") }
+if ($a18Raw -ne 2) { $bad += ("A18 arrRaw92y (装箱吃的那枚原样名) = " + $a18Raw + " 处 (恰好 2：定义 + 装箱表达式；1 = 装箱又去吃分档之后的 argVal)") }
+if ($a18K48 -ne 0) { $bad += ("A18 第四十八刀那条住在 switch 里的 argIsArr92y = " + $a18K48 + " 处 (要求 0：同一问不许住两处，而且它在 default 里打不到模块级数组)") }
+if ($a18Sw -ge 0 -and $a18DefI -ge 0 -and ($a18DefI -gt $a18Sw)) { $bad += "A18 「是不是数组」那一问跑到分档 switch 之后了 —— 模块级数组会先被按元素档分箱（§B161 的现场）" }
+if ($a18Sw -ge 0 -and $a18BoxI -ge 0 -and ($a18BoxI -lt $a18Sw)) { $bad += "A18 数组装箱那条跑到分档 switch 之前了 —— 它得覆盖分档那一趟的结果" }
 
 if ($bad.Count -eq 0) {
     Write-Host ("PASS SA element access: macro " + $macroDefs.Count +
@@ -491,7 +506,9 @@ if ($bad.Count -eq 0) {
                 " / vt-flavor decl " + $vtfDecl + " def " + $vtfDef + " call " + ($vtfAll - $vtfDecl - $vtfDef) +
                 " / pack-of-ptr " + ($vtPackAll - $vtPackDecl - $vtPackDef) + " hard tag " + $hardTag + " tern " + $ternTag +
                 " / TypeName list " + $tnEmpty + " scalar " + ($tnScalarAll - $tnScalarDef) +
-                " / a18 box site " + $a18Decl + " uses " + ($a18All - $a18Decl) + " known " + $a18Known + " old " + $a18Old) -ForegroundColor Green
+                " / a18 arr-box decl " + $a18Decl + " uses " + ($a18All - $a18Decl) +
+                " known " + $a18Known + " raw " + $a18Raw + " k48 " + $a18K48 +
+                " order " + (($a18DefI -lt $a18Sw) -and ($a18BoxI -gt $a18Sw))) -ForegroundColor Green
     exit 0
 }
 foreach ($b in $bad) { Write-Host ("FAIL " + $b) -ForegroundColor Red }

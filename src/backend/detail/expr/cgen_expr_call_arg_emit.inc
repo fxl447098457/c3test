@@ -853,6 +853,27 @@
                         // C 签名为 vb6_VARIANT*, 直接 &(BSTR) 会把字符串当 Variant
                         // 解析 → 字段错位 → lDataLen=0、QR 段为空 (mdQRTest2_url).
                         // 与 2039 M22 分支一致: 按实参 VB 类型构造字段式复合字面量.
+                        // 账 #305 §B161 (第四十九刀): 「这枚实参是不是数组本体」这一问必须在下面那条按
+                        // VB 类型分档的 switch **之前**问完 —— inferExprType 对**模块级**数组答的是**元素**档
+                        // (Long/Byte/String/Boolean), 分档于是走标量那几臂, 把描述符指针塞进标量槽:
+                        // `.lVal=(int32_t)(arr)`, 而 String() 那一臂连 cast 都没有 (`.bstrVal=arr`)。实测被调方
+                        // 读数 3/"Long"、17/"Byte"、8/"String", 元素读静默答 evt=0 val=0 (x64/x86 两台同形),
+                        // 而 VB6 交的是 8195/"Long()" 这一族。第四十八刀把这条判据放在 default 里, 只打到了
+                        // 过程内 Dim 的数组 (那才落 default) —— 判据没错, 位置错; 语料里 VBHacks.IsArrayInitialized
+                        // 那 26 行走的全是标量臂。探针矩阵 .build/k48probe/P49Main.bas 八条形状全录在案。
+                        // 这里只答一次「是不是数组」, 装箱本身发在分档之后 (下面那段); 类数组 (arrayClassElemTypes_)
+                        // 与晚绑定对象/工程类实例仍归原来那两条臂。
+                        std::string arrLs92y = argVal;
+                        std::transform(arrLs92y.begin(), arrLs92y.end(),
+                                       arrLs92y.begin(), ::tolower);
+                        // 分档那几臂对数组答的是元素档, 那个结果一律丢掉 —— 装箱吃的是**进来那一枚** argVal,
+                        // 所以这里先把原样存下。
+                        const std::string arrRaw92y = argVal;
+                        const bool arrArg92y = knownArrays_.count(arrLs92y) > 0
+                            && !knownObjectVars_.count(arrLs92y)
+                            && !knownVariantVars_.count(arrLs92y)
+                            && !arrayClassElemTypes_.count(arrLs92y)
+                            && !cExprIsVariant(argVal);
                         Vb6Type argVbType92y = inferExprType(*node.positional[i]);
                         switch (argVbType92y) {
                             case Vb6Type::String:
@@ -941,20 +962,7 @@
                                 // (VBFlexGrid.c prop_set_CellTag / prop_let_CellText 等 6 处)。
                                 // BASE(8c3e981) 发的是 `&Value` (形参本身可寻址), 这里补上
                                 // knownVariantVars_ 判据后正好回到那条 else 分支。
-                                // 账 #305 §B160 (第四十八刀): **数组变量本体**也在这一档装箱。
-                                // C 侧它是描述符指针 (vb6_SafeArray1D*), 下面那条 else 发的 &arr
-                                // 交出去的是「描述符指针的地址」, 而被调方按 vb6_VARIANT* 解析 ——
-                                // 实测被调方 VarType 答 40320 / TypeName 答 "Variant" (VB6 交
-                                // 8195 / "Long()"), cl 只给一条不兼容指针的警告: 编得过、跑得完、
-                                // 一声不响。真语料 33 行里 26 行是 VBHacks.IsArrayInitialized,
-                                // 它按 VarPtr(arr)+8 去摸 SAFEARRAY 指针 ⇒ 判成「数组没初始化」,
-                                // 整条分支静默走另一头。判据用数组表 knownArrays_ (与元素访问
-                                // VB6_SA_AT 同一张表); 装箱仍走外面那一层 vb6_VariantFromValue —
-                                // _Generic 认 vb6_SafeArray1D* 那一档 = 第四十六刀的载体出口,
-                                // 标签问描述符自己。ByRef 回写刻意不做 (§B160 口径)。
-                                const bool argIsArr92y = knownArrays_.count(argLs92y) > 0
-                                                         && !isObjVar92y && argCls92y.empty();
-                                if ((argIsArr92y || isObjVar92y || !argCls92y.empty())
+                                if ((isObjVar92y || !argCls92y.empty())
                                     && !cExprIsVariant(argVal)
                                     && !knownVariantVars_.count(argLs92y)) {
                                     // 落一个**具名** Variant 临时再传址 ——
@@ -963,15 +971,12 @@
                                     // (类型 vb6_vartype) → C2440 "无法从 vb6_VARIANT 转换为
                                     // vb6_vartype" (实测 Perspective.c:115 等 7 处)。
                                     // 具名临时也正是 VB6 语义 (非 Variant 实参拷进临时 Variant)。
-                                    std::string tmp92y = std::string(argIsArr92y ? "_vb6_arrarg_"
-                                                                                 : "_vb6_vararg_") +
-                                        std::to_string(ansiCounter_++);
-                                    std::string boxed92y = argIsArr92y
-                                        ? argVal   // 数组: 原样交描述符指针, 由外面那层 _Generic 装箱
-                                        : (isObjVar92y
+                                    std::string tmp92y = "_vb6_vararg_" +
+                                    std::to_string(ansiCounter_++);
+                                    std::string boxed92y = isObjVar92y
                                         ? ("(void*)(" + argVal + ")")
                                            : ("(void*)vb6_ComObject_FromInstance(vb6_FindCoClassDesc(\""
-                                              + argCls92y + "\"), (void*)(" + argVal + "))"));
+                                           + argCls92y + "\"), (void*)(" + argVal + "))");
                                     c_.emitLine("vb6_VARIANT " + tmp92y
                                         + " = vb6_VariantFromValue(" + boxed92y
                                         + ");  /* Fix <vbeclipse>: ByRef Variant 实参装箱 */");
@@ -982,6 +987,16 @@
                                 }
                                 break;
                             }
+                        }
+                        if (arrArg92y) {
+                            // §B161: 交出去的是装箱后的槽 —— 仍走 vb6_VariantFromValue, _Generic 认
+                            // vb6_SafeArray1D*/ND* 那一档 = 第四十六刀的载体出口, 标签问描述符自己。必须落
+                            // **具名**临时: 复合字面量 (vb6_VARIANT){vb6_VariantFromValue(x)} 是聚合初始化,
+                            // 第一个初始化式会去初始化 vt 字段 → C2440。ByRef 回写刻意不做 (§B160 口径)。
+                            std::string tmpArr92y = "_vb6_arrarg_" + std::to_string(ansiCounter_++);
+                            c_.emitLine("vb6_VARIANT " + tmpArr92y + " = vb6_VariantFromValue("
+                                + arrRaw92y + ");  /* Fix <vbeclipse> §B161: ByRef Variant 数组实参装箱 */");
+                            argVal = "&" + tmpArr92y;
                         }
                     } else if (calleeIsDeclare && i < calleeParams.size()
                                && !calleeParams[i].isByVal && !calleeParams[i].isParamArray

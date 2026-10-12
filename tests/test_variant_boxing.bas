@@ -20,6 +20,16 @@ Private m_sin As Single
 Private m_dbl As Double
 Private m_d As Date
 
+' Acct #305 para-B161 (knife 49): MODULE-level arrays handed to a ByRef Variant
+' formal. For these inferExprType answers the ELEMENT type, so the switch at the
+' call site took a scalar arm and put the descriptor POINTER into that scalar slot
+' -- (int32_t)(b161Ml) into .lVal, b161Ms into .bstrVal with no cast at all. Only
+' arrays Dim-ed inside the procedure fell through to the arm knife 48 fixed.
+Private b161Ml() As Long
+Private b161MB() As Byte
+Private b161Ms() As String
+Private b161Mf(1 To 3) As Long
+
 Private Sub ReportV(ByVal tag As String, ByVal v As Variant)
     Debug.Print tag; VarType(v); "/"; TypeName(v)
 End Sub
@@ -275,6 +285,18 @@ Public Sub Main()
     Call B160Take("long", b160lg, 2)
     Call B160Take("fixed", b160fx, 2)
     Call B160Take("nd", b160nd, -1)
+    ReDim b161Ml(0 To 3)
+    ReDim b161MB(0 To 2)
+    ReDim b161Ms(0 To 1)
+    b161Ml(1) = 210
+    b161MB(0) = 66
+    b161Ms(0) = "zz"
+    b161Mf(3) = 88
+    Call B160Take("m-long", b161Ml, -1)
+    Call B160Take("m-byte", b161MB, -1)
+    Call B160Take("m-str", b161Ms, -1)
+    Call B160Take("m-fix", b161Mf, -1)
+    Call B160Take("m-elem", b161Ml, 1)
     Debug.Print "VB-DONE"
 End Sub
 

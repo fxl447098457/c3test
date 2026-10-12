@@ -2630,7 +2630,17 @@ if ($Category -in @("all", "run", "bas")) {
         "VB-b160-byte=8209/Byte()", "VB-b160-byte-evt=2", "VB-b160-byte-val=65",
         "VB-b160-long=8195/Long()", "VB-b160-long-evt=3", "VB-b160-long-val=300",
         "VB-b160-fixed=8195/Long()", "VB-b160-fixed-evt=3", "VB-b160-fixed-val=77",
-        "VB-b160-nd=8195/Long()", "VB-DONE")
+        "VB-b160-nd=8195/Long()",
+# 第四十九刀 (§B161): 同样五条针, 但数组是**模块级**的 —— 那一族以前被 inferExprType
+# 答成元素档, 于是分箱走标量臂、把描述符指针塞进标量槽: 实测 m-long=3/"Long"、
+# m-byte=17/"Byte"、m-str=8/"String" (String() 那一臂连 cast 都没有), 而元素读静默答
+# evt=0 val=0 —— 语料里 VBHacks.IsArrayInitialized 那类「摸 SAFEARRAY 指针」的写法因此
+# 一律答「数组没初始化」, 整条分支静默走另一头。修法是「这枚实参是不是数组」那一问提到
+# 分档 switch 之前, 两条臂都落到同一枚装箱出口 ⇒ 模块级也答数组档, String()=8200。
+        "VB-b160-m-long=8195/Long()", "VB-b160-m-byte=8209/Byte()",
+        "VB-b160-m-str=8200/String()", "VB-b160-m-fix=8195/Long()",
+        "VB-b160-m-elem=8195/Long()", "VB-b160-m-elem-evt=3", "VB-b160-m-elem-val=210",
+        "VB-DONE")
     # ⚠ 这里曾经是字面 TAB: `"$Tests<TAB>est_variant_boxing.bas"`。
     # PowerShell 的 "" 里 **`\t` 不是转义**（转义是反引号），所以只要有人把 `\t` 写成真 TAB,
     # 路径就变成 `tests` + TAB + `est_...` —— 门里读到的是 `error VB1006: 无法打开文件`,
