@@ -564,6 +564,12 @@
                         c_.emitLine("vb6_UC_PropBagFree(_bag); }");
                     }
                 }
+                // Fix <vbeclipse> 2026-10-12 (第十二层): 加载路径的 Show/Resize 在这里补齐。
+                // 上面 HostCreate 已把本实例的 Show/Resize 挂起(pendingActivate), 因为 VB6 的
+                // 顺序是 Initialize → ReadProperties → Show/Resize; 不补齐的话 Resize 会读
+                // 未恢复的设计期属性 (实测 czUI: m_ControlType 未恢复 = 0 = czTitleBar ⇒ AV)。
+                // 放在 bag 块**之外**: 即使用 C3_NO_BAG 关掉 bag 也必须激活, 否则实例永不 Show。
+                if (ucSkipInitProps) c_.emitLine("vb6_UC_ActivateHost(" + hwndExpr + ");");
             }
             ctrlId++;
             continue;

@@ -2,6 +2,11 @@
 // 内容 = 拆分前 vb6forms_uc.c 第 634~738 行，逐行未改
 // 在函数体内 #include；路径一律用 basename
 
+    // Fix <vbeclipse> 2026-10-12 (第十二层): 一次性取走"推迟激活"令牌 —— 必须在**本函数
+    // 最前面**取: 后面 desc->init 内部还会为设计子控件再走一次 HostCreate, 那些实例要按
+    // 原行为立即 Show/Resize (它们没有 bag, 也就没有"之后再激活"的机会)。
+    int deferActivate = vb6_uc_deferActivateTake();
+
     vb6_uc_trace("create.begin", typeName, NULL);
     const vb6_UserControlDesc* desc = vb6_uc_findDesc(typeName);
     if (!desc) return NULL;
@@ -111,25 +116,16 @@ if (GetEnvironmentVariableW(L"C3_COM_TRACE", NULL, 0) > 0) { fprintf(stderr, "[C
 
     ShowWindow(hwnd, SW_SHOW);
     // Fix 112: 窗口创建期间被 ready=0 拦下的 Resize/Show 在此补发
-    if (desc->resize) {
-        RECT rc; GetClientRect(hwnd, &rc);
-        r->scaleWidth = rc.right;
-        r->scaleHeight = rc.bottom;
-        vb6_UCSaved saved;
-        vb6_uc_push(r, &saved);
-        vb6_uc_trace("resize.begin", desc->typeName, r->me);
-        desc->resize(r->me);
-        vb6_uc_trace("resize.end", desc->typeName, r->me);
-        vb6_uc_pop(&saved);
+    // Fix <vbeclipse> 2026-10-12 (第十二层): 加载路径(带 bag 的顶层 UC)推迟到 ReadProperties
+    // 之后 —— VB6 的顺序是 Initialize → ReadProperties → Show/Resize, 而 C3 的 ReadProps 由
+    // 窗体创建代码在 HostCreate 之后调用。不推迟的话 Resize 会在设计期属性恢复**之前**跑,
+    // 读到全是默认值/零值的字段 (实测 czUI: m_ControlType 未恢复 = 0 = czTitleBar ⇒
+    // `If m_ControlType = czTitleBar Then ApplyFormRoundCorners` 走错分支 ⇒ AV)。
+    // 由 vb6_UC_ActivateHost(hwnd) 在 ReadProps 之后补齐这一段。
+    if (deferActivate) {
+        r->pendingActivate = 1;
+        vb6_uc_trace("activate.defer", desc->typeName, r->me);
+        return (void*)hwnd;
     }
-    if (desc->show) {
-        vb6_UCSaved saved;
-        vb6_uc_push(r, &saved);
-        vb6_uc_trace("show.begin", desc->typeName, r->me);
-        desc->show(r->me);
-        vb6_uc_trace("show.end", desc->typeName, r->me);
-        vb6_uc_pop(&saved);
-    }
-    vb6_uc_trace("create.end", typeName, r->me);
-    InvalidateRect(hwnd, NULL, FALSE);
+    vb6_uc_activate(r);
     return (void*)hwnd;

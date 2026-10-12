@@ -89,6 +89,12 @@ typedef struct vb6_UCRec {
     int32_t index;        // 控件数组下标, -1=非数组
     wchar_t ctrlName[VB6_UC_NAME_LEN];
     BSTR    displayNameBstr;   // Fix 116: Ambient.DisplayName 缓存 (控件实例名)
+    // Fix <vbeclipse> 2026-10-12 (账 #257 第十二层): "加载路径"的 Show/Resize 推迟标记。
+    // VB6 的顺序是 Initialize → ReadProperties → Show/Resize, 而 C3 的 ReadProps 在
+    // HostCreate 之后调用 ⇒ 不推迟就会让 Resize 读到还没恢复的设计期属性
+    // (实测 czUI: m_ControlType 未恢复 = 0 = czTitleBar ⇒ 走错分支 ⇒ AV)。
+    // 见 uc_host_create.inc 的 vb6_uc_activate 与 vb6_UC_ActivateHost。
+    int32_t pendingActivate;
 } vb6_UCRec;
 
 // UserControl 宿主状态快照（push/pop 用）

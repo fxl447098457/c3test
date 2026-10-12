@@ -1200,7 +1200,32 @@ intptr_t __stdcall vb6_di_GetPropA(intptr_t hWnd, BSTR lpString) {
     return ((intptr_t (WINAPI *)(intptr_t, BSTR))GetPropA)(hWnd, lpString);
 }
 /* GetWindowLongA */
+/* ⚠ GWL_WNDPROC(-4) 这一档**不能**走 A 版本 —— 实测 (2026-10-12):
+ *
+ *   同一台机器、同一个 STATIC 窗口、两个 32 位进程:
+ *     MSVC 直接编译的对照程序(无 manifest)      GetWindowLongA(GWL_WNDPROC) = 0x7493D770 (可执行)
+ *     同一份对照程序挂上 C3 的 Common-Controls v6 manifest 后 = 0xFFFF05B1 (不可执行!)
+ *     C3 产物 (永远带 v6 manifest)              GetWindowLongA(GWL_WNDPROC) = 0xFFFF06CD
+ *   而 GetWindowLongW(GWL_WNDPROC) 三种情形都交真实地址 (0x739C5860 / 0x73705860)。
+ *
+ * 原因: manifest 里的 Microsoft.Windows.Common-Controls v6 使"系统类"(STATIC/BUTTON/…)
+ * 的窗口过程由 **v6 comctl32** 提供, 于是 ANSI 版查询交回的是 **WOW64 的 ANSI thunk**
+ * (0xFFFFxxxx —— 64 位 user32 的地址, 32 位进程**不可执行**)。
+ *
+ * 为什么必须纠: VB6 生态里"取旧过程 → 自造 thunk → SetWindowLong(GWL_WNDPROC)"是标准
+ * 子类化手法 (tests/czUI-main 的 SubclassFormForClose、ComCtlsDemo 若干 UC)。thunk 尾部的
+ * `jmp [oldProc]` 拿到 0xFFFFxxxx 就是 EXECUTE AV ⇒ 窗口创建期整个进程崩
+ * (实测 czUI: `[C3_CRASH] av EXECUTE(DEP) target=0xffff03b7`, 调用链
+ *  UC_HostCreate → ucHostResize → ApplyFormRoundCorners → SubclassFormForClose 的 thunk)。
+ * 真 VB6 里同一份代码能用, 是因为 **VB6 IDE 编译的 exe 默认不带 v6 manifest**
+ * (退回 user32 v5 的 STATIC ⇒ 交可执行地址)。C3 为了视觉样式一律带 manifest,
+ * 所以必须在**取过程指针**这一处补回 VB6 的可用语义。
+ *
+ * 只动 -4 (GWL_WNDPROC == GWLP_WNDPROC) 这一档: 其余索引 A/W 字节语义一致, 照旧走 A。
+ * 交给 CallWindowProc 的路径不受影响 —— 它只是调用地址, 不区分 A/W 过程。 */
 intptr_t __stdcall vb6_di_GetWindowLongA(intptr_t hWnd, intptr_t nIndex) {
+    if (nIndex == -4)
+        return ((intptr_t (WINAPI *)(intptr_t, intptr_t))GetWindowLongW)(hWnd, nIndex);
     return ((intptr_t (WINAPI *)(intptr_t, intptr_t))GetWindowLongA)(hWnd, nIndex);
 }
 /* GetWindowLongPtrW */

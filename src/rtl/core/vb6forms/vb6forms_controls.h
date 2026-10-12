@@ -277,6 +277,10 @@ void  vb6_UC_SetPendingFont(void* f);
 // ucHostInit 入口消费(读后清零), 由 cgen 生成的 ucHostInit 读取。
 void  vb6_UC_SetSkipInitProps(int v);
 int   vb6_UC_SkipInitPropsConsume(void);
+// Fix <vbeclipse> 第十二层: 加载路径的 Show/Resize 推迟到 ReadProperties 之后再补齐
+// (VB6 顺序 Initialize → ReadProperties → Show/Resize)。窗体创建代码在 UC_ReadProps
+// 之后调用它; 非加载路径的实例在 HostCreate 内部就已激活, 这里会直接返回。
+void  vb6_UC_ActivateHost(void* hwnd);
 // ---- czUI fix: 设计器子控件实例化 (.ctl 设计面上的 TextBox 等属于每个实例) ----
 // 在 ucHostInit (宿主实例初始化) 期间调用, 以当前 UC 宿主窗口为父创建真实子窗口。
 // left/top/width/height 单位为缇。返回子窗口句柄 (NULL = 失败)。

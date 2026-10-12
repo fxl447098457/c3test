@@ -64,7 +64,11 @@ void vb6_UC_SetPendingFont(void* f) {
 // **消费**(读后清零)该标志, 于是本实例跳过 InitProperties, 而它在里面创建的设计子控件
 // (更靠后的 HostCreate) 看到的已清零 ⇒ 仍按原行为跑自己的 InitProperties (Fix 112d 依赖)。
 static int vb6_uc_skipInitProps = 0;
-void vb6_UC_SetSkipInitProps(int v) { vb6_uc_skipInitProps = v; }
+static int vb6_uc_deferActivate = 0;   // 加载路径的 Show/Resize 推迟标记 (见 uc_host_create.inc)
+void vb6_UC_SetSkipInitProps(int v) {
+    vb6_uc_skipInitProps = v;
+    vb6_uc_deferActivate = v;   // 同一次置位也把"推迟激活"挂上 —— 见 uc_host_create.inc
+}
 int  vb6_UC_SkipInitPropsConsume(void) {
     int v = vb6_uc_skipInitProps;
     vb6_uc_skipInitProps = 0;
@@ -400,6 +404,51 @@ static const vb6_UserControlDesc* vb6_uc_findDesc(const char* typeName) {
         if (_stricmp(vb6_ucDescs[i]->typeName, typeName) == 0) return vb6_ucDescs[i];
     }
     return NULL;
+}
+
+// Fix <vbeclipse> 2026-10-12 (账 #257 第十二层): "加载路径推迟激活"的两个内部件 ——
+// 见 uc_host_create.inc 的 vb6_uc_activate 与本文件 vb6_UC_SetSkipInitProps 的说明。
+// (vb6_uc_deferActivate 的定义在文件前部, 紧邻 vb6_UC_SetSkipInitProps。)
+static int vb6_uc_deferActivateTake(void) {
+    int v = vb6_uc_deferActivate;
+    vb6_uc_deferActivate = 0;   // 一次性: HostCreate 最前面取走, 设计子控件看不到它
+    return v;
+}
+
+// Show/Resize 补发段 (Fix 112 原在内联在 HostCreate 末尾; 第十二层把它抽出来, 以便
+// 加载路径推迟到 ReadProperties 之后再调用 —— 见 uc_host_create.inc)。
+static void vb6_uc_activate(vb6_UCRec* r) {
+    if (!r) return;
+    HWND hwnd = r->hwnd;
+    const vb6_UserControlDesc* desc = r->desc;
+    if (desc->resize) {
+        RECT rc; GetClientRect(hwnd, &rc);
+        r->scaleWidth = rc.right;
+        r->scaleHeight = rc.bottom;
+        vb6_UCSaved saved;
+        vb6_uc_push(r, &saved);
+        vb6_uc_trace("resize.begin", desc->typeName, r->me);
+        desc->resize(r->me);
+        vb6_uc_trace("resize.end", desc->typeName, r->me);
+        vb6_uc_pop(&saved);
+    }
+    if (desc->show) {
+        vb6_UCSaved saved;
+        vb6_uc_push(r, &saved);
+        vb6_uc_trace("show.begin", desc->typeName, r->me);
+        desc->show(r->me);
+        vb6_uc_trace("show.end", desc->typeName, r->me);
+        vb6_uc_pop(&saved);
+    }
+    vb6_uc_trace("create.end", desc ? desc->typeName : "?", r->me);
+    InvalidateRect(hwnd, NULL, FALSE);
+}
+
+void vb6_UC_ActivateHost(void* hwnd) {
+    vb6_UCRec* r = vb6_uc_findByHwnd(hwnd);
+    if (!r || !r->pendingActivate) return;
+    r->pendingActivate = 0;
+    vb6_uc_activate(r);
 }
 
 void* vb6_UC_HostCreate(const char* typeName, int32_t left, int32_t top,
