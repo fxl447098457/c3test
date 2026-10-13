@@ -28,6 +28,23 @@ void CCodeGen::visit(GoToStmt& node) {
 }
 
 void CCodeGen::visit(OnErrorStmt& node) {
+    // 账 #271: **任何 On Error 语句都清空 Err** (VB6/VBA 语义: "The Err object's
+    // properties are reset whenever an On Error statement is executed" —— 与
+    // Resume / Exit Sub / 错误处理器退出同族)。
+    // 以前三种形态只动 resume_next / jmp_active 三个闸, 从不碰 Err.Number ⇒
+    // **上一次 Resume Next 挡下的错误号一直挂着**, 跨过程污染下一个 `On Error
+    // Resume Next` 里的 `If Err.Number = 0`。
+    // 实测 ComCtlsDemo 启动即未处理错误 380 (CoolBar.ctl:3173):
+    //   Property Set FBandChild 里
+    //     On Error Resume Next: Handle = Value.hWndUserControl   ' 438
+    //     If Err.Number <> 0 Then Handle = Value.hWnd
+    //     On Error GoTo 0                                        ' ← 这里没清
+    //   紧接着 ControlIsValid 的
+    //     On Error Resume Next: Set Container = Control.Container
+    //     ControlIsValid = CBool(Err.Number = 0 And ...)          ' ← 读到 438
+    //   ⇒ 恒 False ⇒ `Err.Raise 380` ⇒ 进程退出。
+    // 清空放在**最前**: 语句自身的副作用(如 GoTo 形态的 setjmp 登记)不依赖 Err。
+    c_.emitLine("vb6_ErrClear();  /* On Error: VB6 语义清空 Err */");
     switch (node.errorKind) {
         case OnErrorKind::GoToLabel: {
             // On Error GoTo label

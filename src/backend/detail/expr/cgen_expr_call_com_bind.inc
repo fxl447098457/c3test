@@ -803,11 +803,21 @@
     // ⇒ 实参静默消失, 接收者变成整个集合并引发运行期错误 9。
     // 拼回去之后 callee 形如 `func(obj)`, 下面的 split/242b 与普通类字段/属性
     // 走**同一条**路径 (实测 ComCtlsDemo ImageList.ListImages("abc").Draw 族)。
+    // ⚠ 只在**下面的 P6.5 拆分确实会跑**时才拼: 拆分的门槛是
+    //   `callee 形如 func(obj)` && (有位置/named 实参 || needsSplitForOptionalPad
+    //   || needsSplitForMissingArgs)
+    // 无实参又不需要补齐时 (如 `s(0).Side()` —— Side 无参) 拆分整段不进, 此时若已把
+    // classMethodObjArg 清掉, 末尾 `callee + "(" + argList + ")"` 就会在**已完整的调用**
+    // 后面再拼一层空括号 ⇒ `vb6_X_Side(recv)()` ⇒ MSVC C2064 (term does not evaluate
+    // to a function taking N arguments)。tests/arr_cls 实测 (Fix 192 那一族)。
     if (!pendingChainObj_.empty()) {
         classMethodObjArg = std::move(pendingChainObj_);
         pendingChainObj_.clear();
-        if (!classMethodObjArg.empty() && !callee.empty()
-            && callee.find('(') == std::string::npos) {
+        const bool splitWillRun = !classMethodObjArg.empty() && !callee.empty()
+            && callee.find('(') == std::string::npos
+            && ((!node.positional.empty() || !node.named.empty())
+                || needsSplitForOptionalPad || needsSplitForMissingArgs);
+        if (splitWillRun) {
             callee += "(" + classMethodObjArg + ")";
             classMethodObjArg.clear();
         }

@@ -308,6 +308,11 @@ void  vb6_UC_BagPutStr(void* bag, const wchar_t* name, const wchar_t* value);
 void  vb6_UC_BagPutInt(void* bag, const wchar_t* name, int32_t value);
 void  vb6_UC_BagPutDbl(void* bag, const wchar_t* name, double value);
 void  vb6_UC_BagPutBool(void* bag, const wchar_t* name, int32_t value);
+// Fix: 二进制 blob (字节数组) 槽 —— .frx 里 UserControl 的持久化 PropertyBag 块
+// (InitPanels/InitBands/InitButtons/InitListImages/InitTabs...) 以原始字节喂给外层包,
+// 运行期 `PropBag.Contents = <该字节数组>` 时由 uc_propbag.c 解析成扁平的
+// InitXCount / InitXText<i> ... 项 (VB6 PropertyBag 序列化格式)。
+void  vb6_UC_BagPutBin(void* bag, const wchar_t* name, const char* bytes, int32_t len);
 // Fix 125: 字体对象身份判定 + 字段定位 (供 COM 属性读写层直接操作字体字段)
 int32_t vb6_UC_IsFont(const void* p);
 void*   vb6_UC_FontField(void* p, const wchar_t* name, int32_t* kind);

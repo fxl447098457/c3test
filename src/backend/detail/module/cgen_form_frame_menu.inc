@@ -247,6 +247,27 @@
                 if (hasReadProps114 && !getenv("C3_NO_BAG") && !bagBlocked) {
                     c_.emitLine("extern void vb6_" + cIdent(ctlClass) + "_UC_ReadProps(void* me, void** PropBag);");
                     c_.emitLine("{ void* _bag = vb6_UC_PropBagCreate();");
+                    // Fix: .frx 属性包块 (UserControl 持久化 PropertyBag) —— 交原始字节,
+                    // 运行期由 RTL 的 PropertyBag.Contents 解析 (见 uc_propbag.c)。
+                    auto emitFrxBagBlob = [&](const std::string& litName,
+                                              const std::vector<uint8_t>& bytes) {
+                        c_.emitLine("vb6_UC_BagPutBin(_bag, " + litName + ",");
+                        std::string line = "\"";
+                        for (unsigned char b : bytes) {
+                            if (b == '"')        line += "\\\"";
+                            else if (b == '\\')  line += "\\\\";
+                            else if (b >= 0x20 && b < 0x7F) line += (char)b;
+                            else {
+                                line += '\\';
+                                line += (char)('0' + ((b >> 6) & 7));
+                                line += (char)('0' + ((b >> 3) & 7));
+                                line += (char)('0' + (b & 7));
+                            }
+                            if (line.size() >= 900) { c_.emitLine(line + "\""); line = "\""; }
+                        }
+                        c_.emitLine(line + "\",");
+                        c_.emitLine(std::to_string(bytes.size()) + ");");
+                    };
                     for (const auto& kvb : uc.properties) {
                         const std::string& pn114 = kvb.first;
                         bool skip114 = false;
@@ -267,12 +288,17 @@
                             if (idl == "true")  c_.emitLine("vb6_UC_BagPutBool(_bag, " + litName + ", -1);");
                             else if (idl == "false") c_.emitLine("vb6_UC_BagPutBool(_bag, " + litName + ", 0);");
                         } else if (kvb.second.type == FrmValueType::FrxReference && frxLoaded) {
+                            FrxPropBagBlob pbB114 = FrxReader::readPropBagBlob(kvb.second.frxOffset);
+                            if (pbB114.found) {
+                                emitFrxBagBlob(litName, pbB114.bytes);
+                            } else {
                             FrxTextData dsB114 = FrxReader::readDocString(kvb.second.frxOffset);
                             if (!dsB114.text.empty()) {
                                 std::string tvB = dsB114.text;
                                 if (tvB.size() >= 2 && tvB.front() == '"' && tvB.back() == '"')
                                     tvB = tvB.substr(1, tvB.size() - 2);
                                 c_.emitLine("vb6_UC_BagPutStr(_bag, " + litName + ", L\"" + escapeWideCString(tvB) + "\");");
+                            }
                             }
                         }
                     }

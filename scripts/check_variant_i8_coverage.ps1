@@ -28,10 +28,14 @@
 # 口径从「一档 × 每表」换成「每档 × 每表」的来历（账 #305 §B143）：VT_I8 那一撞之后 Decimal 是第二次，
 # 而两次都只钉了一档 —— 补了 I8 的表照样可以漏 Decimal。现在同一张表要答两档，名单各列各的。
 # 账 #305 §B142 (第五十三刀): 上面那句 ⚠ 收了 —— 站点现在认**任何**接收者拼法(`p->vt` / `in->vt` /
-#   `pv->vt` / `varElem.vt` / `retVal.vt` / `expr.vt` / 裸 `comVt` 都在内)，且 `.inc` 一起扫(Format 那张
-#   分诊表就住在 detail/*.inc 里，改前压根不在 census 眼皮底下)。放宽之后站点 13 -> 19，
-#   每一张都重新逐张归过因(must 里 13 名 / exempt 里 9 名)，V1 的下限跟着钉成 19。
-#   ⚠ 放宽正则之后**再写一张新表就一定红**：它必须在某一档上二选一(答它 / 写明为什么不答)。
+    #   `pv->vt` / `varElem.vt` / `retVal.vt` / `expr.vt` / 裸 `comVt` 都在内)，且 `.inc` 一起扫(Format 那张
+    #   分诊表就住在 detail/*.inc 里，改前压根不在 census 眼皮底下)。放宽之后站点 13 -> 19，
+    #   每一张都重新逐张归过因(must 里 13 名 / exempt 里 9 名)，V1 的下限跟着钉成 19。
+    #   ⚠ 放宽正则之后**再写一张新表就一定红**：它必须在某一档上二选一(答它 / 写明为什么不答)。
+    # 账 #305 §B171: vb6_bag_deserialize 那张表(UC 属性包反序列化, uc_propbag.c)就是这条 ⚠ 的实物 ——
+    #   它按 iVarType 分档解 (name,value), 漏 I8/Decimal 时那两项**静默不进表**, .ctl 侧只读回默认值
+    #   (与「抹成 0」同形: 错的不是值, 是那一项根本不存在)。两档都答了 —— 顺带把 VB6 真会写出的
+    #   VT_CY(6) / VT_DATE(7) 也补上, 那两档不在这道哨兵的钉子上, 但同一个 default 会吃掉它们。
 # 账 #305 §B165 (第五十四刀): 上面那 19 张里有一张是宿主存值腿(vb6_Host_FromWinVariant)的九档表,
 #   它当年进 exempt 是因为 x86 的 Decimal 槽里装的是一枚指针、借用回来存进集合就悬空(实测读回
 #   2066035336255469780997 那一类数)。本刀撤了那张表(改问 §B144 的布局权威 + 本刀新立的所有权出口),
@@ -59,7 +63,9 @@ $must = @(
     # 账 #305 §B142 (第五十三刀): 往里读那一族的两枚公开名以前各抄一遍 23 档表(134 行 + 121 行)，
     # 现在表只住 vb6_ComVariantIntoSlot 一枚(下面 C1 钉这件事)；Format 那张分诊表住在 .inc 里，
     # 放宽扫描后它进了 census，两档都答(§B142 第三十四刀补的 Decimal + Task #44 补的 I8)。
-    "vb6_ComVariantIntoSlot", "vb6_Format"
+    "vb6_ComVariantIntoSlot", "vb6_Format",
+    # 账 #305 §B171: UC 属性包反序列化那张表(见上面同名的注释)
+    "vb6_bag_deserialize"
 )
 $exempt = @{
     "vb6_CDec" = "两架构读数本来就相同（CStr(CDec(整数)) 今天就是空串），缺的不是这一档 -> 另立 §B141"
@@ -78,7 +84,9 @@ $decMust = @(
     # 账 #305 §B145: 「槽 -> 真 VARIANT」那张表唯一的住处(出站打包与 Variant 算术都读它)。
     "vb6_VariantPackBorrow",
     # 账 #305 §B142 (第五十三刀): 往里读那一枚核 + Format 那张分诊表(见上面 I8 名单同两条的理由)。
-    "vb6_ComVariantIntoSlot", "vb6_Format"
+    "vb6_ComVariantIntoSlot", "vb6_Format",
+    # 账 #305 §B171: 同上 —— 属性包那张表两档都答
+    "vb6_bag_deserialize"
 )
 $decExempt = @{
     # 账 #305 §B145: 这一格撤掉——那张 vt 表整个搬进 vb6_VariantPackBorrow(它现在两档都答)，
