@@ -89,14 +89,16 @@ int32_t vb6_SaVtFromElemType(vb6_safearray_elemtype t) {
 }
 
 // 装箱那一句的落点（声明在 vb6rtl_variant.h —— 那边看不见两套描述符）。手里只有 void*，先认载体:
-// 一维的首字段是魔数 0x5A1D、多维的首字段是秩数 1..16，魔数落不进 1..16 —— 这一问与
-// vb6rtl_string.c / vb6rtl_com.c 里靠魔数认载体的那几处同形。NULL（从没 ReDim / 已被 Erase）
-// 与认不出的载体都交回改前的答案 (vtArray|vtVariant)，不猜。
+// 1D 描述符由 `vb6_SaIs1D` 认（cDims==1 + fFeatures==VB6_SA1D_FFEATURES，见 vb6rtl_array.h），
+// ND 描述符首字段是秩数 1..16。⚠ 首字段**不再是**魔数 0x5A1D（那条口径已随 `signature`
+// 字段一起撤掉），判载体必须走 `vb6_SaIs1D`，与 vb6rtl_string.c / vb6rtl_com.c 同形。
+// NULL（从没 ReDim / 已被 Erase）与认不出的载体都交回改前的答案 (vtArray|vtVariant)，不猜。
 int32_t vb6_SaVtOfArrayPtr(const void* arrV) {
     if (!arrV) return (int32_t)(vb6_vtArray | vb6_vtVariant);
-    const vb6_SafeArray1D* a1 = (const vb6_SafeArray1D*)arrV;
-    if (a1->signature == 0x5A1D)
+    if (vb6_SaIs1D(arrV)) {
+        const vb6_SafeArray1D* a1 = (const vb6_SafeArray1D*)arrV;
         return (int32_t)(vb6_vtArray | vb6_SaVtFromElemType(a1->elemType));
+    }
     const vb6_SafeArrayND* nd = (const vb6_SafeArrayND*)arrV;
     if (nd->dimCount >= 1 && nd->dimCount <= 16)
         return (int32_t)(vb6_vtArray | vb6_SaVtFromElemType(nd->elemType));
@@ -107,7 +109,7 @@ vb6_SafeArray1D* vb6_SafeArrayCreate1D(vb6_safearray_elemtype elemType,
     int32_t lBound, int32_t uBound) {
     vb6_SafeArray1D* arr = (vb6_SafeArray1D*)calloc(1, sizeof(vb6_SafeArray1D));
     if (!arr) return NULL;
-    arr->signature = 0x5A1D;  /* Fix 082g: 1D array magic */
+    vb6_Sa1DInit(arr);  /* cDims/fFeatures —— 与 OLE SAFEARRAY 同布局, 见 vb6rtl_array.h */
     arr->elemType = elemType;
     arr->elemSize = vb6_SaElemSize(elemType);
     arr->lBound = lBound;
@@ -131,7 +133,7 @@ vb6_SafeArray1D* vb6_SafeArrayReDim1D_Udt(int32_t elemSize,
     int32_t lBound, int32_t uBound) {
     vb6_SafeArray1D* arr = (vb6_SafeArray1D*)calloc(1, sizeof(vb6_SafeArray1D));
     if (!arr) return NULL;
-    arr->signature = 0x5A1D;  /* Fix 082g: 1D array magic */
+    vb6_Sa1DInit(arr);  /* 与 Create1D 同一初始化 */
     arr->elemType = vb6_sa_udt;
     arr->elemSize = elemSize;
     arr->lBound = lBound;
@@ -343,7 +345,7 @@ vb6_SafeArray1D* vb6_ArrayAssign1D_Cb(vb6_SafeArray1D* dst, vb6_SafeArray1D* src
     if (src) {
         res = (vb6_SafeArray1D*)calloc(1, sizeof(vb6_SafeArray1D));
         if (!res) { return dst; }
-        res->signature = 0x5A1D;  /* 与 Create1D/ReDim1D_Udt 同魔数 (Fix 082g) */
+        vb6_Sa1DInit(res);  /* 与 Create1D/ReDim1D_Udt 同一初始化 */
         res->elemType = src->elemType;
         res->elemSize = src->elemSize;
         res->lBound   = src->lBound;
@@ -407,12 +409,13 @@ void vb6_SafeArrayPutElem(vb6_SafeArray1D* arr, int32_t index, void* value) {
 int32_t vb6_UBound(vb6_SafeArray1D* safeArray, int32_t dimension) {
     // Fix <vbeclipse> rev4 (2026-09-30): 数组状态追踪, 由 C3_SA_TRACE=1 门控。
     // 崩溃现场 `[edx+ecx*4]` 里 edx(=arr->data)是 NULL 而 uBound>=0 —— 只有把
-    // signature/elemType/elemSize/lBound/uBound/count/data 全打出来才能判是
+    // cDims/fFeatures/elemType/elemSize/lBound/uBound/count/data 全打出来才能判是
     // "结构本身是垃圾"还是"结构对但 data 没分配"。纯 ASCII 输出 (窄流+C locale)。
     if (getenv("C3_SA_TRACE")) {
-        fprintf(stderr, "[SA] UBound arr=%p sig=0x%X et=%d es=%d lb=%d ub=%d cnt=%d data=%p\n",
+        fprintf(stderr, "[SA] UBound arr=%p cDims=%u ff=0x%X et=%d es=%d lb=%d ub=%d cnt=%d data=%p\n",
                 (void*)safeArray,
-                safeArray ? (unsigned)safeArray->signature : 0u,
+                safeArray ? (unsigned)safeArray->cDims : 0u,
+                safeArray ? (unsigned)safeArray->fFeatures : 0u,
                 safeArray ? (int)safeArray->elemType : -1,
                 safeArray ? (int)safeArray->elemSize : -1,
                 safeArray ? (int)safeArray->lBound : -999,
@@ -437,9 +440,9 @@ int32_t vb6_UBound(vb6_SafeArray1D* safeArray, int32_t dimension) {
                      vb6_BSTR_FromStr(L"Subscript out of range"));
         return -1;  /* 不可达: vb6_ErrRaise 必 longjmp 或 ExitProcess */
     }
-    // Fix 082g: use signature field to distinguish 1D vs ND arrays
-    // SafeArray1D has signature=0x5A1D, SafeArrayND has dimCount (2-16)
-    if (safeArray->signature == 0x5A1D) {
+    // 1D 描述符判定: cDims==1 且 fFeatures 是本 RTL 的标记 (见 vb6rtl_array.h)。
+    // ND 描述符首 WORD 是 dimCount (2..16)、offset 2 恒 0 —— 两者不会混。
+    if (vb6_SaIs1D(safeArray)) {
         // Confirmed 1D array
         return safeArray->uBound;
     }
@@ -466,8 +469,8 @@ int32_t vb6_LBound(vb6_SafeArray1D* safeArray, int32_t dimension) {
                      vb6_BSTR_FromStr(L"Subscript out of range"));
         return 0;  /* 不可达 */
     }
-    // Fix 082g: use signature field to distinguish 1D vs ND arrays
-    if (safeArray->signature == 0x5A1D) {
+    // 1D 描述符判定: 与 vb6_UBound 同一口径 (见 vb6rtl_array.h)。
+    if (vb6_SaIs1D(safeArray)) {
         return safeArray->lBound;
     }
     if (dimension > 1) {
@@ -494,8 +497,8 @@ static void vb6_SaElemTrace(void* arr, int32_t idx) {
             (void*)a, (int)idx,
             a ? (int)a->lBound : -999, a ? (int)a->uBound : -999);
     if (a) {
-        fprintf(stderr, "[SA]   desc: sig=0x%X elemType=%d elemSize=%d n=%d dyn=%d\n",
-                (unsigned)a->signature, (int)a->elemType, (int)a->elemSize,
+        fprintf(stderr, "[SA]   desc: cDims=%u ff=0x%X elemType=%d elemSize=%d n=%d dyn=%d\n",
+                (unsigned)a->cDims, (unsigned)a->fFeatures, (int)a->elemType, (int)a->elemSize,
                 (int)a->count, (int)a->isDynamic);
         if (a->data) {
             const unsigned char* p = (const unsigned char*)a->data;

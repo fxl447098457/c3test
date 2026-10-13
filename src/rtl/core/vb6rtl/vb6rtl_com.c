@@ -329,7 +329,7 @@ static vb6_VARIANT vb6_ComVariantIntoSlot(VARIANT* pv, int steal) {
             int32_t esz = vb6_SaElemSize(et);
 
             vb6_SafeArray1D* arr = (vb6_SafeArray1D*)calloc(1, sizeof(vb6_SafeArray1D));
-            arr->signature = 0x5A1D;  /* Fix 082g */
+            vb6_Sa1DInit(arr);
             arr->elemType = et;
             arr->elemSize = esz;
             arr->lBound = lBound;
@@ -545,7 +545,7 @@ static void vb6_VariantArrayIntoSlot(const VARIANT *src, vb6_VARIANT *s) {
     }
     memcpy(data, srcData, (size_t)n * (size_t)esz);
     SafeArrayUnaccessData(psa);
-    arr->signature = 0x5A1D;
+    vb6_Sa1DInit(arr);
     arr->elemType = et;
     arr->elemSize = esz;
     arr->lBound = lo;
@@ -587,7 +587,7 @@ static void vb6_ComPackArrayOut(const void* arrV, VARIANT* out) {
     void* pvData = NULL;
     out->vt = VT_EMPTY;
     if (!arrV) return;
-    if (a1->signature == 0x5A1D) {
+    if (vb6_SaIs1D(a1)) {
         vt = vb6_ComSaVtBlittable(a1->elemType);
         if (!vt) return;
         esz = vb6_SaElemSize(a1->elemType);

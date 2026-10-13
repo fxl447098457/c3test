@@ -137,6 +137,23 @@ void CCodeGen::visit(ReDimStmt& node) {
 
     if (node.dimensions.empty()) return;
 
+    // 账 #305 第二十二层 (2026-10-13): ReDim 的边界表达式若是 **COM 成员读**
+    // (`ReDim Preserve a(1 To coll.Count)`), emitExpr 只发出**接收者对象**
+    // (`me->coll`) 并在 lastExpr_ 里留下待 resolve 的 COM 标记; 此处以前直接取
+    // lastExpr_ 当界 ⇒ 把**对象指针**当元素个数。实测 ImcComboItems.Add 的
+    // `ReDim Preserve PropIndexPtrArr(1 To PropComboItem.Count)`: 界成了
+    // PropComboItem 的堆指针 (≈7.8e7) ⇒ 每次 Add 给 TINDEXPTR 数组 calloc+memcpy
+    // ≈600MB, 30 次 Add 拷贝 ≈15GB ⇒ 启动窗口被拖到 8s+ (采样剖析: 84% 时间在
+    // CopyUpLargeMov/memmove)。
+    // 与 For 循环三表达式同一律 (cgen_control.cpp emitForExpr092n): 取界之前先
+    // 消费 COM 标记 —— 清标记 → emitExpr → 若产生标记则 resolveComValue("Long")。
+    auto emitRedimBound = [&](Expr& e) -> std::string {
+        isComMarker_ = false;
+        emitExpr(e);
+        if (isComMarker_) resolveComValue("Long");
+        return std::move(lastExpr_);
+    };
+
     int dimCount = (int)node.dimensions.size();
 
     if (dimCount == 1) {
@@ -144,14 +161,8 @@ void CCodeGen::visit(ReDimStmt& node) {
         auto& dim = node.dimensions[0];
         std::string lBound = "0";
         std::string uBound = "0";
-        if (dim.lower) {
-            emitExpr(*dim.lower);
-            lBound = std::move(lastExpr_);
-        }
-        if (dim.upper) {
-            emitExpr(*dim.upper);
-            uBound = std::move(lastExpr_);
-        }
+        if (dim.lower) lBound = emitRedimBound(*dim.lower);
+        if (dim.upper) uBound = emitRedimBound(*dim.upper);
 
         if (node.preserve) {
             // Fix 084a: Variant 数组 ReDim Preserve — 实参提取 SafeArray, 结果包装回 Variant
@@ -205,8 +216,8 @@ void CCodeGen::visit(ReDimStmt& node) {
         for (int d = 0; d < dimCount; d++) {
             auto& dim = node.dimensions[d];
             std::string lb = "0", ub = "0";
-            if (dim.lower) { emitExpr(*dim.lower); lb = std::move(lastExpr_); }
-            if (dim.upper) { emitExpr(*dim.upper); ub = std::move(lastExpr_); }
+            if (dim.lower) lb = emitRedimBound(*dim.lower);
+            if (dim.upper) ub = emitRedimBound(*dim.upper);
             std::string trailing = (d < dimCount - 1) ? "," : "";
             // vb6_SafeArrayBound = {lLbound, cElements}
             // cElements = uBound - lBound + 1 (VB6 "0 To 3" has 4 elements)
@@ -344,12 +355,21 @@ void CCodeGen::emitReDimComplexTarget(ReDimStmt& node) {
     if (node.dimensions.empty()) return;
     int dimCount = (int)node.dimensions.size();
 
+    // 账 #305 第二十二层: 与 visit(ReDimStmt&) 同一律 —— ReDim 界若是 COM 成员读,
+    // emitExpr 只发对象并留 COM 标记, 必须 resolve 后再当界 (否则对象指针成了元素数)。
+    auto emitRedimBound = [&](Expr& e) -> std::string {
+        isComMarker_ = false;
+        emitExpr(e);
+        if (isComMarker_) resolveComValue("Long");
+        return std::move(lastExpr_);
+    };
+
     if (dimCount == 1) {
         auto& dim = node.dimensions[0];
         std::string lBound = "0";
         std::string uBound = "0";
-        if (dim.lower) { emitExpr(*dim.lower); lBound = std::move(lastExpr_); }
-        if (dim.upper) { emitExpr(*dim.upper); uBound = std::move(lastExpr_); }
+        if (dim.lower) lBound = emitRedimBound(*dim.lower);
+        if (dim.upper) uBound = emitRedimBound(*dim.upper);
 
         if (node.preserve) {
             if (isUdtArray) {
@@ -387,8 +407,8 @@ void CCodeGen::emitReDimComplexTarget(ReDimStmt& node) {
         for (int d = 0; d < dimCount; d++) {
             auto& dim = node.dimensions[d];
             std::string lb = "0", ub = "0";
-            if (dim.lower) { emitExpr(*dim.lower); lb = std::move(lastExpr_); }
-            if (dim.upper) { emitExpr(*dim.upper); ub = std::move(lastExpr_); }
+            if (dim.lower) lb = emitRedimBound(*dim.lower);
+            if (dim.upper) ub = emitRedimBound(*dim.upper);
             std::string trailing = (d < dimCount - 1) ? "," : "";
             c_.emitLine("{" + lb + ", (" + ub + " - " + lb + " + 1)}" + trailing);
         }

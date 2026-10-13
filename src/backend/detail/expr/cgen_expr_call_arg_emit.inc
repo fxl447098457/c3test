@@ -426,9 +426,10 @@
                                 for (auto& mi44 : udtSym44->udtMembers) {
                                     if (Symbol::toLower(mi44.name) != memWrap44) continue;
                                     if (mi44.arraySize > 0) {
-                                        // 字段序: signature, elemType, elemSize,
-                                        // lBound, uBound, count, data, isDynamic
-                                        // (vb6rtl_array.h vb6_SafeArray1D)。
+                                        // 字段序: cDims, fFeatures, elemSize, elemType,
+                                        // data, count, lBound, uBound, isDynamic
+                                        // (vb6rtl_array.h vb6_SafeArray1D；首字段已由
+                                        //  magic `signature` 换成 OLE 兼容的 cDims)。
                                         // 个数用 sizeof(数组)/sizeof(元素) 由 C 编译器
                                         // 自算 —— 语义层 UdtMemberInfo.arraySize 目前
                                         // 只是"是定长数组"的占位 (=1), 不是元素个数。
@@ -453,15 +454,21 @@
                                         // 形参是 vb6_SafeArray1D** (指向"载体指针变量"
                                         // 的指针), 函数体 (*abBytes) 先解一层。所以不能
                                         // 只传 &(结构字面量) (那是 SafeArray1D*, 解一层
-                                        // 会把 signature 0x5A1D 当指针 → AV 读 0x5a1d,
+                                        // 会把描述符首 WORD 当指针 → AV 读 0x1 或 0xa1d1,
                                         // 首版实测) —— 外面再包一层"1 元素指针数组字面量"
                                         // 取址, 得到真正的 SafeArray1D**。两个复合字面量
                                         // 都在最外层 full-expression 内生存, 覆盖调用。
-                                        argVal = "&(vb6_SafeArray1D*[]){&(vb6_SafeArray1D){0x5A1D, "
-                                            + mapSaElemType(elemT44)
-                                            + ", (int32_t)sizeof(" + deep44 + ")"
-                                            + ", 0, (" + cnt44 + " - 1), " + cnt44
-                                            + ", (void*)(" + argVal + "), 0}}";
+                                        // ⚠ 位置初始化器: 字段序 = vb6rtl_array.h 里
+                                        //    { cDims, fFeatures, elemSize, elemType, data,
+                                        //      count, lBound, uBound, isDynamic }。
+                                        //    cDims/fFeatures 是 OLE SAFEARRAY 兼容前缀
+                                        //    (1 / 0xA1D1), VB6 侧会把这块内存当 SAFEARRAY*
+                                        //    读 .cDims —— 必须填对。
+                                        argVal = std::string("&(vb6_SafeArray1D*[]){&(vb6_SafeArray1D){1, 0xA1D1, ")
+                                            + "(int32_t)sizeof(" + deep44 + ")"
+                                            + ", " + mapSaElemType(elemT44)
+                                            + ", (void*)(" + argVal + ")"
+                                            + ", " + cnt44 + ", 0, (" + cnt44 + " - 1), 0}}";
                                         wholeArr158 = true;
                                     }
                                     break;

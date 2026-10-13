@@ -832,6 +832,23 @@
     bool hostPseudoIsNumeric(const std::string& pseudoObj,
                              const std::string& memberName) const;
 
+    // 账 #257 第十九层: `With UserControl` 体内 `.成员` 的**内建**判定。
+    //
+    // VB6 里 `UserControl.Picture` 与控件自己声明的 `Public Property Set Picture`
+    // 是**两个东西**; 而宿主派发表把后者也挂在 "Picture" 名下, 于是 DrawFrame 里
+    // `Set .Picture = Nothing` 命中控件自己的 Property Set → 它末尾 `Call DrawFrame`
+    // → 无限互递归 (ComCtlsDemo FrameW: 栈溢出 0xC00000FD, 随后被 ntdll 报成堆损坏
+    // 0xC000037D)。故: 成员在宿主伪表里、且**当前模块自己**也声明了同名公开属性时,
+    // 必须发内建全局 `vb6_UserControl_Picture`, 不走 COM 派发。
+    //
+    // 判据刻意收在"撞名"这一档: 不撞名时内建全局与 COM 派发本该同源, 收窄是为了
+    // 不让 `ParentControls` 这类"RTL 只有恒 NULL 空桩"的行被改道 (空桩发出去是
+    // 静默错宿主)。方法行 (HPF_METHOD) 与码头行 (HPF_CHANNEL) 一律不改道。
+    //   outRtl = 该成员的 RTL 全局符号 (vb6_<对象>_<成员>)
+    bool withHostPseudoIntrinsic(const std::string& pseudoObj,
+                                 const std::string& memberName,
+                                 std::string& outRtl);
+
     // Fix 010r-16: COM/Property-Get 左值重写辅助
     // 当赋值语句(Let/Set/Assignment fallback)的 LHS 是非常量 C 表达式(非左值)时,
     // 尝试重写为 COM SetProp/SetPropArg 或 Property Let/Set 调用.

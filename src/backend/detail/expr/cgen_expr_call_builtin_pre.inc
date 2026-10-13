@@ -336,7 +336,15 @@
                         std::string pLower = p.name;
                         std::transform(pLower.begin(), pLower.end(), pLower.begin(), ::tolower);
                         if (pLower == argLower && p.isOptional && !p.isParamArray) {
-                            lastExpr_ = "(!_has_" + cIdent(p.name) + ")";
+                            // 账 #257 第二十层: 必须交 **VB6 布尔 (-1/0)**, 不能交 C 布尔 (0/1)。
+                            // VB6 的 `Not` 在 cgen_expr.cpp 发成 `(~(int32_t)(<操作数>))` —— 按位
+                            // 取反只有在操作数是 -1/0 时才等于逻辑非: ~0=-1 (True), ~(-1)=0 (False)。
+                            // 交 0/1 时 ~0=-1 与 ~1=-2 **都非零** ⇒ `Not IsMissing(x)` 恒真。
+                            // 实测 ComCtlsDemo TvwNodes.Add: `If Not IsMissing(Relative) Then` 在
+                            // Relative 省略 (`TreeView1.Nodes.Add , , , "1", 1`) 时也成立, 于是走进
+                            // `Select Case VarType(Relative)` 对 vbEmpty 落 Case Else ⇒ Err.Raise 13。
+                            // 直接写 `If IsMissing(x)` 那一形不受影响 (0 与 -1 都按假/真成立)。
+                            lastExpr_ = "(-(!_has_" + cIdent(p.name) + "))";
                             return;
                         }
                         // Fix 091k: ParamArray 整体 — RTL vb6_IsMissing(SAFEARRAY*)

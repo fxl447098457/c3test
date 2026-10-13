@@ -37,6 +37,43 @@
 #include <windows.h>
 #endif
 
+// 账 #257 第十八层后: CRT 调试堆诊断 (仅当构建带 C3_DEBUG_CRT ⇒ /MTd /D_DEBUG 时编译)。
+// 堆越界/坏释放被 _CRTDBG_CHECK_ALWAYS_DF 抓到时, CRT 自带报告只给 "DAMAGE: block #N",
+// 没有调用栈。这里挂一个 report hook, 在 ERROR/ASSERT 报告时补抓检测点栈, 落到
+// c3_crt_heap.log (与 sym.py/.map 同源的 RVA)。自带重入保护 + 全程 Win32/stdio, 不碰堆分配。
+#ifdef _DEBUG
+#include <crtdbg.h>
+static volatile LONG vb6_CrtHookBusy = 0;
+static int vb6_CrtReportHook(int reportType, char* message, int* returnValue) {
+    (void)returnValue;
+    if (reportType != _CRT_ERROR && reportType != _CRT_ASSERT) return 0;
+    if (InterlockedCompareExchange(&vb6_CrtHookBusy, 1, 0) != 0) return 0;  // 防重入
+    do {
+        HMODULE hSelf = GetModuleHandleA(NULL);
+        PIMAGE_DOS_HEADER d = (PIMAGE_DOS_HEADER)hSelf;
+        PIMAGE_NT_HEADERS n = (PIMAGE_NT_HEADERS)((char*)hSelf + d->e_lfanew);
+        char* lo = (char*)hSelf;
+        char* hi = lo + n->OptionalHeader.SizeOfImage;
+        void* frames[48];
+        USHORT nf = (USHORT)CaptureStackBackTrace(2, 48, frames, NULL);
+        FILE* f = fopen("c3_crt_heap.log", "a");
+        if (!f) break;
+        fprintf(f, "[CRT_HEAP] type=%d base=%p msg=%s\n", reportType, (void*)lo,
+                message ? message : "");
+        for (USHORT i = 0; i < nf; i++) {
+            if ((char*)frames[i] >= lo && (char*)frames[i] < hi)
+                fprintf(f, "[CRT_HEAP] #%u rva=0x%lx\n", i,
+                        (unsigned long)((char*)frames[i] - lo));
+            else
+                fprintf(f, "[CRT_HEAP] #%u %p (out)\n", i, frames[i]);
+        }
+        fclose(f);
+    } while (0);
+    InterlockedExchange(&vb6_CrtHookBusy, 0);
+    return 0;  // 交回 CRT 默认处理 (继续打 stderr + 按需中断)
+}
+#endif
+
 // P24-08: MessageBoxW (user32) + GetConsoleWindow (kernel32)
 #pragma comment(lib, "user32.lib")
 #pragma comment(lib, "kernel32.lib")
@@ -87,9 +124,13 @@ static LONG CALLBACK vb6_CrashTraceVEH(PEXCEPTION_POINTERS ep) {
     /* 账 #181: 记轨迹本身会再触发异常 (栈溢出时 fprintf 拿 CRT 锁 /
      * CaptureStackBackTrace 再读同一批页) ⇒ 每进程只记第一次。 */
     if (!vb6_CrashTraceClaim(VB6_CRASH_CLAIM_STDERR)) return EXCEPTION_CONTINUE_SEARCH;
+    // 账 #257 第十八层诊断: 堆损坏 (STATUS_HEAP_CORRUPTION 0xC0000374 / 0xC000037D) 默认不进
+    // 这里 ⇒ stderr 一片空白, 只能拿到一个无栈的退出码。把它也纳入打印集合, 至少能把
+    // 现场帧打出来 (CaptureStackBackTrace 拿不到应用侧帧时, 下面 x86/x64 栈线性扫描兜底)。
     if (code == EXCEPTION_ACCESS_VIOLATION || code == EXCEPTION_IN_PAGE_ERROR
         || code == EXCEPTION_ILLEGAL_INSTRUCTION || code == EXCEPTION_INT_DIVIDE_BY_ZERO
-        || code == EXCEPTION_STACK_OVERFLOW) {
+        || code == EXCEPTION_STACK_OVERFLOW
+        || code == 0xC0000374 || code == 0xC000037D) {
         HMODULE hSelf = GetModuleHandleA(NULL);
         void* frames[24];
         USHORT n = (USHORT)CaptureStackBackTrace(0, 24, frames, NULL);
@@ -160,6 +201,23 @@ void vb6_Init(void) {
     if (GetEnvironmentVariableA("C3_COM_TRACE", NULL, 0) > 0
         || GetEnvironmentVariableA("C3_CRASH_TRACE", NULL, 0) > 0) {
         AddVectoredExceptionHandler(1, vb6_CrashTraceVEH);
+    }
+#endif
+#ifdef _DEBUG
+    // 账 #257 第十八层后: C3_DEBUG_CRT=1 构建 + 运行时同变量 ⇒ 打开 CRT 调试堆全量校验。
+    // CHECK_ALWAYS 让每次 alloc/free 都全堆扫描, 越界/坏释放在"下一次堆操作"即被点名
+    // (block #N + before/after), report hook 另落一份检测点栈到 c3_crt_heap.log。
+    if (getenv("C3_DEBUG_CRT")) {
+        _CrtSetReportHook2(_CRT_RPTHOOK_INSTALL, vb6_CrtReportHook);
+        int flg = _CrtSetDbgFlag(_CRTDBG_REPORT_FLAG);
+        flg |= _CRTDBG_ALLOC_MEM_DF | _CRTDBG_CHECK_ALWAYS_DF | _CRTDBG_CHECK_CRT_DF;
+        _CrtSetDbgFlag(flg);
+        _CrtSetReportMode(_CRT_WARN,   _CRTDBG_MODE_FILE);
+        _CrtSetReportMode(_CRT_ERROR,  _CRTDBG_MODE_FILE);
+        _CrtSetReportMode(_CRT_ASSERT, _CRTDBG_MODE_FILE);
+        _CrtSetReportFile(_CRT_WARN,   _CRTDBG_FILE_STDERR);
+        _CrtSetReportFile(_CRT_ERROR,  _CRTDBG_FILE_STDERR);
+        _CrtSetReportFile(_CRT_ASSERT, _CRTDBG_FILE_STDERR);
     }
 #endif
     // P20-44: OLE 拖放 RTL 自测 —— **显式** C3_OLEDDB_SELFTEST=1 才跑

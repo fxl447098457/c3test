@@ -105,8 +105,10 @@
         vb6_uc_push(r, &saved);
 if (GetEnvironmentVariableW(L"C3_COM_TRACE", NULL, 0) > 0) { fprintf(stderr, "[C3_UC] HostCreate stage=create type=%s\n", typeName); fflush(stderr); }
     r->me = desc->create ? desc->create() : NULL;
+    vb6_heap_probe("after-create", typeName);
     if (GetEnvironmentVariableW(L"C3_COM_TRACE", NULL, 0) > 0) { fprintf(stderr, "[C3_UC] HostCreate stage=init type=%s me=%p\n", typeName, r->me); fflush(stderr); }
     if (r->me && desc->init) desc->init(r->me);
+    vb6_heap_probe("after-init", typeName);
     if (GetEnvironmentVariableW(L"C3_COM_TRACE", NULL, 0) > 0) { fprintf(stderr, "[C3_UC] HostCreate stage=init-done type=%s\n", typeName); fflush(stderr); }
         r->ready = 1;   // Fix 112: 之后窗口消息 (Resize/Show/Paint) 才允许进入实例
         vb6_uc_trace("instance.ready", desc->typeName, r->me);

@@ -22,6 +22,21 @@
     if (node.value->kind == ASTNodeKind::LiteralExpr) {
         auto& lit = static_cast<LiteralExpr&>(*node.value);
         if (lit.literalKind == LiteralKind::Nothing) {
+            // 账 #257 第十九层: `Set .Picture = Nothing` (With UserControl / PropertyPage
+            // 体内) —— 内建成员置空直接写 RTL 全局, **不能**走 COM 派发: 派发会命中控件
+            // 自己声明的同名 Property Set, 而它末尾 `Call DrawFrame` ⇒ DrawFrame 又
+            // `Set .Picture` ⇒ 无限互递归 (ComCtlsDemo FrameW 实测栈溢出 0xC00000FD,
+            // 随后被 ntdll 报成堆损坏 0xC000037D)。
+            if (node.target->kind == ASTNodeKind::WithMemberExpr
+                && !withObjectInfoStack_.empty()) {
+                auto& hpWm19 = static_cast<WithMemberExpr&>(*node.target);
+                std::string hpRtl19;
+                if (withHostPseudoIntrinsic(withObjectInfoStack_.back().hostPseudoObj,
+                                            hpWm19.memberName, hpRtl19)) {
+                    c_.emitLine(hpRtl19 + " = NULL;  /* With host pseudo Set Nothing */");
+                    return;
+                }
+            }
             // 左值求值期间关掉虚表派发 (ai/022 B08e-4 站点⑭: Pattern C/D2 要对这段文本做
                 // `prop_get_` -> `prop_let_` 的字符串级改写, 派发表达式会被换成表里不存在的槽字段)
             const bool savedVirtLhs = suppressVirtDispatch_;
@@ -381,6 +396,22 @@
                         _psValTypedPtr236 = true;
                     }
                 }
+                // 账 #257 第二十一层: RHS 是 **COM 调用** (`.ReadProperty("MouseIcon", Nothing)`
+                // → `vb6_ComCall(...)`) 时, vb6_ComCall 交回的是**堆 VARIANT***, 而 Property
+                // Set 的 C 形参是对象指针 (`void* Value`) —— 裸传过去, 被调体里 `Value.Type`
+                // 就把 VARIANT 的第一个 DWORD (vt) 当 vtable 读。
+                // 现场 (ComCtlsDemo 启动卡死, DebugBreakProcess 抓栈):
+                //   FrameW.c:670  prop_set_MouseIcon(me, vb6_ComCall(_vb6_with_1, L"ReadProperty", …))
+                //   → prop_set_MouseIcon 里 `If Value.Type = vbPicTypeIcon` → ComGetIntProp
+                //   → ComGetProp → getDispid → ComIsDispatchable → **av 读 0x3** (vt=3)。
+                // 与 Set 语句通用路径 (本文件下方 `value = comObjectRefFromCallExpr(value)`)
+                // 同一律: 换成 vb6_ComCallObject(...) (内部 UnpackObject + VarFree)。
+                // 只在被调形参**不是** Variant 时改道 —— 形参真是 Variant 槽时, 下面
+                // Fix 236 那一支要的是整只 VARIANT (boxToVariant), 换成对象指针就错了。
+                if (!_psValVariant159 || _psValTypedPtr236) {
+                    _valE = comObjectRefFromCallExpr(_valE);
+                    _arg2 = _valE;  /* 上面 _arg2 的初值取自改道前的 _valE, 同步回来 */
+                }
                 if (_psValTypedPtr236) {
                     _arg2 = _valIsVar159 ? ("vb6_VariantToObjectVal(" + _valE + ")")
                                          : _valE;
@@ -423,6 +454,13 @@
     emitExpr(*node.target);
     suppressVirtDispatch_ = savedVirtLhs;
     std::string target = std::move(lastExpr_);
+
+    // 账 #257 第十九层 · 注: `Set .Picture = .Image` 这一形**不在这里另开分支** ——
+    // 上面 WithMemberExpr 的读取已经把 target 交成内建全局 (且不打 COM 标记),
+    // 于是下方 isComMarker_ 为假, 自然落到本函数末尾那条通用的 `target = value;`
+    // 路径, 发出的就是 `vb6_UserControl_Picture = vb6_ComGetObjectProp(...)`。
+    // 刻意不再调 emitSetObjectRhs: scripts/check_set_rhs_object_context.ps1 钉着
+    // "emitSetObjectRhs 调用点恰好 7 处", 新增一处即红 (实测踩到过)。
 
     // COM属性SetRef: Set obj.Property = objRef → vb6_ComSetRef(obj, L"Property", objRef)
     if (isComMarker_) {

@@ -30,6 +30,29 @@ void vb6_uc_trace(const char* phase, const char* type, void* me) {
     fclose(f);
 }
 
+// 账 #257 第十八层后: 堆损坏相位探针 (C3_HEAP_PROBE=1 才动)。越界写在进程堆上、大跨度,
+// 页堆/VEH/CRT 调试堆都抓不到现场 ⇒ 改用 HeapValidate 在每次宿主回调**之后**验一遍所有
+// 进程堆: 第一个 CORRUPT 行就把越界定位到"哪个回调之后"。写文件 (无缓冲关句柄), 崩溃也留痕。
+static int vb6_heap_probe_all_ok(void) {
+    HANDLE heaps[128];
+    DWORD n = GetProcessHeaps(0, NULL);
+    if (n > 128) n = 128;
+    DWORD got = GetProcessHeaps(n, heaps);
+    for (DWORD i = 0; i < got; i++)
+        if (!HeapValidate(heaps[i], 0, NULL)) return 0;
+    return 1;
+}
+static void vb6_heap_probe(const char* where, const char* type) {
+    if (!getenv("C3_HEAP_PROBE")) return;
+    int ok = vb6_heap_probe_all_ok();
+    FILE* f = fopen("c3_heap_probe.log", "a");
+    if (f) {
+        fprintf(f, "[%s] %s type=%s\n", ok ? "HEAP_OK" : "HEAP_CORRUPT", where,
+                type ? type : "?");
+        fclose(f);
+    }
+}
+
 vb6_UCRec* vb6_ucCurrent = NULL;   // 最近一次进入的实例 (供 Refresh/PropertyChange)
 
 // Fix 119: 待应用的实例字体。VB6 里每个控件实例有独立的 Font 对象(.frm 的
@@ -431,6 +454,7 @@ static void vb6_uc_activate(vb6_UCRec* r) {
         desc->resize(r->me);
         vb6_uc_trace("resize.end", desc->typeName, r->me);
         vb6_uc_pop(&saved);
+        vb6_heap_probe("after-resize", desc->typeName);
     }
     if (desc->show) {
         vb6_UCSaved saved;
@@ -439,6 +463,7 @@ static void vb6_uc_activate(vb6_UCRec* r) {
         desc->show(r->me);
         vb6_uc_trace("show.end", desc->typeName, r->me);
         vb6_uc_pop(&saved);
+        vb6_heap_probe("after-show", desc->typeName);
     }
     vb6_uc_trace("create.end", desc ? desc->typeName : "?", r->me);
     InvalidateRect(hwnd, NULL, FALSE);
