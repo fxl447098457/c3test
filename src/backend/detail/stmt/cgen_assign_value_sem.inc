@@ -368,13 +368,9 @@
             // 「先清旧值」之后，这份共用从「静默别名」变成**二次 free**: 实测 test_host_decimal 的 x86
             // 台 12 次跑里 7 次 0xC0000374(BASE 那台 0/12 —— 它只是把每一轮的旧值漏掉，谁也没 free 两次)。
             // 函数返回/集合取回那些是**内联临时量**(按值交回来)，仍走清+搬，不许多拷一次。
-            bool rhsIsLiveSlot164 = false;
-            if (node.value && node.value->kind == ASTNodeKind::IdentifierExpr) {
-                rhsIsLiveSlot164 =
-                    knownVariantVars_.count(Symbol::toLower(
-                        static_cast<IdentifierExpr&>(*node.value).name)) > 0;
-            }
-            emitVariantSlotStore(target, wrappedValue, !rhsIsLiveSlot164);
+            // 这一问收成一处权威(第五十五刀那一形 + 本刀的借来串存储那一形), 站点不再自己抄。
+            emitVariantSlotStore(target, wrappedValue,
+                                 variantRhsOwnsValue(node.value.get(), value));
         }
     } else if (target.compare(0, 10, "vb6_PA_Get") == 0) {
         // Fix 091c: ParamArray 元素赋值 OutVars(i) = value — vb6_PA_GetXxx 是取值
