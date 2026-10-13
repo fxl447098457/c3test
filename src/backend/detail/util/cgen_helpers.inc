@@ -77,6 +77,18 @@
     // Sub/Function/Property 三个过程出口各调一次, 站点不许再各自抄那三行。
     void emitParamArrayReclaim(const std::vector<std::unique_ptr<ParameterDecl>>& params);
 
+    // 账 #305 §B167 (第五十七刀): 「这枚要收进 Variant 槽的右值自己持有它交出的那份值吗」——
+    // emitVariantSlotStore 的 rhsOwnsValue 那一问的答案只住在这里, 站点不许再各自抄。两形都答:
+    //   形④(第五十五刀) 右值本身是一枚活着的 Variant 槽 —— vb6_VariantFromValue 对槽是 identity
+    //         浅拷贝, 两枚槽共用同一只 BSTR / 同一个 x86 DECIMAL 缓冲;
+    //   形⑪(本刀) 右值是一处**借来的串存储** —— vb6_VariantString 只盖 vtBSTR 的章、既不拷也不
+    //         AddRef, 于是槽与源头共用同一只 BSTR(源头一次重赋值 = 槽里悬空读, 槽一次 Clear =
+    //         把源头还活着的那只块 free 掉)。
+    // 两种都答 false, 都由 emitVariantSlotStore 走 vb6_VariantAssign(Clear + 深拷贝)收尾。
+    bool variantRhsOwnsValue(Expr* rhs, const std::string& rawC) const;
+    // 上面那一问的第二形, 单独露出来是给哨兵与后来的站点(§B164 形⑥ 那一站)当口径用的。
+    bool exprBorrowsBstrStorage(Expr* rhs, const std::string& rawC) const;
+
     // Fix 198: 装箱点上的布尔口径修正. `As Boolean` 在 C 层就是 int16_t (与 Integer
     // 同型), 布尔字面量又是裸 (-1) (int) → 交给 _Generic vb6_VariantFromValue 会分别
     // 选到 short:/int: 分支, 装箱成 VT_I2 / VT_I4: 实测 VarType(b)=2、

@@ -1347,6 +1347,20 @@ function Test-ParamArrayReclaim {
     }
 }
 
+function Test-BstrBorrowSlot {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] bstr_borrow_slot ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\check_bstr_borrow_slot.ps1" 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        $out | Select-Object -First 6 | ForEach-Object { Write-Host "  $_" }
+    }
+}
+
 function Test-RunBudget {
     $script:total++
     Write-Host -NoNewline "  [STATIC] run_budget ... "
@@ -2739,6 +2753,37 @@ if ($Category -in @("all", "run", "bas")) {
         'vb6_VariantClear(&_pa_v0);',
         '_pa_v0 = vb6_PA_GetVariant(items, _fe_i0);',
         'e = vb6_VariantFromStackVARIANT((VARIANT*)&_pa_v0);'
+    )
+
+    # 账 #305 §B167 (第五十七刀): 一枚**借来的 BSTR** 收进 Variant 槽时槽必须另拷一份 ——
+    # 装箱出口 vb6_VariantString 只盖章不拷贝, 于是 `Dim v : v = s` 让槽与源头共用同一只块:
+    # 源头一次重赋值 = 槽里读已释放的块, 槽一次 Clear = 把源头还活着的块放掉(两台 BASE 实测
+    # W2 读成 "W2-SRC="、W7 读成 "8", 存档 .build/k57_base_x64.txt)。14 枚针 = 8 个借用来源
+    # (局部/形参/模块级/UDT 串字段/两种串数组元素[甲乙两条文本路]/返回槽) + 两枚"已经在问的站"
+    # (UDT Variant 成员、Variant 数组元素 = Fix 154/232, 本刀不动它们, 留着当同口径证人) +
+    # 三枚现造形状的证人(字面量/Left 的 mint/槽到槽) + 一枚 200 轮的二次 free  churn。
+    $b167Needles = @("B167-W1=hello|5", "B167-W2=sharedbuf|9", "B167-W3=modslot|7",
+        "B167-W4=udtfield|8", "B167-W5=arrelem|7", "B167-W6=byvalstr|8",
+        "B167-W7=churn200|8", "B167-X1=udtstr|6", "B167-X2=arrstr|6", "B167-X3=modarr|6",
+        "B167-X4=abc|3", "B167-X5=slotone|7", "B167-X6=fromfunc|8", "B167-X7=lit|3",
+        "B167-DONE")
+    Add-BasTest "test_bstr_borrow_slot" "$Tests\test_bstr_borrow_slot.bas" $b167Needles
+    Add-BasTest "test_bstr_borrow_slot_x86" "$Tests\test_bstr_borrow_slot.bas" $b167Needles -Arch "x86"
+    # 发码形状针: 借来的三条路(甲=内联 String 档, 乙=_Generic 的 wchar_t* 档)都归 VariantAssign;
+    # 现造的(LiteralExpr 那一腿)照旧裸 move。第五十七刀真正改的是**问不问**, 不是拷几次。
+    Test-EmitcShape "b167_bstr_borrow_shape" @("$Tests\test_bstr_borrow_slot.bas") @(
+        'vb6_VariantAssign(&sA, vb6_VariantString(s));',
+        'vb6_VariantAssign(&vb6_ret_LabelOf, vb6_VariantString(gModStr));',
+        'vb6_VariantAssign(&sA, vb6_VariantString(rec.Name));',
+        'vb6_VariantAssign(&sA, vb6_VariantFromValue(VB6_SA_AT(BSTR, strArr, 0)));',
+        'vb6_VariantAssign(&sA, vb6_VariantString(VB6_SA_AT(BSTR, gStrArr, 0)));',
+        'sA = vb6_VariantString(vb6_Left(s, 3));',
+        'sA = vb6_VariantString(vb6_BSTR_FromStr(L"lit"));'
+    )
+    # 反面证人: 现造的串不许被多拷一次(那正是 §B164 形① 的漏) —— 两枚 mint 一旦被拖进 Assign 就红。
+    Test-EmitcAbsent "b167_bstr_mint_not_recopied" @("$Tests\test_bstr_borrow_slot.bas") @(
+        'vb6_VariantAssign(&sA, vb6_VariantString(vb6_Left',
+        'vb6_VariantAssign(&sA, vb6_VariantString(vb6_BSTR_FromStr'
     )
     # 账 #305 §B149 + §B150 (第四十刀): 注册表家族的真往返 + 晚绑定槽的二维元素读写。
     # 读数来源 = .build/b1280_rs (新 exe, x64 与 x86 **逐行相同**, 故同针同过); 外部口径证人 =
@@ -6019,6 +6064,7 @@ if ($Category -in @("all", "compile")) {
     Test-VariantI8Coverage
     Test-VariantSlotStore
     Test-ParamArrayReclaim
+    Test-BstrBorrowSlot
     Test-EventHandlerNames
     Test-UcInstanceExit
     Test-StaticSentinelRegistration

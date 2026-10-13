@@ -2366,6 +2366,44 @@ void CCodeGen::emitParamArrayReclaim(const std::vector<std::unique_ptr<Parameter
     }
 }
 
+
+// 账 #305 §B167 (第五十七刀): 「这枚 C 表达式交出的是刚 mint 的串, 还是别人还活着的那只缓冲」。
+// 只看**顶层形状**: 内在函数(Left/CStr/…)、拼接(vb6_BSTR_Concat)、工程函数与 Property Get 的返回、
+// `Public Const X As String` 折出来的 `vb6_BSTR_FromStr(L"…")` 宏 —— 都是调用 = 现造, 槽可以接管;
+// `VB6_SA_AT(BSTR, …)` / `VB6_SA_ND_AT2(BSTR, …)` 是**元素存储**(宏的第一个实参就是元素 C 类型,
+// 与左值那一侧 Fix 177/rev11 同一条口径)、裸标识符与字段访问是**存储** —— 都是借来的。
+static bool b167TopIsCall(const std::string& s, size_t at) {
+    const size_t par = s.find('(', at);
+    if (par == std::string::npos) return false;
+    const size_t sel = s.find_first_of(".[", at);   // `r.Name` / `me->List(i)` 里的点/括号先出现就不是调用
+    return sel == std::string::npos || par < sel;
+}
+
+bool CCodeGen::exprBorrowsBstrStorage(Expr* rhs, const std::string& rawC) const {
+    if (!rhs) return false;
+    static const std::string kSaBstr167 = "VB6_SA_AT(BSTR,";
+    static const std::string kSaNdBstr167 = "VB6_SA_ND_AT2(BSTR,";
+    const size_t at167 = rawC.find_first_not_of(" \t\r\n&(");
+    if (at167 == std::string::npos) return false;
+    if (rawC.compare(at167, kSaBstr167.size(), kSaBstr167) == 0
+        || rawC.compare(at167, kSaNdBstr167.size(), kSaNdBstr167) == 0)
+        return true;                                  // 串数组元素: 宏自己带元素类型, 不必再问表
+    if (rhs->kind == ASTNodeKind::LiteralExpr) return false;
+    if (b167TopIsCall(rawC, at167)) return false;      // 现造的: 所有权随这一句交给槽
+    return inferExprType(*rhs) == Vb6Type::String;
+}
+
+bool CCodeGen::variantRhsOwnsValue(Expr* rhs, const std::string& rawC) const {
+    if (rhs && rhs->kind == ASTNodeKind::IdentifierExpr) {
+        // §B164 形④ (第五十五刀): 右值本身是一枚活着的槽。
+        if (knownVariantVars_.count(Symbol::toLower(
+                static_cast<const IdentifierExpr&>(*rhs).name)) > 0)
+            return false;
+    }
+    // §B167 形⑪ (本刀): 右值是一处借来的串存储。
+    return !exprBorrowsBstrStorage(rhs, rawC);
+}
+
 std::string CCodeGen::wrapVariantValue(ASTNode* valueNode, const std::string& cExpr) const {
     if (!valueNode) return "vb6_VariantEmpty()";
     
