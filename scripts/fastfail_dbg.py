@@ -104,6 +104,10 @@ def main():
         return 1
     h_proc = pi.hProcess
     img_base = [0]
+    # 账 #257 第二十二层: DebugBreakProcess 打断的是**所有**线程, 先到的往往是某个
+    # worker/ntdll 线程 (EBP=0、EIP 落在 64 位 ntdll), 采样就白抓了。要的是**主线程**:
+    # 记下 CREATE_PROCESS 给的 tid, 打断后把不属于主线程的那个断点续掉继续等。
+    main_tid = [pi.dwThreadId]
     log = open(r'D:\vb_yqt4qPac\ComCtlsDemo\c3out\fastfail_dbg.log', 'w')
 
     def out(s, echo=True):
@@ -143,7 +147,8 @@ def main():
 
         if evt == CREATE_PROCESS_DEBUG_EVENT:
             img_base[0] = struct.unpack_from('<Q', b, U + 24)[0]  # lpBaseOfImage
-            out('dbg: CREATE_PROCESS image_base=0x%08x' % img_base[0], echo=False)
+            main_tid[0] = tid  # CREATE_PROCESS 的 tid 就是主线程
+            out('dbg: CREATE_PROCESS image_base=0x%08x main_tid=%d' % (img_base[0], tid), echo=False)
         elif evt == EXCEPTION_DEBUG_EVENT:
             code = struct.unpack_from('<I', b, U)[0]
             flags = struct.unpack_from('<I', b, U + 4)[0]
@@ -156,6 +161,10 @@ def main():
                 # WOW64 initial breakpoint / int3: let it pass through.
                 k.ContinueDebugEvent(pid, tid, DBG_CONTINUE)
                 continue
+            # 采样断点落在这里。⚠ DebugBreakProcess **不是**给每个线程下 int3, 而是
+            # 注入一枚**远程线程**去跑 DbgBreakPoint —— 所以这枚 EXCEPTION 的 tid
+            # 永远是那枚注入线程, 它的 CONTEXT 没有用。要的是**主线程**的栈:
+            # 下面取 CONTEXT 时按 main_tid 取 (见 h_th 那一行), 这里不续掉它。
             if code not in CRASH_CODES and not (code == 0x80000003 and break_fired):
                 if counts[evt] <= 40:
                     out('dbg: EXC code=0x%08x addr=0x%x first=%d n=%d params=%s'
@@ -170,7 +179,9 @@ def main():
             captured = True
             lo = int(img_base[0]) if img_base[0] else 0
             hi = lo + 0x1000000
-            h_th = k.OpenThread(THREAD_GET_CONTEXT, False, tid)
+            # 崩溃时取当事线程; DebugBreakProcess 采样时取**主线程** (见上一条注释)。
+            h_th = k.OpenThread(THREAD_GET_CONTEXT, False,
+                                main_tid[0] if (code == 0x80000003 and break_fired) else tid)
             ctx = (ctypes.c_ubyte * 716)()
             struct.pack_into('<I', ctx, 0, CONTEXT_X86_FULL)
             got = False
