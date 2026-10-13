@@ -6,7 +6,7 @@
 //     driver_codegen_prelude.inc             —— 模块数与分析器数校验（原 95~99 行）
 //     driver_codegen_voidfield_scan.inc      —— Fix 023: className → void* 字段集预扫描（原 100~187 行）
 //     driver_codegen_typedfield_scan.inc     —— Fix 037b/086: typed 字段表 + 窗体模块名 + Public 常量表（原 188~271 行）
-//     driver_codegen_variantfield_scan.inc   —— 账 #305 §B168: className → vb6_VARIANT 字段集预扫描
+//     driver_codegen_fieldkind_scan.inc      —— 账 #305 §B168/§B169: className → (字段名 → 声明档) 预扫描
 //     driver_codegen_variant_funcs.inc       —— Fix 045: 返回 Variant 的项目函数集合（原 272~341 行）
 //     driver_codegen_dup_module_vars.inc     —— Fix 093b: 跨模块同名模块级变量（原 342~370 行）
 //     driver_codegen_module_loop.inc         —— 逐模块代码生成主循环（写 .h/.c，原 371~462 行）
@@ -114,7 +114,7 @@ bool Driver::runCodeGeneration(const CompileOptions& options, const std::string&
 #include "driver/detail/driver_codegen_prelude.inc"
 #include "driver/detail/driver_codegen_voidfield_scan.inc"
 #include "driver/detail/driver_codegen_typedfield_scan.inc"
-#include "driver/detail/driver_codegen_variantfield_scan.inc"
+#include "driver/detail/driver_codegen_fieldkind_scan.inc"
 #include "driver/detail/driver_codegen_variant_funcs.inc"
 #include "driver/detail/driver_codegen_dup_module_vars.inc"
 #include "driver/detail/driver_codegen_module_loop.inc"

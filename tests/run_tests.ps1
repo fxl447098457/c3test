@@ -2807,8 +2807,10 @@ if ($Category -in @("all", "run", "bas")) {
         # 现造的整数/字面量串 → 清 + 搬, 不多拷一次
         'h->PV  /* class var .PV field */ = vb6_VariantLong(7);',
         'h->PW  /* class var .PW field */ = vb6_VariantString(vb6_BSTR_FromStr(L"noclause"));',
-        # 负控: 同类的 String / Long 字段照旧裸存, 一张表只答 Variant 那一档
-        'h->PS  /* class var .PS field */ = vb6_BSTR_FromStr(L"plainstring");',
+        # §B169 (第六十刀) 之后这一档不再是负控: 同类的 String 字段现在也认得了,
+        # 交的是 BSTR 那一枚出口 (自有字面量 = 接管 + 旧值有人放); 剩下的负控只有 Long 字段
+        # 照旧裸存 —— 一张表答三档, 答宽了 (把 String/Long 也拖进装箱) 由下面那两条反针钉住
+        'vb6_BSTR_AssignMove(&h->PS  /* class var .PS field */, vb6_BSTR_FromStr(L"plainstring"));',
         'h->PL  /* class var .PL field */ = 42;'
     )
     Test-EmitcAbsent "b168_class_var_field_not_boxed" @(
@@ -2819,6 +2821,34 @@ if ($Category -in @("all", "run", "bas")) {
         # 非 Variant 字段被误登记的形状 (答宽了就是这两条)
         'h->PS  /* class var .PS field */ = vb6_Variant',
         'h->PL  /* class var .PL field */ = vb6_Variant'
+    )
+
+    # 发码形状针: 三档各一枚 + With 那一站各形一枚; 反针 = BASE 的病灶形状与那四个凭空的函数名。
+    # 读数来源 = .build/k60_pins.txt (NEW 两台 8 针全中、0 反中; BASE 两台 0 针、6 形病灶都在)。
+    Test-EmitcShape "b169_class_field_store_shape" @(
+        "$Tests\b169_cfw\B169Holder.cls", "$Tests\b169_cfw\B169Main.bas") @(
+        # 形② 直接路: 借来的串 → 深拷贝; 字面量 → 接管 (旧值有人放)
+        'vb6_BSTR_Assign(&h->PS  /* class var .PS field */, s);',
+        'vb6_BSTR_AssignMove(&h->PS  /* class var .PS field */, vb6_BSTR_FromStr(L"ccc"));',
+        'vb6_BSTR_Assign(&me->PS  /* class var .PS field */, (*v));',
+        # 形① With 那一站: 同一张表答完三档, 各交各的唯一出口
+        'vb6_BSTR_Assign(&_vb6_with_0->PS, w);',
+        'vb6_VariantClear(&_vb6_with_0->PV);',
+        '_vb6_with_0->PV = vb6_VariantLong(5);',
+        '_vb6_with_0->PL = 9;  /* With class field write */',
+        '_vb6_with_0->PK = 1;  /* With class field write */'
+    )
+    Test-EmitcAbsent "b169_class_field_store_lesion" @(
+        "$Tests\b169_cfw\B169Holder.cls", "$Tests\b169_cfw\B169Main.bas") @(
+        # BASE 的两条病灶形状本身 (裸存借来的指针)
+        'h->PS  /* class var .PS field */ = s;',
+        'me->PS  /* class var .PS field */ = (*v);',
+        # With 那一站不许发裸赋值 (标量档才走那条直发路), 更不许再凭空拼属性写函数名
+        '_vb6_with_0->PS = w;',
+        'vb6_B169Holder_prop_let_PS(',
+        'vb6_B169Holder_prop_let_PL(',
+        'vb6_B169Holder_prop_let_PV(',
+        'vb6_B169Holder_prop_let_PK('
     )
     # 账 #305 §B149 + §B150 (第四十刀): 注册表家族的真往返 + 晚绑定槽的二维元素读写。
     # 读数来源 = .build/b1280_rs (新 exe, x64 与 x86 **逐行相同**, 故同针同过); 外部口径证人 =
@@ -5475,6 +5505,31 @@ if ($Category -in @("all", "run", "vbp")) {
         "B168-W8=plainstring|11|42", "B168-W9=256|256", "B168-DONE")
     Test-Vbp "b168_class_var_field" "$Tests\b168_cvf\B168.vbp" $b168Expected
     Test-Vbp "b168_class_var_field_x86" "$Tests\b168_cvf\B168.vbp" $b168Expected -Arch "x86"
+
+    # <vbeclipse> 回归夹子 (b169_cfw, 账 #305 §B169 第六十刀): 一枚类自己的公共字段被写, 三站同问一张表。
+    # 修前两形各错各的 (BASE 两台实测读数都在案):
+    #   形① With 块里 `.PS/.PL/.PV/.PK = ...` 发的是一句**凭空拼出来的**属性写调用
+    #        vb6_B169Holder_prop_let_PS(...) —— 那函数任何地方都不存在 ⇒ 4 枚 LNK2019 + LNK1120,
+    #        COMPILE-RC=1, **两台都没有 exe** (语料里同一形实测 DllPrint.vbp 发 281 句);
+    #   形② 直接路 `h.PS = s` / 类内 `Me.PS = v` 发的是裸指针赋值 ⇒ 与源头共用一只 BSTR,
+    #        旧值不回收, 而类析构 vb6_BSTR_Free(那枚字段) 会把借来的那只块 free 第二遍。
+    # 每一行钉的一半:
+    #   B169-1        跨对象写 String 字段 = 借来的源 → 必须自己那份 (改源头不许改字段)
+    #   B169-2        连着写两次: 新值赢 + 旧值有人回收
+    #   B169-3        类内 Me.<字段> = String 形参 (BASE 编得过的浅存别名那一形, 见 .build/k59_wit1.txt 同族)
+    #   B169-4/5      With 块四档各一枚: String / Long / Variant(VarType=3) / 枚举(按 Long 入表)
+    # 夹子里刻意**没有**类内 `With Me` 写字段那形 —— 那一站现在解析成 COMObject, 发的是
+    # vb6_ComSetProp(me, L"PS", ...) 而字段没有 dispid ⇒ 运行期一声 property not found 就丢了,
+    # 那是另一格 (台账 §B169 形③), 不许把它的答案写进本夹子的期望里。
+    $b169Expected = @(
+        "B169-1=aaa|3",
+        "B169-2=ddd|3",
+        "B169-3=eee|0|0|0|fff",
+        "B169-4=ggg|9|3|1",
+        "B169-5=ggg|9|1",
+        "B169-DONE")
+    Test-Vbp "b169_class_field_store" "$Tests\b169_cfw\B169.vbp" $b169Expected
+    Test-Vbp "b169_class_field_store_x86" "$Tests\b169_cfw\B169.vbp" $b169Expected -Arch "x86"
 
     # <vbeclipse> 回归夹子 (iface_wrap): 接口宿主**类型映射**的最小夹子, GA run 36732948503
     # (BalloonTooltips 红) 的直接切片。IFoo 显式 `Attribute VB_Creatable = True` ⇒ 进不了

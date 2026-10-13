@@ -104,7 +104,7 @@
         cgen.setInterfaceIidMap(&ifaceIds_);  // tB 接口 IID 唯一出口 (B13c): 同一个 Pass E 建的表
         cgen.setViaRegistry(&vias_);          // tB 委托式实现 (B10): stage 2.7 Pass D 裁决表
         cgen.setDefaultInstanceClasses(&defaultInstanceClasses);  // P6.4+: 类模块默认实例
-        cgen.setClassVariantFieldMap(&classVariantFieldMap);  // 账 #305 §B168: 工程级「类 → vb6_VARIANT 字段」表
+        cgen.setClassFieldKindMap(&classFieldKindMap);  // 账 #305 §B168/§B169: 工程级「类 → 标量字段 → 声明档」表
         cgen.setTrimIncludes(options.trimIncludes);  // opt4: 裁剪未实际引用的跨模块include
         cgen.setTargetArch(options.arch);            // ai/vb-asm-extension-spec: Asm 块仅 x64
         if (options.trimIncludes) {

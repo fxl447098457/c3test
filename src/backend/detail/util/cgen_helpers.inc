@@ -73,6 +73,15 @@
     void emitVariantSlotStore(const std::string& target, const std::string& expr,
                               bool rhsOwnsValue, bool viaTemp = false);
 
+    // 账 #305 §B169 (第六十刀): 收进 **BSTR 槽** 与收进 **Variant 槽** 这两问各收成一枚出口,
+    // 直接赋值那一站与 With 块那一站 (cgen_assign_prop_write.inc) 都问它们 —— 右值折算/所有权/
+    // 发码形状不许有第二份。fixedLen 非空 = 定长串目标 (账 #118 那一档收口);
+    // udtFieldSlot = 目标是 UDT 的 Variant 字段 (与数组元素同属长期槽, 走接管语义)。
+    void emitBstrSlotStore(const std::string& target, Expr* rhs, std::string value,
+                           const std::string& fixedLen);
+    void emitVariantSlotAssign(const std::string& target, Expr* rhs,
+                               const std::string& value, bool udtFieldSlot);
+
     // 账 #305 §B166 (第五十六刀): 「这一次调用现造的 ParamArray 数组, 出口该销毁」收成这一枚 ——
     // Sub/Function/Property 三个过程出口各调一次, 站点不许再各自抄那三行。
     void emitParamArrayReclaim(const std::vector<std::unique_ptr<ParameterDecl>>& params);

@@ -251,21 +251,40 @@
         auto it = projClassNames_->find(Symbol::toLower(name));
         return it == projClassNames_->end() ? std::string() : it->second;
     }
-    // 账 #305 §B168 (第五十九刀): 工程级「类 → vb6_VARIANT 标量字段」表 (driver 预扫描).
-    void setClassVariantFieldMap(const std::unordered_map<std::string, std::set<std::string>>* m) {
-        classVariantFieldMap_ = m;
+    // 账 #305 §B168/§B169: 工程级「类 → (标量数据字段 → 声明档)」表 (driver 预扫描).
+    void setClassFieldKindMap(const std::unordered_map<std::string, std::unordered_map<std::string, Vb6Type>>* m) {
+        classFieldKindMap_ = m;
     }
-    // 「类 <className> 的字段 <memberName> 发出来是不是 vb6_VARIANT 槽」—— 这一问的**唯一**出口.
+    // 「类 <className> 的字段 <memberName> 是哪一档」—— 这一问的**唯一**出口。
+    // 交回 Vb6Type::Unknown = 表里没有这个名字 (不是标量数据字段, 或整个类不认识),
+    // 调用点因此**不许**把它当成"那就是字段" —— 数组/定长串/对象字段/UDT 都走这里交回 Unknown。
     // 字段名两种拼法 (原名 / m_ 前缀) 都在表里, 与 classVoidFieldMap_ 的查法一致.
+    Vb6Type classFieldKind(const std::string& className,
+                           const std::string& memberName) const {
+        if (!classFieldKindMap_ || className.empty() || memberName.empty()) {
+            return Vb6Type::Unknown;
+        }
+        auto it = classFieldKindMap_->find(Symbol::toLower(className));
+        if (it == classFieldKindMap_->end()) return Vb6Type::Unknown;
+        const std::string mem = Symbol::toLower(memberName);
+        auto f = it->second.find(mem);
+        if (f == it->second.end()) f = it->second.find("m_" + mem);
+        return f == it->second.end() ? Vb6Type::Unknown : f->second;
+    }
+    // 三个投影都问上面那一处, 站点不许各自抄 find (§B168 装箱那一档 / §B169 深拷贝那一档 /
+    // §B169 With 站那一站的"是数据字段"那一问)。
     bool classFieldIsVariantSlot(const std::string& className,
                                  const std::string& memberName) const {
-        if (!classVariantFieldMap_ || className.empty() || memberName.empty()) {
-            return false;
-        }
-        auto it = classVariantFieldMap_->find(Symbol::toLower(className));
-        if (it == classVariantFieldMap_->end()) return false;
-        const std::string mem = Symbol::toLower(memberName);
-        return it->second.count(mem) > 0 || it->second.count("m_" + mem) > 0;
+        return classFieldKind(className, memberName) == Vb6Type::Variant;
+    }
+    bool classFieldIsBstrSlot(const std::string& className,
+                              const std::string& memberName) const {
+        return classFieldKind(className, memberName) == Vb6Type::String;
+    }
+    bool classFieldIsScalarData(const std::string& className,
+                                const std::string& memberName) const {
+        const Vb6Type t = classFieldKind(className, memberName);
+        return t != Vb6Type::Unknown && t != Vb6Type::Variant && t != Vb6Type::String;
     }
     // CoClass 身份出口 (tB, ai/022 B13b): 只喂 generateDllEntry。EXE 的 com_entry.c 本批
     // **不接线** —— 它今天整个跑在 legacy mint 上，接上就是把改码前编得过的存量工程换掉。

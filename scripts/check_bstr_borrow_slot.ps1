@@ -62,11 +62,13 @@ foreach ($f in $files) {
             $bodyQ4 = $t.Substring($i, [Math]::Max(0, $j - $i))
         }
     }
-    if ($f.Name -eq 'cgen_assign_value_sem.inc') {
-        # 站④ 那一调用跨两行, 先把空白压平再认 (与 §B166 的 P4 同一读法)
+    if ($f.Name -eq 'cgen_util_ctrl.cpp') {
+        # 站④ 那一问必须问这一枚权威 —— 第六十刀 (§B169) 把这一支整体搬进
+        # CCodeGen::emitVariantSlotAssign (直接赋值那一站与 With 块那一站共用同一枚),
+        # 所以这一针现在住在出口本体的文件里, 右值形参叫 rhs 而不是 node.value.get()。
         $flat = [regex]::Replace($t, '\s+', ' ')
         $asked += ([regex]::Matches($flat,
-            'emitVariantSlotStore\(\s*target\s*,\s*wrappedValue\s*,\s*variantRhsOwnsValue\s*\(\s*node\.value\.get\(\)\s*,\s*value\s*\)\s*\)')).Count
+            'emitVariantSlotStore\(\s*target\s*,\s*wrappedValue\s*,\s*variantRhsOwnsValue\s*\(\s*rhs\s*,\s*value\s*\)\s*\)')).Count
     }
 }
 
