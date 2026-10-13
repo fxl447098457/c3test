@@ -382,7 +382,20 @@ int32_t vb6_IsNumeric(vb6_VARIANT v) {
 
 int32_t vb6_IsNull(vb6_VARIANT v) { return v.vt == vb6_vtNull ? -1 : 0; }
 int32_t vb6_IsEmpty(vb6_VARIANT v) { return v.vt == vb6_vtEmpty ? -1 : 0; }
-int32_t vb6_IsObject(vb6_VARIANT v) { return (v.vt == vb6_vtDispatch && v.pdispVal != NULL) ? -1 : 0; }
+int32_t vb6_IsObject(vb6_VARIANT v) {
+    /* VB6 语义: 问的是"这枚 Variant 的 VarType 是不是 vbObject(9)"
+       —— **与指针是否为空无关**: `Set v = Nothing` 之后 VarType(v) 仍是 9,
+       IsObject(v) 是 **True** (MSDN: "IsObject returns True if the variant
+       contains an object reference", Nothing 也是对象引用)。
+       实证: ComCtlsDemo/Builds/CoolBar/CbrBands.cls 的 `Add`:
+         If IsMissing(Child) Or PropUserMode = False Then ... ElseIf IsObject(Child) Then
+             ... Else Err.Raise 380
+       而它自己的 UserControl_ReadProperties 恰恰传 **Nothing** 给 Child
+       (`Me.Bands.Add(i, .., NewRow, Nothing, Visible)`) ⇒ 若 Nothing 答 False
+       就自己 Err.Raise 380 ("Invalid property value") 把整只进程带走。
+       以前这里多写了 `&& v.pdispVal != NULL` ⇒ 设计期 band 重放必炸。 */
+    return (v.vt == vb6_vtDispatch) ? -1 : 0;
+}
 int32_t vb6_IsArray(vb6_VARIANT v) { return (v.vt & 0x2000) ? -1 : 0; }  // VT_ARRAY=0x2000
 int32_t vb6_IsDate(vb6_VARIANT v) { return v.vt == vb6_vtDate ? -1 : 0; }
 int32_t vb6_IsError(vb6_VARIANT v) { return v.vt == vb6_vtError ? -1 : 0; }

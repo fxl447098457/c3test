@@ -324,6 +324,34 @@ FrxTextData FrxReader::readDocString(size_t offset) {
 }
 
 // ============================================================
+// Fix: 属性包块 (UserControl 持久化 PropertyBag) 识别 + 取原始字节
+//   块 = [DWORD cbSize][cbSize 字节负载]
+//   负载 = [28B 前缀: 00 | GUID(16) | 00010000 | 00000006 | 000000 ]
+//          [VB6 PropertyBag 序列化数据: WORD 0xB293 ; WORD catOff ; DWORD cbContent ; items...]
+//   判据: 前 64B 内存在 0xB293 且 该处偏移 + cbContent == cbSize (实测恒 28 + cbContent)。
+//   这样既命中所有 Init* 属性包, 又不会误判 DocString / 图片块。
+// ============================================================
+FrxPropBagBlob FrxReader::readPropBagBlob(size_t offset) {
+    FrxPropBagBlob out;
+    if (offset + 4 > fileData_.size()) return out;
+    uint32_t cbSize = readLE32(fileData_.data() + offset);
+    if (cbSize < 8 + 12 || offset + 4 + cbSize > fileData_.size()) return out;
+    const uint8_t* blob = fileData_.data() + offset + 4;
+
+    size_t scanMax = (cbSize < 64) ? cbSize : 64;
+    for (size_t h = 0; h + 8 <= cbSize && h <= scanMax; ++h) {
+        if (readLE16(blob + h) != 0xB293) continue;
+        uint32_t cbContent = readLE32(blob + h + 4);
+        if (cbContent < 8 || cbContent > cbSize) continue;
+        if (h + cbContent != cbSize) continue;          // 必须正好补满块
+        out.found = true;
+        out.bytes.assign(blob, blob + cbSize);
+        return out;
+    }
+    return out;
+}
+
+// ============================================================
 // GBK -> UTF-8 转换
 // ============================================================
 std::string FrxReader::gbkToUtf8(const std::string& gbk) {
