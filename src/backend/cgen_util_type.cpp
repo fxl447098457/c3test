@@ -479,6 +479,23 @@ Vb6Type CCodeGen::inferExprType(Expr& expr) const {
                     }
                 }
             }
+            // 账 #305 §B170 (第六十一刀): 「这枚成员读是哪一档」先问**宿主类**那张字段表
+            // (classFieldKind = §B168 那趟预扫描建的表, §B169 收成一处的那一问), 再落到底下
+            // 那条按**裸成员名**查模块级符号的兜底。兜底那一问不认识宿主: 字段名撞上内置函数名
+            // 时它交回的是内置函数的返回档 —— 实测 `Public PV As Variant` 撞上 PV() (金融函数,
+            // builtin_funcs.inc:317 答 Double) ⇒ `CStr(h.PV)` 发 vb6_CStrDbl(那枚槽), RTL 的
+            // _Generic 按数值解它 (VarR8) ⇒ 串值读回 0|1 (探针 K61-2, 两架构同形); 同一形里
+            // `Public PV As String` 也答 Double (K61-4) —— 声明档整个被吞掉。350 行控件那一档
+            // 早就按宿主问表 (账 #229/#231: SSTab1.Tab 撞内置 Tab), 本刀把同一条口径补到类字段。
+            // 只在表答得出 (非 Unknown) 时接管: 数组/定长串/对象字段不入表 (§B168 那条刻意口径),
+            // 同名方法/属性也不许被字段答案抢走 ⇒ 与 §B169 同一枚 resolveClassMemberCall 否决。
+            if (ma.object) {
+                const std::string cls61 = inferClassTypeOfExpr(*ma.object);
+                if (!cls61.empty() && resolveClassMemberCall(cls61, ma.memberName).empty()) {
+                    const Vb6Type fld61 = classFieldKind(cls61, ma.memberName);
+                    if (fld61 != Vb6Type::Unknown) return fld61;
+                }
+            }
             // Fix 220: 对象是 **Variant 载体** (集合 .Item(i) 返回 Variant / Variant 局部变量
             // 持有对象 / ComCall 结果 …) 时, 成员访问是后期绑定属性读, 结果**本身也是
             // Variant** —— 必须与 codegen 侧 Fix 219 (cgen_expr_member_class_fallback.inc /
@@ -545,6 +562,15 @@ Vb6Type CCodeGen::inferExprType(Expr& expr) const {
             const auto& winfo = withObjectInfoStack_.back();
             if (winfo.kind != WithObjKind::Unknown) {
                 // 非 UDT With (类实例/COM 对象): memberName 是属性/方法 → 查成员符号
+                // 账 #305 §B170 (第六十一刀): With 体内那一读与点号那一路同一个病、同一个问 ——
+                // 下面按裸成员名查, 于是 `With h` 里的 `CStr(.PV)` 也发成数值档 (探针 K61-6)。
+                // 宿主类名在 With 元信息栈里就有 (winfo.className, Fix 011r-1; 只有类实例那一档
+                // 非空, 控件/COM/内置那一档交空 ⇒ 既有答案一字不动)。
+                if (!winfo.className.empty()
+                    && resolveClassMemberCall(winfo.className, wm.memberName).empty()) {
+                    const Vb6Type fld61w = classFieldKind(winfo.className, wm.memberName);
+                    if (fld61w != Vb6Type::Unknown) return fld61w;
+                }
                 auto* memSym2 = symTab_.lookupModule(wm.memberName);
                 if (memSym2) return memSym2->type;
                 return Vb6Type::Variant;
