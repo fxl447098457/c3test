@@ -2643,6 +2643,16 @@ marker、重编，之后 `check_rtl_embedded` 报 **125/125 逐字节相同**。
   ② **定长串**字段（`As String * N`）刻意不入那张表（收口宽度 = 账 #118 那一格）：语料里跨对象/类内写定长串字段 **0 处**（带接收者纪律实测），且 #118 的补空格/截断本来就欠着 ⇒ 同一格里一起量。
   ③ §B168 在册的两条未动：Variant **数组字段**的元素写（`h.PA(1) = 9` ⇒ cl C2064，语料 0 处）与跨对象**读**回来走 `vb6_CStrDbl` 数值档（同一枚表能答，但那是**表达式类型 oracle**，动它会扫到全语料的选档 ⇒ 另立一格）。
 
+### B170 「这枚成员读是哪一档」按**裸成员名**查全局，字段名撞上内置函数名就读成内置的返回档（2026-10-13 第六十一刀 **已出** = 实现 `790ececb` → 门 **#597**（run 38417888070、attempt 1、12 job 里 6 绿 + 6 红：`Tests (compile)` 那道 `[STATIC] manifest_coverage` 是本刀新夹具未登记（流程性），另外 5 道（4 个 vbp 分片 + 形状门）是 `656b2086` 那一笔带进来的**继承红**，见本节末尾）→ 登记 `43fe7761`（吃 CI 那台 head=790ececb 自己交的 412 行清单：本刀只动 **4 行** = 移动 2 行 b168/b169 + 新增 2 行 b170；**刻意不登记**别人那 7 行，理由在末尾那段）→ 验证轮 **#598**（head `43fe7761`：本刀自己那道红应清，那 5 道继承红不归本刀））
+
+- **归因订正（这条最重要）**：§B168 在册 ③ 写的是「别类的 Variant 字段读一律答 Double」—— 错。对照组 `Public PZ As Variant`（名字不撞内置表）两台都读对 `withform|8`。真机制 = `inferExprType` 的 MemberAccess 兜底 `symTab_.lookupModule(成员名)` **按裸名查全局**，`PV` 命中 `builtin_funcs.inc:317 addBuiltinFunc("PV", Double)`（VB6 金融函数）⇙ `CStr(h.PV)` 发 `vb6_CStrDbl(那枚槽)`（RTL `_Generic` 有 `vb6_VARIANT:` 臂，按 VarR8 解）⇙ 串值折成 `0|1`；同名的 `Public PV As String` 也答 Double（声明档整个被吞）。
+- **最响的一形是崩，不是打印差异**：`Public Command As Long` 撞内置 `Command()`（答 String）⇙ 发**裸 BSTR 读**，把 7 当指针解 ⇒ BASE 两台 `RUN-RC=0xC0000005`（与账 #229/#231 那枚 `SSTab1.Tab` 撞内置 `Tab` 同一条病：那一次修的是控件档，这一次补的是类字段档）。
+- **类内两条腿本来就对**：`Me.PV` 与裸名 `PV` 在类自己的过程里读回 `withform`（探针 K61-8/9）⇒ 只欠点号那一路 + With 体内那一路两站。
+- **落地**：两站各补一问 `classFieldKind`（§B168/§B169 那张工程级表），带 §B169 同一枚 `resolveClassMemberCall` 否决；表答不出（数组/定长串/对象字段不入表）维持既有答案 ⇒ **不是**旧账担心的那一动（改表达式类型 oracle 扫全语料选档）。A/B = 410 输入 × 两架构 = 820 捕获，**same=816 / changed=4 / 未归因=0 / 跑挂=0**，移动的 6 行全是字段读换档（b168 的 W1/W9 两台 + b169 的 ReadBack 两台），且 b168/b169 夹具期望读数一字未动。
+- **判据**：新夹具 `tests/b170_mrt`（三形撞名 + 不撞名对照 + With + 类内两腿 + VarType/TypeName + 槽里换数字）两台真跑 9 行；发码针 5 + 反针 5（BASE 上五枚反针全在场、NEW 上 0 在场）；哨兵 `check_variant_slot_store.ps1` 长出 **R8**（读侧问点数恰好 2 + 名单外新问点即红），两条负控各红自己那条。⚠ 负控第一版把那一问**注释掉**没红 —— 哨兵数的是文本出现次数，注释也算 ⇒ **负控必须删文本**。
+- **语料暴露面（粗算，别当结论用）**：内置名池 172 枚（`addBuiltinFunc` 66 + 发码 ident 表 165，去重 172）；真语料 `D:\vb_yqt4qPac` 33 份工程 / 9389 份源文件里 **24 份**声明过与池子同名的类成员，点号读 18230 处 —— 但 `.Left` 那 10689 处多数是控件属性（已被 case 头部 `controlPropType` 接管），按宿主归因还没做。
+- **继承红（不是本刀的，但挡本刀的收线）**：`656b2086`（别人那笔 `e84a9515` = ComCtlsDemo 点 Command2 退出）合进 dev 之后 CI run 38404170829 已红 4 个 vbp 分片 + 形状门（ve_units / arr_cls_elem / cls_inh / cc_demo_exe / cc_demo_dll_external / ctrlslider / FlexGridX86，另 `sl_emitc_native` 缺针）。本机用**不含本刀**的 HEAD 源码编出的编译器复现同一红 = `frmUnits.c(288) error C2064`，而 A/B 证明 ve_units 产物带不带本刀逐字节相同 ⇒ 机制在他改的 `cgen_expr_call_com_bind.inc` / `cgen_setlet_set_prop.inc` 那一族；#594（含六十刀、不含他那笔）12/12 绿。⇒ 那 7 行形状**故意不登记**（夹具现在它根编不过，形状不是结论），等那一格修完由它自己登记；本刀的「验证轮全绿」在那之前拿不到。
+
 ### B151 把真二维数组赋给 Variant 槽，槽读回来是 VarType=9 / "Object" 而不是 8204 —— 自家多维描述符被折成一维（2026-10-12 第四十刀量到；**未开工**）
 
 - **读数**（探针 `.build/b1268_ndread/{tnd,tag}.bas`，`.build/b1268_ndread/rt.txt`）：`Dim a(1 To 2, 1 To 3) As Variant: v = a` 之后 `VarType(v)` 交 **9**、`TypeName(v)` 交 **"Object"**；VB6 交 8204 / "Variant()"。而同一枚 `v` 的 `UBound(v, 2)` 那一路是按 ND 问的 ⇒ 装箱那一档少认多维。
