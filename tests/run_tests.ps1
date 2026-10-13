@@ -2539,6 +2539,14 @@ if ($Category -in @("all", "run", "bas")) {
         "VE-promote-lp-dbl=4.5", "VE-promote-lp-mul=7.5", "VE-promote-ll-dbl=5.5",
         "VE-promote-ll-cur=5.5", "VE-promote-u3-dbl=5.5", "VE-promote-u3-cur=5.5",
         "VE-promote-dbl-ll=5.5", "VE-promote-ll-wide=4294967300",
+        # ai/032 §6.6/§6.7 收口: 无符号两档 Variant 装箱的真值 (VT_UI4/VT_UI8) 与
+        # Eqv/Imp 的 64 位路径。装箱改档前的答案是 -1 / 空串那一家, 读取侧全表同刀补齐。
+        # 本注释里不要出现双引号。
+        "VE-ubox-u=4294967295", "VE-ubox-u-tn=ULong", "VE-ubox-u-vt=19",
+        "VE-ubox-u-cmp=True", "VE-ubox-u-fmt=4294967295",
+        "VE-ubox-u3=78187493530", "VE-ubox-u3-vt=21",
+        "VE-ei-u3-eqvsame=18446744073709551615", "VE-ei-u3-eqv0=18446743995522058085",
+        "VE-ei-u3-imp0=18446743995522058085", "VE-ei-u-imp0=0",
         "VE-DONE")
     Add-BasTest "test_vbnet_ext" "$Tests\test_vbnet_ext.bas" $vbnetExtNeedles
     Add-BasTest "test_vbnet_ext_x86" "$Tests\test_vbnet_ext.bas" $vbnetExtNeedles -Arch "x86"
@@ -3433,6 +3441,13 @@ if ($Category -in @("all", "run", "vbp")) {
     $vbpSw = [Diagnostics.Stopwatch]::StartNew()
 
     Test-Vbp "test_class" "$Tests\test_class.vbp" @("3", "0")
+
+    # ai/032 §6.9 收口: 四档类型 (ULong/UInteger/ULongLong/SByte) 的**类模块字段**位 ——
+    # 字段不在 knownNarrowIntVars_, CStr/装箱/混算/整除四条路靠"权威装箱 + 读取侧全表"。
+    Test-Vbp "test_uintfields" "$Tests\test_uintfields.vbp" @("UF-u=4294967295", "UF-ui=65535",
+        "UF-u3=78187493530", "UF-sb=-128", "UF-u-add=4294967296", "UF-u-idiv=2147483647",
+        "UF-u3-idiv=39093746765", "UF-u-box=4294967295", "UF-u-box-tn=ULong",
+        "UF-u3-box=78187493530", "UF-ui-box=65535", "UF-DONE")
 
     # Cross-module overload resolution (O3): modA exports Sub/Function overload
     # groups; modB Main calls them. Deferred re-resolution must pick variants.

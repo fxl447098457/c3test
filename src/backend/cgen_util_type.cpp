@@ -1051,6 +1051,9 @@ std::string CCodeGen::getRuntimeParamCType(const std::string& funcName, size_t p
         {"vb6_CUInt",           {"double"}},
         {"vb6_CULng",           {"double"}},
         {"vb6_CULngLng",        {"double"}},
+        // twinBASIC 形 CLngPtr: 转 LongPtr, 同族 double 入口 (Variant 实参由
+        // cgen_expr_call_conv_numeric.inc 改写为 *V 版本)。
+        {"vb6_CLngPtr",         {"double"}},
         // 数组操作
         {"vb6_UBound",          {"vb6_SafeArray1D*", "int32_t"}},
         {"vb6_LBound",          {"vb6_SafeArray1D*", "int32_t"}},

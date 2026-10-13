@@ -290,6 +290,22 @@ vb6_VARIANT vb6_CDec(vb6_VARIANT v) {
             vb6_VARIANT_DECVAL(result).sign = (ival < 0) ? 0x80 : 0;
             break;
         }
+        /* ai/032 §6.6: 64 位整数与无符号两档按整数进 DECIMAL (以前整段落 default → 0)。
+         * 负数取绝对值用补码技巧 (INT64_MIN 的 -i64 是 UB)。 */
+        case (vb6_vartype)VT_I8:
+        case (vb6_vartype)VT_UI4:
+        case (vb6_vartype)VT_UI8: {
+            uint64_t mag; int neg = 0;
+            if (v.vt == (vb6_vartype)VT_UI4)      { mag = (uint64_t)v.ulVal; }
+            else if (v.vt == (vb6_vartype)VT_UI8) { mag = v.ullVal; }
+            else { int64_t i64 = v.llVal; neg = (i64 < 0); mag = neg ? ~(uint64_t)i64 + 1u : (uint64_t)i64; }
+            vb6_VARIANT_DECVAL(result).Lo32  = (uint32_t)(mag & 0xFFFFFFFF);
+            vb6_VARIANT_DECVAL(result).Mid32 = (uint32_t)((mag >> 32) & 0xFFFFFFFF);
+            vb6_VARIANT_DECVAL(result).Hi32  = 0;
+            vb6_VARIANT_DECVAL(result).scale = 0;
+            vb6_VARIANT_DECVAL(result).sign  = neg ? 0x80 : 0;
+            break;
+        }
         case vb6_vtSingle: case vb6_vtDouble: case vb6_vtCurrency: {
             double dval = (v.vt == vb6_vtSingle) ? (double)v.fltVal :
                           (v.vt == vb6_vtCurrency) ? (double)v.cyVal / 10000.0 : v.dblVal;

@@ -48,6 +48,8 @@ typedef struct vb6_VARIANT {
         uint8_t bVal;
         int64_t cyVal;
         int64_t llVal;  /* Fix 133x: VT_I8 (LongPtr 64位指针/句柄) 存回用 */
+        uint32_t ulVal;  /* ai/032 §6.6: VT_UI4 (ULong 装箱载体, 与 lVal 同槽) */
+        uint64_t ullVal; /* ai/032 §6.6: VT_UI8 (ULongLong 装箱载体, 与 llVal 同槽) */
         struct vb6_SafeArray1D* parray;  /* P20-37: array pointer for GetAllSettings etc */
         /* Fix <vbeclipse> rev11: **与 Windows VARIANT 完全同布局**。
          * VB6/OLE 的 VARIANT 在 x86 = 16 字节 (2B vt + 6B 保留 + 8B union),
@@ -134,6 +136,24 @@ static inline vb6_VARIANT vb6_VariantLong(int32_t val) {
 static inline vb6_VARIANT vb6_VariantLongLong(int64_t val) {
     vb6_VARIANT v; memset(&v, 0, sizeof(v));
     v.vt = (vb6_vartype)VT_I8; v.llVal = val; return v;
+}
+
+// ai/032 §6.6 收口: 无符号两档的 Variant 装箱 (VT_UI4 / VT_UI8)。
+// 以前 _Generic 把 unsigned int/long/long long 全落 vb6_VariantLong(int32) ——
+// `v = u` (ULong=4294967295) 读回 -1。档位对齐 C 侧实宽: 32 位无符号 → VT_UI4,
+// 64 位无符号 → VT_UI8 (与 VT_I8 同槽位 ullVal/llVal, 位模式不截断)。
+// (UInteger=uint16_t 走既有 `wchar_t:` 档 —— MSVC C 里 wchar_t 就是 unsigned short,
+//  原表那一档本来就是它在接; 别再加 `unsigned short:` 分支, 是同一类型, C7700。)
+// 全部读取侧本刀连同补齐 (ToLong/LongPtr/Bool/Double/比较/Format/TypeName/IsNumeric
+// /com 包与拆/host 读表/属性包)。
+static inline vb6_VARIANT vb6_VariantULong(uint32_t val) {
+    vb6_VARIANT v; memset(&v, 0, sizeof(v));
+    v.vt = (vb6_vartype)VT_UI4; v.ulVal = val; return v;
+}
+
+static inline vb6_VARIANT vb6_VariantULongLong(uint64_t val) {
+    vb6_VARIANT v; memset(&v, 0, sizeof(v));
+    v.vt = (vb6_vartype)VT_UI8; v.ullVal = val; return v;
 }
 
 static inline vb6_VARIANT vb6_VariantDouble(double val) {
@@ -230,11 +250,11 @@ static inline vb6_VARIANT vb6_VariantIdentity(vb6_VARIANT v) { return v; }
     unsigned char:        vb6_VariantByte, \
     short:                vb6_VariantInt, \
     int:                  vb6_VariantLong, \
-    unsigned int:         vb6_VariantLong, \
+    unsigned int:         vb6_VariantULong, \
     long:                 vb6_VariantLong, \
-    unsigned long:        vb6_VariantLong, \
+    unsigned long:        vb6_VariantULong, \
     long long:            vb6_VariantLongLong, \
-    unsigned long long:   vb6_VariantLong, \
+    unsigned long long:   vb6_VariantULongLong, \
     wchar_t:              vb6_VariantLong, \
     float:                vb6_VariantSingle, \
     double:               vb6_VariantDouble, \
@@ -251,11 +271,11 @@ static inline vb6_VARIANT vb6_VariantIdentity(vb6_VARIANT v) { return v; }
     unsigned char:        vb6_VariantByte, \
     short:                vb6_VariantInt, \
     int:                  vb6_VariantLong, \
-    unsigned int:         vb6_VariantLong, \
+    unsigned int:         vb6_VariantULong, \
     long:                 vb6_VariantLong, \
-    unsigned long:        vb6_VariantLong, \
+    unsigned long:        vb6_VariantULong, \
     long long:            vb6_VariantLongLong, \
-    unsigned long long:   vb6_VariantLong, \
+    unsigned long long:   vb6_VariantULongLong, \
     wchar_t:              vb6_VariantLong, \
     float:                vb6_VariantSingle, \
     double:               vb6_VariantDouble, \

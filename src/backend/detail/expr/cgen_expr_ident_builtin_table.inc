@@ -97,6 +97,7 @@ static const std::unordered_map<std::string, std::string> builtinFuncs = {
     {"cuint",    "vb6_CUInt"},
     {"culng",    "vb6_CULng"},
     {"culnglng", "vb6_CULngLng"},
+    {"clngptr",  "vb6_CLngPtr"},
     {"cvar",     "vb6_CVar"},
     {"hex",      "vb6_Hex"},
     {"oct",      "vb6_Oct"},
