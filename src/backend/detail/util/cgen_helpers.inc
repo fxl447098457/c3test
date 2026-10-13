@@ -571,6 +571,12 @@
     // 仅检查顶层表达式 (去除前导括号后), 避免对子表达式误判.
     bool cExprIsVariant(const std::string& cExpr) const;
 
+    // 账 #305 §B171 (第六十二刀): 「这一枚 C 文本是不是**类字段里那枚 Variant 槽的读**」——
+    // cExprIsVariant 的一条来源, 单独成一枚是因为它是**唯一可寻址**的那一档: 装箱站对
+    // 「槽的函数结果」只能复制, 对「槽字段本身」可以直传 &(...)。判据 = 尾注里那个
+    // ` variant` 词, 由两条成员读的发码路按 classFieldKind (§B169 的唯一出口) 盖上。
+    bool cExprIsVariantSlotFieldRead(const std::string& cExpr) const;
+
     // 账 #305 §B147: 「这枚 C 表达式是不是整只 vb6_VARIANT 槽」的 **AST 那一半** ——
     // 与上面 cExprIsVariant (文本前缀表) 合起来回答同一个问句。为什么必须分两头供出：
     // 类型 oracle 手上只有 AST (它先于发码), 而发码改道能吃两半。于是规矩是

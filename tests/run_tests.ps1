@@ -2799,14 +2799,14 @@ if ($Category -in @("all", "run", "bas")) {
     Test-EmitcShape "b168_class_var_field_shape" @(
         "$Tests\b168_cvf\B168Holder.cls", "$Tests\b168_cvf\B168Main.bas") @(
         # 借来的串存储 → 深拷贝 (§B167 那一枚 oracle 在本形上生效)
-        'vb6_VariantAssign(&h->PV  /* class var .PV field */, vb6_VariantString(s));',
+        'vb6_VariantAssign(&h->PV  /* class var .PV field variant */, vb6_VariantString(s));',
         # 槽到槽 → 深拷贝 (不许多共用一只 BSTR)
-        'vb6_VariantAssign(&h->PV  /* class var .PV field */, vb6_VariantFromValue(w));',
+        'vb6_VariantAssign(&h->PV  /* class var .PV field variant */, vb6_VariantFromValue(w));',
         # 类内 Me.<字段> = ByRef Variant 形参 → 同一问同一答案
-        'vb6_VariantAssign(&me->PV  /* class var .PV field */, vb6_VariantFromValue((*v)));',
+        'vb6_VariantAssign(&me->PV  /* class var .PV field variant */, vb6_VariantFromValue((*v)));',
         # 现造的整数/字面量串 → 清 + 搬, 不多拷一次
-        'h->PV  /* class var .PV field */ = vb6_VariantLong(7);',
-        'h->PW  /* class var .PW field */ = vb6_VariantString(vb6_BSTR_FromStr(L"noclause"));',
+        'h->PV  /* class var .PV field variant */ = vb6_VariantLong(7);',
+        'h->PW  /* class var .PW field variant */ = vb6_VariantString(vb6_BSTR_FromStr(L"noclause"));',
         # §B169 (第六十刀) 之后这一档不再是负控: 同类的 String 字段现在也认得了,
         # 交的是 BSTR 那一枚出口 (自有字面量 = 接管 + 旧值有人放); 剩下的负控只有 Long 字段
         # 照旧裸存 —— 一张表答三档, 答宽了 (把 String/Long 也拖进装箱) 由下面那两条反针钉住
@@ -2816,8 +2816,8 @@ if ($Category -in @("all", "run", "bas")) {
     Test-EmitcAbsent "b168_class_var_field_not_boxed" @(
         "$Tests\b168_cvf\B168Holder.cls", "$Tests\b168_cvf\B168Main.bas") @(
         # BASE 的病灶形状本身 (裸存借来的指针 / 裸存整数进槽)
-        'h->PV  /* class var .PV field */ = s;',
-        'me->PV  /* class var .PV field */ = (*v);',
+        'h->PV  /* class var .PV field variant */ = s;',
+        'me->PV  /* class var .PV field variant */ = (*v);',
         # 非 Variant 字段被误登记的形状 (答宽了就是这两条)
         'h->PS  /* class var .PS field */ = vb6_Variant',
         'h->PL  /* class var .PL field */ = vb6_Variant'
@@ -2855,22 +2855,45 @@ if ($Category -in @("all", "run", "bas")) {
         "$Tests\b170_mrt\B170Main.bas", "$Tests\b170_mrt\B170Holder.cls",
                  "$Tests\b170_mrt\B170Holder2.cls") @(
         # 撞名的 Variant 字段读 → 槽档; With 那一站同一个答案; Long 字段走数值档; String 字段裸读
-        'vb6_CStr(vb6_VariantFromValue(h->PV  /* class var .PV field */))',
-        'vb6_CStr(vb6_VariantFromValue(_vb6_with_0->PV  /* With class .PV field */))',
+        'vb6_CStr(vb6_VariantFromValue(h->PV  /* class var .PV field variant */))',
+        'vb6_CStr(vb6_VariantFromValue(_vb6_with_0->PV  /* With class .PV field variant */))',
         'vb6_CStrLong(h->Command  /* class var .Command field */)',
         'vb6_Len(k->PV  /* class var .PV field */)',
-        'vb6_CStr(vb6_VariantFromValue(h->PZ  /* class var .PZ field */))'
+        'vb6_CStr(vb6_VariantFromValue(h->PZ  /* class var .PZ field variant */))'
     )
     Test-EmitcAbsent "b170_member_read_lesion" @(
         "$Tests\b170_mrt\B170Main.bas", "$Tests\b170_mrt\B170Holder.cls",
                  "$Tests\b170_mrt\B170Holder2.cls") @(
         # BASE 答错的形状: 数值档吃掉了 Variant 槽, 也吃掉了同名的 String 字段 (两台都在场)
-        'vb6_CStrDbl(h->PV  /* class var .PV field */)',
+        'vb6_CStrDbl(h->PV  /* class var .PV field variant */)',
         'vb6_CStrDbl(k->PV  /* class var .PV field */)',
-        'vb6_CStrDbl(_vb6_with_0->PV  /* With class .PV field */)',
+        'vb6_CStrDbl(_vb6_with_0->PV  /* With class .PV field variant */)',
         # BASE 的 AV 形状: 把 Long 字段当 BSTR 读
         'vb6_Len(h->Command  /* class var .Command field */)',
         'L"B170-4="), h->Command  /* class var .Command field */)'
+    )
+
+    # 账 #305 §B171 (第六十二刀): 「把这枚成员读交给要槽的消费者」那一问的第二位主人 ——
+    # 按 **C 文本** 认槽的那一位 (cExprIsVariant)。它此前只认得「函数交槽」那一族, 认不出
+    # 带尾注的类字段读, 于是装箱站把整只 vb6_VARIANT 塞进标量槽 (两台 6 枚 C2440, 没 exe)。
+    # 尾注由 §B168/§B169 那张表盖上, 只在 Variant 那一档多一个 variant 词 —— 下面第六枚
+    # 就是那枚证人: 同类的 String 字段一个字没动, 照旧按 BSTR 装。
+    Test-EmitcShape 'b171_class_slot_arg_shape' @(
+        "$Tests\b171_slotarg\B171Main.bas", "$Tests\b171_slotarg\B171Holder.cls") @(
+        'vb6_B171Main_EchoBack(&(h->PZ  /* class var .PZ field variant */))',
+        'vb6_B171Main_EchoBack(&(h->PV  /* class var .PV field variant */))',
+        'vb6_B171Main_Mutate(&(h->PV  /* class var .PV field variant */))',
+        'vb6_B171Main_EchoBack(&(_vb6_with_0->PN  /* With class .PN field variant */))',
+        'vb6_Len(vb6_VariantToString(h->PV  /* class var .PV field variant */))',
+        'vb6_B171Main_EchoBack((&(vb6_VARIANT){.vt=VT_BSTR, .bstrVal=h->PS  /* class var .PS field */}))'
+    )
+    Test-EmitcAbsent 'b171_class_slot_arg_lesion' @(
+        "$Tests\b171_slotarg\B171Main.bas", "$Tests\b171_slotarg\B171Holder.cls") @(
+        '.bstrVal=h->PZ  /* class var .PZ field variant */',
+        '.bstrVal=h->PV  /* class var .PV field variant */',
+        '.bstrVal=vb6_VariantToString(h->PN',
+        'vb6_Len(h->PV  /* class var .PV field variant */)',
+        'vb6_Left(h->PV  /* class var .PV field variant */'
     )
     # 账 #305 §B149 + §B150 (第四十刀): 注册表家族的真往返 + 晚绑定槽的二维元素读写。
     # 读数来源 = .build/b1280_rs (新 exe, x64 与 x86 **逐行相同**, 故同针同过); 外部口径证人 =
@@ -5575,6 +5598,34 @@ if ($Category -in @("all", "run", "vbp")) {
         "B170-7=8|String", "B170-8=123", "B170-DONE")
     Test-Vbp "b170_member_read_type" "$Tests\b170_mrt\B170.vbp" $b170Expected
     Test-Vbp "b170_member_read_type_x86" "$Tests\b170_mrt\B170.vbp" $b170Expected -Arch "x86"
+
+    # <vbeclipse> 回归夹子 (b171_slotarg, 账 #305 §B171 第六十二刀): 整枚类 Variant 字段
+    # 递进 ByRef Variant 形参。修前两台都编不过 (含 §B170 那台 6 枚 C2440、不含那台 4 枚):
+    # 装箱站问「这是不是一枚槽」的那一位只认得函数前缀, 认不出带尾注的成员读, 于是兜底把
+    # 整只槽塞进 .bstrVal。两台实测读数 (x64/x86 逐行相同):
+    #   B171-1/2  不撞名的槽 (PZ) 与撞名的槽 (PV 撞内置 PV()) 必须同答 [8|withform];
+    #   B171-3    一枚普通 Variant 变量作同一形参 —— 控制组, 一直是错的它是对的;
+    #   B171-4    数值槽 [3|7] 与内层 vt=3: 交**地址**才保得住档位 (若改走
+    #             .bstrVal=vb6_VariantToString 那一档, 这里会答 [8|7] —— 静默压成串);
+    #   B171-5    同类的 String 字段走 BSTR 装箱那一档, 本刀一个字没动它;
+    #   B171-12   ByRef 回写落地 [8|changed] —— 传地址的另一半理由。
+    $b171Expected = @(
+        "B171-1=[8|withform]",
+        "B171-2=[8|withform]",
+        "B171-3=[8|withform]",
+        "B171-4=[3|7]",
+        "B171-5=[8|strfield]",
+        "  inner vt=3 s=[7]",
+        "B171-6=8",
+        "B171-7=with",
+        "B171-8=True",
+        "B171-9=[withform]",
+        "B171-10=[3|7]",
+        "B171-11=8",
+        "B171-12=[8|changed]",
+        "B171-DONE")
+    Test-Vbp 'b171_class_slot_arg' "$Tests\b171_slotarg\B171.vbp" $b171Expected
+    Test-Vbp 'b171_class_slot_arg_x86' "$Tests\b171_slotarg\B171.vbp" $b171Expected -Arch "x86"
 
     # <vbeclipse> 回归夹子 (iface_wrap): 接口宿主**类型映射**的最小夹子, GA run 36732948503
     # (BalloonTooltips 红) 的直接切片。IFoo 显式 `Attribute VB_Creatable = True` ⇒ 进不了

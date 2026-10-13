@@ -259,8 +259,18 @@
                     lastExpr_ = obj090 + "->" + cIdent(fldC092p)
                               + "  /* class var ." + node.memberName + " field voidptr */";
                 } else {
+                    // 账 #305 §B171 (第六十二刀): 尾注里带上「这一档交出来的是不是整只槽」。
+                    //   这一问的答案早就在 §B168 那张表里 (classFieldKind = §B169 收成的唯一
+                    //   出口), 但这条尾注此前只说「是个字段」不说「是哪一档」—— 于是「按 C 文本
+                    //   认槽」那一问 (cExprIsVariant) 一律答否, 实参装箱的两站都把整只
+                    //   vb6_VARIANT 塞进了标量槽 (实测 .bstrVal=h->PZ ⇒ C2440, 两台都没 exe)。
+                    //   词只加在 Variant 那一档: String/Long/Object 那些档的尾注一个字不动,
+                    //   所以「认得尾注」不会把它们误认成槽。
+                    const bool slotField62 = classFieldIsVariantSlot(
+                        itClassVar->second, node.memberName);
                     lastExpr_ = obj090 + "->" + cIdent(fldC092p)
-                              + "  /* class var ." + node.memberName + " field */";
+                              + "  /* class var ." + node.memberName + " field"
+                              + (slotField62 ? " variant" : "") + " */";
                 }
             }
         // Fix 089b: trailing 变量名匹配在 obj 含 '.' 时跳过 — obj 是 UDT/属性字段链

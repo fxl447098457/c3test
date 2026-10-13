@@ -752,6 +752,19 @@ bool CCodeGen::isDefinitelyVariantExpr(Expr& expr, bool* isArrOut) const {
             if (!inferUdtTypeOfExpr(*ma.object).empty()) {
                 return inferExprType(expr) == Vb6Type::Variant;
             }
+            // 账 #305 §B171 (第六十二刀): 宿主是工程类时, 这一问先问 §B168 那张字段表 ——
+            //   与 §B170 给 inferExprType 补的那一格同一条口径、同一枚否决。下面那条按**裸成员名**
+            //   查模块符号的兜底不认识宿主: 成员名撞上内置函数名时它交回内置函数的档位
+            //   (实测 `Public PV As Variant` 撞 PV() ⇒ 这里答「不是槽」⇒ `Len(h.PV)` 发裸的
+            //   vb6_VARIANT 进 vb6_Len(BSTR) = C2440; 不撞名的 PZ 一直答对)。
+            //   表答得出 (非 Unknown) 才接管: 数组 / 定长串 / 对象字段不入表, 仍归兜底。
+            if (ma.object) {
+                const std::string cls62 = inferClassTypeOfExpr(*ma.object);
+                if (!cls62.empty() && resolveClassMemberCall(cls62, ma.memberName).empty()) {
+                    const Vb6Type fld62 = classFieldKind(cls62, ma.memberName);
+                    if (fld62 != Vb6Type::Unknown) return fld62 == Vb6Type::Variant;
+                }
+            }
             // 符号表查找成员 (Property/Function)
             auto* memSym = symTab_.lookupModule(ma.memberName);
             // 关键差异: memSym==null (UDT 字段访问或外部类成员) 视为非 Variant
@@ -789,6 +802,17 @@ bool CCodeGen::cmpOperandMayTakeAddr(const std::string& c, Expr* ast) const {
 // 包含已知返回 vb6_VARIANT 的函数调用时, 判定为 Variant.
 // 仅检查顶层表达式 (去除前导括号/空白后), 避免对子表达式误判.
 
+// 账 #305 §B171 (第六十二刀): 「按 C 文本认槽」这一问漏认的那一族 —— 类字段的 Variant 槽读。
+// 两条发码路 (§B168/§B169 那张表的两处成员读) 现在在尾注里带上 ` variant` 这个词, 而**只有**
+// Variant 那一档带 —— 所以这一问的答案仍然只有那张表一个来源, 这里只是把它读回来。
+// 判据钉在**串尾**: 成员读的 C 就是 `obj->fld  /* ... */`, 尾注后头什么都不许有 ——
+// 拿 "包含" 判会把 `vb6_CStr(h->PZ /*...*/)` 那种**已经消费过槽**的表达式也答成槽 (反向 C2440)。
+bool CCodeGen::cExprIsVariantSlotFieldRead(const std::string& cExpr) const {
+    static const std::string tail = " field variant */";
+    return cExpr.size() >= tail.size()
+        && cExpr.compare(cExpr.size() - tail.size(), tail.size(), tail) == 0;
+}
+
 bool CCodeGen::cExprIsVariant(const std::string& cExpr) const {
     // 去除前导空白和括号
     size_t start = 0;
@@ -801,6 +825,11 @@ bool CCodeGen::cExprIsVariant(const std::string& cExpr) const {
         }
     }
     if (start >= cExpr.size()) return false;
+
+    // 账 #305 §B171 (第六十二刀): 类字段的 Variant 槽读 —— 此前这一问只认得「函数交槽」那一族
+    //   (下面的前缀表) 与「数组元素是槽」那一族, 成员读一律答否, 于是实参装箱的两站把整只
+    //   vb6_VARIANT 塞进标量槽 (`.bstrVal=h->PZ` ⇒ cl C2440, 两台都没 exe)。
+    if (cExprIsVariantSlotFieldRead(cExpr)) return true;
 
     // 已知返回 vb6_VARIANT 的函数前缀。
     //

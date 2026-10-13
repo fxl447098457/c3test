@@ -268,11 +268,12 @@ $bstrTotal169 = 0
 foreach ($v in $bstrByFile169.Values) { $bstrTotal169 += $v }
 
 # ---- R8 (账 #305 §B170 第六十一刀): 「这枚成员读是哪一档」那两站都问那张表 ----
-# 钉的是**读侧**两站 (inferExprType 的点号 case + With 体内 case) 各问一次 classFieldKind,
+# 钉的是**读侧**三站 (inferExprType 的点号 case + With 体内 case + isDefinitelyVariantExpr 的认槽 case) 各问一次 classFieldKind,
 # 并且问点只许长在名单里那几个文件。少一站 = 那一站回到按裸成员名查全局符号 —— 实测: 字段名
 # 撞上内置函数名就读成内置的返回档 (`CStr(h.PV)` 撞 PV() 答 Double ⇒ 串值 0|1; 一枚
 # `Public Command As Long` 撞 Command() 答 String ⇒ 把 7 当 BSTR 指针解, 两台原生 AV)。
-$WantReadAsk170 = [ordered]@{ 'cgen_util_type.cpp' = 2 }
+# 第六十二刀 (§B171) 的第三站是**同一问的第三个读点** (isDefinitelyVariantExpr 的成员读分支), 不是新抄一份答案; 它同时把「尾注 variant 词」收进 cExprIsVariantSlotFieldRead 一处 (见 R9).
+$WantReadAsk170 = [ordered]@{ 'cgen_util_type.cpp' = 3 }
 $KnownAskFiles170 = @('cgen_api.inc', 'cgen_state.inc', 'driver_codegen_fieldkind_scan.inc',
                       'cgen_assign_prop_write.inc', 'cgen_util_type.cpp')
 $askByFile170 = @{}
@@ -285,7 +286,7 @@ foreach ($k in $WantReadAsk170.Keys) {
     $g170 = 0
     if ($askByFile170.ContainsKey($k)) { $g170 = $askByFile170[$k] }
     if ($g170 -ne $WantReadAsk170[$k]) {
-        $bad += ('R8 ' + $k + ' 问 classFieldKind ' + $g170 + ' 处, 名单钉的是 ' + $WantReadAsk170[$k] + ' (点号 + With 两站)')
+        $bad += ('R8 ' + $k + ' 问 classFieldKind ' + $g170 + ' 处, 名单钉的是 ' + $WantReadAsk170[$k] + ' (点号 + With + 认槽三站)')
     }
 }
 foreach ($k in $askByFile170.Keys) {
@@ -295,12 +296,56 @@ foreach ($k in $askByFile170.Keys) {
 }
 $readAsk170 = 0
 if ($askByFile170.ContainsKey('cgen_util_type.cpp')) { $readAsk170 = $askByFile170['cgen_util_type.cpp'] }
+# ---- R9 (账 #305 §B171 第六十二刀): 尾注上那个 variant 词只许两处写、一处读 ----
+# 「这枚 C 文本是不是一枚**可寻址的槽字段读」**收成一处 (cExprIsVariantSlotFieldRead):
+#   定义与 cExprIsVariant 的那枚委托都在 cgen_util_type.cpp, 装箱站要地址就问这一处。
+#   写词那一头只认得两条成员读的发文路 (点号 / With) —— 第三处自己拼尾注 = 下一次漏档的现场。
+$WantWord171 = [ordered]@{ 'cgen_expr_member_class_fallback.inc' = 1; 'cgen_expr_with.cpp' = 1 }
+$WantAsk171 = [ordered]@{ 'cgen_util_type.cpp' = 2; 'cgen_helpers.inc' = 1;
+                          'cgen_util_comwrite.cpp' = 1; 'cgen_expr_call_arg_emit.inc' = 2 }
+$wordByFile171 = @{}; $askByFile171 = @{}
+foreach ($f in $srcFiles168) {
+    $t171 = [System.IO.File]::ReadAllText($f.FullName)
+    $leaf171 = Split-Path $f.FullName -Leaf
+    $w171 = [regex]::Matches($t171, '\?\s*" variant" : ""').Count
+    $a171 = [regex]::Matches($t171, 'cExprIsVariantSlotFieldRead\(').Count
+    if ($w171 -gt 0) { $wordByFile171[$leaf171] = $w171 }
+    if ($a171 -gt 0) { $askByFile171[$leaf171] = $a171 }
+}
+foreach ($k in $WantWord171.Keys) {
+    $gw171 = 0
+    if ($wordByFile171.ContainsKey($k)) { $gw171 = $wordByFile171[$k] }
+    if ($gw171 -ne $WantWord171[$k]) {
+        $bad += ('R9 ' + $k + ' 写 variant 尾注 ' + $gw171 + ' 处, 名单钉的是 ' + $WantWord171[$k] + ' (点号 + With 两条成员读)')
+    }
+}
+foreach ($k in $wordByFile171.Keys) {
+    if (-not $WantWord171.Contains($k)) {
+        $bad += ('R9 第三处手写 variant 尾注 ' + $k + ' x' + $wordByFile171[$k] + ' —— 写词那一问又长了第三份地方')
+    }
+}
+foreach ($k in $WantAsk171.Keys) {
+    $ga171 = 0
+    if ($askByFile171.ContainsKey($k)) { $ga171 = $askByFile171[$k] }
+    if ($ga171 -ne $WantAsk171[$k]) {
+        $bad += ('R9 ' + $k + ' 问 cExprIsVariantSlotFieldRead ' + $ga171 + ' 处, 名单钉的是 ' + $WantAsk171[$k])
+    }
+}
+foreach ($k in $askByFile171.Keys) {
+    if (-not $WantAsk171.Contains($k)) {
+        $bad += ('R9 名单外的新问点 ' + $k + ' x' + $askByFile171[$k] + ' —— 这一问又有人自己抄一份')
+    }
+}
+$wordTotal171 = 0
+foreach ($v in $wordByFile171.Values) { $wordTotal171 += $v }
+$askTotal171 = 0
+foreach ($v in $askByFile171.Values) { $askTotal171 += $v }
 $markTotal168 = 0
 foreach ($v in $markByFile168.Values) { $markTotal168 += $v }
 
 $nHand = $handPairs.Count
 if ($bad.Count -eq 0) {
-    Write-Host ('PASS variant_slot_store: def 1 | calls ' + $callSites + ' | shapes ' + $nHand + ' | open stations ' + $bareTotal + ' | slotask168 ' + $qSites168 + ' | projask169 ' + $projSites169 + ' | mark168 ' + $markTotal168 + ' | bstr169 ' + $bstrTotal169 + ' | readask170 ' + $readAsk170 + ' | auth169 ' + $authCall169['emitBstrSlotStore'] + '/' + $authCall169['emitVariantSlotAssign'] + ' | violations 0') -ForegroundColor Green
+    Write-Host ('PASS variant_slot_store: def 1 | calls ' + $callSites + ' | shapes ' + $nHand + ' | open stations ' + $bareTotal + ' | slotask168 ' + $qSites168 + ' | projask169 ' + $projSites169 + ' | mark168 ' + $markTotal168 + ' | bstr169 ' + $bstrTotal169 + ' | readask170 ' + $readAsk170 + ' | slotword171 ' + $wordTotal171 + ' | slotask171 ' + $askTotal171 + ' | auth169 ' + $authCall169['emitBstrSlotStore'] + '/' + $authCall169['emitVariantSlotAssign'] + ' | violations 0') -ForegroundColor Green
     exit 0
 }
 foreach ($b in $bad) { Write-Host ('FAIL ' + $b) -ForegroundColor Red }
