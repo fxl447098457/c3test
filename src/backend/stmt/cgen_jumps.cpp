@@ -28,23 +28,20 @@ void CCodeGen::visit(GoToStmt& node) {
 }
 
 void CCodeGen::visit(OnErrorStmt& node) {
-    // 账 #271: **任何 On Error 语句都清空 Err** (VB6/VBA 语义: "The Err object's
-    // properties are reset whenever an On Error statement is executed" —— 与
-    // Resume / Exit Sub / 错误处理器退出同族)。
-    // 以前三种形态只动 resume_next / jmp_active 三个闸, 从不碰 Err.Number ⇒
-    // **上一次 Resume Next 挡下的错误号一直挂着**, 跨过程污染下一个 `On Error
-    // Resume Next` 里的 `If Err.Number = 0`。
-    // 实测 ComCtlsDemo 启动即未处理错误 380 (CoolBar.ctl:3173):
-    //   Property Set FBandChild 里
-    //     On Error Resume Next: Handle = Value.hWndUserControl   ' 438
-    //     If Err.Number <> 0 Then Handle = Value.hWnd
-    //     On Error GoTo 0                                        ' ← 这里没清
-    //   紧接着 ControlIsValid 的
-    //     On Error Resume Next: Set Container = Control.Container
-    //     ControlIsValid = CBool(Err.Number = 0 And ...)          ' ← 读到 438
-    //   ⇒ 恒 False ⇒ `Err.Raise 380` ⇒ 进程退出。
-    // 清空放在**最前**: 语句自身的副作用(如 GoTo 形态的 setjmp 登记)不依赖 Err。
-    c_.emitLine("vb6_ErrClear();  /* On Error: VB6 语义清空 Err */");
+    // 账 #271: **Err 的清空点只挂在 `On Error Resume Next` 与 `On Error GoTo label`
+    // 上, 不挂 `On Error GoTo 0`** —— 这是被两处实测夹出来的唯一解:
+    //   ① tests/test_bstr_concat_scalar.bas 照 native VB6 定的口径是
+    //        On Error Resume Next / Err.Raise 5 / On Error GoTo 0 / "a=" & Err.Number
+    //      VB6 交 "a=5" ⇒ **`On Error GoTo 0` 不清 Err** (这也与 VBA 那条众所周知的
+    //      提醒一致: GoTo 0 只关闸, 要清得自己 Err.Clear)。整刀清空会让它交 "a=0",
+    //      GA run 38442708160 的 test_bstr_concat_scalar 就是这么红的。
+    //   ② ComCtlsDemo 启动那个未处理错误 380 (CoolBar.ctl:3173 ControlIsValid)
+    //        On Error Resume Next: Set Container = Control.Container
+    //        ControlIsValid = CBool(Err.Number = 0 And ...)
+    //      要求进 ControlIsValid 时 Err 已被清 —— 它上面那一句正是 `On Error Resume Next`。
+    //      不清则读到上一层 `Value.hWndUserControl` 留下的错误号 ⇒ 恒 False ⇒ 380。
+    // 于是: ResumeNext / GoToLabel 清, GoToZero 不动。清空放在**最前**, 语句自身的
+    // 副作用 (GoToLabel 的 setjmp 登记) 不依赖 Err。
     switch (node.errorKind) {
         case OnErrorKind::GoToLabel: {
             // On Error GoTo label
@@ -54,6 +51,7 @@ void CCodeGen::visit(OnErrorStmt& node) {
             //       goto vb6_label_ErrorHandler;
             //   }
             //   vb6_err_jmp_active = 1;
+            c_.emitLine("vb6_ErrClear();  /* On Error: 见 visit(OnErrorStmt) 顶注 */");
             c_.emitLine("if (setjmp(vb6_local_err_jmp) != 0) {");
             c_.indent();
             if (hasResume_) {
@@ -78,6 +76,7 @@ void CCodeGen::visit(OnErrorStmt& node) {
         }
         case OnErrorKind::ResumeNext: {
             // On Error Resume Next
+            c_.emitLine("vb6_ErrClear();  /* On Error: 见 visit(OnErrorStmt) 顶注 */");
             c_.emitLine("vb6_err_resume_next = 1;");
             break;
         }
