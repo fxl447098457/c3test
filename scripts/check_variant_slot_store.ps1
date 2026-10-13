@@ -366,6 +366,34 @@ foreach ($k in $stationByFile172.Keys) {
 $stationTotal172 = 0
 foreach ($v in $stationByFile172.Values) { $stationTotal172 += $v }
 
+# ---- R10 (账 #305 §B173 第六十四刀): 「整枚槽交进具体档形参」那两条臂都必须先问 AST ----
+# cgen_expr_call_arg_variant.inc 里同一句决定抄了两遍: 上面那条臂 (Fix 029, 形参类型已知) 问
+# AST ∪ 文本, 下面那条臂 (Fix 038b-2, 内置/运行时形参表为空或档为 Variant) 此前只问文本 ——
+# 于是同一枚 UDT 的 Variant 成员 `u.UV` 在 Left/Len/Replace/Val (带类型化形参表) 那里被解包,
+# 在 InStr (只登记返回档) 那里裸交 vb6_VARIANT 进 BSTR 形参 = cl C2440 (两台都没 exe)。
+# 口径 = §B147「改道吃 AST ∪ 文本」: 两条臂各问一次, 总数钉在 2。掉回 1 = 那条臂又只认文本了。
+$WantAstAsk173 = [ordered]@{ 'cgen_expr_call_arg_variant.inc' = 2; 'cgen_expr_call_arg_emit.inc' = 2 }
+$astByFile173 = @{}
+foreach ($f in $srcFiles168) {
+    $t173 = [System.IO.File]::ReadAllText($f.FullName)
+    $n173 = [regex]::Matches($t173, 'isDefinitelyVariantExpr\(\s*\*node\.positional\[i\]').Count
+    if ($n173 -gt 0) { $astByFile173[(Split-Path $f.FullName -Leaf)] = $n173 }
+}
+foreach ($k in $WantAstAsk173.Keys) {
+    $g173 = 0
+    if ($astByFile173.ContainsKey($k)) { $g173 = $astByFile173[$k] }
+    if ($g173 -ne $WantAstAsk173[$k]) {
+        $bad += ('R10 ' + $k + ' 问 isDefinitelyVariantExpr ' + $g173 + ' 处, 名单钉的是 ' + $WantAstAsk173[$k] + ' (形参已知/形参未知两条臂都要吃 AST)')
+    }
+}
+foreach ($k in $astByFile173.Keys) {
+    if (-not $WantAstAsk173.Contains($k)) {
+        $bad += ('R10 名单外的新问点 ' + $k + ' x' + $astByFile173[$k] + ' —— 「实参是不是整枚槽」那一问又长了第五处地方')
+    }
+}
+$astTotal173 = 0
+foreach ($v in $astByFile173.Values) { $astTotal173 += $v }
+
 $wordTotal171 = 0
 foreach ($v in $wordByFile171.Values) { $wordTotal171 += $v }
 $askTotal171 = 0
@@ -375,7 +403,7 @@ foreach ($v in $markByFile168.Values) { $markTotal168 += $v }
 
 $nHand = $handPairs.Count
 if ($bad.Count -eq 0) {
-    Write-Host ('PASS variant_slot_store: def 1 | calls ' + $callSites + ' | shapes ' + $nHand + ' | open stations ' + $bareTotal + ' | slotask168 ' + $qSites168 + ' | projask169 ' + $projSites169 + ' | mark168 ' + $markTotal168 + ' | bstr169 ' + $bstrTotal169 + ' | readask170 ' + $readAsk170 + ' | slotword171 ' + $wordTotal171 + ' | slotst172 ' + $stationTotal172 + ' | slotask171 ' + $askTotal171 + ' | auth169 ' + $authCall169['emitBstrSlotStore'] + '/' + $authCall169['emitVariantSlotAssign'] + ' | violations 0') -ForegroundColor Green
+    Write-Host ('PASS variant_slot_store: def 1 | calls ' + $callSites + ' | shapes ' + $nHand + ' | open stations ' + $bareTotal + ' | slotask168 ' + $qSites168 + ' | projask169 ' + $projSites169 + ' | mark168 ' + $markTotal168 + ' | bstr169 ' + $bstrTotal169 + ' | readask170 ' + $readAsk170 + ' | slotword171 ' + $wordTotal171 + ' | slotst172 ' + $stationTotal172 + ' | slotask171 ' + $askTotal171 + ' | argarm173 ' + $astTotal173 + ' | auth169 ' + $authCall169['emitBstrSlotStore'] + '/' + $authCall169['emitVariantSlotAssign'] + ' | violations 0') -ForegroundColor Green
     exit 0
 }
 foreach ($b in $bad) { Write-Host ('FAIL ' + $b) -ForegroundColor Red }

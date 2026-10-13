@@ -2919,6 +2919,30 @@ if ($Category -in @("all", "run", "bas")) {
         'vb6_InStr(1, _vb6_with_0->PZ',
         'vb6_Len((*h)->PV'
     )
+    # 账 #305 §B173 (第六十四刀): 内置/运行时那条实参转换臂 (calleeParams 为空或档为 Variant)
+    # 此前**只问文本**「这枚 C 表达式是不是整只槽」, 而上一条「形参类型已知」的臂先问 AST。
+    # 同一枚 UDT 的 Variant 成员 u.UV 因此两种命运: Left/Len/Replace/Val 在 builtin_funcs.inc 里
+    # 带类型化形参表 => 被 AST 认出并解包; InStr 只登记返回档 (start 可选) => 落这一臂 =>
+    # 裸 `vb6_InStr(1, u.UV, …)` = cl C2440 (两台各三枚, 都没 exe)。修后两条臂同口径 (AST ∪ 文本)。
+    # 第 3/4 枚 = 六十二/六十三刀那两站今天也走这一臂, 尾注还在; 第 6 枚 = 证人: 形参表已知那一臂
+    # 的答案一字未动; 第 7 枚 = String 变量必须继续裸送 (不许二次包装)。
+    Test-EmitcShape 'b173_udt_slot_arg_shape' @(
+        "$Tests\b173_udtarg\B173Main.bas", "$Tests\b173_udtarg\B173Holder.cls") @(
+        'vb6_InStr(1, vb6_VariantToString(u.UV), vb6_BSTR_FromStr(L"t"))',
+        'vb6_InStr(1, vb6_VariantToString(u.UV), vb6_BSTR_FromStr(L"7"))',
+        'vb6_InStr(1, vb6_VariantToString((*h)->PV  /* class var .PV field variant */)',
+        'vb6_InStr(1, vb6_VariantToString(m_h->PV  /* class var .PV field variant */)',
+        'vb6_InStr(1, vb6_VariantToString(VB6_SA_AT(vb6_VARIANT, a, 1))',
+        'vb6_Len(vb6_VariantToString(u.UV))',
+        'vb6_InStr(1, s, vb6_BSTR_FromStr(L"t"))'
+    )
+    Test-EmitcAbsent 'b173_udt_slot_arg_lesion' @(
+        "$Tests\b173_udtarg\B173Main.bas", "$Tests\b173_udtarg\B173Holder.cls") @(
+        'vb6_InStr(1, u.UV,',
+        'vb6_InStr(1, vb6_VariantToString(vb6_VariantToString',
+        'vb6_InStr(1, vb6_VariantToString(s,',
+        'vb6_Replace(u.UV,'
+    )
     # 账 #305 §B149 + §B150 (第四十刀): 注册表家族的真往返 + 晚绑定槽的二维元素读写。
     # 读数来源 = .build/b1280_rs (新 exe, x64 与 x86 **逐行相同**, 故同针同过); 外部口径证人 =
     # VB6 真语料 mdoceditor/E-Type/Main.bas:269 (`For i = 0 To UBound(varFiles, 1)` + `varFiles(i, 1)`)。
@@ -5672,6 +5696,38 @@ if ($Category -in @("all", "run", "vbp")) {
         "B172-DONE")
     Test-Vbp 'b172_param_slot_read' "$Tests\b172_paramslot\B172.vbp" $b172Expected
     Test-Vbp 'b172_param_slot_read_x86' "$Tests\b172_paramslot\B172.vbp" $b172Expected -Arch "x86"
+    # <vbeclipse> 回归夹子 (b173_udtarg, 账 #305 §B173 第六十四刀): 整枚槽作内在函数实参时,
+    # 「这是不是槽」那一问在两条臂上口径不同 (一条问 AST ∪ 文本, 一条只问文本) => UDT 的
+    # Variant 成员 u.UV 走 InStr 那一路被裸交给 BSTR 形参 = cl C2440, 修前两台**都没有 exe**。
+    # 两台实测读数逐行相同 (.build/k64_fix/o64.txt 与 o32.txt):
+    #   B73-1..3   局部 Variant / 模块级 Variant / **UDT Variant 成员** (本刀的靶形) 必须同答 3;
+    #   B73-4..8   Len / Replace / CStr / Left / Val 五枚证人: 形参表已知那一臂一字未动;
+    #   B73-9      槽里换成数值 (7) 找 "7" 答 1 = 解包没把档位压成串;  B73-10 找不着答 0 (不许假绿);
+    #   B73-11..12 ByRef / ByVal Variant 形参两形;  B73-13 槽数组元素;
+    #   B73-14..15 工程类字段 (六十二/六十三刀那两站) 与返回 Variant 的用户函数;
+    #   B73-16     String 变量证人: 继续裸送, 不许二次包装;  B73-18..19 类形参 + New 局部对象。
+    $b173Expected = @(
+        "B73-1=3",
+        "B73-2=3",
+        "B73-3=3",
+        "B73-4=8",
+        "B73-5=withf0rm",
+        "B73-6=withform",
+        "B73-7=wi",
+        "B73-8=0",
+        "B73-9=1",
+        "B73-10=0",
+        "B73-13=3",
+        "B73-14=3",
+        "B73-15=3",
+        "B73-16=3",
+        "B73-11=3",
+        "B73-12=3",
+        "B73-18=3",
+        "B73-19=3",
+        "B73-DONE")
+    Test-Vbp 'b173_udt_slot_arg' "$Tests\b173_udtarg\B173.vbp" $b173Expected
+    Test-Vbp 'b173_udt_slot_arg_x86' "$Tests\b173_udtarg\B173.vbp" $b173Expected -Arch "x86"
 
     # <vbeclipse> 回归夹子 (iface_wrap): 接口宿主**类型映射**的最小夹子, GA run 36732948503
     # (BalloonTooltips 红) 的直接切片。IFoo 显式 `Attribute VB_Creatable = True` ⇒ 进不了
