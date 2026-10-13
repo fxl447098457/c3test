@@ -2531,7 +2531,7 @@ marker、重编，之后 `check_rtl_embedded` 报 **125/125 逐字节相同**。
 - **判据**：新夹具 `tests/test_bstr_borrow_slot.bas` 两台各 **15 枚针**（`$b167Needles`）：9 枚借用来路（局部 / 形参 / 模块级 / UDT 串字段 / 两种串数组元素=甲乙两路 / Variant 返回槽 / 二次 free 的 200 轮 churn）+ 4 枚证人（UDT Variant 成员与 Variant 数组元素 = **本刀不动**的两位旧主人，读数一字不许变）+ 三枚现造对照（字面量 / `Left()` / 槽到槽）。BASE 上红 W2 与 W7 两枚、NEW 两台全中。发码形状针 7 行（`b167_bstr_borrow_shape`：甲乙两路都归 `vb6_VariantAssign`）+ **反面** `Test-EmitcAbsent` 2 行（现造的串不许被多拷一次 —— 那正是 §B164 形① 欠的那笔漏）。
 - **哨兵** `scripts/check_bstr_borrow_slot.ps1`（第 58 道）：Q1 那一问的定义/声明/调用点（定义成死码也算红）/ Q2 借用那一形各一处（单独露出来是给后来的站点当口径）/ Q3 站④ 必须问它、且旧内联判据不许回来（跨行调用先把空白压平再认）/ Q4 借用那一问的四条腿都在（两种宏前缀 + 「顶层是调用」+ 类型表）/ Q5 **硬填 flag 的站点计数钉死 6** —— 新站点不问这一问就写死 `true` 当场红。五条负控各点各的红（NC2 的还原同时红 Q1+Q3 两条，是同一处回退的自证），原地插桩、跑完按 md5 还原并复核。
 - **清单（门 #586 的读数 + 独立复算）**：形状门报 **6 移动 + 1 新增**。**关键读数**：别人那一棵 rebase 进来的树 `9ba20883`（**不含本刀**）在门 #584 / #585 上就已经报「存量 6 份发码真的变了」—— 同样这 6 行 ⇒ 这 6 行整行是 `wip/comctls-variant-fixes` 那条分支欠的账（随本刀的 rebase 第一次进 CI），两形都点得名：13 处 `(!_has_X)` → `(-(!_has_X))`（IsMissing 交 0/1，发码点 `cgen_expr_call_builtin_pre.inc`）+ 1 处 1D 描述符首字段 `signature 0x5A1D` → OLE 兼容的 `cDims 1, 0xA1D1`（发码点 `cgen_expr_call_arg_emit.inc`）。本刀自己的形状落在 `tests/dbgdlg/dbgdlg.vbp` **那一行里另加 3 处**（`.build/k57_attrib.txt` 逐行：`vb6_ret_sLeftOfNull` / `vb6_ret_sLeftOfLastNull` / `vb6_ret_sAPIFilter` = **Variant 返回函数收下自己的 String 形参**这一形，BASE 发 `Clear + 直赋`、NEW 发 `VariantAssign`），新增那一行是本刀的夹具。⇒ 登记 `4076cf99`（吃 CI 自己那份 head=9d520d4a 的 406 行清单；**本机独立复算 406/406 逐字节相同**、29 行注脚未动、K1..K3 sets equal）。**登记那一笔的题面把门号写成了 #583 —— 错了**：#583 是别人 head=`c5bc5ac4` 的那轮，本刀的门是 **#586**（run 38348063962、head `9d520d4a`），订正写在本格里。真语料暴露面（`D:/vb_yqt4qPac` 10138 份 `.bas/.frm/.cls/.ctl/.pag`，拿**改前那台** `--emit-c` 数「紧挨着的 Clear + 直赋 `vb6_VariantString(存储)`」两行式，甲乙两条文本路都数，按存储形态分档；正控 = 四份手核探针各自命中已知数 6/3/5/12）：**476 处、命中 252 份**（`.build/k57_exposure_base.txt`；分档 = 甲路 227（裸名 146 / 成员 42 / 元素 39）+ 乙路 249（成员 138 / 裸名 76 / 元素 35）—— 两条文本路同一个偷 ⇒ 本刀接管掉的正是这 476 处。口径要说全：10138 份输入里 **1031 份 `--emit-c` 就失败**（语料本身编不过 / 缺控件）、**48 份超时**（含 `GDI+透明控件/QQGrid.ctl` 那枚挂 45 分钟没出声的，另格另账）⇒ 真覆盖 9059 份，这个数是**下界**）
-- **本刀另撞见 / 登记，刻意不动**：**形⑫** `Fn(...).V = <String>`（返回 UDT 的 Variant 成员在**函数体外**被赋值）发的是一句不装箱的裸赋值 `vb6_Make().V = s;` ⇒ cl **C2440 编不过**（`.build/k57_p/run_fnu/c3-error.log`，探针 `fnu.bas`）—— 响的，不是静默的，另格另量；**形⑬ 那条推测已作废**（打本刀这一格时顺手量的：`With r` 里 `v = .Name` 与 `.FV = .Name` **两形都发** `vb6_VariantAssign`，
+- **本刀另撞见 / 登记，刻意不动**：**形⑫** `Fn(...).V = <String>`（返回 UDT 的 Variant 成员在**函数体外**被赋值）发的是一句不装箱的裸赋值 `vb6_Make().V = s;` ⇒ cl **C2440 编不过**（`.build/k57_p/run_fnu/c3-error.log`，探针 `fnu.bas`）—— 响的，不是静默的，另格另量；【**2026-10-13 第五十九刀订正：那一格 = §B168，已合上** —— 目标侧一旦问工程级那张「类 → vb6_VARIANT 字段」表，`Fn(...)` 这形本来就被 `inferClassTypeOfExpr` 的 `IndexOrCallExpr` 那一支答得出类名，实测同一形从 `vb6_F12Main_MakeH()->PV = s;` 变成 `vb6_VariantAssign(&vb6_F12Main_MakeH()->PV, vb6_VariantString(s));`（探针 `.build/k59_p/f12`），**没有为它另开一刀**】；**形⑬ 那条推测已作废**（打本刀这一格时顺手量的：`With r` 里 `v = .Name` 与 `.FV = .Name` **两形都发** `vb6_VariantAssign`，
     探针 `.build/k58_p/w13.bas` / `w13b.bas` 的产物）—— With 成员作为**右值**时 `inferExprType` 答得出 String，本刀的借用那一腿收得住；**三枚发借来指针的 RTL 出口**（`vb6_ErrDescription` / `vb6_ErrSource` / `vb6_ho_variantToBstr`，#113 那条注记在册）在本刀的「顶层是调用 = 现造」这一腿里被读成自有 ⇒ 仍悬空，修法是给这一腿一份从 RTL 派生的名单（§B146 那一族的手法）；**形⑥ 站⑥** 与 **形⑤ 那三站**的前置问（「右值是不是借来的」）现在这枚权威已经能答，接线时按各自目标是不是长期槽逐站定。
 - **形⑭（第五十八刀）：那一腿的例外名单**：`b167TopIsCall` 答「现造的」对 RTL 的大多数出口成立，但有 **3 枚**交回的是
   **别人那一只还活着的块** —— `vb6_ErrDescription`(`return vb6_err.description;`)、`vb6_ErrSource`、
@@ -2561,7 +2561,7 @@ marker、重编，之后 `check_rtl_embedded` 报 **125/125 逐字节相同**。
 
 
 
-### B168 「对象.类的公共 Variant 字段」当赋值目标时**根本不装箱** —— 目标侧「这是不是一枚槽」有三张名单各答各的（2026-10-13 第五十九刀的前置量完，**未开工**）
+### B168 「对象.类的公共 Variant 字段」当赋值目标时**根本不装箱** —— 目标侧「这是不是一枚槽」有三张名单各答各的（2026-10-13 第五十九刀 **已出** = 实现 `f909ef7f` → 门 **#591**（run 38379525625、attempt 1、10 绿 + **两条同源红** = 形状门那 2 行新增未登记 + `Tests (compile)` 里那道 `[STATIC] manifest_coverage` 同一件事）→ 登记 `d29a387e` → 验证轮 **#592**（run 38381571448、head `d29a387e`、attempt 1、12 job 逐格 completed/success）；§B167 挂着的 **形⑫** 随本刀一并合上；同族还剩三形未开工，见末尾三条）
 
 - **题面（真编译撞出来的，不是读码猜的）**：`Dim h As Holder` + 类里 `Public PV As Variant`，写 `h.PV = <右值>` 发的是
   `h->PV  /* class var .PV field */ = <右值>;` —— **一次装箱都没有**。除 Variant→Variant 那一形（结构体抄 = 合法但浅拷 =
@@ -2580,9 +2580,44 @@ marker、重编，之后 `check_rtl_embedded` 报 **125/125 逐字节相同**。
   点名的病人 = `D:/vb_yqt4qPac/NewTab-main/control-source/cls/cPropertyData.cls`（`Public Value As Variant`）的
   `iProp.Value = …` 一族（同项目的 `cNewTabTheme.cls` / `pagNewTabThemes.pag` 等 28 份）。⇒ 这一格**不是纸面缺口**：
   那棵工程今天整棵编不过（读侧 `.build/k59_exposure3.txt`，脚本自带两趟扫描：先收「类→公共 Variant 字段」，再收「变量→类型」）。
-- **开工前要先答的两问**：① `obj.Field = <标量>` 该装到哪一档（整数走 `vb6_VariantLong` 还是 `_Generic` 的 `VB6_SA_*`？
-  与 §B147「oracle ⊆ 改道」那条同族，先定档再接线）；② 装箱之后**旧值谁回收** —— 这一问已经有权威了（`variantRhsOwnsValue`），
-  接上即可，但 lvalue 侧必须先被认成槽，否则答案进不去。
+- **开工前要先答的两问 —— 都已答（第五十九刀）**：① 装到哪一档 = **不另开一档**，接站④ 现成的
+  `wrapVariantValue`（标量 → `vb6_VariantLong/Double/Bool/String…`，`_Generic` 那串一个字没改）；
+  ② 旧值回收 = 已登记的 `variantRhsOwnsValue` 那一枚权威，lvalue 侧一旦被认成槽，答案自己就进去了。
+- **落地（一处问 + 一张表，不新造机制）**：
+  ① driver 新增一趟预扫描 `src/driver/detail/driver_codegen_variantfield_scan.inc`，建工程级
+  「类(小写) → vb6_VARIANT 标量字段」表，与 `classVoidFieldMap`/`classTypedFieldMap` 同格、setter 注入。
+  判据 = 「类模块发 struct 时这条字段写的是不是 `vb6_VARIANT`」：无 `As` 子句 = 默认 Variant（Fix 089j 那一路）、
+  `resolveTypeName == Variant`；**数组字段刻意不进**（C 字段是 `vb6_SafeArray1D*`）、String/定长串（BSTR）、
+  项目类/COM/未知对象名（void* 或类指针，正是 Fix 090bx 那批漏网名字）、UDT（`vb6_type_x`）都不算槽。
+  ② 后端一处查询 `classFieldIsVariantSlot(className, member)`（住 `cgen_api.inc`，与 `projectClassNameOf` 同格），
+  类名问既有出口 `inferClassTypeOfExpr`（`IdentifierExpr`/`MeExpr`/链式成员/`IndexOrCallExpr` 返回类都在它覆盖里）；
+  **不**认发出来的文本尾注 `/* class var .X field */`。③ 赋值站（`cgen_assign_value_sem.inc`）在 Fix 232 那一支之后
+  补一条 MemberAccessExpr 判据；**否决**：member 若是该类的 method/属性（`resolveClassMemberCall` 非空）仍归属性写那一路
+  —— 与读侧 `cgen_expr_call_callee_member.inc` 的 Pattern C/D 同一条判据。
+- **实测读数**（BASE = `C3_base_k59.exe`）：`h.PV = 7` → `h->PV = 7;`、`h.PV = "s"` → `h->PV = vb6_BSTR_FromStr(L"s");`、
+  `Me.PV = x` → `me->PV = (*x);`；改后三形分别是 清+`vb6_VariantLong(7)` / `vb6_VariantAssign(&…, vb6_VariantString(s))` /
+  `vb6_VariantAssign(&…, vb6_VariantFromValue((*x)))` —— 借来的值一律深拷贝，现造的仍清+搬，与 §B164/§B166/§B167 同一口径。
+  **浅存那一半是 BASE 编得过的**：证人工程 `.build/k59_p/b6`（全部写走类内 `Me.PV = v`）两台 BASE 都答 `WIT-1=bbb`
+  （字段跟着调用方那枚槽一起变 = 别名），NEW 两台答 `aaa`（`.build/k59_wit1.txt`）。
+- **护栏**：新夹具 `tests/b168_cvf`（一份 .cls + 一份 .bas 的 .vbp）两台各 9 行读数 + 发码形状针 7 枚 + 反面证人 4 枚
+  （BASE 两台 = 各 7 枚 C2440、**根本没有 exe**；NEW 两台 9/9 全对且逐行相同 —— `.build/k59_fix1.txt`）；
+  哨兵 = `check_variant_slot_store.ps1` 加 **R5** 五子规则（查询出口 1 枚且住 `cgen_api.inc` / 调用点不许归零 /
+  那张表只在一趟预扫描里建且注入 1 处 / `class var .` 那句尾注**逐文件钉死 11 处** = 认文本那条歧路不许复活 /
+  老表 `classVariantMembers_` 的写者仍只住一份文件 x4），7 枚假针在副本上各自只红自己那条、还原后重新绿
+  （`.build/k59h_nc.py`）；语料 A/B = 408 输入 × 两架构 = 816 捕获，**只有新夹具那 2 份变、OTHER=0、run-failures=0**
+  （`.build/k59j_ab_report.txt`），CI 那台自己交的清单复核 = 406 行逐行相同 + 2 行新增、**0 行移动** ⇒ 这张表在存量工程上没改过一个字。
+- **⚠ 同族还剩三形（本刀刻意没碰，各有实测读数）**：
+  ① **With 块内** `.PV = <值>`（探针 `.build/k59_p/holder4.cls` + `use5.bas`，存档 `.build/k59_p/run/h4.txt:215`）
+  发的是 `vb6_holder4_prop_let_PV(_vb6_with_0, s);` —— 这个名字全仓**既无声明也无定义**（类里只有一枚公共字段，
+  没有 Property Let），走的是 `cgen_assign_prop_write.inc:729` 那条「With 类属性直调」的路，它把公共字段也当属性拼 ⇒
+  cl 只给 **C4013**（隐式外部 int，`.build/k59_p/k59_h4out/c3-error.log`），链期必 LNK2019。**修法要先拍口径**：
+  那一站该改问本刀这张表（字段 ⇒ 走站④）还是该补一枚 field_let 出口 —— 与 §B164 形⑤ 那两条 `/* Let */` 裸发是同一族。
+  ② **Variant 数组字段**的元素写 `h.PA(1) = 9` / With 内 `.PA(0) = s` 发成 `h->PA(1) = 9;`（把 `vb6_SafeArray1D*` 当可调用）
+  ⇒ 实测 **cl C2064 ×2**（同一份 c3-error.log）。这张表刻意不认数组字段，所以那一形今天仍然响。
+  ③ 跨对象**读**回来那一腿：`CStr(h.PV)` 发 `vb6_CStrDbl(h->PV)`（`inferExprType` 对「别类的 Variant 字段」答 Double ⇒
+  选错 CStr 的重载族），串值实测读回 `0|1` 而不是 `sharedbuf|9`（NEW 第一版夹具的 W2..W6 全 0 —— 改判据为走类内
+  `ReadBack()` 之后才对上，存档 `.build/k59_fix1.txt` 的第一轮）。同一枚表能答这一问，但那是**表达式类型 oracle**，
+  动它会扫到全语料的选档 ⇒ 另立一格，别顺手接。
 
 
 ### B151 把真二维数组赋给 Variant 槽，槽读回来是 VarType=9 / "Object" 而不是 8204 —— 自家多维描述符被折成一维（2026-10-12 第四十刀量到；**未开工**）
