@@ -37,6 +37,32 @@
                     return;
                 }
             }
+            // Fix <Command2>: `Set <窗体控件>.Picture = Nothing` —— 目标侧是**控件属性**
+            // 而不是对象变量。修复前走下面通用的 vb6_ReleaseObject 路：先把目标当表达式
+            // 求值成 `vb6_GetControlPicture(hwnd)` (那是**借用**引用，见 RTL 注释)，
+            // 再对它 Release ⇒ 把控件还握着的引用放掉。RTL 侧 vb6_GetControlPicture 现在
+            // 会交真 IPictureDisp (裸 GDI 句柄也包一层)，这次过度释放会真的把对象销毁、
+            // 留下悬空缓存指针。VB6 语义 `Set Picture1.Picture = Nothing` = 清掉控件的图，
+            // 正解就是调控件属性的写函数传 NULL。
+            if (node.target->kind == ASTNodeKind::MemberAccessExpr) {
+                auto& _picMa = static_cast<MemberAccessExpr&>(*node.target);
+                if (_picMa.object && _picMa.object->kind == ASTNodeKind::IdentifierExpr) {
+                    std::string _picObjLower = Symbol::toLower(
+                        static_cast<IdentifierExpr&>(*_picMa.object).name);
+                    auto _picItCtrl = knownFormControls_.find(_picObjLower);
+                    if (_picItCtrl != knownFormControls_.end()
+                        && Symbol::toLower(_picMa.memberName) == "picture") {
+                        std::string _picWriteFn = getControlPropWriteFn(
+                            _picItCtrl->second, _picMa.memberName);
+                        if (_picWriteFn.find("SetControlPicture") != std::string::npos) {
+                            c_.emitLine(_picWriteFn + "("
+                                + makeCtrlHwndArg(_picObjLower, _picItCtrl->second)
+                                + ", NULL);  /* Set Nothing (control Picture) */");
+                            return;
+                        }
+                    }
+                }
+            }
             // 左值求值期间关掉虚表派发 (ai/022 B08e-4 站点⑭: Pattern C/D2 要对这段文本做
                 // `prop_get_` -> `prop_let_` 的字符串级改写, 派发表达式会被换成表里不存在的槽字段)
             const bool savedVirtLhs = suppressVirtDispatch_;

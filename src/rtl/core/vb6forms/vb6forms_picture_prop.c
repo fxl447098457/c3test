@@ -49,16 +49,118 @@ void vb6_FormPaintBlitAutoRedraw(void* hwndForm, void* hdc) {
     BitBlt((HDC)hdc, 0, 0, rc.right, rc.bottom, ar, 0, 0, SRCCOPY);
 }
 
+/* Fix <Command2>: 控件 Picture 的 C 面必须是**真 COM IPictureDisp**。
+ *
+ * VB 语义 `Property Get Picture() As IPictureDisp` 交出去的是**对象**
+ * (`Picture.Handle` / `.Type` / `.Width` / `.Height` 全走 IDispatch 派发)，
+ * 而 `vb6_SetControlPicture` 的裸 GDI 句柄路径 (设计期 .frx / LoadPictureFromFile)
+ * 只把 HBITMAP/HICON 存在 VB6_Picture 属性里。以前 vb6_GetControlPicture 直接
+ * 把这个裸句柄交出去 ⇒ 下游 vb6_ComGetProp 把它当 IDispatch，
+ * vb6_ComIsDispatchable 判否 ⇒ `property "Handle" not found` ⇒ 返回 0
+ * ⇒ ImageList.FListImagesAdd 里 `ElseIf Picture.Handle = NULL_PTR Then
+ *    Err.Raise 35607` ⇒ 未处理错误，程序整只退出 (ComCtlsDemo Command2 实测)。
+ *
+ * 这里用 OleCreatePictureIndirect 把裸句柄包成真 IPictureDisp 并按窗口缓存:
+ *   fOwn = FALSE —— 句柄仍归控件所有 (替换/清空/WM_DESTROY 时由控件销毁)，
+ *   包装对象只是借用，不会二次 DeleteObject。
+ *   缓存的那份引用带**一枚保险引用**: 发码层对 `Set <控件>.Picture = Nothing`
+ *   历史性地发成 `vb6_ReleaseObject((void**)(&(void*){vb6_GetControlPicture(..)}))`
+ *   (借用引用被 Release)，多留一枚可吸收这次过度释放而不让缓存指针悬空；
+ *   保险引用在替换/清空/销毁时与缓存引用一并归还。
+ */
+static IPictureDisp* vb6_WrapGdiHandleAsPictureDisp(HWND hw, HANDLE hGdi) {
+    if (!hw || !hGdi) return NULL;
+    IPictureDisp* pDisp = (IPictureDisp*)GetPropW(hw, L"VB6_IPictureDisp");
+    if (pDisp) return pDisp;
+
+    int picType = (int)(INT_PTR)GetPropW(hw, L"VB6_PictureType");
+    DWORD objType = GetObjectType((HGDIOBJ)hGdi);
+
+    PICTDESC pd;
+    memset(&pd, 0, sizeof(pd));
+    pd.cbSizeofstruct = sizeof(pd);
+    if (picType == 3 /*PICTYPE_ICON*/) {
+        pd.picType = PICTYPE_ICON;
+        pd.icon.hicon = (HICON)hGdi;
+    } else if (objType == OBJ_ENHMETAFILE) {
+        pd.picType = PICTYPE_ENHMETAFILE;
+        pd.emf.hemf = (HENHMETAFILE)hGdi;
+    } else if (objType == OBJ_METAFILE) {
+        pd.picType = PICTYPE_METAFILE;
+        pd.wmf.hmeta = (HMETAFILE)hGdi;
+        pd.wmf.xExt = 0;
+        pd.wmf.yExt = 0;
+    } else {
+        pd.picType = PICTYPE_BITMAP;
+        pd.bmp.hbitmap = (HBITMAP)hGdi;
+    }
+
+    static int oleInitedPic = 0;
+    if (!oleInitedPic) {
+        if (SUCCEEDED(OleInitialize(NULL))) oleInitedPic = 1;
+        else { CoInitialize(NULL); oleInitedPic = 2; }
+    }
+
+    /* IID_IPictureDisp = {7BF80981-BF32-101A-8BBB-00AA00300CAB}
+     * 与 vb6forms_picture.c 的 OleLoadPicture 同一枚本地定义 (本 TU 的头文件链
+     * 不保证带出该符号)。 */
+    static const GUID local_IID_IPictureDisp =
+        {0x7BF80981, 0xBF32, 0x101A, {0x8B, 0xBB, 0x00, 0xAA, 0x00, 0x30, 0x0C, 0xAB}};
+
+    IPictureDisp* pNew = NULL;
+    HRESULT hr = OleCreatePictureIndirect(&pd, &local_IID_IPictureDisp, FALSE,
+                                          (void**)&pNew);
+    if (FAILED(hr) || !pNew) return NULL;
+    /* 登进 Picture 注册表 (Fix P-BMP-3D): 这样 `Set 另一枚控件.Picture = 本控件.Picture`
+     * 时 vb6_SetControlPicture 能认出这是 COM 对象而不是 GDI 句柄，正确走 FromCom。 */
+    vb6_PictureRegister((void*)pNew);
+    /* 缓存引用 + 保险引用 (见上方注释) */
+    pNew->lpVtbl->AddRef(pNew);
+    if (!SetPropW(hw, L"VB6_IPictureDisp", (HANDLE)pNew)) {
+        pNew->lpVtbl->Release(pNew);
+        pNew->lpVtbl->Release(pNew);
+        return NULL;
+    }
+    return pNew;
+}
+
+/* 存一枚 IPictureDisp 到窗口 (含保险引用); 旧的那枚连保险引用一并归还。 */
+static void vb6_StorePictureDisp(HWND hw, IPictureDisp* pDisp) {
+    if (!hw) return;
+    IPictureDisp* pOld = (IPictureDisp*)GetPropW(hw, L"VB6_IPictureDisp");
+    if (pDisp) pDisp->lpVtbl->AddRef(pDisp);
+    if (!SetPropW(hw, L"VB6_IPictureDisp", (HANDLE)pDisp)) {
+        if (pDisp) pDisp->lpVtbl->Release(pDisp);
+        return;
+    }
+    if (pOld) { pOld->lpVtbl->Release(pOld); pOld->lpVtbl->Release(pOld); }
+}
+
+/* 归还并清掉窗口上的 IPictureDisp 缓存 (缓存引用 + 保险引用)。 */
+static void vb6_ClearPictureDisp(HWND hw) {
+    if (!hw) return;
+    IPictureDisp* pOld = (IPictureDisp*)GetPropW(hw, L"VB6_IPictureDisp");
+    if (pOld) {
+        RemovePropW(hw, L"VB6_IPictureDisp");
+        pOld->lpVtbl->Release(pOld);
+        pOld->lpVtbl->Release(pOld);
+    }
+}
+
 void* vb6_GetControlPicture(void* hwnd) {
     if (!hwnd) return NULL;
     HWND hw = (HWND)hwnd;
-    /* If a COM IPicture was stored via SetControlPictureFromCom, return the
+    /* If a COM IPictureDisp was stored via SetControlPictureFromCom, return the
      * borrowed COM pointer so callers (e.g. Clipboard.SetData) can QI/use it.
      * The caller must NOT Release this borrowed reference. */
-    IPicture* pPic = (IPicture*)GetPropW(hw, L"VB6_IPicture");
-    if (pPic) return (void*)pPic;
+    IPictureDisp* pDisp = (IPictureDisp*)GetPropW(hw, L"VB6_IPictureDisp");
+    if (pDisp) return (void*)pDisp;
+    /* Fix <Command2>: 裸 GDI 句柄也要包成真 IPictureDisp 再交出去 ——
+       VB 侧 `Picture As IPictureDisp` 是对象，交裸句柄会让下游 COM 读全部
+       "not found" (实测 ImageList.FListImagesAdd → Err.Raise 35607 → 退出)。 */
     HANDLE hProp = GetPropW(hw, L"VB6_Picture");
-    return hProp;  // HBITMAP/HICON handle
+    if (hProp) return (void*)vb6_WrapGdiHandleAsPictureDisp(hw, hProp);
+    return NULL;
 }
 
 void vb6_SetControlPicture(void* hwnd, void* hPicture) {
@@ -80,6 +182,9 @@ void vb6_SetControlPicture(void* hwnd, void* hPicture) {
         pOldCom->lpVtbl->Release(pOldCom);
         RemovePropW(hw, L"VB6_IPicture");
     }
+    /* Fix <Command2>: 句柄换了，先前懒包出来的 IPictureDisp 缓存作废
+     * (它借用的是旧句柄)，连保险引用一并归还。 */
+    vb6_ClearPictureDisp(hw);
     /* Store the picture handle and type (default=bitmap) */
     SetPropW(hw, L"VB6_Picture", (HANDLE)hPicture);
     SetPropW(hw, L"VB6_PictureType", (HANDLE)1);  /* default: bitmap */
@@ -146,6 +251,7 @@ void vb6_SetControlPictureFromCom(void* hwnd, void* pPictureDisp) {
             pOld->lpVtbl->Release(pOld);
             RemovePropW(hw, L"VB6_IPicture");
         }
+        vb6_ClearPictureDisp(hw);
         SetPropW(hw, L"VB6_Picture", (HANDLE)NULL);
         SetPropW(hw, L"VB6_PictureType", (HANDLE)0);
         InvalidateRect(hw, NULL, TRUE);
@@ -178,6 +284,22 @@ void vb6_SetControlPictureFromCom(void* hwnd, void* pPictureDisp) {
         return;
     }
     if (pOld) pOld->lpVtbl->Release(pOld);
+
+    /* Fix <Command2>: 同时存一份真 IPictureDisp (QI 自传入指针)，让
+     * vb6_GetControlPicture 交出去的是 IDispatch 而不是 IPicture* ——
+     * 两者的 vtable 槽位不同，把 IPicture* 当 IDispatch 用会让
+     * GetIDsOfNames 落到 IPicture::get_Type 上 (槽 5) 造成类型混淆。 */
+    {
+        static const GUID local_IID_IPictureDisp2 =
+            {0x7BF80981, 0xBF32, 0x101A, {0x8B, 0xBB, 0x00, 0xAA, 0x00, 0x30, 0x0C, 0xAB}};
+        IPictureDisp* pDispIn = NULL;
+        HRESULT hrD = pUnk->lpVtbl->QueryInterface(pUnk, &local_IID_IPictureDisp2,
+                                                   (void**)&pDispIn);
+        if (SUCCEEDED(hrD) && pDispIn) {
+            vb6_StorePictureDisp(hw, pDispIn);
+            pDispIn->lpVtbl->Release(pDispIn);   /* 缓存里已含引用 */
+        }
+    }
 
     /* Keep the native handle for legacy raw-handle callers (GetControlPicture
      * falls back to this when no COM pointer is stored). */
@@ -530,6 +652,8 @@ static LRESULT CALLBACK vb6_ImageSubclassProc(HWND hwnd, UINT msg, WPARAM wp, LP
             pPic->lpVtbl->Release(pPic);
             RemovePropW(hwnd, L"VB6_IPicture");
         }
+        /* Fix <Command2>: 懒包出来的 IPictureDisp 缓存也在这里归还 */
+        vb6_ClearPictureDisp(hwnd);
         if (origProc) {
             SetWindowLongPtrW(hwnd, GWLP_WNDPROC, (LONG_PTR)origProc);
             RemovePropW(hwnd, L"VB6_ImageOrigProc");
