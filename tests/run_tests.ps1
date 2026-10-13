@@ -2895,6 +2895,30 @@ if ($Category -in @("all", "run", "bas")) {
         'vb6_Len(h->PV  /* class var .PV field variant */)',
         'vb6_Left(h->PV  /* class var .PV field variant */'
     )
+
+    # 账 #305 §B172 (第六十三刀): 「成员读」还有**第三条**发码路 —— 接收者是类形参时
+    # 那一站 (Fix 088c) 连尾注都不写, 于是 §B171 那两半判据都看不见它。修前 InStr(h.PV, …)
+    # 发 `vb6_InStr(1, (*h)->PV, …)` = cl C2440 (两台都没 exe); 修后与局部变量那形同出口。
+    # 第六枚是证人: 同类的 String 字段 (PS) 不带 variant 词, 裸 BSTR 直送, 一字未动。
+    Test-EmitcShape 'b172_param_slot_read_shape' @(
+        "$Tests\b172_paramslot\B172Main.bas", "$Tests\b172_paramslot\B172Holder.cls") @(
+        'vb6_InStr(1, vb6_VariantToString((*h)->PV  /* class var .PV field variant */)',
+        'vb6_InStr(1, vb6_VariantToString((*h)->PZ  /* class var .PZ field variant */)',
+        'vb6_Replace(vb6_VariantToString((*h)->PV  /* class var .PV field variant */)',
+        'vb6_InStr(1, vb6_VariantToString((*h)->PN  /* class var .PN field variant */)',
+        'vb6_InStr(1, vb6_VariantToString(_vb6_with_0->PZ  /* With class .PZ field variant */)',
+        'vb6_InStr(1, (*h)->PS  /* class var .PS field */,',
+        'vb6_InStr(1, vb6_VariantToString(h->PV  /* class var .PV field variant */)'
+    )
+    Test-EmitcAbsent 'b172_param_slot_read_lesion' @(
+        "$Tests\b172_paramslot\B172Main.bas", "$Tests\b172_paramslot\B172Holder.cls") @(
+        'vb6_InStr(1, (*h)->PV',
+        'vb6_InStr(1, (*h)->PZ',
+        'vb6_InStr(1, (*h)->PN',
+        'vb6_Replace((*h)->PV',
+        'vb6_InStr(1, _vb6_with_0->PZ',
+        'vb6_Len((*h)->PV'
+    )
     # 账 #305 §B149 + §B150 (第四十刀): 注册表家族的真往返 + 晚绑定槽的二维元素读写。
     # 读数来源 = .build/b1280_rs (新 exe, x64 与 x86 **逐行相同**, 故同针同过); 外部口径证人 =
     # VB6 真语料 mdoceditor/E-Type/Main.bas:269 (`For i = 0 To UBound(varFiles, 1)` + `varFiles(i, 1)`)。
@@ -5626,6 +5650,28 @@ if ($Category -in @("all", "run", "vbp")) {
         "B171-DONE")
     Test-Vbp 'b171_class_slot_arg' "$Tests\b171_slotarg\B171.vbp" $b171Expected
     Test-Vbp 'b171_class_slot_arg_x86' "$Tests\b171_slotarg\B171.vbp" $b171Expected -Arch "x86"
+    # <vbeclipse> 回归夹子 (b172_paramslot, 账 #305 §B172 第六十三刀): 类**形参**那一站的成员读
+    # 以前不写尾注 ⇒ 「这是不是一枚槽」两半判据全答否 ⇒ InStr/Replace 把整只 vb6_VARIANT 递给
+    # BSTR 形参 = C2440 (修前两台都编不过)。两台实测读数逐行相同:
+    #   B172-1..2  撞名 (PV) 与不撞名 (PZ) 必须同答 3;  B172-3  Replace 同一格;
+    #   B172-4     数值槽 (PN=7) 找 "7" 答 1 = 档位留着;
+    #   B172-5     同类的 String 字段 (PS) 是另一档, 本刀一个字没动它;
+    #   B172-6     找不着的针 ("z") 答 0 —— 不许「1=空对空」那种假绿;
+    #   B172-7     Len=8;  B172-8 With 块套在形参上那一形;  B172-9/10 局部变量那一形作对照。
+    $b172Expected = @(
+        "B172-1=3",
+        "B172-2=3",
+        "B172-3=withf0rm",
+        "B172-4=1",
+        "B172-5=3",
+        "B172-6=0",
+        "B172-7=8",
+        "B172-8=3",
+        "B172-9=3",
+        "B172-10=withf0rm",
+        "B172-DONE")
+    Test-Vbp 'b172_param_slot_read' "$Tests\b172_paramslot\B172.vbp" $b172Expected
+    Test-Vbp 'b172_param_slot_read_x86' "$Tests\b172_paramslot\B172.vbp" $b172Expected -Arch "x86"
 
     # <vbeclipse> 回归夹子 (iface_wrap): 接口宿主**类型映射**的最小夹子, GA run 36732948503
     # (BalloonTooltips 红) 的直接切片。IFoo 显式 `Attribute VB_Creatable = True` ⇒ 进不了

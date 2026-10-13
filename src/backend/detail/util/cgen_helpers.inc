@@ -577,6 +577,16 @@
     // ` variant` 词, 由两条成员读的发码路按 classFieldKind (§B169 的唯一出口) 盖上。
     bool cExprIsVariantSlotFieldRead(const std::string& cExpr) const;
 
+    // 账 #305 §B172 (第六十三刀): 上面那个词的**唯一作者** —— 「把一枚类数据字段的读发出去」
+    // 这一件事收成一枚出口。三条成员读的发码路 (点号走 knownClassVars_ 的那一站 / 点号走
+    // Fix 088c 由 AST 推类的那一站 / With 体内那一站) 都调它, 尾注与 ` variant` 词因此
+    // 只有一个来源。测量在案的教训: 本函数落地前只有前两条调得到那个词, 第三条 (类形参
+    // `UseAll(h As K63Holder)` 发 `(*h)->PV`) 不写尾注 ⇒ 「按文本认槽」一律答否 ⇒
+    // InStr(h.PV, …) 把整只 vb6_VARIANT 递给 BSTR 形参 = C2440, 两台都没 exe。
+    std::string classFieldReadExpr(const std::string& objC, const std::string& clsName,
+                                   const std::string& memberName, bool isVoidPtr,
+                                   const std::string& markerLabel) const;
+
     // 账 #305 §B147: 「这枚 C 表达式是不是整只 vb6_VARIANT 槽」的 **AST 那一半** ——
     // 与上面 cExprIsVariant (文本前缀表) 合起来回答同一个问句。为什么必须分两头供出：
     // 类型 oracle 手上只有 AST (它先于发码), 而发码改道能吃两半。于是规矩是

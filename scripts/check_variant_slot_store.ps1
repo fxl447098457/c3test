@@ -128,7 +128,10 @@ foreach ($k in $bareByFile.Keys) {
 #   R5c 那张表只在 driver 的一趟预扫描里建 (恰好 1 份文件
 #       driver_codegen_fieldkind_scan.inc), 注入站点恰好 1 处
 #   R5d 「认文本尾注」这条歧路不许复活: `class var .` 这份拼写逐文件钉死处数, 新增即红
-#       (今天 11 处 / 6 份文件: 8 处是**生产**那句尾注的发码点, 3 处是讲这件事的注释 ——
+#       (今天 9 处 / 6 份文件 —— 第六十三刀 (§B172) 之前 11 处: 那两处**生产**尾注的字面量收进了
+#        唯一出口 classFieldReadExpr, 它按 label 实参拼这句, 于是发码文件里再无该字面量; 「哪几站
+#        调它」改由 R9c 钉。剩下的都是讲这件事的注释或消费点 —— 注释也一起钉, 因为「谁在提这句
+#        文本」正是这一族重新长出来的地方)
 #        注释也一起钉, 因为「谁在提这句文本」正是这一族重新长出来的地方)
 #   R5e 本模块那张老表 classVariantMembers_ 的写者仍只住一份文件, 恰好 4 枚 insert
 $QDEF_RE_168    = 'Vb6Type\s+classFieldKind\s*\('
@@ -185,7 +188,7 @@ if ($mapFiles168.Count -ne 1 -or $mapFiles168[0] -ne 'driver_codegen_fieldkind_s
 if ($inj168 -ne 1) { $bad += ('R5c 表的注入站点 ' + $inj168 + ' 处 (要恰好 1)') }
 $WantMark168 = [ordered]@{
     'cgen_expr_call_callee_member.inc'    = 1
-    'cgen_expr_member_class_fallback.inc' = 3
+    'cgen_expr_member_class_fallback.inc' = 1
     'cgen_expr_member_voidptr_com.inc'    = 4
     'cgen_state.inc'                      = 1
     'cgen_call.cpp'                       = 1
@@ -296,11 +299,15 @@ foreach ($k in $askByFile170.Keys) {
 }
 $readAsk170 = 0
 if ($askByFile170.ContainsKey('cgen_util_type.cpp')) { $readAsk170 = $askByFile170['cgen_util_type.cpp'] }
-# ---- R9 (账 #305 §B171 第六十二刀): 尾注上那个 variant 词只许两处写、一处读 ----
+# ---- R9 (账 #305 §B171 第六十二刀 → §B172 第六十三刀): 那条尾注只许一处写、三站调、一处读 ----
+# 第六十三刀把「拼这条成员读尾注」本身收进唯一出口 classFieldReadExpr (定义在 cgen_util_type.cpp,
+# 档位那一问就在它身上问 classFieldIsVariantSlot)。三站 (点号 / Fix 088c 的类形参 AST 推 / With)
+# 只许调它; 少一站 = 那一站的槽读从此不带档位, 「按 C 文本认槽」那一问一律答否 —— 实测: 内在函数
+# 吃整枚类形参的 Variant 槽字段 (`InStr(1, h.PV, ...)') 把 vb6_VARIANT 递进 BSTR 槽 ⇒ cl C2440.
 # 「这枚 C 文本是不是一枚**可寻址的槽字段读」**收成一处 (cExprIsVariantSlotFieldRead):
 #   定义与 cExprIsVariant 的那枚委托都在 cgen_util_type.cpp, 装箱站要地址就问这一处。
 #   写词那一头只认得两条成员读的发文路 (点号 / With) —— 第三处自己拼尾注 = 下一次漏档的现场。
-$WantWord171 = [ordered]@{ 'cgen_expr_member_class_fallback.inc' = 1; 'cgen_expr_with.cpp' = 1 }
+$WantWord171 = [ordered]@{ 'cgen_util_type.cpp' = 1 }
 $WantAsk171 = [ordered]@{ 'cgen_util_type.cpp' = 2; 'cgen_helpers.inc' = 1;
                           'cgen_util_comwrite.cpp' = 1; 'cgen_expr_call_arg_emit.inc' = 2 }
 $wordByFile171 = @{}; $askByFile171 = @{}
@@ -316,7 +323,7 @@ foreach ($k in $WantWord171.Keys) {
     $gw171 = 0
     if ($wordByFile171.ContainsKey($k)) { $gw171 = $wordByFile171[$k] }
     if ($gw171 -ne $WantWord171[$k]) {
-        $bad += ('R9 ' + $k + ' 写 variant 尾注 ' + $gw171 + ' 处, 名单钉的是 ' + $WantWord171[$k] + ' (点号 + With 两条成员读)')
+        $bad += ('R9 ' + $k + ' 写 variant 尾注 ' + $gw171 + ' 处, 名单钉的是 ' + $WantWord171[$k] + ' (三站只许调唯一出口 classFieldReadExpr, 词由它写)')
     }
 }
 foreach ($k in $wordByFile171.Keys) {
@@ -336,6 +343,29 @@ foreach ($k in $askByFile171.Keys) {
         $bad += ('R9 名单外的新问点 ' + $k + ' x' + $askByFile171[$k] + ' —— 这一问又有人自己抄一份')
     }
 }
+# ---- R9c (第六十三刀 §B172): 成员读发文站三处, 每一处都只许调那条唯一出口 ----
+$WantStation172 = [ordered]@{ 'cgen_expr_member_class_fallback.inc' = 2; 'cgen_expr_with.cpp' = 1 }
+$stationByFile172 = @{}
+foreach ($f in $srcFiles168) {
+    $t172 = [System.IO.File]::ReadAllText($f.FullName)
+    $n172 = [regex]::Matches($t172, '= classFieldReadExpr\(').Count
+    if ($n172 -gt 0) { $stationByFile172[(Split-Path $f.FullName -Leaf)] = $n172 }
+}
+foreach ($k in $WantStation172.Keys) {
+    $g172 = 0
+    if ($stationByFile172.ContainsKey($k)) { $g172 = $stationByFile172[$k] }
+    if ($g172 -ne $WantStation172[$k]) {
+        $bad += ('R9 ' + $k + ' 调 classFieldReadExpr ' + $g172 + ' 处, 名单钉的是 ' + $WantStation172[$k] + ' (点号 + 类形参 AST + With 三站)')
+    }
+}
+foreach ($k in $stationByFile172.Keys) {
+    if (-not $WantStation172.Contains($k)) {
+        $bad += ('R9 名单外的新发文站 ' + $k + ' x' + $stationByFile172[$k] + ' —— 成员读那一站又有人自己拼尾注')
+    }
+}
+$stationTotal172 = 0
+foreach ($v in $stationByFile172.Values) { $stationTotal172 += $v }
+
 $wordTotal171 = 0
 foreach ($v in $wordByFile171.Values) { $wordTotal171 += $v }
 $askTotal171 = 0
@@ -345,7 +375,7 @@ foreach ($v in $markByFile168.Values) { $markTotal168 += $v }
 
 $nHand = $handPairs.Count
 if ($bad.Count -eq 0) {
-    Write-Host ('PASS variant_slot_store: def 1 | calls ' + $callSites + ' | shapes ' + $nHand + ' | open stations ' + $bareTotal + ' | slotask168 ' + $qSites168 + ' | projask169 ' + $projSites169 + ' | mark168 ' + $markTotal168 + ' | bstr169 ' + $bstrTotal169 + ' | readask170 ' + $readAsk170 + ' | slotword171 ' + $wordTotal171 + ' | slotask171 ' + $askTotal171 + ' | auth169 ' + $authCall169['emitBstrSlotStore'] + '/' + $authCall169['emitVariantSlotAssign'] + ' | violations 0') -ForegroundColor Green
+    Write-Host ('PASS variant_slot_store: def 1 | calls ' + $callSites + ' | shapes ' + $nHand + ' | open stations ' + $bareTotal + ' | slotask168 ' + $qSites168 + ' | projask169 ' + $projSites169 + ' | mark168 ' + $markTotal168 + ' | bstr169 ' + $bstrTotal169 + ' | readask170 ' + $readAsk170 + ' | slotword171 ' + $wordTotal171 + ' | slotst172 ' + $stationTotal172 + ' | slotask171 ' + $askTotal171 + ' | auth169 ' + $authCall169['emitBstrSlotStore'] + '/' + $authCall169['emitVariantSlotAssign'] + ' | violations 0') -ForegroundColor Green
     exit 0
 }
 foreach ($b in $bad) { Write-Host ('FAIL ' + $b) -ForegroundColor Red }

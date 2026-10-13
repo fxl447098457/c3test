@@ -251,27 +251,11 @@
                         }
                     }
                 }
-                // Fix 092p: 字段名规范化回声明名 — VB6 大小写不敏感, 源码 `.socket`
-                // 与声明 `Socket` 是同一字段, 直接用源码拼写会生成 `...->socket` (C2039).
-                const std::string fldC092p =
-                    canonicalClassFieldName(itClassVar->second, node.memberName);
-                if (isVoidPtr) {
-                    lastExpr_ = obj090 + "->" + cIdent(fldC092p)
-                              + "  /* class var ." + node.memberName + " field voidptr */";
-                } else {
-                    // 账 #305 §B171 (第六十二刀): 尾注里带上「这一档交出来的是不是整只槽」。
-                    //   这一问的答案早就在 §B168 那张表里 (classFieldKind = §B169 收成的唯一
-                    //   出口), 但这条尾注此前只说「是个字段」不说「是哪一档」—— 于是「按 C 文本
-                    //   认槽」那一问 (cExprIsVariant) 一律答否, 实参装箱的两站都把整只
-                    //   vb6_VARIANT 塞进了标量槽 (实测 .bstrVal=h->PZ ⇒ C2440, 两台都没 exe)。
-                    //   词只加在 Variant 那一档: String/Long/Object 那些档的尾注一个字不动,
-                    //   所以「认得尾注」不会把它们误认成槽。
-                    const bool slotField62 = classFieldIsVariantSlot(
-                        itClassVar->second, node.memberName);
-                    lastExpr_ = obj090 + "->" + cIdent(fldC092p)
-                              + "  /* class var ." + node.memberName + " field"
-                              + (slotField62 ? " variant" : "") + " */";
-                }
+                // 账 #305 §B172 (第六十三刀): 这一整段「拼字段访问 + 尾注」收进唯一出口
+                //   classFieldReadExpr —— 尾注里的档位 (` variant` 那一个词, §B171) 与
+                //   字段名规范化 (Fix 092p) 从此只有一个作者, 站点只递"是不是 voidptr"。
+                lastExpr_ = classFieldReadExpr(obj090, itClassVar->second, node.memberName,
+                                               isVoidPtr, "class var");
             }
         // Fix 089b: trailing 变量名匹配在 obj 含 '.' 时跳过 — obj 是 UDT/属性字段链
         // (如 uFile.Data) 时, 尾段 "data" 是字段名而非变量名. 若外部 COM 变量恰好
@@ -331,7 +315,15 @@
                     lastExpr_ = lateBoundReadOnVariantCarrier(obj, node.memberName);
                     return;
                 }
-                lastExpr_ = obj + "->" + cIdent(node.memberName);
+                // 账 #305 §B172 (第六十三刀): **这一站就是那条被漏掉的成员读**。接收者是
+                //   "文本没进 knownClassVars_ 的类实例" —— 实测类形参 `Private Sub UseAll(h As
+                //   K63Holder)` 的标识符发成 `(*h)`, 于是走到这里, 而它以前只发裸的
+                //   `(*h)->PV` (无尾注) ⇒ §B171 那两半判据都看不见它 ⇒ InStr(h.PV, …) 把整只
+                //   vb6_VARIANT 递给 BSTR 形参 = C2440 (两台实测)。现在与上面那一站同出口、
+                //   同尾注、同 variant 词。voidptr 那一问刻意仍交 false: 本刀只补"认槽",
+                //   不顺手改 COM 指针字段的链式路由 (那是另一问, 台账 §B172 记着)。
+                lastExpr_ = classFieldReadExpr(obj, clsFromAst, node.memberName,
+                                               /*isVoidPtr=*/false, "class var");
                 return;
             }
             // Fix 085: 更深嵌套的 UDT 链末端字段访问 (Fix 031 只覆盖直接 UDT 变量).

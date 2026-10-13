@@ -802,6 +802,26 @@ bool CCodeGen::cmpOperandMayTakeAddr(const std::string& c, Expr* ast) const {
 // 包含已知返回 vb6_VARIANT 的函数调用时, 判定为 Variant.
 // 仅检查顶层表达式 (去除前导括号/空白后), 避免对子表达式误判.
 
+// 账 #305 §B172 (第六十三刀): 「把一枚类数据字段的读发出去」的唯一出口 —— 尾注由这一处拼,
+// 三站只递参数。为什么必须收在这里: §B171 把「认槽」那一问教成「看尾注那个 variant 词」,
+// 而词当时只有**两条**发码路会盖 (点号走 knownClassVars_ 的那一站 + With 体内那一站);
+// 第三条 (Fix 088c: 接收者是"文本没进 knownClassVars_ 的类实例" —— 类形参 `UseAll(h As K63Holder)`
+// 的标识符发成 `(*h)`) 连尾注都不写, 于是同一枚字段换一种接收者声明方式就一律答「不是槽」,
+// InStr(h.PV, …) 直接把整只 vb6_VARIANT 递给 BSTR 形参 = C2440 (两台实测, 都没 exe)。
+// 档位与 voidptr 都仍由 §B169 那张表回答: 本函数只是把那张表的答案**投影**成 C 文本。
+std::string CCodeGen::classFieldReadExpr(const std::string& objC, const std::string& clsName,
+                                         const std::string& memberName, bool isVoidPtr,
+                                         const std::string& markerLabel) const {
+    // Fix 092p 的口径留在这一处: VB6 大小写不敏感, 源码拼写要规范化回声明名, 否则
+    // `...->socket` (声明 Socket) 是 C2039。
+    const std::string base = objC + "->" + cIdent(canonicalClassFieldName(clsName, memberName));
+    if (isVoidPtr) {
+        return base + "  /* " + markerLabel + " ." + memberName + " field voidptr */";
+    }
+    return base + "  /* " + markerLabel + " ." + memberName + " field"
+         + (classFieldIsVariantSlot(clsName, memberName) ? " variant" : "") + " */";
+}
+
 // 账 #305 §B171 (第六十二刀): 「按 C 文本认槽」这一问漏认的那一族 —— 类字段的 Variant 槽读。
 // 两条发码路 (§B168/§B169 那张表的两处成员读) 现在在尾注里带上 ` variant` 这个词, 而**只有**
 // Variant 那一档带 —— 所以这一问的答案仍然只有那张表一个来源, 这里只是把它读回来。
