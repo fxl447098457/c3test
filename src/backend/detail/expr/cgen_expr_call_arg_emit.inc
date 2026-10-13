@@ -1138,8 +1138,12 @@
                     // ---------------------------------------------------------------
                     bool lvArgIsVariantField092t = false;
                     if (i < node.positional.size()) {
+                        // 账 #305 §B171: 同一枚「这是不是一枚可寻址的槽字段」—— 工程类那一族以前
+                        //   够不着 (这一问只认 UDT 字段), 于是下面那条「非 Variant 左值 ⇒ 落临时再装箱」
+                        //   会把整只槽再装一层 (vt 压成 8、回写丢)。三格问的是同一句话。
                         lvArgIsVariantField092t =
-                            (inferUdtFieldVb6Type(node.positional[i].get()) == Vb6Type::Variant);
+                            (inferUdtFieldVb6Type(node.positional[i].get()) == Vb6Type::Variant)
+                            || cExprIsVariantSlotFieldRead(argVal);
                     }
                     if (isLvChain092z && !lvArgIsVariantField092t
                         && i < calleeParams.size()
@@ -1283,8 +1287,16 @@
                                 // 2. C 表达式已是 Variant (vb6_VariantArrayGet 等),
                                 //    提取 BSTR 值到 .bstrVal (避免 VARIANT→BSTR C2440)
                                 // 3. 其他未知类型保持原样 (UDT 等单独处理)
-                                if (i < node.positional.size()
-                                    && inferUdtFieldVb6Type(node.positional[i].get()) == Vb6Type::Variant) {
+                                if ((i < node.positional.size()
+                                     && inferUdtFieldVb6Type(node.positional[i].get()) == Vb6Type::Variant)
+                                    || cExprIsVariantSlotFieldRead(argVal)) {
+                                    // 账 #305 §B171 (第六十二刀): 工程类里那枚 Variant 字段读走的是
+                                    //   同一条 UDT 那一格 —— 值本来就是可寻址的 vb6_VARIANT, 直传地址。
+                                    //   实测在此之前它落进下面那条「按文本认槽」那一问: 认不出 ⇒ 兜底把
+                                    //   整只槽塞进 .bstrVal (cl C2440); 光把尾注教进 cExprIsVariant 又只
+                                    //   剩下 vb6_VariantToString 那一档 —— 串值对 ([8|withform])、数值槽
+                                    //   静默压成串 ([8|7], VB6 交 [3|7])、回写整个丢 (Mutate 之后再读还是
+                                    //   旧值)。地址那一档三样都保住, 且与 Variant 变量作实参同形 (&w)。
                                     argVal = "&(" + argVal + ")";
                                 } else if (cExprIsVariant(argVal)) {
                                     argVal = "(&(vb6_VARIANT){.vt=VT_BSTR, .bstrVal=vb6_VariantToString(" + argVal + ")})";

@@ -771,6 +771,11 @@ std::string CCodeGen::packLetValueArg(const ParameterInfo& lastP, Expr* valueExp
             return "(&(vb6_VARIANT){.vt=VT_BOOL, .boolVal=(int16_t)(" + val + ")})";
         default:
             // 与 M22 default 分支对齐: 变体表达式提取 BSTR, 其余未知按 BSTR 兜底
+            // 账 #305 §B171 (第六十二刀): 可寻址的那一档先走 —— 实参本身就是一枚类里的
+            //   Variant 槽时交**槽的地址** (VB6 的 ByRef 语义, 与 cgen_expr_call_arg_emit.inc
+            //   的 UDT 槽那一格同一条)。次序反了就会掉进下面那条 vb6_VariantToString:
+            //   串值照样对, 但数值槽被静默压成串、回写整个丢 (实测读数在台账)。
+            if (cExprIsVariantSlotFieldRead(val)) return "&(" + val + ")";
             if (cExprIsVariant(val)) {
                 return "(&(vb6_VARIANT){.vt=VT_BSTR, .bstrVal=vb6_VariantToString("
                        + val + ")})";
