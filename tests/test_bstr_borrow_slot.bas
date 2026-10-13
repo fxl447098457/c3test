@@ -78,6 +78,21 @@ Sub Main()
     Next
     Debug.Print "B167-W7=" & s & "|" & Len(s)
 
+    ' 8/9 (knife 58): the right-hand side here is a CALL, but these two RTL exports hand
+    ' back somebody else's live buffer (vb6_ErrDescription -> vb6_err.description,
+    ' vb6_ErrSource -> vb6_err.source; neither copies nor frees). Before the exception
+    ' list the slot took that pointer as its own, so clearing the slot freed Err's block.
+    On Error Resume Next
+    Err.Raise 5, "errsrcw9", "errdescw8"
+    sA = Err.Description
+    Debug.Print "B167-W8a=" & CStr(sA) & "|" & Len(sA)
+    sA = 1
+    Debug.Print "B167-W8b=" & CStr(Err.Description) & "|" & Len(Err.Description)
+    sB = Err.Source
+    Debug.Print "B167-W9a=" & CStr(sB) & "|" & Len(sB)
+    sB = 1
+    Debug.Print "B167-W9b=" & CStr(Err.Source) & "|" & Len(Err.Source)
+
     ' X1: UDT String field as the source
     rec.Name = "udtstr"
     sA = rec.Name

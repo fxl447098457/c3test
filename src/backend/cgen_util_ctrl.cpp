@@ -2354,6 +2354,236 @@ void CCodeGen::emitVariantSlotStore(const std::string& target, const std::string
     c_.emitLine(target + " = " + expr + ";");
 }
 
+// 账 #305 §B169 (第六十刀): 「把这枚右值收进一处 BSTR 槽」收成这一枚出口 —— 原先这段
+// 住在 visit(AssignmentStmt&) 的 targetIsBstr 那一支里。搬出来的理由不是整洁: With 块里
+// 写类的 String 数据字段那一站 (§B169 形②) 需要的正是同一串决定 (右值折算 / 自有还是借来 /
+// 定长串收口 / 清旧值+拷新值), 在那里再抄一遍就是第四份答案 (与 §B164 第五十五刀把槽位写入
+// 收成 emitVariantSlotStore 同一手法)。行为逐字节不变 —— 语料 emit A/B 钉这一条。
+void CCodeGen::emitBstrSlotStore(const std::string& target, Expr* rhs,
+                                 std::string value, const std::string& fixedLen) {
+    // Fix 038b-6: BSTR 目标 + Variant 值 → 先提取 BSTR
+    // 使用 cExprIsVariant (C 字符串级) + knownVariantVars_ 检测.
+    bool valueIsVariant = cExprIsVariant(value);
+    if (!valueIsVariant && rhs && rhs->kind == ASTNodeKind::IdentifierExpr) {
+        auto& id = static_cast<IdentifierExpr&>(*rhs);
+        std::string idLower = id.name;
+        std::transform(idLower.begin(), idLower.end(), idLower.begin(), ::tolower);
+        if (knownVariantVars_.count(idLower)) valueIsVariant = true;
+    }
+    // Fix 089j: RHS 为类 Variant 字段 (me->mParentsColKey 等) 也视为
+    // Variant 表达式 — cExprIsVariant 只查函数前缀, me-> 成员不命中,
+    // 导致 PropertyGet 里 `ret = me->VarField` 不转 → C2440.
+    if (!valueIsVariant && value.compare(0, 4, "me->") == 0) {
+        std::string rhsMember = value.substr(4);
+        std::transform(rhsMember.begin(), rhsMember.end(), rhsMember.begin(), ::tolower);
+        if (classVariantMembers_.count(rhsMember)) valueIsVariant = true;
+    }
+    if (valueIsVariant) {
+        value = "vb6_VariantToString(" + value + ")";
+    }
+    // Fix P24-10b: RHS 是裸晚绑定调用结果 (vb6_ComCallByDispid → void* 指向
+    // VARIANT) 且目标是 BSTR — Fix 113 已把 ComCall 无类型结果从前缀表回退,
+    // valueIsVariant 不命中, 原样交给 vb6_BSTR_Assign 会把它当 BSTR 指针
+    // → 运行期 0xC0000005 (test_com_latebound `s1 = o("name")` 实测)。
+    // 先 VariantFromComResult 包回 vb6_VARIANT 再提取 BSTR, 与下方 else
+    // 分支的 Fix 124 valueIsBareComResult 同口径 (只认返回 void* VARIANT*
+    // 的四兄弟; ComCallBSTR/Int/Double/Object 返回类型化值, 不在此列)。
+    if (!valueIsVariant) {
+        bool comResBstr = value.compare(0, 12, "vb6_ComCall(") == 0
+            || value.compare(0, 20, "vb6_ComCallByDispid(") == 0
+            || value.compare(0, 15, "vb6_ComGetProp(") == 0
+            || value.compare(0, 21, "vb6_ComGetObjectProp(") == 0;
+        if (comResBstr) {
+            value = "vb6_VariantToString(vb6_VariantFromComResult(" + value + "))";
+        }
+    }
+    // Fix 140: RHS 是 Byte() 数组 (类成员 m_Caption 或已知字节数组变量) 且目标是
+    // BSTR → 按 UTF-16LE 字节还原为字符串. 不能把数组指针当 BSTR 交给
+    // vb6_BSTR_Assign (SysStringLen 会读数组前的堆元数据当长度 → 堆损坏).
+    // 场景: LabelPlus.ctl `Property Get Caption() As String: Caption = m_Caption`.
+    // 记账这一支改没改成 (给下面 #122 那支看): 值本身是 Byte() 数组 ⇒ inferExprType 会
+    // 报 Byte, 但那已经是**转好的字符串**了, 再套一层 CStrByte 是错的 (实测把
+    // LabelPlus 的 `Caption = m_Caption` 发成 vb6_CStrByte(vb6_ByteArrayToString(..)))。
+    bool wrappedByteArr140 = false;
+    if (!valueIsVariant) {
+        std::string rhs140 = value;
+        if (rhs140.compare(0, 4, "me->") == 0) rhs140 = rhs140.substr(4);
+        if (rhs140.size() > 4 && rhs140[0] == '(' && rhs140[1] == '*'
+            && rhs140.back() == ')') {
+            rhs140 = rhs140.substr(2, rhs140.size() - 3);
+        }
+        std::string rhs140l = rhs140;
+        std::transform(rhs140l.begin(), rhs140l.end(), rhs140l.begin(), ::tolower);
+        if (rhs140.find_first_of("( .") == std::string::npos
+            && (knownByteArrayVars_.count(rhs140l)
+                || classByteArrayMembers_.count(rhs140l))) {
+            value = "vb6_ByteArrayToString(" + value + ")";
+            wrappedByteArr140 = true;
+        }
+    }
+    // 账 #122: VB6 在**赋值那一刻**就做隐式 CStr —— `Dim s As String: s = 123` 合法，
+    // 而这一格以前把值原样交给 vb6_BSTR_Assign。后果分两种，别当成同一种：
+    //   整型那半 (Long/Integer/Boolean/Byte) 在 C 里只是警告 (int → BSTR 形参)，数字被
+    //     当指针存进 String 变量，**第一次读/释放就崩** —— 实测修复前二进制 `s = n` 是
+    //     BUILD-RC=0 而跑起来 SIGSEGV (rc=139)，所以它不是"编不过"，是静默埋雷;
+    //   浮点/日期那半 (Double/Currency/Date) 才是响的 cl `error C2440 无法从 double
+    //     转换为 BSTR`。
+    // 这一支只在 inferExprType 认得出的**标量**类型上折 (isScalarImplicitStr159:
+    // Integer/Long/Single/Double/Byte/Boolean/Currency/Date)，String/Variant/Object/
+    // 未知一律不介入。正因为整型那半今天过得去，本批的护栏不是"现存工程零改动"而是
+    // "改动必须逐条解释得清": 实测 7 枚存量工程里 6 枚逐字节相同，Charts 2020 只剩
+    // `sDiplay = CLng(me->m_Value)` 那一行 —— 那是一处真实修复而非回归。
+    // 复用形参那条路 (Fix 159-B) 的同一个 wrapToBSTR, 不另开一套折算表。
+    // 上面两支 (Variant 提取 / Byte() 还原) 已经把值转成了字符串, 不能再套一层。
+    bool wrapped122 = false;
+    if (!valueIsVariant && !wrappedByteArr140 && rhs) {
+        Vb6Type vt122 = inferExprType(*rhs);
+        if (isScalarImplicitStr159(vt122)) {
+            std::string w122 = wrapToBSTR(value, *rhs);
+            if (w122 != value) {
+                value = w122;
+                wrapped122 = true;
+            }
+        }
+    }
+    // 账 #113 / #119: 值是不是"自有的临时串" —— **字符串**字面量 / 拼接 / 返回 String 的
+    // 工程函数或 Property Get (返回变量 vb6_ret_* 在入口处已按值语义拷过)。变量、形参、
+    // 成员字段、数组元素都是**借来的**, 只能深拷贝。
+    // #119 之前这条判据只服务模块级目标 (#113 那格为了少翻发码面刻意加了
+    // `bstrTargetViaTypeQuery` 那道闸), 局部/形参/UDT String 字段三条老路一律 Assign
+    // ⇒ 每句从自有临时来的赋值都漏一只堆块 (`s = Left(x,2)` 就是 64 字符 + 块头那种
+    // 146 字节级的漏, 循环里就是纯漏, 旧值要等下一次赋值才被释放)。
+    // 铺开的底气是这一轮把 RTL 全扫了一遍: 77 枚 `BSTR` 返回函数里只有 3 枚发的是**借来
+    // 的**指针 (vb6_ErrDescription / vb6_ErrSource 直接回 vb6_err 那两个字段、
+    // vb6_ho_variantToBstr 回 v->bstrVal), 而它们都只能以成员访问的形态到达
+    // (`Err.Description`), 下面的 IdentifierExpr 那一支根本捡不到 ⇒ 不会被误判自有。
+    // 字面量那支限定成 LiteralKind::String: 数值/布尔字面量赋给 String 目标这一格发的是
+    // 裸数字 (`vb6_BSTR_Assign(&s, 123)` → cl C2440, 已另立一账), 把它标成自有只会把
+    // "当场编译不响"变成"存进一只假指针", 不能顺手动。
+    bool valueOwned113 = false;
+    if (rhs) {
+        switch (rhs->kind) {
+            case ASTNodeKind::LiteralExpr:
+                valueOwned113 = (static_cast<LiteralExpr&>(*rhs).literalKind
+                                 == LiteralKind::String);
+                break;
+            case ASTNodeKind::BinaryExpr: {
+                auto& vb113 = static_cast<BinaryExpr&>(*rhs);
+                valueOwned113 = (vb113.op == BinaryOp::Concat || vb113.op == BinaryOp::Add);
+                break;
+            }
+            case ASTNodeKind::IndexOrCallExpr: {
+                auto& vc113 = static_cast<IndexOrCallExpr&>(*rhs);
+                if (vc113.callee && vc113.callee->kind == ASTNodeKind::IdentifierExpr) {
+                    auto* vSym113 = symTab_.lookup(
+                        static_cast<IdentifierExpr&>(*vc113.callee).name);
+                    valueOwned113 = (vSym113
+                                     && (vSym113->kind == SymbolKind::Function
+                                         || vSym113->kind == SymbolKind::PropertyGet));
+                }
+                break;
+            }
+            default:
+                break;
+        }
+    }
+    // #122 折出来的 `vb6_CStrXxx(...)` 是刚 alloc 的新块, 与字面量/拼接同属"自有"。
+    if (!fixedLen.empty()) {
+        // 账 #118 ①: 定长串赋值的收口 —— 短则右侧补空格、长则截右 (VB6 手册 + 真机
+        // CopyMemory 实测一致, 与 LSet 同口径)。必须先 fit 成一只**新** BSTR 再 move
+        // 进目标: 先 Assign 再回头改长度会多留一只临时, 而裸赋值连长度都不对。
+        // RHS 是自有临时串那一侧用 vb6_LSetFree 顺手把它释放 —— 尺与下面
+        // AssignMove/Assign 的选择同一把, 否则每次赋值都漏一块 (账 #118 ②)。
+        const std::string fitFn118 =
+            (valueOwned113 || wrapped122) ? "vb6_LSetFree" : "vb6_LSet";
+        c_.emitLine("vb6_BSTR_AssignMove(&" + target + ", " + fitFn118 + "(" + value
+                    + ", " + fixedLen + "));");
+    } else if (valueOwned113 || wrapped122) {
+        c_.emitLine("vb6_BSTR_AssignMove(&" + target + ", " + value + ");");
+    } else {
+        c_.emitLine("vb6_BSTR_Assign(&" + target + ", " + value + ");");
+    }
+}
+
+// 账 #305 §B169 (第六十刀): 「把这枚右值收进一枚 Variant 槽」(装箱 + 所有权 + 槽位语义)
+// 收成这一枚出口。原先住在 visit(AssignmentStmt&) 的 targetIsVariant 那一支; §B168 给类
+// 的公共 Variant 字段补上判据之后, With 块那一站还需要**同一串**决定 (自指右值要先收临时量,
+// 借来的走 vb6_VariantAssign), 所以两条路共用这一枚, 不再各抄一遍。
+void CCodeGen::emitVariantSlotAssign(const std::string& target, Expr* rhs,
+                                   const std::string& value, bool udtFieldSlot) {
+    // P8.4: 包装值为vb6_VARIANT, 先释放旧BSTR
+    std::string wrappedValue = wrapVariantValue(rhs, value);
+    // Fix <vbeclipse> rev16: Variant **数组元素**槽位走"接管"语义。
+    // `Clear + 浅拷贝` 对"从别处借来的值"不足: RHS 是 ByRef Variant 实参或相邻
+    // 元素时, wrapVariantValue 给出的是 vb6_VariantFromValue(...) —— 对 vb6_VARIANT
+    // 是 identity **浅拷贝**, 槽与借用方共用同一只 BSTR / 同一个 Dispatch, 借用方
+    // 一 Clear 槽即悬垂 (地址被后续同尺寸分配复用 ⇒ 每槽都读"最后一次写入的值")。
+    // 实测 tests/ve_list (工程内 List.cls 的 m_Items) idx=0/1/2 全答 "Gamma";
+    // 真工程 play78: Folder.Views.Item(0) 取回 1 字符垃圾 → 后续 NULL 解引用。
+    // vb6_VariantAssign = Clear(dst) + 深拷贝(BSTR 另分配 / Dispatch AddRef),
+    // 与同一个类的 m_Keys (String 数组, 走 vb6_BSTR_Assign) 同一口径。
+    bool targetIsVariantArraySlot =
+        (target.compare(0, 7, "VB6_SA_") == 0
+         && target.find("(vb6_VARIANT,") != std::string::npos)
+        // Fix 232: UDT 的 Variant 字段同属"槽位"—— `Clear(&字段)` + 浅拷贝赋值
+        // 会把 wrapVariantValue 给出的借用值 (BSTR / Dispatch) 与容器共用,
+        // 借用方一释放槽即悬垂 (与 Fix 154 的数组元素同一个理由)。
+        || udtFieldSlot;
+    if (targetIsVariantArraySlot) {
+        c_.emitLine("vb6_VariantAssign(&" + target + ", " + wrappedValue + ");");
+    } else if ([&] {
+                   // Fix <vbeclipse> 2026-10-12: RHS 文本里是否出现目标自身 (独立标识符)。
+                   // 目标不以标识符字符开头 (如 `(*o)` / `VB6_SA_AT(...)`) 时按原样走 ——
+                   // 那一族要么已由上面的"槽位"分支接管, 要么不是本缺陷的形态。
+                   const std::string& hay = wrappedValue;
+                   const std::string& ndl = target;
+                   if (ndl.empty()) return false;
+                   auto idc = [](char c) {
+                       return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+                              || (c >= '0' && c <= '9') || c == '_';
+                   };
+                   if (!idc(ndl.front())) return false;
+                   size_t p = 0;
+                   while ((p = hay.find(ndl, p)) != std::string::npos) {
+                       size_t e = p + ndl.size();
+                       bool lb = (p == 0) || !idc(hay[p - 1]);
+                       bool rb = (e >= hay.size()) || !idc(hay[e]);
+                       if (lb && rb) return true;
+                       p = e;
+                   }
+                   return false;
+               }()) {
+        // Fix <vbeclipse> 2026-10-12: RHS 里出现目标自己时 (`v = CDate(v)`) 不能
+        // 「先 Clear 目标再赋值」—— 那样 RHS 读到的是**已被清空的目标** (VT_EMPTY),
+        // 静默变成 0。实测 (ComCtlsDemo DTPicker.ctl 的 Property Let Value):
+        //   Select Case VarType(DateValue)
+        //     Case vbLong, vbInteger, vbByte, vbDouble, vbSingle
+        //       DateValue = CDate(DateValue)
+        // 原发成
+        //   vb6_VariantClear(&DateValue);
+        //   DateValue = vb6_VariantDate(vb6_CDate(vb6_VariantFromValue(DateValue)));  ← 读 Empty ⇒ 0
+        // 于是 CreateDTPicker 结尾的 `Me.Value = PropValue` 把日期变成 0 (1899-12-30),
+        // 落到 MinDate (#1/1/1900# = 2.0) 之下 ⇒ 误报
+        // Err.Raise 35773 "A date was specified that does not fall within the
+        // MinDate and MaxDate properties" (实测页堆下启动即退, RC=189=35773-256×139)。
+        // 修法: 先把 RHS 收进栈上临时量, 再清目标并接管。**临时量刻意不 Clear** ——
+        // `target = tmp` 是浅拷贝, BSTR/Dispatch 的所有权随拷贝交给目标, 与原来
+        // "把内联临时值赋给目标" 的转移语义一致。
+        emitVariantSlotStore(target, wrappedValue, true, true);  /* §B164 站⑤ 自指右值: 先收临时量再清+搬(形状不变) */
+    } else {
+        // §B164 站④ 的第二半句要问一句: 右值**本身是不是一枚活着的槽**。
+        // `last = e2`(两边都是 Variant)经 wrapVariantValue 发的是 `vb6_VariantFromValue(e2)`，
+        // 而 _Generic 对 vb6_VARIANT 是 identity **浅拷贝** ⇒ 两枚槽共用同一只 BSTR / 同一个
+        // x86 DECIMAL 缓冲(与 Rev16 那格数组元素同一个成因)。第五十五刀给 For Each 那一站补上
+        // 「先清旧值」之后，这份共用从「静默别名」变成**二次 free**: 实测 test_host_decimal 的 x86
+        // 台 12 次跑里 7 次 0xC0000374(BASE 那台 0/12 —— 它只是把每一轮的旧值漏掉，谁也没 free 两次)。
+        // 函数返回/集合取回那些是**内联临时量**(按值交回来)，仍走清+搬，不许多拷一次。
+        // 这一问收成一处权威(第五十五刀那一形 + 本刀的借来串存储那一形), 站点不再自己抄。
+        emitVariantSlotStore(target, wrappedValue,
+                             variantRhsOwnsValue(rhs, value));
+    }
+}
+
 // 账 #305 §B166 (第五十六刀): 被调方在统一出口销毁调用点为这一次调用现造的 ParamArray 数组。
 // VB6 的口径 = 这枚数组的寿命就是这一次调用; 安全性已量过: 每个 VB 过程的 PA 实参都由调用点的
 // vb6_PA_Create 新造(连 `Inner b` 那种把一枚 ParamArray 再递出去的形状也是重新装箱,
@@ -2379,6 +2609,17 @@ static bool b167TopIsCall(const std::string& s, size_t at) {
     return sel == std::string::npos || par < sel;
 }
 
+// 账 #305 §B167 形⑭ (第五十八刀): 「顶层是调用 = 现造的」这一腿有一条例外名单 —— RTL 里交回
+// **别人那一只还活着的块**的出口。名单是 RTL 逐枚手核出来的(返回 BSTR 的出口共 90 枚, 借来的就这三枚:
+// `return vb6_err.description;` / `return vb6_err.source;` / `return v->bstrVal;`, 既不 SysAllocString
+// 也不 Copy), 由第 58 道哨兵的 Q6 与 RTL 双向对钉(漏一名、多一名、名单外的新借名都当场红)。
+// 这三枚都不许被当成现造的: 槽一旦接管, 槽的 Clear 放掉的是 Err / 宿主自己那只块。
+static const char* kBorrowedBstrExports167[] = {
+    "vb6_ErrDescription",
+    "vb6_ErrSource",
+    "vb6_ho_variantToBstr",
+};
+
 bool CCodeGen::exprBorrowsBstrStorage(Expr* rhs, const std::string& rawC) const {
     if (!rhs) return false;
     static const std::string kSaBstr167 = "VB6_SA_AT(BSTR,";
@@ -2389,7 +2630,12 @@ bool CCodeGen::exprBorrowsBstrStorage(Expr* rhs, const std::string& rawC) const 
         || rawC.compare(at167, kSaNdBstr167.size(), kSaNdBstr167) == 0)
         return true;                                  // 串数组元素: 宏自己带元素类型, 不必再问表
     if (rhs->kind == ASTNodeKind::LiteralExpr) return false;
-    if (b167TopIsCall(rawC, at167)) return false;      // 现造的: 所有权随这一句交给槽
+    if (b167TopIsCall(rawC, at167)) {
+        const std::string callee167 = rawC.substr(at167, rawC.find('(', at167) - at167);
+        for (const char* br167 : kBorrowedBstrExports167)
+            if (callee167 == br167) return true;      // 例外: 这一枚调用交回的是借来的块
+        return false;                                 // 现造的: 所有权随这一句交给槽
+    }
     return inferExprType(*rhs) == Vb6Type::String;
 }
 
