@@ -280,6 +280,13 @@
     // 项目类 → 直接调用 vb6_<Type>_prop_get_Item(obj.field, arg);
     // COM 接口 → vb6_ComCall((void*)obj.field, L"Item", args, argc).
     const std::unordered_map<std::string, std::unordered_map<std::string, std::string>>* classTypedFieldMap_ = nullptr;
+    // 账 #305 §B168 (第五十九刀): 工程级「类 → vb6_VARIANT 标量字段」表 — driver 预扫描.
+    // key: 小写类名, value: 小写字段名集合 (原名 + "m_" 前缀两种拼法都在).
+    // 用途: 回答「`<对象>.<字段>` 这个左值发出来到底是不是 Variant 容器」—— 赋值站
+    // 的四条既有判据 (裸名 / 本模块 classVariantMembers_ / VB6_SA_* 文本 / UDT 字段类型)
+    // 都够不着**别类**的字段, 于是整句不装箱裸发 → cl C2440 (实测 use3.bas + holder2.cls:
+    // `h->PV = 7;`). 查询走 classFieldIsVariantSlot() 一处, 不要在调用点再抄一遍 find.
+    const std::unordered_map<std::string, std::set<std::string>>* classVariantFieldMap_ = nullptr;
     // Fix 045: 跨模块 Variant 返回值函数 C 名集合 — 由 driver.cpp 预扫描所有模块构建.
     // 包含所有返回 vb6_VARIANT 的项目函数的 C 名称 (如 "vb6_cAsyncSocket_Znl").
     // 在 cExprIsVariant() 中检查 C 表达式是否调用这些函数, 以正确识别 Variant 值.

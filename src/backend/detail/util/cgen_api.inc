@@ -251,6 +251,22 @@
         auto it = projClassNames_->find(Symbol::toLower(name));
         return it == projClassNames_->end() ? std::string() : it->second;
     }
+    // 账 #305 §B168 (第五十九刀): 工程级「类 → vb6_VARIANT 标量字段」表 (driver 预扫描).
+    void setClassVariantFieldMap(const std::unordered_map<std::string, std::set<std::string>>* m) {
+        classVariantFieldMap_ = m;
+    }
+    // 「类 <className> 的字段 <memberName> 发出来是不是 vb6_VARIANT 槽」—— 这一问的**唯一**出口.
+    // 字段名两种拼法 (原名 / m_ 前缀) 都在表里, 与 classVoidFieldMap_ 的查法一致.
+    bool classFieldIsVariantSlot(const std::string& className,
+                                 const std::string& memberName) const {
+        if (!classVariantFieldMap_ || className.empty() || memberName.empty()) {
+            return false;
+        }
+        auto it = classVariantFieldMap_->find(Symbol::toLower(className));
+        if (it == classVariantFieldMap_->end()) return false;
+        const std::string mem = Symbol::toLower(memberName);
+        return it->second.count(mem) > 0 || it->second.count("m_" + mem) > 0;
+    }
     // CoClass 身份出口 (tB, ai/022 B13b): 只喂 generateDllEntry。EXE 的 com_entry.c 本批
     // **不接线** —— 它今天整个跑在 legacy mint 上，接上就是把改码前编得过的存量工程换掉。
     void setCoClassIdentityRegistry(const std::unordered_map<std::string, CoClassIdentity>* reg) {

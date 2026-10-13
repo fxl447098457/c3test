@@ -156,6 +156,38 @@
                 }
             }
         }
+        // 账 #305 §B168 (第五十九刀): `<对象>.<类的公共 Variant 字段>` 与类内的
+        // `Me.<同一字段>` —— 上面四条判据问的全是「**本模块**认不认识这个名字」(裸名
+        // knownVariantVars_ / 本模块 classVariantMembers_ / 发出来的文本长得像 VB6_SA_*
+        // / UDT 字段类型表), 而这条字段的 C 类型由**那个类自己的声明**决定, 于是这一形
+        // 整个漏掉, 发的是一句**完全不装箱**的裸赋值 (实测 use3.bas + holder2.cls):
+        //   h.PV = 7      → `h->PV = 7;`                        → cl C2440 int32_t→vb6_VARIANT
+        //   h.PV = "s"    → `h->PV = vb6_BSTR_FromStr(L"s");`    → 同形 C2440
+        //   Me.PV = x     → `me->PV = (*x);`                    → 编得过, 但浅存 + 不回收旧值
+        // C2440 是硬错误 ⇒ 整棵工程编不过 (语料 94 个写点 / 28 份文件)。
+        // 这一问收成一处: 类名问既有出口 inferClassTypeOfExpr (IdentifierExpr / MeExpr /
+        // 链式成员都在它覆盖里), 字段档问 driver 注入的工程级「类 → vb6_VARIANT 字段」表
+        // (classFieldIsVariantSlot, 与 classVoidFieldMap_/classTypedFieldMap_ 同格)。
+        // **不**认发出来的文本尾注 (`/* class var .X field */`) —— 那是拼出来的注释,
+        // 不是答案; 也**不**再抄一份字段类型表。
+        // 命中后交下方站④: wrapVariantValue 装箱 + variantRhsOwnsValue 定所有权
+        // (§B164 第五十五刀 / §B166 第五十六刀 / §B167 第五十七、五十八刀同一口径),
+        // 所以这里只把「是不是槽」答对, 不碰槽位语义 —— 借用值 (h.PV = 活的 String 变量)
+        // 由那份权威给出 vb6_VariantAssign 深拷贝, 与 UDT 的 232 那一支同一个答案。
+        // 否决: member 若是该类的**方法/属性** (resolveClassMemberCall 非空), 这一句归
+        // 属性写那一路, 不许在这里抢 —— 判据与读侧 cgen_expr_call_callee_member.inc
+        // Pattern C/D 那条「是方法→跳过, 否→数据字段」完全一致。
+        if (!targetIsVariant && node.target
+            && node.target->kind == ASTNodeKind::MemberAccessExpr) {
+            auto& maT = static_cast<const MemberAccessExpr&>(*node.target);
+            const std::string clsT
+                = maT.object ? inferClassTypeOfExpr(*maT.object) : std::string();
+            if (!clsT.empty()
+                && resolveClassMemberCall(clsT, maT.memberName).empty()
+                && classFieldIsVariantSlot(clsT, maT.memberName)) {
+                targetIsVariant = true;
+            }
+        }
     }
     if (targetIsBstr) {
         // Fix 038b-6: BSTR 目标 + Variant 值 → 先提取 BSTR

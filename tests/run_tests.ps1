@@ -2790,6 +2790,36 @@ if ($Category -in @("all", "run", "bas")) {
         'vb6_VariantAssign(&sA, vb6_VariantString(vb6_Left',
         'vb6_VariantAssign(&sA, vb6_VariantString(vb6_BSTR_FromStr'
     )
+    # 账 #305 §B168 (第五十九刀): `<对象>.<类的公共 Variant 字段>` 与类内 `Me.<同一字段>` 的赋值
+    # 都从没问过「这是不是 Variant 容器」—— 发的是完全不装箱的裸赋值 (BASE: 7 枚 C2440, 两架构
+    # 都没有 exe)。这一族发码形状针钉住「问完之后站④交出的三档」各一枚, 反面证人钉住
+    # String/Long 字段**不许**被一起拖进装箱 (那才是这张表答错时的形状)。
+    # 读数来源 = .build/k59_fix1.txt (NEW 两台 9 行全对且逐行相同; BASE 两台 NO-EXE) 与
+    # .build/k59_wit1.txt (BASE 编得过的那枚证人: WIT-1=bbb 浅存别名, NEW=aaa)。
+    Test-EmitcShape "b168_class_var_field_shape" @(
+        "$Tests\b168_cvf\B168Holder.cls", "$Tests\b168_cvf\B168Main.bas") @(
+        # 借来的串存储 → 深拷贝 (§B167 那一枚 oracle 在本形上生效)
+        'vb6_VariantAssign(&h->PV  /* class var .PV field */, vb6_VariantString(s));',
+        # 槽到槽 → 深拷贝 (不许多共用一只 BSTR)
+        'vb6_VariantAssign(&h->PV  /* class var .PV field */, vb6_VariantFromValue(w));',
+        # 类内 Me.<字段> = ByRef Variant 形参 → 同一问同一答案
+        'vb6_VariantAssign(&me->PV  /* class var .PV field */, vb6_VariantFromValue((*v)));',
+        # 现造的整数/字面量串 → 清 + 搬, 不多拷一次
+        'h->PV  /* class var .PV field */ = vb6_VariantLong(7);',
+        'h->PW  /* class var .PW field */ = vb6_VariantString(vb6_BSTR_FromStr(L"noclause"));',
+        # 负控: 同类的 String / Long 字段照旧裸存, 一张表只答 Variant 那一档
+        'h->PS  /* class var .PS field */ = vb6_BSTR_FromStr(L"plainstring");',
+        'h->PL  /* class var .PL field */ = 42;'
+    )
+    Test-EmitcAbsent "b168_class_var_field_not_boxed" @(
+        "$Tests\b168_cvf\B168Holder.cls", "$Tests\b168_cvf\B168Main.bas") @(
+        # BASE 的病灶形状本身 (裸存借来的指针 / 裸存整数进槽)
+        'h->PV  /* class var .PV field */ = s;',
+        'me->PV  /* class var .PV field */ = (*v);',
+        # 非 Variant 字段被误登记的形状 (答宽了就是这两条)
+        'h->PS  /* class var .PS field */ = vb6_Variant',
+        'h->PL  /* class var .PL field */ = vb6_Variant'
+    )
     # 账 #305 §B149 + §B150 (第四十刀): 注册表家族的真往返 + 晚绑定槽的二维元素读写。
     # 读数来源 = .build/b1280_rs (新 exe, x64 与 x86 **逐行相同**, 故同针同过); 外部口径证人 =
     # VB6 真语料 mdoceditor/E-Type/Main.bas:269 (`For i = 0 To UBound(varFiles, 1)` + `varFiles(i, 1)`)。
@@ -5423,6 +5453,28 @@ if ($Category -in @("all", "run", "vbp")) {
         "fwdvt=9", "fwdnil=False", "fwdid=[FwdId]")
     Test-Vbp "ve_list" "$Tests\ve_list\VeList.vbp" $veListExpected
     Test-Vbp "ve_list_x86" "$Tests\ve_list\VeList.vbp" $veListExpected -Arch "x86"
+
+    # <vbeclipse> 回归夹子 (b168_cvf, 账 #305 §B168 第五十九刀): 一枚类自己的公共 **Variant 字段**
+    # 被**别的模块**写。修前这一句从来没进过装箱站 —— `h.PV = 7` 发成 `h->PV = 7;`、
+    # `h.PV = s` 发成 `h->PV = vb6_BSTR_FromStr(L"..");`, cl C2440 是硬错误 ⇒ 整棵工程编不过
+    # (实测 BASE 两台各 7 枚 C2440、根本没有 exe; 语料暴露面 94 个写点 / 28 份文件)。
+    # 每一行钉的一半:
+    #   W1            标量进槽 (C2440 那一形本身)
+    #   W2/W4/W5      源头在赋值之后被改掉 —— 槽必须自己持有 (W5 走的是 BASE **编得过**的那条
+    #                  类内 `Me.PV = v` 浅存路, 见 .build/k59_wit1.txt: BASE 答 bbb, NEW 答 aaa)
+    #   W3            连着写两次: 新值赢 + 旧值有人回收
+    #   W6            类内字面量进槽
+    #   W7            无 As 子句的隐式 Variant 字段 (Fix 089j 那一路的跨对象形)
+    #   W8            负控: 同类的 String / Long 字段照旧裸存, 一张表只答 Variant 那一档
+    #   W9            数字读回 (串值走的是另一条还没接线的读路, 台账 §B168c)
+    # x86 + x64 双跑: 浅存那一半在 x86 上是"读成别人的值"而不是崩, 只有两台都钉才看得见。
+    $b168Expected = @(
+        "B168-W1=7",
+        "B168-W2=sharedbuf|9", "B168-W3=second|6", "B168-W4=wide|4",
+        "B168-W5=callerslot|10", "B168-W6=insideme|8", "B168-W7=noclause|8",
+        "B168-W8=plainstring|11|42", "B168-W9=256|256", "B168-DONE")
+    Test-Vbp "b168_class_var_field" "$Tests\b168_cvf\B168.vbp" $b168Expected
+    Test-Vbp "b168_class_var_field_x86" "$Tests\b168_cvf\B168.vbp" $b168Expected -Arch "x86"
 
     # <vbeclipse> 回归夹子 (iface_wrap): 接口宿主**类型映射**的最小夹子, GA run 36732948503
     # (BalloonTooltips 红) 的直接切片。IFoo 显式 `Attribute VB_Creatable = True` ⇒ 进不了
