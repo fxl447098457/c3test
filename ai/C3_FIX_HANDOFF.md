@@ -2521,7 +2521,7 @@ marker、重编，之后 `check_rtl_embedded` 报 **125/125 逐字节相同**。
   - **形⑨ `ParamArray x()` 不带 `As Variant` 时 For Each 走错臂 ⇒ cl C2440**（本刀的探针第一次跑就撞上）：`cgen_control.cpp` 里「这是不是一枚 ParamArray」有**两位主人** —— 选臂的 `isCollArray` 问符号表的 `isArray`（带 `As Variant` 才登记），同函数下面的 `isPA092q` 问形参的 `isParamArray`（parser 两种拼法都置位，`parser_decl_var.cpp:336`）。裸拼法掉进 COM 集合臂 ⇒ `vb6_VariantToObjectVal(SAFEARRAY*)` C2440。语料 95 处 PA 签名里 **16 处裸拼法**（带 As 的 79 处全是 Variant），与 For Each 的组合今天 0 处 ⇒ 编不过但暂时不响。
   - **形⑩ `Exit For` 跳过块尾那一声收尾**：产物里 `vb6_loop_exit_N:` 落在那对花括号**之外**（实测 `.build/k56_p/exitfor.bas`），走这条路时 `_pa_vN` 手上最后一份带权值没人收（每次调用一份，有界）。要覆盖它得给循环栈带一枚「块尾回收清单」，与 §B164 的 ①/② 那条口径同族 —— 等拍。
 
-### B167 一枚**借来的 BSTR** 收进 Variant 槽时，槽与源头共用同一只缓冲 —— 「这枚右值自带所有权吗」这一问有几位主人（2026-10-13 第五十七刀量完并**已出** = 提交 `9d520d4a`；门链 **#586**（head `9d520d4a`、attempt 1）= 12 job 里 10 绿 + 两条预期红（形状门 6 移动 + 1 新增、`Tests (compile)` 那条 `[STATIC] manifest_coverage` 同源，十个真跑 job 全绿 ⇒ 新夹具在 CI 那台上也过）→ 登记 `4076cf99` → 验证轮 **#587**（run 38350859716、head `4076cf99`、attempt 1）= 12 job 逐格复核全 completed/success，`Emit manifest` 与 `Tests (compile)` 两格同绿 = CI 那台独立复算证实了这份登记）
+### B167 一枚**借来的 BSTR** 收进 Variant 槽时，槽与源头共用同一只缓冲 —— 「这枚右值自带所有权吗」这一问有几位主人（2026-10-13 第五十七刀量完并**已出** = 提交 `9d520d4a`；门链 **#586**（head `9d520d4a`、attempt 1）= 12 job 里 10 绿 + 两条预期红（形状门 6 移动 + 1 新增、`Tests (compile)` 那条 `[STATIC] manifest_coverage` 同源，十个真跑 job 全绿 ⇒ 新夹具在 CI 那台上也过）→ 登记 `4076cf99` → 验证轮 **#587**（run 38350859716、head `4076cf99`、attempt 1）= 12 job 逐格复核全 completed/success，`Emit manifest` 与 `Tests (compile)` 两格同绿 = CI 那台独立复算证实了这份登记）；**形⑭（同一枚权威的第二腿）第五十八刀已出** = 提交 `c3efcc30`，门链 **#589**（run 38360606587、head `c3efcc30`、attempt 1）= 12 job 里 11 绿 + 一条预期红（形状门「存量 7 份发码真的变了」；本刀没加新输入 ⇒ `manifest_coverage` 那格**直接绿**，与登记口径无关）→ 登记 `d9248927`（7 行 = 本刀 1 行 + 别人那两笔欠的 6 行，逐行点名）→ 验证轮 **#590**（run 38362819214、head `d9248927`、attempt 1）= 12 job 逐格复核全 completed/success，`Emit manifest (shape oracle)` 同绿 = CI 那台独立复算证实了这份登记
 
 - **题面**：装箱出口 `vb6_VariantString(BSTR)`（`src/rtl/core/vb6rtl/vb6rtl_variant.h:159`）只做 `v.vt = vb6_vtBSTR; v.bstrVal = val;` —— 既不 `SysAllocString` 也不加引用；`_Generic` 的 `wchar_t*` 那一档（同文件 241/262 两张表）指的也是它。所以「把一枚 VB String 装进 Variant 槽」只要右值是**一处活存储**，槽拿到的就是别人那只缓冲：源头一次重赋值 ⇒ 槽里读的是已释放的块；槽一次 Clear ⇒ 把源头还活着的那只块放掉。
 - **这一问的主人有几位**（发码实测，探针 `.build/k57_p/stat.bas` / `stat2.bas` / `own.bas`，产物同一台 `--emit-c`）：**三站两形只有一位答了**。UDT 的 Variant 字段（`r.Fv = s`）与 Variant 数组元素（`arrV(0) = s`）发 `vb6_VariantAssign`（Fix 232 / Rev16 = 清 + 深拷）⇒ 对；**普通 Variant 槽**那一站（局部、形参、模块级、以及 `vb6_ret_<返回 Variant 的函数>`）发的是 `vb6_VariantClear(&v); v = vb6_VariantString(s);` ⇒ 根本没问。两条文本路到同一处：`wrapVariantValue` 的 String 档发甲形（`vb6_VariantString(x)`），`boxToVariant` 落 `_Generic` 发乙形（`vb6_VariantFromValue(VB6_SA_AT(BSTR, …))`）—— **同一站、两形、同一个偷**（与 [[two-variant-predicates]] 那条「一条问有两条答案」同族，判据要两头钉）。
@@ -2533,6 +2533,32 @@ marker、重编，之后 `check_rtl_embedded` 报 **125/125 逐字节相同**。
 - **清单（门 #586 的读数 + 独立复算）**：形状门报 **6 移动 + 1 新增**。**关键读数**：别人那一棵 rebase 进来的树 `9ba20883`（**不含本刀**）在门 #584 / #585 上就已经报「存量 6 份发码真的变了」—— 同样这 6 行 ⇒ 这 6 行整行是 `wip/comctls-variant-fixes` 那条分支欠的账（随本刀的 rebase 第一次进 CI），两形都点得名：13 处 `(!_has_X)` → `(-(!_has_X))`（IsMissing 交 0/1，发码点 `cgen_expr_call_builtin_pre.inc`）+ 1 处 1D 描述符首字段 `signature 0x5A1D` → OLE 兼容的 `cDims 1, 0xA1D1`（发码点 `cgen_expr_call_arg_emit.inc`）。本刀自己的形状落在 `tests/dbgdlg/dbgdlg.vbp` **那一行里另加 3 处**（`.build/k57_attrib.txt` 逐行：`vb6_ret_sLeftOfNull` / `vb6_ret_sLeftOfLastNull` / `vb6_ret_sAPIFilter` = **Variant 返回函数收下自己的 String 形参**这一形，BASE 发 `Clear + 直赋`、NEW 发 `VariantAssign`），新增那一行是本刀的夹具。⇒ 登记 `4076cf99`（吃 CI 自己那份 head=9d520d4a 的 406 行清单；**本机独立复算 406/406 逐字节相同**、29 行注脚未动、K1..K3 sets equal）。**登记那一笔的题面把门号写成了 #583 —— 错了**：#583 是别人 head=`c5bc5ac4` 的那轮，本刀的门是 **#586**（run 38348063962、head `9d520d4a`），订正写在本格里。真语料暴露面（`D:/vb_yqt4qPac` 10138 份 `.bas/.frm/.cls/.ctl/.pag`，拿**改前那台** `--emit-c` 数「紧挨着的 Clear + 直赋 `vb6_VariantString(存储)`」两行式，甲乙两条文本路都数，按存储形态分档；正控 = 四份手核探针各自命中已知数 6/3/5/12）：**476 处、命中 252 份**（`.build/k57_exposure_base.txt`；分档 = 甲路 227（裸名 146 / 成员 42 / 元素 39）+ 乙路 249（成员 138 / 裸名 76 / 元素 35）—— 两条文本路同一个偷 ⇒ 本刀接管掉的正是这 476 处。口径要说全：10138 份输入里 **1031 份 `--emit-c` 就失败**（语料本身编不过 / 缺控件）、**48 份超时**（含 `GDI+透明控件/QQGrid.ctl` 那枚挂 45 分钟没出声的，另格另账）⇒ 真覆盖 9059 份，这个数是**下界**）
 - **本刀另撞见 / 登记，刻意不动**：**形⑫** `Fn(...).V = <String>`（返回 UDT 的 Variant 成员在**函数体外**被赋值）发的是一句不装箱的裸赋值 `vb6_Make().V = s;` ⇒ cl **C2440 编不过**（`.build/k57_p/run_fnu/c3-error.log`，探针 `fnu.bas`）—— 响的，不是静默的，另格另量；**形⑬ 那条推测已作废**（打本刀这一格时顺手量的：`With r` 里 `v = .Name` 与 `.FV = .Name` **两形都发** `vb6_VariantAssign`，
     探针 `.build/k58_p/w13.bas` / `w13b.bas` 的产物）—— With 成员作为**右值**时 `inferExprType` 答得出 String，本刀的借用那一腿收得住；**三枚发借来指针的 RTL 出口**（`vb6_ErrDescription` / `vb6_ErrSource` / `vb6_ho_variantToBstr`，#113 那条注记在册）在本刀的「顶层是调用 = 现造」这一腿里被读成自有 ⇒ 仍悬空，修法是给这一腿一份从 RTL 派生的名单（§B146 那一族的手法）；**形⑥ 站⑥** 与 **形⑤ 那三站**的前置问（「右值是不是借来的」）现在这枚权威已经能答，接线时按各自目标是不是长期槽逐站定。
+- **形⑭（第五十八刀）：那一腿的例外名单**：`b167TopIsCall` 答「现造的」对 RTL 的大多数出口成立，但有 **3 枚**交回的是
+  **别人那一只还活着的块** —— `vb6_ErrDescription`(`return vb6_err.description;`)、`vb6_ErrSource`、
+  `vb6_ho_variantToBstr`(`return v->bstrVal;`)。名单只住一处（`kBorrowedBstrExports167`，`cgen_util_ctrl.cpp`），
+  命中即答「借来」⇒ 站④ 交 `vb6_VariantAssign`。
+  **名单怎么来的**：不是按文本猜 —— 返回 BSTR 的出口全仓 **90 枚**，先按数据流派生（`.build/k58_audit.py`：68 枚自有 /
+  2 枚直接派生成借来 / 7 枚进手核队列，其余落复合档所以这三数不加成 90 —— 这条不完备正是它必须配一条独立复算的原因），
+  手核队列逐枚读体定档 ⇒ 借来的最终就这 3 枚，`vb6_IIfBSTR` 是**刻意的转手参数**（它 free 未被选中的那一支），
+  `vb6_DecimalToBSTR` 的注释本身就写着「把权抄给调用方」；而哨兵 Q6 用的**形状规则**独立扫这 90 枚，
+  派生出的正好也是这 3 枚（`.build/k58_q6_proto.py` 的正控）⇒ 两条互不依赖的路同一个答案。
+- **形⑭ 的读数**（两台 BASE = 第五十七刀那一台，两台**逐行相同**）：`Err.Raise 5, "errsrcw9", "errdescw8"` 之后
+  `sA = Err.Description : sA = 1` 再读 `Err.Description` ⇒ **`B167-W8b=9|9`**（源串读成一位数、Len 还是旧的 9 = 那只块已被复用），
+  `Err.Source` 那一窗 ⇒ **`B167-W9b=8|8`**；新两台 ⇒ `errdescw8|9` / `errsrcw9|8`，19 枚针同过、两台同针
+  （`.build/k58_ab.txt` / 合并后复跑 `.build/k58_ab2.txt`）。判据仍是**两头钉**：`W8a/W9a` 问「槽里存的是请求值」，
+  `W8b/W9b` 问「Err 自己那一面还在不在」。发码形状针 7→9 行（新增这两枚借来调用归 `vb6_VariantAssign`），
+  反面证人 2 行原样（`Left()` / 字面量一次都不许多拷）。
+- **形⑭ 的哨兵 = 第 58 道加 Q6**（双向对钉）：名单只许定义一处、恰好 3 名、不许重名；反向从 RTL 现推 —— 凡「体内无 mint 标记
+  且某条 `return` 交回**成员访问**（非调用起手）」的 BSTR 出口都必须在名单里，名单里的名反过来也必须还呈那一形。
+  五条负控各点各的红且**只红 Q6**（少一名 / 多一名自有 / RTL 那枚改成交自有 / RTL 新添一枚借来的 / 名单换名开第二家），
+  全部在 `src/backend` + `src/rtl` 的**副本**上做（真实树一个字节未动，`.build/k58_nc.py`）；正控 = 派生规则在 90 枚里推出的正好是那 3 枚。
+- **形⑭ 的真语料暴露面 = 0 处**（这条本身是「下界口径」的反面教材）：`D:/vb_yqt4qPac` 里 **1067 份**输入含 `Err.Description`/`Err.Source`，
+  拿改前那台逐份 `--emit-c` 数「Clear + 直赋这两行式」（甲乙两条文本路都数，正控 = 夹具必须报 2）⇒ **处数 0**
+  （其中 220 份 emit 就失败、11 份超时 ⇒ 真跑通 836 份，`.build/k58_exposure_b2.txt`）。⇒ 这一形在语料里今天**编得过、响不着**
+  （真实写法是把 `Err.Description` 交给 String 目标 / `MsgBox` / `Debug.Print`，那一路由 #113 的深拷管着），
+  本刀的价值在**那一问的答案本身**：站④ 的答案已经错过一次，形⑤⑥ 接线时不必再继承这个错。`vb6_ho_variantToBstr`
+  那枚今天只能以调用实参的形态出现（`unboxArg` 那一处），进槽那一路还没现形 ⇒ 名单收住它、行为判据只覆盖 Err 两枚。
+
 
 
 ### B151 把真二维数组赋给 Variant 槽，槽读回来是 VarType=9 / "Object" 而不是 8204 —— 自家多维描述符被折成一维（2026-10-12 第四十刀量到；**未开工**）
