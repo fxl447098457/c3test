@@ -396,6 +396,22 @@
                         _psValTypedPtr236 = true;
                     }
                 }
+                // 账 #257 第二十一层: RHS 是 **COM 调用** (`.ReadProperty("MouseIcon", Nothing)`
+                // → `vb6_ComCall(...)`) 时, vb6_ComCall 交回的是**堆 VARIANT***, 而 Property
+                // Set 的 C 形参是对象指针 (`void* Value`) —— 裸传过去, 被调体里 `Value.Type`
+                // 就把 VARIANT 的第一个 DWORD (vt) 当 vtable 读。
+                // 现场 (ComCtlsDemo 启动卡死, DebugBreakProcess 抓栈):
+                //   FrameW.c:670  prop_set_MouseIcon(me, vb6_ComCall(_vb6_with_1, L"ReadProperty", …))
+                //   → prop_set_MouseIcon 里 `If Value.Type = vbPicTypeIcon` → ComGetIntProp
+                //   → ComGetProp → getDispid → ComIsDispatchable → **av 读 0x3** (vt=3)。
+                // 与 Set 语句通用路径 (本文件下方 `value = comObjectRefFromCallExpr(value)`)
+                // 同一律: 换成 vb6_ComCallObject(...) (内部 UnpackObject + VarFree)。
+                // 只在被调形参**不是** Variant 时改道 —— 形参真是 Variant 槽时, 下面
+                // Fix 236 那一支要的是整只 VARIANT (boxToVariant), 换成对象指针就错了。
+                if (!_psValVariant159 || _psValTypedPtr236) {
+                    _valE = comObjectRefFromCallExpr(_valE);
+                    _arg2 = _valE;  /* 上面 _arg2 的初值取自改道前的 _valE, 同步回来 */
+                }
                 if (_psValTypedPtr236) {
                     _arg2 = _valIsVar159 ? ("vb6_VariantToObjectVal(" + _valE + ")")
                                          : _valE;
