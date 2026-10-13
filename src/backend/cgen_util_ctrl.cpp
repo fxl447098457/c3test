@@ -2379,6 +2379,17 @@ static bool b167TopIsCall(const std::string& s, size_t at) {
     return sel == std::string::npos || par < sel;
 }
 
+// 账 #305 §B167 形⑭ (第五十八刀): 「顶层是调用 = 现造的」这一腿有一条例外名单 —— RTL 里交回
+// **别人那一只还活着的块**的出口。名单是 RTL 逐枚手核出来的(返回 BSTR 的出口共 90 枚, 借来的就这三枚:
+// `return vb6_err.description;` / `return vb6_err.source;` / `return v->bstrVal;`, 既不 SysAllocString
+// 也不 Copy), 由第 58 道哨兵的 Q6 与 RTL 双向对钉(漏一名、多一名、名单外的新借名都当场红)。
+// 这三枚都不许被当成现造的: 槽一旦接管, 槽的 Clear 放掉的是 Err / 宿主自己那只块。
+static const char* kBorrowedBstrExports167[] = {
+    "vb6_ErrDescription",
+    "vb6_ErrSource",
+    "vb6_ho_variantToBstr",
+};
+
 bool CCodeGen::exprBorrowsBstrStorage(Expr* rhs, const std::string& rawC) const {
     if (!rhs) return false;
     static const std::string kSaBstr167 = "VB6_SA_AT(BSTR,";
@@ -2389,7 +2400,12 @@ bool CCodeGen::exprBorrowsBstrStorage(Expr* rhs, const std::string& rawC) const 
         || rawC.compare(at167, kSaNdBstr167.size(), kSaNdBstr167) == 0)
         return true;                                  // 串数组元素: 宏自己带元素类型, 不必再问表
     if (rhs->kind == ASTNodeKind::LiteralExpr) return false;
-    if (b167TopIsCall(rawC, at167)) return false;      // 现造的: 所有权随这一句交给槽
+    if (b167TopIsCall(rawC, at167)) {
+        const std::string callee167 = rawC.substr(at167, rawC.find('(', at167) - at167);
+        for (const char* br167 : kBorrowedBstrExports167)
+            if (callee167 == br167) return true;      // 例外: 这一枚调用交回的是借来的块
+        return false;                                 // 现造的: 所有权随这一句交给槽
+    }
     return inferExprType(*rhs) == Vb6Type::String;
 }
 

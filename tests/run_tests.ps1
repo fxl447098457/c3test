@@ -2764,7 +2764,9 @@ if ($Category -in @("all", "run", "bas")) {
     # 三枚现造形状的证人(字面量/Left 的 mint/槽到槽) + 一枚 200 轮的二次 free  churn。
     $b167Needles = @("B167-W1=hello|5", "B167-W2=sharedbuf|9", "B167-W3=modslot|7",
         "B167-W4=udtfield|8", "B167-W5=arrelem|7", "B167-W6=byvalstr|8",
-        "B167-W7=churn200|8", "B167-X1=udtstr|6", "B167-X2=arrstr|6", "B167-X3=modarr|6",
+        "B167-W7=churn200|8", "B167-W8a=errdescw8|9", "B167-W8b=errdescw8|9",
+        "B167-W9a=errsrcw9|8", "B167-W9b=errsrcw9|8",
+        "B167-X1=udtstr|6", "B167-X2=arrstr|6", "B167-X3=modarr|6",
         "B167-X4=abc|3", "B167-X5=slotone|7", "B167-X6=fromfunc|8", "B167-X7=lit|3",
         "B167-DONE")
     Add-BasTest "test_bstr_borrow_slot" "$Tests\test_bstr_borrow_slot.bas" $b167Needles
@@ -2777,6 +2779,9 @@ if ($Category -in @("all", "run", "bas")) {
         'vb6_VariantAssign(&sA, vb6_VariantString(rec.Name));',
         'vb6_VariantAssign(&sA, vb6_VariantFromValue(VB6_SA_AT(BSTR, strArr, 0)));',
         'vb6_VariantAssign(&sA, vb6_VariantString(VB6_SA_AT(BSTR, gStrArr, 0)));',
+        # 第五十八刀那一枚例外名单: 顶层是调用, 但这两枚 RTL 出口交回的是 Err 自己那只块。
+        'vb6_VariantAssign(&sA, vb6_VariantString(vb6_ErrDescription()));',
+        'vb6_VariantAssign(&sB, vb6_VariantString(vb6_ErrSource()));',
         'sA = vb6_VariantString(vb6_Left(s, 3));',
         'sA = vb6_VariantString(vb6_BSTR_FromStr(L"lit"));'
     )
