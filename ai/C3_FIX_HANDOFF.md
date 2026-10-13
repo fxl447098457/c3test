@@ -2653,6 +2653,13 @@ marker、重编，之后 `check_rtl_embedded` 报 **125/125 逐字节相同**。
 - **语料暴露面（粗算，别当结论用）**：内置名池 172 枚（`addBuiltinFunc` 66 + 发码 ident 表 165，去重 172）；真语料 `D:\vb_yqt4qPac` 33 份工程 / 9389 份源文件里 **24 份**声明过与池子同名的类成员，点号读 18230 处 —— 但 `.Left` 那 10689 处多数是控件属性（已被 case 头部 `controlPropType` 接管），按宿主归因还没做。
 - **继承红（不是本刀的，但挡本刀的收线）**：`656b2086`（别人那笔 `e84a9515` = ComCtlsDemo 点 Command2 退出）合进 dev 之后 CI run 38404170829 已红 4 个 vbp 分片 + 形状门（ve_units / arr_cls_elem / cls_inh / cc_demo_exe / cc_demo_dll_external / ctrlslider / FlexGridX86，另 `sl_emitc_native` 缺针）。本机用**不含本刀**的 HEAD 源码编出的编译器复现同一红 = `frmUnits.c(288) error C2064`，而 A/B 证明 ve_units 产物带不带本刀逐字节相同 ⇒ 机制在他改的 `cgen_expr_call_com_bind.inc` / `cgen_setlet_set_prop.inc` 那一族；#594（含六十刀、不含他那笔）12/12 绿。⇒ 那 7 行形状**故意不登记**（夹具现在它根编不过，形状不是结论），等那一格修完由它自己登记；本刀的「验证轮全绿」在那之前拿不到。
 
+### B171 「把这枚成员读交给要字符串 / 要槽的消费者」时，「这是不是一枚槽」还有第二位主人 —— 而且它按**文本**认（2026-10-13 第六十二刀 **量完未开工**，探针 `.build/k62_p/{K62.vbp,use62.bas,Holder62.cls}`）
+
+- **两台都没有 exe**：含 §B170 那台 6 枚 C2440，不含的那台 4 枚 C2440（两枚 `vb6_VARIANT→BSTR` + 两枚 `vb6_VARIANT→double`）。
+- **病①（与撞名无关，两态都坏）**：`Public PZ As Variant` 整枚递给 `As Variant` 形参 ⇒ 装箱站发 `(&(vb6_VARIANT){.vt=VT_BSTR, .bstrVal=h->PZ  /* class var .PZ field */})` —— 结构体进 BSTR 槽。站点 = `cgen_util_comwrite.cpp:746-752`（default 臂）与 `cgen_expr_call_arg_emit.inc:883-886`（按 `inferExprType` 分档、Variant 落 default）；那一格「是不是槽」问的是 `cExprIsVariant(文本)`，**认不出**带 `/* class var .X field */` 尾注的那一枚 ⇒ 该走的两条（交槽的地址 / `vb6_VariantToString` 解包）今天都没走。
+- **病②（只在撞名时）**：`Len(h.PV)` / `Left(h.PV, 4)` 这类内在函数消费者，§B170 之后发**裸 `h->PV`** ⇒ C2440；同一站对不撞名的 `PZ` 发 `vb6_VariantToString(h->PZ)` ⇒ 对。⚠ **对 §B170 的一句话订正**：这两条腿在 §B170 之前是「静默答错」（`(int32_t)sizeof(h->PV)` 恒 8 / `vb6_CStrDbl` 把串值折成 0），类型答对之后变成**编不过** —— 严重度更高、可归因，但它是一处**新的编译失败面**：`tests/**` 的 A/B（816 同 / 4 变）里没有这种工程，**真语料里有没有要单独数**。
+- **与 §B150 的关系**：第四十刀补格已把「晚绑定槽元素读的『认文本』那一问」收成一处；本刀这条是同一问的**第二份**，且这份直接决定发码臂 ⇒ 修法 = 两站改问那一处权威（并把「带 `class var .X field` 尾注的成员读」教进认槽那张出口），不许再各自 `find`。
+- **开工前先量两件事**：① 「认槽」那一问究竟有几位主人（`cExprIsVariant` 调用点逐个点名，与 `classFieldIsVariantSlot` 的消费者对照）；② 真语料里「把一枚类 Variant 字段整个递给 Variant 形参」有几处（决定这是硬错误族还是纸面族）。
 ### B151 把真二维数组赋给 Variant 槽，槽读回来是 VarType=9 / "Object" 而不是 8204 —— 自家多维描述符被折成一维（2026-10-12 第四十刀量到；**未开工**）
 
 - **读数**（探针 `.build/b1268_ndread/{tnd,tag}.bas`，`.build/b1268_ndread/rt.txt`）：`Dim a(1 To 2, 1 To 3) As Variant: v = a` 之后 `VarType(v)` 交 **9**、`TypeName(v)` 交 **"Object"**；VB6 交 8204 / "Variant()"。而同一枚 `v` 的 `UBound(v, 2)` 那一路是按 ND 问的 ⇒ 装箱那一档少认多维。
