@@ -2561,6 +2561,30 @@ marker、重编，之后 `check_rtl_embedded` 报 **125/125 逐字节相同**。
 
 
 
+### B168 「对象.类的公共 Variant 字段」当赋值目标时**根本不装箱** —— 目标侧「这是不是一枚槽」有三张名单各答各的（2026-10-13 第五十九刀的前置量完，**未开工**）
+
+- **题面（真编译撞出来的，不是读码猜的）**：`Dim h As Holder` + 类里 `Public PV As Variant`，写 `h.PV = <右值>` 发的是
+  `h->PV  /* class var .PV field */ = <右值>;` —— **一次装箱都没有**。除 Variant→Variant 那一形（结构体抄 = 合法但浅拷 =
+  §B167 记的 `held = e` 同族）以外全是 **cl C2440 ⇒ 整个工程编不过**。真读数：
+  `uselet.c(18): error C2440: “=”: 无法从“BSTR”转换为“vb6_VARIANT"`（探针 `.build/k59_p/uselet.bas` + `holder.cls`，
+  四形 RHS 各发一句裸赋值：`= 5` / `= v2` / `= vb6_BSTR_FromStr(L"lit")` / `= vb6_Left(…)`，`.build/k59_p/use2.bas`）。
+- **同族的第二形（同一处病）**：§B167 登记的 **形⑫** `Fn(...).V = <String>` 发 `vb6_Make().FV = s;` ⇒ 同样 C2440。
+  两形的共同点 = **目标**是一条成员访问文本，而发码侧认槽的那几张名单都没覆盖它。
+- **为什么**：目标文本出自 `cgen_expr_member_class_fallback.inc:263`（类公共字段那一支，名字里带 `/* class var .X field */`），
+  而 §B164/§B167 那枚站④ 认槽用的是 `knownVariantVars_`（局部/模块/形参的**变量名**）、
+  `classVariantMembers_`（读侧 Fix 089j 用的那张类字段名单）、以及**文本** `VB6_SA_AT(vb6_VARIANT, …)`（数组元素）——
+  **三张名单三种口径，没有一张认这条目标** ⇒ 与 [[two-variant-predicates]] 同族：一条决定有两种答案时，
+  造出来的正是另一个极端。修法方向 = 把「这枚目标是不是长期槽」也收成一处权威（lvalue 侧一枚，与 `variantRhsOwnsValue` 配对），
+  而不是在站④ 再补一个 `find("/* class var .")`。
+- **暴露面（真语料，纯文本两趟，口径 = 写点不算读点）**：**94 处赋值 / 28 份文件 / 9 枚带公共 Variant 字段的类**；
+  点名的病人 = `D:/vb_yqt4qPac/NewTab-main/control-source/cls/cPropertyData.cls`（`Public Value As Variant`）的
+  `iProp.Value = …` 一族（同项目的 `cNewTabTheme.cls` / `pagNewTabThemes.pag` 等 28 份）。⇒ 这一格**不是纸面缺口**：
+  那棵工程今天整棵编不过（读侧 `.build/k59_exposure3.txt`，脚本自带两趟扫描：先收「类→公共 Variant 字段」，再收「变量→类型」）。
+- **开工前要先答的两问**：① `obj.Field = <标量>` 该装到哪一档（整数走 `vb6_VariantLong` 还是 `_Generic` 的 `VB6_SA_*`？
+  与 §B147「oracle ⊆ 改道」那条同族，先定档再接线）；② 装箱之后**旧值谁回收** —— 这一问已经有权威了（`variantRhsOwnsValue`），
+  接上即可，但 lvalue 侧必须先被认成槽，否则答案进不去。
+
+
 ### B151 把真二维数组赋给 Variant 槽，槽读回来是 VarType=9 / "Object" 而不是 8204 —— 自家多维描述符被折成一维（2026-10-12 第四十刀量到；**未开工**）
 
 - **读数**（探针 `.build/b1268_ndread/{tnd,tag}.bas`，`.build/b1268_ndread/rt.txt`）：`Dim a(1 To 2, 1 To 3) As Variant: v = a` 之后 `VarType(v)` 交 **9**、`TypeName(v)` 交 **"Object"**；VB6 交 8204 / "Variant()"。而同一枚 `v` 的 `UBound(v, 2)` 那一路是按 ND 问的 ⇒ 装箱那一档少认多维。
