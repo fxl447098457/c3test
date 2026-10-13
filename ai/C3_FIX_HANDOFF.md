@@ -2616,6 +2616,8 @@ marker、重编，之后 `check_rtl_embedded` 报 **125/125 逐字节相同**。
   没有 Property Let），走的是 `cgen_assign_prop_write.inc:729` 那条「With 类属性直调」的路，它把公共字段也当属性拼 ⇒
   cl 只给 **C4013**（隐式外部 int，`.build/k59_p/k59_h4out/c3-error.log`），链期必 LNK2019。**修法要先拍口径**：
   那一站该改问本刀这张表（字段 ⇒ 走站④）还是该补一枚 field_let 出口 —— 与 §B164 形⑤ 那两条 `/* Let */` 裸发是同一族。
+     【**2026-10-13 第六十刀订正：这一形已随 §B169 收掉** —— 那一站没补 field_let 出口，而是先问工程级那张「类 → 标量字段 → 声明档」表：是数据字段就按档发字段赋值 (Variant/BSTR 交 §B164/§B167 那两枚槽位出口，其余标量落到既有的字段直发那一支)。实测 DllPrint.vbp 那 281 句凭空的 vb6_<Cls>_prop_let_<F>(...) 全清零，本刀夹子在 BASE 上的 4 枚 LNK2019 也一并没了。】
+
   ② **Variant 数组字段**的元素写 `h.PA(1) = 9` / With 内 `.PA(0) = s` 发成 `h->PA(1) = 9;`（把 `vb6_SafeArray1D*` 当可调用）
   ⇒ 实测 **cl C2064 ×2**（同一份 c3-error.log）。这张表刻意不认数组字段，所以那一形今天仍然响。
   ③ 跨对象**读**回来那一腿：`CStr(h.PV)` 发 `vb6_CStrDbl(h->PV)`（`inferExprType` 对「别类的 Variant 字段」答 Double ⇒
@@ -2623,6 +2625,23 @@ marker、重编，之后 `check_rtl_embedded` 报 **125/125 逐字节相同**。
   `ReadBack()` 之后才对上，存档 `.build/k59_fix1.txt` 的第一轮）。同一枚表能答这一问，但那是**表达式类型 oracle**，
   动它会扫到全语料的选档 ⇒ 另立一格，别顺手接。
 
+
+### B169 「`<对象>.<字段> = v` 里这枚字段是哪一档」有三份答案，With 块那一站因此**凭空拼一个函数名**（2026-10-13 第六十刀 **已出** = 实现 `ca3a1e67` → 门 **#593**（run 38399757587、attempt 1、12 条里 10 绿 + 两条**同源**红 = 形状门「2 行新增未登记 + 1 行移动」与 `Tests (compile)` 里那道 `[STATIC] manifest_coverage` 是同一件事）→ 登记 `ee414607`（吃 CI 那台自己交的 410 行清单：407 行逐行相同 / 1 行移动 / 2 行新增、缺席 0 多出 0）→ 验证轮 **#594**（run 38402409894、head `ee414607`、attempt 1、12 job 逐格 completed/success）；§B168 在册的 ① 随本刀合上）
+
+- **两形同一病**（都是「这枚左值属于哪一档」没人统一答）：
+  ① **With 块里写类的标量数据字段** —— 属性写那一站在查不到 Property Let/Set 之后按命名约定**造一个名字** `vb6_<Cls>_prop_let_<F>(...)`（它的 `isDataField090c` 只查 `classTypedFieldMap_`，那里只有**对象**字段，于是所有标量字段都被判成「不是字段」）。那函数全仓既无声明也无定义 ⇒ cl C4013 + 链期 LNK2019。真读数：语料 `DllPrint.vbp` 的产物里 **281 句**这种调用（emit census `.build/k60_reach.txt`）；本刀夹子在 BASE 两台各 **4 枚 LNK2019 + LNK1120、无 exe**（`.build/k60_run/base_x64/c3-error.log`）；文本口径（带接收者纪律）另有 47 个写点 / 6 份文件（`.build/k60_census2.txt`）。
+  ② **直接路写类的 String 字段**（`h.PS = s` / 类内 `Me.PS = v`）—— BSTR 档那五道判据问的全是「本模块认不认识这个名字」，于是发一句裸指针赋值：与源头共用一只 BSTR（源头一重赋值字段就跟着变）、旧值没人回收、而类析构 `vb6_BSTR_Free(那枚字段)` 会把**借来**的那只块 free 第二遍。真读数：MSNMacro 工程 `CDLG.cls` 两句 `Me.SelectedPrinterName = vb6_ComGetStringProp(myP, L"DeviceName")` 与 `= vb6_BSTR_FromStr(L""")`（`.build/k60_reach.txt`）；文本口径 13 个写点 / 6 份文件。
+- **落地（一处答案 × 三站接线，不新造机制）**：
+  · §B168 那趟预扫描的表从「只答 Variant」扩成「答声明档」—— `driver_codegen_variantfield_scan.inc` 改名 `driver_codegen_fieldkind_scan.inc`，值 = `Vb6Type`，键仍是小写类名 + 字段名两种拼法；**只收标量数据字段**：数组 / 定长串（`FixedStringTypeRef`）/ 项目类·COM·未知对象名 / UDT 一律不入表；工程枚举（`As typeField`，struct 发 `int32_t`）按 **Long** 入表，判据 = 符号表指着 `SymbolKind::EnumType`（与 Fix 050/098 给 COM 枚举、XxxConstants 定的底层档同一个答案）。
+  · 一处查询 `classFieldKind(className, memberName)`（`cgen_api.inc`；交回 `Unknown` = 表里没有 ⇒ 调用点**不许**读成「那就是字段」）+ 三个投影 `classFieldIsVariantSlot` / `classFieldIsBstrSlot` / `classFieldIsScalarData`，投影里只许转问它，不许再抄一遍 find。
+  · 站③ 补 String 档判据（与 §B168 的 Variant 那一支同形、同一条 `resolveClassMemberCall` 否决）；站③/站④ 那两串决定**整体搬进** `emitBstrSlotStore` / `emitVariantSlotAssign`（`cgen_util_ctrl.cpp`，紧挨第五十五刀那枚 `emitVariantSlotStore`）—— 搬出来不是为了整洁：With 那一站需要的正是同一串决定（右值折算 / 自有还是借来 / 定长收口 / 自指先收临时量），在那儿再抄一遍就是第四份答案。With 那一站按档发：Variant/BSTR 交这两枚出口（COM 标记仍由同一条腿消费），其余标量档落到既有的字段直发那一支（与对象字段同一条路）。
+- **判据**：新夹具 `tests/b169_cfw`（一份 .cls + 一份 .bas 的 .vbp）两台各 6 行读数 —— `B169-1=aaa|3` 是别名那一半的行为面（BASE 上 `h->PS = s;` 之后再改 `s` 会读到 `bbb`）；发码形状针 **8 枚**（直接路 借来 / 自有字面量 / 类内形参 + With 站 BSTR / Variant 清+搬 / Long / 枚举）+ 反针 **7 枚**（BASE 的两条裸赋值 + 四个凭空的 prop_let 名字 + With 站不许发裸赋值）：NEW 两台 8/8 且反针 0 中，BASE 那台 0/8 且 6 形病灶全在。哨兵 `check_variant_slot_store.ps1` 的 R5 改问同一张表 + 新 **R6/R7**（两枚槽位出口各 1 定义 / 1 声明 / 调用点 >= 2；手抄 `vb6_BSTR_Assign(&…)` 的发码点**逐文件钉死** 3 / 4 / 1 = 还没并进那枚出口的三站）—— **8 枚假针**在副本上各自只红自己那条、还原后重新绿（`.build/k60_nc.py`）；`check_bstr_borrow_slot.ps1` 的 Q3 那一针跟着搬到出口本体的文件里（第五十五刀那枚站④的形状搬了家，判据不搬就是假绿）。
+- **护栏**：语料 emit A/B = 410 输入 × 两架构 = 820 捕获，**same=816 / changed=4 / unattributed=0 / run-failures=0**（`.build/k60_ab_report.txt`）—— 那 4 份 = 新夹具两架构 + 第五十九刀那枚 `b168` 夹子；58 道哨兵 57 绿（唯一红 = 新夹具两份输入没登记哈希，登记后即 #594 全绿）。
+- **一条读数订正（第五十九刀写下的那条「负控」）**：`b168` 夹子里 `h.PS = "plainstring"` 今天不再是裸存 —— 那张表认得 String 档，发 `vb6_BSTR_AssignMove(&h->PS  /* class var .PS field */, vb6_BSTR_FromStr(L"plainstring"));`（CI 那份清单 +21 字节移动的那一行就是它，与本刀 A/B 的逐行归因一条不差）。针与反针的措辞都跟着改了；**Long 字段那条负控仍然在** ⇒ 这张表答的是「三档各归各位」，不是「把所有字段都拖进槽语义」。
+- **⚠ 同族还剩三形（各有实测读数，本刀刻意不碰）**：
+  ① **类内** `With Me` 写自己的数据字段 —— 那一站把接收者解析成 `COMObject`，发 `vb6_ComSetProp(me, L"PS", ...)`，而字段没有 dispid ⇒ 运行期一声 `property "PS" not found`，这一句**静默丢了**（本刀夹具的第五形实测，已从期望里撤掉；语料口径 = 全语料 78 处 `With Me` 写的**全是属性**，写数据字段 **0 处** ⇒ 纸面缺口，先证明可达再动）。
+  ② **定长串**字段（`As String * N`）刻意不入那张表（收口宽度 = 账 #118 那一格）：语料里跨对象/类内写定长串字段 **0 处**（带接收者纪律实测），且 #118 的补空格/截断本来就欠着 ⇒ 同一格里一起量。
+  ③ §B168 在册的两条未动：Variant **数组字段**的元素写（`h.PA(1) = 9` ⇒ cl C2064，语料 0 处）与跨对象**读**回来走 `vb6_CStrDbl` 数值档（同一枚表能答，但那是**表达式类型 oracle**，动它会扫到全语料的选档 ⇒ 另立一格）。
 
 ### B151 把真二维数组赋给 Variant 槽，槽读回来是 VarType=9 / "Object" 而不是 8204 —— 自家多维描述符被折成一维（2026-10-12 第四十刀量到；**未开工**）
 
