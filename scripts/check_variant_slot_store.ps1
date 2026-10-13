@@ -266,12 +266,41 @@ foreach ($k in $bstrByFile169.Keys) {
 }
 $bstrTotal169 = 0
 foreach ($v in $bstrByFile169.Values) { $bstrTotal169 += $v }
+
+# ---- R8 (账 #305 §B170 第六十一刀): 「这枚成员读是哪一档」那两站都问那张表 ----
+# 钉的是**读侧**两站 (inferExprType 的点号 case + With 体内 case) 各问一次 classFieldKind,
+# 并且问点只许长在名单里那几个文件。少一站 = 那一站回到按裸成员名查全局符号 —— 实测: 字段名
+# 撞上内置函数名就读成内置的返回档 (`CStr(h.PV)` 撞 PV() 答 Double ⇒ 串值 0|1; 一枚
+# `Public Command As Long` 撞 Command() 答 String ⇒ 把 7 当 BSTR 指针解, 两台原生 AV)。
+$WantReadAsk170 = [ordered]@{ 'cgen_util_type.cpp' = 2 }
+$KnownAskFiles170 = @('cgen_api.inc', 'cgen_state.inc', 'driver_codegen_fieldkind_scan.inc',
+                      'cgen_assign_prop_write.inc', 'cgen_util_type.cpp')
+$askByFile170 = @{}
+foreach ($f in $srcFiles168) {
+    $t = [System.IO.File]::ReadAllText($f.FullName)
+    $n170 = [regex]::Matches($t, 'classFieldKind\(').Count
+    if ($n170 -gt 0) { $askByFile170[(Split-Path $f.FullName -Leaf)] = $n170 }
+}
+foreach ($k in $WantReadAsk170.Keys) {
+    $g170 = 0
+    if ($askByFile170.ContainsKey($k)) { $g170 = $askByFile170[$k] }
+    if ($g170 -ne $WantReadAsk170[$k]) {
+        $bad += ('R8 ' + $k + ' 问 classFieldKind ' + $g170 + ' 处, 名单钉的是 ' + $WantReadAsk170[$k] + ' (点号 + With 两站)')
+    }
+}
+foreach ($k in $askByFile170.Keys) {
+    if ($KnownAskFiles170 -notcontains $k) {
+        $bad += ('R8 名单外的新问点 ' + $k + ' x' + $askByFile170[$k] + ' —— 读侧那一问又长了第二份地方')
+    }
+}
+$readAsk170 = 0
+if ($askByFile170.ContainsKey('cgen_util_type.cpp')) { $readAsk170 = $askByFile170['cgen_util_type.cpp'] }
 $markTotal168 = 0
 foreach ($v in $markByFile168.Values) { $markTotal168 += $v }
 
 $nHand = $handPairs.Count
 if ($bad.Count -eq 0) {
-    Write-Host ('PASS variant_slot_store: def 1 | calls ' + $callSites + ' | shapes ' + $nHand + ' | open stations ' + $bareTotal + ' | slotask168 ' + $qSites168 + ' | projask169 ' + $projSites169 + ' | mark168 ' + $markTotal168 + ' | bstr169 ' + $bstrTotal169 + ' | auth169 ' + $authCall169['emitBstrSlotStore'] + '/' + $authCall169['emitVariantSlotAssign'] + ' | violations 0') -ForegroundColor Green
+    Write-Host ('PASS variant_slot_store: def 1 | calls ' + $callSites + ' | shapes ' + $nHand + ' | open stations ' + $bareTotal + ' | slotask168 ' + $qSites168 + ' | projask169 ' + $projSites169 + ' | mark168 ' + $markTotal168 + ' | bstr169 ' + $bstrTotal169 + ' | readask170 ' + $readAsk170 + ' | auth169 ' + $authCall169['emitBstrSlotStore'] + '/' + $authCall169['emitVariantSlotAssign'] + ' | violations 0') -ForegroundColor Green
     exit 0
 }
 foreach ($b in $bad) { Write-Host ('FAIL ' + $b) -ForegroundColor Red }

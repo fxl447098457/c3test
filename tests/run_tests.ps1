@@ -2850,6 +2850,28 @@ if ($Category -in @("all", "run", "bas")) {
         'vb6_B169Holder_prop_let_PV(',
         'vb6_B169Holder_prop_let_PK('
     )
+
+    Test-EmitcShape "b170_member_read_slot_arm" @(
+        "$Tests\b170_mrt\B170Main.bas", "$Tests\b170_mrt\B170Holder.cls",
+                 "$Tests\b170_mrt\B170Holder2.cls") @(
+        # 撞名的 Variant 字段读 → 槽档; With 那一站同一个答案; Long 字段走数值档; String 字段裸读
+        'vb6_CStr(vb6_VariantFromValue(h->PV  /* class var .PV field */))',
+        'vb6_CStr(vb6_VariantFromValue(_vb6_with_0->PV  /* With class .PV field */))',
+        'vb6_CStrLong(h->Command  /* class var .Command field */)',
+        'vb6_Len(k->PV  /* class var .PV field */)',
+        'vb6_CStr(vb6_VariantFromValue(h->PZ  /* class var .PZ field */))'
+    )
+    Test-EmitcAbsent "b170_member_read_lesion" @(
+        "$Tests\b170_mrt\B170Main.bas", "$Tests\b170_mrt\B170Holder.cls",
+                 "$Tests\b170_mrt\B170Holder2.cls") @(
+        # BASE 答错的形状: 数值档吃掉了 Variant 槽, 也吃掉了同名的 String 字段 (两台都在场)
+        'vb6_CStrDbl(h->PV  /* class var .PV field */)',
+        'vb6_CStrDbl(k->PV  /* class var .PV field */)',
+        'vb6_CStrDbl(_vb6_with_0->PV  /* With class .PV field */)',
+        # BASE 的 AV 形状: 把 Long 字段当 BSTR 读
+        'vb6_Len(h->Command  /* class var .Command field */)',
+        'L"B170-4="), h->Command  /* class var .Command field */)'
+    )
     # 账 #305 §B149 + §B150 (第四十刀): 注册表家族的真往返 + 晚绑定槽的二维元素读写。
     # 读数来源 = .build/b1280_rs (新 exe, x64 与 x86 **逐行相同**, 故同针同过); 外部口径证人 =
     # VB6 真语料 mdoceditor/E-Type/Main.bas:269 (`For i = 0 To UBound(varFiles, 1)` + `varFiles(i, 1)`)。
@@ -5530,6 +5552,29 @@ if ($Category -in @("all", "run", "vbp")) {
         "B169-DONE")
     Test-Vbp "b169_class_field_store" "$Tests\b169_cfw\B169.vbp" $b169Expected
     Test-Vbp "b169_class_field_store_x86" "$Tests\b169_cfw\B169.vbp" $b169Expected -Arch "x86"
+
+    # <vbeclipse> 回归夹子 (b170_mrt, 账 #305 §B170 第六十一刀): 类字段的**读**那一问改问宿主那张表。
+    # 修前 BASE 两台实测读数 (都在案):
+    #   B170-1  `Public PV As Variant` 读回 0|1 —— 成员名的兜底查表撞上内置函数 PV()
+    #           (builtin_funcs.inc:317 答 Double) ⇒ 发 vb6_CStrDbl(那枚槽), RTL 的 _Generic 按数值
+    #           解它 (VarR8), 串值就折成 0;
+    #   B170-3  同一名在另一枚类里声明成 `As String` 也答 Double —— 声明档整个被吞掉;
+    #   B170-4  `Public Command As Long` 撞上内置 Command (答 String) ⇒ 发**裸 BSTR 读**, 把 7
+    #           当指针解 ⇒ 两台 RUN-RC=0xC0000005 (原生 AV, 只有真跑才看得见);
+    #   B170-5  With 块里 `.PV` 是同一枚问题的第二个站。
+    # 每一行钉的一半:
+    #   B170-1/2   撞名的 Variant 字段 vs 不撞名的 Variant 字段 (后者是负控, 修前后都得对)
+    #   B170-3/4   撞名的 String 字段 / 撞名的 Long 字段 (两台都真跑)
+    #   B170-5     With 那一站 (与点号那一路两个站问同一枚表)
+    #   B170-6     类内 Me.<字段> 与裸名 <字段> 两条本来就对的腿 (本刀不许改坏)
+    #   B170-7/8   VarType/TypeName 那一档 + 槽里换成数字之后 CStr 照旧对
+    $b170Expected = @(
+        "B170-1=withform|8", "B170-2=withform|8", "B170-3=withform|8", "B170-4=7|1",
+        "B170-5=withform|withform",
+        "B170-6=withform|withform|withform|withform",
+        "B170-7=8|String", "B170-8=123", "B170-DONE")
+    Test-Vbp "b170_member_read_type" "$Tests\b170_mrt\B170.vbp" $b170Expected
+    Test-Vbp "b170_member_read_type_x86" "$Tests\b170_mrt\B170.vbp" $b170Expected -Arch "x86"
 
     # <vbeclipse> 回归夹子 (iface_wrap): 接口宿主**类型映射**的最小夹子, GA run 36732948503
     # (BalloonTooltips 红) 的直接切片。IFoo 显式 `Attribute VB_Creatable = True` ⇒ 进不了
