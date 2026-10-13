@@ -31,6 +31,23 @@
     if (_wcsicmp(name, L"hwnd") == 0 || _wcsicmp(name, L"hWnd") == 0) {
         vb6_ho_setVariantLong(out, (int32_t)(intptr_t)obj); return 1;
     }
+    /* 账 #271: `hWndUserControl` 是 Krool/ComCtls 那一族 UserControl 的**通行属性**
+       (Animation/CheckBoxW/ComboBoxW/CommandButtonW … 每个 .ctl 都写
+       `Public Property Get hWndUserControl() As LongPtr: hWndUserControl = UserControl.hWnd`)。
+       CoolBar.ctl:2028 用「先问它、问不到(Err)再问 .hWnd」来区分 UC 与内建控件:
+         Handle = GetWindowFromObject(Value.Object)
+         If Handle = NULL_PTR Then
+             On Error Resume Next: Handle = Value.hWndUserControl
+             If Err.Number <> 0 Then Handle = Value.hWnd
+         …  If ControlIsValid(Value) = True And Handle <> NULL_PTR Then … Else Err.Raise 380
+       本 RTL 的宿主模型对**认不得的成员一律交 Empty 且不报错** (刻意如此, 见文件末尾),
+       于是 `Value.hWndUserControl` 不报错 ⇒ `Err.Number = 0` ⇒ 不会退到 `.hWnd`
+       ⇒ Handle 停在 0 ⇒ 第二十六层的 `Err.Raise 380`。
+       VB6 里 `UserControl.hWnd` 与本模型的 `hWnd` 是**同一个窗口**, 这里按同一口径
+       交回 obj 即可 (对 UC 与非 UC 控件都一样 ⇒ 与 VB6 那条 fallback 殊途同归)。 */
+    if (_wcsicmp(name, L"hWndUserControl") == 0) {
+        vb6_ho_setVariantLong(out, (int32_t)(intptr_t)obj); return 1;
+    }
     if (_wcsicmp(name, L"Name") == 0) {
         vb6_ho_setVariantBstr(out, vb6_BSTR_FromStr(h && h->name[0] ? h->name : (r && r->ctrlName[0] ? r->ctrlName : L"")));
         return 1;
@@ -122,6 +139,21 @@
     if (_wcsicmp(name, L"Container") == 0 || _wcsicmp(name, L"Parent") == 0) {
         void* parentHwnd = (void*)GetParent((HWND)obj);
         if (!parentHwnd) { vb6_ho_setVariantEmpty(out); return 1; }
+        /* 账 #271: **父是 UserControl** 时, VB6 的 Container 交回的是**该 UserControl
+           的 Extender**, 不是宿主窗口 —— 这条「同一性」在 VB6 里是真的, 而且是
+           Krool/NewTab 那一族控件唯一的"这个控件确实摆在我身上"判据:
+             ComCtlsDemo CoolBar.ctl:3173 `Set Container = Control.Container`
+                 → `CBool(Err.Number = 0 And Not Control Is Extender And Container Is Extender)`
+             NewTab ctlNewTab.ctl:12401 `If iContainer_Prev.Container Is UserControl.Extender Then`
+           以前一律交回父窗口 HWND ⇒ 上面两处的 `Is Extender` **恒假** ⇒
+           CoolBar 的 ControlIsValid 永远 False ⇒ `Err.Raise 380`
+           (ComCtlsDemo 启动即未处理错误 380 退出, 验收位"窗口 5s 内出现"因此红)。
+           父是**窗体**时维持原口径 —— Charts ClsResizer 的
+           `oCtrl.Container.Name = oForm.Name` 问的就是那一档 (Extender 没有 Name)。 */
+        if (vb6_uc_findByHwnd(parentHwnd)) {
+            vb6_ho_setVariantObject(out, (void*)&vb6_UserControl_Extender);
+            return 1;
+        }
         vb6_ho_setVariantObject(out, parentHwnd); return 1;
     }
     if (_wcsicmp(name, L"Caption") == 0 || _wcsicmp(name, L"Text") == 0) {
