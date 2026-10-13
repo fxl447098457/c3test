@@ -73,6 +73,10 @@
     void emitVariantSlotStore(const std::string& target, const std::string& expr,
                               bool rhsOwnsValue, bool viaTemp = false);
 
+    // 账 #305 §B166 (第五十六刀): 「这一次调用现造的 ParamArray 数组, 出口该销毁」收成这一枚 ——
+    // Sub/Function/Property 三个过程出口各调一次, 站点不许再各自抄那三行。
+    void emitParamArrayReclaim(const std::vector<std::unique_ptr<ParameterDecl>>& params);
+
     // Fix 198: 装箱点上的布尔口径修正. `As Boolean` 在 C 层就是 int16_t (与 Integer
     // 同型), 布尔字面量又是裸 (-1) (int) → 交给 _Generic vb6_VariantFromValue 会分别
     // 选到 short:/int: 分支, 装箱成 VT_I2 / VT_I4: 实测 VarType(b)=2、

@@ -355,6 +355,10 @@ void CCodeGen::visit(PropertyDecl& node) {
     ansiTempsToFree_.clear();
     ansiOutParams_.clear();
 
+    // 账 #305 §B166 (第五十六刀): 本次调用现造的 ParamArray 数组在统一出口销毁(口径见那枚出口)。
+    // Exit Sub 那条形同 M22 的 ANSI 临时量, 走不到这一行。
+    emitParamArrayReclaim(node.params);
+
     // tB Interface B05: 接口变量持有引用, 正常出口处经槽 Release
     emitIvrefScopeRelease();
 

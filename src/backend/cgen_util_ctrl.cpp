@@ -2354,6 +2354,18 @@ void CCodeGen::emitVariantSlotStore(const std::string& target, const std::string
     c_.emitLine(target + " = " + expr + ";");
 }
 
+// 账 #305 §B166 (第五十六刀): 被调方在统一出口销毁调用点为这一次调用现造的 ParamArray 数组。
+// VB6 的口径 = 这枚数组的寿命就是这一次调用; 安全性已量过: 每个 VB 过程的 PA 实参都由调用点的
+// vb6_PA_Create 新造(连 `Inner b` 那种把一枚 ParamArray 再递出去的形状也是重新装箱,
+// .build/k56_p/fwd.bas 的产物), 所以这里销毁碰不到别人的指针。
+void CCodeGen::emitParamArrayReclaim(const std::vector<std::unique_ptr<ParameterDecl>>& params) {
+    for (const auto& prm : params) {
+        if (prm && prm->isParamArray) {
+            c_.emitLine("vb6_PA_Destroy(" + cIdent(prm->name) + ");");
+        }
+    }
+}
+
 std::string CCodeGen::wrapVariantValue(ASTNode* valueNode, const std::string& cExpr) const {
     if (!valueNode) return "vb6_VariantEmpty()";
     

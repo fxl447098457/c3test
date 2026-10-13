@@ -1333,6 +1333,20 @@ function Test-VariantSlotStore {
     }
 }
 
+function Test-ParamArrayReclaim {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] paramarray_reclaim ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\check_paramarray_reclaim.ps1" 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        $out | Select-Object -First 6 | ForEach-Object { Write-Host "  $_" }
+    }
+}
+
 function Test-RunBudget {
     $script:total++
     Write-Host -NoNewline "  [STATIC] run_budget ... "
@@ -2706,6 +2720,25 @@ if ($Category -in @("all", "run", "bas")) {
         'e = vb6_VariantFromStackVARIANT(&_fe_var_0);',
         'vb6_VariantAssign(&e, vb6_VariantFromValue(VB6_SA_AT(BSTR, gArr, _fe_i5)));',
         'vb6_VariantAssign(&keep, vb6_VariantFromValue(e));'
+    )
+    # 账 #305 §B166 (第五十六刀): 一枚 ParamArray 往返的两半回收各接上一枚出口 —— 调用点现造的
+    # 数组归**被调方统一出口**销毁(此前 vb6_PA_Destroy 全仓 0 调用者), For Each 的中间槽 _pa_vN
+    # 改问 §B164 那枚出口 + 块尾收尾。两台实测(BASE 存档 .build/k56_fix_base55_*.txt):
+    # 数组那一半每次调用漏 158/109 字节, 中间槽那一半每元素再漏 87/61 字节。
+    # long-window 那一针是**精确 0**: Long 档元素不带权, 它非 0 只可能是数组本身没人收。
+    # loop-bytes 用四窗相减把打包代价与每次调用的尾巴一起抵掉, 只剩 _pa_vN 自己; 判的是带宽
+    # (页粒度会抖: 同一台两次读 49,152 与 188,416), BASE 那台在这针上是 N。
+    # 字面量在打包站点被现造两次(实测残差 123/100 B/字符串元素)是下一格 ⇒ 这里的针都不看字符串窗口。
+    $b166Needles = @("B166-sum8=40", "B166-count=3", "B166-last=XXXX", "B166-long-window=0",
+        "B166-loop-ok=Y", "B166-acc=210008", "B166-apiBad=0", "B166-DONE")
+    Add-BasTest "test_pa_reclaim" "$Tests\test_pa_reclaim.bas" $b166Needles
+    Add-BasTest "test_pa_reclaim_x86" "$Tests\test_pa_reclaim.bas" $b166Needles -Arch "x86"
+    # 发码形状针: 那四行就是两枚出口的产物 —— 少任何一行都是有人把回收又改回没人管。
+    Test-EmitcShape "b166_pa_reclaim_shape" @("$Tests\test_pa_reclaim.bas") @(
+        'vb6_PA_Destroy(items);',
+        'vb6_VariantClear(&_pa_v0);',
+        '_pa_v0 = vb6_PA_GetVariant(items, _fe_i0);',
+        'e = vb6_VariantFromStackVARIANT((VARIANT*)&_pa_v0);'
     )
     # 账 #305 §B149 + §B150 (第四十刀): 注册表家族的真往返 + 晚绑定槽的二维元素读写。
     # 读数来源 = .build/b1280_rs (新 exe, x64 与 x86 **逐行相同**, 故同针同过); 外部口径证人 =
@@ -5985,6 +6018,7 @@ if ($Category -in @("all", "compile")) {
     Test-RunBudget
     Test-VariantI8Coverage
     Test-VariantSlotStore
+    Test-ParamArrayReclaim
     Test-EventHandlerNames
     Test-UcInstanceExit
     Test-StaticSentinelRegistration

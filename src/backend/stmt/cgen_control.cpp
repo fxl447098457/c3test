@@ -299,7 +299,7 @@ void CCodeGen::visit(ForEachStmt& node) {
             std::string paGet092q = "vb6_PA_GetVariant(" + arrRef091f + ", " + idxVar + ")";
             std::string paTmp092q = "_pa_v" + std::to_string(tmpIdx);
             if (feVarIsVariant) {
-                c_.emitLine(paTmp092q + " = " + paGet092q + ";");
+                emitVariantSlotStore(paTmp092q, paGet092q, true);  /* §B166 形⑦: 实测交的是带权副本(每元素 52/44 字节) = 自己持有, 每轮先清旧的 */
                 // Fix 176: ParamArray 的 For Each 元素在栈上 (VARIANT 槽位),
                 // vb6_VariantFromComResult 尾部会 free(pv) 释放堆宿主 VARIANT,
                 // 对栈地址 free → 堆损坏 (0xC0000374). 栈上源用
@@ -327,6 +327,12 @@ void CCodeGen::visit(ForEachStmt& node) {
         emitStmtList(node.body);
         c_.dedent();
         c_.emitLine("}");
+        if (isPA092q && feVarIsVariant) {
+            // 账 #305 §B166: 中间槽 _pa_vN 每轮由上面那一枚出口清了前一份, 循环退出后手上
+            // 还留着最后一份带权值 —— 块尾收掉(这一枚槽是编译器自己 mint 的, 不必等 §B164 的
+            // ①/② 那条口径: 它的范围就是这一对花括号)。
+            c_.emitLine("vb6_VariantClear(&_pa_v" + std::to_string(tmpIdx) + ");");
+        }
         c_.dedent();
         c_.emitLine("}");
     } else {
