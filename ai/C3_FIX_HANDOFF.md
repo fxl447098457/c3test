@@ -2570,6 +2570,10 @@ marker、重编，之后 `check_rtl_embedded` 报 **125/125 逐字节相同**。
   四形 RHS 各发一句裸赋值：`= 5` / `= v2` / `= vb6_BSTR_FromStr(L"lit")` / `= vb6_Left(…)`，`.build/k59_p/use2.bas`）。
 - **同族的第二形（同一处病）**：§B167 登记的 **形⑫** `Fn(...).V = <String>` 发 `vb6_Make().FV = s;` ⇒ 同样 C2440。
   两形的共同点 = **目标**是一条成员访问文本，而发码侧认槽的那几张名单都没覆盖它。
+  【**第五十九刀实测：这一形随本刀一并合上** —— 接收者是 `IndexOrCallExpr` 时 `inferClassTypeOfExpr` 本来
+  就答得出类名，所以那张新表也认它：同一形从 `vb6_F12Main_MakeH()->PV = s;` 变成
+  `vb6_VariantAssign(&vb6_F12Main_MakeH()->PV, vb6_VariantString(s));`（探针 `.build/k59_p/f12`，两台对照）
+  ⇒ **没有为它另开一刀** —— 这正是「收成一处」收得住的证据。】
 - **为什么**：目标文本出自 `cgen_expr_member_class_fallback.inc:263`（类公共字段那一支，名字里带 `/* class var .X field */`），
   而 §B164/§B167 那枚站④ 认槽用的是 `knownVariantVars_`（局部/模块/形参的**变量名**）、
   `classVariantMembers_`（读侧 Fix 089j 用的那张类字段名单）、以及**文本** `VB6_SA_AT(vb6_VARIANT, …)`（数组元素）——
