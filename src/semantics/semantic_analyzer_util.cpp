@@ -532,6 +532,7 @@ std::string SemanticAnalyzer::evalOptionalDefault(ASTNode* defaultValue, Vb6Type
                     case Vb6Type::String: {
                         // C-escape constStringValue before embedding in C string literal
                         std::string cEsc;
+                        bool hasNul = false;
                         cEsc.reserve(sym->constStringValue.size() + 16);
                         for (char ec : sym->constStringValue) {
                             switch (ec) {
@@ -540,8 +541,19 @@ std::string SemanticAnalyzer::evalOptionalDefault(ASTNode* defaultValue, Vb6Type
                                 case '\n': cEsc += "\\n"; break;
                                 case '\r': cEsc += "\\r"; break;
                                 case '\t': cEsc += "\\t"; break;
+                                // 内嵌 NUL 必须显式转义 (否则原样落进 L"…" 会把字面量截断)
+                                case '\0': cEsc += "\\000"; hasNul = true; break;
                                 default:   cEsc += ec; break;
                             }
+                        }
+                        // 含内嵌 NUL 的串常量 (VB6 `vbNullChar` / Chr$(0) 拼出的串) 改用
+                        // **定长**构造: 普通 vb6_BSTR_FromStr 走 wcslen, 内嵌 NUL 会被当
+                        // 串尾 ⇒ 长度丢失 (实测 Builds/ListView 的 LVN_GETDISPINFO 回调
+                        // `s & vbNullChar` 因此少了终止符, 控件读越界 = 屏上「正确文字 +
+                        // 后接乱码」)。与 vb6_BSTR_FromBSTR 同口径, 都走 SysAllocStringLen。
+                        if (hasNul) {
+                            return "vb6_BSTR_FromStrN(L\"" + cEsc + "\", "
+                                 + std::to_string(sym->constStringValue.size()) + ")";
                         }
                         return std::string("vb6_BSTR_FromStr(L\"") + cEsc + "\")";
                     }

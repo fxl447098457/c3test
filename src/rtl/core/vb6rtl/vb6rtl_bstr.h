@@ -69,6 +69,31 @@ static inline BSTR vb6_BSTR_FromStr(const wchar_t* s) {
 #endif
 }
 
+// 从**定长**宽串创建 BSTR —— 走 SysAllocStringLen, 不按 NUL 截断。
+// 专给含**内嵌 NUL** 的串常量用 (VB6 `vbNullChar` / Chr$(0) 拼出的串):
+// 普通 vb6_BSTR_FromStr 走 wcslen, 会把内嵌 NUL 当串尾 ⇒ 长度丢失,
+// 最直接的受害者是 `s & vbNullChar` 这类「末尾补 NUL」的写法 (ListView 的
+// LVN_GETDISPINFO 回调正是靠它给 pszText 落终止符) —— 少了终止符, 控件读越界,
+// 屏幕上是「正确文字 + 后接一串乱码」。与 vb6_BSTR_FromBSTR (Fix 161b-decl-out) 同口径。
+static inline BSTR vb6_BSTR_FromStrN(const wchar_t* s, int32_t n) {
+    if (!s || n <= 0) return vb6_BSTR_Empty();
+#ifdef _WIN32
+    BSTR r = SysAllocStringLen(NULL, (UINT)n);
+    if (!r) return vb6_BSTR_Empty();
+    memcpy(r, s, (size_t)n * sizeof(WCHAR));
+    r[n] = L'\0';
+    return r;
+#else
+    uint32_t* p = (uint32_t*)malloc(sizeof(uint32_t) + (size_t)(n + 1) * sizeof(wchar_t));
+    if (!p) return NULL;
+    *p = (uint32_t)n;
+    BSTR bstr = (BSTR)(p + 1);
+    memcpy(bstr, s, (size_t)n * sizeof(wchar_t));
+    bstr[n] = 0;
+    return bstr;
+#endif
+}
+
 // 复制BSTR (创建独立副本, 调用方负责释放)
 static inline BSTR vb6_BSTR_FromBSTR(BSTR bstr) {
     if (!bstr) return vb6_BSTR_Empty();

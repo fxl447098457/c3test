@@ -66,7 +66,9 @@ addConst("vbActiveTitleBarText", Vb6Type::Long, (long long)0x80000009);
     addConst("vbWhite", Vb6Type::Long, 16777215);
 
     // 字符串常量
-    auto addStrConst = [&](const char* name, const char* val) {
+    // 形参取 std::string (不是 const char*) —— 否则含**内嵌 NUL** 的常量
+    // (`vbNullChar` = Chr(0)) 会被 C 字符串语义在第一个 NUL 处截成空串。
+    auto addStrConst = [&](const char* name, const std::string& val) {
         auto sym = std::make_unique<Symbol>(SymbolKind::Constant, name, Vb6Type::String,
             SourceLocation{}, AccessLevel::Public);
         sym->hasConstValue = true;
@@ -79,7 +81,7 @@ addConst("vbActiveTitleBarText", Vb6Type::Long, (long long)0x80000009);
     addStrConst("vbLf", "\n");
     addStrConst("vbCrLf", "\r\n");
     addStrConst("vbNewLine", "\r\n");
-    addStrConst("vbNullChar", std::string(1, '\0').c_str());
+    addStrConst("vbNullChar", std::string(1, '\0'));
     addStrConst("vbTab", "\t");
     addStrConst("vbBack", "\b");
     addStrConst("vbFormFeed", "\f");

@@ -194,7 +194,10 @@
 
     // Fix 010q: Misc VB6 constants
     if (lower == "vbobjecterror")  { lastExpr_ = "(-2147221504)"; return; }  // &H800A0000
-    if (lower == "vbnullchar")     { lastExpr_ = "vb6_BSTR_Empty()"; return; }  // Chr(0) ≈ empty BSTR
+    // Chr$(0) = **一枚 NUL 字符**的串 (Len=1), 不是空串 —— 老写法交 Empty 会把
+    // `s & vbNullChar` 的终止符吃掉 (Builds/ListView 的 LVN_GETDISPINFO 回调靠它给
+    // pszText 落 NUL; 少了就是「正确文字 + 后接乱码」)。走定长构造保住内嵌 NUL。
+    if (lower == "vbnullchar")     { lastExpr_ = "vb6_BSTR_FromStrN(L\"\\000\", 1)"; return; }
     if (lower == "vbobject")       { lastExpr_ = "9"; return; }  // already above but dedup-safe
     if (lower == "vbfirstjan1")    { lastExpr_ = "1"; return; }
     if (lower == "vbfirstfourdays") { lastExpr_ = "2"; return; }

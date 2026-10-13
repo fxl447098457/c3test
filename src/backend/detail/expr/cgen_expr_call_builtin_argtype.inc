@@ -149,6 +149,22 @@
                 }
             }
         }
+        // Fix (vbNullChar 一族): VB6 `String$(n, charcode)` 的 charcode **也可以是字符串** ——
+        // 取它**首字符**的码 (手册: String$(3, "A") = "AAA")。RTL 原型是
+        // vb6_String(int32_t n, int32_t charCode), 把 BSTR 直接递进去是**指针→int**:
+        // 低 32 位被当字符码 ⇒ `String$(260, vbNullChar)` 造出 260 个**垃圾宽字符**
+        // (屏上是整条 CJK 乱码)。实测 Builds/ImageCombo/ImageCombo.ctl:1400
+        // `Buffer = String$(CBEMAXSTRLEN, vbNullChar)` 是 ComCtls 控件分配缓冲的惯用写法。
+        // 改用 vb6_AscW(BSTR) 取首字符 (空串/NULL 交 0, 无 Asc 的错误副作用)。
+        if (callee == "vb6_String" && args.size() >= 2
+            && node.positional.size() >= 2 && node.positional[1]
+            && inferExprType(*node.positional[1]) == Vb6Type::String) {
+            std::string wrappedStr = "vb6_AscW(" + args[1] + ")";
+            replaceInArgList108c(args[1], wrappedStr);
+            args[1] = wrappedStr;
+            argsFixed108c = true;
+        }
+
         (void)argsFixed108c;
     }
 
