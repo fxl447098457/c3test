@@ -262,6 +262,7 @@ static int32_t memVariantToI4(VARIANT* v) {
     case VT_I2: return (int32_t)v->iVal;
     case VT_UI1: return (int32_t)v->bVal;
     case VT_I8: return (int32_t)v->llVal;
+    case VT_UI8: return (int32_t)v->ullVal;   /* ai/032 §6.6: 无符号 64 位档同格 */
     case VT_BOOL: return (v->boolVal == VARIANT_TRUE) ? -1 : 0;
     case VT_R8: return (int32_t)v->dblVal;
     case VT_R4: return (int32_t)v->fltVal;

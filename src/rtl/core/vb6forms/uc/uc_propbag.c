@@ -410,6 +410,18 @@ static int vb6_bag_deserialize(Vb6PropBag* bag, const uint8_t* data, uint32_t n)
                 memcpy(&q, &bits, 8); v.llVal = q;
                 vb6_BagPut(bag, name, &v); parsed++; }
             break; }
+        case VT_UI4: {  /* 19 —— ai/032 §6.6: 无符号两档同理, 原样保留 */
+            if (vp + 4 <= end) { VARIANT v; VariantInit(&v); v.vt = VT_UI4;
+                v.ulVal = vb6_bag_rd32(vp);
+                vb6_BagPut(bag, name, &v); parsed++; }
+            break; }
+        case VT_UI8: {  /* 21 */
+            if (vp + 8 <= end) { VARIANT v; VariantInit(&v); v.vt = VT_UI8;
+                uint64_t bits2 = (uint64_t)vb6_bag_rd32(vp)
+                               | ((uint64_t)vb6_bag_rd32(vp + 4) << 32);
+                memcpy(&v.ullVal, &bits2, 8);
+                vb6_BagPut(bag, name, &v); parsed++; }
+            break; }
         case (VT_ARRAY | VT_UI1): {   /* 0x2011 */
             if (vp + 10 <= end) {
                 uint32_t cbData = vb6_bag_rd32(vp + 2);

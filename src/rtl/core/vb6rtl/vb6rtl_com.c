@@ -89,6 +89,9 @@ int vb6_EnumNext(void* penum, vb6_VARIANT* outElem) {
         case VT_NULL:   outElem->vt = vb6_vtNull; break;
         case VT_I2:     outElem->vt = vb6_vtInteger; outElem->iVal = varElem.iVal; break;
         case VT_I4:     outElem->vt = vb6_vtLong; outElem->lVal = varElem.lVal; break;
+        /* ai/032 §6.6: 无符号两档 (缺档时 default 是把数值转 BSTR —— 不是答错而是换型)。 */
+        case VT_UI4:    outElem->vt = (vb6_vartype)VT_UI4; outElem->ulVal = varElem.ulVal; break;
+        case VT_UI8:    outElem->vt = (vb6_vartype)VT_UI8; outElem->ullVal = varElem.ullVal; break;
         case VT_R4:     outElem->vt = vb6_vtSingle; outElem->fltVal = varElem.fltVal; break;
         case VT_R8:     outElem->vt = vb6_vtDouble; outElem->dblVal = varElem.dblVal; break;
         case VT_BSTR:   outElem->vt = vb6_vtBSTR; outElem->bstrVal = varElem.bstrVal; break;
@@ -415,6 +418,10 @@ static vb6_VARIANT vb6_ComVariantIntoSlot(VARIANT* pv, int steal) {
          * 把 llVal 当指针解) —— 不是「答错数」而是直接垃圾；而 VarAdd(VT_I8, VT_I4) 本来
          * 就交回 vt=20 的结果(实测)，所以这一格是 Variant 算术的必经之路。 */
         case VT_I8:    result.llVal = pv->llVal; break;
+        /* ai/032 §6.6: 无符号两档与 VT_I8 同条 —— 缺档时 default 那段会把 ullVal
+         * 当数组指针解 (与 §B145 那次同形的垃圾读)。原样带值过界。 */
+        case VT_UI4:   result.ulVal = pv->ulVal; break;
+        case VT_UI8:   result.ullVal = pv->ullVal; break;
         case VT_DECIMAL:
             /* 账 #305 §B144: 这一档只问唯一出口「DECIMAL 住在哪一字节」—— 两架构的布局
              * 不在这里抄第二遍(这里曾经抄过两次，都是抄错的)。 */
@@ -652,6 +659,10 @@ void vb6_VariantPackBorrow(vb6_VARIANT v, VARIANT *out) {
         case vb6_vtByte:    out->vt = VT_UI1; out->bVal = v.bVal; break;
         /* 账 #305: 以前这一档落 default ⇒ 交出去是 VT_EMPTY —— 地址**静默变成空值**，不是报错。*/
         case VT_I8:       out->vt = VT_I8; out->llVal = v.llVal; break;
+        /* ai/032 §6.6: 无符号两档按原档交给 COM (缺档时 default 交 VT_EMPTY —— 
+         * 与 VT_I8 那条同一条严重度)。 */
+        case (vb6_vartype)VT_UI4: out->vt = VT_UI4; out->ulVal = v.ulVal; break;
+        case (vb6_vartype)VT_UI8: out->vt = VT_UI8; out->ullVal = v.ullVal; break;
         /* 账 #305 §B145: §B142 census 点名的那三格 —— Decimal / Currency / Date 以前都落 default
          * ⇒ 交给 COM 或交给 VarAdd 的是 VT_EMPTY，与上面 VT_I8 同一条严重度分级。
          * Decimal 走 §B142 那枚唯一出口(两份布局不在这里抄第二遍)；Currency 那一格是

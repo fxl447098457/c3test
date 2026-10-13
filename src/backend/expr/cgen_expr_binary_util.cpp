@@ -151,6 +151,9 @@ std::string CCodeGen::wrapToBSTR(const std::string& expr, Expr& node) {
         if (fn == "vb6_CULng")    return "vb6_CStrULong(" + expr + ")";
         if (fn == "vb6_CULngLng") return "vb6_CStrULongLong(" + expr + ")";
         if (fn == "vb6_CSByte" || fn == "vb6_CUInt") return "vb6_CStrLong(" + expr + ")";
+        // twinBASIC 形 CLngPtr 返回 LongPtr (intptr_t): 按 LongPtr 档走 CStrLongLong
+        // (与 cstr inc 里 LongPtr 实参的分诊同款 int64 提升), 不能落"其他 vb6_ 函数假定 BSTR"。
+        if (fn == "vb6_CLngPtr") return "vb6_CStrLongLong((int64_t)(intptr_t)(" + expr + "))";
         // Fix 091i: 项目内返回 Variant 的函数 (driver 预扫描 variantReturnFuncs_,
         // 含 vb6_<cls>_prop_get_<name>) 不能按"其他 vb6_ 函数假定为 BSTR"直通 —
         // 需 vb6_VariantToString 提取. 此前字符串拼接 / BSTR 形参处生成
