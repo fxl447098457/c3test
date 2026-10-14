@@ -294,6 +294,23 @@
                     : (node.positional[0] ? inferExprType(*node.positional[0]) : Vb6Type::Empty);
                 std::string kind176 = builtinNoParamTableFormalCType(
                     callee, node.positional.size(), i, first176);
+                // 账 #305 §B177 (第六十八刀): 宏的分派位(= InStr 的 needle) 上 **Variant 裸交**。
+                // `vb6_InStr` / `vb6_InStrC` 是按 needle 分派的 _Generic 宏, needle 是
+                // vb6_VARIANT 时选 `vb6_InStrVar` / `vb6_InStrVarC` —— 那里自己
+                // `vb6_VariantToString` 再 `vb6_BSTR_Free` (vb6rtl_string.c:235-247)。
+                // 发码侧抢先解一层语义同值, 但多一份没人回收的临时串 (两台实测:
+                // 20000 次 `InStr(hay, v)` 比同形状的串实参多 753664 字节, `.build/k68_lp2_x64` /
+                // `_x86` 修前 753664、修后 0) ⇒ 把这一位的答案换成「形参本来就是槽」,
+                // 复用下面那条既有的闸 —— 不新开一站、不新写一种形状。
+                // 同格另一半年: 这一位对**数值**实参照旧要折 (§B174/§B175 那一站看的是
+                // `builtinNoParamTableFormalCType` 的 BSTR 档, 六十七刀把它答成空过, 于是
+                // `InStr(2, s, 7)` 发裸 int 进 `wchar_t*` —— cl 不报, 两台跑到那行都崩)。
+                // 位号两问同源: 都走 builtinNoParamTableDispatchSlot 那一处, 不许在这里再数一遍。
+                if (kind176 == "BSTR"
+                    && builtinNoParamTableVariantMayStayRaw(
+                           callee, node.positional.size(), i, first176)) {
+                    kind176 = "vb6_VARIANT";
+                }
                 rtParamType = kind176.empty() ? getRuntimeParamCType(callee, i) : kind176;
             }
             if (!rtParamType.empty() && rtParamType != "vb6_VARIANT"

@@ -3229,6 +3229,49 @@ if ($Category -in @("all", "run", "bas")) {
         "V8-fmt=1235", "V9-fmt-lit=1235", "V10-fmt-len=4", "BV-DONE")
     Add-BasTest "b176_var_slot" "$Tests\b176_var_slot.bas" $bv176Needles
     Add-BasTest "b176_var_slot_x86" "$Tests\b176_var_slot.bas" $bv176Needles -Arch "x86"
+    # <vbeclipse> 账 #305 §B177（第六十八刀）：InStr 的 needle 位**一位两答** —— 数值实参要折成串
+    # (VB6 隐式 CStr)，而 Variant 实参要**裸交**：`vb6_InStr` / `vb6_InStrC` 是按 needle 分派的
+    # _Generic 宏，Variant 那一臂 `vb6_InStrVar` 自己解包**并 free**（`vb6rtl_string.c:235-247`）。
+    # 六十七刀把这一位在「写了 start」的两形答成空，于是**数值那一半跟着掉了**：`InStr(2, s, 7)`
+    # 发裸 int 进 `wchar_t*`，cl 不报，两台跑到那行都崩（实测修前 x64 与 x86 都停在 N5 那行、
+    # 只剩前四行输出；六十六刀那台答 4）。反过来两参形与「串首三参形」又多折一层：20000 次
+    # `InStr(hay, vStr)` 比同形状的 String 实参多 753664 字节（两台修前 753664、修后 0）。
+    # 修法 = 位号只在一处数（`builtinNoParamTableDispatchSlot`），「第 pos 位要什么档」与
+    # 「这一位的 Variant 可不可以不折」都是它的投影 ⇒ 两答同源、站点数不增加。
+    $b177Needles = @("N1-twoarg-lit=4", "N2-twoarg-long=4", "N5-start-lit=4", "N6-start-long=4",
+        "N13-cmp-long=4", "N14-start-cmp-long=4", "N3-twoarg-varstr=4", "N4-twoarg-varnum=4",
+        "N7-start-varstr=4", "N8-cmp-varstr=4", "N10-start-cmp-varstr=4", "N15-miss=0",
+        "N16-bin-vs-text=0|4", "B177-apiBad=0", "B177-leak-ok=Y", "B177-acc=4",
+        "C3ProbeB177-DONE")
+    Add-BasTest "b177_instr_needle" "$Tests\b177_instr_needle.bas" $b177Needles
+    Add-BasTest "b177_instr_needle_x86" "$Tests\b177_instr_needle.bas" $b177Needles -Arch "x86"
+    # 发码针：六枚数值折算（两形不写 start、两形写 start、两形带 compare）+ 五枚 Variant **裸交**
+    # + 一枚 haystack 位照旧解包（宏不按那一维分派 ⇒ 那一位的折是必须的，别跟着改）。
+    Test-EmitcShape 'b177_instr_needle_shape' @(
+        "$Tests\b177_instr_needle.bas") @(
+        'vb6_InStr(1, hay, vb6_CStrLong(7))',
+        'vb6_InStr(1, hay, vb6_CStrLong(nLong))',
+        'vb6_InStr(2, hay, vb6_CStrLong(7))',
+        'vb6_InStr(2, hay, vb6_CStrLong(nLong))',
+        'vb6_InStrC(1, hay, vb6_CStrLong(nLong), 1)',
+        'vb6_InStrC(2, hay, vb6_CStrLong(nLong), 1)',
+        'vb6_InStr(1, hay, vStr)',
+        'vb6_InStrC(1, hay, vStr, 1)',
+        'vb6_InStrC(wNum, wHay, wVar, vb6_VariantToLong(wCmp))',
+        'vb6_InStr(1, vb6_VariantToString(wVar), wHay)',
+        'vb6_InStr(wNum, wHay, vb6_CStrLong(7))'
+    )
+    # 反针：前两枚 = 六十七刀丢掉的那一半（裸数值进 needle 位），中两枚 = 多折的那一半
+    # （needle 位被预先解包），第五枚钉「不许二次折」，最后一枚钉四参形也不许预先解包。
+    Test-EmitcAbsent 'b177_instr_needle_lesion' @(
+        "$Tests\b177_instr_needle.bas") @(
+        'vb6_InStr(2, hay, 7)',
+        'vb6_InStr(2, hay, nLong)',
+        'vb6_InStr(1, hay, vb6_VariantToString(vStr)',
+        'vb6_InStrC(1, hay, vb6_VariantToString(vStr)',
+        'vb6_VariantToString(vb6_VariantToString',
+        'vb6_InStrC(wNum, wHay, vb6_VariantToString(wVar), '
+    )
     # <vbeclipse> 账 #305 §B154（第四十二刀）：ReDim 重建一枚动态数组时，元素档**问声明**，不是问 ReDim 自己
     # 的 As 子句。修前 cgen_redim.cpp 只问 asType，没写 As 就交 vb6_sa_variant，而访问侧（VB6_SA_AT /
     # VB6_SA_ND_AT2）问的是声明表 arrayElemTypes_ —— 同一枚描述符两个答案：造出来 24 字节一步（x64），

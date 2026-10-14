@@ -609,6 +609,16 @@
                                                Vb6Type firstArgType) const;
     bool builtinNoParamTableStringSlot(const std::string& callee, size_t argc, size_t pos,
                                        Vb6Type firstArgType) const;
+    // 账 #305 §B177 (第六十八刀): 同一张表的**第三问** —— 「这一位是不是那枚 _Generic 宏的分派位」。
+    // 位号只在 builtinNoParamTableDispatchSlot 里数一遍, 上面「第 pos 位要什么档」与这一问都是它的
+    // 投影: needle 那一位对**数值**实参答 BSTR (要折, §B175), 对 **Variant** 实参要**裸交**
+    // (宏自己选 vb6_InStrVar 解包并 free) ⇒ 一枚 C 档串表达不了这一位, 六十七刀就是被这一维绊住的
+    // (它按「裸交」把整格答成空, 数值那一半跟着掉了, `InStr(2, s, 7)` 当场 AV)。
+    // 读者 = arg_variant 那条臂一枚 (Fix 038b-2), 站点数不许增加。
+    size_t builtinNoParamTableDispatchSlot(const std::string& callee, size_t argc,
+                                           Vb6Type firstArgType) const;
+    bool builtinNoParamTableVariantMayStayRaw(const std::string& callee, size_t argc, size_t pos,
+                                              Vb6Type firstArgType) const;
 
     // 账 #305 §B147: 「这枚 C 表达式是不是整只 vb6_VARIANT 槽」的 **AST 那一半** ——
     // 与上面 cExprIsVariant (文本前缀表) 合起来回答同一个问句。为什么必须分两头供出：

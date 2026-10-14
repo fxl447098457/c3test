@@ -91,7 +91,7 @@ function Get-CallSites([string]$name) {
             # 定义 = "…bool CCodeGen::" / 声明 = "…bool " —— 两者都不算调用点。
             $pre = $t.Substring(0, $m.Index)
             if ($pre -match 'CCodeGen::\s*$') { continue }
-            if ($pre -match '(bool|std::string)\s+$') { continue }
+            if ($pre -match '(bool|std::string|size_t)\s+$') { continue }
             $hits += (Split-Path -Leaf $path)
         }
     }
@@ -205,6 +205,28 @@ if (-not [regex]::IsMatch($argVariant, 'builtinNoParamTableFormalCType\(')) {
     $viol += 'R8 arg_variant 那条臂不再问档表 —— 位号又回到只认 C 签名表的状态 (§B176)'
 }
 
+# ---- R9 (账 #305 §B177, 第六十八刀) ----
+# needle 位 = RTL 那枚 _Generic 宏的**分派位**, 它一位两答: 数值实参要折成串 (Fix 175 那一站),
+# Variant 实参要**裸交** (宏自己走 vb6_InStrVar 解包并 free)。两答必须同源 —— 位号只许在
+# builtinNoParamTableDispatchSlot 里数一遍, 否则下一刀又会像六十七刀那样「改一答、掉一答」。
+$rawSites = @(Get-CallSites 'builtinNoParamTableVariantMayStayRaw')
+if ($rawSites.Count -ne 1 -or $rawSites[0] -ne 'cgen_expr_call_arg_variant.inc') {
+    $viol += ('R9 「这一位的 Variant 可否裸交」的调用点应恰好 1 处 (arg_variant), 实为 ' +
+              $rawSites.Count + ' (' + (($rawSites | Sort-Object -Unique) -join ', ') +
+              ') —— 这一问又长出第二位主人')
+}
+$slotSites = @(Get-CallSites 'builtinNoParamTableDispatchSlot')
+if ($slotSites.Count -ne 2 -or (($slotSites | Sort-Object -Unique) -join ',') -ne 'cgen_util_type.cpp') {
+    $viol += ('R9 分派位那一问的调用点应恰好 2 处且都在 cgen_util_type.cpp (档 + 可否裸交两枚投影), ' +
+              '实为 ' + $slotSites.Count + ' (' + (($slotSites | Sort-Object -Unique) -join ', ') +
+              ') —— 位号被抄了第二遍, §B176 形② 就是这么长回来的')
+}
+$arityN = @([regex]::Matches($util, 'firstArgType\s*==\s*Vb6Type::String')).Count
+if ($arityN -ne 1) {
+    $viol += ('R9 cgen_util_type.cpp 里「首参是不是串」那一问出现 ' + $arityN +
+              ' 次, 应为 1 次 —— InStr 的位号只能有一位主人')
+}
+
 Write-Host ('census: backendFiles=' + $allFiles.Count +
             ' gateCases=' + $gateCases +
             ' slotTableNames=' + $tableNames +
@@ -212,6 +234,9 @@ Write-Host ('census: backendFiles=' + $allFiles.Count +
             ' wrapToBSTR@conv=' + $convWrap +
             ' kindSites=' + $kindSites.Count +
             ' rtSites=' + $rtSites.Count +
+            ' rawSites=' + $rawSites.Count +
+            ' dispatchSites=' + $slotSites.Count +
+            ' arityQuestions=' + $arityN +
             ' castShapes=' + $castN)
 
 if ($viol.Count -gt 0) {
@@ -223,5 +248,5 @@ if ($viol.Count -gt 0) {
                 '形状走 wrapToBSTR; 要加第二位主人请先说明这四个问为什么分不开')
     exit 1
 }
-Write-Host 'PASS implicit_cstr_station (R1..R8)'
+Write-Host 'PASS implicit_cstr_station (R1..R9)'
 exit 0

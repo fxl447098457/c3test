@@ -902,30 +902,51 @@ bool CCodeGen::typeTakesImplicitCStr(Vb6Type t) const {
 // C 签名表**按写出来的位号**答 InStr 的 start 位时给出 BSTR (它的行是按 VB 两参形登的) ⇒
 // `InStr(vA, s1, "7")` 把该转数值的实参解成了串, 交进 `int32_t start` —— cl 只是 warning,
 // 运行时 start 是个被截断的指针 ⇒ 静默答 0 (`.build/k67_probe2.bas` 五形实测, 见 §B176)。
+// 账 #305 §B177 (第六十八刀): 「这一位是不是那枚 _Generic 宏的**分派位**」—— 位号只在这里数
+// **一遍**, 上面那两问 (档 / Variant 能不能裸交) 都只是它的投影。为什么要有第三问:
+// needle 这一位对两种实参要两种答案 —— 数值实参 VB6 会隐式 CStr (要折), 而 Variant 实参宏自己
+// 选 `vb6_InStrVar` 解包**并 free** (`vb6rtl_string.c:235-247`) (要裸交)。一枚 C 档串说不完,
+// 六十七刀按「裸交」那一半把这一位答成空, 于是**数值那一半跟着掉了** ——
+// `InStr(2, s, 7)` 发成 `vb6_InStr(2, s, 7)` (裸 int 进 `wchar_t*`, cl 不报, x64 跑到那行 AV,
+// RC=139; `.build/k68_probe4.bas` 两台对照: 六十六刀那台答 4、六十七刀这台崩),
+// 而两参形 `InStr(s, v)` 反过来还**多折一层** (20000 次调用漏 753664 字节, `.build/k68_lp`)。
+// 全仓 21 枚 `_Generic` 宏里「分派位不是第一参」的就 `vb6_InStr` / `vb6_InStrC` 两枚
+// (§B176 ①.1 量的), 而 `vb6_InStrC` 这一形在**改道之前**的 callee 名仍是 `vb6_InStr`
+// (`builtin_fixup` 才换成 InStrC), 所以这一问只认这一个名字。返回 SIZE_MAX = 这一族以外。
+size_t CCodeGen::builtinNoParamTableDispatchSlot(const std::string& callee, size_t argc,
+                                                 Vb6Type firstArgType) const {
+    if (callee != "vb6_InStr") return SIZE_MAX;
+    if (argc == 2) return 1;                                              // InStr(hay, needle)
+    if (argc == 3) return firstArgType == Vb6Type::String ? 1 : 2;        // (hay, needle, cmp)
+                                                                            // 或 (start, hay, needle)
+    if (argc == 4) return 2;                                              // (start, hay, needle, cmp)
+    return SIZE_MAX;
+}
+
+bool CCodeGen::builtinNoParamTableVariantMayStayRaw(const std::string& callee, size_t argc,
+                                                    size_t pos, Vb6Type firstArgType) const {
+    const size_t slot = builtinNoParamTableDispatchSlot(callee, argc, firstArgType);
+    return slot != SIZE_MAX && slot == pos;
+}
+
 std::string CCodeGen::builtinNoParamTableFormalCType(const std::string& callee, size_t argc,
                                                      size_t pos, Vb6Type firstArgType) const {
     // §B174 的正主: InStr 的位随"有没有写 start"整体移位, 依据与 builtin_fixup 选
     // vb6_InStr / vb6_InStrC 时那一问同源 (首参是不是串 —— 那里问 AST, 这里也问 AST)。
     //   InStr(s1, s2)                   → 0,1 = BSTR
     //   InStr(s1, s2, compare)          → 0,1 = BSTR, 2 = int32_t
-    //   InStr(start, s1, s2)            → 0 = int32_t (start), 1 = BSTR, 2 留空 (见下)
-    //   InStr(start, s1, s2, compare)   → 0,3 = int32_t, 1 = BSTR, 2 留空
+    //   InStr(start, s1, s2)            → 0 = int32_t (start), 1,2 = BSTR
+    //   InStr(start, s1, s2, compare)   → 0,3 = int32_t, 1,2 = BSTR
+    // 位号由上面那一问给出; needle 这一位**照答 BSTR** (数值实参要折, §B175 那一站),
+    // Variant 实参则在那一站里被 `builtinNoParamTableVariantMayStayRaw` 拦下裸交。
     if (callee == "vb6_InStr") {
-        // needle 那一形**刻意留空**: 它有自己的出口 —— `vb6_InStr` 是按 needle 分派的 _Generic
-        // 宏 (vb6rtl_builtin.h:596), needle 是 vb6_VARIANT 时选 `vb6_InStrVar`, 那里
-        // `vb6_VariantToString` 之后**自己 free** (`vb6rtl_string.c:235-240`)。发码侧提前解包
-        // 语义同值但会**多一份没人回收的临时串** (§B164 那一族) ⇒ 这一位不抢它的活。
-        // (两参形 pos1 = needle 答 BSTR = 六十五刀之前就在的行为, 本刀不改形状; 那一格的
-        //  临时串账记在 §B176。)
-        if (argc == 2) return (pos == 0 || pos == 1) ? "BSTR" : "";
-        if (argc == 3 && firstArgType == Vb6Type::String)
-            return (pos == 0 || pos == 1) ? "BSTR" : (pos == 2 ? "int32_t" : "");
-        if (argc == 3) return pos == 0 ? "int32_t" : (pos == 1 ? "BSTR" : "");
-        if (argc == 4) {
-            if (pos == 0 || pos == 3) return "int32_t";
-            return pos == 1 ? "BSTR" : "";
-        }
-        return "";
+        const size_t needle177 = builtinNoParamTableDispatchSlot(callee, argc, firstArgType);
+        if (needle177 == SIZE_MAX || pos >= argc) return "";
+        // 位号只从那一问推: needle 与其前一位 (haystack) 都是 VB 语义上的串, 剩下的位就是
+        // start / compare 那一类数值位。`firstArgType` 因此只在那一枚出口里用一次 ——
+        // 这一族每一位的答案都由「有没有写 start」决定, 而那个问句只有一处 (§B177)。
+        if (pos == needle177 || pos == needle177 - 1) return "BSTR";
+        return "int32_t";
     }
     // 账 #305 §B175 (第六十六刀) 那张「哪几位是字符串」的名单, 这一格按同一批读数**扩成档**:
     // 每一行的依据 = ① RTL 的 C 形参 (vb6rtl_registry.h / vb6rtl_dialog.h / vb6rtl_builtin.h 实读),
