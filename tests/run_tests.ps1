@@ -2264,6 +2264,113 @@ function Test-ObjCache {
     }
 }
 
+# ai/030 §九 欠账②: 失效负控 —— 「改源内容 (且动到生成的公开面) ⇒ 该格与依赖它的模块格
+# 一起失效, RTL 不动; 复编回到全命中」。夹具用两模块的 M6Test (MathHelper), MainApp.c
+# include MathHelper.h ⇒ 改 MathHelper 的公开面必须至少打掉两格 (hits <= total-2)。
+# 绝不改 tests\ 下的原件: vbp 与两个 .bas 先拷进沙箱再动刀。
+function Test-ObjCacheInvalidate {
+    param([string]$Name)
+    if (-not (Enter-VbpShard)) { return }
+    $script:total++
+    Write-Host -NoNewline "  [OBJCACHE-NEG] $Name ... "
+    $reasons = @()
+    $sandbox = Join-Path $OutDir ("{0}_store" -f $Name)
+    if (Test-Path $sandbox) { Remove-Item -Recurse -Force $sandbox }
+    $src = Join-Path $sandbox 'src'
+    New-Item -ItemType Directory -Force -Path $src | Out-Null
+    foreach ($f in @('M6Test.vbp', 'm6_math.bas', 'm6_main.bas')) {
+        Copy-Item -LiteralPath (Join-Path $Tests $f) -Destination (Join-Path $src $f) -Force
+    }
+    $ladSaved = $env:LOCALAPPDATA
+    $env:LOCALAPPDATA = $sandbox
+    $hits = @()
+    try {
+        for ($i = 0; $i -lt 4; $i++) {
+            if ($i -eq 2) {
+                Add-Content -LiteralPath (Join-Path $src 'm6_math.bas') -Value "Public Function M6NegProbe() As Long`r`n    M6NegProbe = 7`r`nEnd Function"
+            }
+            $dir = Join-Path $OutDir ("{0}_{1}" -f $Name, $i)
+            if (Test-Path $dir) { Remove-Item -Recurse -Force $dir }
+            New-Item -ItemType Directory -Force -Path $dir | Out-Null
+            $log = (& $C3 (Join-Path $src 'M6Test.vbp') '--output-dir' $dir '--incremental' 2>&1) | Out-String
+            if ($LASTEXITCODE -ne 0) { $reasons += ("build{0} rc={1}" -f $i, $LASTEXITCODE); continue }
+            $m = [regex]::Match($log, 'OBJCACHE rtl=(\d+)/(\d+) user=(\d+)/(\d+)')
+            if (-not $m.Success) { $reasons += ("build{0} 没读到 OBJCACHE" -f $i); continue }
+            $hits += , @([int]$m.Groups[3].Value, [int]$m.Groups[4].Value,
+                         [int]$m.Groups[1].Value, [int]$m.Groups[2].Value)
+            $exe = Join-Path $dir 'M6Test.exe'
+            if (-not (Test-Path $exe)) { $reasons += ("build{0} 无 exe" -f $i); continue }
+            $run = Invoke-TestExe -ExePath $exe -WorkDir $dir -Name ("{0}run{1}" -f $Name, $i)
+            if (-not $run.Ok) { $reasons += ("build{0} 跑失败 {1}" -f $i, $run.Detail) }
+        }
+    } finally {
+        $env:LOCALAPPDATA = $ladSaved
+    }
+    if ($reasons.Count -eq 0) {
+        if ($hits.Count -ne 4) { $reasons += ('四臂读数缺') }
+        elseif ($hits[0][0] -ne 0) { $reasons += ("空 store 第一次竟有用户码命中: {0}/{1}" -f $hits[0][0], $hits[0][1]) }
+        elseif ($hits[1][0] -ne $hits[1][1]) { $reasons += ("第二次没全命中: {0}/{1}" -f $hits[1][0], $hits[1][1]) }
+        elseif ($hits[2][2] -ne $hits[2][3]) { $reasons += ("改源之后 RTL 竟失效: {0}/{1}" -f $hits[2][2], $hits[2][3]) }
+        elseif ($hits[2][0] -gt ($hits[2][1] - 2)) {
+            $reasons += ("改公开面后用户码只掉 {0} 格 (该 >=2: 自身 + include 依赖者)" -f ($hits[2][1] - $hits[2][0]))
+        }
+        elseif ($hits[3][0] -ne $hits[3][1]) { $reasons += ("复编没回全命中: {0}/{1}" -f $hits[3][0], $hits[3][1]) }
+    }
+    if ($reasons.Count -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host ("FAIL: " + ($reasons -join ' | ')) -ForegroundColor Red
+        if ($Verbose) { Write-Host ("  hits=" + (($hits | ForEach-Object { $_ -join '/' }) -join ' ')) }
+    }
+}
+
+# ai/030 §九 欠账①: store 淘汰 —— C3_OBJCACHE_CAP_MB=1 压到 1MB: 一次构建把 80+ 个 RTL obj
+# 灌进 store 后应被裁回上限内 (跑到 80%), 且产物照常。上限默认 2 GiB, 只在测试里压小。
+function Test-ObjCacheEvict {
+    param([string]$Name, [string]$Source)
+    if (-not (Enter-VbpShard)) { return }
+    $script:total++
+    Write-Host -NoNewline "  [OBJCACHE-CAP] $Name ... "
+    $reasons = @()
+    $sandbox = Join-Path $OutDir ("{0}_store" -f $Name)
+    if (Test-Path $sandbox) { Remove-Item -Recurse -Force $sandbox }
+    New-Item -ItemType Directory -Force -Path $sandbox | Out-Null
+    $dir = Join-Path $OutDir ("{0}_0" -f $Name)
+    if (Test-Path $dir) { Remove-Item -Recurse -Force $dir }
+    New-Item -ItemType Directory -Force -Path $dir | Out-Null
+    $ladSaved = $env:LOCALAPPDATA
+    $capSaved = $env:C3_OBJCACHE_CAP_MB
+    $env:LOCALAPPDATA = $sandbox
+    $env:C3_OBJCACHE_CAP_MB = '1'
+    try {
+        $log = (& $C3 $Source '--output-dir' $dir '--incremental' 2>&1) | Out-String
+        if ($LASTEXITCODE -ne 0) { $reasons += ("rc={0}" -f $LASTEXITCODE) }
+    } finally {
+        $env:LOCALAPPDATA = $ladSaved
+        $env:C3_OBJCACHE_CAP_MB = $capSaved
+    }
+    $store = Join-Path (Join-Path $sandbox 'C3') 'objcache'
+    if (-not (Test-Path $store)) {
+        $reasons += 'store 不存在 (没走增量路?)'
+    } else {
+        $sum = (Get-ChildItem $store -File -ErrorAction SilentlyContinue |
+                Measure-Object -Property Length -Sum).Sum
+        if ($null -eq $sum) { $sum = 0 }
+        if ($sum -gt 1100000) { $reasons += ("store {0} 字节 > 1MB 上限 (淘汰没跑?)" -f [int]$sum) }
+    }
+    $exe = Join-Path $dir 'hello.exe'
+    if (-not (Test-Path $exe)) { $reasons += '无 exe' }
+    if ($reasons.Count -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host ("FAIL: " + ($reasons -join ' | ')) -ForegroundColor Red
+    }
+}
+
 function Test-VbpFail {
     param([string]$Name, [string]$VbpFile, [string]$Needle)
     $script:total++
@@ -3859,6 +3966,10 @@ if ($Category -in @("all", "run", "vbp")) {
     )
     # ai/030 T30-A: 内容寻址 obj store —— 命中/解耦/不改产物三条一起断 (用例自带隔离 store)
     Test-ObjCache "objcache" "$Tests\hello.bas"
+    # ai/030 §九 欠账①②: 默认化 --incremental 前的最后两件 —— store 淘汰 (压 1MB 上限) 与
+    # 失效负控 (改公开面 ⇒ 自身+include 依赖者失效, RTL 不动, 复编回全命中)。
+    Test-ObjCacheEvict "objcache_cap" "$Tests\hello.bas"
+    Test-ObjCacheInvalidate "objcache_neg"
     Test-EmitcShape "cf_emitc_shape" @("$Tests\ctrlfiles\CfApp.vbp") @(
         'extern void vb6_drvList_Change(); vb6_drvList_Change();',
         'extern void vb6_dirList_Change(); vb6_dirList_Change();',
