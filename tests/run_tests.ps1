@@ -1333,6 +1333,22 @@ function Test-VariantSlotStore {
     }
 }
 
+function Test-ImplicitCstrStation {
+    # 账 #305 §B174 (第六十五刀): 「数值实参交进 VB 的字符串形参 ⇒ 隐式 CStr」这条规则的
+    # 站点/位号/档位/形状四问各只许有一位主人 (站点=arg_emit 的 Fix 175)。
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] implicit_cstr_station ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\check_implicit_cstr_station.ps1" 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        $out | Select-Object -First 6 | ForEach-Object { Write-Host "  $_" }
+    }
+}
+
 function Test-ParamArrayReclaim {
     $script:total++
     Write-Host -NoNewline "  [STATIC] paramarray_reclaim ... "
@@ -2950,6 +2966,35 @@ if ($Category -in @("all", "run", "bas")) {
         'vb6_InStr(1, vb6_VariantToString(vb6_VariantToString',
         'vb6_InStr(1, vb6_VariantToString(s,',
         'vb6_Replace(u.UV,'
+    )
+    # 账 #305 §B174 (第六十五刀): 「数值实参交进 VB 的字符串形参 ⇒ 按 VB6 的隐式 CStr 折」这条
+    # 规则原本有两位主人 —— Fix 175 (问形参表, 形状走 wrapToBSTR) 与 Fix 108c (一张 13 枚名单 +
+    # 自己一套形状, 做在 argList 已拼成串之后的文本替换里)。本刀收成一位 = Fix 175, 并补上它
+    # 管不着的那一族: **故意不声明形参表**的内在函数 (InStr —— 可选 start 会把位号整体挪错,
+    # builtin_funcs.inc:74-76 写明不声明的原因), 位号答在 builtinNoParamTableStringSlot 一处。
+    # 第 1/2/3 枚 = 三种数值档各折一次, 且形状都出自 wrapToBSTR (Boolean 那枚从此口径 = "True",
+    # 不再是名单自己写的 "-1"); 第 4 枚 = 六十四刀那条槽解包一字未动; 第 5 枚 = 无符号那档从
+    # 名单转进共享档位闸 (名单原来独有的四档); 第 6 枚 = 证人: 写了 start 的三实参形, 位号没挪
+    # 也没被折; 第 7/8 枚 = 内存宽度那一族 (Len/LenB 对数值与 UDT 交**字节宽度**, VB6 不做 CStr)
+    # 仍由它们自己的 sizeof 分派接住 —— 本刀草稿按运行时 C 签名表裸答时, 正是这两条形被打红。
+    Test-EmitcShape 'b174_num_str_arg_shape' @(
+        "$Tests\b174_numstrarg\B174Main.bas") @(
+        'vb6_InStr(1, vb6_CStrLong(n), vb6_BSTR_FromStr(L"1"))',
+        'vb6_InStr(1, vb6_CStrDbl(d), vb6_BSTR_FromStr(L"5"))',
+        'vb6_InStr(1, vb6_CStrBool(b), vb6_BSTR_FromStr(L"-1"))',
+        'vb6_InStr(1, vb6_VariantToString(u.UV), vb6_BSTR_FromStr(L"t"))',
+        'vb6_Left(vb6_CStrULong(q), 10)',
+        'vb6_InStr(2, s, vb6_BSTR_FromStr(L"t"))',
+        '(int32_t)sizeof(n)',
+        '(int32_t)sizeof(vb6_type_U74)'
+    )
+    Test-EmitcAbsent 'b174_num_str_arg_lesion' @(
+        "$Tests\b174_numstrarg\B174Main.bas") @(
+        'vb6_InStr(1, n,',
+        'vb6_InStr(1, b,',
+        'vb6_InStr(vb6_CStrLong(2), s,',
+        'vb6_LenB(vb6_CStr',
+        'vb6_Len(vb6_CStrLong'
     )
     # 账 #305 §B149 + §B150 (第四十刀): 注册表家族的真往返 + 晚绑定槽的二维元素读写。
     # 读数来源 = .build/b1280_rs (新 exe, x64 与 x86 **逐行相同**, 故同针同过); 外部口径证人 =
@@ -5743,6 +5788,43 @@ if ($Category -in @("all", "run", "vbp")) {
         "B73-DONE")
     Test-Vbp 'b173_udt_slot_arg' "$Tests\b173_udtarg\B173.vbp" $b173Expected
     Test-Vbp 'b173_udt_slot_arg_x86' "$Tests\b173_udtarg\B173.vbp" $b173Expected -Arch "x86"
+    # <vbeclipse> 回归夹子 (b174_numstrarg, 账 #305 §B174 第六十五刀): 数值实参交进内在函数的
+    # BSTR 形参。修前 InStr 那一路把 int32_t / double / int16_t 裸交给 wchar_t* —— cl 只给 C4047
+    # (在 -W3 之外) ⇒ **编得过**, 而 BASE 那一台在别处 (Mid$(1.1,...) 那类) 拿的是 C2440, 本机
+    # 两台真跑: 用 BASE 编译器编这份夹具 = 一条 C2440 硬错误、没有 exe; 修后两台都有 exe。
+    # 两台实测读数逐行相同 (.build/k65_fix3/x64 与 /x86):
+    #   B74-1..4   数值/浮点/布尔三档进 InStr 的串位: 12 找 "1" 答 1、1.5 找 "5" 答 3、
+    #              True 折成 "True" 找 "-1" 答 0 (口径 = VB6 的 CStr(Boolean) = "True",
+    #              名单那套 "-1" 从此消失);
+    #   B74-2/17/18 内存宽度那一族的三条证人: Len(12&)=4、LenB(12&)=4、LenB(UDT)>LenB(Long);
+    #   B74-5..9   名单原本管着的五枚 (Left/Mid/Replace/StrComp/Trim) 换站之后一字未动;
+    #   B74-10..12 串/Variant/UDT 槽三种实参: 不许二次包装;  B74-13/14 Len 的串形参两形;
+    #   B74-15     ULong 4000000000 折出来仍是无符号十进制 (名单独有的那四档收进共享闸);
+    #   B74-16     写了 start 的三实参形: 起点没被折成串 (草稿的第一版就错在这里);
+    #   B74-SN     工程过程 ByVal String 形参 —— 那一站本来就是主人, 从此只剩一位。
+    $b174Expected = @(
+        "B74-1=1",
+        "B74-2=4",
+        "B74-3=3",
+        "B74-4=0",
+        "B74-5=1",
+        "B74-6=2",
+        "B74-7=92",
+        "B74-8=0",
+        "B74-9=12",
+        "B74-10=3",
+        "B74-11=3",
+        "B74-12=3",
+        "B74-13=8",
+        "B74-14=8",
+        "B74-15=4000000000",
+        "B74-16=3",
+        "B74-17=4",
+        "B74-18=True",
+        "B74-SN=12",
+        "B74-DONE")
+    Test-Vbp 'b174_num_str_arg' "$Tests\b174_numstrarg\B174.vbp" $b174Expected
+    Test-Vbp 'b174_num_str_arg_x86' "$Tests\b174_numstrarg\B174.vbp" $b174Expected -Arch "x86"
 
     # <vbeclipse> 回归夹子 (iface_wrap): 接口宿主**类型映射**的最小夹子, GA run 36732948503
     # (BalloonTooltips 红) 的直接切片。IFoo 显式 `Attribute VB_Creatable = True` ⇒ 进不了
@@ -6388,6 +6470,7 @@ if ($Category -in @("all", "compile")) {
     Test-RunBudget
     Test-VariantI8Coverage
     Test-VariantSlotStore
+    Test-ImplicitCstrStation
     Test-ParamArrayReclaim
     Test-BstrBorrowSlot
     Test-EventHandlerNames

@@ -822,6 +822,69 @@ std::string CCodeGen::classFieldReadExpr(const std::string& objC, const std::str
          + (classFieldIsVariantSlot(clsName, memberName) ? " variant" : "") + " */";
 }
 
+// 账 #305 §B174 (第六十五刀): 「数值实参交进 VB 的字符串形参 ⇒ VB6 会隐式 CStr」这一条规则,
+// 发码侧此前有**两位主人**，本刀收成一位：
+//   主人一 = Fix 175 (cgen_expr_call_arg_emit.inc) —— 按**形参表**那一档答的 (ByVal String)，
+//             形状走 wrapToBSTR (全仓唯一的"数值→BSTR"形状出口)。
+//   主人二 = Fix 108c (cgen_expr_call_builtin_argtype.inc) —— 按一张 13 枚名单答的, 形状自己
+//             写了一遍 if/else, 而且做在 argList **已拼成一整串之后** (靠"从上次命中往后找下
+//             一次出现"对齐实参下标)。
+// 本站点只留主人一，且它以前答不到的那一格补上了：InStr 这类**故意不声明形参表**的内在函数
+// (builtin_funcs.inc:74-76 写明原因 = 可选 start 会让位号错位) 没有形参可问 ⇒ 改问下面那张表。
+// 档位集合 = 两位主人原来两份清单的**并集** (13 枚名单的 SByte/UInteger/ULong/ULongLong/Decimal
+// + Fix 175 的 Byte/LongPtr) —— 每一档都有一条现成的清单作底, 没量过的 (如 LongLong) 不加。
+// 返回 false = 这一档不折 (串 / 对象 / 数组 / Variant / 未知, 以及清单外没量过的档)。
+bool CCodeGen::typeTakesImplicitCStr(Vb6Type t) const {
+    switch (t) {
+        case Vb6Type::Date:
+        case Vb6Type::Double:
+        case Vb6Type::Single:
+        case Vb6Type::Currency:
+        case Vb6Type::Decimal:
+        case Vb6Type::Long:
+        case Vb6Type::Integer:
+        case Vb6Type::Byte:
+        case Vb6Type::Boolean:
+        case Vb6Type::LongPtr:
+        case Vb6Type::SByte:
+        case Vb6Type::UInteger:
+        case Vb6Type::ULong:
+        case Vb6Type::ULongLong:
+            return true;
+        default:
+            return false;
+    }
+}
+
+// 账 #305 §B174 (第六十五刀): 「**没有形参表**的内在函数 callee 的第 pos 位 (VB 实参下标) 是不是
+// VB 语义上的字符串形参」。只管 builtin_funcs.inc 里用 addBuiltinFunc (只登记返回类型) 那一族,
+// 带类型化形参表的内在函数与工程过程都由 Fix 175 直接问形参表, 不吃这张表。
+// 这一问**不许**从运行时 C 签名表 (getRuntimeParamCType) 反推, 两条都在本刀里实测过:
+//  ① `vb6_LenB` 在表里那格 "BSTR" 只是 _Generic 宏的第一个分支 (vb6rtl_builtin.h:19) —— VB6 的
+//     Len/LenB 对数值交**字节宽度**、不做 CStr, 发码侧另有按类型的 sizeof 分派 (Fix 065/084h/125/160w)。
+//     草稿按那张表裸答时, A/B 在 VBFlexGridDemo 上当场打出 `LenB(Version)` 的
+//     `sizeof(vb6_type_DLLVERSIONINFO)` 变成 `sizeof(int32_t)` (折出来的串让那条按名字认 UDT 的分派失手)。
+//  ② 那张表也答不对**位号**: InStr 的 C 签名是 (start, haystack, needle), 而 VB 写两个实参时 cgen
+//     要补 start=1、写三个而首参是串时又换一条路 (见 builtin_fixup 选 InStr/InStrC 那段)。
+// ⇒ 表按 VB 手册一枚枚写, 每行都是"这一位收了数值实参 VB6 会隐式 CStr"那条事实。
+// Len / LenB / Asc / StrPtr 刻意**不进表** —— ①就是理由, 不是来不及。
+// InStrB 不进表: RTL 那两形是 void* (Byte() 或 BSTR), 数值进不去也就没人折; 没量过 = 不加。
+bool CCodeGen::builtinNoParamTableStringSlot(const std::string& callee, size_t argc, size_t pos,
+                                             Vb6Type firstArgType) const {
+    // §B174 的正主: InStr 的字符串位随"有没有写 start"整体移位, 依据与 builtin_fixup 选
+    // vb6_InStr / vb6_InStrC 时那一问同源 (首参是不是串 —— 那里问 AST, 这里也问 AST)。
+    //   InStr(s1, s2)                   → 串在 0,1
+    //   InStr(s1, s2, compare)          → 串在 0,1   (末位是 compare, 不许折)
+    //   InStr(start, s1, s2)            → 串在 1,2
+    //   InStr(start, s1, s2, compare)   → 串在 1,2   (末位同上)
+    if (callee != "vb6_InStr") return false;
+    if (argc == 2 || (argc == 3 && firstArgType == Vb6Type::String)) {
+        return pos == 0 || pos == 1;
+    }
+    if (argc == 3 || argc == 4) return pos == 1 || pos == 2;
+    return false;
+}
+
 // 账 #305 §B171 (第六十二刀): 「按 C 文本认槽」这一问漏认的那一族 —— 类字段的 Variant 槽读。
 // 两条发码路 (§B168/§B169 那张表的两处成员读) 现在在尾注里带上 ` variant` 这个词, 而**只有**
 // Variant 那一档带 —— 所以这一问的答案仍然只有那张表一个来源, 这里只是把它读回来。

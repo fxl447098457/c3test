@@ -247,14 +247,25 @@
         // (`ShowStr(d)` / `ShowStr(n)`)。VB6 按 CStr 隐式转字符串; C 侧形参是 BSTR,
         // 裸传 double → C2440, 裸传 int32_t → 只报 C4047 警告, 运行期把整数当指针
         // 解引用 (0xC0000005 或读到垃圾字符串)。按形参类型补 wrapToBSTR。
-        if (!isDeclareAnsiCall && i < calleeParams.size() && calleeParams[i].isByVal
-            && calleeParams[i].type == Vb6Type::String && node.positional[i]
-            && !cExprIsVariant(argVal)) {
-            Vb6Type at175 = inferExprType(*node.positional[i]);
-            if (at175 == Vb6Type::Date || at175 == Vb6Type::Double || at175 == Vb6Type::Single
-                || at175 == Vb6Type::Currency || at175 == Vb6Type::Long
-                || at175 == Vb6Type::Integer || at175 == Vb6Type::Byte
-                || at175 == Vb6Type::Boolean || at175 == Vb6Type::LongPtr) {
+        // 账 #305 §B174 (第六十五刀): 这条规则从此是**唯一站点** —— 原第二主人 Fix 108c
+        // (一张 13 枚名单 + 自己一套折算形状, 做在 argList 拼成串之后的文本替换里) 整段撤掉。
+        // 同刀补上本站以前管不着的一族: **故意不声明形参表**的内在函数 (InStr) —— 它没有
+        // 形参可问, 位号改问 builtinNoParamTableStringSlot; 档位问 typeTakesImplicitCStr
+        // (两位旧主人两份清单的并集); 形状仍走 wrapToBSTR (全仓唯一的 数值→BSTR 出口,
+        // Boolean 那档它给 vb6_CStrBool = VB6 的 "True"/"False", 与 Fix 108c 的 "-1" 不同口径,
+        // 收成一位之后只剩这一个口径)。
+        if (!isDeclareAnsiCall && node.positional[i] && !cExprIsVariant(argVal)) {
+            bool strSlot175 = false;
+            if (i < calleeParams.size()) {
+                strSlot175 = calleeParams[i].isByVal
+                    && calleeParams[i].type == Vb6Type::String;
+            } else if (calleeParams.empty()) {
+                const Vb6Type first175 = node.positional[0]
+                    ? inferExprType(*node.positional[0]) : Vb6Type::Empty;
+                strSlot175 = builtinNoParamTableStringSlot(
+                    callee, node.positional.size(), i, first175);
+            }
+            if (strSlot175 && typeTakesImplicitCStr(inferExprType(*node.positional[i]))) {
                 argVal = wrapToBSTR(argVal, *node.positional[i]);
             }
         }

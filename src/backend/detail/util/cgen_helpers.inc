@@ -587,6 +587,18 @@
                                    const std::string& memberName, bool isVoidPtr,
                                    const std::string& markerLabel) const;
 
+    // 账 #305 §B174 (第六十五刀): 「数值实参交进 VB 的字符串形参 ⇒ 按 VB6 的隐式 CStr 折」这一条
+    // 规则的三个问句, 各一处答案, 站点只有一位 (Fix 175, cgen_expr_call_arg_emit.inc):
+    //   哪一位算字符串形参 = 形参表 (工程过程 + 92 枚带表的内在函数), 表没有的那族问
+    //                      builtinNoParamTableStringSlot (InStr 一族 —— 它故意没形参表);
+    //   哪一档要折           = typeTakesImplicitCStr (两位旧主人两份清单的并集);
+    //   折成哪一种 CStr      = wrapToBSTR (全仓唯一的 数值→BSTR 形状出口)。
+    // 原来第二、三问还有另一位主人 = Fix 108c 那张 13 枚名单 (在 argList 拼成串之后做文本替换),
+    // 本刀整段撤掉。
+    bool typeTakesImplicitCStr(Vb6Type t) const;
+    bool builtinNoParamTableStringSlot(const std::string& callee, size_t argc, size_t pos,
+                                       Vb6Type firstArgType) const;
+
     // 账 #305 §B147: 「这枚 C 表达式是不是整只 vb6_VARIANT 槽」的 **AST 那一半** ——
     // 与上面 cExprIsVariant (文本前缀表) 合起来回答同一个问句。为什么必须分两头供出：
     // 类型 oracle 手上只有 AST (它先于发码), 而发码改道能吃两半。于是规矩是
