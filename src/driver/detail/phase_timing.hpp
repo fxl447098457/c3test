@@ -59,7 +59,10 @@ inline void c3PhaseMarkIf(const std::string& label, double minMs) {
 // 用 RAII (C3ScopeTimer) 记账 —— 两次时钟读 ~60ns/次, 万级调用下忽略不计。
 namespace detail {
 struct PhaseStats {
-    static const int kSlots = 20;
+    // 24 档上限: 0-7 热函数自时 / 8-12 call 分段 / 13-19 member 分段 / 20-22 ident 分段。
+    // (曾把 kSlots 留 20 而用到 22 ⇒ ms[] 越界写进 n[] 区, 计数列打成垃圾数 —— 加档位
+    //  必须同步扩这里。)
+    static const int kSlots = 24;
     double ms[kSlots] = {};
     unsigned long long n[kSlots] = {};
 };
@@ -95,10 +98,12 @@ inline void c3StatDump(const std::string& tag) {
                  s.ms[4], s.n[4], s.ms[5], s.n[5], s.ms[6], s.n[6], s.ms[7], s.n[7]);
     std::fprintf(stderr,
                  "C3: STATS2 %s callPre=%.0f callCallee=%.0f callParams=%.0f callArgs=%.0f callFixup=%.0f "
-                 "mPre=%.0f mForm=%.0f mObj=%.0f mCls=%.0f mM22=%.0f mGen=%.0f mVoid=%.0f\n",
+                 "mPre=%.0f mForm=%.0f mObj=%.0f mCls=%.0f mM22=%.0f mGen=%.0f mVoid=%.0f "
+                 "idDisp=%.0f idSym=%.0f idBlt=%.0f\n",
                  tag.c_str(),
                  s.ms[8], s.ms[9], s.ms[10], s.ms[11], s.ms[12],
-                 s.ms[13], s.ms[14], s.ms[15], s.ms[16], s.ms[17], s.ms[18], s.ms[19]);
+                 s.ms[13], s.ms[14], s.ms[15], s.ms[16], s.ms[17], s.ms[18], s.ms[19],
+                 s.ms[20], s.ms[21], s.ms[22]);
     std::fflush(stderr);
     for (int i = 0; i < detail::PhaseStats::kSlots; i++) { s.ms[i] = 0; s.n[i] = 0; }
 }

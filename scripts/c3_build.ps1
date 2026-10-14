@@ -13,6 +13,11 @@ $kitlib = "$kits\Lib\10.0.19041.0"
 $env:INCLUDE = "$msvc\include;$kitinc\um;$kitinc\ucrt;$kitinc\shared;$kitinc\winrt;$kitinc\cppwinrt"
 $env:LIB     = "$msvc\lib\x64;$kitlib\um\x64;$kitlib\ucrt\x64"
 $env:PATH    = "$msvc\bin\Hostx64\x64;$kits\bin\10.0.19041.0\x64;$env:PATH"
+# T30-C 续 (ai/030 §六): 本脚本已把 INCLUDE/LIB/PATH 灌好, 再补上 P24-05 早退判据要的两枚
+# (VCINSTALLDIR + VSCMD_ARG_TGT_ARCH) —— buildVcvarsPrefix 随即短路, 连那一遍 vcvarsall
+# 捕获都省掉 (实测捕获本身 ~4.7s/次构建)。x86 时 TGT_ARCH 让原样重配 (旧行为)。
+$env:VCINSTALLDIR = (Split-Path -Parent (Split-Path -Parent $msvc)) + "\"
+$env:VSCMD_ARG_TGT_ARCH = "x64"
 
 # 项目根目录: 环境变量 C3_PROJECT_DIR 优先, 缺省由脚本位置推导 (与 dev.ps1 同口径)。
 # 原为硬编码 `Set-Location D:\c3.vb6.pro` —— 那是另一台机器/另一份 checkout 的路径,
