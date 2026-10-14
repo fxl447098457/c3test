@@ -196,6 +196,13 @@ static void vb6_uc_defaultFont(void) {
     if (!vb6_Ambient_Font) vb6_Ambient_Font = vb6_UserControl_Font;
 }
 
+/* 账 #257 续(诊断期): 兼容全局 vb6_UserControl_ParentControls 的同步点。 */
+static void vb6_uc_syncParentControls(void) {
+    extern void* vb6_UC_ParentControls(void);
+    extern void* vb6_UserControl_ParentControls;
+    vb6_UserControl_ParentControls = vb6_UC_ParentControls();
+}
+
 void vb6_uc_push(vb6_UCRec* r, vb6_UCSaved* saved) {
     saved->scaleWidth = vb6_UserControl_ScaleWidth;
     saved->scaleHeight = vb6_UserControl_ScaleHeight;
@@ -257,6 +264,7 @@ void vb6_uc_push(vb6_UCRec* r, vb6_UCSaved* saved) {
     if (!r->displayNameBstr && r->ctrlName[0])
         r->displayNameBstr = SysAllocString(r->ctrlName);
     vb6_Ambient_DisplayName = r->displayNameBstr;
+    vb6_uc_syncParentControls();
 }
 
 void vb6_uc_pop(const vb6_UCSaved* saved) {
@@ -279,6 +287,7 @@ void vb6_uc_pop(const vb6_UCSaved* saved) {
     vb6_UserControl_Extender = saved->ext;           // Fix 133u
     vb6_ucCurrent = saved->current;
     vb6_Ambient_DisplayName = (BSTR)saved->displayName;   // Fix 116
+    vb6_uc_syncParentControls();
 }
 
 // 仅换入不换出 — 供「窗体代码直接调用控件公开方法」路径使用
