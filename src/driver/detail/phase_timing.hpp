@@ -16,6 +16,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <string>
+#include <vector>
 
 namespace vb6c3 {
 
@@ -58,9 +59,9 @@ inline void c3PhaseMarkIf(const std::string& label, double minMs) {
 // 用 RAII (C3ScopeTimer) 记账 —— 两次时钟读 ~60ns/次, 万级调用下忽略不计。
 namespace detail {
 struct PhaseStats {
-    static const int kSlots = 8;
-    double ms[kSlots] = {0, 0, 0, 0, 0, 0, 0, 0};
-    unsigned long long n[kSlots] = {0, 0, 0, 0, 0, 0, 0, 0};
+    static const int kSlots = 20;
+    double ms[kSlots] = {};
+    unsigned long long n[kSlots] = {};
 };
 inline PhaseStats& phaseStats() { static PhaseStats s; return s; }
 } // namespace detail
@@ -69,6 +70,17 @@ inline void c3StatAdd(int slot, double ms) {
     auto& s = detail::phaseStats();
     s.ms[slot] += ms;
     s.n[slot] += 1;
+}
+
+// 分段打点 (v6): 不做 RAII 帧 —— 把 `now - prev` 记进 slot 并把 prev 推到 now。
+// 给「同一函数体里顺序排列的片段组」归因用 (call/member 的 .inc 组), 组与组之间是
+// 纯 wall 差值 (组内含子节点, 本就不求自时); 早退路径只是少打几个点, 不破坏别的档。
+inline void c3StatSplit(int slot, std::chrono::steady_clock::time_point& prev) {
+    auto& clk = detail::phaseClock();
+    if (!clk.on) return;
+    auto now = std::chrono::steady_clock::now();
+    c3StatAdd(slot, std::chrono::duration<double, std::milli>(now - prev).count());
+    prev = now;
 }
 
 inline void c3StatDump(const std::string& tag) {
@@ -81,25 +93,53 @@ inline void c3StatDump(const std::string& tag) {
                  tag.c_str(),
                  s.ms[0], s.n[0], s.ms[1], s.n[1], s.ms[2], s.n[2], s.ms[3], s.n[3],
                  s.ms[4], s.n[4], s.ms[5], s.n[5], s.ms[6], s.n[6], s.ms[7], s.n[7]);
+    std::fprintf(stderr,
+                 "C3: STATS2 %s callPre=%.0f callCallee=%.0f callParams=%.0f callArgs=%.0f callFixup=%.0f "
+                 "mPre=%.0f mForm=%.0f mObj=%.0f mCls=%.0f mM22=%.0f mGen=%.0f mVoid=%.0f\n",
+                 tag.c_str(),
+                 s.ms[8], s.ms[9], s.ms[10], s.ms[11], s.ms[12],
+                 s.ms[13], s.ms[14], s.ms[15], s.ms[16], s.ms[17], s.ms[18], s.ms[19]);
     std::fflush(stderr);
     for (int i = 0; i < detail::PhaseStats::kSlots; i++) { s.ms[i] = 0; s.n[i] = 0; }
 }
 
-// RAII 记账器: 构造时(仅当开启)取时刻, 析构时把耗时累进 slot。
-// 用在**多出口**的热函数顶部 (emitExpr/inferExprType 里到处 return)。
-struct C3ScopeTimer {
+// RAII 记账器 —— **自时**口径 (ai/030 续 v5):
+// 每条计时器只把「不在任何子计时器里」的那段时间记进自己的档位; 子计时器的整段时长
+// 从父帧里扣 (childMs 累积)。于是 8 档读数互不重叠、相加 ≈ 全时, 每档都是"该函数
+// 自己干活"的钱 (emitExpr 的 self 近零 = 它的活都在子节点/子函数里; call 的 self 大
+// = 调用节点自己体内那句代码重)。单线程假设成立 (C3 前端不并行), 栈直接全局一张。
+namespace detail {
+struct TimerFrame {
     int slot;
+    std::chrono::steady_clock::time_point start;
+    double childMs;
+};
+inline std::vector<TimerFrame>& timerStack() {
+    static std::vector<TimerFrame> s;
+    return s;
+}
+} // namespace detail
+
+struct C3ScopeTimer {
     bool on;
-    std::chrono::steady_clock::time_point t0;
-    explicit C3ScopeTimer(int s) : slot(s), on(false) {
+    explicit C3ScopeTimer(int s) : on(false) {
         static const bool c3t = (std::getenv("C3_TIMING") != nullptr);
         on = c3t;
-        if (on) t0 = std::chrono::steady_clock::now();
+        if (!on) return;
+        detail::timerStack().push_back({s, std::chrono::steady_clock::now(), 0.0});
     }
     ~C3ScopeTimer() {
         if (!on) return;
-        c3StatAdd(slot, std::chrono::duration<double, std::milli>(
-                            std::chrono::steady_clock::now() - t0).count());
+        auto& st = detail::timerStack();
+        if (st.empty()) return;
+        detail::TimerFrame frame = st.back();
+        st.pop_back();
+        double ms = std::chrono::duration<double, std::milli>(
+                        std::chrono::steady_clock::now() - frame.start).count();
+        double selfMs = ms - frame.childMs;
+        if (selfMs < 0.0) selfMs = 0.0;
+        c3StatAdd(frame.slot, selfMs);
+        if (!st.empty()) st.back().childMs += ms;
     }
 };
 

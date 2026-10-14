@@ -1009,6 +1009,30 @@
                                   const std::string& memberName,
                                   std::vector<ParameterInfo>& outParams) const;
 
+    // ---- ai/030 续 (§性能, 2026-10-14): 类成员解析三张实例级 memo ----
+    // 上面三个 helper 每次调用都在 moduleScope 上全表扫 (N 千符号), 全仓 50 处调用点;
+    // 实测 calleeParams 一段 (2.5s / 16.7k 次调用) 的大头就是它们。结果只依赖
+    // (className, memberName) 与**本实例 lifespan 内固定的**符号表 (cgen 在语义分析
+    // 之后运行, 符号表不再变) ⇒ 命中一次终身复用。跨模块 scope 内容不同, 缓存按
+    // 实例 (每模块一个 CCodeGen) 存放, 不跨实例共享。
+    struct ClassMemberParamsMemo {
+        bool found = false;
+        bool isBuiltin = false;
+        std::vector<ParameterInfo> params;
+    };
+    mutable std::unordered_map<std::string, std::string> classMemberCallMemo_;                 // resolveClassMemberCall
+    mutable std::unordered_map<std::string, ClassMemberParamsMemo> classMemberCallParamsMemo_; // findClassMemberCallParams
+    mutable std::unordered_map<std::string, ClassMemberParamsMemo> classMemberGetParamsMemo_;  // findClassMemberGetParams
+    std::string resolveClassMemberCallUncached(const std::string& className,
+                                               const std::string& memberName) const;
+    bool findClassMemberCallParamsUncached(const std::string& className,
+                                           const std::string& memberName,
+                                           std::vector<ParameterInfo>& outParams,
+                                           bool& outIsBuiltin) const;
+    bool findClassMemberGetParamsUncached(const std::string& className,
+                                          const std::string& memberName,
+                                          std::vector<ParameterInfo>& outParams) const;
+
     // ---- Fix 015: Method chaining 解析辅助 ----
     // 给定一个表达式 AST 节点, 推断其在运行时返回的类名 (如果它返回类实例)
     //  - IdentifierExpr: 查 knownClassVars_, 找到则返回该变量的声明类名
