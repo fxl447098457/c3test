@@ -1903,11 +1903,6 @@ long CCodeGen::controlTypeStyleBits(const FrmControl& ctrl) const {
     constexpr long kEsAutoV    = 0x00000040L;
     constexpr long kWsHscroll  = 0x00100000L;
     constexpr long kWsVscroll  = 0x00200000L;
-    // Fix 运行期第二十六层: WS_CLIPCHILDREN —— VB6 容器类控件 (PictureBox / Frame)
-    // 默认 ClipControls=True, 自己重绘时要把子控件矩形裁掉。缺这一位时容器背景
-    // 重绘会盖住子控件 (子窗口 IsWindowVisible 仍为真、PrintWindow 单独抓也有内容,
-    // 但屏幕上整片空白)。与 cgen_form_ctrl_style_apply.inc 的 kWsClipChld 同值同口径。
-    constexpr long kWsClipChld = 0x02000000L;
 
     long style = 0;
     switch (ctrl.controlType) {
@@ -1963,7 +1958,6 @@ long CCodeGen::controlTypeStyleBits(const FrmControl& ctrl) const {
         }
         case FrmControlType::Frame:
             style |= kBsGroupBox;
-            style |= kWsClipChld;   // Fix 第二十六层: 容器不裁子控件 ⇒ 背景重绘盖掉子控件
             break;
         case FrmControlType::ListBox: {
             style |= kLbsNotify | kWsBorder | kWsVscroll;
@@ -1996,7 +1990,6 @@ long CCodeGen::controlTypeStyleBits(const FrmControl& ctrl) const {
         }
         case FrmControlType::PictureBox:
             style |= kSsBitmap | kSsCenterImg | kWsBorder;
-            style |= kWsClipChld;   // Fix 第二十六层: 容器不裁子控件 ⇒ 背景重绘盖掉子控件
             break;
         case FrmControlType::Image:
             style |= kSsBitmap | kSsCenterImg;
