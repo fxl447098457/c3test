@@ -226,6 +226,29 @@ if ($arityN -ne 1) {
     $viol += ('R9 cgen_util_type.cpp 里「首参是不是串」那一问出现 ' + $arityN +
               ' 次, 应为 1 次 —— InStr 的位号只能有一位主人')
 }
+$slotWantsWant = @('cgen_expr_call_arg_variant.inc', 'cgen_expr_call_builtin_fixup.inc') -join ','
+
+# ---- R10 (账 #305 §B180, 第六十九刀) ----
+# 「这一位要不要收**整枚槽**而不是收串」= 一枚问句，读者**恰好两枚**（arg_variant 撤回 Variant→BSTR
+# 的解包 / builtin_fixup 照着同一问句把 callee 换成收槽的出口 vb6_StrPtrVar）。两站判据必须同源 ——
+# 只改一头就会造出「发码把整枚槽交给 void* vb6_StrPtr(BSTR)」(C2440) 或「callee 没改名、槽被解包
+# 又现造一枚临时串」(本刀要撤的那条) 两种半边病。
+# 它刻意**不进**上面那张按位号答档的表：`vb6_StrPtr(` 在全语料 1720 处里 1478 处交的是普通 String
+# 变量（`.build/k69_strptr_census.txt`），无条件按位号答槽会把它们一并打成 C2440。
+$slotWants = @(Get-CallSites 'builtinWantsRawSlotFromVariant')
+if ($slotWants.Count -ne 2) {
+    $viol += ('R10 「这一位要不要收整枚槽」的调用点应为 2 (arg_variant 撤回解包 + builtin_fixup 改名), ' +
+              '实为 ' + $slotWants.Count + ' (' + (($slotWants | Sort-Object -Unique) -join ', ') +
+              ') —— 两站又开始各判各的')
+} elseif ((($slotWants | Sort-Object -Unique) -join ',') -ne $slotWantsWant) {
+    $viol += ('R10 这一问的读者应是 arg_variant + builtin_fixup, 现在是 ' +
+              (($slotWants | Sort-Object -Unique) -join ', '))
+}
+$strPtrVarN = @([regex]::Matches($allCode, [regex]::Escape('vb6_StrPtrVar'))).Count
+if ($strPtrVarN -ne 1) {
+    $viol += ('R10 vb6_StrPtrVar 在 src/backend 出现 ' + $strPtrVarN + ' 处, 应为 1 处 —— ' +
+              '改道只许在 builtin_fixup 那一处发生, 别在第二站再拼一次出口名')
+}
 
 Write-Host ('census: backendFiles=' + $allFiles.Count +
             ' gateCases=' + $gateCases +
@@ -237,6 +260,8 @@ Write-Host ('census: backendFiles=' + $allFiles.Count +
             ' rawSites=' + $rawSites.Count +
             ' dispatchSites=' + $slotSites.Count +
             ' arityQuestions=' + $arityN +
+            ' rawSlotReaders=' + $slotWants.Count +
+            ' strPtrVarNames=' + $strPtrVarN +
             ' castShapes=' + $castN)
 
 if ($viol.Count -gt 0) {
@@ -248,5 +273,5 @@ if ($viol.Count -gt 0) {
                 '形状走 wrapToBSTR; 要加第二位主人请先说明这四个问为什么分不开')
     exit 1
 }
-Write-Host 'PASS implicit_cstr_station (R1..R9)'
+Write-Host 'PASS implicit_cstr_station (R1..R10)'
 exit 0

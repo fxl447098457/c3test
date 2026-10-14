@@ -312,6 +312,18 @@
                     kind176 = "vb6_VARIANT";
                 }
                 rtParamType = kind176.empty() ? getRuntimeParamCType(callee, i) : kind176;
+                // 账 #305 §B180 (第六十九刀): 这一位要不要**收整枚槽**（= 不解包），一处问句
+                // 两站同归 —— 这里撤回解包，`builtin_fixup` 那一站照着同一问句把 callee 换成
+                // 收槽的出口 `vb6_StrPtrVar`。撤掉的病形是 `vb6_StrPtr(vb6_VariantToString(v))`：
+                // 每次调用现造一枚 BSTR 把地址交出去、那枚串没人回收 (两台实测 1089536/909312
+                // 字节每 18000 次；真语料 41 处)。⚠ 这一问**看实参不看位号** —— 同一个
+                // `vb6_StrPtr` 在全语料另有 1478 处交的是普通 String 变量，按位号无条件答槽
+                // 会把它们全打成 C2440 (读数与理由见 cgen_util_type.cpp 那一问)。
+                if (rtParamType == "BSTR" && node.positional[i]
+                    && builtinWantsRawSlotFromVariant(callee, node.positional.size(), i,
+                                                      *node.positional[i])) {
+                    rtParamType = "vb6_VARIANT";
+                }
             }
             if (!rtParamType.empty() && rtParamType != "vb6_VARIANT"
                  && rtParamType != "vb6_VARIANT*") {

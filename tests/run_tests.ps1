@@ -3272,6 +3272,44 @@ if ($Category -in @("all", "run", "bas")) {
         'vb6_VariantToString(vb6_VariantToString',
         'vb6_InStrC(wNum, wHay, vb6_VariantToString(wVar), '
     )
+    # <vbeclipse> 账 #305 §B180（第六十九刀）：`StrPtr(<Variant>)` 曾经发
+    # `vb6_StrPtr(vb6_VariantToString(v))` —— 而 `vb6_VariantToString` 的定义就一句 `return vb6_CStr(v)`
+    # (= `vb6_Format(...)`) ⇒ **每次调用现造一枚 BSTR**，地址交给 Win32 之后那枚串没人回收。
+    # 两台实测（`.build/k69sp`，18000 次减去同形状普通 String 的零分配基线窗）=
+    # x64 1089536 / x86 909312 字节；真语料 18 份文件 41 处，全坐在 `lpszIcon` / `pszText` /
+    # `CreateWindowExW` / `FindFirstFileW` / `VarI8FromStr` / `dwTypeData` 这些指针交接位上。
+    # 修法 = `vt` 已是串时**借**槽里那枚 BSTR（RTL 新出口 `vb6_StrPtrVar`），发码侧由一枚**看实参**的
+    # 问句撤回解包 + `builtin_fixup` 改 callee 名（两站同归一处）。⚠ 这一问不许按位号无条件答槽：
+    # 同一个 `vb6_StrPtr(` 在全语料另有 1478 处交的是普通 String 变量，无条件答槽会把它们全打成
+    # C2440（读数 = `.build/k69_strptr_census.txt`）。非串那档仍 mint，那半归 §B164 形①。
+    $b180Needles = @("P1-var-string-nonzero=Y", "P2-empty-string=0",
+        "P3-variant-empty-string=0", "P4-var-numeric-nonzero=Y", "P5-stable=Y",
+        "B180-apiBad=0", "B180-leak-ok=Y", "B180-acc=-1", "C3ProbeB180-DONE")
+    Add-BasTest "b180_strptr_variant" "$Tests\b180_strptr_variant.bas" $b180Needles
+    Add-BasTest "b180_strptr_variant_x86" "$Tests\b180_strptr_variant.bas" $b180Needles -Arch "x86"
+    # 发码针：三枚 Variant 形走收槽的出口（装串 / 装空串 / 装数值），两枚证人钉「普通 String
+    # 变量与空串变量**照旧**走 `vb6_StrPtr`（不许过度改道）， witness 子程序里两枚各一档。
+    Test-EmitcShape 'b180_strptr_variant_shape' @(
+        "$Tests\b180_strptr_variant.bas") @(
+        'vb6_StrPtrVar(vStr);',
+        'vb6_StrPtrVar(vEmptyStr);',
+        'vb6_StrPtrVar(vNum);',
+        'vb6_StrPtr(e);',
+        'vb6_StrPtr(s);',
+        'vb6_StrPtrVar(wHay);',
+        'vb6_StrPtr(wTxt);'
+    )
+    # 反针：前两枚 = 病形本体（解包后进 StrPtr / mint 分支被绕进解包），中两枚 = 二次解包与
+    # 把 String 变量也改道到收槽出口（那正是普查警告过的 1478 处误伤形状）。
+    Test-EmitcAbsent 'b180_strptr_variant_lesion' @(
+        "$Tests\b180_strptr_variant.bas") @(
+        'vb6_StrPtr(vb6_VariantToString(',
+        'vb6_StrPtr(vb6_CStr(',
+        'vb6_StrPtrVar(vb6_VariantToString(',
+        'vb6_VariantToString(vb6_VariantToString(',
+        'vb6_StrPtrVar(e)',
+        'vb6_StrPtrVar(s)'
+    )
     # <vbeclipse> 账 #305 §B154（第四十二刀）：ReDim 重建一枚动态数组时，元素档**问声明**，不是问 ReDim 自己
     # 的 As 子句。修前 cgen_redim.cpp 只问 asType，没写 As 就交 vb6_sa_variant，而访问侧（VB6_SA_AT /
     # VB6_SA_ND_AT2）问的是声明表 arrayElemTypes_ —— 同一枚描述符两个答案：造出来 24 字节一步（x64），

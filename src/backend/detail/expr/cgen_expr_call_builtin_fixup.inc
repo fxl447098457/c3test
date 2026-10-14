@@ -438,6 +438,18 @@
             callee = "vb6_SafeArrayDataPtr";
         }
     }
+    // 账 #305 §B180 (第六十九刀): StrPtr 收**整枚槽**那一形改道到收槽的出口。
+    // 上面 Fix 140 已经立了「按实参换 callee 名」这一形状的先例 (Byte() → SafeArrayDataPtr)，
+    // 本格只是把同一形状用到 Variant 上 —— 而**问句只有一处主人**
+    // (`builtinWantsRawSlotFromVariant`，另一枚读者 = arg_variant 撤回解包；两站判据同源，
+    // 免得再长一次 §B176 形② 那种「一位两主、各判各的」)。改道后发码 =
+    // `vb6_StrPtrVar(v)`，RTL 那一枚在 `vt` 已是串时**借**槽里的 BSTR (空串仍答 0，
+    // 与账 #257 第十三层同一条口径)，不再每调用现造一枚没人回收的临时串。
+    if (callee == "vb6_StrPtr" && !node.positional.empty() && node.positional[0]
+        && builtinWantsRawSlotFromVariant(callee, node.positional.size(), 0,
+                                          *node.positional[0])) {
+        callee = "vb6_StrPtrVar";
+    }
     // InStr 的 compare 形 (<vbeclipse>, 替换 Fix 041 的"截掉第 4 参"):
     //   InStr(s1, s2[, compare])            首参是字符串 ⇒ (s1, s2, compare)
     //   InStr(start, s1, s2[, compare])     首参是数值   ⇒ (start, s1, s2[, compare])

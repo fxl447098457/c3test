@@ -929,6 +929,22 @@ bool CCodeGen::builtinNoParamTableVariantMayStayRaw(const std::string& callee, s
     return slot != SIZE_MAX && slot == pos;
 }
 
+// 账 #305 §B180 (第六十九刀): 「这一位要不要收整枚槽而不是收串」= 一枚出口，读者恰好两枚
+// (arg_variant 撤回解包 / builtin_fixup 改 callee 名，见 cgen_helpers.inc 那一问的注释)。
+// 病在发码形状 `vb6_StrPtr(vb6_VariantToString(v))`：`vb6_VariantToString` 的定义就一句
+// `return vb6_CStr(v)` (vb6rtl.c:484) = `vb6_Format(...)` ⇒ **每调用现造一枚 BSTR**，
+// 地址交给 Win32 之后那枚串没人回收 (实测 18000 次 = x64 1089536 / x86 909312 字节，
+// 同形状普通 String 基线增量 0；真语料 18 份文件 41 处，全在指针交接位)。
+// 为什么不能并进 §B176 那张按位号答档的表 (那是本节上面两问的家): `vb6_StrPtr(` 全语料 1720 处
+// 里 **1478 处交的是普通 String 变量** (`.build/k69_strptr_census.txt`) —— 按位号无条件答槽会把
+// 它们一并打坏 (BSTR 进 vb6_VARIANT 形参 = C2440)。所以这一问**看实参**，且只认 AST 那一半。
+bool CCodeGen::builtinWantsRawSlotFromVariant(const std::string& callee, size_t argc, size_t pos,
+                                              Expr& actual) const {
+    if (callee != "vb6_StrPtr") return false;
+    if (argc != 1 || pos != 0) return false;
+    return isDefinitelyVariantExpr(actual);
+}
+
 std::string CCodeGen::builtinNoParamTableFormalCType(const std::string& callee, size_t argc,
                                                      size_t pos, Vb6Type firstArgType) const {
     // §B174 的正主: InStr 的位随"有没有写 start"整体移位, 依据与 builtin_fixup 选

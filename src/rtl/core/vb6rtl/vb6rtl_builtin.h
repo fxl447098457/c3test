@@ -446,6 +446,11 @@ BSTR   vb6_ByteArrayToString(struct vb6_SafeArray1D* arr);
 void*  vb6_SafeArrayDataPtr(struct vb6_SafeArray1D* arr);
 struct vb6_SafeArray1D* vb6_Filter(struct vb6_SafeArray1D* source, BSTR match, int32_t include, int32_t compare);
 void*    vb6_StrPtr(BSTR s);          // StrPtr: address of string data
+// 账 #305 §B180 (第六十九刀): StrPtr 收**整枚槽**那一档 —— vt 已是串时**借**槽里那枚 BSTR，
+// 不再像 `vb6_StrPtr(vb6_VariantToString(v))` 那样每调用现造一枚没人回收的临时串。
+// 发码侧由 arg_variant (撤回解包) 与 builtin_fixup (改 callee 名) 两站同归一处新问句决定，
+// 只有「实参本身是槽」时才走这一枚 (理由与读数见 §B180 —— 无条件按位号答槽会打坏 1679 处)。
+void*    vb6_StrPtrVar(vb6_VARIANT v);
 uintptr_t vb6_ObjPtr(void* obj);       // ObjPtr: address of object
 BSTR   vb6_LSet(BSTR str, int32_t length);  // LSet: left-justify
 BSTR   vb6_RSet(BSTR str, int32_t length);  // RSet: right-justify
