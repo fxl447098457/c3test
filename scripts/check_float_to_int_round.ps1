@@ -61,6 +61,22 @@ function Get-SrcFiles($dir) {
         Where-Object { $_.Extension -in ".c", ".h", ".cpp", ".inc", ".hpp" }
 }
 
+# 读一份源码的**代码部分**: 把 // 注释去掉再数。两道普查 (S6 的"别人不许出现 Chk 名字"、
+# S8 的"别人不许问 narrowTargetTypeOf") 数的是**消费点**, 而注释里提一句权威的名字是给人看的
+# 说明, 不是调用 —— 门 #634 就红在这一点上 (第七十三刀给三条形参臂写的 WHY 注释各提了一次
+# narrowTargetTypeOf, 被 S8 数成三处消费)。只裁"行首或空白后的 //"两种形状, 免得吃掉字符串里的
+# 路径; 块注释不裁 (真要藏一个调用进 /* */ 里, 那是另一回事, 这里不放宽)。
+function Get-CodeText($path) {
+    $raw = [System.IO.File]::ReadAllText($path)
+    $kept = New-Object System.Collections.Generic.List[string]
+    foreach ($line in ($raw -split "`n")) {
+        $line = $line.TrimEnd("`r")
+        $m = [regex]::Match($line, '(^|\s)//')
+        if ($m.Success) { $kept.Add($line.Substring(0, $m.Index)) } else { $kept.Add($line) }
+    }
+    return ($kept -join "`n")
+}
+
 # ---- S1: 取整出口只有一枚 ----
 $defSites = @()
 $defCount = 0
@@ -125,7 +141,7 @@ if ($bHelp -ne 1) { $bad += ("S6 vb6_FltToLng( occurrences in cgen_util_type.cpp
 $others = @()
 foreach ($f in Get-SrcFiles $beDir) {
     if ($f.FullName -eq $typeFile) { continue }
-    $n = @([regex]::Matches([System.IO.File]::ReadAllText($f.FullName), '"vb6_Chk(Byte|Int|Long)"')).Count
+    $n = @([regex]::Matches((Get-CodeText $f.FullName), '"vb6_Chk(Byte|Int|Long)"')).Count
     if ($n -gt 0) { $others += ($f.Name + "=" + $n) }
 }
 if ($others.Count -ne 0) {
@@ -186,7 +202,7 @@ $nOtherAsk = 0
 foreach ($f in Get-SrcFiles $beDir) {
     if ($f.FullName -eq $typeFile) { continue }
     if ($f.FullName -eq $helpFile) { continue }
-    $nOtherAsk += @([regex]::Matches([System.IO.File]::ReadAllText($f.FullName), 'narrowTargetTypeOf')).Count
+    $nOtherAsk += @([regex]::Matches((Get-CodeText $f.FullName), 'narrowTargetTypeOf')).Count
 }
 if ($nOtherAsk -ne 0) {
     $bad += ("S8 narrowTargetTypeOf consumed outside cgen_util_type.cpp: " + $nOtherAsk + " site(s)")
