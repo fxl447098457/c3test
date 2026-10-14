@@ -3177,6 +3177,58 @@ if ($Category -in @("all", "run", "bas")) {
         "R7-fmt-eq=True", "R8-fmt-len=8", "NB-DONE")
     Add-BasTest "b175_num_bstr" "$Tests\b175_num_bstr.bas" $nb175Needles
     Add-BasTest "b175_num_bstr_x86" "$Tests\b175_num_bstr.bas" $nb175Needles -Arch "x86"
+    # <vbeclipse> 账 #305 §B176（第六十七刀）：「这一位形参要什么 C 档」原先有三位主人，
+    # 第三位（getRuntimeParamCType 那张表）登的是 **VB 书写的个数**、问它的位号却是**发码位置**，
+    # 两者不同源 —— InStr 那一格按两参形只登了两枚 BSTR，于是三参形整格错位一格：Variant 的
+    # start 位被当成字符串解包、串交进 int32_t 形参。cl 只给一条 C4047（在 -W3 之外，而 C3 的
+    # 构建日志根本不打 cl 警告）⇒ 运行期 start = 被截断的指针，InStr **静默答 0**。本刀把这一问
+    # 收成一处 builtinNoParamTableFormalCType（档位表），字符串位由它投影出
+    # builtinNoParamTableStringSlot —— 同一张表答两问，不再各自抄。
+    # 八枚形状针全部出自 .build/k67_w2 的 --emit-c 逐行读数（两台逐字节相同）。
+    # 第 2/3 枚 = Variant 进**数值**形参那一半（vb6_VariantToLong），钉「不许裸交结构体」；
+    # 第 7/8 枚 = 同一问的两档 arity：三参形 start 在位 0、两参形压根没有 start（haystack
+    # 仍在位 0）—— 两枚同时落地才证明位号不再跟书写个数错位。
+    Test-EmitcShape 'b176_var_slot_shape' @(
+        "$Tests\b176_var_slot.bas") @(
+        'vb6_MsgBox(vb6_VariantToString(vP), vb6_VariantToLong(vBtn), vb6_VariantToString(vTitle))',
+        'vb6_SendKeys(vb6_VariantToString(vKeys), vb6_VariantToLong(vWait))',
+        'vb6_SetAttr(vb6_VariantToString(vName), vb6_VariantToLong(vAttr))',
+        'vb6_SavePicture(pic, vb6_VariantToString(vName))',
+        'vb6_InStr(vb6_VariantToLong(vS3), w1, vNeedle)',
+        'vb6_InStrC(vb6_VariantToLong(vS3), w1, vb6_BSTR_FromStr(L"7"), vb6_VariantToLong(vCmp))',
+        'vb6_InStr(vb6_VariantToLong(vS4), s1, vb6_BSTR_FromStr(L"7"))',
+        'vb6_InStr(1, vb6_VariantToString(vKey), vb6_BSTR_FromStr(L"text"))'
+    )
+    # 反针七枚：前四枚 = 病形本身（Variant 裸交进 BSTR 位 / 串交进数值位 / 指针位被解包），
+    # 第 5 枚钉「不许二次折」（六十五刀在 argtype 那站量到的双层折不许在这一站重演），
+    # 第 6 枚钉 needle 位**不许预先解包** —— vb6_InStr 是 _Generic 宏，它自己会走 vb6_InStrVar
+    # 解包并 SysFreeString；发码侧抢先解一次就多出一枚没人回收的临时串（§B176 读数③）。
+    Test-EmitcAbsent 'b176_var_slot_lesion' @(
+        "$Tests\b176_var_slot.bas") @(
+        'vb6_MsgBox(vP,',
+        'vb6_GetSetting(BV_APP, vSec,',
+        'vb6_InStr(vb6_VariantToString(vS4)',
+        'vb6_SavePicture(vb6_VariantToString',
+        'vb6_VariantToString(vb6_VariantToString',
+        'vb6_InStr(vb6_VariantToLong(vS3), w1, vb6_VariantToString(vNeedle)',
+        'vb6_Format(dNum, vStyle'
+    )
+    # 真跑读数来源 = .build/k67_w2（新 exe，x64 与 x86 **逐行相同**）。V1/V2 是形②那一位的
+    # 读数（start 是 Variant 的三参形），V3 是没写 Variant 的那一形 = 证人（老形状不许变），
+    # V4 钉两参形不许被当成 start。V5..V7 是注册表家族真往返、V8..V10 是 Format 的 style 位。
+    # 行为负控分两条，因为两形的 BASE 表现根本不同：
+    #   形①（Variant 进 BSTR 位）：整份夹具在 BASE 那台**压根编不过** —— 两台各十六枚 cl C2440、
+    #     无产物（.build/k67_base2/{x64,x86}/c3-error.log）；
+    #   形②（Variant 进 int32_t 位）：BASE **编得过、静默答错**。单独一份只含 InStr 的探针
+    #     (.build/k67_istr_probe2.bas, BASE 读数 .build/k67_istr2_{x64,x86}) 四行全答 0，
+    #     修后六/0/四/七 —— 而这条探针在 BASE x64 上**有过一次答对**（截断后的指针低 32 位
+    #     恰好落进串长之内，.build/k67_istr_base/x64 那次 I1=6）⇒ 「BASE 上也对」只是反面证人
+    #     不够格，真跑判据必须钉在 NEW 这一台的确定值上（V1=4 与 V2=0 两头，缺一头不成立）。
+    $bv176Needles = @("V1-start4=4", "V2-start5=0", "V3-start2=4", "V4-twoarg=0",
+        "V5-roundtrip=roundtrip", "V6-vartype=8", "V7-miss=roundtrip",
+        "V8-fmt=1235", "V9-fmt-lit=1235", "V10-fmt-len=4", "BV-DONE")
+    Add-BasTest "b176_var_slot" "$Tests\b176_var_slot.bas" $bv176Needles
+    Add-BasTest "b176_var_slot_x86" "$Tests\b176_var_slot.bas" $bv176Needles -Arch "x86"
     # <vbeclipse> 账 #305 §B154（第四十二刀）：ReDim 重建一枚动态数组时，元素档**问声明**，不是问 ReDim 自己
     # 的 As 子句。修前 cgen_redim.cpp 只问 asType，没写 As 就交 vb6_sa_variant，而访问侧（VB6_SA_AT /
     # VB6_SA_ND_AT2）问的是声明表 arrayElemTypes_ —— 同一枚描述符两个答案：造出来 24 字节一步（x64），

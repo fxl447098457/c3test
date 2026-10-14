@@ -277,7 +277,25 @@
             || calleeParams[i].type == Vb6Type::Variant
             || calleeParams[i].type == Vb6Type::Empty;
         if (!isByRef && rtParamTypeUsable) {
-            std::string rtParamType = getRuntimeParamCType(callee, i);
+            // 账 #305 §B176 (第六十七刀): 「这一位要什么 C 档」先问**那一位权威** ——
+            // 没有类型化形参表的那族内在函数由 `builtinNoParamTableFormalCType` 按**写出来的**
+            // arity 答档 (Fix 175 与它同源, §B174/§B175 那张名单现在就是这张表)。它答得出就用它,
+            // 答不出才回落到 `getRuntimeParamCType` (按 callee 名登的 C 签名表)。
+            // 为什么这个次序是要紧的: 那张表的行是**按 VB 写出来的 arity 里"串在哪几位"**登的,
+            // 而这一臂问的是**发码位号** —— `vb6_InStr {"BSTR","BSTR"}` 对两参形正好, 对
+            // `InStr(start, s1, s2)` 就把 `int32_t start` 那位答成 BSTR ⇒ 把该转数值的 Variant
+            // 实参解成串交进 int 形参 (cl 只 warning, 运行时 start = 被截断的指针 ⇒ 静默答 0)。
+            // 同一位权威反过来也管 BSTR: Variant 交进 GetSetting/MsgBox 标题/InputBox 那几形
+            // 以前**没人问** (那张表里根本没有这些名字) ⇒ 裸结构体交进 BSTR 形参 = cl C2440。
+            std::string rtParamType;
+            {
+                const Vb6Type first176 = node.positional.empty()
+                    ? Vb6Type::Empty
+                    : (node.positional[0] ? inferExprType(*node.positional[0]) : Vb6Type::Empty);
+                std::string kind176 = builtinNoParamTableFormalCType(
+                    callee, node.positional.size(), i, first176);
+                rtParamType = kind176.empty() ? getRuntimeParamCType(callee, i) : kind176;
+            }
             if (!rtParamType.empty() && rtParamType != "vb6_VARIANT"
                  && rtParamType != "vb6_VARIANT*") {
                 // 账 #305 §B173 (第六十四刀): 「这枚实参是不是整只槽」在本文件里由**两条臂**

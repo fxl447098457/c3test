@@ -39,7 +39,8 @@ $helpers = Join-Path $backend 'detail\util\cgen_helpers.inc'
 $emitInc = Join-Path $backend 'detail\expr\cgen_expr_call_arg_emit.inc'
 $argtypeInc = Join-Path $backend 'detail\expr\cgen_expr_call_builtin_argtype.inc'
 $convInc    = Join-Path $backend 'detail\expr\cgen_expr_call_conv_output.inc'
-foreach ($p in @($utilCpp, $helpers, $emitInc, $argtypeInc, $convInc)) {
+$argVariantInc = Join-Path $backend 'detail\expr\cgen_expr_call_arg_variant.inc'
+foreach ($p in @($utilCpp, $helpers, $emitInc, $argtypeInc, $convInc, $argVariantInc)) {
     if (-not (Test-Path -LiteralPath $p)) { Write-Host ('FAIL: 读不到 ' + $p); exit 1 }
 }
 
@@ -70,6 +71,7 @@ foreach ($f in $allFiles) { $codeByFile[$f.FullName] = Strip-CComments ([IO.File
 $util = $codeByFile[$utilCpp]
 $emit = $codeByFile[$emitInc]
 $argtype = $codeByFile[$argtypeInc]
+$argVariant = $codeByFile[$argVariantInc]
 $allCode = ($codeByFile.Values -join [Environment]::NewLine)
 
 $srcRaw = ''
@@ -143,8 +145,10 @@ if ($gateCases -lt 14) {
               '少一档就是 Left/Replace 那类实参重新裸交给 BSTR')
 }
 # 位号表的覆盖面 = 两条形状各数一次：InStr 那一枚带 arity 判断 (callee == "vb6_InStr")，
-# 其余十枚住在 kNoTableStringSlots175 那张名单里 ({"vb6_GetSetting", {0,1,2,3}}, ...)。
-$slotDef = [regex]::Match($util, 'bool CCodeGen::builtinNoParamTableStringSlot[^\{]*\{')
+# 其余十枚住在 kNoTableFormalKinds176 那张档表里 ({"vb6_GetSetting", {"BSTR",…}}, ...)。
+# 账 #305 §B176: 这张表从「哪几位是字符串」升成「第 pos 位要什么 C 档」，是这一问唯一的主人；
+# `builtinNoParamTableStringSlot` 只剩一行投影 (== "BSTR")，所以名单必须按**档表**那一段数。
+$slotDef = [regex]::Match($util, 'std::string CCodeGen::builtinNoParamTableFormalCType[^\{]*\{')
 $tableNames = 0
 if ($slotDef.Success) {
     $slotBody = Get-BlockBody $util ($slotDef.Index + $slotDef.Value.Length - 1)
@@ -176,20 +180,48 @@ if ($convRename -ne 1) {
               $convRename + ' 处 —— 那一问与形参档位无关, 撤了就没人补 1/2/3 参三形')
 }
 
+# ---- R8 (账 #305 §B176, 第六十七刀) ----
+# 「没有形参表的那一族, 第 pos 位要什么 C 档」= 一枚出口, 读者只许两位:
+#   cgen_util_type.cpp 里那行投影 (`== "BSTR"`) + arg_variant 那条臂 (Fix 038b-2)。
+# 同时钉住: 那张按 callee 名登的 C 签名表 (`getRuntimeParamCType`) 只剩**一枚回落读者**,
+# 它的行是按 VB 写出来的 arity 登的 —— 谁再拿它答位号, 就会把 InStr 的 int32_t start 位答成 BSTR。
+$kindSites = @(Get-CallSites 'builtinNoParamTableFormalCType')
+$kindWant = @('cgen_expr_call_arg_variant.inc', 'cgen_util_type.cpp')
+if ($kindSites.Count -ne 2) {
+    $viol += ('R8 builtinNoParamTableFormalCType 的调用点数应为 2 (投影 + arg_variant), 实为 ' +
+              $kindSites.Count + ' (' + (($kindSites | Sort-Object -Unique) -join ', ') +
+              ') —— 这一问又长出第三位读者/主人了')
+} elseif ((($kindSites | Sort-Object -Unique) -join ',') -ne ($kindWant -join ',')) {
+    $viol += ('R8 档表的读者应是 ' + ($kindWant -join ' + ') + ', 现在是 ' +
+              (($kindSites | Sort-Object -Unique) -join ', '))
+}
+$rtSites = @(Get-CallSites 'getRuntimeParamCType')
+if ($rtSites.Count -ne 1 -or $rtSites[0] -ne 'cgen_expr_call_arg_variant.inc') {
+    $viol += ('R8 getRuntimeParamCType 的调用点应只剩 1 处 (arg_variant 的回落), 实为 ' +
+              $rtSites.Count + ' (' + (($rtSites | Sort-Object -Unique) -join ', ') +
+              ') —— 那张 C 签名表不许再答位号 (§B176 形② 就是这么来的)')
+}
+if (-not [regex]::IsMatch($argVariant, 'builtinNoParamTableFormalCType\(')) {
+    $viol += 'R8 arg_variant 那条臂不再问档表 —— 位号又回到只认 C 签名表的状态 (§B176)'
+}
+
 Write-Host ('census: backendFiles=' + $allFiles.Count +
             ' gateCases=' + $gateCases +
             ' slotTableNames=' + $tableNames +
             ' wrapToBSTR@emit=' + $wrapN +
             ' wrapToBSTR@conv=' + $convWrap +
+            ' kindSites=' + $kindSites.Count +
+            ' rtSites=' + $rtSites.Count +
             ' castShapes=' + $castN)
 
 if ($viol.Count -gt 0) {
     foreach ($v in $viol) { Write-Host ('  ' + $v) }
     Write-Host ('FAIL implicit_cstr_station: ' + $viol.Count +
                 ' 条违规 —— 这条规则的站点在 cgen_expr_call_arg_emit.inc (Fix 175): ' +
-                '位号问形参表 (缺表时问 builtinNoParamTableStringSlot), 档位问 typeTakesImplicitCStr, ' +
+                '位号问形参表 (缺表时问 builtinNoParamTableFormalCType 那一枚档表), ' +
+                '档位问 typeTakesImplicitCStr, ' +
                 '形状走 wrapToBSTR; 要加第二位主人请先说明这四个问为什么分不开')
     exit 1
 }
-Write-Host 'PASS implicit_cstr_station (R1..R7)'
+Write-Host 'PASS implicit_cstr_station (R1..R8)'
 exit 0

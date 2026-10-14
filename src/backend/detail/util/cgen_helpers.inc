@@ -599,7 +599,14 @@
     //   折成哪一种 CStr      = wrapToBSTR (全仓唯一的 数值→BSTR 形状出口)。
     // 原来第二、三问还有另一位主人 = Fix 108c 那张 13 枚名单 (在 argList 拼成串之后做文本替换),
     // 本刀整段撤掉。
+    // 账 #305 §B176 (第六十七刀): 「没有形参表的那一族, 第 pos 位要什么 C 档」收成**一枚出口**
+    // (builtinNoParamTableFormalCType, 按**写出来的** arity 数位号), 上面那枚「是不是字符串位」
+    // 降级成它在 BSTR 档上的投影; 读者 = 这一位出口自己 (投影) + arg_variant 那条臂 (Fix 038b-2),
+    // 而 `getRuntimeParamCType` 那张按 callee 名登的 C 签名表**不再答位号** —— 它的 InStr 行是
+    // 按 VB 两参形登的, 按发码位号问就会把 int32_t 的 start 位答成 BSTR (§B176 形②)。
     bool typeTakesImplicitCStr(Vb6Type t) const;
+    std::string builtinNoParamTableFormalCType(const std::string& callee, size_t argc, size_t pos,
+                                               Vb6Type firstArgType) const;
     bool builtinNoParamTableStringSlot(const std::string& callee, size_t argc, size_t pos,
                                        Vb6Type firstArgType) const;
 
