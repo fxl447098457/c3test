@@ -24,6 +24,10 @@ $ProjectDir = if ($env:C3_PROJECT_DIR) { $env:C3_PROJECT_DIR } else { Split-Path
 Set-Location $ProjectDir
 Write-Host "== building $Vbp (in $ProjectDir) =="
 $argList = @($Vbp, "--output-dir", $OutDir)
+# ai/030 续 (§10.6 同款约定): 本入口默认走 obj 级缓存 —— 84 个 RTL .c 只在 store 冷时
+# 编一遍, 之后 RTL + 未变用户码全部命中 (实测 VBFlexGridDemo 默认路径里 RTL 批独占约 27s)。
+# 编译器默认仍未动, 只在本入口显式传; C3_NO_OBJCACHE=1 可关 (复现 GA 那条路, 同 test.bat)。
+if (-not $env:C3_NO_OBJCACHE -and $Extra -notmatch '--incremental') { $argList += "--incremental" }
 if ($Extra -ne "") { $argList += ($Extra -split ' ') }
 & .build\C3.exe @argList 2>&1 | ForEach-Object { "$_" }
 Write-Host "== C3 exit=$LASTEXITCODE =="
