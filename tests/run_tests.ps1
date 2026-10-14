@@ -3103,6 +3103,37 @@ if ($Category -in @("all", "run", "bas")) {
         'vb6_LenB(vb6_CStr',
         'vb6_Len(vb6_CStrLong'
     )
+
+    # <vbeclipse> 账 #305 §B175（第六十六刀）：**没有类型化形参表**的那 66 枚内在函数，字符串
+    # 形参位从此也问得到 Fix 175 那一站。八枚 = 注册表家族的四位 + Format 的 style 位 + DeleteSetting
+    # 的节位；形状全部出自 wrapToBSTR（与 §B174 同一个口径，档位差异只在那一枚共享闸里）。
+    # 第 5/6/7 枚是本格最响的一条：语料里 `GetSetting("A","S","K", 0)` 那一形 369 处、
+    # `SaveSetting … , 42` 78 处 —— 修前交的是裸 int32_t，写侧静默存指针、读侧拿它当 wchar_t*。
+    Test-EmitcShape 'b175_notab_str_arg_shape' @(
+        "$Tests\b175_num_bstr.bas") @(
+        'vb6_GetSetting(NB_APP, vb6_BSTR_FromStr(L"Sec"), sKey, vb6_CStrLong(nLen))',
+        'vb6_GetSetting(NB_APP, vb6_BSTR_FromStr(L"Sec"), sKey, vb6_CStrDbl(dDef))',
+        'vb6_GetSetting(vb6_CStrLong(nLen),',
+        'vb6_SaveSetting(NB_APP, vb6_BSTR_FromStr(L"Sec"), sKey, vb6_CStrLong(nSet))',
+        'vb6_SaveSetting(NB_APP, vb6_CStrLong(nSec), sKey, vb6_CStrLong(nLen))',
+        'vb6_GetAllSettings(NB_APP, vb6_CStrLong(nSec))',
+        'vb6_DeleteSetting(NB_APP, vb6_CStrLong(nSec), sKey)',
+        'vb6_Format(vb6_VariantDouble(1234.567), vb6_CStrLong(nForm)',
+        # 第 9/10 枚 = 同一句问句的**反面**: 省略掉的标题位不许折 (真语料 ppProgressCircular.pag:351
+        # `InputBox("...", , 100)` —— 占位 0 折成 "0" 就把「没写标题」变成了标题 "0")。
+        'vb6_InputBox(vb6_BSTR_FromStr(L"witness omitted title"), 0L, vb6_CStrLong(100), 0, 0'
+    )
+    # 反针四枚 = 病形本身（数值裸进那一位），第五枚钉「不许二次折」—— 六十五刀在 argtype 那站
+    # 量到的双层折 (`vb6_CStrDbl((double)(vb6_VariantToString(...)))`) 不许在这一站重演。
+    Test-EmitcAbsent 'b175_notab_str_arg_lesion' @(
+        "$Tests\b175_num_bstr.bas") @(
+        'vb6_GetSetting(NB_APP, vb6_BSTR_FromStr(L"Sec"), sKey, nLen)',
+        'vb6_SaveSetting(NB_APP, vb6_BSTR_FromStr(L"Sec"), sKey, nSet)',
+        'vb6_GetSetting(nLen,',
+        'vb6_GetAllSettings(NB_APP, nSec)',
+        'vb6_InputBox(vb6_BSTR_FromStr(L"witness omitted title"), vb6_CStrLong(0L)',
+        'vb6_CStrLong(vb6_CStrLong'
+    )
     # 账 #305 §B149 + §B150 (第四十刀): 注册表家族的真往返 + 晚绑定槽的二维元素读写。
     # 读数来源 = .build/b1280_rs (新 exe, x64 与 x86 **逐行相同**, 故同针同过); 外部口径证人 =
     # VB6 真语料 mdoceditor/E-Type/Main.bas:269 (`For i = 0 To UBound(varFiles, 1)` + `varFiles(i, 1)`)。
@@ -3130,6 +3161,22 @@ if ($Category -in @("all", "run", "bas")) {
         "RS-DONE")
     Add-BasTest "test_registry_settings" "$Tests\test_registry_settings.bas" $rsSetNeedles
     Add-BasTest "test_registry_settings_x86" "$Tests\test_registry_settings.bas" $rsSetNeedles -Arch "x86"
+
+    # <vbeclipse> 回归夹子 (b175_num_bstr, 账 #305 §B175 第六十六刀): 数值实参交进**没有形参表**
+    # 的内在函数的字符串形参位 —— 注册表家族真往返 + Format 的 style 位。
+    # 读数来源 = .build/k66_fix (新 exe, x64 与 x86 **逐行相同**)。行为负控 = BASE 那台
+    # (C3_k66_on.exe = 六十五刀合完那台) 跑同一份夹具: **两台都 cl C2440**
+    # (`b175.c(39): 无法从 double 转换到 BSTR`)、无 exe (.build/k66_fix_base/<arch>/c3-error.log)
+    # —— 整型那几档今天只是 C4047 (在 -W3 之外) 所以编得过、真跑 AV, 浮点这一档本来就是硬错误。
+    # R7/R8 是不依赖地区小数点的证人: 数值 style 折成串之后与手写 "2" 那一形**同答**
+    # (Len=8 = 千分位那一形), 于是这条针钉的是「两档汇合」而不是「格式对不对」。
+    # ⚠ 变量名不叫 $rsNeedles / $b174Expected —— 那两个名字上面已经有人用了。
+    $nb175Needles = @("R1-default-long=12", "R2-default-dbl=1.5", "R3-app-numeric=d3",
+        "R4-write-read=42", "R5-num-section=12",
+        "R6-gas-vt=8204", "R6-gas-cell=K1|12",
+        "R7-fmt-eq=True", "R8-fmt-len=8", "NB-DONE")
+    Add-BasTest "b175_num_bstr" "$Tests\b175_num_bstr.bas" $nb175Needles
+    Add-BasTest "b175_num_bstr_x86" "$Tests\b175_num_bstr.bas" $nb175Needles -Arch "x86"
     # <vbeclipse> 账 #305 §B154（第四十二刀）：ReDim 重建一枚动态数组时，元素档**问声明**，不是问 ReDim 自己
     # 的 As 子句。修前 cgen_redim.cpp 只问 asType，没写 As 就交 vb6_sa_variant，而访问侧（VB6_SA_AT /
     # VB6_SA_ND_AT2）问的是声明表 arrayElemTypes_ —— 同一枚描述符两个答案：造出来 24 字节一步（x64），

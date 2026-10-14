@@ -19,8 +19,13 @@
 #   R3 旧名单不许回来：strArgPos108c 在 src/ 里 0 处。
 #   R4 那一站不再发形状：cgen_expr_call_builtin_argtype.inc 的**代码**里不许出现 vb6_CStr。
 #   R5 名单自己的 cast 形状不许在别处重现：vb6_CStrLong((int32_t)( 在 src/backend 里 0 处。
-#   R6 census 不许读空：档位闸的 case >= 14、位号表认到的内在函数名 >= 1、arg_emit 里
-#      wrapToBSTR 的调用 >= 1（形状出口还在被问）。
+#   R6 census 不许读空：档位闸的 case >= 14、**位号表认到的内在函数名 >= 11**（第六十六刀
+#      从 1 枚扩到 11 枚 = InStr + 注册表四枚 + MsgBox / InputBox / SendKeys / SetAttr /
+#      SavePicture / Format），arg_emit 里 wrapToBSTR 的调用 >= 1（形状出口还在被问）。
+#   R7 第二位主人不许回来：cgen_expr_call_conv_output.inc 的**代码**里 wrapToBSTR 0 处 ——
+#      那一站曾经按 args[0] 的文本前缀连判六条自己折 MsgBox 的 prompt（§B175 量过：它在自己
+#      管的位上折得对，但**只管 prompt 一位**，标题位今天仍裸交 double）。同时钉
+#      'callee = "vb6_MsgBox1"' 恰好 1 处 —— 那一形是 arity 改道，问的是另一件事，必须还在。
 #
 # 用法: powershell -File scripts\check_implicit_cstr_station.ps1 [-RootOverride <目录>]  (PASS = exit 0)
 #   -RootOverride 是给负控用的: 把 src\backend 抄到别处再判, 真树一字不动。
@@ -33,7 +38,8 @@ $utilCpp = Join-Path $backend 'cgen_util_type.cpp'
 $helpers = Join-Path $backend 'detail\util\cgen_helpers.inc'
 $emitInc = Join-Path $backend 'detail\expr\cgen_expr_call_arg_emit.inc'
 $argtypeInc = Join-Path $backend 'detail\expr\cgen_expr_call_builtin_argtype.inc'
-foreach ($p in @($utilCpp, $helpers, $emitInc, $argtypeInc)) {
+$convInc    = Join-Path $backend 'detail\expr\cgen_expr_call_conv_output.inc'
+foreach ($p in @($utilCpp, $helpers, $emitInc, $argtypeInc, $convInc)) {
     if (-not (Test-Path -LiteralPath $p)) { Write-Host ('FAIL: 读不到 ' + $p); exit 1 }
 }
 
@@ -136,19 +142,45 @@ if ($gateCases -lt 14) {
     $viol += ('R6 档位闸读出 ' + $gateCases + ' 档 (< 14) —— 两位旧主人的清单并集是 14 档, ' +
               '少一档就是 Left/Replace 那类实参重新裸交给 BSTR')
 }
-$tableNames = @([regex]::Matches($util, 'callee (==|!=) "vb6_[A-Za-z]+"')).Count
-if ($tableNames -lt 1) {
-    $viol += 'R6 位号表里一枚内在函数名都没有 —— InStr 那一族会退回裸交 (x64 真跑 AV)'
+# 位号表的覆盖面 = 两条形状各数一次：InStr 那一枚带 arity 判断 (callee == "vb6_InStr")，
+# 其余十枚住在 kNoTableStringSlots175 那张名单里 ({"vb6_GetSetting", {0,1,2,3}}, ...)。
+$slotDef = [regex]::Match($util, 'bool CCodeGen::builtinNoParamTableStringSlot[^\{]*\{')
+$tableNames = 0
+if ($slotDef.Success) {
+    $slotBody = Get-BlockBody $util ($slotDef.Index + $slotDef.Value.Length - 1)
+    if ($slotBody) {
+        $tableNames = @([regex]::Matches($slotBody, 'callee == "vb6_[A-Za-z]+"')).Count
+        $tableNames += @([regex]::Matches($slotBody, '\{"vb6_[A-Za-z]+",\s*\{')).Count
+    }
+}
+if ($tableNames -lt 11) {
+    $viol += ('R6 位号表只认到 ' + $tableNames + ' 枚内在函数名 (< 11) —— 少一枚就是那一族' +
+              '的字符串形参位又没人答 (注册表那四位今天语料命中 461 处数字字面量, §B175)')
 }
 $wrapN = @([regex]::Matches($emit, 'wrapToBSTR\(')).Count
 if ($wrapN -lt 1) {
     $viol += 'R6 cgen_expr_call_arg_emit.inc 里不再问 wrapToBSTR —— 折算形状那一站断了'
 }
 
+# ---- R7 ----
+$conv = $codeByFile[$convInc]
+$convWrap = @([regex]::Matches($conv, 'wrapToBSTR\(')).Count
+$convRename = @([regex]::Matches($conv, 'callee = "vb6_MsgBox1"')).Count
+if ($convWrap -ne 0) {
+    $viol += ('R7 cgen_expr_call_conv_output.inc 的代码里又有 ' + $convWrap +
+              ' 处 wrapToBSTR —— MsgBox 那一形又长出第二位主人 (它只吃文本前缀, 且只管' +
+              ' prompt 一位; 位号与形状都问 Fix 175 那一站, 见 §B175)')
+}
+if ($convRename -ne 1) {
+    $viol += ('R7 conv_output 里的 arity 改道 (callee = "vb6_MsgBox1") 应为 1 处, 实为 ' +
+              $convRename + ' 处 —— 那一问与形参档位无关, 撤了就没人补 1/2/3 参三形')
+}
+
 Write-Host ('census: backendFiles=' + $allFiles.Count +
             ' gateCases=' + $gateCases +
             ' slotTableNames=' + $tableNames +
             ' wrapToBSTR@emit=' + $wrapN +
+            ' wrapToBSTR@conv=' + $convWrap +
             ' castShapes=' + $castN)
 
 if ($viol.Count -gt 0) {
@@ -159,5 +191,5 @@ if ($viol.Count -gt 0) {
                 '形状走 wrapToBSTR; 要加第二位主人请先说明这四个问为什么分不开')
     exit 1
 }
-Write-Host 'PASS implicit_cstr_station (R1..R6)'
+Write-Host 'PASS implicit_cstr_station (R1..R7)'
 exit 0

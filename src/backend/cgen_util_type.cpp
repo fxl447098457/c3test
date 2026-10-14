@@ -903,11 +903,42 @@ bool CCodeGen::builtinNoParamTableStringSlot(const std::string& callee, size_t a
     //   InStr(s1, s2, compare)          → 串在 0,1   (末位是 compare, 不许折)
     //   InStr(start, s1, s2)            → 串在 1,2
     //   InStr(start, s1, s2, compare)   → 串在 1,2   (末位同上)
-    if (callee != "vb6_InStr") return false;
-    if (argc == 2 || (argc == 3 && firstArgType == Vb6Type::String)) {
-        return pos == 0 || pos == 1;
+    if (callee == "vb6_InStr") {
+        if (argc == 2 || (argc == 3 && firstArgType == Vb6Type::String)) {
+            return pos == 0 || pos == 1;
+        }
+        if (argc == 3 || argc == 4) return pos == 1 || pos == 2;
+        return false;
     }
-    if (argc == 3 || argc == 4) return pos == 1 || pos == 2;
+    // 账 #305 §B175 (第六十六刀): 其余**没有形参表**的内在函数 —— 位号与实参个数无关,
+    // 所以一张名单就够, 不必像 InStr 那样先看 arity。每一行的依据 = 本刀那三份读数:
+    //   ① RTL 的 C 形参是 BSTR (vb6rtl.h / vb6rtl_registry.h / vb6rtl_dialog.h 实读),
+    //   ② `--emit-c` 实测那一形今天裸送数值进 wchar_t* (`.build/k66_probe{2,3}.bas`),
+    //   ③ VB6 收了数值会隐式 CStr (手册口径 + 真语料写法, 见 §B175 台账)。
+    // 刻意**不进**这张名单的, 每条都有理由, 不是没排上:
+    //   vb6_AppActivate —— 数值那一形到底是「CStr 当标题」还是「按 PID 激活」没定: RTL 另有一枚
+    //     `vb6_AppActivateByPid(int32_t pid, int32_t wait)` 而全仓 0 调用者; 真语料 8 处实写全是串
+    //     (AppActivate "mIRC32" / ReturnValue / title) ⇒ 没有读数就不动它, 口径另记 §B175。
+    //   Len / LenB / Asc / StrPtr —— 上面注释里那条 ① (字节宽度那一问)。
+    //   InStrB —— RTL 两形是 void* (Byte() 或 BSTR), 数值进不去。
+    //   InStrRev / Mid / Filter 那一族里带类型化形参表的 —— 它们根本不落这张表, Fix 175 直接问表。
+    static const std::unordered_map<std::string, std::vector<size_t>> kNoTableStringSlots175 = {
+        {"vb6_GetSetting",    {0, 1, 2, 3}},  // GetSetting(app, sec, key, default)
+        {"vb6_SaveSetting",   {0, 1, 2, 3}},  // SaveSetting(app, sec, key, setting)
+        {"vb6_DeleteSetting", {0, 1, 2}},     // DeleteSetting(app, sec, key)
+        {"vb6_GetAllSettings", {0, 1}},       // GetAllSettings(app[, sec])
+        {"vb6_MsgBox",        {0, 2}},        // 1 = buttons(int); VB 的 helpfile/context C 出口不收
+        {"vb6_InputBox",      {0, 1, 2}},     // 3,4 = xpos/ypos(int), 6 = context(int)
+        {"vb6_SendKeys",      {0}},           // 1 = wait(Boolean)
+        {"vb6_SetAttr",       {0}},           // 1 = attributes(int)
+        {"vb6_SavePicture",   {1}},           // 0 = picture(void*)
+        {"vb6_Format",        {1}},           // 0 是 VARIANT 形参, 由 conv_output 的装箱那腿办
+    };
+    auto it175 = kNoTableStringSlots175.find(callee);
+    if (it175 == kNoTableStringSlots175.end()) return false;
+    for (size_t p : it175->second) {
+        if (p == pos) return true;
+    }
     return false;
 }
 
