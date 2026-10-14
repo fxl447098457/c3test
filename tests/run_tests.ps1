@@ -3343,6 +3343,39 @@ if ($Category -in @("all", "run", "bas")) {
         'vb6_StrConvFromByteArray(VB6_SA_AT'
     )
 
+    # <vbeclipse> 账 #305 §B182（第七十三刀）：一枚 Integer **形参**的赋值从不查 16 位范围 ——
+    # 模块级与局部 Integer 的存值都走 vb6_ChkInt（越界 = run-time error 6 Overflow），而三条形参臂
+    # 把 Integer 只折进 knownLongVars_、没进 knownIntVars_ ⇒ 发码成裸 `(*fi) = 40000;`，C 静默
+    # 截断成 -25536 并**顺着 ByRef 写回调用方的变量**。BASE 读数 = P2 一声不响、P6 = -25536；
+    # 修后两台逐行相同：P2 报 6、P6 保持 1（那次存值被拒 ⇒ 调用方没被污染）。
+    # P9 = Long 形参的证人：32 位目标不许被窄检查碰。
+    $b182Needles = @("C3ProbeB182-P1-local-raised=6", "C3ProbeB182-P2-formal-raised=6",
+        "C3ProbeB182-P3-module-raised=6", "C3ProbeB182-P4-byval-inrange-ok=6",
+        "C3ProbeB182-P5-formal-inrange-ok", "C3ProbeB182-P6-sink-after-outofrange=1",
+        "C3ProbeB182-P7-sink-after-inrange=7", "C3ProbeB182-P8-untouched=2",
+        "C3ProbeB182-P9-long-formal-ok=40000", "C3ProbeB182-DONE")
+    Add-BasTest "b182_intformal" "$Tests\b182_intformal.bas" $b182Needles
+    Add-BasTest "b182_intformal_x86" "$Tests\b182_intformal.bas" $b182Needles -Arch "x86"
+    # 发码针：ByRef 与 ByVal 两形形参都上窄检查；模块级/局部那两枚是**证人**（修前修后都在，钉
+    # 「本来就对的那些形状不许动」）；最后一枚 = Long 形参的裸存照旧。
+    Test-EmitcShape 'b182_intformal_shape' @(
+        "$Tests\b182_intformal.bas") @(
+        '(*fi) = vb6_ChkInt(40000)',
+        'fv = vb6_ChkInt((fv + 1))',
+        'li = vb6_ChkInt(40000)',
+        'gi = vb6_ChkInt(40000)',
+        '(*lg) = 40000'
+    )
+    # 反针：前两枚 = 病形本体（形参存值不查范围）；后两枚 = 过度形状的闸（Long 形参、Single 形参
+    # 都不许被卷进窄检查——Single 的存值走它自己的浮点档，与这一问无关）。
+    Test-EmitcAbsent 'b182_intformal_lesion' @(
+        "$Tests\b182_intformal.bas") @(
+        '(*fi) = 40000;',
+        'fv = (fv + 1);',
+        'vb6_ChkInt((*lg))',
+        'vb6_ChkInt((*fi) +'
+    )
+
     # <vbeclipse> 账 #305 §B154（第四十二刀）：ReDim 重建一枚动态数组时，元素档**问声明**，不是问 ReDim 自己
     # 的 As 子句。修前 cgen_redim.cpp 只问 asType，没写 As 就交 vb6_sa_variant，而访问侧（VB6_SA_AT /
     # VB6_SA_ND_AT2）问的是声明表 arrayElemTypes_ —— 同一枚描述符两个答案：造出来 24 字节一步（x64），

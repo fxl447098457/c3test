@@ -211,6 +211,11 @@ void CCodeGen::visit(SubDecl& node) {
             else if (paramType == Vb6Type::Long || paramType == Vb6Type::Integer || paramType == Vb6Type::Boolean
                      || paramType == Vb6Type::Byte) {
                 knownLongVars_.insert(pLower);
+                // 账 #305 §B182: Integer 形参也要进窄档表 —— knownIntVars_ 是 narrowTargetTypeOf
+                // 「这个左值有多窄」的唯一问句, 缺这一档就不套 vb6_ChkInt ⇒ C 把 40000 静默截成
+                // -25536, 而 ByRef 那形还把它写回调用方的变量。口径同 Fix 175 的 Date、账 #123 的
+                // Byte: 放宽档登记过不等于窄档看得见。
+                if (paramType == Vb6Type::Integer) knownIntVars_.insert(pLower);
                 // ai/022 W1: 布尔形参另登记一份 (口径同 Fix 175 的 Date 形参)
                 if (paramType == Vb6Type::Boolean) knownBoolVars_.insert(pLower);
                 // 账 #123: Byte 形参一并进这一支 (口径同 ai/022 W1 的 Boolean —— C 型不同串

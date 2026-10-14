@@ -309,5 +309,34 @@ if ($viol.Count -gt 0) {
                 '形状走 wrapToBSTR; 要加第二位主人请先说明这四个问为什么分不开')
     exit 1
 }
-Write-Host 'PASS implicit_cstr_station (R1..R12)'
+
+# --- R13 (knife 73, ledger #305 B182): a formal registered in the WIDENED (32-bit) table by its VB
+# type must also reach the NARROW table when that type is Integer. Otherwise a store into an Integer
+# formal skips vb6_ChkInt: VB6 raises run-time error 6 and leaves the caller's variable alone, while
+# C truncates silently and ByRef writes -25536 back through the reference.
+# Two widened insert shapes live in these files: the bare one (exact VB type) and a guarded fallback
+# for enum/unknown parameters whose C type is int32_t/int16_t/VBABOOL. Only the bare arm can carry an
+# Integer, so R13 compares the narrow count against the bare count and requires exactly one of each
+# per file - a fix that lands in only one of the three declaration paths goes red here.
+$intFormalFiles = @('src\backend\decl\cgen_decl_func.cpp', 'src\backend\decl\cgen_decl_prop.cpp',
+                   'src\backend\decl\cgen_decl_proc.cpp')
+$r13Bad = @()
+foreach ($f in $intFormalFiles) {
+    $txt = [IO.File]::ReadAllText((Join-Path $Root $f))
+    $allWide = ([regex]::Matches($txt, 'knownLongVars_\.insert\(pLower\)')).Count
+    $fallback = ([regex]::Matches($txt, 'if \(!knownLongVars_\.count\(pLower\)\) knownLongVars_\.insert\(pLower\)')).Count
+    $bareWide = $allWide - $fallback
+    $narrow = ([regex]::Matches($txt, 'knownIntVars_\.insert\(pLower\)')).Count
+    if ($bareWide -lt 1) { $r13Bad += ('{0}: no bare widened formal arm found' -f (Split-Path $f -Leaf)) }
+    if ($narrow -ne $bareWide) {
+        $r13Bad += ('{0}: Integer reaches the narrow table in {1} of {2} bare widened formal arms' -f
+            (Split-Path $f -Leaf), $narrow, $bareWide)
+    }
+}
+if ($r13Bad.Count -gt 0) {
+    Write-Host ('FAIL implicit_cstr_station R13 (formal Integer must reach the narrow table): ' + ($r13Bad -join ' | '))
+    exit 1
+}
+Write-Host ('  R13 formal-Integer narrow registration OK ({0} files, bare-widened + narrow in lockstep)' -f $intFormalFiles.Count)
+Write-Host 'PASS implicit_cstr_station (R1..R13)'
 exit 0
