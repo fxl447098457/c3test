@@ -11,6 +11,14 @@
         constexpr long kWsClipSib  = 0x04000000L;  // WS_CLIPSIBLINGS (Fix 124)
         constexpr long kWsVisible  = 0x10000000L;
         constexpr long kWsBorder   = 0x00800000L;
+        // Fix 运行期第二十六层: WS_CLIPCHILDREN —— VB6 的容器类控件
+        // (PictureBox / Frame) 默认 ClipControls = True, 即"自己重绘时把子控件矩形裁掉"。
+        // 缺这一位时: 容器的 WM_ERASEBKGND/背景重绘会**盖住**子控件矩形 ——
+        // 子窗口 IsWindowVisible 为真、PrintWindow 单独抓也有内容, 但屏幕上整片空白
+        // (实测 ComCtlsDemo 的 Picture3: FrameW1/CheckBoxW2/HotKey1 三层子树全 vis=1
+        //  而 TabStrip 页体一片白)。与 vb6forms_sstab.c:305 / uc_host_create.inc:70
+        // 的同一口径。
+        constexpr long kWsClipChld = 0x02000000L;  // WS_CLIPCHILDREN
         constexpr long kBsPush     = 0x00000000L;
         constexpr long kBsAutoChk  = 0x00000003L;
         constexpr long kBsAutoRad  = 0x00000009L;
@@ -94,6 +102,9 @@
                 break;
             case FrmControlType::Frame:
                 style |= kBsGroupBox;
+                // Fix 运行期第二十六层: Frame 也是容器 (VB6 ClipControls 默认 True),
+                // 与 PictureBox 同口径 —— 不裁子控件矩形时框体重绘会擦掉框内子控件。
+                style |= kWsClipChld;
                 break;
             case FrmControlType::ListBox: {
                 style |= kLbsNotify | kWsBorder | kWsVscroll;  // VB6 ListBox always shows vertical scrollbar
@@ -134,6 +145,9 @@
                 // VB6 PictureBox: STATIC + SS_BITMAP + SS_CENTERIMAGE + border
                 style |= kSsBitmap | kSsCenterImg;
                 style |= kWsBorder;  // WS_BORDER for sunken border
+                // Fix 运行期第二十六层: PictureBox 是容器 (ClipControls 默认 True),
+                // 否则它的背景重绘会盖掉 FrameW1/CheckBoxW2 一类子控件 (见 kWsClipChld 注)。
+                style |= kWsClipChld;
                 createCaption = "";   // No text for picture controls
                 break;
             case FrmControlType::Image:
