@@ -299,14 +299,14 @@ void CCodeGen::visit(ForEachStmt& node) {
             std::string paGet092q = "vb6_PA_GetVariant(" + arrRef091f + ", " + idxVar + ")";
             std::string paTmp092q = "_pa_v" + std::to_string(tmpIdx);
             if (feVarIsVariant) {
-                c_.emitLine(paTmp092q + " = " + paGet092q + ";");
+                emitVariantSlotStore(paTmp092q, paGet092q, true);  /* §B166 形⑦: 实测交的是带权副本(每元素 52/44 字节) = 自己持有, 每轮先清旧的 */
                 // Fix 176: ParamArray 的 For Each 元素在栈上 (VARIANT 槽位),
                 // vb6_VariantFromComResult 尾部会 free(pv) 释放堆宿主 VARIANT,
                 // 对栈地址 free → 堆损坏 (0xC0000374). 栈上源用
                 // vb6_VariantFromStackVARIANT (P24-03, 不释放源).
                 // rev37: 槽位已是 vb6_VARIANT 而该函数收 VARIANT* —— 同布局,
                 // 显式转回指针 (改 RTL 签名会波及 vb6rtl_com.c:396 的内部调用).
-                c_.emitLine(varAcc + " = vb6_VariantFromStackVARIANT((VARIANT*)&" + paTmp092q + ");");
+                emitVariantSlotStore(varAcc, "vb6_VariantFromStackVARIANT((VARIANT*)&" + paTmp092q + ")", true);  /* §B164 站① ParamArray: 栈 VARIANT 带权副本 = 自己持有 */
             } else if (elemCType == "BSTR") {
                 c_.emitLine(varAcc + " = vb6_PA_GetBSTR(" + arrRef091f + ", " + idxVar + ");");
             } else if (elemCType == "double") {
@@ -315,8 +315,11 @@ void CCodeGen::visit(ForEachStmt& node) {
                 c_.emitLine(varAcc + " = vb6_PA_GetLong(" + arrRef091f + ", " + idxVar + ");");
             }
         } else if (feVarIsVariant) {
-            c_.emitLine(varAcc + " = vb6_VariantFromValue(VB6_SA_AT(" + elemCType + ", "
-                        + arrRef091f + ", " + idxVar + "));");
+            // §B164 站②: VB 数组元素 —— VB6_SA_AT 是裸读，交出去的是**数组自己**那只
+            // BSTR(借用)，故按「右值不持有」走 Clear+深拷贝。第五十四刀那台在此既不清旧值
+            // 也不复制，于是两种半句各缺一半: 漏一只 BSTR，或把数组的串 free 掉。
+            emitVariantSlotStore(varAcc, "vb6_VariantFromValue(VB6_SA_AT(" + elemCType + ", "
+                                 + arrRef091f + ", " + idxVar + "))", false);
         } else {
             c_.emitLine(varAcc + " = VB6_SA_AT(" + elemCType + ", " + arrRef091f + ", " + idxVar + ");");
         }
@@ -324,6 +327,12 @@ void CCodeGen::visit(ForEachStmt& node) {
         emitStmtList(node.body);
         c_.dedent();
         c_.emitLine("}");
+        if (isPA092q && feVarIsVariant) {
+            // 账 #305 §B166: 中间槽 _pa_vN 每轮由上面那一枚出口清了前一份, 循环退出后手上
+            // 还留着最后一份带权值 —— 块尾收掉(这一枚槽是编译器自己 mint 的, 不必等 §B164 的
+            // ①/② 那条口径: 它的范围就是这一对花括号)。
+            c_.emitLine("vb6_VariantClear(&_pa_v" + std::to_string(tmpIdx) + ");");
+        }
         c_.dedent();
         c_.emitLine("}");
     } else {
@@ -445,7 +454,7 @@ void CCodeGen::visit(ForEachStmt& node) {
             // (ucTabStrip.c 301/353/394). 本过程的 Dim 已把名字登记进 knownVariantVars_,
             // C 侧声明就是 vb6_VARIANT, 故先判它.
             if (knownVariantVars_.count(lower)) {
-                c_.emitLine(varAcc + " = vb6_VariantFromStackVARIANT(&" + feVar + ");  /* P24-05: For Each Variant: VARIANT→vb6_VARIANT */");
+                emitVariantSlotStore(varAcc, "vb6_VariantFromStackVARIANT(&" + feVar + ")", true);  /* §B164 站③ COM 集合: 栈 VARIANT 带权副本 = 自己持有(改前只赋不清, 每元素漏 81/71 B) */
             } else if (knownObjectVars_.count(lower) || knownTypedComVars_.count(lower)) {
                 c_.emitLine(varAcc + " = vb6_ComUnpackObject(&" + feVar + ");  /* P24-05: For Each Object: VARIANT→IDispatch* */");
             } else if (knownClassVars_.count(lower)) {
@@ -455,7 +464,7 @@ void CCodeGen::visit(ForEachStmt& node) {
                 c_.emitLine(varAcc + " = (vb6_cls_" + cIdent(knownClassVars_[lower])
                             + "*)vb6_ComUnpackObject(&" + feVar + ");  /* P24-05: For Each 项目类: VARIANT→IDispatch*→类指针 */");
             } else {
-                c_.emitLine(varAcc + " = vb6_VariantFromStackVARIANT(&" + feVar + ");  /* P24-05: For Each Variant: VARIANT→vb6_VARIANT */");
+                emitVariantSlotStore(varAcc, "vb6_VariantFromStackVARIANT(&" + feVar + ")", true);  /* §B164 站③ COM 集合: 栈 VARIANT 带权副本 = 自己持有(改前只赋不清, 每元素漏 81/71 B) */
             }
         }
         emitStmtList(node.body);

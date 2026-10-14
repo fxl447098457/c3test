@@ -188,6 +188,8 @@ int32_t vb6_ho_variantToLong(const vb6_VARIANT* v) {
             return v->lVal;
         case vb6_vtSingle: case vb6_vtDouble: return (int32_t)v->dblVal;
         case VT_I8: return (int32_t)v->llVal;   /* 账 #305: 这一档以前落 default ⇒ 读回 0 */
+        case VT_UI4: return (int32_t)v->ulVal;  /* ai/032 §6.6: 无符号两档同格 */
+        case VT_UI8: return (int32_t)v->ullVal;
         default: return 0;
     }
 }
@@ -198,6 +200,8 @@ double vb6_ho_variantToDouble(const vb6_VARIANT* v) {
         case vb6_vtSingle: case vb6_vtDouble: return v->dblVal;
         case vb6_vtInteger: case vb6_vtLong: case vb6_vtBoolean: return (double)v->lVal;
         case VT_I8: return (double)v->llVal;   /* 账 #305: 同上 */
+        case VT_UI4: return (double)v->ulVal;  /* ai/032 §6.6: 同上 */
+        case VT_UI8: return (double)v->ullVal;
         default: return 0.0;
     }
 }
@@ -264,23 +268,17 @@ void vb6_Host_ToWinVariant(const void* inV, void* outV) {
     VARIANT* out = (VARIANT*)outV;
     VariantInit(out);
     if (!in) return;
-    switch (in->vt) {
-        case vb6_vtInteger:  V_VT(out) = VT_I2; V_I2(out) = (short)in->iVal; break;
-        case vb6_vtLong:     V_VT(out) = VT_I4; V_I4(out) = in->lVal; break;
-        case vb6_vtBoolean:  V_VT(out) = VT_BOOL; V_BOOL(out) = in->boolVal; break;
-        case vb6_vtByte:     V_VT(out) = VT_UI1; V_UI1(out) = in->bVal; break;
-        case vb6_vtSingle:   V_VT(out) = VT_R4; V_R4(out) = in->fltVal; break;
-        case vb6_vtDouble:   V_VT(out) = VT_R8; V_R8(out) = in->dblVal; break;
-        case vb6_vtBSTR:     V_VT(out) = VT_BSTR; V_BSTR(out) = SysAllocString(in->bstrVal); break;
-        // Fix <vbeclipse> rev14: 缺这一条时 `.Item(...)` 返回的对象变体落 default →
-        // VT_EMPTY, vb6_ComCallObject 取不到 pdispVal → `Set x = Controls.Item(...)`
-        // 恒为 NULL。宿主对象 (UC 实例/HWND/集合) 不是真 IDispatch, 这里只透传指针;
-        // 释放侧由 vb6_ComIsDispatchable 守卫, 不会对裸指针调 Release。
-        case vb6_vtDispatch: V_VT(out) = VT_DISPATCH; V_DISPATCH(out) = (IDispatch*)in->pdispVal; break;
-        case vb6_vtEmpty:    V_VT(out) = VT_EMPTY; break;
-        case vb6_vtNull:     V_VT(out) = VT_NULL; break;
-        default:             V_VT(out) = VT_EMPTY; break;
-    }
+    /* 账 #305 §B142 (第五十三刀): 这一格原来是一张十档的手抄表，Decimal / LongLong(VT_I8) /
+       Currency / Date 一律落到 default ⇒ VT_EMPTY。实测 `c.Add CDec(5)` 之后 `VarType(c(1))` 与
+       `For Each` 读回来都是 0/Empty，x64 与 x86 两台逐行相同(`.build/k53_p/x64b.out` / `x86b.out`)，
+       而同一枚值直接装箱读是 14/Decimal ⇒ 罪就在这一格，不在写侧。
+       「这枚槽的数值住在真 VARIANT 的哪一格」§B145 已经收成一枚权威(vb6_VariantPackBorrow，
+       十四档 + 数组那一问都答)，这里改问它，只补它刻意不做的那一步: 宿主管道交出去的串是
+       **带权副本**(调用方随后 Host_ClearVariant 会放掉它)。**对象那一档照旧不 AddRef** ——
+       与改前一字不差：反向的 FromWinVariant 借来的指针不计数，Clear 也只放串，
+       这里给一次 AddRef 就成双份(§B144 记的那条收支)。 */
+    vb6_VariantPackBorrow(*in, out);
+    if (out->vt == VT_BSTR && out->bstrVal) out->bstrVal = SysAllocString(out->bstrVal);
 }
 
 void vb6_Host_FromWinVariant(const void* inV, void* outV) {
@@ -288,29 +286,35 @@ void vb6_Host_FromWinVariant(const void* inV, void* outV) {
     vb6_VARIANT* out = (vb6_VARIANT*)outV;
     memset(out, 0, sizeof(*out));
     if (!in) { out->vt = vb6_vtEmpty; return; }
-    switch (in->vt) {
-        case VT_I2:    out->vt = vb6_vtInteger; out->iVal = in->iVal; break;
-        case VT_I4:    out->vt = vb6_vtLong; out->lVal = in->lVal; break;
-        case VT_BOOL:  out->vt = vb6_vtBoolean; out->boolVal = in->boolVal; break;
-        case VT_UI1:   out->vt = vb6_vtByte; out->bVal = in->bVal; break;
-        case VT_R4:    out->vt = vb6_vtSingle; out->fltVal = in->fltVal; break;
-        case VT_R8:    out->vt = vb6_vtDouble; out->dblVal = in->dblVal; break;
-        case VT_BSTR:  out->vt = vb6_vtBSTR; out->bstrVal = SysAllocString(in->bstrVal); break;
-        // Fix <vbeclipse>: 对象属性 Set (如 `With l_ucSplitBar: .Folder = Folder`) 的值
-        // 是 IDispatch*/IUnknown*。原 switch 没有 object 档 → 落 default 变 Empty,
-        // 于是 ComSetRef 即便路由到 Host_SetProp 也把对象丢了。这里**借用**指针
-        // (不 AddRef): 转换缓冲是瞬时的, 所有权仍归调用方, Host_ClearVariant 只放 BSTR。
-        case VT_DISPATCH: out->vt = vb6_vtDispatch; out->pdispVal = in->pdispVal; break;
-        case VT_UNKNOWN:  out->vt = vb6_vtDispatch; out->pdispVal = in->punkVal; break;
-        default:       out->vt = vb6_vtEmpty; break;
+    /* 账 #305 §B165 (第五十四刀): 上面那张九档手抄表撤了 —— Date/Currency/I8/Decimal 一律
+       落 default ⇒ VT_EMPTY。实测 `c.Add CDec(5)` 之后 `VarType(c("d"))` 与 For Each 读回
+       都是 0/Empty，两台逐行相同(.build/k54_p/x64b.out / x86b.out)，而同一枚值直接装箱读是
+       14/Decimal/5 ⇒ 罪就在这一格，不在写侧，也不在第五十三刀刚并好的那枚核里。
+       「对端那 16 字节的数值住在哪一格」§B144/§B162 收成 vb6_VariantBorrowIntoSlot;
+       「这一格该自己持有什么」§B165 收成 vb6_VariantValueCopy。两问各只一枚答案，
+       这里正是它们的交点，所以改问它们，不抄第三遍。
+       ⚠ 对象那一档**照旧借用不计数**，与改前一字不差: ValueCopy 不 AddRef，而本环的
+       vb6_Host_ClearVariant 也刻意不放对象 —— 环上递手的可能是 Vb6HostWrap
+       (vb6com_foreach.c:160 那一趟的引用数是调用栈上那次 VariantClear 放的)，再取一份就是双份。
+       ⚠ 数组 / ByRef / IUnknown 三形**刻意不收**，读数与改前同为 Empty: 数组归 §B159/§B161
+       (BorrowIntoSlot 造的 owned 描述符在这条环上没有释放点，收了就漏)，ByRef 归 §B144 的
+       另一问，IUnknown 折成对象档那一步住在发码侧而不是这里。 */
+    if ((in->vt & (VT_ARRAY | VT_BYREF)) || in->vt == VT_UNKNOWN) {
+        out->vt = vb6_vtEmpty;
+        return;
     }
+    vb6_VARIANT borrowed;
+    vb6_VariantBorrowIntoSlot(in, &borrowed);
+    vb6_VariantValueCopy(out, &borrowed);
 }
 
-// 释放 vb6_Host_Call/GetProp 填出的 vb6_VARIANT (BSTR 需 SysFreeString)
+// 释放 vb6_Host_Call/GetProp 填出的 vb6_VARIANT: 值档问 §B165 那唯一一枚出口
+// (改前只放串 ⇒ 第五十四刀新存下来的 x86 DECIMAL 会漏)。对象那一档照旧不动，与
+// vb6_Host_FromWinVariant 的「借用不计数」配平。
 void vb6_Host_ClearVariant(void* v) {
     vb6_VARIANT* p = (vb6_VARIANT*)v;
     if (!p) return;
-    if (p->vt == vb6_vtBSTR && p->bstrVal) { SysFreeString(p->bstrVal); }
+    vb6_VariantValueFree(p);
     memset(p, 0, sizeof(*p));
     p->vt = vb6_vtEmpty;
 }

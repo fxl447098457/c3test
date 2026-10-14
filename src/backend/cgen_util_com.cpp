@@ -581,6 +581,25 @@ std::string CCodeGen::comPackExpr(Expr& expr) {
                 }
             }
         }
+        // 账 #305 §B159 (第五十刀): **数组本体当 COM 实参** —— 这一问必须排在下面那串「已知变量型」
+        // 之前, 因为模块级数组同时登记在 knownLongVars_/knownBstrVars_ 里, 按它们打包交出去的是
+        // 描述符**指针**的标量档。实测 (探针 .build/k50probe, Scripting.Dictionary 写后读回,
+        // x64/x86 两台同形):
+        //   mL() As Long      -> vt=3 "Long"    (指针折进 int32, x64 连高位都丢)
+        //   mBy() As Byte     -> vt=3 "Long"
+        //   mFx(1 To 3) As Long -> vt=3 "Long"
+        //   mSt() As String   -> vt=8 "String"  (描述符指针被当 BSTR 交给 SysAllocString = 越界读)
+        // 而 VB6 交的是 8192|元素码 的一枚真 SAFEARRAY。改交 vb6_ComPackValue(载体指针): _Generic 认
+        // vb6_SafeArray1D* 那一档 (第四十六刀的载体出口, 标签问描述符自己), 真数组由
+        // vb6_VariantPackBorrow 的数组臂现造。局部动态数组今天已经落 ComPackValue, 实测读数
+        // 0/"Empty" —— 它缺的是运行期那一臂, 不是这里的分派。
+        // ⚠ 只接管**声明成一维**的载体: vb6_VariantFromValue 那张 _Generic 没有 vb6_SafeArrayND*
+        //   那一档, 二维载体进去会落 default = vb6_VariantObject ⇒ 对端 Release 一枚描述符 = 野 Release
+        //   堆损坏 (账 #256 §B85 同形)。那一格归 §B151, 补法是给 _Generic 加 ND 档, 不是在这里绕。
+        if (isArrayCarrierArgName(lower, id.name)) {
+            auto it50 = arrayDimCounts_.find(lower);
+            if (it50 != arrayDimCounts_.end() && it50->second <= 1) return "vb6_ComPackValue";
+        }
         // Fix 110v: knownVariantVars_ 先于 knownObjectVars_ 判定. `Dim Value As Variant`
         // 的局部变量在 For Each 语境下同时被登记进 knownObjectVars_ (旧代码把
         // For-Each 元素一律当对象), 使 Variant 变量走 vb6_ComPackObject →

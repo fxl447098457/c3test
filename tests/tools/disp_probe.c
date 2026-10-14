@@ -78,6 +78,32 @@ static void call_member(IDispatch *disp, const wchar_t *name, VARIANT *argv, int
             printf(" dec_i8=FAIL");
         VariantClear(&cy); VariantClear(&i8);
     }
+    /* Acct #305 SB159 + SB162 (knife 50): an array that came IN as a real SAFEARRAY has to be
+     * readable by the callee and come BACK OUT as one. EchoVal just returns its own argument, so
+     * the whole round trip is one call: inbound converts SAFEARRAY -> our descriptor, the reply
+     * converts back. Before this knife both directions answered VT_EMPTY (no array arm at all),
+     * and the arm that exists today must not deliver a slot whose parray still points at the
+     * caller's SAFEARRAY header -- that is the cell SB162 was opened for. */
+    if (SUCCEEDED(hr) && (res.vt & VT_ARRAY)) {
+        SAFEARRAY* psa = res.parray;
+        LONG lo = 0, hi = 0, k;
+        long sum = 0;
+        printf(" arrvt=%u dims=%u", (unsigned)res.vt,
+               psa ? (unsigned)SafeArrayGetDim(psa) : 0u);
+        if (psa) {
+            SafeArrayGetLBound(psa, 1, &lo);
+            SafeArrayGetUBound(psa, 1, &hi);
+            printf(" lo=%ld hi=%ld", (long)lo, (long)hi);
+            if ((res.vt & VT_TYPEMASK) == VT_I4) {
+                for (k = lo; k <= hi; k++) {
+                    LONG one = 0;
+                    if (FAILED(SafeArrayGetElement(psa, &k, &one))) { sum = -1; break; }
+                    sum += (long)one;
+                }
+                printf(" arrsum=%ld", sum);
+            }
+        }
+    }
     printf("\n");
     VariantClear(&res);
     for (i = 0; i < argc; i++) VariantClear(&argv[i]);
@@ -100,6 +126,31 @@ static VARIANT mk_i4(LONG v) {
     VariantInit(&x);
     x.vt = VT_I4;
     x.lVal = v;
+    return x;
+}
+
+/* Acct #305 SB159 (knife 50): a real one-element-per-slot VT_ARRAY|VT_I4 built the way a
+ * real client builds one -- SafeArrayCreate + SafeArrayPutElement, no hand-written layout. */
+static VARIANT mk_sa_i4(const LONG* vals, int n) {
+    SAFEARRAYBOUND b;
+    VARIANT x;
+    int i;
+    VariantInit(&x);
+    b.lLbound = 0;
+    b.cElements = (ULONG)n;
+    x.parray = SafeArrayCreate(VT_I4, 1, &b);
+    if (!x.parray) {
+        printf("MKSA=FAIL\n");
+        return x;
+    }
+    for (i = 0; i < n; i++) {
+        long k = i;
+        if (FAILED(SafeArrayPutElement(x.parray, &k, (void*)&vals[i]))) {
+            printf("MKSA=FAIL put=%d\n", i);
+            break;
+        }
+    }
+    x.vt = (VARTYPE)(VT_ARRAY | VT_I4);
     return x;
 }
 
@@ -249,6 +300,13 @@ int main(int argc, char **argv) {
         VARIANT dargs[1];
         dargs[0] = mk_dec_i4(5);
         call_member(disp, L"EchoVal", dargs, 1, DISPATCH_METHOD, "ECHO");
+    }
+    {
+        /* Acct #305 SB159/SB162: array in and back out through the same Variant slot. */
+        VARIANT aargs[1];
+        static const LONG av[3] = { 10, 20, 30 };
+        aargs[0] = mk_sa_i4(av, 3);
+        call_member(disp, L"EchoVal", aargs, 1, DISPATCH_METHOD, "ECHOARR");
     }
     {
         DISPID id = DISPID_UNKNOWN;

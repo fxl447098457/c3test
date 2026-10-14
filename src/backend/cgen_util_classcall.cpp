@@ -14,7 +14,21 @@ namespace vb6c3 {
 // ============================================================
 // Fix 011r-1: 类实例成员调用解析 (跨模块符号表的精确类查找)
 // ============================================================
+// ai/030 续 (§性能): 带 memo 的包装 —— 真身 (…Uncached) 每次全表扫 moduleScope;
+// 键 = (className, memberName) 各自小写 + '\x1f' 连接。命中即回, 语义与真身逐字一致。
 std::string CCodeGen::resolveClassMemberCall(const std::string& className,
+                                             const std::string& memberName) const {
+    if (className.empty()) return "";
+    const std::string memoKey =
+        Symbol::toLower(className) + '\x1f' + Symbol::toLower(memberName);
+    auto itMemo = classMemberCallMemo_.find(memoKey);
+    if (itMemo != classMemberCallMemo_.end()) return itMemo->second;
+    std::string r = resolveClassMemberCallUncached(className, memberName);
+    classMemberCallMemo_.emplace(memoKey, r);
+    return r;
+}
+
+std::string CCodeGen::resolveClassMemberCallUncached(const std::string& className,
                                                const std::string& memberName) const {
     if (className.empty()) return "";
     if (!symTab_.moduleScope()) return "";
@@ -246,6 +260,31 @@ bool CCodeGen::findClassMemberCallParams(const std::string& className,
                                          bool& outIsBuiltin) const {
     outParams.clear();
     outIsBuiltin = false;
+    if (className.empty()) return false;
+    const std::string memoKey =
+        Symbol::toLower(className) + '\x1f' + Symbol::toLower(memberName);
+    auto itMemo = classMemberCallParamsMemo_.find(memoKey);
+    if (itMemo != classMemberCallParamsMemo_.end()) {
+        if (!itMemo->second.found) return false;
+        outParams = itMemo->second.params;
+        outIsBuiltin = itMemo->second.isBuiltin;
+        return true;
+    }
+    bool r = findClassMemberCallParamsUncached(className, memberName, outParams, outIsBuiltin);
+    ClassMemberParamsMemo m;
+    m.found = r;
+    m.isBuiltin = outIsBuiltin;
+    m.params = outParams;
+    classMemberCallParamsMemo_.emplace(memoKey, std::move(m));
+    return r;
+}
+
+bool CCodeGen::findClassMemberCallParamsUncached(const std::string& className,
+                                         const std::string& memberName,
+                                         std::vector<ParameterInfo>& outParams,
+                                         bool& outIsBuiltin) const {
+    outParams.clear();
+    outIsBuiltin = false;
     if (className.empty() || !symTab_.moduleScope()) return false;
 
     const std::string memberLower = Symbol::toLower(memberName);
@@ -396,6 +435,27 @@ bool CCodeGen::findClassMemberWriteParams(const std::string& className,
 // 这里只认读方向那一份; Phase B 必须带「不许与 Let 同宽」那道否决 —— 认不出就不 pad
 // (宁可退回"参数太少" C2198, 也不拿错方向的表硬凑参数个数; 个数错了会静默编过)。
 bool CCodeGen::findClassMemberGetParams(const std::string& className,
+                                        const std::string& memberName,
+                                        std::vector<ParameterInfo>& outParams) const {
+    outParams.clear();
+    if (className.empty() || memberName.empty()) return false;
+    const std::string memoKey =
+        Symbol::toLower(className) + '\x1f' + Symbol::toLower(memberName);
+    auto itMemo = classMemberGetParamsMemo_.find(memoKey);
+    if (itMemo != classMemberGetParamsMemo_.end()) {
+        if (!itMemo->second.found) return false;
+        outParams = itMemo->second.params;
+        return true;
+    }
+    bool r = findClassMemberGetParamsUncached(className, memberName, outParams);
+    ClassMemberParamsMemo m;
+    m.found = r;
+    m.params = outParams;
+    classMemberGetParamsMemo_.emplace(memoKey, std::move(m));
+    return r;
+}
+
+bool CCodeGen::findClassMemberGetParamsUncached(const std::string& className,
                                         const std::string& memberName,
                                         std::vector<ParameterInfo>& outParams) const {
     outParams.clear();

@@ -83,13 +83,19 @@
 # vb6rtl_com.c 那两条 VT_ARRAY 进口各自折一枚三元表达式（BSTR/VARIANT 之外一律答 vtLong ⇒
 # VT_ARRAY|VT_I2 进来标签答 Long，而载体是 int16 —— 标签与描述符两个答案，拿着错标签交回
 # COM 就是错档）。TypeName 那边压根没有数组分支，8204 落 default 答 "Variant"。
-#   A17 新表 vb6_SaVtFromElemType 声明 1 / 定义 1 / 调用恰好 5（array.h 的 UDT 字节装箱 1 + com.c 两
-#       条进口 2 + array.c 自己那枚认载体的出口 2）；认载体那一问 vb6_SaVtOfArrayPtr 声明 1 / 定义 1 /
+#   A17 新表 vb6_SaVtFromElemType 声明 1 / 定义 1 / 调用恰好 5（array.h 的 UDT 字节装箱 1 + com.c 那
+#       条进口 2 + array.c 自己那枚认载体的出口 2 + 出站白名单 1，第五十刀）；反向表 vb6_SaElemTypeFromVt
+#       声明 1 / 定义 1 / 调用恰好 3（com.c 那两条 VT_ARRAY 进口 + §B162 入站那一臂），手抄的元素 switch 回到 0 处；认载体那一问 vb6_SaVtOfArrayPtr 声明 1 / 定义 1 /
 #       调用恰好 2（装箱 + GetAllSettings）；写死的 vb6_vtArray|vb6_vtVariant 恰好 2 且**只能在**
 #       vb6_SaVtOfArrayPtr 的两条兜底里（NULL 与认不出载体）；旧的三元折档形状 `vb6_vtArray | (baseVt`
 #       恰好 0。TypeName 那一张标量名单只许一份：`case vb6_vtEmpty:` 在 vb6rtl_conv.c 恰好 1，
+#   A19（§B159 第五十刀）出站那一半：白名单 vb6_ComSaVtOut 里批准的每一档，反向表必须认得（否则
+#       写进去真数组、读回来是别家档 = 半程往返，第五十刀的 Byte 那一档就是这么现形的）；真数组
+#       只许一处造（vb6_ComPackArrayOut 定义 1 / 调用 1），数组那一问在 PackBorrow 的 switch 之前 1 处；
+#       入站那一臂同样只许一处认（vb6_VariantArrayIntoSlot 定义 1 / 调用 1），它造的 descriptor
+#       只许一处收（vb6_VariantSlotRelease 在服务端 free 槽阵列之前调一次）。
 #       抽出来的 vb6_TypeNameScalar 定义 1 / 调用恰好 2（数组那一支 + 标量那一条）。
-# --- A18（账 #305 §B160/§B161，第四十八刀 + 第四十九刀）：数组递给 ByRef Variant 形参时
+# --- A18（账 #305 §B160/§B161，第四十八刀 + 第四十九刀 + 第五十刀）：数组递给 ByRef Variant 形参时
 #     「这是不是一枚数组」那一问只许一处答, 而且必须答在按 VB 类型分档的那条 switch 之前 ---
 # 改前那一支只认两种实参：晚绑定对象 (void*) 与工程类实例，其余一律落 `&arr` ——
 # 数组变量的 C 表示是描述符指针，`&arr` 就是「描述符指针的地址」，而被调方按
@@ -441,7 +447,7 @@ $vtfAll  = @([regex]::Matches($vH + $vC + $vCom, 'vb6_SaVtFromElemType\s*\(')).C
 if ($vtfDecl -ne 1) { $bad += ("A17 vb6_SaVtFromElemType 的声明(array.h) = " + $vtfDecl + " (恰好 1；0 = 表还在但没人能问)") }
 if ($vtfDef -ne 1)  { $bad += ("A17 vb6_SaVtFromElemType 的定义(array.c) = " + $vtfDef + " (恰好 1；>1 = 第二张档表)") }
 if ($vtfAll - $vtfDecl - $vtfDef -ne 5) {
-    $bad += ("A17 问这张表的地方 = " + ($vtfAll - $vtfDecl - $vtfDef) + " 处 (恰好 5：UDT 字节装箱 1 + COM 两条进口 2 + 认载体出口 2；少一处 = 那一位又自己折一档)")
+    $bad += ("A17 问这张表的地方 = " + ($vtfAll - $vtfDecl - $vtfDef) + " 处 (恰好 5：UDT 字节装箱 1 + COM 进口 1 + 认载体出口 2 + 出站白名单 1；少一处 = 那一位又自己折一档。第五十三刀 §B142 把 COM 那**两条进口**并成一枚核，所以 6 -> 5 —— 是少了一张手抄表，不是少了一次问)")
 }
 
 $vtPackDecl = @([regex]::Matches($vVar, '(?m)^int32_t\s+vb6_SaVtOfArrayPtr\s*\(')).Count
@@ -458,6 +464,19 @@ if ($hardTag -ne 2) { $bad += ("A17 写死的 vb6_vtArray|vb6_vtVariant = " + $h
 $ternTag = @([regex]::Matches($vCom, 'vb6_vtArray\s*\|\s*\(\s*baseVt')).Count
 if ($ternTag -ne 0) { $bad += ("A17 旧的三元折档形状 vb6_vtArray|(baseVt …) = " + $ternTag + " 处 (要求 0：它把 I2/R8/R4 进来一律答成 Long)") }
 
+# A17 续（账 #305 §B159 第五十刀）：反向表 vb6_SaElemTypeFromVt 也只许一处答，
+#   两条进口的手抄元素 switch 一旦回来（那是同一个问句的第二份、第三份答案），这里报红。
+$stiDecl = @([regex]::Matches($vH, '(?m)^vb6_safearray_elemtype\s+vb6_SaElemTypeFromVt\s*\(')).Count
+$stiDef  = @([regex]::Matches($vC, '(?m)^vb6_safearray_elemtype\s+vb6_SaElemTypeFromVt\s*\(')).Count
+$stiAll  = @([regex]::Matches($vH + $vC + $vCom, 'vb6_SaElemTypeFromVt\s*\(')).Count
+if ($stiDecl -ne 1) { $bad += ("A17 vb6_SaElemTypeFromVt 的声明(array.h) = " + $stiDecl + " (恰好 1；0 = 反向表还在但没人能问)") }
+if ($stiDef -ne 1)  { $bad += ("A17 vb6_SaElemTypeFromVt 的定义(array.c) = " + $stiDef + " (恰好 1；>1 = 第二张反向表)") }
+if ($stiAll - $stiDecl - $stiDef -ne 2) {
+    $bad += ("A17 问反向表的地方 = " + ($stiAll - $stiDecl - $stiDef) + " 处 (恰好 2：COM 进口那一枚核 1 + 入站那一臂 (§B162) 1；第五十三刀 §B142 把 com.c 那两条进口并成一枚核，所以 3 -> 2。多一处 = 又有人自己抄了一份元素 switch)")
+}
+$stiHand = @([regex]::Matches($vCom, 'case\s+VT_BSTR\s*:\s*et\s*=')).Count
+if ($stiHand -ne 0) { $bad += ("A17 手抄的元素 switch (case VT_BSTR: et =) = " + $stiHand + " 处 (要求 0：第五十刀把它并进反向表；回来就是两份答案)") }
+
 $tnEmpty = @([regex]::Matches($vConv, 'case\s+vb6_vtEmpty\s*:')).Count
 $tnScalarDef = @([regex]::Matches($vConv, '(?m)^static const wchar_t\*\s+vb6_TypeNameScalar\s*\(')).Count
 $tnScalarAll = @([regex]::Matches($vConv, 'vb6_TypeNameScalar\s*\(')).Count
@@ -466,6 +485,38 @@ if ($tnScalarDef -ne 1) { $bad += ("A17 vb6_TypeNameScalar 的定义 = " + $tnSc
 if ($tnScalarAll - $tnScalarDef -ne 2) {
     $bad += ("A17 问那张名单的地方 = " + ($tnScalarAll - $tnScalarDef) + " 处 (恰好 2：数组那一支的元素名 + 标量那一条；数组分支被摘掉就只剩 1)")
 }
+# A19（账 #305 §B159，第五十刀）：出站白名单与反向表必须对得上，真数组只许一处造
+$blkOut = $vCom.Substring($vCom.IndexOf('static VARTYPE vb6_ComSaVtBlittable'))
+$blkOut = $blkOut.Substring(0, $blkOut.IndexOf('' + [char]10 + '}'))
+$invTxt = $vC.Substring($vC.IndexOf('vb6_safearray_elemtype vb6_SaElemTypeFromVt'))
+$invTxt = $invTxt.Substring(0, $invTxt.IndexOf('' + [char]10 + '}'))
+$whitelist = @([regex]::Matches($blkOut, 'case\s+(vb6_sa_\w+)\s*:') | ForEach-Object { $_.Groups[1].Value })
+$inverse  = @([regex]::Matches($invTxt, 'return\s+(vb6_sa_\w+)\s*;') | ForEach-Object { $_.Groups[1].Value })
+if ($whitelist.Count -lt 6) { $bad += ("A19 出站白名单只数出 " + $whitelist.Count + " 档 (下限 6：bool/byte/int/long/single/double) —— 正则或函数体形状变了，这条规则断电") }
+foreach ($w in $whitelist) {
+    if ($inverse -notcontains $w) {
+        $bad += ("A19 出站白名单批准了 " + $w + "，而反向表 vb6_SaElemTypeFromVt 不认它 —— 写出去是真数组、读回来是别家档（半程往返，Byte 那一档实测答 8204/Variant() 并按 24 字节步长越界读）")
+    }
+}
+$packDef = @([regex]::Matches($vCom, '(?m)^static void\s+vb6_ComPackArrayOut\s*\(')).Count
+$packAll = @([regex]::Matches($vCom, 'vb6_ComPackArrayOut\s*\(')).Count
+if ($packDef -ne 1) { $bad += ("A19 造真数组那枚出口的定义 = " + $packDef + " (恰好 1)") }
+if ($packAll - $packDef -ne 1) { $bad += ("A19 调用它的地方 = " + ($packAll - $packDef) + " 处 (恰好 1：PackBorrow 的数组那一臂；多一处 = 第二个人也开始现造真数组)") }
+$tagAsk = @([regex]::Matches($vCom, 'if\s*\(\s*v\.vt\s*&\s*vb6_vtArray\s*\)')).Count
+if ($tagAsk -ne 1) { $bad += ("A19 PackBorrow 里数组那一问 = " + $tagAsk + " 处 (恰好 1；0 = 数组又落 default 静默交 VT_EMPTY)") }
+$inDef = @([regex]::Matches($vCom, '(?m)^static void\s+vb6_VariantArrayIntoSlot\s*\(')).Count
+$inAll = @([regex]::Matches($vCom, 'vb6_VariantArrayIntoSlot\s*\(')).Count
+if ($inDef -ne 1) { $bad += ("A19 入站那一臂的定义 = " + $inDef + " (恰好 1)") }
+if ($inAll - $inDef -ne 1) { $bad += ("A19 入站那一臂被调的地方 = " + ($inAll - $inDef) + " 处 (恰好 1：BorrowIntoSlot；多一处 = 第二个人也开始自己折真数组)") }
+$relDef = @([regex]::Matches($vCom, '(?m)^void\s+vb6_VariantSlotRelease\s*\(')).Count
+$relSrv = @([regex]::Matches((Get-Content -Raw (Join-Path $root 'src\rtl\core\vb6comserver\vb6comserver_obj.c')), 'vb6_VariantSlotRelease\s*\(')).Count
+if ($relDef -ne 1) { $bad += ("A19 回收出口的定义 = " + $relDef + " (恰好 1)") }
+if ($relSrv -ne 1) { $bad += ("A19 服务端调回收出口 = " + $relSrv + " 处 (恰好 1；0 = 入站那一臂造的描述符每调一次漏一枚)") }
+$iAsk = $vCom.IndexOf('if (v.vt & vb6_vtArray)')
+$iSw  = $vCom.IndexOf('void vb6_VariantPackBorrow')
+$iSw  = $vCom.IndexOf('switch (v.vt)', $iSw)
+if ($iAsk -lt 0 -or $iSw -lt 0) { $bad += "A19 锚点找不到（数组那一问或那张 switch 被改形了）" }
+elseif ($iAsk -gt $iSw) { $bad += "A19 数组那一问跑到那张 switch 之后了 —— 标签对不上任何 case，它会静默落 default" }
 # A18: 数组 -> ByRef Variant 形参的装箱只许一处答, 且必须问在分档 switch 之前 (账 #305 §B161, 第四十九刀)
 # $beAll 只剥**行注释**：正则里的 \r\n 必须是字面反斜杠（.NET 自己解释），写成**真换行**会
 # 把注释行的下一整行一起吃掉 —— 后端这些文件是 CRLF，那正是上一版 Strip-LineCmt 把站点数
@@ -475,10 +526,21 @@ function Strip-LineCmt([string]$s) { return [regex]::Replace($s, '(?m)//[^\r\n]*
 foreach ($f in (Get-ChildItem -LiteralPath $beDir -Recurse -File | Where-Object { $_.Extension -in '.cpp', '.inc', '.hpp' })) {
     $beAll += (Strip-LineCmt ([System.IO.File]::ReadAllText($f.FullName)))
 }
-$a18Txt = [System.IO.File]::ReadAllText((Join-Path $beDir 'detail\expr\cgen_expr_call_arg_emit.inc'))
+$a18Txt = Strip-LineCmt ([System.IO.File]::ReadAllText((Join-Path $beDir 'detail\expr\cgen_expr_call_arg_emit.inc')))
+$a18ComTxt = Strip-LineCmt ([System.IO.File]::ReadAllText((Join-Path $beDir 'cgen_util_com.cpp')))
 $a18Decl = @([regex]::Matches($beAll, '(?m)const bool\s+arrArg92y\s*=')).Count
 $a18All  = @([regex]::Matches($beAll, 'arrArg92y')).Count
-$a18Known = @([regex]::Matches($beAll, 'knownArrays_\s*\.\s*count\s*\(\s*arrLs92y')).Count
+# 第五十刀: 那一问本身搬进了唯一出口 isArrayCarrierArgName —— 判据改成「定义 1 / 声明 1 / 两个消费者」,
+#   而「这张表在哪儿被问」(knownArrays_.count(lowerName)) 仍然恰好 1 处, 就住在那条出口里。
+$a18Known = @([regex]::Matches($beAll, 'knownArrays_\s*\.\s*count\s*\(\s*lowerName')).Count
+$a18AuthDef = @([regex]::Matches($beAll, '(?m)^bool CCodeGen::isArrayCarrierArgName\s*\(')).Count
+$a18AuthAll = @([regex]::Matches($beAll, 'isArrayCarrierArgName\s*\(')).Count
+$a18AuthDecl = @([regex]::Matches($beAll, '(?m)^\s*bool\s+isArrayCarrierArgName\s*\(')).Count
+$a18AsnTxt = Strip-LineCmt ([System.IO.File]::ReadAllText((Join-Path $beDir 'cgen_util_ctrl.cpp')))
+$a18AsnQ = $a18AsnTxt.IndexOf('isArrayCarrierArgName(lowerB163, cExpr)')
+$a18AsnT = $a18AsnTxt.IndexOf('Vb6Type vtype = inferExprType(static_cast<Expr&>(*valueNode));')
+$a18ComQ = $a18ComTxt.IndexOf('isArrayCarrierArgName(lower, id.name)')
+$a18ComV = $a18ComTxt.IndexOf('if (knownVariantVars_.count(lower)) return')
 $a18Temp  = @([regex]::Matches($beAll, '"_vb6_arrarg_"')).Count
 $a18Raw   = @([regex]::Matches($beAll, 'arrRaw92y')).Count
 $a18K48   = @([regex]::Matches($beAll, 'argIsArr92y')).Count
@@ -490,7 +552,17 @@ if ($a18Decl -ne 1) { $bad += ("A18 arrArg92y 的定义 = " + $a18Decl + " (恰�
 if ($a18All - $a18Decl -ne 1) {
     $bad += ("A18 arrArg92y 的使用 = " + ($a18All - $a18Decl) + " 处 (恰好 1：那条 if；多一处 = 判据又搬回 switch 里面，或抄了第二份)")
 }
-if ($a18Known -ne 1) { $bad += ("A18 问数组表 knownArrays_ 的地方 = " + $a18Known + " 处 (恰好 1；0 = 判据换成了别的表，第二处 = 抄了两份)") }
+if ($a18Known -ne 1) { $bad += ("A18 出口里问数组表 knownArrays_ 的地方 = " + $a18Known + " 处 (恰好 1，且必须住在 isArrayCarrierArgName 里；0 = 判据换成了别的表，2 = 又抄了一份)") }
+if ($a18AuthDef -ne 1) { $bad += ("A18 那条唯一出口的定义 = " + $a18AuthDef + " (恰好 1)") }
+if ($a18AuthAll - $a18AuthDef - $a18AuthDecl -ne 3) { $bad += ("A18 问那条出口的地方 = " + ($a18AuthAll - $a18AuthDef - $a18AuthDecl) + " 处 (恰好 3：ByRef Variant 实参 + COM 实参打包；少一处 = 有一个消费者又开始自己答)") }
+if ($a18ComQ -lt 0 -or $a18ComV -lt 0) { $bad += "A18 COM 打包那一格的锚点找不到（数组那一问或 knownVariantVars_ 那条链被改形了）" }
+if ($a18AsnQ -lt 0 -or $a18AsnT -lt 0) {
+    $bad += ("A18 赋值站（wrapVariantValue）那两行锚点找不到 (asn=" + $a18AsnQ + " tbl=" + $a18AsnT + ") —— 第五十一刀那一问或那张类型表被改形了")
+}
+elseif ($a18AsnQ -gt $a18AsnT) {
+    $bad += ("A18 赋值站的数组那一问排到了 inferExprType 那张表之后 —— 模块级数组与撞内在函数名的数组会先被折成标量档（账 #305 §B163，第五十一刀）")
+}
+elseif ($a18ComQ -gt $a18ComV) { $bad += "A18 COM 实参的数组那一问排到了已知变量型那串之后 —— 模块级数组会先被 knownLongVars_/knownBstrVars_ 折成标量档（实测交出去是 3/Long、8/String）" }
 if ($a18Temp -ne 1) { $bad += ("A18 临时量前缀 _vb6_arrarg_ = " + $a18Temp + " 处 (恰好 1)") }
 if ($a18Raw -ne 2) { $bad += ("A18 arrRaw92y (装箱吃的那枚原样名) = " + $a18Raw + " 处 (恰好 2：定义 + 装箱表达式；1 = 装箱又去吃分档之后的 argVal)") }
 if ($a18K48 -ne 0) { $bad += ("A18 第四十八刀那条住在 switch 里的 argIsArr92y = " + $a18K48 + " 处 (要求 0：同一问不许住两处，而且它在 default 里打不到模块级数组)") }
@@ -506,6 +578,9 @@ if ($bad.Count -eq 0) {
                 " / vt-flavor decl " + $vtfDecl + " def " + $vtfDef + " call " + ($vtfAll - $vtfDecl - $vtfDef) +
                 " / pack-of-ptr " + ($vtPackAll - $vtPackDecl - $vtPackDef) + " hard tag " + $hardTag + " tern " + $ternTag +
                 " / TypeName list " + $tnEmpty + " scalar " + ($tnScalarAll - $tnScalarDef) +
+                " / a19 out-wl " + $whitelist.Count + " inv " + $inverse.Count +
+                " pack-call " + ($packAll - $packDef) + " array-ask " + $tagAsk + " in-call " + ($inAll - $inDef) + " rel-srv " + $relSrv +
+                " / sti-call " + ($stiAll - $stiDecl - $stiDef) + " hand " + $stiHand +
                 " / a18 arr-box decl " + $a18Decl + " uses " + ($a18All - $a18Decl) +
                 " known " + $a18Known + " raw " + $a18Raw + " k48 " + $a18K48 +
                 " order " + (($a18DefI -lt $a18Sw) -and ($a18BoxI -gt $a18Sw))) -ForegroundColor Green

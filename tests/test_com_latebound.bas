@@ -5,6 +5,16 @@
 
 Option Explicit
 
+' ---- vbeclipse knife 50 (case #305 B159): module-level arrays <-> real COM SAFEARRAY.
+' Values sit at the index each case reads back; b159Mu() is never ReDim-ed on purpose.
+Private b159L() As Long
+Private b159B() As Byte
+Private b159X(1 To 3) As Long
+Private b159St() As String
+Private b159Bl() As Boolean
+Private b159Sg() As Single
+Private b159Mu() As Long
+
 Sub Main()
     Dim passCount As Long
     passCount = 0
@@ -63,5 +73,65 @@ Sub Main()
         Debug.Print "LB-5:FAIL Len expected 5, got "; n2
     End If
 
+
+    ' ---- knife 50: write an array through IDispatch, read it back, ask what came ----
+    ReDim b159L(0 To 3)
+    b159L(0) = 7002
+    ReDim b159B(0 To 2)
+    b159B(1) = 66
+    b159X(2) = 7022
+    ReDim b159St(0 To 1)
+    b159St(0) = "s0"
+    ReDim b159Bl(0 To 1)
+    b159Bl(0) = True
+    ReDim b159Sg(0 To 1)
+    b159Sg(0) = 1.25
+    Dim b159Loc() As Long
+    ReDim b159Loc(0 To 1)
+    b159Loc(0) = 7100
+    Dim b159Va As Variant
+    b159Va = b159L
+    o.Add "ml", b159L
+    B159Show "ml", o, 0
+    o.Add "mb", b159B
+    B159Show "mb", o, 1
+    o.Add "mx", b159X
+    B159Show "mx", o, 2
+    o.Add "bl", b159Bl
+    B159Show "bl", o, 0
+    o.Add "sg", b159Sg
+    B159Show "sg", o, 0
+    o.Add "loc", b159Loc
+    B159Show "loc", o, 0
+    o.Add "mu", b159Mu
+    B159Show "mu", o, 0
+    o.Add "ms", b159St
+    B159Show "ms", o, 0
+    o.Add "va", b159Va
+    B159Show "va", o, 0
+    On Error GoTo 0
+
     Debug.Print "P24-10b: "; passCount; "/5 passed"
+End Sub
+
+' Reads one key back into a Variant slot and prints vt/type/UBound/element.
+' UBound and the element read are error-guarded: the deliberate negative cases answer
+' Empty there (VB6 raises 9 as well), and a bare error would abort the whole fixture.
+Private Sub B159Show(tag As String, d As Object, idx As Long)
+    Dim r As Variant
+    r = d(tag)
+    Dim s As String
+    s = "VB-b159-" & tag & "=" & CStr(VarType(r)) & "/" & TypeName(r)
+    On Error Resume Next
+    s = s & "/" & CStr(UBound(r))
+    If Err.Number <> 0 Then
+        s = s & "(e" & CStr(Err.Number) & ")"
+        Err.Clear
+    End If
+    s = s & "/" & CStr(r(idx))
+    If Err.Number <> 0 Then
+        s = s & "(e" & CStr(Err.Number) & ")"
+        Err.Clear
+    End If
+    Debug.Print s
 End Sub

@@ -527,6 +527,34 @@
                     if (hasReadProps114 && !getenv("C3_NO_BAG") && !bagBlocked) {
                         c_.emitLine("extern void vb6_" + cIdent(ctlClass) + "_UC_ReadProps(void* me, void** PropBag);");
                         c_.emitLine("{ void* _bag = vb6_UC_PropBagCreate();");
+                        // Fix: .frx 属性包块 (UserControl 持久化 PropertyBag: InitPanels/InitBands/
+                        // InitButtons/InitListImages/InitTabs...) —— 交**原始字节**, 运行期
+                        // `PropBag.Contents = <字节数组>` 由 RTL 按 VB6 PropertyBag 序列化格式
+                        // 解析成扁平的 InitXCount / InitXText<i> ... 项 (uc_propbag.c)。
+                        // 此前按 DocString 解 ⇒ 得到 `L"\uE874\uF9B1\uD001"` 这类垃圾, 且 flat 项
+                        // 全缺 ⇒ ComCtlsDemo StatusBar1 设计期 3 个面板全丢, Command2_Click
+                        // `Panels(1)` 取回 NULL 直接 AV (Unhandled 整只退出)。
+                        // 字节按 C 串转义 (可打印 ASCII 原样, 其余 \ooo 八进制 —— 后接数字
+                        // 不会被吞, 换 \xNN 会贪吃), 每 ~900 字符断一行拼接。
+                        auto emitFrxBagBlob = [&](const std::string& litName,
+                                                  const std::vector<uint8_t>& bytes) {
+                            c_.emitLine("vb6_UC_BagPutBin(_bag, " + litName + ",");
+                            std::string line = "\"";
+                            for (unsigned char b : bytes) {
+                                if (b == '"')        line += "\\\"";
+                                else if (b == '\\')  line += "\\\\";
+                                else if (b >= 0x20 && b < 0x7F) line += (char)b;
+                                else {
+                                    line += '\\';
+                                    line += (char)('0' + ((b >> 6) & 7));
+                                    line += (char)('0' + ((b >> 3) & 7));
+                                    line += (char)('0' + (b & 7));
+                                }
+                                if (line.size() >= 900) { c_.emitLine(line + "\""); line = "\""; }
+                            }
+                            c_.emitLine(line + "\",");
+                            c_.emitLine(std::to_string(bytes.size()) + ");");
+                        };
                         for (const auto& kvb : ctrl.properties) {
                             const std::string& pn114 = kvb.first;
                             bool skip114 = false;
@@ -547,15 +575,19 @@
                                 if (idl == "true")  c_.emitLine("vb6_UC_BagPutBool(_bag, " + litName + ", -1);");
                                 else if (idl == "false") c_.emitLine("vb6_UC_BagPutBool(_bag, " + litName + ", 0);");
                             } else if (kvb.second.type == FrmValueType::FrxReference && frxLoaded) {
-                                // czUI fix: Caption 等字符串常存于 .frx (如 "Form2.frx":006E) —
-                                // 跳过会让 ReadProperty 返回默认空串, 把 prop_let 设置好的
-                                // 标题清空 (Charts2020 所有 LabelPlus 标题消失的根因)
+                                // Fix: 先试"属性包块" (UserControl 持久化 PropertyBag) —— 交原始字节;
+                                // 不是属性包块时退回原来的 DocString 路径 (Caption 等字符串常存于 .frx)。
+                                FrxPropBagBlob pbB114 = FrxReader::readPropBagBlob(kvb.second.frxOffset);
+                                if (pbB114.found) {
+                                    emitFrxBagBlob(litName, pbB114.bytes);
+                                } else {
                                 FrxTextData dsB114 = FrxReader::readDocString(kvb.second.frxOffset);
                                 if (!dsB114.text.empty()) {
                                     std::string tvB = dsB114.text;
                                     if (tvB.size() >= 2 && tvB.front() == '"' && tvB.back() == '"')
                                         tvB = tvB.substr(1, tvB.size() - 2);
                                     c_.emitLine("vb6_UC_BagPutStr(_bag, " + litName + ", L\"" + escapeWideCString(tvB) + "\");");
+                                }
                                 }
                             }
                         }

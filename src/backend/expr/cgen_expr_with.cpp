@@ -285,10 +285,10 @@ void CCodeGen::visit(WithMemberExpr& node) {
             }
             // 未找到方法/属性 → 假设是数据字段: tempVar->member
             // (此时tempVar类型为 vb6_cls_<className>*, ->访问正确编译)
-            // Fix 092p: 字段名规范化回声明名 (源码大小写变体 → C 结构体实际成员名)
-            lastExpr_ = tempVar + "->"
-                      + cIdent(canonicalClassFieldName(info.className, node.memberName))
-                      + "  /* With class ." + node.memberName + " field */";
+            // 账 #305 §B171 (第六十二刀) → §B172 (第六十三刀): 尾注由唯一出口 classFieldReadExpr
+            //   拼 (档位词 + 字段名规范化 Fix 092p 都在那一处), 这一站只递自己的标签 "With class"。
+            lastExpr_ = classFieldReadExpr(tempVar, info.className, node.memberName,
+                                           /*isVoidPtr=*/false, "With class");
             return;
         }
 

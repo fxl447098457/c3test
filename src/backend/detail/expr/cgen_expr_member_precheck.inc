@@ -169,7 +169,7 @@
         if (_objLower == "vba" || _objLower == "vba5") {
             static const std::unordered_map<std::string, std::string> vbaConsts = {
                 {"vbcr", "13"}, {"vblf", "10"}, {"vbtab", "9"},
-                {"vbnullchar", "0"}, {"vbnullstring", "vb6_BSTR_FromStr(L\"\")"},
+                {"vbnullchar", "vb6_BSTR_FromStrN(L\"\\000\", 1)"}, {"vbnullstring", "vb6_BSTR_FromStr(L\"\")"},
                 {"vbcrif", "vb6_BSTR_FromStr(L\"\\r\\n\")"},
                 {"vbnewline", "vb6_BSTR_FromStr(L\"\\r\\n\")"},
                 {"vbempty", "0"}, {"vbnull", "1"}, {"vbinteger", "2"}, {"vblong", "3"},

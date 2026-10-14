@@ -289,6 +289,11 @@ static HRESULT STDMETHODCALLTYPE ComObj_Invoke(vb6_ComObject* self, DISPID dispI
             vb6_VariantPackCopyInto(&tmpRet, pVarResult);
     }
 
+    /* 账 #305 §B162 (第五十刀): 数组那一臂是个例外 —— 递进来的真 SAFEARRAY 被换成了**我们自己**
+     * 那枚描述符, 槽阵列一 free 它就没人管了。其余各档仍是调用方的资源, 一律不动。 */
+    for (int i = 0; i < argc; i++) {
+        vb6_VariantSlotRelease(&((vb6_VarSlot*)coercedArgs)[i]);
+    }
     // 槽内是调用方 VARIANT 的副本, 资源仍归调用方, 不得 VariantClear
     if (coercedArgs) CoTaskMemFree(coercedArgs);
     if (args) CoTaskMemFree(args);

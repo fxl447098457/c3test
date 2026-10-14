@@ -714,6 +714,50 @@
                                 Symbol::toLower(wmExpr.memberName)))
                             isDataField090c = true;
                     }
+                    // 账 #305 §B169 (第六十刀): 上面这一问只认**对象**字段 (classTypedFieldMap_
+                    // 装的是项目类/COM 指针字段), 于是**所有标量数据字段**都被判成"不是字段",
+                    // 下面那一支就凭空拼一个 `vb6_<Cls>_prop_let_<F>(...)` —— 那函数在工程里
+                    // 压根不存在 (名字没有任何声明/定义处), 实测 DllPrint.vbp 发 281 句
+                    // `vb6_vb6_clsText_prop_let_stringX(...)` ⇒ cl C4013 + LNK2019, 整棵工程
+                    // 连不出 exe。拼名字之前先问工程级那张字段档表 (§B168 那一趟预扫描):
+                    // 命中 = 这是一个**数据字段**, 按档发字段赋值 —— Variant/BSTR 都交那两枚
+                    // 唯一出口 (emitVariantSlotAssign / emitBstrSlotStore, 与直接赋值那一站
+                    // 共用同一份右值折算与所有权答案), 其它标量档落到下面既有的字段直发那一支
+                    // (`tempVar->field = value;`, 与对象字段同一条腿, COM 标记也由它消费)。
+                    // 否决与 §B168 同一条: 类里有同名方法/属性时这一句归属性写那一路。
+                    if (!isDataField090c && !info.className.empty()) {
+                        const Vb6Type fldKind169 = classFieldKind(
+                            info.className, wmExpr.memberName);
+                        if (fldKind169 != Vb6Type::Unknown
+                            && resolveClassMemberCall(info.className,
+                                                      wmExpr.memberName).empty()) {
+                            if (fldKind169 == Vb6Type::Variant
+                                || fldKind169 == Vb6Type::String) {
+                                emitExpr(*node.value);
+                                // 与下面"字段直发"那一支同一条腿: 右值整枚是 COM/typed-COM
+                                // 成员读时先消费 COM 标记, 按目标字段档解包 (§B168 形② 订正里
+                                // 那条「With 成员作右值已经答得出」的读数在这里同样成立)。
+                                if (isComMarker_) {
+                                    resolveComValue(classFieldComUnpackHint(
+                                        info.className, wmExpr.memberName));
+                                }
+                                const std::string tgt169 = tempVar + "->"
+                                    + cIdent(canonicalClassFieldName(
+                                           info.className, wmExpr.memberName));
+                                if (fldKind169 == Vb6Type::Variant) {
+                                    emitVariantSlotAssign(tgt169, node.value.get(),
+                                                          lastExpr_, false);
+                                } else {
+                                    // 定长串不入那张表 (收口宽度是账 #118 那一格), 故 fixedLen 交空
+                                    emitBstrSlotStore(tgt169, node.value.get(),
+                                                      lastExpr_, std::string());
+                                }
+                                return;
+                            }
+                            // 其它标量档: 不发凭空的 prop_let 名字, 直接落到下面那一支
+                            isDataField090c = true;
+                        }
+                    }
                     if (!isDataField090c && !info.className.empty()) {
                         std::string canonCls090c = info.className;
                         if (symTab_.moduleScope()) {

@@ -19,6 +19,9 @@
 #       而挂死的用例本来就该被杀
 #   B6  表的适用面不许是空的: 至少 1 枚具名夹具 (与 check_fixture_timer_close 的 F3 同一口径 ——
 #       哪天 GUI 夹具真不再吃余量, 该红一次让人来决定是撤表还是留着)
+#   B7  「起窗自关」探针(RTL vb6forms_ctrl.c)一发就走: 命中标志必须既有写者也有读者, 且上膛
+#       那一步要把它归零 —— 这一格决定 B1 那张表要吃多大 (台账 §B157: 命中后没人退, 一枚框
+#       被投了 259 发取消, 同一枚 ShowSave 的墙钟从 0.22 s 推到 4.64 s)
 #
 # 用法:  pwsh -File scripts/check_run_budget.ps1
 # 退出码: 0 = 全绿; 1 = 红
@@ -116,9 +119,38 @@ foreach ($en in $entries) {
     }
 }
 
+# ---- B7: 探针一发就走 (同一格账: §B140 的预算被这个机制吃掉的) ----
+$rtlProbe = Join-Path $root ('src' + [char]92 + 'rtl' + [char]92 + 'core' + [char]92 + 'vb6forms' + [char]92 + 'vb6forms_ctrl.c')
+if (-not (Test-Path -LiteralPath $rtlProbe)) {
+    $bad += ('B7 probe source not found: ' + $rtlProbe)
+} else {
+    $ptxt = [System.IO.File]::ReadAllText($rtlProbe)
+    $ppairs = @(
+        [pscustomobject]@{ Pat = 'InterlockedExchange(&vb6_CdProbeFired, 0)'; Want = 1;
+            Why = 'the arm must clear the shot flag - without that the second Show* sees the first shot and posts nothing' },
+        [pscustomobject]@{ Pat = 'InterlockedExchange(&vb6_CdProbeFired, 1)'; Want = 1;
+            Why = 'the enum callback still has to mark the shot as delivered' },
+        [pscustomobject]@{ Pat = 'InterlockedCompareExchange(&vb6_CdProbeFired, 0, 0)'; Want = 1;
+            Why = 'the poll loop must READ the flag - that read is the only exit that ends a delivered shot' },
+        [pscustomobject]@{ Pat = 'BOOL found = FALSE'; Want = 0;
+            Why = 'the dead exit condition is back (nobody ever wrote it, so the thread kept firing)' },
+        [pscustomobject]@{ Pat = 'for (int i = 0; i < 400; i++)'; Want = 0;
+            Why = 'a tick count is not a time unit (Sleep(10) measures 15.6ms idle, longer under load)' }
+    )
+    foreach ($p in $ppairs) {
+        # 这几条都是**字面形状** ⇒ 走 Escape 而不是正则: '(int i = 0; i < 400; i++)' 当正则喂进去会
+        # 因为 `))+` 是嵌套量词而抛 ArgumentException, 报出来的是脚本自己的错, 不是这一格的判定
+        $n = [regex]::Matches($ptxt, [regex]::Escape($p.Pat)).Count
+        if ($n -ne $p.Want) {
+            $bad += ('B7 ' + $p.Why + ': shape found ' + $n + ' times (want ' + $p.Want + ')')
+        }
+    }
+}
+
 if ($bad.Count -eq 0) {
     Write-Host ('PASS run budget: one resolver, ' + $entries.Count + ' named entries, every key matched a' +
-                ' real fixture, global still ' + $globSec + 's, both wait paths ask the authority') -ForegroundColor Green
+                ' real fixture, global still ' + $globSec + 's, both wait paths ask the authority,' +
+                ' probe exits on its own shot') -ForegroundColor Green
     exit 0
 }
 foreach ($b in $bad) { Write-Host ('FAIL ' + $b) -ForegroundColor Red }

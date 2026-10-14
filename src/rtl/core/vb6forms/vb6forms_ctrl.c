@@ -1118,8 +1118,9 @@ static void vb6_CdCancel(void* hwnd) {
 // 只有环境变量 C3_CDPROBE=1 才上膛，不设时这条路完全不存在（现有 ctrldlg 用例逐字不变）。
 // 线程只认**本线程**创建的 #32770（EnumThreadWindows），所以不会去关别人的窗；发过去的
 // WM_COMMAND/IDCANCEL 就是「用户点了取消」那条出口。于是「对话框真出现过」这条判据的断点
-// 就是取消出口本身：框没出现 ⇒ 没人取消 ⇒ CancelError 不会报 32755。找不到就不动，
-// 那种情况由套件的 -RunTimeoutSec 兜底（用例阶段最多 60 s）。
+// 就是取消出口本身：框没出现 ⇒ 没人取消 ⇒ CancelError 不会报 32755。线程只认两条出口
+// ——命中(Fired)与撤膛(Stop)——，都等不到才由 60 s 保险丝罢手（真兜底是套件的逐例预算，
+// §B140 那张表；这一格的重复收费记在 §B157）。
 typedef struct { DWORD tid; } vb6_CdProbeArgs;
 
 static volatile LONG vb6_CdProbeFired = 0;
@@ -1139,10 +1140,20 @@ static BOOL CALLBACK vb6_CdProbeEnum(HWND h, LPARAM lp) {
 static DWORD WINAPI vb6_CdProbeProc(LPVOID arg) {
     vb6_CdProbeArgs a = *(vb6_CdProbeArgs*)arg;
     free(arg);
-    for (int i = 0; i < 400; i++) {           // 最多等约 4 s
-        BOOL found = FALSE;
-        EnumThreadWindows(a.tid, vb6_CdProbeEnum, (LPARAM)&found);
-        if (found || InterlockedCompareExchange(&vb6_CdProbeStop, 0, 0)) break;
+    // 出口只有两条，且都是真事件：Fired = 那一发 WM_COMMAND/IDCANCEL 已经递进框里；
+    // Stop = 调用方已经从 pFn 回来（撤膛）。改前这里问的是一枚**没人写**的 `found`（回调只
+    // (void)lp 就返回了），于是命中之后线程照样每拍重数一遍窗口、把取消一遍遍投进
+    // 正在关的框 —— 本机 8 枚忙等压 4 vCPU 实测一枚框吃到 259 发、同一枚 ShowSave 的墙钟
+    // 从空载 0.22 s 推到 4.64 s，而这笔放大正是门 #548/#569 那两轮吃满具名 150 s 预算的因
+    // （台账 §B157）。Fired 从前有写者没读者，哨兵 check_run_budget 的 B7 现在两头都钉。
+    // 保险丝按**毫秒**记：Sleep(10) 实测落在 15.6 ms 的系统 tick 上、压满时更长，所以拍数
+    // 不是时间单位，拿它当上限就是拿运气当上限。
+    const DWORD fuse = GetTickCount() + 60000;
+    for (;;) {
+        EnumThreadWindows(a.tid, vb6_CdProbeEnum, 0);
+        if (InterlockedCompareExchange(&vb6_CdProbeFired, 0, 0)) break;
+        if (InterlockedCompareExchange(&vb6_CdProbeStop, 0, 0)) break;
+        if ((LONG)(GetTickCount() - fuse) >= 0) break;
         Sleep(10);
     }
     return 0;
@@ -1161,6 +1172,7 @@ static int vb6_CdProbeOn(void) {
 static HANDLE vb6_CdProbeArm(void) {
     if (!vb6_CdProbeOn()) return 0;
     InterlockedExchange(&vb6_CdProbeStop, 0);
+    InterlockedExchange(&vb6_CdProbeFired, 0);   // 每一发重新归零：线程读的就是它，不归零则第二发 Show* 会看见第一发的命中、一发都不投
     vb6_CdProbeArgs* a = (vb6_CdProbeArgs*)malloc(sizeof(vb6_CdProbeArgs));
     if (!a) return 0;
     a->tid = GetCurrentThreadId();
@@ -1170,7 +1182,8 @@ static HANDLE vb6_CdProbeArm(void) {
     return h;
 }
 
-// 撤膛必须真撤：上一发的线程若没命中，会一直轮到 4 s，可能把**下一发** Show* 的框关掉。
+// 撤膛必须真撤：上一发的线程还活着就会去关**下一发** Show* 的框。Stop 落地后它最多再睡一拍
+// （实测 15.6 ms）就退，所以这里等 2 s 是够的 —— 改前那句「一直轮到 4 s」把拍数当成了时间。
 static void vb6_CdProbeDisarm(HANDLE h) {
     if (h) {
         InterlockedExchange(&vb6_CdProbeStop, 1);

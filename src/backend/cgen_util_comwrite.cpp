@@ -313,6 +313,32 @@ bool CCodeGen::tryRewriteCOMLvalue(const std::string& target, const std::string&
                                                     parens.second - parens.first - 1);
                 std::string newVerbs = (matchedVerb != "prop_get_") ? matchedVerb
                                       : (isSet ? "prop_set_" : "prop_let_");
+                // Fix 270: **Set 方向必须重新裁决动词**, 不能沿用 emitExpr 交回的那一个。
+                // emitExpr 把 LHS 当**读**上下文发射; 「Property Let 与 Property Set 同名
+                // 并存」时它按 Let 胜出 (findClassMemberCallParams 的优先级), 于是
+                // Set 语句的改写目标被钉成 prop_let_。
+                //   实测 ComCtlsDemo CoolBar.ctl:2010
+                //     Friend Property Let FBandChild(ByVal ID As Long, ByVal Value As Object)
+                //       Set Me.FBandChild(ID) = Value      ' ← 本意是调 Property Set
+                //     Friend Property Set FBandChild(...)  ' ← 真实实现
+                //   ⇒ 发成 vb6_CoolBar_prop_let_FBandChild(me, ID, Value) —— 调回自己,
+                //     无限递归 → 栈溢出 0xC00000FD (点 Command2 即退出)。
+                // 判据与下方 Fix rev9 / Fix 268 同一把尺: 该类在该**写方向**确有访问器时,
+                // 无条件用对应动词。查不到 (类名取不到 / 成员名经 cIdent 变形 / 该类只有
+                // 另一个方向的访问器) 才退回上面那一行 —— 与改前逐字等价。
+                // 只动 isSet 这一侧: Let 语句的动词沿用旧行为, 不新增回归面。
+                if (isSet && newVerbs == "prop_let_" && prefix.rfind("vb6_", 0) == 0
+                    && !afterPg.empty() && afterPg.find('(') == std::string::npos) {
+                    std::string cls270 = prefix.substr(4);   // 去 "vb6_" → "cXx_"
+                    if (!cls270.empty() && cls270.back() == '_') cls270.pop_back();
+                    std::vector<ParameterInfo> sig270;
+                    if (!cls270.empty()
+                        && findClassMemberWriteParams(cls270, afterPg, /*isSet=*/true,
+                                                      sig270)
+                        && !sig270.empty()) {
+                        newVerbs = "prop_set_";
+                    }
+                }
                 // Fix <vbeclipse> rev9: **Property Set 的值槽是 ByRef 对象/类形参**
                 // (C 侧 `void**` / `vb6_cls_X**`) 时, 值实参必须交付**槽地址**,
                 // 不能交付对象指针本身。
@@ -745,6 +771,11 @@ std::string CCodeGen::packLetValueArg(const ParameterInfo& lastP, Expr* valueExp
             return "(&(vb6_VARIANT){.vt=VT_BOOL, .boolVal=(int16_t)(" + val + ")})";
         default:
             // 与 M22 default 分支对齐: 变体表达式提取 BSTR, 其余未知按 BSTR 兜底
+            // 账 #305 §B171 (第六十二刀): 可寻址的那一档先走 —— 实参本身就是一枚类里的
+            //   Variant 槽时交**槽的地址** (VB6 的 ByRef 语义, 与 cgen_expr_call_arg_emit.inc
+            //   的 UDT 槽那一格同一条)。次序反了就会掉进下面那条 vb6_VariantToString:
+            //   串值照样对, 但数值槽被静默压成串、回写整个丢 (实测读数在台账)。
+            if (cExprIsVariantSlotFieldRead(val)) return "&(" + val + ")";
             if (cExprIsVariant(val)) {
                 return "(&(vb6_VARIANT){.vt=VT_BSTR, .bstrVal=vb6_VariantToString("
                        + val + ")})";

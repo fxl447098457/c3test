@@ -280,6 +280,20 @@
     // 项目类 → 直接调用 vb6_<Type>_prop_get_Item(obj.field, arg);
     // COM 接口 → vb6_ComCall((void*)obj.field, L"Item", args, argc).
     const std::unordered_map<std::string, std::unordered_map<std::string, std::string>>* classTypedFieldMap_ = nullptr;
+    // 账 #305 §B168 (第五十九刀) + §B169 (第六十刀): 工程级「类 → (标量数据字段 → 声明档)」表
+    // — driver 预扫描。key: 小写类名, value: 小写字段名 (原名 + "m_" 前缀两种拼法都在) → Vb6Type。
+    // 用途: 回答「`<对象>.<字段>` 这个左值到底属于哪一档」—— 只有三档用得着:
+    //   Variant → 必须装箱 (vb6_VARIANT 槽);  String → 必须深拷贝/接管 (BSTR 槽);
+    //   其它标量 → 直发字段赋值;  数组/定长串/对象名/UDT **不入表** (各有自己的账与表)。
+    // 赋值站的四条既有判据 (裸名 / 本模块 classVariantMembers_ / VB6_SA_* 文本 / UDT 字段类型)
+    // 都够不着**别类**的字段, 于是 §B168 发的是不装箱裸赋值 (cl C2440, `h->PV = 7;`)、
+    // §B169 形② 发的是指针别名裸赋值 (`h->PS = s;` — 旧值不释放, 析构再 free 一遍),
+    // 而 With 块那一站 (§B169 形①) 在查不到 Property Let/Set 之后**凭空拼一个函数名**
+    // `vb6_<Cls>_prop_let_<F>` (实测 DllPrint 281 句) ⇒ C4013 + LNK2019。
+    // 查询走 classFieldKind() 一处, 不要在调用点再抄一遍 find; 三个布尔投影
+    // (classFieldIsVariantSlot / classFieldIsBstrSlot / classFieldIsScalarData) 也都问它。
+    const std::unordered_map<std::string, std::unordered_map<std::string, Vb6Type>>*
+        classFieldKindMap_ = nullptr;
     // Fix 045: 跨模块 Variant 返回值函数 C 名集合 — 由 driver.cpp 预扫描所有模块构建.
     // 包含所有返回 vb6_VARIANT 的项目函数的 C 名称 (如 "vb6_cAsyncSocket_Znl").
     // 在 cExprIsVariant() 中检查 C 表达式是否调用这些函数, 以正确识别 Variant 值.

@@ -11,6 +11,7 @@ namespace vb6c3 {
 
 
 void CCodeGen::visit(FunctionDecl& node) {
+    bumpInferEpoch();   // ai/030 续: 过程入口推推断缓存 epoch (形参/局部表在这里重建)
     // 泛型模板 (tB, G2/G3): 模板本体不发码 (泛型器注入特化副本)
     if (!node.typeParams.empty()) return;
     // ai/vb-asm-extension-spec: Asm 块过程 → x64 独立 MASM 过程 / x86 内联 __asm 块
@@ -472,6 +473,10 @@ void CCodeGen::visit(FunctionDecl& node) {
     }
     ansiTempsToFree_.clear();
     ansiOutParams_.clear();
+
+    // 账 #305 §B166 (第五十六刀): 本次调用现造的 ParamArray 数组在统一出口销毁(口径见那枚出口)。
+    // Exit Sub 那条形同 M22 的 ANSI 临时量, 走不到这一行。
+    emitParamArrayReclaim(node.params);
 
     // tB Interface B05: 接口变量持有引用, 正常出口处经槽 Release (Exit Sub 例外, 同 ANSI 临时变量)
     emitIvrefScopeRelease();

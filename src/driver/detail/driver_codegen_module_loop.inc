@@ -104,6 +104,7 @@
         cgen.setInterfaceIidMap(&ifaceIds_);  // tB 接口 IID 唯一出口 (B13c): 同一个 Pass E 建的表
         cgen.setViaRegistry(&vias_);          // tB 委托式实现 (B10): stage 2.7 Pass D 裁决表
         cgen.setDefaultInstanceClasses(&defaultInstanceClasses);  // P6.4+: 类模块默认实例
+        cgen.setClassFieldKindMap(&classFieldKindMap);  // 账 #305 §B168/§B169: 工程级「类 → 标量字段 → 声明档」表
         cgen.setTrimIncludes(options.trimIncludes);  // opt4: 裁剪未实际引用的跨模块include
         cgen.setTargetArch(options.arch);            // ai/vb-asm-extension-spec: Asm 块仅 x64
         if (options.trimIncludes) {
@@ -125,6 +126,8 @@
         bool ok = cgen.generate(*module, baseName, externalModules,
                                 options.isDll, options.dllProgId, frmDescPtr);
         if (!ok) return false;
+        c3PhaseMark("gen " + baseName);   // ai/030 续: 逐模块发码计时 (含串料化)
+        c3StatDump("mod " + baseName);    // ai/030 续: 本模块的热函数累计 (emitLine/infer/emitExpr)
 
         // ai/vb-asm-extension-spec: 回收本模块的 Asm 过程 (体=单个 Asm 块), 交 runLinker 生成 .asm
         for (auto& ap : cgen.asmProcs()) {
@@ -152,6 +155,7 @@
             }
             ofs << cgen.sourceCode();
         }
+        c3PhaseMark("io " + baseName);    // ai/030 续: .h/.c 落盘计时
 
         if (options.verbose) {
             std::cout << "C3: 生成 " << hPath << " (" << cgen.headerCode().size() << " bytes)" << std::endl;

@@ -9,6 +9,8 @@
 #include <vector>
 #include <string>
 #include <cstdlib>
+#include <cstdint>
+#include <algorithm>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -165,6 +167,42 @@ bool isRtlSource(const std::string& src, const std::string& rtlDir) {
     if (rtlDir.empty()) return false;
     if (src.compare(0, rtlDir.size(), rtlDir) != 0) return false;
     return src.size() > rtlDir.size() && (src[rtlDir.size()] == '/' || src[rtlDir.size()] == '\\');
+}
+
+// ai/030 §九 欠账①: store 淘汰 —— 只增不减会让 %LOCALAPPDATA%\C3\objcache 无限长大
+// (工程每改一处就多一格 obj)。默认上限 2 GiB, env C3_OBJCACHE_CAP_MB 可覆盖 (测试压到 1MB 用);
+// 超出后按 mtime 从旧到新删 store **根下**的 *.obj 直到降回 80%。被并发构建正打开的文件
+// 删除会失败 (共享冲突) —— 跳过即可, 下一轮再收。只删本函数认识的 .obj, 不碰 .tmp 与目录。
+void pruneObjStore(const std::string& store) {
+    long long capMB = 2048;
+    if (const char* e = std::getenv("C3_OBJCACHE_CAP_MB")) {
+        long long v = std::atoll(e);
+        if (v > 0) capMB = v;
+    }
+    const unsigned long long cap = static_cast<unsigned long long>(capMB) * 1024ULL * 1024ULL;
+    std::error_code ec;
+    std::vector<std::pair<std::filesystem::file_time_type, std::pair<uintmax_t, std::string>>> files;
+    unsigned long long total = 0;
+    for (auto& de : std::filesystem::directory_iterator(utf8ToPath(store), ec)) {
+        if (ec) return;
+        std::error_code fec;
+        if (!de.is_regular_file(fec)) continue;
+        if (de.path().extension() != ".obj") continue;
+        uintmax_t sz = de.file_size(fec);
+        auto mt = de.last_write_time(fec);
+        total += sz;
+        files.push_back({mt, {sz, pathToUtf8(de.path())}});
+    }
+    if (total <= cap) return;
+    std::sort(files.begin(), files.end(),
+              [](const auto& a, const auto& b) { return a.first < b.first; });
+    const unsigned long long target = cap * 4 / 5;
+    for (auto& f : files) {
+        if (total <= target) break;
+        std::error_code rec;
+        std::filesystem::remove(utf8ToPath(f.second.second), rec);
+        if (!rec) total -= f.second.first;
+    }
 }
 
 } // namespace
@@ -416,6 +454,9 @@ bool MsvcDriver::compileAndLinkIncremental(const MsvcDriverOptions& options) {
     if (options.verbose) {
         std::cout << "C3: 编译成功: " << options.outputFile << std::endl;
     }
+    // ai/030 §九 欠账①: 链接成功后才收店 —— 本轮的链接输入已消费完, 删旧格子不会
+    // 打断任何在飞的链接 (别的进程正读的文件删不掉, 会自然跳过)。
+    pruneObjStore(store);
     return true;
 }
 

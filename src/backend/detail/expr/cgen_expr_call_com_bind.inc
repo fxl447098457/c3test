@@ -791,9 +791,36 @@
     // 移交给 classMethodObjArg (随后会被前置到参数列表).
     // 此时 callee 是裸函数名 (如 "vb6_cDataBase_Exec"), 上面的 split 路径因
     // callee.back() != ')' 不会触发, 故不会被双重设置.
+    //
+    // Fix <Command2>: 但"裸函数名 + this"这一形态**必须**先拼回完整调用, 否则下面
+    // P6.5 的拆分与 Fix 242b 的「项目类集合默认成员索引」识别整段被跳过 ——
+    // 它们都以 `callee` 形如 `func(obj)` 为前提。UserControl 实例的成员
+    // (emitUcInstanceMemberExpr 的 asCallCallee_ 分支) 交的正是裸名:
+    //   `MyUC1.Things("abc").DoIt`
+    //     → 裸名 vb6_MyUC_prop_get_Things + pendingChainObj_ = (vb6_cls_MyUC*)…
+    // 拼不回去 ⇒ `("abc")` 落进通用位置实参路, 又被 Fix 041c 按「Things 是 0 参
+    // PropertyGet」截掉 (args.size()=1 > calleeParams.size()=0 ⇒ maxArgs=0)
+    // ⇒ 实参静默消失, 接收者变成整个集合并引发运行期错误 9。
+    // 拼回去之后 callee 形如 `func(obj)`, 下面的 split/242b 与普通类字段/属性
+    // 走**同一条**路径 (实测 ComCtlsDemo ImageList.ListImages("abc").Draw 族)。
+    // ⚠ 只在**下面的 P6.5 拆分确实会跑**时才拼: 拆分的门槛是
+    //   `callee 形如 func(obj)` && (有位置/named 实参 || needsSplitForOptionalPad
+    //   || needsSplitForMissingArgs)
+    // 无实参又不需要补齐时 (如 `s(0).Side()` —— Side 无参) 拆分整段不进, 此时若已把
+    // classMethodObjArg 清掉, 末尾 `callee + "(" + argList + ")"` 就会在**已完整的调用**
+    // 后面再拼一层空括号 ⇒ `vb6_X_Side(recv)()` ⇒ MSVC C2064 (term does not evaluate
+    // to a function taking N arguments)。tests/arr_cls 实测 (Fix 192 那一族)。
     if (!pendingChainObj_.empty()) {
         classMethodObjArg = std::move(pendingChainObj_);
         pendingChainObj_.clear();
+        const bool splitWillRun = !classMethodObjArg.empty() && !callee.empty()
+            && callee.find('(') == std::string::npos
+            && ((!node.positional.empty() || !node.named.empty())
+                || needsSplitForOptionalPad || needsSplitForMissingArgs);
+        if (splitWillRun) {
+            callee += "(" + classMethodObjArg + ")";
+            classMethodObjArg.clear();
+        }
     }
 
     if (callee.size() >= 2 && callee.back() == ')'
@@ -834,7 +861,40 @@
                     size_t gp = funcPart.find("_prop_get_");
                     if (gp != std::string::npos) {
                         std::string propName = funcPart.substr(gp + 10);
-                        Symbol* propSym86 = symTab_.lookupModuleByKind(propName, SymbolKind::PropertyGet);
+                        // Fix <Command2>: `_prop_get_` 必须按 **funcPart 里的类前缀**解析
+                        // (`vb6_<Cls>_prop_get_<Prop>`)。原实现只用 lookupModuleByKind
+                        // 在当前模块作用域里按**名字**找 PropertyGet —— 工程内多个类有同名
+                        // 属性 (Value / Text / Caption / Picture …) 时会命中**别的类**那枚。
+                        // 实测 ComCtlsDemo MainForm.frm:598
+                        //   `HotKey1.Value(vbCtrlMask + vbAltMask) = vbKeyA`
+                        // 撞上一枚 0 参的 Value ⇒ 被误判成"集合默认成员索引"，发成
+                        //   vb6_VariantFromComResult(vb6_ComCall(<HotKey.Value>, L"Item", …)) = …
+                        // ⇒ C2198 (实参太多) + C2106 (不是左值)，工程直接编不过。
+                        // 判据与 resolveClassMemberCall / getClassMethodReturnType 同源:
+                        // 按 sourceModule (或本模块名) 匹配类，名字只作次要条件。
+                        std::string clsPrefix86;
+                        if (gp > 4) clsPrefix86 = funcPart.substr(4, gp - 4);
+                        Symbol* propSym86 = nullptr;
+                        if (!clsPrefix86.empty() && symTab_.moduleScope()) {
+                            const std::string pLower86 = Symbol::toLower(propName);
+                            const std::string cLower86 = Symbol::toLower(clsPrefix86);
+                            for (const auto& [k86, s86] : symTab_.moduleScope()->symbols()) {
+                                if (s86->lowerName != pLower86) continue;
+                                if (s86->kind != SymbolKind::PropertyGet) continue;
+                                bool m86 = false;
+                                if (s86->isExternal) {
+                                    if (Symbol::toLower(s86->sourceModule) == cLower86) m86 = true;
+                                } else if (isClassModule_
+                                           && Symbol::toLower(moduleName_) == cLower86) {
+                                    m86 = true;
+                                }
+                                if (m86) { propSym86 = s86.get(); break; }
+                            }
+                        }
+                        if (!propSym86 && clsPrefix86.empty()) {
+                            propSym86 = symTab_.lookupModuleByKind(propName,
+                                                                   SymbolKind::PropertyGet);
+                        }
                         if (propSym86 && propSym86->params.empty()) {
                             innerIsChainedObj = true;
                             // Fix 242b: 该无参属性返回**项目类集合**时记下项目类 Item 发射

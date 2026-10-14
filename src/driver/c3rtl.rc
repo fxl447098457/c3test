@@ -590,3 +590,16 @@
  *   装箱那一档新增唯一出口 vb6_SaVtOfArrayPtr（认载体：一维魔数 0x5A1D / 多维秩数 1..16）。
  *   vb6_TypeName 的标量名单抽成 vb6_TypeNameScalar，数组那一支按 VB6 拼「元素名()」。
  *   touch 本文件 = 让 125 份 RCDATA 重嵌一次（§B99②）。 */
+
+
+/* 账 #305 §B159（2026-10-12 第五十刀）：槽 → 真 VARIANT 那张表第一次有了**数组**那一臂 ——
+ *   vb6rtl_com.c 新增两枚 static：vb6_ComSaVtOut（哪几档元素许出站，blittable 才许；
+ *   「这枚数组是哪一档」仍只问上面那张 vb6_SaVtFromElemType）与 vb6_ComPackArrayOut
+ *   （唯一一处用载体**现造**一枚真 SAFEARRAY：界照抄、整块 memcpy、新数组归收到的那一头 Clear）。
+ *   vb6_VariantPackBorrow 里数组那一问排在 switch 之前（标签是 vb6_vtArray|元素码，对不上任何 case）；
+ *   vb6_VarArith 的借用契约里只有这一臂交的是新分配，所以就地 SafeArrayDestroy，不然每算一次漏一份。
+ *   回程那一半同时补：两条 VT_ARRAY 进口的手抄元素 switch（各只认 6 档）换成第三张表 vb6_SaElemTypeFromVt，
+ *   Byte/Boolean 数组交回来不再按 24 字节步长越界读、也不再答 8204/"Variant()"。
+ *   再补 §B162 那一臂（同批）：vb6_VariantBorrowIntoSlot 遇到真 SAFEARRAY 现在换成我们自己的描述符
+ *   （拷，白名单与出站同一张；认不出的档交回 vtEmpty），服务端 free 槽阵列前经 vb6_VariantSlotRelease 回收。
+ *   touch 本文件 = 让 125 份 RCDATA 重嵌一次（§B99②）。 */

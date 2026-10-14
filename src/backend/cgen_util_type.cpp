@@ -1,4 +1,5 @@
 #include "backend/cgen.hpp"
+#include "driver/detail/phase_timing.hpp"   // ai/030 续: inferExprType 累计统计
 #include <algorithm>
 #include <cctype>
 #include <iostream>
@@ -122,7 +123,31 @@ Vb6Type CCodeGen::intDivResultType(Vb6Type lt, Vb6Type rt) const {
 // 表达式类型推断 (简化版, 用于Select Case等场景)
 // ============================================================
 
+// ai/030 续 (§性能, 2026-10-14): inferExprType 的按节点缓存。
+// 背景 (VBFlexGridDemo 读数): inferExprType 263,641 次 / 18.4s —— 70µs/次。根因是
+// 同一枚节点在一条语句里被反复下潜重推 (对象子树 × 若干辅助各推一遍, 每推一遍还带
+// 全符号表线性扫描与 toLower 分配)。缓存口径:
+//   · epoch 单调不减且**全局** —— AST 节点可能被两个 CCodeGen 实例先后访问 (EXE 的
+//     逐模块实例与 DLL 的 dll_entry 实例), 各实例自行计数会撞车;
+//   · 推 epoch 的两个边界: 每个过程入口 (visit(Sub/Function/Property)) 与
+//     emitStmtList 的每条语句 —— 会改推断答案的表 (known*Vars_) 在体内中途的注册
+//     (Dim/For Each/With 临时) 全落在语句边界上, 语句内表格不动, 正是缓存可复用的窗口;
+//   · epoch==0 (首次推之前) 只算不存 —— 该窗口的表格状态不保证稳定。
+static uint32_t g_inferCacheEpoch = 0;
+
+void CCodeGen::bumpInferEpoch() { ++g_inferCacheEpoch; }
+
 Vb6Type CCodeGen::inferExprType(Expr& expr) const {
+    C3ScopeTimer _c3t(1);   // ai/030 续: 累计统计计在包装层 (缓存命中也算一次问)
+    const uint32_t ep = g_inferCacheEpoch;
+    if (ep != 0 && expr.inferCacheEpoch == ep) return static_cast<Vb6Type>(expr.inferCacheType);
+    Vb6Type t = inferExprTypeImpl(expr);
+    expr.inferCacheEpoch = ep;
+    expr.inferCacheType = static_cast<uint16_t>(t);
+    return t;
+}
+
+Vb6Type CCodeGen::inferExprTypeImpl(Expr& expr) const {
     switch (expr.kind) {
         case ASTNodeKind::IdentifierExpr: {
             auto& id = static_cast<IdentifierExpr&>(expr);
@@ -479,6 +504,23 @@ Vb6Type CCodeGen::inferExprType(Expr& expr) const {
                     }
                 }
             }
+            // 账 #305 §B170 (第六十一刀): 「这枚成员读是哪一档」先问**宿主类**那张字段表
+            // (classFieldKind = §B168 那趟预扫描建的表, §B169 收成一处的那一问), 再落到底下
+            // 那条按**裸成员名**查模块级符号的兜底。兜底那一问不认识宿主: 字段名撞上内置函数名
+            // 时它交回的是内置函数的返回档 —— 实测 `Public PV As Variant` 撞上 PV() (金融函数,
+            // builtin_funcs.inc:317 答 Double) ⇒ `CStr(h.PV)` 发 vb6_CStrDbl(那枚槽), RTL 的
+            // _Generic 按数值解它 (VarR8) ⇒ 串值读回 0|1 (探针 K61-2, 两架构同形); 同一形里
+            // `Public PV As String` 也答 Double (K61-4) —— 声明档整个被吞掉。350 行控件那一档
+            // 早就按宿主问表 (账 #229/#231: SSTab1.Tab 撞内置 Tab), 本刀把同一条口径补到类字段。
+            // 只在表答得出 (非 Unknown) 时接管: 数组/定长串/对象字段不入表 (§B168 那条刻意口径),
+            // 同名方法/属性也不许被字段答案抢走 ⇒ 与 §B169 同一枚 resolveClassMemberCall 否决。
+            if (ma.object) {
+                const std::string cls61 = inferClassTypeOfExpr(*ma.object);
+                if (!cls61.empty() && resolveClassMemberCall(cls61, ma.memberName).empty()) {
+                    const Vb6Type fld61 = classFieldKind(cls61, ma.memberName);
+                    if (fld61 != Vb6Type::Unknown) return fld61;
+                }
+            }
             // Fix 220: 对象是 **Variant 载体** (集合 .Item(i) 返回 Variant / Variant 局部变量
             // 持有对象 / ComCall 结果 …) 时, 成员访问是后期绑定属性读, 结果**本身也是
             // Variant** —— 必须与 codegen 侧 Fix 219 (cgen_expr_member_class_fallback.inc /
@@ -545,6 +587,15 @@ Vb6Type CCodeGen::inferExprType(Expr& expr) const {
             const auto& winfo = withObjectInfoStack_.back();
             if (winfo.kind != WithObjKind::Unknown) {
                 // 非 UDT With (类实例/COM 对象): memberName 是属性/方法 → 查成员符号
+                // 账 #305 §B170 (第六十一刀): With 体内那一读与点号那一路同一个病、同一个问 ——
+                // 下面按裸成员名查, 于是 `With h` 里的 `CStr(.PV)` 也发成数值档 (探针 K61-6)。
+                // 宿主类名在 With 元信息栈里就有 (winfo.className, Fix 011r-1; 只有类实例那一档
+                // 非空, 控件/COM/内置那一档交空 ⇒ 既有答案一字不动)。
+                if (!winfo.className.empty()
+                    && resolveClassMemberCall(winfo.className, wm.memberName).empty()) {
+                    const Vb6Type fld61w = classFieldKind(winfo.className, wm.memberName);
+                    if (fld61w != Vb6Type::Unknown) return fld61w;
+                }
                 auto* memSym2 = symTab_.lookupModule(wm.memberName);
                 if (memSym2) return memSym2->type;
                 return Vb6Type::Variant;
@@ -577,6 +628,7 @@ Vb6Type CCodeGen::inferExprType(Expr& expr) const {
 // 与 inferExprType 的差异: 内置函数 (sym==null) 与 UDT 字段访问 (lookupModule 失败) 等
 // 通过 fallback 返回 Variant 的情形, 此处视为非 Variant, 避免对 int/BSTR 等实参误包装.
 bool CCodeGen::isDefinitelyVariantExpr(Expr& expr, bool* isArrOut) const {
+    C3ScopeTimer _c3t(3);   // ai/030 续: isDefinitelyVariantExpr 累计统计 (slot 3)
     if (isArrOut) *isArrOut = false;
     uint16_t variantArrRaw = static_cast<uint16_t>(Vb6Type::Variant)
                            | static_cast<uint16_t>(Vb6Type::Array);
@@ -726,6 +778,19 @@ bool CCodeGen::isDefinitelyVariantExpr(Expr& expr, bool* isArrOut) const {
             if (!inferUdtTypeOfExpr(*ma.object).empty()) {
                 return inferExprType(expr) == Vb6Type::Variant;
             }
+            // 账 #305 §B171 (第六十二刀): 宿主是工程类时, 这一问先问 §B168 那张字段表 ——
+            //   与 §B170 给 inferExprType 补的那一格同一条口径、同一枚否决。下面那条按**裸成员名**
+            //   查模块符号的兜底不认识宿主: 成员名撞上内置函数名时它交回内置函数的档位
+            //   (实测 `Public PV As Variant` 撞 PV() ⇒ 这里答「不是槽」⇒ `Len(h.PV)` 发裸的
+            //   vb6_VARIANT 进 vb6_Len(BSTR) = C2440; 不撞名的 PZ 一直答对)。
+            //   表答得出 (非 Unknown) 才接管: 数组 / 定长串 / 对象字段不入表, 仍归兜底。
+            if (ma.object) {
+                const std::string cls62 = inferClassTypeOfExpr(*ma.object);
+                if (!cls62.empty() && resolveClassMemberCall(cls62, ma.memberName).empty()) {
+                    const Vb6Type fld62 = classFieldKind(cls62, ma.memberName);
+                    if (fld62 != Vb6Type::Unknown) return fld62 == Vb6Type::Variant;
+                }
+            }
             // 符号表查找成员 (Property/Function)
             auto* memSym = symTab_.lookupModule(ma.memberName);
             // 关键差异: memSym==null (UDT 字段访问或外部类成员) 视为非 Variant
@@ -763,6 +828,131 @@ bool CCodeGen::cmpOperandMayTakeAddr(const std::string& c, Expr* ast) const {
 // 包含已知返回 vb6_VARIANT 的函数调用时, 判定为 Variant.
 // 仅检查顶层表达式 (去除前导括号/空白后), 避免对子表达式误判.
 
+// 账 #305 §B172 (第六十三刀): 「把一枚类数据字段的读发出去」的唯一出口 —— 尾注由这一处拼,
+// 三站只递参数。为什么必须收在这里: §B171 把「认槽」那一问教成「看尾注那个 variant 词」,
+// 而词当时只有**两条**发码路会盖 (点号走 knownClassVars_ 的那一站 + With 体内那一站);
+// 第三条 (Fix 088c: 接收者是"文本没进 knownClassVars_ 的类实例" —— 类形参 `UseAll(h As K63Holder)`
+// 的标识符发成 `(*h)`) 连尾注都不写, 于是同一枚字段换一种接收者声明方式就一律答「不是槽」,
+// InStr(h.PV, …) 直接把整只 vb6_VARIANT 递给 BSTR 形参 = C2440 (两台实测, 都没 exe)。
+// 档位与 voidptr 都仍由 §B169 那张表回答: 本函数只是把那张表的答案**投影**成 C 文本。
+std::string CCodeGen::classFieldReadExpr(const std::string& objC, const std::string& clsName,
+                                         const std::string& memberName, bool isVoidPtr,
+                                         const std::string& markerLabel) const {
+    // Fix 092p 的口径留在这一处: VB6 大小写不敏感, 源码拼写要规范化回声明名, 否则
+    // `...->socket` (声明 Socket) 是 C2039。
+    const std::string base = objC + "->" + cIdent(canonicalClassFieldName(clsName, memberName));
+    if (isVoidPtr) {
+        return base + "  /* " + markerLabel + " ." + memberName + " field voidptr */";
+    }
+    return base + "  /* " + markerLabel + " ." + memberName + " field"
+         + (classFieldIsVariantSlot(clsName, memberName) ? " variant" : "") + " */";
+}
+
+// 账 #305 §B174 (第六十五刀): 「数值实参交进 VB 的字符串形参 ⇒ VB6 会隐式 CStr」这一条规则,
+// 发码侧此前有**两位主人**，本刀收成一位：
+//   主人一 = Fix 175 (cgen_expr_call_arg_emit.inc) —— 按**形参表**那一档答的 (ByVal String)，
+//             形状走 wrapToBSTR (全仓唯一的"数值→BSTR"形状出口)。
+//   主人二 = Fix 108c (cgen_expr_call_builtin_argtype.inc) —— 按一张 13 枚名单答的, 形状自己
+//             写了一遍 if/else, 而且做在 argList **已拼成一整串之后** (靠"从上次命中往后找下
+//             一次出现"对齐实参下标)。
+// 本站点只留主人一，且它以前答不到的那一格补上了：InStr 这类**故意不声明形参表**的内在函数
+// (builtin_funcs.inc:74-76 写明原因 = 可选 start 会让位号错位) 没有形参可问 ⇒ 改问下面那张表。
+// 档位集合 = 两位主人原来两份清单的**并集** (13 枚名单的 SByte/UInteger/ULong/ULongLong/Decimal
+// + Fix 175 的 Byte/LongPtr) —— 每一档都有一条现成的清单作底, 没量过的 (如 LongLong) 不加。
+// 返回 false = 这一档不折 (串 / 对象 / 数组 / Variant / 未知, 以及清单外没量过的档)。
+bool CCodeGen::typeTakesImplicitCStr(Vb6Type t) const {
+    switch (t) {
+        case Vb6Type::Date:
+        case Vb6Type::Double:
+        case Vb6Type::Single:
+        case Vb6Type::Currency:
+        case Vb6Type::Decimal:
+        case Vb6Type::Long:
+        case Vb6Type::Integer:
+        case Vb6Type::Byte:
+        case Vb6Type::Boolean:
+        case Vb6Type::LongPtr:
+        case Vb6Type::SByte:
+        case Vb6Type::UInteger:
+        case Vb6Type::ULong:
+        case Vb6Type::ULongLong:
+            return true;
+        default:
+            return false;
+    }
+}
+
+// 账 #305 §B174 (第六十五刀): 「**没有形参表**的内在函数 callee 的第 pos 位 (VB 实参下标) 是不是
+// VB 语义上的字符串形参」。只管 builtin_funcs.inc 里用 addBuiltinFunc (只登记返回类型) 那一族,
+// 带类型化形参表的内在函数与工程过程都由 Fix 175 直接问形参表, 不吃这张表。
+// 这一问**不许**从运行时 C 签名表 (getRuntimeParamCType) 反推, 两条都在本刀里实测过:
+//  ① `vb6_LenB` 在表里那格 "BSTR" 只是 _Generic 宏的第一个分支 (vb6rtl_builtin.h:19) —— VB6 的
+//     Len/LenB 对数值交**字节宽度**、不做 CStr, 发码侧另有按类型的 sizeof 分派 (Fix 065/084h/125/160w)。
+//     草稿按那张表裸答时, A/B 在 VBFlexGridDemo 上当场打出 `LenB(Version)` 的
+//     `sizeof(vb6_type_DLLVERSIONINFO)` 变成 `sizeof(int32_t)` (折出来的串让那条按名字认 UDT 的分派失手)。
+//  ② 那张表也答不对**位号**: InStr 的 C 签名是 (start, haystack, needle), 而 VB 写两个实参时 cgen
+//     要补 start=1、写三个而首参是串时又换一条路 (见 builtin_fixup 选 InStr/InStrC 那段)。
+// ⇒ 表按 VB 手册一枚枚写, 每行都是"这一位收了数值实参 VB6 会隐式 CStr"那条事实。
+// Len / LenB / Asc / StrPtr 刻意**不进表** —— ①就是理由, 不是来不及。
+// InStrB 不进表: RTL 那两形是 void* (Byte() 或 BSTR), 数值进不去也就没人折; 没量过 = 不加。
+bool CCodeGen::builtinNoParamTableStringSlot(const std::string& callee, size_t argc, size_t pos,
+                                             Vb6Type firstArgType) const {
+    // §B174 的正主: InStr 的字符串位随"有没有写 start"整体移位, 依据与 builtin_fixup 选
+    // vb6_InStr / vb6_InStrC 时那一问同源 (首参是不是串 —— 那里问 AST, 这里也问 AST)。
+    //   InStr(s1, s2)                   → 串在 0,1
+    //   InStr(s1, s2, compare)          → 串在 0,1   (末位是 compare, 不许折)
+    //   InStr(start, s1, s2)            → 串在 1,2
+    //   InStr(start, s1, s2, compare)   → 串在 1,2   (末位同上)
+    if (callee == "vb6_InStr") {
+        if (argc == 2 || (argc == 3 && firstArgType == Vb6Type::String)) {
+            return pos == 0 || pos == 1;
+        }
+        if (argc == 3 || argc == 4) return pos == 1 || pos == 2;
+        return false;
+    }
+    // 账 #305 §B175 (第六十六刀): 其余**没有形参表**的内在函数 —— 位号与实参个数无关,
+    // 所以一张名单就够, 不必像 InStr 那样先看 arity。每一行的依据 = 本刀那三份读数:
+    //   ① RTL 的 C 形参是 BSTR (vb6rtl.h / vb6rtl_registry.h / vb6rtl_dialog.h 实读),
+    //   ② `--emit-c` 实测那一形今天裸送数值进 wchar_t* (`.build/k66_probe{2,3}.bas`),
+    //   ③ VB6 收了数值会隐式 CStr (手册口径 + 真语料写法, 见 §B175 台账)。
+    // 刻意**不进**这张名单的, 每条都有理由, 不是没排上:
+    //   vb6_AppActivate —— 数值那一形到底是「CStr 当标题」还是「按 PID 激活」没定: RTL 另有一枚
+    //     `vb6_AppActivateByPid(int32_t pid, int32_t wait)` 而全仓 0 调用者; 真语料 8 处实写全是串
+    //     (AppActivate "mIRC32" / ReturnValue / title) ⇒ 没有读数就不动它, 口径另记 §B175。
+    //   Len / LenB / Asc / StrPtr —— 上面注释里那条 ① (字节宽度那一问)。
+    //   InStrB —— RTL 两形是 void* (Byte() 或 BSTR), 数值进不去。
+    //   InStrRev / Mid / Filter 那一族里带类型化形参表的 —— 它们根本不落这张表, Fix 175 直接问表。
+    static const std::unordered_map<std::string, std::vector<size_t>> kNoTableStringSlots175 = {
+        {"vb6_GetSetting",    {0, 1, 2, 3}},  // GetSetting(app, sec, key, default)
+        {"vb6_SaveSetting",   {0, 1, 2, 3}},  // SaveSetting(app, sec, key, setting)
+        {"vb6_DeleteSetting", {0, 1, 2}},     // DeleteSetting(app, sec, key)
+        {"vb6_GetAllSettings", {0, 1}},       // GetAllSettings(app[, sec])
+        {"vb6_MsgBox",        {0, 2}},        // 1 = buttons(int); VB 的 helpfile/context C 出口不收
+        {"vb6_InputBox",      {0, 1, 2}},     // 3,4 = xpos/ypos(int), 6 = context(int)
+        {"vb6_SendKeys",      {0}},           // 1 = wait(Boolean)
+        {"vb6_SetAttr",       {0}},           // 1 = attributes(int)
+        {"vb6_SavePicture",   {1}},           // 0 = picture(void*)
+        {"vb6_Format",        {1}},           // 0 是 VARIANT 形参, 由 conv_output 的装箱那腿办
+    };
+    auto it175 = kNoTableStringSlots175.find(callee);
+    if (it175 == kNoTableStringSlots175.end()) return false;
+    for (size_t p : it175->second) {
+        if (p == pos) return true;
+    }
+    return false;
+}
+
+// 账 #305 §B171 (第六十二刀): 「按 C 文本认槽」这一问漏认的那一族 —— 类字段的 Variant 槽读。
+// 两条发码路 (§B168/§B169 那张表的两处成员读) 现在在尾注里带上 ` variant` 这个词, 而**只有**
+// Variant 那一档带 —— 所以这一问的答案仍然只有那张表一个来源, 这里只是把它读回来。
+// 判据钉在**串尾**: 成员读的 C 就是 `obj->fld  /* ... */`, 尾注后头什么都不许有 ——
+// 拿 "包含" 判会把 `vb6_CStr(h->PZ /*...*/)` 那种**已经消费过槽**的表达式也答成槽 (反向 C2440)。
+bool CCodeGen::cExprIsVariantSlotFieldRead(const std::string& cExpr) const {
+    static const std::string tail = " field variant */";
+    return cExpr.size() >= tail.size()
+        && cExpr.compare(cExpr.size() - tail.size(), tail.size(), tail) == 0;
+}
+
 bool CCodeGen::cExprIsVariant(const std::string& cExpr) const {
     // 去除前导空白和括号
     size_t start = 0;
@@ -775,6 +965,11 @@ bool CCodeGen::cExprIsVariant(const std::string& cExpr) const {
         }
     }
     if (start >= cExpr.size()) return false;
+
+    // 账 #305 §B171 (第六十二刀): 类字段的 Variant 槽读 —— 此前这一问只认得「函数交槽」那一族
+    //   (下面的前缀表) 与「数组元素是槽」那一族, 成员读一律答否, 于是实参装箱的两站把整只
+    //   vb6_VARIANT 塞进标量槽 (`.bstrVal=h->PZ` ⇒ cl C2440, 两台都没 exe)。
+    if (cExprIsVariantSlotFieldRead(cExpr)) return true;
 
     // 已知返回 vb6_VARIANT 的函数前缀。
     //
@@ -1025,6 +1220,9 @@ std::string CCodeGen::getRuntimeParamCType(const std::string& funcName, size_t p
         {"vb6_CUInt",           {"double"}},
         {"vb6_CULng",           {"double"}},
         {"vb6_CULngLng",        {"double"}},
+        // twinBASIC 形 CLngPtr: 转 LongPtr, 同族 double 入口 (Variant 实参由
+        // cgen_expr_call_conv_numeric.inc 改写为 *V 版本)。
+        {"vb6_CLngPtr",         {"double"}},
         // 数组操作
         {"vb6_UBound",          {"vb6_SafeArray1D*", "int32_t"}},
         {"vb6_LBound",          {"vb6_SafeArray1D*", "int32_t"}},
@@ -1173,6 +1371,19 @@ bool CCodeGen::isWholeArrayRef(const Expr* e) const {
     // Fix 178: `.Cols() = VBFlexGridDefaultCols.Cols()` —— UDT/With 的动态数组成员
     // 用空括号整体赋值。原先只认裸数组变量, 这类目标退化成载体指针直赋 → 别名。
     return isDynamicArrayMemberCallee(n.callee.get(), nullptr);
+}
+
+// 账 #305 §B161/§B159 (第五十刀): 数组载体实参这一问的唯一主人 (声明处记着四个排除项)。
+// 刻意**不看** inferExprType: 它对模块级数组答的是**元素**档 (Long/Byte/String), 那两个消费者要的
+// 恰恰是「别按元素档处置」—— 第四十九刀的实读数 (3/"Long"、17/"Byte"、8/"String") 就是照着它抄的结果。
+bool CCodeGen::isArrayCarrierArgName(const std::string& lowerName,
+                                     const std::string& cExpr) const {
+    if (knownArrays_.count(lowerName) == 0) return false;
+    if (knownObjectVars_.count(lowerName)) return false;
+    if (knownVariantVars_.count(lowerName)) return false;
+    if (arrayClassElemTypes_.count(lowerName)) return false;
+    if (cExprIsVariant(cExpr)) return false;
+    return true;
 }
 
 // Fix 178: callee 是「UDT 的动态数组成员」(`.Cols` / `Default.Cols`) 时返回 true,

@@ -504,18 +504,47 @@ void CCodeGen::visit(BinaryExpr& node) {
         bool rv158n = varLike158n(right, node.right.get());
         if (lv158n || rv158n) {
             if (lv158n && rv158n) {
-                lastExpr_ = "(vb6_VarCmpEq(" + variantAddr158n(left, node.left.get()) + ", "
-                          + variantAddr158n(right, node.right.get()) + "))";
+                // Fix: 两侧都是 Variant 时也必须按**对象同一性**比 —— VB6 的 `Is`
+                // 问的是"两个对象引用是否同一只"。旧发码走 vb6_VarCmpEq(值比较),
+                // 而它对非同串档会退化成
+                //   vb6_VarToDouble_internal(a) == vb6_VarToDouble_internal(b)
+                // 空串 → 0.0、对象 → 0.0 ⇒ **恒等**。
+                // 实测代价: ComCtlsDemo/Builds/CoolBar/CbrBand.cls
+                //   Public Property Set Tag(ByVal Value As Variant)
+                //     If Value Is ShadowCoolBar Then Err.Raise 35700 ...
+                // 右侧工程类调用被折成 Variant ⇒ 走的就是这一支 ⇒ 空串与 CoolBar
+                // "相等" ⇒ Err.Raise 35700 ⇒ 设计期 band 重放整只进程退出。
+                // 取 `两边都是对象 且 对象指针相等` (VB6 里 `Is` 的非对象操作数本是
+                // 编译期错误; 这里退化为 false, 安全侧)。
+                std::string la = variantAddr158n(left, node.left.get());
+                std::string ra = variantAddr158n(right, node.right.get());
+                lastExpr_ = "(vb6_IsObject(*(" + la + ")) && vb6_IsObject(*(" + ra
+                          + ")) && (void*)vb6_VariantToObject(" + la
+                          + ") == (void*)vb6_VariantToObject(" + ra + "))";
             } else if (lv158n && isNothingSentinel158n(right)) {
                 lastExpr_ = "(vb6_IsNothing(vb6_VariantToObject(" + variantAddr158n(left, node.left.get()) + ")))";
             } else if (rv158n && isNothingSentinel158n(left)) {
                 lastExpr_ = "(vb6_IsNothing(vb6_VariantToObject(" + variantAddr158n(right, node.right.get()) + ")))";
             } else if (lv158n) {
-                lastExpr_ = "(vb6_VarCmpLongEq(" + variantAddr158n(left, node.left.get()) + ", (int32_t)("
-                          + right + ")))";
+                // Fix: `<Variant> Is <对象/指针>` —— VB6 的 `Is` 问的是**对象同一性**
+                // (指针相等), 不是值相等。旧发码
+                //   vb6_VarCmpLongEq(&v, (int32_t)(other))
+                // 有两处硬伤: (a) 把对象指针截成 int32 再按值比较 (x64/gc 下必错);
+                // (b) vb6_VarCmp 会把对象转成它的默认值 — 于是**空串 Variant 与
+                // 对象指针"相等"**。实测代价: ComCtlsDemo/Builds/CoolBar/CbrBand.cls:96
+                //   Public Property Set Tag(ByVal Value As Variant)
+                //     If Value Is ShadowCoolBar Then Err.Raise 35700 ...
+                // 设计期 band 重放走 `.Tag = InitBands(i).Tag`(空串) 时误判"是
+                // ShadowCoolBar" ⇒ Err.Raise 35700 ⇒ 未处理错误, 整只进程退出。
+                // 现按 `IsObject(v) && 两边对象指针相等` 发 (VB6 里 `Is` 非对象操作数
+                // 是编译期错误, 这里退化为 false —— 安全侧)。
+                std::string la = variantAddr158n(left, node.left.get());
+                lastExpr_ = "(vb6_IsObject(*(" + la + ")) && (void*)vb6_VariantToObject(" + la
+                          + ") == (void*)(" + right + "))";
             } else {
-                lastExpr_ = "(vb6_VarCmpLongEq(" + variantAddr158n(right, node.right.get()) + ", (int32_t)("
-                          + left + ")))";
+                std::string ra = variantAddr158n(right, node.right.get());
+                lastExpr_ = "(vb6_IsObject(*(" + ra + ")) && (void*)vb6_VariantToObject(" + ra
+                          + ") == (void*)(" + left + "))";
             }
             return;
         }
