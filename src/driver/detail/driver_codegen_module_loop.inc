@@ -126,6 +126,8 @@
         bool ok = cgen.generate(*module, baseName, externalModules,
                                 options.isDll, options.dllProgId, frmDescPtr);
         if (!ok) return false;
+        c3PhaseMark("gen " + baseName);   // ai/030 续: 逐模块发码计时 (含串料化)
+        c3StatDump("mod " + baseName);    // ai/030 续: 本模块的热函数累计 (emitLine/infer/emitExpr)
 
         // ai/vb-asm-extension-spec: 回收本模块的 Asm 过程 (体=单个 Asm 块), 交 runLinker 生成 .asm
         for (auto& ap : cgen.asmProcs()) {
@@ -153,6 +155,7 @@
             }
             ofs << cgen.sourceCode();
         }
+        c3PhaseMark("io " + baseName);    // ai/030 续: .h/.c 落盘计时
 
         if (options.verbose) {
             std::cout << "C3: 生成 " << hPath << " (" << cgen.headerCode().size() << " bytes)" << std::endl;

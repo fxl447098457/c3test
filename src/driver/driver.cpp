@@ -16,6 +16,7 @@
 // 10 个 .inc 不是独立编译单元（不登记 CMakeLists），单独 include 会编译不过；片段内容逐行未改，零行为改动。
 
 #include "driver/driver.hpp"
+#include "driver/detail/phase_timing.hpp"   // ai/030 续: C3_TIMING=1 的相位计时
 #include "common/diagnostics.hpp"
 #include "common/encoding.hpp"
 #include "common/source_manager.hpp"
