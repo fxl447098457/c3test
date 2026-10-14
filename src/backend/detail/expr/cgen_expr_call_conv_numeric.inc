@@ -10,6 +10,7 @@
         // ai/032: 四档无符号/窄整型转换函数 —— 同口径 (Variant → *V, BSTR → vb6_NumVal)
         || callee == "vb6_CSByte" || callee == "vb6_CUInt"
         || callee == "vb6_CULng" || callee == "vb6_CULngLng"
+        || callee == "vb6_CLngLng"
         // twinBASIC 形 CLngPtr 同路 (RTL vb6_CLngPtr* 已在头里备齐三档)
         || callee == "vb6_CLngPtr") {
         // 检查第一个参数是否为Variant变量
@@ -45,6 +46,7 @@
             else if (callee == "vb6_CUInt")    callee = "vb6_CUIntV";
             else if (callee == "vb6_CULng")    callee = "vb6_CULngV";
             else if (callee == "vb6_CULngLng") callee = "vb6_CULngLngV";
+            else if (callee == "vb6_CLngLng")  callee = "vb6_CLngLngV";
             else if (callee == "vb6_CLngPtr")  callee = "vb6_CLngPtrV";
             // Fix 084l: 撤销 Fix 038b-2 的 Variant→double 提前提取 (getRuntimeParamCType
             // 把 CLng/CDbl/CInt 形参当作 double, 已将 lRet 替换为 vb6_VariantToDouble(lRet)).

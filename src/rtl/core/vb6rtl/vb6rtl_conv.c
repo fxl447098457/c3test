@@ -224,12 +224,24 @@ uint64_t vb6_CULngLng(double x) {
     if (x < 0) (void)vb6_OvfChk(-1, 0, 0);   // 负数 → 走既有溢出通道报 Error 6
     return (uint64_t)vb6_FltToLng(x);
 }
+// CLngLng: 阶梯里有符号的 64 位那一档。x64 的界 (int64 全域) 装得下 double 的整数域,
+// 故不能像 CULngLng 那样只挡一侧 —— 与 CLngPtr 的 x64 分支同款: 界先于转换挡住
+// (round/(int64_t) 对越界 double 是 UB, 没有窄缝可倚赖)。
+#ifdef vb6_CLngLng
+#undef vb6_CLngLng
+#endif
+int64_t vb6_CLngLng(double x) {
+    if (x >= 9223372036854775808.0 || x < -9223372036854775808.0)
+        (void)vb6_OvfChk(-1, 0, 0);   // 越界 → 走既有溢出通道报 Error 6
+    return vb6_FltToLng(x);
+}
 // ai/032: 字符串实参入口 (口径同 Fix 158r 的 vb6_CLngBSTR)。十进制走 vb6_Val;
 // "&H"/"&O" 前缀式由 cgen 那侧改发 vb6_NumVal, 到不了这里。
 int8_t   vb6_CSByteBSTR(BSTR s)   { return vb6_CSByte(vb6_Val(s)); }
 uint16_t vb6_CUIntBSTR(BSTR s)    { return vb6_CUInt(vb6_Val(s)); }
 uint32_t vb6_CULngBSTR(BSTR s)    { return vb6_CULng(vb6_Val(s)); }
 uint64_t vb6_CULngLngBSTR(BSTR s) { return vb6_CULngLng(vb6_Val(s)); }
+int64_t  vb6_CLngLngBSTR(BSTR s)  { return vb6_CLngLng(vb6_Val(s)); }
 
 // twinBASIC 形 CLngPtr (doc.twinbasic.vb6.pro .../Conversion/CLngPtr.html): 转 LongPtr。
 // 值域按目标架构: x86 = Long (文档 "Long on 32-bit"), x64 = 整个 int64 ("LongLong")。

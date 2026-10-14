@@ -129,6 +129,11 @@
     addBuiltinFunc("CUInt",    Vb6Type::UInteger);
     addBuiltinFunc("CULng",    Vb6Type::ULong);
     addBuiltinFunc("CULngLng", Vb6Type::ULongLong);
+    // CLngLng: 上面对应的**有符号** 64 位那一档 (ai/032 的四档全是无符号/窄的,
+    // 签名这一位当时没登记)。ComCtlsDemo ProgressBar.ctl:1328 真在用它 —— `#If Win64`
+    // 分支里 `CLngLng(PropValue)` 给 ITaskBarList3::SetProgressValue 送 ULONGLONG。
+    // 返回 LongLong (int64_t), 口径同 CLng (FltToLng + 越界 Error 6), 同样不加 calleeParams。
+    addBuiltinFunc("CLngLng",  Vb6Type::LongLong);
     // twinBASIC 形 CLngPtr (doc.twinbasic.vb6.pro .../Conversion/CLngPtr.html):
     // 转 LongPtr (x86 = Long / x64 = LongLong), .5 舍入与越界口径随 CLng 同族
     // (RTL vb6_CLngPtr: FltToLng + OvfChk → 越界 Error 6)。同样不加 calleeParams。

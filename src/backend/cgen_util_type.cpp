@@ -1228,6 +1228,8 @@ std::string CCodeGen::getRuntimeParamCType(const std::string& funcName, size_t p
         {"vb6_CUInt",           {"double"}},
         {"vb6_CULng",           {"double"}},
         {"vb6_CULngLng",        {"double"}},
+        // CLngLng: 同族的有符号 64 位档 (ComCtlsDemo ProgressBar.ctl 的 #If Win64 分支)
+        {"vb6_CLngLng",         {"double"}},
         // twinBASIC 形 CLngPtr: 转 LongPtr, 同族 double 入口 (Variant 实参由
         // cgen_expr_call_conv_numeric.inc 改写为 *V 版本)。
         {"vb6_CLngPtr",         {"double"}},
