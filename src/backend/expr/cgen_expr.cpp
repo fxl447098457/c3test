@@ -11,6 +11,7 @@
 #include <limits>
 #include <locale>
 #include <sstream>
+#include "driver/detail/phase_timing.hpp"   // ai/030 续: emitExpr 累计统计
 
 namespace vb6c3 {
 
@@ -19,6 +20,7 @@ namespace vb6c3 {
 // --- cgen_expr.cpp: emitExpr 分发 + 字面量/一元/字典访问/New/TypeOf/AddressOf/Me 表达式 ---
 
 void CCodeGen::emitExpr(Expr& expr) {
+    C3ScopeTimer _c3t(2);   // ai/030 续: emitExpr 累计统计 (slot 2)
     switch (expr.kind) {
         case ASTNodeKind::LiteralExpr:
             visit(static_cast<LiteralExpr&>(expr)); break;

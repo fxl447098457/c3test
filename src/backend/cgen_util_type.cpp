@@ -1,4 +1,5 @@
 #include "backend/cgen.hpp"
+#include "driver/detail/phase_timing.hpp"   // ai/030 续: inferExprType 累计统计
 #include <algorithm>
 #include <cctype>
 #include <iostream>
@@ -122,7 +123,31 @@ Vb6Type CCodeGen::intDivResultType(Vb6Type lt, Vb6Type rt) const {
 // 表达式类型推断 (简化版, 用于Select Case等场景)
 // ============================================================
 
+// ai/030 续 (§性能, 2026-10-14): inferExprType 的按节点缓存。
+// 背景 (VBFlexGridDemo 读数): inferExprType 263,641 次 / 18.4s —— 70µs/次。根因是
+// 同一枚节点在一条语句里被反复下潜重推 (对象子树 × 若干辅助各推一遍, 每推一遍还带
+// 全符号表线性扫描与 toLower 分配)。缓存口径:
+//   · epoch 单调不减且**全局** —— AST 节点可能被两个 CCodeGen 实例先后访问 (EXE 的
+//     逐模块实例与 DLL 的 dll_entry 实例), 各实例自行计数会撞车;
+//   · 推 epoch 的两个边界: 每个过程入口 (visit(Sub/Function/Property)) 与
+//     emitStmtList 的每条语句 —— 会改推断答案的表 (known*Vars_) 在体内中途的注册
+//     (Dim/For Each/With 临时) 全落在语句边界上, 语句内表格不动, 正是缓存可复用的窗口;
+//   · epoch==0 (首次推之前) 只算不存 —— 该窗口的表格状态不保证稳定。
+static uint32_t g_inferCacheEpoch = 0;
+
+void CCodeGen::bumpInferEpoch() { ++g_inferCacheEpoch; }
+
 Vb6Type CCodeGen::inferExprType(Expr& expr) const {
+    C3ScopeTimer _c3t(1);   // ai/030 续: 累计统计计在包装层 (缓存命中也算一次问)
+    const uint32_t ep = g_inferCacheEpoch;
+    if (ep != 0 && expr.inferCacheEpoch == ep) return static_cast<Vb6Type>(expr.inferCacheType);
+    Vb6Type t = inferExprTypeImpl(expr);
+    expr.inferCacheEpoch = ep;
+    expr.inferCacheType = static_cast<uint16_t>(t);
+    return t;
+}
+
+Vb6Type CCodeGen::inferExprTypeImpl(Expr& expr) const {
     switch (expr.kind) {
         case ASTNodeKind::IdentifierExpr: {
             auto& id = static_cast<IdentifierExpr&>(expr);

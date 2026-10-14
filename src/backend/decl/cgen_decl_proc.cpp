@@ -14,6 +14,7 @@ namespace vb6c3 {
 // ============================================================
 
 void CCodeGen::visit(SubDecl& node) {
+    bumpInferEpoch();   // ai/030 续: 过程入口推推断缓存 epoch (形参/局部表在这里重建)
     // 泛型模板 (tB, G2/G3): 模板本体不发码 (泛型器注入特化副本)
     if (!node.typeParams.empty()) return;
     // ai/vb-asm-extension-spec: Asm 块过程 → x64 独立 MASM 过程 / x86 内联 __asm 块

@@ -528,6 +528,10 @@
     // ---- 表达式类型推断 ----
     // 推断表达式的Vb6Type（简化版，用于Select Case等需要类型判断的场景）
     Vb6Type inferExprType(Expr& expr) const;
+    // ai/030 续 (§性能): 上面那枚是按节点缓存的薄包装, 真身在这里。缓存 epoch 由
+    // bumpInferEpoch 推进 (过程入口 / emitStmtList 的语句边界), 见 cgen_util_type.cpp。
+    Vb6Type inferExprTypeImpl(Expr& expr) const;
+    static void bumpInferEpoch();
 
     // ai/009 §5.10 (P3): 给**窄整型目标**的赋值右值套上溢出检查 (vb6_ChkByte/
     // ChkInt/ChkLong), 越界即 run-time error 6。原先这类赋值是裸 `t = v;`, 由 C
