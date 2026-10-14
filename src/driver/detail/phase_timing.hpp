@@ -58,9 +58,9 @@ inline void c3PhaseMarkIf(const std::string& label, double minMs) {
 // 用 RAII (C3ScopeTimer) 记账 —— 两次时钟读 ~60ns/次, 万级调用下忽略不计。
 namespace detail {
 struct PhaseStats {
-    static const int kSlots = 4;
-    double ms[kSlots] = {0, 0, 0, 0};
-    unsigned long long n[kSlots] = {0, 0, 0, 0};
+    static const int kSlots = 8;
+    double ms[kSlots] = {0, 0, 0, 0, 0, 0, 0, 0};
+    unsigned long long n[kSlots] = {0, 0, 0, 0, 0, 0, 0, 0};
 };
 inline PhaseStats& phaseStats() { static PhaseStats s; return s; }
 } // namespace detail
@@ -76,9 +76,11 @@ inline void c3StatDump(const std::string& tag) {
     if (!clk.on) return;
     auto& s = detail::phaseStats();
     std::fprintf(stderr,
-                 "C3: STATS %s emitLine=%.0fms/%llu inferExprType=%.0fms/%llu emitExpr=%.0fms/%llu\n",
+                 "C3: STATS %s emitLine=%.0f/%llu inferExprType=%.0f/%llu emitExpr=%.0f/%llu "
+                 "defVariant=%.0f/%llu ident=%.0f/%llu member=%.0f/%llu call=%.0f/%llu binary=%.0f/%llu\n",
                  tag.c_str(),
-                 s.ms[0], s.n[0], s.ms[1], s.n[1], s.ms[2], s.n[2]);
+                 s.ms[0], s.n[0], s.ms[1], s.n[1], s.ms[2], s.n[2], s.ms[3], s.n[3],
+                 s.ms[4], s.n[4], s.ms[5], s.n[5], s.ms[6], s.n[6], s.ms[7], s.n[7]);
     std::fflush(stderr);
     for (int i = 0; i < detail::PhaseStats::kSlots; i++) { s.ms[i] = 0; s.n[i] = 0; }
 }

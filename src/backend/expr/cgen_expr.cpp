@@ -24,18 +24,26 @@ void CCodeGen::emitExpr(Expr& expr) {
     switch (expr.kind) {
         case ASTNodeKind::LiteralExpr:
             visit(static_cast<LiteralExpr&>(expr)); break;
-        case ASTNodeKind::IdentifierExpr:
+        case ASTNodeKind::IdentifierExpr: {
+            C3ScopeTimer _k(4);   // ai/030 续: 逐类自时 (ident)
             visit(static_cast<IdentifierExpr&>(expr)); break;
-        case ASTNodeKind::BinaryExpr:
+        }
+        case ASTNodeKind::BinaryExpr: {
+            C3ScopeTimer _k(7);   // ai/030 续: 逐类自时 (binary)
             visit(static_cast<BinaryExpr&>(expr)); break;
+        }
         case ASTNodeKind::UnaryExpr:
             visit(static_cast<UnaryExpr&>(expr)); break;
-        case ASTNodeKind::MemberAccessExpr:
+        case ASTNodeKind::MemberAccessExpr: {
+            C3ScopeTimer _k(5);   // ai/030 续: 逐类自时 (member)
             visit(static_cast<MemberAccessExpr&>(expr)); break;
+        }
         case ASTNodeKind::DictionaryAccessExpr:
             visit(static_cast<DictionaryAccessExpr&>(expr)); break;
-        case ASTNodeKind::IndexOrCallExpr:
+        case ASTNodeKind::IndexOrCallExpr: {
+            C3ScopeTimer _k(6);   // ai/030 续: 逐类自时 (call)
             visit(static_cast<IndexOrCallExpr&>(expr)); break;
+        }
         case ASTNodeKind::NewExpr:
             visit(static_cast<NewExpr&>(expr)); break;
         case ASTNodeKind::TypeOfExpr:

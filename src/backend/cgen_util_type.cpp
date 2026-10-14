@@ -628,6 +628,7 @@ Vb6Type CCodeGen::inferExprTypeImpl(Expr& expr) const {
 // 与 inferExprType 的差异: 内置函数 (sym==null) 与 UDT 字段访问 (lookupModule 失败) 等
 // 通过 fallback 返回 Variant 的情形, 此处视为非 Variant, 避免对 int/BSTR 等实参误包装.
 bool CCodeGen::isDefinitelyVariantExpr(Expr& expr, bool* isArrOut) const {
+    C3ScopeTimer _c3t(3);   // ai/030 续: isDefinitelyVariantExpr 累计统计 (slot 3)
     if (isArrOut) *isArrOut = false;
     uint16_t variantArrRaw = static_cast<uint16_t>(Vb6Type::Variant)
                            | static_cast<uint16_t>(Vb6Type::Array);
