@@ -241,6 +241,11 @@ void CCodeGen::visit(PropertyDecl& node) {
             // Fix 055: 注册UDT数组元素C类型
             std::string udtCType = resolveArrayUdtElemCType(p->asType.get());
             if (!udtCType.empty()) arrayUdtElemTypes_[pLower] = udtCType;
+            // 账 #305 B181 (knife 71): a ByRef Byte() FORMAL used to reach none of the two
+            // byte-array name sets (only module-level + local declaration paths write them),
+            // so StrPtr(b) / StrConv(b, ...) silently handed the SafeArray DESCRIPTOR pointer
+            // to a BSTR formal. Symmetric with cgen_decl_var.cpp:85 / cgen_localdecl.cpp:104.
+            if (elemType == Vb6Type::Byte) knownByteArrayVars_.insert(pLower);
             knownLocalVars_.insert(pLower);
         }
     }

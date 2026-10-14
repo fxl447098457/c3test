@@ -281,6 +281,12 @@ void CCodeGen::visit(FunctionDecl& node) {
             // Fix 055: 注册UDT数组元素C类型
             std::string udtCType = resolveArrayUdtElemCType(p->asType.get());
             if (!udtCType.empty()) arrayUdtElemTypes_[pLower] = udtCType;
+            // 账 #305 §B181 (第七十一刀): 形参这一档以前只进上面那几张表, **没进字节数组名单**
+            // (knownByteArrayVars_ 的写者只有模块级两条 + 局部两条声明路) ⇒
+            // `StrPtr(b)` / `StrConv(b, …)` 里 b 是 `ByRef b() As Byte` 时按裸名查不到,
+            // 静默把 SafeArray **描述符**指针交给要 BSTR 的 Win32 形参。与
+            // cgen_decl_var.cpp:85 / cgen_localdecl.cpp:104 那两条登记路对称。
+            if (elemType == Vb6Type::Byte) knownByteArrayVars_.insert(pLower);
             knownLocalVars_.insert(pLower);
         }
     }

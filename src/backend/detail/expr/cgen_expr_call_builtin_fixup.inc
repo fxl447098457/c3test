@@ -411,7 +411,10 @@
     if (callee == "vb6_StrConv" && !args.empty()) {
         std::string arg0name = args[0];
         if (arg0name.compare(0, 4, "me->") == 0) arg0name = arg0name.substr(4);
-        if (arg0name.size() > 4 && arg0name[0] == '(' && arg0name[1] == '*'
+        // 账 #305 §B181 (第七十一刀): 长度闸原来是 `> 4`，于是枚长正好 4 的 `(*b)`
+        // (单字母名) 剥不出 `b` ⇒ 这一族的规则在 backend 里有 24 位主人、各家闸不同
+        // (`> 2` / `> 3` / `> 4`)，同一个问题在不同站点答案不一样。这里收成「至少 `(*x)`」。
+        if (arg0name.size() >= 4 && arg0name[0] == '(' && arg0name[1] == '*'
             && arg0name.back() == ')') {
             arg0name = arg0name.substr(2, arg0name.size() - 3);
         }
@@ -427,7 +430,11 @@
     if (callee == "vb6_StrPtr" && !args.empty()) {
         std::string a140 = args[0];
         if (a140.compare(0, 4, "me->") == 0) a140 = a140.substr(4);
-        if (a140.size() > 4 && a140[0] == '(' && a140[1] == '*'
+        // 账 #305 §B181 (第七十一刀): 原来写 `> 4` ⇒ 枚长正好 4 的 `(*b)` (单字母名) 剥不出
+        // `b`，而这一站剥不出来就等于认不出是字节数组 ⇒ 静默把描述符指针交给要 BSTR 的形参。
+        // 闸改成「至少 `(*x)`」。同一条剥壳规则在 backend 里有 24 位主人、闸各有三种
+        // (`> 2` / `> 3` / `> 4`) ⇒ 收成一处是下一格 (§B181 先手)，本刀先把这一格修对。
+        if (a140.size() >= 4 && a140[0] == '(' && a140[1] == '*'
             && a140.back() == ')') {
             a140 = a140.substr(2, a140.size() - 3);
         }

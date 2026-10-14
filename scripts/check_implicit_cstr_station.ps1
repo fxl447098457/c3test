@@ -27,6 +27,8 @@
 #      管的位上折得对，但**只管 prompt 一位**，标题位今天仍裸交 double）。同时钉
 #      'callee = "vb6_MsgBox1"' 恰好 1 处 —— 那一形是 arity 改道，问的是另一件事，必须还在。
 #
+#   R11 字节数组的两位主人登记路数相等（各 7 条：模块级 2 + 局部 2 + 形参 3）。
+#   R12 字节数组那两站的剥壳闸 = 2 条 `>= 4`，且 builtin_fixup 里不许再留 `> 4`。
 # 用法: powershell -File scripts\check_implicit_cstr_station.ps1 [-RootOverride <目录>]  (PASS = exit 0)
 #   -RootOverride 是给负控用的: 把 src\backend 抄到别处再判, 真树一字不动。
 
@@ -233,7 +235,9 @@ $slotWantsWant = @('cgen_expr_call_arg_variant.inc', 'cgen_expr_call_builtin_fix
 # 的解包 / builtin_fixup 照着同一问句把 callee 换成收槽的出口 vb6_StrPtrVar）。两站判据必须同源 ——
 # 只改一头就会造出「发码把整枚槽交给 void* vb6_StrPtr(BSTR)」(C2440) 或「callee 没改名、槽被解包
 # 又现造一枚临时串」(本刀要撤的那条) 两种半边病。
-# 它刻意**不进**上面那张按位号答档的表：`vb6_StrPtr(` 在全语料 1720 处里 1478 处交的是普通 String
+# 它刻意**不进**上面那张按位号答档的表：`vb6_StrPtr(` 在全语料 1720 处里确定不是现造串的有 953 处，
+# 另有 535 处这次逐枚读过（数组元素左值 / 解引用 / 返回 BSTR 的调用），只有 41 处是槽 ——
+# 逐枚分解与订正见台账 §B180；无条件按位号答槽会把那 953 处一并打成 C2440。
 # 变量（`.build/k69_strptr_census.txt`），无条件按位号答槽会把它们一并打成 C2440。
 $slotWants = @(Get-CallSites 'builtinWantsRawSlotFromVariant')
 if ($slotWants.Count -ne 2) {
@@ -248,6 +252,38 @@ $strPtrVarN = @([regex]::Matches($allCode, [regex]::Escape('vb6_StrPtrVar'))).Co
 if ($strPtrVarN -ne 1) {
     $viol += ('R10 vb6_StrPtrVar 在 src/backend 出现 ' + $strPtrVarN + ' 处, 应为 1 处 —— ' +
               '改道只许在 builtin_fixup 那一处发生, 别在第二站再拼一次出口名')
+}
+
+# ---- R11 (账 #305 §B181, 第七十一刀) ----
+# 「这一枚实参是不是字节数组」有两位主人：`arrayElemTypes_`（按名字答元素档，六条声明路都填、**含形参**）
+# 与 `knownByteArrayVars_` ∪ `classByteArrayMembers_`（Fix 140 那两站查的文本名单）。第七十一刀之前
+# 名单缺「形参」整条路 ⇒ 同一枚数组在 `StrPtr(局部)` 与 `StrPtr(形参)` 下交出两种指针（后者把 SafeArray
+# **描述符**地址交给要 BSTR 的 Win32 形参，cl 在 C 里只警告）。现在补齐，于是两位主人的**登记路数**
+# 必须相等：以后谁再添一条声明路而只填一张表，这一条就红。
+$aeWriters = @([regex]::Matches($allCode, 'arrayElemTypes_\[\s*\w+\s*\]\s*=\s*elemType')).Count
+$baWriters = @([regex]::Matches($allCode, 'knownByteArrayVars_\.insert')).Count
+if ($aeWriters -ne 7 -or $baWriters -ne 7) {
+    $viol += ('R11 数组元素档的登记路数 = ' + $aeWriters + '，字节数组名单的登记路数 = ' + $baWriters +
+              '，两者应各为 7（模块级 2 + 局部 2 + 形参 3）—— 一张表多一条腿而另一张没有，' +
+              '就是「StrPtr(形参) 交出描述符指针」那一族静默病的成因')
+}
+
+# ---- R12 (账 #305 §B181, 第七十一刀) ----
+# 剥 `(*x)` 这层壳的规则在 src/backend 里有 **24 位主人**，长度闸却写着三种（`> 2` / `> 3` / `> 4`）
+# ⇒ 同一个问题在不同站点答案不一样，而 `> 4` 那批对**单字母名**整片失灵（`(*b)` 正好 4 个字符）。
+# 收成一处是下一格；本刀先把字节数组那两站（`vb6_StrPtr` / `vb6_StrConv` 的改名）的闸写成 `>= 4`，
+# 这里钉两件事：那两站各一条 `>= 4`，且 builtin_fixup 里**不许**再留 `> 4` 的剥壳闸。
+$fixupPath = Join-Path $backend 'detail\expr\cgen_expr_call_builtin_fixup.inc'
+$fixupCode = if ($codeByFile.ContainsKey($fixupPath)) { $codeByFile[$fixupPath] } else { '' }
+$derefGe4 = @([regex]::Matches($fixupCode, '\.size\(\)\s*>=\s*4\s*&&\s*\w+\[0\]\s*==\s*''\(''')).Count
+if ($derefGe4 -ne 2) {
+    $viol += ('R12 字节数组那两站的 (*x) 剥壳闸应有 2 条 `>= 4`，实为 ' + $derefGe4 +
+              ' 条 —— 闸退回 `> 4` 会让单字母形参连查表那一步都没进（病形 = 描述符指针交给要 BSTR 的形参）')
+}
+$derefGt4Fixup = @([regex]::Matches($fixupCode, '\.size\(\)\s*>\s*4\s*&&\s*\w+\[0\]\s*==\s*''\(''')).Count
+if ($derefGt4Fixup -ne 0) {
+    $viol += ('R12 builtin_fixup 里还剩 ' + $derefGt4Fixup + ' 条 `> 4` 的 (*x) 剥壳闸：同一条规则的两半' +
+              '不许一个修一个不修')
 }
 
 Write-Host ('census: backendFiles=' + $allFiles.Count +
@@ -273,5 +309,5 @@ if ($viol.Count -gt 0) {
                 '形状走 wrapToBSTR; 要加第二位主人请先说明这四个问为什么分不开')
     exit 1
 }
-Write-Host 'PASS implicit_cstr_station (R1..R10)'
+Write-Host 'PASS implicit_cstr_station (R1..R12)'
 exit 0

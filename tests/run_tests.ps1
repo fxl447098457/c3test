@@ -3280,7 +3280,7 @@ if ($Category -in @("all", "run", "bas")) {
     # `CreateWindowExW` / `FindFirstFileW` / `VarI8FromStr` / `dwTypeData` 这些指针交接位上。
     # 修法 = `vt` 已是串时**借**槽里那枚 BSTR（RTL 新出口 `vb6_StrPtrVar`），发码侧由一枚**看实参**的
     # 问句撤回解包 + `builtin_fixup` 改 callee 名（两站同归一处）。⚠ 这一问不许按位号无条件答槽：
-    # 同一个 `vb6_StrPtr(` 在全语料另有 1478 处交的是普通 String 变量，无条件答槽会把它们全打成
+    # 同一个 `vb6_StrPtr(` 在全语料 1720 处里只有 41 处是槽，其余 1679 处交的是普通 String 变量 / 数组元素 / 解引用（逐枚分解见台账 §B180 的订正条），无条件答槽会把它们全打成
     # C2440（读数 = `.build/k69_strptr_census.txt`）。非串那档仍 mint，那半归 §B164 形①。
     $b180Needles = @("P1-var-string-nonzero=Y", "P2-empty-string=0",
         "P3-variant-empty-string=0", "P4-var-numeric-nonzero=Y", "P5-stable=Y",
@@ -3310,6 +3310,39 @@ if ($Category -in @("all", "run", "bas")) {
         'vb6_StrPtrVar(e)',
         'vb6_StrPtrVar(s)'
     )
+    # <vbeclipse> 账 #305 §B181（第七十一刀）：`StrPtr` / `StrConv` 收一枚 **ByRef Byte() 形参**时，
+    # 以前交出去的是 SafeArray **描述符**的地址，不是数据首地址 —— cl 在 C 里只警告不拦，静默。
+    # 两处独立成因，都用本夹具自己的形状在修前那台（`C3_k69_new.exe`）上量到：① 字节数组名单
+    # 压根没有「形参」那条登记路（模块级与局部都有：`cgen_decl_var.cpp:85` / `cgen_localdecl.cpp:104`），
+    # ② 剥 `(*x)` 的长度闸写作 `> 4` ⇒ 单字母形参连查表那一步都没进。BASE 读数 = formal 指针 ≠
+    # 调用方指针、delta 非 0、`lstrlenW` 把描述符头读成 3；修后两台逐行相同（都是 2 / 都是 Y）。
+    $b181Needles = @("C3ProbeB181-P1-short-formal-same=Y", "C3ProbeB181-P2-long-formal-same=Y",
+        "C3ProbeB181-P3-short-formal-len=2", "C3ProbeB181-P4-long-formal-len=2",
+        "C3ProbeB181-P5-module-len=2", "C3ProbeB181-P6-caller-nonzero=True", "C3ProbeB181-DONE")
+    Add-BasTest "b181_baformal" "$Tests\b181_baformal.bas" $b181Needles
+    Add-BasTest "b181_baformal_x86" "$Tests\b181_baformal.bas" $b181Needles -Arch "x86"
+    # 发码针：单字母与长名两枚形参都走数据指针出口；兄弟站 StrConv 同一条腿；模块级那枚是**证人**
+    # （修前修后都在，钉「这一站本来就对的那些形状不许动」）；最后一枚 = 非字节数组的元素照旧走裸
+    # `vb6_StrPtr`，钉这一档没被过度改道。
+    Test-EmitcShape 'b181_baformal_shape' @(
+        "$Tests\b181_baformal.bas") @(
+        'vb6_SafeArrayDataPtr((*b))',
+        'vb6_SafeArrayDataPtr((*data))',
+        'vb6_StrConvFromByteArray((*data)',
+        'vb6_SafeArrayDataPtr(m_Module)',
+        'vb6_StrPtr(VB6_SA_AT'
+    )
+    # 反针：前三枚 = 病形本体（描述符指针进 BSTR 形参）；后两枚 = 把 String 数组元素也改道过去
+    # 的过度形状（那正是 §B180 那条普查警告过的误伤方向）。
+    Test-EmitcAbsent 'b181_baformal_lesion' @(
+        "$Tests\b181_baformal.bas") @(
+        'vb6_StrPtr((*b))',
+        'vb6_StrPtr((*data))',
+        'vb6_StrConv((*data)',
+        'vb6_SafeArrayDataPtr(VB6_SA_AT',
+        'vb6_StrConvFromByteArray(VB6_SA_AT'
+    )
+
     # <vbeclipse> 账 #305 §B154（第四十二刀）：ReDim 重建一枚动态数组时，元素档**问声明**，不是问 ReDim 自己
     # 的 As 子句。修前 cgen_redim.cpp 只问 asType，没写 As 就交 vb6_sa_variant，而访问侧（VB6_SA_AT /
     # VB6_SA_ND_AT2）问的是声明表 arrayElemTypes_ —— 同一枚描述符两个答案：造出来 24 字节一步（x64），
