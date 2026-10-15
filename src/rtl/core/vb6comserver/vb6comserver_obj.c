@@ -430,8 +430,9 @@ vb6_ComObject* vb6_ComObject_Create(const vb6_CoClassDesc* desc, HRESULT* pFailH
 //
 // 复用规则: 实例首个字段 __comObj 已指向包装对象时直接 AddRef 复用 (同一实例
 // 每次读出返回同一 IDispatch, 引用计数正确), 否则新建包装并回填 __comObj.
-// 前置条件: 实例所在类的结构体首字段必须是 __comObj —— cgen 仅在 ActiveX DLL
-// 工程 (isDll_) 的类结构体里生成该字段, 故本函数只能用于 DLL 侧的字段 getter.
+// 前置条件: 实例所在类的结构体首字段必须是 __comObj —— 自 ExeComBridge 01 起**所有**类模块
+// 的结构体都有这一格 (工厂里那句 me->__comObj = NULL 是无条件发的), 所以本函数不只服务 DLL
+// 侧的字段 getter; 但 EXE 里今天既不装箱也没人查登记表 (§B187), 真走到它的仍只有 ActiveX 那一路。
 vb6_ComObject* vb6_ComObject_FromInstance(const vb6_CoClassDesc* desc, void* instance) {
     void** ppComObj;
     vb6_ComObject* existing;
@@ -543,11 +544,14 @@ const vb6_CoClassDesc* vb6_FindCoClassDesc(const char* classVariable) {
 //      处)」—— 那一枚复核函数与那个分派处在整棵树与全部历史里都不存在 (git log -S 对两个
 //      名字都只命中引入本表那一笔), 所以它是一个从来没接上的打算, 不是现有机制。今天
 //      查表的读者是 0 枚: vb6_FindProjectClassDesc / ...Raw 全仓无调用点 ⇒ 本表只有登记
-//      这一腿在跑。撤掉整格、还是反过来把读者接上 (= 工程内对象走晚绑定那一格, 台账
-//      W2/#64) 是口径待拍, 本刀不并; 而「接上」单独还不够 —— EXE 里没有 CoClass 块时
-//      vb6_FindCoClassDesc 恒 NULL, 登记腿那声 if (_d) 直接把这类实例挡在表外 (实测
-//      .build/k79_late/, 两台逐行相同: Set v = <工程内对象> 之后 v.Twice(21) 空答、Err=0,
-//      stderr 只有一句 vb6_ComCall: method "Twice" not found)。
+//      这一腿在跑。2026-10-15 口径已拍 (§B187 第二格): **按工程类型分档** —— ActiveX 那一档
+//      (Type=DLL / Type=Control, 后端读 isDll_) 走 (b) = 接读者 + 配注销腿, 其余走 (a) =
+//      连登记都不发。订正一条旧解释: 先前写的「EXE 里没有 CoClass 块 ⇒ vb6_FindCoClassDesc
+//      恒 NULL ⇒ 这类实例压根没进表」是**错的** —— EXE 也链一张完整 coclass 表 (com_entry.c,
+//      ExeComBridge 01), 收集判据是类的 Instancing 而非有没有手写 CoClass 块, 那张表在 EXE 里
+//      天天被写。真断点在两条腿都没接: Set v = <工程内对象> 发成**裸指针赋值** (不装箱、不查
+//      表), 晚绑定那站 vb6_ComIsDispatchable 判否 ⇒ DISPID_UNKNOWN ⇒ 恒 VT_EMPTY (实测
+//      .build/k79_late/ 与 .build/k81_run.bat, 两台逐行相同: v.Twice(21) 空答、Err=0)。
 //   ② 「扫到哪儿」这一问以前有两个答案: 登记腿那圈只按 g_vb6_projClassCount 走, 查表腿
 //      那圈另外夹住 VB6_PROJCLASS_MAX; 而计数是在夹界检查之前自增、放弃登记那一路不回退
 //      ⇒ 计数无上界, 从第 514 枚实例起登记腿就在读数组外面的相邻静态数据 (巧合命中时还会

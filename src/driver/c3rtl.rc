@@ -1,4 +1,9 @@
 // c3rtl.rc - RTL runtime library embedded as resources
+// 2026-10-15 (账 #305 §B187 第二格, 第八十一刀): 登记腿改成只在 ActiveX 那一档发 (后端读 isDll_),
+//   非 ActiveX 工程从此不喂这张表 —— 零行为改动 (读者 0 枚), 动的是发码; 本轮 RTL 只改注释两处:
+//   ① 那张表头部订正掉「EXE 里没 CoClass 块 ⇒ 实例没进表」那句被 com_entry.c 推翻的解释, 记下拍定的
+//   分档口径; ② vb6_ComObject_FromInstance 头上那句「__comObj 只在 DLL 工程生成」自 ExeComBridge 01
+//   起就是错的, 一并订正。下面第一格那条注脚照旧有效, 不动它。
 // 2026-10-15 (账 #305 §B187 第一格, 第七十九刀): 工程类那张 512 格登记表上「扫到哪儿」这一问以前
 //   有两个答案 —— 登记腿那圈只按 g_vb6_projClassCount 走, 查表腿那圈另外夹住 VB6_PROJCLASS_MAX; 而计数
 //   是在夹界检查**之前**自增、放弃登记那一路不回退 ⇒ 计数无上界, 从第 514 枚实例起登记腿就在读数组外面

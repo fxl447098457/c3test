@@ -14,6 +14,7 @@
 #   P2  任何 for 条件都不许再直接拿 g_vb6_projClassCount 当边界 (代码里 0 处)。
 #   P3  那枚夹界出口: 定义恰好 1 处; VB6_PROJCLASS_MAX 在代码里恰好 5 处(住在 4 行上:
 #       #define / 数组尺寸 / 出口里那行夹界(同一行点了它两次) / 放弃登记那一句), 后者恰好 1 处。
+#   P5  登记腿只许 ActiveX 那一档发: cgen_com.cpp 里恰好 1 处, 且它上面一行就是 if (isDll_) {
 #   P4  读者普查: vb6_FindProjectClassDesc( 在 .c 的代码里恰好 2 处 (定义 + ...Raw 的转调)、
 #       在 .h 里至多 1 处 (就那一枚声明); vb6_ProjClassVerify 在代码里 0 处 (它不存在,
 #       只许住在注释里)。
@@ -87,7 +88,8 @@ $hdrCalls = @([regex]::Matches($hdrCode, $callRx)).Count
 if ($objCalls -gt 2 -or $hdrCalls -gt 1) {
     $bad += ("P4 the project-class lookup gained readers (code mentions: .c=" + $objCalls +
              " .h=" + $hdrCalls + ", want <=2 / <=1) - §B187 的「撤掉整格 vs 把读者接上」是待拍口径,")
-    $bad += ("     接上之前先回台账读那两条读数 (EXE 里没有 CoClass 块 ⇒ 登记腿那声 if (_d) 把工程内实例挡在表外)")
+    $bad += ("     接上之前先回台账读那两条读数 (2026-10-15 拍定的分档: ActiveX DLL/Control 走 (b) = 接读者 + 配注销腿,")
+    $bad += ("     其余走 (a) = 连登记都不发; 而「EXE 里没有 CoClass 块 ⇒ 实例没进表」那句旧解释已被 com_entry.c 推翻")
 }
 $verify = @([regex]::Matches($objCode, 'vb6_ProjClassVerify')).Count
 if ($verify -ne 0) {
@@ -95,9 +97,31 @@ if ($verify -ne 0) {
              " times in code text - that function does not exist; the claim belongs in a comment at most")
 }
 
+# ---- P5 (账 #305 §B187 第二格, 2026-10-15 拍定的分档) ----
+# 登记腿只许在 ActiveX 那一档发: 那一句 emit 必须恰好 1 处, 且它上面一行就是 if (isDll_) { 。
+# 撤掉这层夹 = 非 ActiveX 工程又开始喂那张表 (读者 0 枚 ⇒ 白付每实例一格), 或者两处各发一遍。
+$cgenRel = 'src\backend\module\cgen_com.cpp'
+$cgen = Join-Path $Root $cgenRel
+if (-not (Test-Path -LiteralPath $cgen)) {
+    $bad += ("P5 missing " + $cgenRel + " - the registration leg's project-type gate is not where B187 says it is")
+} else {
+    $cgenAll = Get-CodeText187 (Get-Content -Raw -Encoding UTF8 $cgen)
+    $regAll = @([regex]::Matches($cgenAll, 'vb6_RegisterProjectClassInstance')).Count
+    if ($regAll -ne 1) {
+        $bad += ("P5 registration-emit sites = " + $regAll + " (want exactly 1)")
+    }
+    $cl = @($cgenAll -split "`n")
+    $at = -1
+    for ($j = 0; $j -lt $cl.Count; $j++) { if ($cl[$j] -match 'vb6_RegisterProjectClassInstance') { $at = $j; break } }
+    $gated = ($at -ge 2 -and ($cl[$at - 1] -match 'if \(isDll_\) \{' -or $cl[$at - 2] -match 'if \(isDll_\) \{'))
+    if ($at -ge 1 -and -not $gated) {
+        $bad += ("P5 the registration leg is not gated by the single project-type answer (want if (isDll_) { within the 2 lines above) - reads: " + $cl[$at - 1].Trim())
+    }
+}
+
 if ($bad.Count -gt 0) {
     foreach ($b in $bad) { Write-Host ("FAIL " + $b) }
     exit 1
 }
-Write-Host ("PASS check_projclass_scan_bound: loops=2 raw-bound=0 helper=1 cap=5/4lines bail=1 readers=0 verify-in-code=0")
+Write-Host ("PASS check_projclass_scan_bound: loops=2 raw-bound=0 helper=1 cap=5/4lines bail=1 readers=0 verify-in-code=0 reg-site=1 gated=isDll_")
 exit 0
