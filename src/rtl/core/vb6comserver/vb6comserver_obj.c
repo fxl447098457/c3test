@@ -670,6 +670,26 @@ int32_t vb6_ComObject_IsBoxed(void* v) {
     return ((vb6_ComObject*)v)->vtable == &g_ComObjectVtable;
 }
 
+/* 账 #305 §B189 第一档: 见 vb6comserver.h 声明处的论证。char*→BSTR 走 CP_ACP 那一条,
+ * 与本文件上方 progId / 类名那几处同一口径 (VB 的类模块名允许非 ASCII 标识符)。
+ * 认不出 (不是我们的包装器 / desc 缺 / 名为空) 一律 NULL —— 调用方那一路要交回原答案。 */
+BSTR vb6_ComObject_ClassNameBStr(void* v) {
+    const vb6_ComObject* obj;
+    const char* s;
+    int wlen;
+    BSTR r;
+    if (!vb6_ComObject_IsBoxed(v)) return NULL;
+    obj = (const vb6_ComObject*)v;
+    s = obj->desc ? obj->desc->classVariable : NULL;
+    if (!s || !s[0]) return NULL;
+    wlen = MultiByteToWideChar(CP_ACP, 0, s, -1, NULL, 0);  /* -1 = 输入以 NUL 结尾 */
+    if (wlen <= 1) return NULL;
+    r = SysAllocStringLen(NULL, (UINT)wlen - 1);
+    if (!r) return NULL;
+    MultiByteToWideChar(CP_ACP, 0, s, -1, r, wlen);
+    return r;
+}
+
 // ============================================================
 // ExeComBridge 03: 工程类实例 → COM 调用实参 (VT_DISPATCH VARIANT*)
 // ============================================================

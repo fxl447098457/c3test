@@ -181,6 +181,11 @@ void* vb6_ComObject_GetInstance(void* pdisp);
 // (IsWindow / IsBadReadPtr / 首字段可读), 最后一闸换成**身份**: 首字段 == g_ComObjectVtable。
 int32_t vb6_ComObject_IsBoxed(void* v);
 
+// 账 #305 §B189 第一档: 「这枚包装器是哪一枚工程类」—— 交类模块名 (VB6 的 TypeName 对
+// 工程内类实例答的就是类模块名)。只认 vb6_ComObject_IsBoxed 说"是"的值, 其余一律 NULL:
+// 调用方 (vb6rtl_conv.c 的 vb6_TypeName) 拿 NULL 就继续走它原来的答案, 本刀不改标签也不改档。
+BSTR vb6_ComObject_ClassNameBStr(void* v);
+
 // ExeComBridge 03: 把工程类实例包成"COM 调用实参格式"的 VARIANT* (VT_DISPATCH).
 // cgen 为每个类模块生成 vb6_ComPack_<类名>(void* instance) 包一层本函数; 触发场景
 // 是 `New <本工程类>` 出现在 COM 调用实参位置

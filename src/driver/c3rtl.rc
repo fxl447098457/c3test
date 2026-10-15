@@ -684,3 +684,11 @@
  *   调用点是 cgen 新落的那座桥（ByRef 泛对象形参：调用前就地装箱、调用后剥回），它拿到的是
  *   "一枚槽里此刻装着什么"，可能是裸 HWND，所以 deref 之前必须先证明可读。
  *   touch 本文件 = 让 RCDATA 重嵌一次（§B99②）。 */
+
+
+/* 账 #305 §B189 第一档（2026-10-16 第八十六刀）：vb6comserver 再多一枚出口
+ *   vb6_ComObject_ClassNameBStr —— 「这枚包装器是哪一枚工程类」，交 desc->classVariable
+ *   （类模块名）；只认 vb6_ComObject_IsBoxed 说"是"的值，其余交 NULL。
+ *   消费点一处 = vb6rtl_conv.c 的 vb6_TypeName 在 VT_DISPATCH 那一支、排在宿主那一问之后
+ *   （tests/setobj 两枚针钉着控件名那一档，顺序不许倒）。
+ *   touch 本文件 = 让 RCDATA 重嵌一次（§B99②）。 */
