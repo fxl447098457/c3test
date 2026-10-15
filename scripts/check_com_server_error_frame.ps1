@@ -21,6 +21,14 @@
 #   R4  失败路径不许跳过收尾：ComObj_Invoke 末尾那两行无条件收尾(`if (args)` / `if (coercedArgs)`
 #       各 CoTaskMemFree)必须还在，且 `vb6_ComFailExcep(` 那一次调用排在它们之后
 #       (错误路径与成功路径走同一条收尾，否则每次抛错漏两批缓冲)。
+#   R5  账 #305 §B186 (第七十八刀)：服务端进门的**第二站** = `vb6_ComObject_Create` 里
+#       `desc->factoryFunc()` 那一句(它走进 Class_Initialize)。同一道决定不许只补一半：
+#       这一格里 `setjmp` / Save / Restore / `factoryFunc` 各恰好 1 次，且登记排在调进去之前。
+#   R6  同那一刀的**分档**：这一条通道没有 EXCEPINFO，失败只能编进 HRESULT ——
+#       `vb6_ComObject_Create` 里交回 0x800A0000|n 的那一句必须恰好 1 次、E_OUTOFMEMORY 那两格
+#       (包装器分不到 / 工厂交回 NULL)必须还在，而 `CF_CreateInstance` 里**不许**再出现
+#       `return E_OUTOFMEMORY`(它过去把 NULL 一律说成内存不够，正是这一格的分档缺失)；
+#       客户端三条 create 腿一律问 `vb6_ComFailCreate`，那张网里不许再出现裸的 `vb6_RaiseError(429`。
 #
 # 用法: powershell -File scripts\check_com_server_error_frame.ps1 [-Root <目录>]   (PASS ⇒ exit 0)
 # 负控在 src 的副本上跑(-Root)，共享工作树一格不动。
@@ -34,6 +42,7 @@ $objPath  = Join-Path $Root 'src\rtl\core\vb6comserver\vb6comserver_obj.c'
 $comPath  = Join-Path $Root 'src\rtl\core\vb6com\vb6com.c'
 $colPath  = Join-Path $Root 'src\rtl\core\vb6com\vb6com_collection.c'
 $hPath    = Join-Path $Root 'src\rtl\core\vb6com\vb6com_internal.h'
+$facPath  = Join-Path $Root 'src\rtl\core\vb6comserver\vb6comserver_factory.c'
 
 $fail = @()
 
@@ -131,9 +140,12 @@ if ((Count-In $failBody 'vb6_ComFailExcep(') -ne 1) {
 $com  = Read-Lines $comPath
 $defB = Get-Body $com '^HRESULT vb6_ComFailExcep'
 if ($defB.Count -lt 5) { $fail += "R3 vb6_ComFailExcep definition not found in vb6com.c" }
-$decls = 0
-foreach ($l in (Read-Lines $hPath)) { if ($l.Contains('vb6_ComFailExcep')) { $decls++ } }
-if ($decls -ne 1) { $fail += "R3 declaration count in vb6com_internal.h = $decls (want 1)" }
+# 声明按**签名形状**数，且先剥注释 (账 #305 §B186 的实测: 头文件里那句「造: vb6_ComFailExcep 填
+# scode」是给人读的说明，被整行 Contains 数成了第二枚声明 —— 与 R3 那条数 0x800A 的尺子同形，
+# 这一族的做法是**把尺子的形状识别改对**，不是把说明文字改哑)。
+$hCode = Strip-Comments185 ((Read-Lines $hPath) -join "`n")
+$decls = ([regex]::Matches($hCode, 'HRESULT vb6_ComFailExcep\s*\(')).Count
+if ($decls -ne 1) { $fail += "R3 declarations of vb6_ComFailExcep in vb6com_internal.h = $decls (want 1)" }
 # 调用点 = 真的把那枚出口**用出去**的两处；本文件顶部那句 extern 声明不算(否则这一计数会随
 # 跨族声明的写法漂，而漂的不是这道决定)。
 $objCode = Strip-Comments185 (($obj -join "`n"))
@@ -163,9 +175,59 @@ elseif ($iFailc -lt 0) {
 elseif (-not ($iFreeA -lt $iFailc -and $iFreeC -lt $iFailc)) {
     $fail += "R4 failure return($iFailc) must come after the cleanup tail args=$iFreeA coercedArgs=$iFreeC, or every raise leaks both buffers" }
 
+# ---- R5 (账 #305 §B186: 第二站那一格同样只许一枚帧，且登记先于调进去) ----
+$createBody = Get-Body $obj '^vb6_ComObject\* vb6_ComObject_Create'
+if ($createBody.Count -lt 10) { Write-Host 'FAIL R5 cannot locate vb6_ComObject_Create body'; exit 1 }
+$cSet  = Count-In $createBody 'setjmp('
+$cSave = Count-In $createBody 'vb6_SaveErrState();'
+$cRest = Count-In $createBody 'vb6_RestoreErrState();'
+$cCall = Count-In $createBody 'desc->factoryFunc()'
+if ($cSet -ne 1)  { $fail += "R5 setjmp in vb6_ComObject_Create = $cSet (want exactly 1)" }
+if ($cSave -ne 1) { $fail += "R5 vb6_SaveErrState in vb6_ComObject_Create = $cSave (want exactly 1)" }
+if ($cRest -ne 1) { $fail += "R5 vb6_RestoreErrState in vb6_ComObject_Create = $cRest (want exactly 1)" }
+if ($cCall -ne 1) { $fail += "R5 desc->factoryFunc in vb6_ComObject_Create = $cCall (want exactly 1)" }
+$cSetI  = Index-Of $createBody 'setjmp('
+$cPtrI  = Index-Of $createBody 'vb6_error_jmp_ptr = &srvJmpC'
+$cCallI = Index-Of $createBody 'desc->factoryFunc()'
+if ($cSetI -lt 0 -or $cPtrI -lt 0 -or $cCallI -lt 0) {
+    $fail += "R5 missing one of setjmp/jmp_ptr-registration/factoryFunc (set=$cSetI ptr=$cPtrI call=$cCallI)" }
+elseif (-not ($cSetI -lt $cPtrI -and $cPtrI -lt $cCallI)) {
+    $fail += "R5 order is setjmp($cSetI) -> jmp_ptr($cPtrI) -> factoryFunc($cCallI); must register the frame before calling in" }
+
+# ---- R6 (账 #305 §B186: 这一条通道的失败要分得开，客户端三条腿只问一枚出口) ----
+$cVb = Count-In $createBody '*pFailHr = vb6_ComVbHresult('
+$cOom = Count-In $createBody '*pFailHr = E_OUTOFMEMORY;'
+if ($cVb -ne 1)  { $fail += "R6 vb6_ComVbHresult out-param in vb6_ComObject_Create = $cVb (want exactly 1)" }
+if ($cOom -ne 2) { $fail += "R6 E_OUTOFMEMORY out-param in vb6_ComObject_Create = $cOom (want 2: wrapper alloc + factory NULL)" }
+$cFree = Count-In $createBody 'CoTaskMemFree(obj);'
+if ($cFree -lt 2) { $fail += "R6 the two failure paths must both free obj before returning NULL (found $cFree)" }
+
+$fac  = Read-Lines $facPath
+$cfBody = Get-Body $fac 'static HRESULT STDMETHODCALLTYPE CF_CreateInstance'
+if ($cfBody.Count -lt 5) { $fail += "R6 CF_CreateInstance body not found" }
+if ((Count-In $cfBody 'vb6_ComObject_Create(self->desc, &failHr)') -ne 1) {
+    $fail += "R6 CF_CreateInstance does not ask vb6_ComObject_Create for the failure shape" }
+if ((Count-In $cfBody 'return E_OUTOFMEMORY;') -ne 0) {
+    $fail += "R6 CF_CreateInstance blankets NULL into E_OUTOFMEMORY again - the two questions must stay separable" }
+
+$createCalls = ([regex]::Matches($objCode, 'vb6_ComObject\* vb6_ComObject_Create\s*\(')).Count
+if ($createCalls -ne 1) { $fail += "R6 definitions of vb6_ComObject_Create = $createCalls (want 1)" }
+$mkCalls = ([regex]::Matches($comCode, 'vb6_ComVbHresult\s*\(')).Count
+if ($mkCalls -ne 2) { $fail += "R6 uses of vb6_ComVbHresult in vb6com.c = $mkCalls (want 2: the definition + the scode fill)" }
+$failCreateDefs = ([regex]::Matches($comCode, 'static void vb6_ComFailCreate\s*\(')).Count
+$failCreateCalls = ([regex]::Matches($comCode, 'vb6_ComFailCreate\s*\(')).Count
+if ($failCreateDefs -ne 1) { $fail += "R6 vb6_ComFailCreate definitions = $failCreateDefs (want 1)" }
+if ($failCreateCalls -ne 4) { $fail += "R6 vb6_ComFailCreate mentions in vb6com.c = $failCreateCalls (want 4: 1 def + 3 legs)" }
+$blanket429 = ([regex]::Matches($comCode, 'vb6_RaiseError\s*\(\s*429')).Count
+if ($blanket429 -ne 0) { $fail += "R6 a create leg raises a blanket 429 again ($blanket429) - it must go through vb6_ComFailCreate" }
+$externVb = ([regex]::Matches($objCode, 'extern HRESULT vb6_ComVbHresult')).Count
+if ($externVb -ne 1) { $fail += "R6 cross-family extern of vb6_ComVbHresult in vb6comserver_obj.c = $externVb (want 1)" }
+$hVb = ([regex]::Matches((Strip-Comments185 ((Read-Lines $hPath) -join "`n")), 'HRESULT vb6_ComVbHresult\s*\(')).Count
+if ($hVb -ne 1) { $fail += "R6 declaration of vb6_ComVbHresult in vb6com_internal.h = $hVb (want 1)" }
+
 if ($fail.Count -gt 0) {
     foreach ($f in $fail) { Write-Host ("FAIL " + $f) }
     exit 1
 }
-Write-Host ("PASS check_com_server_error_frame: frame=1 registration-ordered shape=1 callers=2 cleanup-before-return")
+Write-Host ("PASS check_com_server_error_frame: frames=2 registration-ordered shape=1 callers=2 cleanup-before-return factory-shapes-split")
 exit 0

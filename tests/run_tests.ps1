@@ -6774,6 +6774,56 @@ if ($Category -in @("all", "run", "vbp")) {
         "DONE") @(
         "CALL=PUTRANGE hr=0x00000000") -Arch "x86"
 
+    # 账 #305 SB186 (第七十八刀): 服务端进门的**第二站** —— IClassFactory::CreateInstance 走进
+    # Class_Initialize 那一步。这条通道连 EXCEPINFO 都没有, 错误号只能编在交回的 HRESULT 里; 这一趟过去同样
+    # 没有边界: 体里一条没人接住的 Err.Raise 123 会把客户端进程打死(两台实测 RC=123 + stderr
+    # "Unhandled error 123", CREATE 那一行根本没打出来)。
+    # 主 CLSID 故意用**干净的那一枚类**(B186Good): 它自己的 CREATE 那一行就是「不是所有构造都坏」的
+    # 证人; 抛错的那枚(B1)与自带 On Error 的那枚(B3)走 -Tail 的 CREATE= 臂, 排在最后跑 —— 万一客户端
+    # 被打死, 前面的读数已经落在管道里了。臂里成功的那枚还要点一次成员(CREATE2MEM=42), 否则「一律失败」也能蒙过。
+    # 反面证人(「交回 NULL 不准再一律说成 E_OUTOFMEMORY」)就是 0x800A007B 这一枚数本身: 低 16 位 = 123,
+    # 而旧行为交回的是 0x8007000E。这一条通道上没有 scode, 所以针面只钉 hr, 不钉描述。
+    Test-DispatchInvoke "b186_factory_error_frame" "$Tests\b186_srv\B186d.vbp" "B186d" `
+        "{11112222-3333-4444-5555-6666777788B2}" @(
+        "CREATE hr=0x00000000 ptr=OK",
+        "CREATE=1[{11112222-3333-4444-5555-6666777788B1}] hr=0x800A007B ptr=NULL",
+        "CREATE=2[{11112222-3333-4444-5555-6666777788B3}] hr=0x00000000 ptr=OK",
+        "CALL=CREATE2MEM hr=0x00000000 result=42",
+        "DONE") @(
+        "CREATE=1[{11112222-3333-4444-5555-6666777788B1}] hr=0x8007000E",
+        "CREATE=1[{11112222-3333-4444-5555-6666777788B1}] hr=0x00000000") `
+        -Tail @("CREATE={11112222-3333-4444-5555-6666777788B1},{11112222-3333-4444-5555-6666777788B3}")
+    Test-DispatchInvoke "b186_factory_error_frame_x86" "$Tests\b186_srv\B186d.vbp" "B186d" `
+        "{11112222-3333-4444-5555-6666777788B2}" @(
+        "CREATE hr=0x00000000 ptr=OK",
+        "CREATE=1[{11112222-3333-4444-5555-6666777788B1}] hr=0x800A007B ptr=NULL",
+        "CREATE=2[{11112222-3333-4444-5555-6666777788B3}] hr=0x00000000 ptr=OK",
+        "CALL=CREATE2MEM hr=0x00000000 result=42",
+        "DONE") @(
+        "CREATE=1[{11112222-3333-4444-5555-6666777788B1}] hr=0x8007000E",
+        "CREATE=1[{11112222-3333-4444-5555-6666777788B1}] hr=0x00000000") `
+        -Tail @("CREATE={11112222-3333-4444-5555-6666777788B1},{11112222-3333-4444-5555-6666777788B3}") -Arch "x86"
+
+    # 账 #305 SB186 第二头: VB 客户那一头　「口径」的唯一读数面　—— 探针是 C 客户, 它只能读 hr;
+    # 「服务端自己那条错折回原号」还是「一律 429」这一问, 只有真的 VB 客户点得到。
+    # BC1 = 抛错的那枚: 客户活着(rc=0)且 On Error 拿到 123(不是 429, 也不是 exit(123)), 对象仍是 Nothing;
+    # BC2 = 干净的那枚: twice=42 / seed=12345(构造真跑过 Class_Initialize)/ num=0(不残留错误);
+    # BC3 = 体里自带 On Error 的那枚: handled=123 证它接住了自己的错, twice=8 证构造成功、成员点得通。
+    Test-ComActivateClient "b186_create_client" "$Tests\b186_srv\B186d.vbp" "B186d" `
+        "{11112222-3333-4444-5555-6666777788B1}" "B186d.Boom" "$Tests\b186_srv\B186Client.vbp" @(
+        "BC1:num=123",
+        "BC1:null=yes",
+        "BC2:twice=42 seed=12345 num=0",
+        "BC3:handled=123 twice=8",
+        "BC-DONE")
+    Test-ComActivateClient "b186_create_client_x86" "$Tests\b186_srv\B186d.vbp" "B186d" `
+        "{11112222-3333-4444-5555-6666777788B1}" "B186d.Boom" "$Tests\b186_srv\B186Client.vbp" @(
+        "BC1:num=123",
+        "BC1:null=yes",
+        "BC2:twice=42 seed=12345 num=0",
+        "BC3:handled=123 twice=8",
+        "BC-DONE") -Arch "x86"
+
     # --- ai/022 B17: 外部激活（注册 -> 系统那条路 -> 反注册后不留键）---
     # 上面两条走的是**进程内**独立客户端（LoadLibrary + DllGetClassObject，刻意不查注册表）；
     # 这两条走的是系统那条路：DllRegisterServer 真写注册表，再按 CLSID/ProgID 让 COM 自己去找

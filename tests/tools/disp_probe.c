@@ -216,6 +216,58 @@ static void call_vtable_slots(void *iface) {
     printf("VTBL_GET_AFTER=%ld\n", (long)vt->Got(iface));
 }
 
+/* Acct #305 SB186 (knife 78): the class factory is the SECOND station that walks in from a COM
+ * entry point into VB code (CreateInstance -> vb6_ComObject_Create -> factoryFunc -> Class_Initialize),
+ * and IClassFactory::CreateInstance has no EXCEPINFO channel at all -- the only thing it can answer
+ * with is an HRESULT. Before this knife that station had no error boundary either, so a body that
+ * raised an uncaught runtime error killed the client process (exit(123), and the CREATE line below
+ * never printed). Each CREATE=<clsid[,clsid...]> argument therefore asks the factory for one object
+ * and prints the number it answered -- the error has to be readable in the hr, not in a scode.
+ * A listed class that DOES answer a pointer is then asked for Twice(21): "the clean class still
+ * constructs and its member still works" is the witness that keeps "the factory now fails for
+ * everything" from passing. This block runs last, after the primary object's own readings, so an
+ * early death still leaves everything before it on disk. */
+static void create_arms(PFN_GETCLASSOBJ getClassObject, const char *spec) {
+    char buf[512];
+    char *tok;
+    char *save;
+    IDispatch *d;
+    IClassFactory *f;
+    VARIANT one[1];
+    int idx = 0;
+    CLSID c;
+    HRESULT hr;
+
+    strncpy(buf, spec, sizeof(buf) - 1);
+    buf[sizeof(buf) - 1] = 0;
+    for (tok = strtok_s(buf, ",", &save); tok != NULL; tok = strtok_s(NULL, ",", &save)) {
+        char tag[64];
+        char mtag[32];
+        idx++;
+        sprintf(tag, "CREATE=%d[%s]", idx, tok);
+        sprintf(mtag, "CREATE%dMEM", idx);
+        if (!parse_guid(tok, &c)) {
+            printf("%s CLSID=BAD\n", tag);
+            continue;
+        }
+        f = NULL;
+        d = NULL;
+        hr = getClassObject(&c, &IID_IClassFactory_local, (void **)&f);
+        if (FAILED(hr) || !f) {
+            printf("%s FACTORY hr=0x%08lX\n", tag, (unsigned long)hr);
+            continue;
+        }
+        hr = IClassFactory_CreateInstance(f, NULL, &IID_IDispatch, (void **)&d);
+        printf("%s hr=0x%08lX ptr=%s\n", tag, (unsigned long)hr, d ? "OK" : "NULL");
+        IClassFactory_Release(f);
+        if (d) {
+            one[0] = mk_i4(21);          /* its own slot, set right before the call */
+            call_member(d, L"Twice", one, 1, DISPATCH_METHOD, mtag);
+            IDispatch_Release(d);
+        }
+    }
+}
+
 int main(int argc, char **argv) {
     HMODULE mod;
     PFN_GETCLASSOBJ getClassObject;
@@ -228,6 +280,7 @@ int main(int argc, char **argv) {
     VARIANT args[2];
     UINT cinfo = 0;
     ITypeInfo *tinfo = NULL;
+    int ai;
     HRESULT hr;
 
     if (argc < 3) {
@@ -379,6 +432,11 @@ int main(int argc, char **argv) {
         hr = IDispatch_GetIDsOfNames(disp, &IID_NULL, names, 1, LOCALE_USER_DEFAULT, &id);
         printf("NAMES=bogus hr=0x%08lX dispid=%ld\n", (unsigned long)hr, (long)id);
     }
+
+    /* Acct #305 SB186 (knife 78): the factory-side arms, last, so the primary object's readings are
+     * already on the pipe before anything here can kill the process. */
+    for (ai = 3; ai < argc; ai++)
+        if (strncmp(argv[ai], "CREATE=", 7) == 0) create_arms(getClassObject, argv[ai] + 7);
 
     IDispatch_Release(disp);
     CoUninitialize();
