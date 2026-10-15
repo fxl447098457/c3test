@@ -10,11 +10,16 @@
 # 「无法打开文件」。**任何 VB6 IDE 存出来的工程都编不出 exe。**
 #
 # 本哨兵钉两头, 缺一头都会红:
-#   V1 正例: 一份完全照 VB6 原生写法 (条目不带扩展名) 的工程, 七种条目
+#   V1 正例: 一份完全照 VB6 原生写法 (条目不带扩展名) 的工程, 六种条目
 #      (Form / Module / Class / UserControl / PropertyPage / 子目录 Module)
-#      必须全部解析成功并各自产出对应的 .c。
-#   V2 反面证人: 已经带扩展名的条目不许被"顺手"改写 —— 放一个真叫 `Foo.Bar` 的源文件,
-#      产物必须仍然是它自己 (补扩展名只允许发生在**确实没有扩展名**时)。
+#      必须全部解析成功, 且每个源文件都在产物里留下自己的编译单元。
+#   V2 反面证人: 已经带扩展名的条目不许被"顺手"改写 —— 放一条 `Module=Weird.bas`,
+#      必须照样解析 (若无条件往后接, 会去找 Weird.bas.bas, 全部落空)。
+#
+# 断言打在**产物**上而不是会话目录上: `--emit-c` 把合并后的 C 写到 stdout, 每个源文件
+# 一个 `VB6CGEN_<名>_H` 头守卫。第一版是去 %TEMP%\C3C 里挑"最近修改"的会话目录找 .c
+# —— 那个目录在 `--emit-c` 下压根没有 .c, 于是要么假红, 要么**假绿**(撞上别的构建
+# 留下的会话)。私有 TEMP + 断言产物, 两头都堵死。
 #
 # 用法: powershell -File scripts\check_vbp_source_ext.ps1   (PASS = exit 0)
 
@@ -32,14 +37,11 @@ if (-not (Test-Path -LiteralPath $exe)) {
 
 $bad = @()
 
-# 会话目录跟着 TEMP 走; C3 建不出来就只剩一句 access denied, 读不成被测缺陷。
 $work = Join-Path $env:TEMP ("c3_vbpext_" + [Guid]::NewGuid().ToString("N").Substring(0, 8))
-$outDir = Join-Path $work "out"
-New-Item -ItemType Directory -Force -Path "$work\Sub" | Out-Null
+New-Item -ItemType Directory -Force -Path (Join-Path $work "Sub") | Out-Null
 
 function Put([string]$rel, [string[]]$lines) {
-    $p = Join-Path $work $rel
-    Set-Content -LiteralPath $p -Value $lines -Encoding ASCII
+    Set-Content -LiteralPath (Join-Path $work $rel) -Value $lines -Encoding ASCII
 }
 
 # ---- 夹具: VB6 原生写法, 条目一律不带扩展名 -------------------------------
@@ -76,62 +78,57 @@ Put "PP1.pag" @(
     'Attribute VB_Name = "PP1"', 'Attribute VB_GlobalNameSpace = False'
 )
 
-# ---- V2 反面证人: 条目已经带扩展名, 不许被再补一层 --------------------------
-# ComCtlsDemo.vbp 就是这种写法 (`Module=Common; Common\Common.bas`)。补扩展名的
-# 逻辑只看"是否已有扩展名", 所以这一份必须照样解析成功 —— 若无条件往后接,
-# 会去找 Weird.bas.bas / Weird.bas.frm ... 全部落空。
-$vbp2 = Join-Path $work "q.vbp"
-Set-Content -LiteralPath $vbp2 -Value @('Type=Exe', 'Module=Weird.bas') -Encoding ASCII
-Set-Content -LiteralPath (Join-Path $work "Weird.bas") -Encoding ASCII -Value @(
-    'Attribute VB_Name = "Weird"', 'Public Const Z = 1'
-)
+# ---- V2 夹具: 条目已经带扩展名 ---------------------------------------------
+Put "q.vbp" @('Type=Exe', 'Module=Weird.bas')
+Put "Weird.bas" @('Attribute VB_Name = "Weird"', 'Public Const Z = 1')
 
-$emit = Join-Path $work "emit.c"
-$err  = Join-Path $work "emit.err"
-$p = Start-Process -FilePath $exe `
-        -ArgumentList @("`"$(Join-Path $work 'p.vbp')`"", "--emit-c") `
-        -NoNewWindow -Wait -PassThru `
-        -RedirectStandardOutput $emit -RedirectStandardError $err
-$v1exit = $p.ExitCode
-$v1err = ""
-if (Test-Path -LiteralPath $err) { $v1err = Get-Content -LiteralPath $err -Raw }
+# 私有 TEMP: 会话目录别跟同机其它 C3 抢 (编译 ComCtlsDemo / 跑别的哨兵都会建)。
+$saveTEMP = $env:TEMP; $saveTMP = $env:TMP
+$privTmp = Join-Path $work "_tmp"
+New-Item -ItemType Directory -Force -Path $privTmp | Out-Null
+$env:TEMP = $privTmp; $env:TMP = $privTmp
 
-# ---- V1 正例: 七种条目各自都要解析出来 --------------------------------------
-if ($v1exit -ne 0) {
-    $bad += ("V1 compiler exited " + $v1exit + " on an extensionless (VB6-native) vbp")
+function Run-C3([string]$proj) {
+    $out = Join-Path $work "emit.c"
+    $err = Join-Path $work "emit.err"
+    $p = Start-Process -FilePath $exe `
+            -ArgumentList @("`"$proj`"", "--emit-c") `
+            -NoNewWindow -Wait -PassThru `
+            -RedirectStandardOutput $out -RedirectStandardError $err
+    $txt = ""
+    if (Test-Path -LiteralPath $out) { $txt = Get-Content -LiteralPath $out -Raw }
+    $etxt = ""
+    if (Test-Path -LiteralPath $err) { $etxt = Get-Content -LiteralPath $err -Raw }
+    return @{ Exit = $p.ExitCode; Out = $txt; Err = $etxt }
 }
-if ($v1err -match "VB1006") {
+
+# ---- V1 正例: 六种条目都要解析出来并各自留下编译单元 -----------------------
+$r1 = Run-C3 (Join-Path $work "p.vbp")
+if ($r1.Exit -ne 0) {
+    $bad += ("V1 compiler exited " + $r1.Exit + " on an extensionless (VB6-native) vbp")
+}
+if ($r1.Err -match "VB1006") {
     $bad += ("V1 still reports VB1006 (cannot open file) on an extensionless vbp: " +
-             (($v1err -split "`r?`n" | Where-Object { $_ -match "VB1006" } | Select-Object -First 1)))
+             (($r1.Err -split "`r?`n" | Where-Object { $_ -match "VB1006" } | Select-Object -First 1)))
 }
-
-# 产物按模块名出 .c; 子目录的 Module=Sub\Deep 也要出 Deep.c
-$want = @('MainForm.c', 'Mod1.c', 'Deep.c', 'C1.c', 'U1.c', 'PP1.c')
-if ($v1exit -eq 0) {
-    $session = Get-ChildItem -Path (Join-Path $env:TEMP "C3C") -Directory -ErrorAction SilentlyContinue |
-               Sort-Object LastWriteTime -Descending | Select-Object -First 1
-    foreach ($w in $want) {
-        if (-not $session -or -not (Test-Path -LiteralPath (Join-Path $session.FullName $w))) {
-            $bad += ("V1 no emit for " + $w + " (extensionless entry not resolved)")
-        }
+foreach ($g in @('MAINFORM', 'MOD1', 'DEEP', 'C1', 'U1', 'PP1')) {
+    if ($r1.Out -notmatch ("VB6CGEN_" + $g + "_H")) {
+        $bad += ("V1 no compiled unit for " + $g + " (extensionless entry not resolved)")
     }
 }
 
-# ---- V2 反面证人 ----------------------------------------------------------
-$err2 = Join-Path $work "emit2.err"
-$p2 = Start-Process -FilePath $exe `
-        -ArgumentList @("`"$vbp2`"", "--emit-c") `
-        -NoNewWindow -Wait -PassThru `
-        -RedirectStandardOutput (Join-Path $work "emit2.c") -RedirectStandardError $err2
-if ($p2.ExitCode -ne 0) {
-    $e2 = ""
-    if (Test-Path -LiteralPath $err2) { $e2 = Get-Content -LiteralPath $err2 -Raw }
-    $bad += ("V2 compiler exited " + $p2.ExitCode + " on an entry that already has an extension (Module=Weird.bas)")
-    if ($e2 -match "VB1006") {
+# ---- V2 反面证人 -----------------------------------------------------------
+$r2 = Run-C3 (Join-Path $work "q.vbp")
+if ($r2.Exit -ne 0) {
+    $bad += ("V2 compiler exited " + $r2.Exit + " on an entry that already has an extension (Module=Weird.bas)")
+    if ($r2.Err -match "VB1006") {
         $bad += "V2 reports VB1006 for Weird.bas - an extra extension was appended blindly"
     }
+} elseif ($r2.Out -notmatch "VB6CGEN_WEIRD_H") {
+    $bad += "V2 resolved Module=Weird.bas but emitted no unit for it"
 }
 
+$env:TEMP = $saveTEMP; $env:TMP = $saveTMP
 Remove-Item -Recurse -Force $work -ErrorAction SilentlyContinue
 
 if ($bad.Count -eq 0) {
