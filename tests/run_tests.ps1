@@ -3177,6 +3177,248 @@ if ($Category -in @("all", "run", "bas")) {
         "R7-fmt-eq=True", "R8-fmt-len=8", "NB-DONE")
     Add-BasTest "b175_num_bstr" "$Tests\b175_num_bstr.bas" $nb175Needles
     Add-BasTest "b175_num_bstr_x86" "$Tests\b175_num_bstr.bas" $nb175Needles -Arch "x86"
+    # <vbeclipse> 账 #305 §B176（第六十七刀）：「这一位形参要什么 C 档」原先有三位主人，
+    # 第三位（getRuntimeParamCType 那张表）登的是 **VB 书写的个数**、问它的位号却是**发码位置**，
+    # 两者不同源 —— InStr 那一格按两参形只登了两枚 BSTR，于是三参形整格错位一格：Variant 的
+    # start 位被当成字符串解包、串交进 int32_t 形参。cl 只给一条 C4047（在 -W3 之外，而 C3 的
+    # 构建日志根本不打 cl 警告）⇒ 运行期 start = 被截断的指针，InStr **静默答 0**。本刀把这一问
+    # 收成一处 builtinNoParamTableFormalCType（档位表），字符串位由它投影出
+    # builtinNoParamTableStringSlot —— 同一张表答两问，不再各自抄。
+    # 八枚形状针全部出自 .build/k67_w2 的 --emit-c 逐行读数（两台逐字节相同）。
+    # 第 2/3 枚 = Variant 进**数值**形参那一半（vb6_VariantToLong），钉「不许裸交结构体」；
+    # 第 7/8 枚 = 同一问的两档 arity：三参形 start 在位 0、两参形压根没有 start（haystack
+    # 仍在位 0）—— 两枚同时落地才证明位号不再跟书写个数错位。
+    Test-EmitcShape 'b176_var_slot_shape' @(
+        "$Tests\b176_var_slot.bas") @(
+        'vb6_MsgBox(vb6_VariantToString(vP), vb6_VariantToLong(vBtn), vb6_VariantToString(vTitle))',
+        'vb6_SendKeys(vb6_VariantToString(vKeys), vb6_VariantToLong(vWait))',
+        'vb6_SetAttr(vb6_VariantToString(vName), vb6_VariantToLong(vAttr))',
+        'vb6_SavePicture(pic, vb6_VariantToString(vName))',
+        'vb6_InStr(vb6_VariantToLong(vS3), w1, vNeedle)',
+        'vb6_InStrC(vb6_VariantToLong(vS3), w1, vb6_BSTR_FromStr(L"7"), vb6_VariantToLong(vCmp))',
+        'vb6_InStr(vb6_VariantToLong(vS4), s1, vb6_BSTR_FromStr(L"7"))',
+        'vb6_InStr(1, vb6_VariantToString(vKey), vb6_BSTR_FromStr(L"text"))'
+    )
+    # 反针七枚：前四枚 = 病形本身（Variant 裸交进 BSTR 位 / 串交进数值位 / 指针位被解包），
+    # 第 5 枚钉「不许二次折」（六十五刀在 argtype 那站量到的双层折不许在这一站重演），
+    # 第 6 枚钉 needle 位**不许预先解包** —— vb6_InStr 是 _Generic 宏，它自己会走 vb6_InStrVar
+    # 解包并 SysFreeString；发码侧抢先解一次就多出一枚没人回收的临时串（§B176 读数③）。
+    Test-EmitcAbsent 'b176_var_slot_lesion' @(
+        "$Tests\b176_var_slot.bas") @(
+        'vb6_MsgBox(vP,',
+        'vb6_GetSetting(BV_APP, vSec,',
+        'vb6_InStr(vb6_VariantToString(vS4)',
+        'vb6_SavePicture(vb6_VariantToString',
+        'vb6_VariantToString(vb6_VariantToString',
+        'vb6_InStr(vb6_VariantToLong(vS3), w1, vb6_VariantToString(vNeedle)',
+        'vb6_Format(dNum, vStyle'
+    )
+    # 真跑读数来源 = .build/k67_w2（新 exe，x64 与 x86 **逐行相同**）。V1/V2 是形②那一位的
+    # 读数（start 是 Variant 的三参形），V3 是没写 Variant 的那一形 = 证人（老形状不许变），
+    # V4 钉两参形不许被当成 start。V5..V7 是注册表家族真往返、V8..V10 是 Format 的 style 位。
+    # 行为负控分两条，因为两形的 BASE 表现根本不同：
+    #   形①（Variant 进 BSTR 位）：整份夹具在 BASE 那台**压根编不过** —— 两台各十六枚 cl C2440、
+    #     无产物（.build/k67_base2/{x64,x86}/c3-error.log）；
+    #   形②（Variant 进 int32_t 位）：BASE **编得过、静默答错**。单独一份只含 InStr 的探针
+    #     (.build/k67_istr_probe2.bas, BASE 读数 .build/k67_istr2_{x64,x86}) 四行全答 0，
+    #     修后六/0/四/七 —— 而这条探针在 BASE x64 上**有过一次答对**（截断后的指针低 32 位
+    #     恰好落进串长之内，.build/k67_istr_base/x64 那次 I1=6）⇒ 「BASE 上也对」只是反面证人
+    #     不够格，真跑判据必须钉在 NEW 这一台的确定值上（V1=4 与 V2=0 两头，缺一头不成立）。
+    $bv176Needles = @("V1-start4=4", "V2-start5=0", "V3-start2=4", "V4-twoarg=0",
+        "V5-roundtrip=roundtrip", "V6-vartype=8", "V7-miss=roundtrip",
+        "V8-fmt=1235", "V9-fmt-lit=1235", "V10-fmt-len=4", "BV-DONE")
+    Add-BasTest "b176_var_slot" "$Tests\b176_var_slot.bas" $bv176Needles
+    Add-BasTest "b176_var_slot_x86" "$Tests\b176_var_slot.bas" $bv176Needles -Arch "x86"
+    # <vbeclipse> 账 #305 §B177（第六十八刀）：InStr 的 needle 位**一位两答** —— 数值实参要折成串
+    # (VB6 隐式 CStr)，而 Variant 实参要**裸交**：`vb6_InStr` / `vb6_InStrC` 是按 needle 分派的
+    # _Generic 宏，Variant 那一臂 `vb6_InStrVar` 自己解包**并 free**（`vb6rtl_string.c:235-247`）。
+    # 六十七刀把这一位在「写了 start」的两形答成空，于是**数值那一半跟着掉了**：`InStr(2, s, 7)`
+    # 发裸 int 进 `wchar_t*`，cl 不报，两台跑到那行都崩（实测修前 x64 与 x86 都停在 N5 那行、
+    # 只剩前四行输出；六十六刀那台答 4）。反过来两参形与「串首三参形」又多折一层：20000 次
+    # `InStr(hay, vStr)` 比同形状的 String 实参多 753664 字节（两台修前 753664、修后 0）。
+    # 修法 = 位号只在一处数（`builtinNoParamTableDispatchSlot`），「第 pos 位要什么档」与
+    # 「这一位的 Variant 可不可以不折」都是它的投影 ⇒ 两答同源、站点数不增加。
+    $b177Needles = @("N1-twoarg-lit=4", "N2-twoarg-long=4", "N5-start-lit=4", "N6-start-long=4",
+        "N13-cmp-long=4", "N14-start-cmp-long=4", "N3-twoarg-varstr=4", "N4-twoarg-varnum=4",
+        "N7-start-varstr=4", "N8-cmp-varstr=4", "N10-start-cmp-varstr=4", "N15-miss=0",
+        "N16-bin-vs-text=0|4", "B177-apiBad=0", "B177-leak-ok=Y", "B177-acc=4",
+        "C3ProbeB177-DONE")
+    Add-BasTest "b177_instr_needle" "$Tests\b177_instr_needle.bas" $b177Needles
+    Add-BasTest "b177_instr_needle_x86" "$Tests\b177_instr_needle.bas" $b177Needles -Arch "x86"
+    # 发码针：六枚数值折算（两形不写 start、两形写 start、两形带 compare）+ 五枚 Variant **裸交**
+    # + 一枚 haystack 位照旧解包（宏不按那一维分派 ⇒ 那一位的折是必须的，别跟着改）。
+    Test-EmitcShape 'b177_instr_needle_shape' @(
+        "$Tests\b177_instr_needle.bas") @(
+        'vb6_InStr(1, hay, vb6_CStrLong(7))',
+        'vb6_InStr(1, hay, vb6_CStrLong(nLong))',
+        'vb6_InStr(2, hay, vb6_CStrLong(7))',
+        'vb6_InStr(2, hay, vb6_CStrLong(nLong))',
+        'vb6_InStrC(1, hay, vb6_CStrLong(nLong), 1)',
+        'vb6_InStrC(2, hay, vb6_CStrLong(nLong), 1)',
+        'vb6_InStr(1, hay, vStr)',
+        'vb6_InStrC(1, hay, vStr, 1)',
+        'vb6_InStrC(wNum, wHay, wVar, vb6_VariantToLong(wCmp))',
+        'vb6_InStr(1, vb6_VariantToString(wVar), wHay)',
+        'vb6_InStr(wNum, wHay, vb6_CStrLong(7))'
+    )
+    # 反针：前两枚 = 六十七刀丢掉的那一半（裸数值进 needle 位），中两枚 = 多折的那一半
+    # （needle 位被预先解包），第五枚钉「不许二次折」，最后一枚钉四参形也不许预先解包。
+    Test-EmitcAbsent 'b177_instr_needle_lesion' @(
+        "$Tests\b177_instr_needle.bas") @(
+        'vb6_InStr(2, hay, 7)',
+        'vb6_InStr(2, hay, nLong)',
+        'vb6_InStr(1, hay, vb6_VariantToString(vStr)',
+        'vb6_InStrC(1, hay, vb6_VariantToString(vStr)',
+        'vb6_VariantToString(vb6_VariantToString',
+        'vb6_InStrC(wNum, wHay, vb6_VariantToString(wVar), '
+    )
+    # <vbeclipse> 账 #305 §B180（第六十九刀）：`StrPtr(<Variant>)` 曾经发
+    # `vb6_StrPtr(vb6_VariantToString(v))` —— 而 `vb6_VariantToString` 的定义就一句 `return vb6_CStr(v)`
+    # (= `vb6_Format(...)`) ⇒ **每次调用现造一枚 BSTR**，地址交给 Win32 之后那枚串没人回收。
+    # 两台实测（`.build/k69sp`，18000 次减去同形状普通 String 的零分配基线窗）=
+    # x64 1089536 / x86 909312 字节；真语料 18 份文件 41 处，全坐在 `lpszIcon` / `pszText` /
+    # `CreateWindowExW` / `FindFirstFileW` / `VarI8FromStr` / `dwTypeData` 这些指针交接位上。
+    # 修法 = `vt` 已是串时**借**槽里那枚 BSTR（RTL 新出口 `vb6_StrPtrVar`），发码侧由一枚**看实参**的
+    # 问句撤回解包 + `builtin_fixup` 改 callee 名（两站同归一处）。⚠ 这一问不许按位号无条件答槽：
+    # 同一个 `vb6_StrPtr(` 在全语料 1720 处里只有 41 处是槽，其余 1679 处交的是普通 String 变量 / 数组元素 / 解引用（逐枚分解见台账 §B180 的订正条），无条件答槽会把它们全打成
+    # C2440（读数 = `.build/k69_strptr_census.txt`）。非串那档仍 mint，那半归 §B164 形①。
+    $b180Needles = @("P1-var-string-nonzero=Y", "P2-empty-string=0",
+        "P3-variant-empty-string=0", "P4-var-numeric-nonzero=Y", "P5-stable=Y",
+        "B180-apiBad=0", "B180-leak-ok=Y", "B180-acc=-1", "C3ProbeB180-DONE")
+    Add-BasTest "b180_strptr_variant" "$Tests\b180_strptr_variant.bas" $b180Needles
+    Add-BasTest "b180_strptr_variant_x86" "$Tests\b180_strptr_variant.bas" $b180Needles -Arch "x86"
+    # 发码针：三枚 Variant 形走收槽的出口（装串 / 装空串 / 装数值），两枚证人钉「普通 String
+    # 变量与空串变量**照旧**走 `vb6_StrPtr`（不许过度改道）， witness 子程序里两枚各一档。
+    Test-EmitcShape 'b180_strptr_variant_shape' @(
+        "$Tests\b180_strptr_variant.bas") @(
+        'vb6_StrPtrVar(vStr);',
+        'vb6_StrPtrVar(vEmptyStr);',
+        'vb6_StrPtrVar(vNum);',
+        'vb6_StrPtr(e);',
+        'vb6_StrPtr(s);',
+        'vb6_StrPtrVar(wHay);',
+        'vb6_StrPtr(wTxt);'
+    )
+    # 反针：前两枚 = 病形本体（解包后进 StrPtr / mint 分支被绕进解包），中两枚 = 二次解包与
+    # 把 String 变量也改道到收槽出口（那正是普查警告过的 1478 处误伤形状）。
+    Test-EmitcAbsent 'b180_strptr_variant_lesion' @(
+        "$Tests\b180_strptr_variant.bas") @(
+        'vb6_StrPtr(vb6_VariantToString(',
+        'vb6_StrPtr(vb6_CStr(',
+        'vb6_StrPtrVar(vb6_VariantToString(',
+        'vb6_VariantToString(vb6_VariantToString(',
+        'vb6_StrPtrVar(e)',
+        'vb6_StrPtrVar(s)'
+    )
+    # <vbeclipse> 账 #305 §B181（第七十一刀）：`StrPtr` / `StrConv` 收一枚 **ByRef Byte() 形参**时，
+    # 以前交出去的是 SafeArray **描述符**的地址，不是数据首地址 —— cl 在 C 里只警告不拦，静默。
+    # 两处独立成因，都用本夹具自己的形状在修前那台（`C3_k69_new.exe`）上量到：① 字节数组名单
+    # 压根没有「形参」那条登记路（模块级与局部都有：`cgen_decl_var.cpp:85` / `cgen_localdecl.cpp:104`），
+    # ② 剥 `(*x)` 的长度闸写作 `> 4` ⇒ 单字母形参连查表那一步都没进。BASE 读数 = formal 指针 ≠
+    # 调用方指针、delta 非 0、`lstrlenW` 把描述符头读成 3；修后两台逐行相同（都是 2 / 都是 Y）。
+    $b181Needles = @("C3ProbeB181-P1-short-formal-same=Y", "C3ProbeB181-P2-long-formal-same=Y",
+        "C3ProbeB181-P3-short-formal-len=2", "C3ProbeB181-P4-long-formal-len=2",
+        "C3ProbeB181-P5-module-len=2", "C3ProbeB181-P6-caller-nonzero=True", "C3ProbeB181-DONE")
+    Add-BasTest "b181_baformal" "$Tests\b181_baformal.bas" $b181Needles
+    Add-BasTest "b181_baformal_x86" "$Tests\b181_baformal.bas" $b181Needles -Arch "x86"
+    # 发码针：单字母与长名两枚形参都走数据指针出口；兄弟站 StrConv 同一条腿；模块级那枚是**证人**
+    # （修前修后都在，钉「这一站本来就对的那些形状不许动」）；最后一枚 = 非字节数组的元素照旧走裸
+    # `vb6_StrPtr`，钉这一档没被过度改道。
+    Test-EmitcShape 'b181_baformal_shape' @(
+        "$Tests\b181_baformal.bas") @(
+        'vb6_SafeArrayDataPtr((*b))',
+        'vb6_SafeArrayDataPtr((*data))',
+        'vb6_StrConvFromByteArray((*data)',
+        'vb6_SafeArrayDataPtr(m_Module)',
+        'vb6_StrPtr(VB6_SA_AT'
+    )
+    # 反针：前三枚 = 病形本体（描述符指针进 BSTR 形参）；后两枚 = 把 String 数组元素也改道过去
+    # 的过度形状（那正是 §B180 那条普查警告过的误伤方向）。
+    Test-EmitcAbsent 'b181_baformal_lesion' @(
+        "$Tests\b181_baformal.bas") @(
+        'vb6_StrPtr((*b))',
+        'vb6_StrPtr((*data))',
+        'vb6_StrConv((*data)',
+        'vb6_SafeArrayDataPtr(VB6_SA_AT',
+        'vb6_StrConvFromByteArray(VB6_SA_AT'
+    )
+
+    # <vbeclipse> 账 #305 §B182（第七十三刀）：一枚 Integer **形参**的赋值从不查 16 位范围 ——
+    # 模块级与局部 Integer 的存值都走 vb6_ChkInt（越界 = run-time error 6 Overflow），而三条形参臂
+    # 把 Integer 只折进 knownLongVars_、没进 knownIntVars_ ⇒ 发码成裸 `(*fi) = 40000;`，C 静默
+    # 截断成 -25536 并**顺着 ByRef 写回调用方的变量**。BASE 读数 = P2 一声不响、P6 = -25536；
+    # 修后两台逐行相同：P2 报 6、P6 保持 1（那次存值被拒 ⇒ 调用方没被污染）。
+    # P9 = Long 形参的证人：32 位目标不许被窄检查碰。
+    $b182Needles = @("C3ProbeB182-P1-local-raised=6", "C3ProbeB182-P2-formal-raised=6",
+        "C3ProbeB182-P3-module-raised=6", "C3ProbeB182-P4-byval-inrange-ok=6",
+        "C3ProbeB182-P5-formal-inrange-ok", "C3ProbeB182-P6-sink-after-outofrange=1",
+        "C3ProbeB182-P7-sink-after-inrange=7", "C3ProbeB182-P8-untouched=2",
+        "C3ProbeB182-P9-long-formal-ok=40000", "C3ProbeB182-DONE")
+    Add-BasTest "b182_intformal" "$Tests\b182_intformal.bas" $b182Needles
+    Add-BasTest "b182_intformal_x86" "$Tests\b182_intformal.bas" $b182Needles -Arch "x86"
+    # 发码针：ByRef 与 ByVal 两形形参都上窄检查；模块级/局部那两枚是**证人**（修前修后都在，钉
+    # 「本来就对的那些形状不许动」）；最后一枚 = Long 形参的裸存照旧。
+    Test-EmitcShape 'b182_intformal_shape' @(
+        "$Tests\b182_intformal.bas") @(
+        '(*fi) = vb6_ChkInt(40000)',
+        'fv = vb6_ChkInt((fv + 1))',
+        'li = vb6_ChkInt(40000)',
+        'gi = vb6_ChkInt(40000)',
+        '(*lg) = 40000'
+    )
+    # 反针：前两枚 = 病形本体（形参存值不查范围）；后两枚 = 过度形状的闸（Long 形参、Single 形参
+    # 都不许被卷进窄检查——Single 的存值走它自己的浮点档，与这一问无关）。
+    Test-EmitcAbsent 'b182_intformal_lesion' @(
+        "$Tests\b182_intformal.bas") @(
+        '(*fi) = 40000;',
+        'fv = (fv + 1);',
+        'vb6_ChkInt((*lg))',
+        'vb6_ChkInt((*fi) +'
+    )
+
+    # <vbeclipse> 账 #305 §B183（第七十四刀）：Integer **类字段**的存值也不查 16 位范围 —— 类成员扫描
+    # 把 Long/Integer/Boolean 一起折进放宽档 classLongMembers_，而那张表全仓只有三处过程入口整份拷回
+    # knownLongVars_；于是一枚类自己的代码里，裸名成员左值在窄档表之前先被放宽档答成 32 位 ⇒
+    # `ci = 40000` 发成裸存：VB6 给 run-time error 6 **且保留旧值**，C 静默截成 -25536 并写回字段。
+    # 修法 = 同一条折叠臂旁另立窄档表 classIntMembers_（m_ 与裸名两拼都记）+ 三处入口各补一行恢复；
+    # **不摘**放宽档里的 Integer（它另有消费方，双登记是本文件族既有口径：Byte 账 #123 / Boolean
+    # ai/022 W1 / Date Fix 175）。窄表全仓只有一位消费点 narrowTargetTypeOf ⇒ 本刀唯一后果 = 越界存值多套一层 vb6_ChkInt。
+    # BASE 读数（两台逐行相同）= P1/P2/P7 一声不响、P3/P4 都是 -25536；修后：三处报 6、两处读回保住
+    # 上一次那个合法值。P0 = 合法存值照旧落位（检查不许改答案）；P5/P6/P8 = 证人（Byte 字段本来就响、
+    # Long 字段不许被卷进窄检查）。
+    $b183Needles = @("C3ProbeB183-P0-seed=12345|23456", "C3ProbeB183-P1-bare-raised=6",
+        "C3ProbeB183-P2-fromlong-raised=6", "C3ProbeB183-P7-private-raised=6",
+        "C3ProbeB183-P3-ci-kept=12345", "C3ProbeB183-P4-pf-kept=23456",
+        "C3ProbeB183-P5-byte-raised=6", "C3ProbeB183-P6-long-noerr",
+        "C3ProbeB183-P8-cl=40000", "C3ProbeB183-DONE")
+    Test-Vbp 'b183_int_field' "$Tests\b183_intfield\B183.vbp" $b183Needles
+    Test-Vbp 'b183_int_field_x86' "$Tests\b183_intfield\B183.vbp" $b183Needles -Arch "x86"
+    # 发码针：前三枚 = 三条病形（裸名 / 来源是 Long 变量 / 私有字段）都上了 vb6_ChkInt；中间两枚 =
+    # 合法值那一趟也被套上但答案不变（钉「检查不改数」）；后两枚 = 证人形状（Byte 仍走 ChkByte、
+    # Long 仍是裸存），BASE 与 NEW 都在场。
+    Test-EmitcShape 'b183_intfield_shape' @(
+        "$Tests\b183_intfield\B183Main.bas",
+        "$Tests\b183_intfield\B183Holder.cls") @(
+        'me->ci = vb6_ChkInt(40000);',
+        'me->ci = vb6_ChkInt(t);',
+        'me->pf = vb6_ChkInt(40000);',
+        'me->ci = vb6_ChkInt(12345);',
+        'me->cb = vb6_ChkByte(300);',
+        'me->cl = 40000;'
+    )
+    # 反针：前四枚 = 病形本体（BASE 产物各命中一次，NEW 全 0）；后两枚 = 过度形状的闸（Long 字段、
+    # Byte 字段都不许被挪进 ChkInt——那是把别一档的宽度答案改嫁过来）。
+    Test-EmitcAbsent 'b183_intfield_lesion' @(
+        "$Tests\b183_intfield\B183Main.bas",
+        "$Tests\b183_intfield\B183Holder.cls") @(
+        'me->ci = 40000;',
+        'me->ci = t;',
+        'me->pf = 40000;',
+        'me->pf = 23456;',
+        'vb6_ChkInt(me->cl)',
+        'me->cb = vb6_ChkInt'
+    )
+
     # <vbeclipse> 账 #305 §B154（第四十二刀）：ReDim 重建一枚动态数组时，元素档**问声明**，不是问 ReDim 自己
     # 的 As 子句。修前 cgen_redim.cpp 只问 asType，没写 As 就交 vb6_sa_variant，而访问侧（VB6_SA_AT /
     # VB6_SA_ND_AT2）问的是声明表 arrayElemTypes_ —— 同一枚描述符两个答案：造出来 24 字节一步（x64），

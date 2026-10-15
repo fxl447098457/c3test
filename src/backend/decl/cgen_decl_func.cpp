@@ -85,6 +85,8 @@ void CCodeGen::visit(FunctionDecl& node) {
     knownFixedStringLen_.insert(moduleFixedStringLen_.begin(), moduleFixedStringLen_.end());
     knownDoubleVars_.insert(classDoubleMembers_.begin(), classDoubleMembers_.end());
     knownLongVars_.insert(classLongMembers_.begin(), classLongMembers_.end());
+    // 账 #305 §B183: Integer 类字段的窄档名单也要在过程入口恢复一份，否则裸名成员左值问「有多窄」只查到放宽档。
+    knownIntVars_.insert(classIntMembers_.begin(), classIntMembers_.end());
     // Fix 010n: 恢复类模块UDT成员变量 (knownUdtVars_被clear后需要从classUdtMembers_恢复)
     knownUdtVars_.insert(classUdtMembers_.begin(), classUdtMembers_.end());
     // Fix 010n (扩展): 恢复普通模块模块级UDT变量 (同 classUdtMembers_ 机制)
@@ -202,6 +204,11 @@ void CCodeGen::visit(FunctionDecl& node) {
             else if (paramType == Vb6Type::Long || paramType == Vb6Type::Integer || paramType == Vb6Type::Boolean
                      || paramType == Vb6Type::Byte) {
                 knownLongVars_.insert(pLower);
+                // 账 #305 §B182: Integer 形参也要进窄档表 —— knownIntVars_ 是 narrowTargetTypeOf
+                // 「这个左值有多窄」的唯一问句, 缺这一档就不套 vb6_ChkInt ⇒ C 把 40000 静默截成
+                // -25536, 而 ByRef 那形还把它写回调用方的变量。口径同 Fix 175 的 Date、账 #123 的
+                // Byte: 放宽档登记过不等于窄档看得见。
+                if (paramType == Vb6Type::Integer) knownIntVars_.insert(pLower);
                 // ai/022 W1: 布尔形参另登记一份 (口径同 Fix 175 的 Date 形参)
                 if (paramType == Vb6Type::Boolean) knownBoolVars_.insert(pLower);
                 // 账 #123: Byte 形参一并进这一支 (口径同 ai/022 W1 的 Boolean —— C 型不同串
@@ -281,6 +288,12 @@ void CCodeGen::visit(FunctionDecl& node) {
             // Fix 055: 注册UDT数组元素C类型
             std::string udtCType = resolveArrayUdtElemCType(p->asType.get());
             if (!udtCType.empty()) arrayUdtElemTypes_[pLower] = udtCType;
+            // 账 #305 §B181 (第七十一刀): 形参这一档以前只进上面那几张表, **没进字节数组名单**
+            // (knownByteArrayVars_ 的写者只有模块级两条 + 局部两条声明路) ⇒
+            // `StrPtr(b)` / `StrConv(b, …)` 里 b 是 `ByRef b() As Byte` 时按裸名查不到,
+            // 静默把 SafeArray **描述符**指针交给要 BSTR 的 Win32 形参。与
+            // cgen_decl_var.cpp:85 / cgen_localdecl.cpp:104 那两条登记路对称。
+            if (elemType == Vb6Type::Byte) knownByteArrayVars_.insert(pLower);
             knownLocalVars_.insert(pLower);
         }
     }

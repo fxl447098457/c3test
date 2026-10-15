@@ -107,6 +107,8 @@ void CCodeGen::visit(SubDecl& node) {
     knownFixedStringLen_.insert(moduleFixedStringLen_.begin(), moduleFixedStringLen_.end());
     knownDoubleVars_.insert(classDoubleMembers_.begin(), classDoubleMembers_.end());
     knownLongVars_.insert(classLongMembers_.begin(), classLongMembers_.end());
+    // 账 #305 §B183: Integer 类字段的窄档名单也要在过程入口恢复一份，否则裸名成员左值问「有多窄」只查到放宽档。
+    knownIntVars_.insert(classIntMembers_.begin(), classIntMembers_.end());
     // Fix 010n: 恢复类模块UDT成员变量 (knownUdtVars_被clear后需要从classUdtMembers_恢复)
     knownUdtVars_.insert(classUdtMembers_.begin(), classUdtMembers_.end());
     // Fix 010n (扩展): 恢复普通模块模块级UDT变量 (同 classUdtMembers_ 机制)
@@ -211,6 +213,11 @@ void CCodeGen::visit(SubDecl& node) {
             else if (paramType == Vb6Type::Long || paramType == Vb6Type::Integer || paramType == Vb6Type::Boolean
                      || paramType == Vb6Type::Byte) {
                 knownLongVars_.insert(pLower);
+                // 账 #305 §B182: Integer 形参也要进窄档表 —— knownIntVars_ 是 narrowTargetTypeOf
+                // 「这个左值有多窄」的唯一问句, 缺这一档就不套 vb6_ChkInt ⇒ C 把 40000 静默截成
+                // -25536, 而 ByRef 那形还把它写回调用方的变量。口径同 Fix 175 的 Date、账 #123 的
+                // Byte: 放宽档登记过不等于窄档看得见。
+                if (paramType == Vb6Type::Integer) knownIntVars_.insert(pLower);
                 // ai/022 W1: 布尔形参另登记一份 (口径同 Fix 175 的 Date 形参)
                 if (paramType == Vb6Type::Boolean) knownBoolVars_.insert(pLower);
                 // 账 #123: Byte 形参一并进这一支 (口径同 ai/022 W1 的 Boolean —— C 型不同串
@@ -285,6 +292,11 @@ void CCodeGen::visit(SubDecl& node) {
             if (!udtCType.empty()) {
                 arrayUdtElemTypes_[pLower] = udtCType;
             }
+            // 账 #305 B181 (knife 71): a ByRef Byte() FORMAL used to reach none of the two
+            // byte-array name sets (only module-level + local declaration paths write them),
+            // so StrPtr(b) / StrConv(b, ...) silently handed the SafeArray DESCRIPTOR pointer
+            // to a BSTR formal. Symmetric with cgen_decl_var.cpp:85 / cgen_localdecl.cpp:104.
+            if (elemType == Vb6Type::Byte) knownByteArrayVars_.insert(pLower);
             knownLocalVars_.insert(pLower);
         }
     }

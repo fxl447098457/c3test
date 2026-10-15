@@ -599,9 +599,36 @@
     //   折成哪一种 CStr      = wrapToBSTR (全仓唯一的 数值→BSTR 形状出口)。
     // 原来第二、三问还有另一位主人 = Fix 108c 那张 13 枚名单 (在 argList 拼成串之后做文本替换),
     // 本刀整段撤掉。
+    // 账 #305 §B176 (第六十七刀): 「没有形参表的那一族, 第 pos 位要什么 C 档」收成**一枚出口**
+    // (builtinNoParamTableFormalCType, 按**写出来的** arity 数位号), 上面那枚「是不是字符串位」
+    // 降级成它在 BSTR 档上的投影; 读者 = 这一位出口自己 (投影) + arg_variant 那条臂 (Fix 038b-2),
+    // 而 `getRuntimeParamCType` 那张按 callee 名登的 C 签名表**不再答位号** —— 它的 InStr 行是
+    // 按 VB 两参形登的, 按发码位号问就会把 int32_t 的 start 位答成 BSTR (§B176 形②)。
     bool typeTakesImplicitCStr(Vb6Type t) const;
+    std::string builtinNoParamTableFormalCType(const std::string& callee, size_t argc, size_t pos,
+                                               Vb6Type firstArgType) const;
     bool builtinNoParamTableStringSlot(const std::string& callee, size_t argc, size_t pos,
                                        Vb6Type firstArgType) const;
+    // 账 #305 §B177 (第六十八刀): 同一张表的**第三问** —— 「这一位是不是那枚 _Generic 宏的分派位」。
+    // 位号只在 builtinNoParamTableDispatchSlot 里数一遍, 上面「第 pos 位要什么档」与这一问都是它的
+    // 投影: needle 那一位对**数值**实参答 BSTR (要折, §B175), 对 **Variant** 实参要**裸交**
+    // (宏自己选 vb6_InStrVar 解包并 free) ⇒ 一枚 C 档串表达不了这一位, 六十七刀就是被这一维绊住的
+    // (它按「裸交」把整格答成空, 数值那一半跟着掉了, `InStr(2, s, 7)` 当场 AV)。
+    // 读者 = arg_variant 那条臂一枚 (Fix 038b-2), 站点数不许增加。
+    size_t builtinNoParamTableDispatchSlot(const std::string& callee, size_t argc,
+                                           Vb6Type firstArgType) const;
+    bool builtinNoParamTableVariantMayStayRaw(const std::string& callee, size_t argc, size_t pos,
+                                              Vb6Type firstArgType) const;
+    // 账 #305 §B180 (第六十九刀): 「这一位要不要收**整枚槽**而不是收串」—— 一枚出口三件一起答
+    // (callee + 位号 + **实参本身是不是槽**)，读者**恰好两枚**：arg_variant 用它撤回 Variant→BSTR
+    // 的解包，builtin_fixup 用它把 callee 换成收槽的那枚出口 (`vb6_StrPtr` → `vb6_StrPtrVar`)。
+    // 为什么不并进上面那张按位号答档的表: `vb6_StrPtr(` 在语料里 1720 次调用有 1478 次交的是
+    // **普通 String 变量** (§B180 的普查) ⇒ 无条件按 callee+位号答 `vb6_VARIANT` 会把那 1679 处
+    // 打成 BSTR 进 vb6_VARIANT 形参 = C2440；这一问必须**看实参**。
+    // 只认 AST 那一半 (`isDefinitelyVariantExpr`)：文本那一半 (`cExprIsVariant`) 今天还含
+    // 「裸 COM 结果」一类形状，那些形状下的解包是 Fix 113c 的活，没量过就不撤。
+    bool builtinWantsRawSlotFromVariant(const std::string& callee, size_t argc, size_t pos,
+                                        Expr& actual) const;
 
     // 账 #305 §B147: 「这枚 C 表达式是不是整只 vb6_VARIANT 槽」的 **AST 那一半** ——
     // 与上面 cExprIsVariant (文本前缀表) 合起来回答同一个问句。为什么必须分两头供出：

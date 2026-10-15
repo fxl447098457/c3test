@@ -903,51 +903,110 @@ bool CCodeGen::typeTakesImplicitCStr(Vb6Type t) const {
 // ⇒ 表按 VB 手册一枚枚写, 每行都是"这一位收了数值实参 VB6 会隐式 CStr"那条事实。
 // Len / LenB / Asc / StrPtr 刻意**不进表** —— ①就是理由, 不是来不及。
 // InStrB 不进表: RTL 那两形是 void* (Byte() 或 BSTR), 数值进不去也就没人折; 没量过 = 不加。
+// 账 #305 §B176 (第六十七刀): 「**没有类型化形参表**的那批内在函数, 第 pos 位(按**写出来的**
+// arity 数)要什么 C 档」 —— 这一问现在只有这一位主人。返回 "" = 这一位我不知道 (调用方维持原样)。
+// 为什么必须是「档」而不是「是不是字符串位」: 上一格 (§B175) 那只答了 BSTR 的一半, 于是同一站
+// 剩下的方向 (Variant 交进**数值**形参) 没人答, 而 `getRuntimeParamCType` 那张按 callee 名登的
+// C 签名表**按写出来的位号**答 InStr 的 start 位时给出 BSTR (它的行是按 VB 两参形登的) ⇒
+// `InStr(vA, s1, "7")` 把该转数值的实参解成了串, 交进 `int32_t start` —— cl 只是 warning,
+// 运行时 start 是个被截断的指针 ⇒ 静默答 0 (`.build/k67_probe2.bas` 五形实测, 见 §B176)。
+// 账 #305 §B177 (第六十八刀): 「这一位是不是那枚 _Generic 宏的**分派位**」—— 位号只在这里数
+// **一遍**, 上面那两问 (档 / Variant 能不能裸交) 都只是它的投影。为什么要有第三问:
+// needle 这一位对两种实参要两种答案 —— 数值实参 VB6 会隐式 CStr (要折), 而 Variant 实参宏自己
+// 选 `vb6_InStrVar` 解包**并 free** (`vb6rtl_string.c:235-247`) (要裸交)。一枚 C 档串说不完,
+// 六十七刀按「裸交」那一半把这一位答成空, 于是**数值那一半跟着掉了** ——
+// `InStr(2, s, 7)` 发成 `vb6_InStr(2, s, 7)` (裸 int 进 `wchar_t*`, cl 不报, x64 跑到那行 AV,
+// RC=139; `.build/k68_probe4.bas` 两台对照: 六十六刀那台答 4、六十七刀这台崩),
+// 而两参形 `InStr(s, v)` 反过来还**多折一层** (20000 次调用漏 753664 字节, `.build/k68_lp`)。
+// 全仓 21 枚 `_Generic` 宏里「分派位不是第一参」的就 `vb6_InStr` / `vb6_InStrC` 两枚
+// (§B176 ①.1 量的), 而 `vb6_InStrC` 这一形在**改道之前**的 callee 名仍是 `vb6_InStr`
+// (`builtin_fixup` 才换成 InStrC), 所以这一问只认这一个名字。返回 SIZE_MAX = 这一族以外。
+size_t CCodeGen::builtinNoParamTableDispatchSlot(const std::string& callee, size_t argc,
+                                                 Vb6Type firstArgType) const {
+    if (callee != "vb6_InStr") return SIZE_MAX;
+    if (argc == 2) return 1;                                              // InStr(hay, needle)
+    if (argc == 3) return firstArgType == Vb6Type::String ? 1 : 2;        // (hay, needle, cmp)
+                                                                            // 或 (start, hay, needle)
+    if (argc == 4) return 2;                                              // (start, hay, needle, cmp)
+    return SIZE_MAX;
+}
+
+bool CCodeGen::builtinNoParamTableVariantMayStayRaw(const std::string& callee, size_t argc,
+                                                    size_t pos, Vb6Type firstArgType) const {
+    const size_t slot = builtinNoParamTableDispatchSlot(callee, argc, firstArgType);
+    return slot != SIZE_MAX && slot == pos;
+}
+
+// 账 #305 §B180 (第六十九刀): 「这一位要不要收整枚槽而不是收串」= 一枚出口，读者恰好两枚
+// (arg_variant 撤回解包 / builtin_fixup 改 callee 名，见 cgen_helpers.inc 那一问的注释)。
+// 病在发码形状 `vb6_StrPtr(vb6_VariantToString(v))`：`vb6_VariantToString` 的定义就一句
+// `return vb6_CStr(v)` (vb6rtl.c:484) = `vb6_Format(...)` ⇒ **每调用现造一枚 BSTR**，
+// 地址交给 Win32 之后那枚串没人回收 (实测 18000 次 = x64 1089536 / x86 909312 字节，
+// 同形状普通 String 基线增量 0；真语料 18 份文件 41 处，全在指针交接位)。
+// 为什么不能并进 §B176 那张按位号答档的表 (那是本节上面两问的家): `vb6_StrPtr(` 全语料 1720 处
+// 里 **1478 处交的是普通 String 变量** (`.build/k69_strptr_census.txt`) —— 按位号无条件答槽会把
+// 它们一并打坏 (BSTR 进 vb6_VARIANT 形参 = C2440)。所以这一问**看实参**，且只认 AST 那一半。
+bool CCodeGen::builtinWantsRawSlotFromVariant(const std::string& callee, size_t argc, size_t pos,
+                                              Expr& actual) const {
+    if (callee != "vb6_StrPtr") return false;
+    if (argc != 1 || pos != 0) return false;
+    return isDefinitelyVariantExpr(actual);
+}
+
+std::string CCodeGen::builtinNoParamTableFormalCType(const std::string& callee, size_t argc,
+                                                     size_t pos, Vb6Type firstArgType) const {
+    // §B174 的正主: InStr 的位随"有没有写 start"整体移位, 依据与 builtin_fixup 选
+    // vb6_InStr / vb6_InStrC 时那一问同源 (首参是不是串 —— 那里问 AST, 这里也问 AST)。
+    //   InStr(s1, s2)                   → 0,1 = BSTR
+    //   InStr(s1, s2, compare)          → 0,1 = BSTR, 2 = int32_t
+    //   InStr(start, s1, s2)            → 0 = int32_t (start), 1,2 = BSTR
+    //   InStr(start, s1, s2, compare)   → 0,3 = int32_t, 1,2 = BSTR
+    // 位号由上面那一问给出; needle 这一位**照答 BSTR** (数值实参要折, §B175 那一站),
+    // Variant 实参则在那一站里被 `builtinNoParamTableVariantMayStayRaw` 拦下裸交。
+    if (callee == "vb6_InStr") {
+        const size_t needle177 = builtinNoParamTableDispatchSlot(callee, argc, firstArgType);
+        if (needle177 == SIZE_MAX || pos >= argc) return "";
+        // 位号只从那一问推: needle 与其前一位 (haystack) 都是 VB 语义上的串, 剩下的位就是
+        // start / compare 那一类数值位。`firstArgType` 因此只在那一枚出口里用一次 ——
+        // 这一族每一位的答案都由「有没有写 start」决定, 而那个问句只有一处 (§B177)。
+        if (pos == needle177 || pos == needle177 - 1) return "BSTR";
+        return "int32_t";
+    }
+    // 账 #305 §B175 (第六十六刀) 那张「哪几位是字符串」的名单, 这一格按同一批读数**扩成档**:
+    // 每一行的依据 = ① RTL 的 C 形参 (vb6rtl_registry.h / vb6rtl_dialog.h / vb6rtl_builtin.h 实读),
+    // ② `--emit-c` 实测这一形今天裸送 (`.build/k66_probe{2,3}.bas`、`.build/k67_probe.bas`),
+    // ③ VB6 收了数值/Variant 会隐式折算 (手册口径 + 真语料写法)。
+    // 刻意**不进**这张表的, 每条都有理由:
+    //   vb6_AppActivate —— 数值那一形到底是「CStr 当标题」还是「按 PID 激活」没定 (RTL 另有
+    //     `vb6_AppActivateByPid`、全仓 0 调用者; 语料 8 处实写全是串) ⇒ 口径等拍, §B175 记着。
+    //   Len / LenB / Asc / StrPtr —— 字节宽度那一问 (§B174 教训①: 这张表按 C 签名反推会答错)。
+    //   InStrB —— RTL 两形是 void* (Byte() 或 BSTR), 数值进不去。
+    //   带类型化形参表的那一族 (InStrRev / Mid / Filter / Left / Right …) —— 它们不落这张表,
+    //     Fix 175 与 arg_variant 那一站直接问 `calleeParams`。
+    static const std::unordered_map<std::string, std::vector<std::string>> kNoTableFormalKinds176 = {
+        {"vb6_GetSetting",    {"BSTR", "BSTR", "BSTR", "BSTR"}},   // (app, section, key[, default])
+        {"vb6_SaveSetting",   {"BSTR", "BSTR", "BSTR", "BSTR"}},   // (app, section, key, setting)
+        {"vb6_DeleteSetting", {"BSTR", "BSTR", "BSTR"}},           // (app, section[, key])
+        {"vb6_GetAllSettings", {"BSTR", "BSTR"}},                  // (app[, section])
+        {"vb6_MsgBox",        {"BSTR", "int32_t", "BSTR"}},        // 1 = buttons; helpfile/context
+                                                                    //   两形 C 出口不收 (MsgBox1)
+        {"vb6_InputBox",      {"BSTR", "BSTR", "BSTR", "int32_t", "int32_t", "BSTR", "int32_t"}},
+        {"vb6_SendKeys",      {"BSTR", "int32_t"}},                // 1 = wait
+        {"vb6_SetAttr",       {"BSTR", "int32_t"}},                // 1 = attributes
+        {"vb6_SavePicture",   {"", "BSTR"}},                      // 0 = picture(void*) —— 不是串也不是数值
+        {"vb6_Format",        {"", "BSTR", "int32_t", "int32_t"}}, // 0 是 VARIANT 形参, 由 conv_output
+                                                                    //   的装箱那腿办, 这里刻意留空
+    };
+    auto it176 = kNoTableFormalKinds176.find(callee);
+    if (it176 == kNoTableFormalKinds176.end()) return "";
+    if (pos >= it176->second.size()) return "";
+    return it176->second[pos];
+}
+
 bool CCodeGen::builtinNoParamTableStringSlot(const std::string& callee, size_t argc, size_t pos,
                                              Vb6Type firstArgType) const {
-    // §B174 的正主: InStr 的字符串位随"有没有写 start"整体移位, 依据与 builtin_fixup 选
-    // vb6_InStr / vb6_InStrC 时那一问同源 (首参是不是串 —— 那里问 AST, 这里也问 AST)。
-    //   InStr(s1, s2)                   → 串在 0,1
-    //   InStr(s1, s2, compare)          → 串在 0,1   (末位是 compare, 不许折)
-    //   InStr(start, s1, s2)            → 串在 1,2
-    //   InStr(start, s1, s2, compare)   → 串在 1,2   (末位同上)
-    if (callee == "vb6_InStr") {
-        if (argc == 2 || (argc == 3 && firstArgType == Vb6Type::String)) {
-            return pos == 0 || pos == 1;
-        }
-        if (argc == 3 || argc == 4) return pos == 1 || pos == 2;
-        return false;
-    }
-    // 账 #305 §B175 (第六十六刀): 其余**没有形参表**的内在函数 —— 位号与实参个数无关,
-    // 所以一张名单就够, 不必像 InStr 那样先看 arity。每一行的依据 = 本刀那三份读数:
-    //   ① RTL 的 C 形参是 BSTR (vb6rtl.h / vb6rtl_registry.h / vb6rtl_dialog.h 实读),
-    //   ② `--emit-c` 实测那一形今天裸送数值进 wchar_t* (`.build/k66_probe{2,3}.bas`),
-    //   ③ VB6 收了数值会隐式 CStr (手册口径 + 真语料写法, 见 §B175 台账)。
-    // 刻意**不进**这张名单的, 每条都有理由, 不是没排上:
-    //   vb6_AppActivate —— 数值那一形到底是「CStr 当标题」还是「按 PID 激活」没定: RTL 另有一枚
-    //     `vb6_AppActivateByPid(int32_t pid, int32_t wait)` 而全仓 0 调用者; 真语料 8 处实写全是串
-    //     (AppActivate "mIRC32" / ReturnValue / title) ⇒ 没有读数就不动它, 口径另记 §B175。
-    //   Len / LenB / Asc / StrPtr —— 上面注释里那条 ① (字节宽度那一问)。
-    //   InStrB —— RTL 两形是 void* (Byte() 或 BSTR), 数值进不去。
-    //   InStrRev / Mid / Filter 那一族里带类型化形参表的 —— 它们根本不落这张表, Fix 175 直接问表。
-    static const std::unordered_map<std::string, std::vector<size_t>> kNoTableStringSlots175 = {
-        {"vb6_GetSetting",    {0, 1, 2, 3}},  // GetSetting(app, sec, key, default)
-        {"vb6_SaveSetting",   {0, 1, 2, 3}},  // SaveSetting(app, sec, key, setting)
-        {"vb6_DeleteSetting", {0, 1, 2}},     // DeleteSetting(app, sec, key)
-        {"vb6_GetAllSettings", {0, 1}},       // GetAllSettings(app[, sec])
-        {"vb6_MsgBox",        {0, 2}},        // 1 = buttons(int); VB 的 helpfile/context C 出口不收
-        {"vb6_InputBox",      {0, 1, 2}},     // 3,4 = xpos/ypos(int), 6 = context(int)
-        {"vb6_SendKeys",      {0}},           // 1 = wait(Boolean)
-        {"vb6_SetAttr",       {0}},           // 1 = attributes(int)
-        {"vb6_SavePicture",   {1}},           // 0 = picture(void*)
-        {"vb6_Format",        {1}},           // 0 是 VARIANT 形参, 由 conv_output 的装箱那腿办
-    };
-    auto it175 = kNoTableStringSlots175.find(callee);
-    if (it175 == kNoTableStringSlots175.end()) return false;
-    for (size_t p : it175->second) {
-        if (p == pos) return true;
-    }
-    return false;
+    // 「哪一位是字符串形参」= 上面那一问在 BSTR 档上的投影 (不是第二份名单)。
+    return builtinNoParamTableFormalCType(callee, argc, pos, firstArgType) == "BSTR";
 }
 
 // 账 #305 §B171 (第六十二刀): 「按 C 文本认槽」这一问漏认的那一族 —— 类字段的 Variant 槽读。
