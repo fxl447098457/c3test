@@ -1011,6 +1011,12 @@
     // 遮蔽, 判"某类型名是不是工程类"只能问这张表 (详见 setProjectClassNames 注释).
     const std::unordered_map<std::string, std::string>* projClassNames_ = nullptr;
 
+    // 账 #305 §B187 第二腿: 工程级「在运行期 coclass 描述表里占一行」的类名名单
+    // (小写, driver 与建表那侧同一条判据扫出 —— 见 driver_codegen_voidfield_scan.inc)。
+    // 装箱腿发每一句 vb6_FindCoClassDesc("<类>") 之前先问它: 表里没有这行 ⇒ desc=NULL
+    // ⇒ 包装器=NULL ⇒ 槽里成了 Nothing, 比裸指针还差, 所以那种形状一律不装箱。
+    const std::unordered_set<std::string>* projCoclassNames_ = nullptr;
+
     // CoClass 身份 (tB, ai/022 B13b): stage 2.7 Pass E 求出的唯一出口 (coclassIds_)。
     // 只有 generateDllEntry 读它 —— 产品里的 CLSID / 默认接口 IID / 组名 ProgID 一律
     // 从这里取，prelude 里那两枚 lambda 退成"读不到块的类"的兜底路径。

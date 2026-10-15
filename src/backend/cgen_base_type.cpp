@@ -283,6 +283,13 @@ std::string CCodeGen::deliverToClassSlot(const std::string& clsPtr,
         return "(" + clsPtr + ")vb6_ComObject_GetInstance("
                "vb6_VariantToObjectVal(" + argVal + "))";
     }
+    // 账 #305 §B187 装箱腿的读者②: 实参是一枚**装箱过的泛对象变量** (void* 槽里现在
+    // 装的是 vb6_ComObject 包装器) 时也必须剥回裸实例 —— C 里 void* 喂给 vb6_cls_X*
+    // 形参不报错 (隐式转换)，把包装器当实例用就是静默的坏指针。判据问 varHoldsComWrapper
+    // (唯一那张登记表)，与 Fix 179b / Is 那一站同一个问句。
+    if (!clsPtr.empty() && clsPtr.compare(0, 8, "vb6_cls_") == 0 && varHoldsComWrapper(argVal)) {
+        return "(" + clsPtr + ")" + unwrapComVarExpr(argVal);
+    }
     return argVal;
 }
 

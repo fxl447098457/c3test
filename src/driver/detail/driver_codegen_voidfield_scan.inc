@@ -32,6 +32,29 @@
         return it == projectClassNames.end() ? std::string() : it->second;
     };
 
+    // 账 #305 §B187 第二腿: 工程级「在运行期 coclass 描述表 (g_vb6_coclasses[]) 里占一行」
+    // 的类名名单 (小写)。
+    // 为什么发码期要它: 装箱腿 (cgen_setlet_set_rhs.inc) 每一句
+    // `vb6_ComObject_FromBorrowedInstance(vb6_FindCoClassDesc("<类>"), …)` 都得先知道
+    // "查 desc 查不查得中" —— 查不中 RTL 交回 NULL 包装器，槽里就成了一枚 Nothing，
+    // 比今天的裸指针**更坏** (裸指针至少早绑定那半能用)。
+    // 名单与建表那侧同一条判据 (Symbol::isCoClassTableEntry)、同一份输入 (每张模块符号表
+    // 都扫，含注入副本)：rev17 记的那条漏路在这里同样成立 —— 类名与同名成员撞车时
+    // driver_crossmod 的注入守卫会跳过，只看单模块表就收不到这类。
+    // EXE 与 DLL 共用这一份: com_entry.c (driver_codegen_dll_entry.inc 的 EXE 平行分支)
+    // 与 dll_entry.c 发的是同一张表。
+    std::unordered_set<std::string> projectCoclassNames;
+    for (const auto& cocAn : analyzers_) {
+        if (!cocAn) continue;
+        Scope* cocMs = cocAn->symbolTable().moduleScope();
+        if (!cocMs) continue;
+        for (const auto& cocKv : cocMs->symbols()) {
+            if (cocKv.second && cocKv.second->isCoClassTableEntry()) {
+                projectCoclassNames.insert(Symbol::toLower(cocKv.second->name));
+            }
+        }
+    }
+
     // Fix 023: 预扫描所有模块的 AST, 构建 className → void* 字段集 映射.
     // 这个映射在 cgen_expr.cpp 的 knownClassVars_ fallback 路径用于判断
     // obj->member 是否返回 void* COM 指针 (例: cDataBase.Rs As New ADODB.Recordset,

@@ -347,10 +347,11 @@ void CCodeGen::emitClassFieldAccessors(Module& module) {
             size_t nDot = nTarget.find_last_of('.');
             if (nDot != std::string::npos) nTarget = nTarget.substr(nDot + 1);
             Symbol* nSym = lookupModuleDotted(nTarget);
-            const bool nIsCoclass = nSym && nSym->kind == SymbolKind::Class
-                && !nSym->isInterface
-                && (nSym->instancing == VBInstancing::MultiUse
-                    || nSym->instancing == VBInstancing::SingleUse);
+            // 账 #305 §B187 第二腿: 判据问 Symbol::isCoClassTableEntry() (与建表那侧、
+            // 装箱腿那份名单同一把尺子) —— 这里发的正是
+            // vb6_ComObject_FromBorrowedInstance(vb6_FindCoClassDesc(...))，类不在表里
+            // 就会装箱出 NULL 包装器 (= Nothing)。
+            const bool nIsCoclass = nSym && nSym->isCoClassTableEntry();
             if (nIsCoclass) {
                 const std::string tId = cIdent(nSym->name);
                 fe.getLines.push_back("if (!me->" + fld + ") me->" + fld + " = (void*)vb6_cls_"

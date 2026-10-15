@@ -191,33 +191,127 @@
     // 仅 void* 目标包装; typed 目标保持裸指针; Variant 走上方 _Generic 路径.
     bool fix179bUnwrapped = false;
     {
+        // 「这枚目标槽是不是后期绑定的泛对象槽 (void* 里该装 IDispatch*)」——
+        // Fix 179a 与下面的装箱腿**同一问**，所以收成一条 lambda 问一次:
+        //   me-> 字段 → classVoidFieldMap_ (driver 预扫描, 含 As Object / As New)
+        //   其余      → knownObjectVars_   (本过程登记过的晚绑定变量/参数)
+        auto lateBoundSlotTarget = [&]() -> bool {
+            if (target.rfind("me->", 0) == 0) {
+                if (!classVoidFieldMap_) return false;
+                auto itV = classVoidFieldMap_->find(moduleName_);
+                return itV != classVoidFieldMap_->end()
+                    && itV->second.count(targetLower) > 0;
+            }
+            return knownObjectVars_.count(targetLower) > 0;
+        };
+
+        // 进站时的值 (下面几条臂会改写 value, 登记表那一问要吃**原样**那一枚)
+        const std::string rawSrcForReg = value;
+
         // value 形如 "(vb6_cls_<X>_New())"
         std::string bare179;
         if (value.size() > 16 && value.compare(0, 9, "(vb6_cls_") == 0
             && value.compare(value.size() - 7, 7, "_New())") == 0) {
             bare179 = value.substr(9, value.size() - 16);
         }
+        bool wrappedBy179a = false;   // 179a: New 那一形交回**拥有型**包装器
+        bool boxedHere = false;       // 装箱腿: 借用型包装器
         if (!bare179.empty()
             && bare179.find_first_not_of(
                    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_")
                    == std::string::npos
             && !targetIsVariant) {
-            bool targetIsCom179 = false;
-            if (target.rfind("me->", 0) == 0) {
-                if (classVoidFieldMap_) {
-                    auto itV179 = classVoidFieldMap_->find(moduleName_);
-                    if (itV179 != classVoidFieldMap_->end()
-                        && itV179->second.count(targetLower)) {
-                        targetIsCom179 = true;
-                    }
-                }
-            } else {
-                targetIsCom179 = knownObjectVars_.count(targetLower) > 0;
-            }
-            if (targetIsCom179) {
+            if (lateBoundSlotTarget()) {
                 value = "(void*)vb6_ComObject_FromInstance(vb6_FindCoClassDesc(\""
                       + bare179 + "\"), (void*)" + value.substr(1, value.size() - 2) + ")";
-                wrappedComVars_.insert(targetLower);
+                wrappedBy179a = true;
+            }
+        }
+        // 账 #305 §B187 第二腿 装箱腿: `Set <泛对象槽> = <工程内实例>` (不是 New 那一形)
+        // → 交**借用型**包装器 vb6_ComObject_FromBorrowedInstance。
+        // 为什么这一格欠着 (第八十二刀三条实测读数, 台账 §B187):
+        //   H = Type=DLL 的驱动实测 result=42000 —— 早绑定那半 42 对, 晚绑定那半 0。
+        //     `Set v = o` 发成裸指针赋值 `v = o;  /* Set */` 后，槽里是一枚
+        //     `vb6_cls_X*`，首字段 __comObj 被 vb6_ComIsDispatchable 当 vtable 读 → 判否
+        //     → GetIDsOfNames 给 DISPID_UNKNOWN → **静默空答** (不崩, 但值永远是 0)。
+        //   I = Type=Exe 那台把同一枚槽交给真外部 COM 的实参位 (Dictionary.Add) 直接
+        //     0xC0000005 —— 与工程类型无关，是"裸实例指针越过 IDispatch 边界"那一族。
+        // 所有权: 这里交出去的是**别人已有的实例** (类变量/字段/返回槽), 销毁权还留在
+        // 宿主, 所以必须用 ownsInstance=0 的借用型 (Fix 188 那一档) 而不是 179a 的
+        // FromInstance —— 用后者会让客户端 Release 到 0 时把宿主还在用的实例拆掉。
+        // desc 判据 (为什么先问 classHasCoClassDesc): 查不中 desc ⇒ FromBorrowedInstance
+        // 交回 NULL ⇒ 槽里成了 Nothing，比今天的裸指针**更坏** (裸指针至少早绑定那半
+        // 能用)。名单由 driver 与建表那侧同一条 Symbol::isCoClassTableEntry() 扫出。
+        // 负条件 (宁可不动，也不把好产物改坏):
+        //   · 179a 已经包过的 (New 那一形) 不再二次装箱;
+        //   · 值里带 vb6_VariantToObjectVal / vb6_ComObject_GetInstance = 上面那一站刚从
+        //     槽里剥出来的**已经是** IDispatch/宿主指针, 再套一层会把包装器的 vtable 字段
+        //     当 __comObj 回填 ⇒ 当场把包装器改坏;
+        //   · cExprIsVariant(值) = 还是枚槽，交回下面的 Variant 路径处理。
+        if (!wrappedBy179a && !targetIsVariant && node.value && lateBoundSlotTarget()) {
+            // 控件那一族必须留在闸门外: 窗体上的子控件 (含工程内 UserControl) 在 C 侧的值是
+            // **HWND** (`vb6_hwnd_<名>` / `vb6_form_ctrl_<窗体>_<名>()`)，而 Fix 112 又把 UC
+            // 控件名登记进 knownClassVars_ (名字 → .ctl 模块名) —— 只看类名就会把句柄当
+            // `vb6_cls_ucX*` 交给 FromBorrowedInstance，而它头一件事是 `*(void**)instance`
+            // 回填 __comObj ⇒ 往窗口句柄那个数当地址写 ⇒ 内存损坏。
+            // 实测探针 (.build/k88_uc_probe.py: 复制 tests/Charts 2020/ucChartBar 后在 Form1
+            // 里加 `Set oBox = ucChartBar1`)：base/new 都发 `oBox = vb6_hwnd_ucChartBar1` ——
+            // 挡下它的是 desc 闸门 (.ctl 头里只有 `Begin VB.UserControl`，没有 CLASS 的
+            // MultiUse 块 ⇒ UC 不进 coclass 表)。这条不把那个巧合当依据，句柄形状显式钉死。
+            const bool valueIsHostHandle =
+                value.find("vb6_hwnd_") != std::string::npos
+                || value.find("vb6_form_ctrl_") != std::string::npos;
+            const bool valueAlreadyUnboxed =
+                value.find("vb6_VariantToObjectVal") != std::string::npos
+                || value.find("vb6_ComObject_GetInstance") != std::string::npos;
+            if (!valueIsHostHandle && !valueAlreadyUnboxed && !cExprIsVariant(value)) {
+                const std::string boxCls = inferClassTypeOfExpr(*node.value);
+                if (!boxCls.empty() && classHasCoClassDesc(boxCls)) {
+                    value = "(void*)vb6_ComObject_FromBorrowedInstance(vb6_FindCoClassDesc(\""
+                          + boxCls + "\"), (void*)" + value + ")";
+                    boxedHere = true;
+                }
+            }
+        }
+
+        // 登记表的口径: wrappedComVars_ 记的是「这个名字**最后一次** Set 进去的是不是
+        // 一枚包装器」—— 只有那一次交的是包装器才许登记，交了别的东西 (裸实例 / 外部
+        // IDispatch / Nothing) 一律注销。收不拢就会留一枚过期答案给三处读者:
+        //   Set o = New Foo          → 登记 (179a 交的是包装器)
+        //   Set o = CreateObject(…)  → 这一站既不装箱也不注销 ⇒ 表里还挂着"o 装着包装器"
+        //   If o Is Nothing          → 拿着旧答案去 GetInstance 一枚活着的外部 IDispatch
+        //                              ⇒ 认不出 vtable ⇒ 交回 NULL ⇒ **真对象被判成 Nothing**
+        // 原来只有 `Set x = Nothing` 一条注销, 那本来就是这条规则的一个特例。
+        // 复制 (`Set v2 = v1`, v1 装着包装器) 也算"最后一次交的是包装器" —— 槽里换的
+        // 就是同一枚指针，不登记会让读者② / ③ 在 v2 上漏一次剥壳。
+        if (!targetIsVariant) {
+            bool holdsWrapper = wrappedBy179a || boxedHere
+                || (lateBoundSlotTarget() && varHoldsComWrapper(rawSrcForReg));
+            if (holdsWrapper) wrappedComVars_.insert(targetLower);
+            else              wrappedComVars_.erase(targetLower);
+        } else {
+            // Variant 槽里的值是 vb6_VARIANT 那份存储，不是裸包装器指针 —— 名字不许进
+            // 登记表 (否则读者② / ③ 会把它当指针剥壳)。`Set v = Nothing` 那半直译自这里。
+            wrappedComVars_.erase(targetLower);
+        }
+
+        // 账 #305 §B187 装箱腿的读者①: Set <typed 工程类**局部/形参**目标> = <装箱过的
+        // 泛对象变量> → 剥回裸实例。Fix 179b 只接了 me-> 字段那一格 (且限类模块), 局部
+        // 那一格漏着: 装箱腿把这枚变量的内容从裸实例换成了包装器, 原样赋给 typed 目标
+        // 就是把包装器当实例用 (读字段整排错位)。判据问 varHoldsComWrapper (唯一那张
+        // 登记表), 目标类名问 knownClassVars_ (与 Fix 084g / deliverToClassSlot 同一条)。
+        {
+            std::string srcBoxed = value;
+            if (srcBoxed.size() >= 2 && srcBoxed.front() == '(' && srcBoxed.back() == ')') {
+                srcBoxed = srcBoxed.substr(1, srcBoxed.size() - 2);
+            }
+            if (!targetIsVariant && varHoldsComWrapper(srcBoxed)
+                && target.rfind("me->", 0) != 0) {
+                auto itTgtCls = knownClassVars_.find(targetLower);
+                if (itTgtCls != knownClassVars_.end() && !itTgtCls->second.empty()) {
+                    value = "(vb6_cls_" + cIdent(itTgtCls->second) + "*)"
+                          + unwrapComVarExpr(srcBoxed);
+                }
             }
         }
         // Fix 179b: Set <typed工程类目标> = <179a包装的Object变量> → 解包回裸实例
@@ -230,11 +324,10 @@
             && !src179.empty()
             && src179.find_first_of(" ()+*/,") == std::string::npos
             && !targetIsVariant) {
-            std::string srcLower179 = src179;
-            std::transform(srcLower179.begin(), srcLower179.end(), srcLower179.begin(), ::tolower);
-            std::string srcField179 = srcLower179;
-            if (srcField179.rfind("me->", 0) == 0) srcField179 = srcField179.substr(4);
-            if (wrappedComVars_.count(srcField179)) {
+            // 账 #305 §B187: 「这枚源变量此刻装着包装器吗」收成一条问句
+            // (varHoldsComWrapper) —— 别名复制、类槽实参交付、`Is` 同一性那三站问的
+            // 就是同一句话，这里不再手抄「lowercase + 剥 me-> + 查表」那一段。
+            if (varHoldsComWrapper(src179)) {
                 std::string tgtClass179;
                 if (classTypedFieldMap_) {
                     auto itT179 = classTypedFieldMap_->find(moduleName_);
@@ -254,10 +347,8 @@
                 }
             }
         }
-        // Set Nothing 清除跟踪
-        if (value == "NULL" || value == "0") {
-            wrappedComVars_.erase(targetLower);
-        }
+        // (原来这条 "Set Nothing 清除跟踪" 已并入上面那条"最后一次 Set 交的是不是包装器"
+        //  —— Nothing 那一形本来就落在它的 else 分支上，两条并着就是一处问。)
     }
 
     if (!fix179bUnwrapped) {
