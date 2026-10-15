@@ -28,3 +28,8 @@ CoClass Arg
     [Implementation("B187Arg")]
     [ComCreatable(True)]
 End CoClass
+
+CoClass Ref
+    [Implementation("B187Ref")]
+    [ComCreatable(True)]
+End CoClass

@@ -1,18 +1,21 @@
-﻿# check_object_slot_boxing.ps1 - 账 #305 §B187 装箱腿的结构性哨兵 (只扫源码, 不起 cl)
+﻿# check_object_slot_boxing.ps1 - 账 #305 §B187 装箱一族的结构性哨兵 (只扫源码, 不起 cl)
 #
 # 为什么单开这一道: 「一枚工程内实例交给泛对象槽 (void* 里该装 IDispatch*) 时该发什么」这一问
 # 改前的答案是"直接发裸指针" —— 于是槽里/形参里是一枚 `vb6_cls_X*`, 晚绑定那一族 (vb6_ComCall /
 # 外部 COM 实参) 各自读它: 前者静默空答, 后者 0xC0000005。现在这一问只有一处回答
-# (boxIntoLateSlot 那一枚唯一发码处, 三处站点都问它), 而它要问两句「这枚类在不在运行期 coclass
-# 表里」和「这枚变量此刻装的是不是包装器」—— 那两句也各只有一处定义。哨兵钉的是这四件事不许再
-# 长出第二份。
+# (boxIntoLateSlot 那一枚唯一发码处, 三处站点都问它), 而它要问三句:「这枚类在不在运行期 coclass
+# 表里」、「这枚变量此刻装的是不是包装器」、「这枚**值**自己是不是包装器」—— 三句各只有一处定义。
+# ByRef 那一座桥 (第五腿) 的两端也一律问第三句, 且两句发码文本只许从 bridgeByRefLateSlotArg 出。
+# 哨兵钉的是这五件事不许再长出第二份。
 #
 # 规则 (改坏了会红, 不是装饰):
 #   B1  装箱的发码处只许一枚: src/backend 的代码行里 `vb6_ComObject_FromBorrowedInstance` 恰好
-#       4 处 = 唯一发码处 1 + 站点那条 boxedHere 前缀判据 1 + cgen_com.cpp 的 getter 2; 其中
-#       **发出**包装器的那一句 (`return "(void*)vb6_ComObject_FromBorrowedInstance`) 恰好 1 处。
+#       5 处 = 唯一发码处 1 + ByRef 桥的进场那一句 1 + 站点那条 boxedHere 前缀判据 1 +
+#       cgen_com.cpp 的 getter 2; 其中 **按值发出**包装器的那一句
+#       (`return "(void*)vb6_ComObject_FromBorrowedInstance`) 恰好 1 处。
 #       `boxIntoLateSlot(` 恰好 5 处 = 声明 1 + 定义 1 + 站点 3 (Set / 位置实参 / 命名实参);
-#       `cParamLateSlotType(` 恰好 4 处 = 声明 1 + 定义 1 + 实参站点 2。
+#       `cParamLateSlotType(` 恰好 5 处 = 声明 1 + 定义 1 + ByVal 实参站点 2 + ByRef 桥那一问 1
+#       (桥与 ByVal 那一档**共用同一把形参声明尺**, 不许另立)。
 #   B2  「哪一档的类在 coclass 表里占一行」这条判据只许住在 Symbol::isCoClassTableEntry:
 #       全 src 里 `instancing == VBInstancing::MultiUse|SingleUse` 必须恰好 2 处且都在
 #       symbol_table.hpp 的定义体内 (cgen_com_events.cpp / driver_codegen_dll_typelib.inc
@@ -20,7 +23,7 @@
 #       (mod.instancing = VBInstancing::MultiUse) 必须还在 1 处; 消费点 (->isCoClassTableEntry())
 #       至少 3 处: 建表收集 / As New 那一支 / driver 那份工程级名单 —— 少一处就是有人又开始
 #       手抄判据。
-#   B3  「这枚变量此刻装着包装器吗」只有 varHoldsComWrapper 一处回答 (cgen_api.inc): src 代码行
+#   B3  「这枚**变量**此刻装着包装器吗」只有 varHoldsComWrapper 一处回答 (cgen_api.inc): src 代码行
 #       恰好 8 处 = 定义 1 + 消费 7 (读者① typed 目标 / 读者② 类槽实参 / 读者③ Is 两臂 /
 #       登记块 / 别名复制 / 唯一发码处的槽→槽负条件); 直查 `wrappedComVars_.count` 只许剩定义
 #       体内那 1 处, 别处必须 0 —— 179b 改问它之前那里就是一处手抄。
@@ -30,11 +33,17 @@
 #   B5  负条件齐件: 唯一发码处那一份 (cgen_base_type.cpp) 必须同时含句柄闸 (vb6_hwnd_ /
 #       vb6_form_ctrl_) + desc 闸 (classHasCoClassDesc) + 登记表闸 (varHoldsComWrapper) +
 #       Variant 闸 (cExprIsVariant); 两枚实参站点各自必须含 isByVal 与 cParamLateSlotType
-#       —— ByRef 那一档刻意不装箱 (要落临时就丢写回), 闸门掉了就会一路吃掉 ByRef;
+#       (ByVal 那一档) 与 bridgeByRefLateSlotArg (ByRef 那一档) —— 两边少一个就会互相吃进来;
 #       Set 那一站必须还问 lateBoundSlotTarget 并给登记表写 boxedHere。
-#   B6  夹具与两架构的真跑格都在: tests/b187_box/B187d.vbp 与 B187Arg.cls (第四臂 = 实参那一站)
-#       存在, run_tests.ps1 里 b187_boxed_object_slot 恰好 2 处 (x64 + x86)、CREATE4MEM 恰好 4 处
-#       (每臂各一条正针 + 一条反面证人)。
+#   B6  夹具与两架构的真跑格都在: tests/b187_box/B187d.vbp 与 B187Arg.cls (第四臂 = 实参那一站)、
+#       B187Ref.cls (第五臂 = ByRef 那座桥) 存在, run_tests.ps1 里 b187_boxed_object_slot 恰好
+#       2 处 (x64 + x86)、CREATE4MEM 与 CREATE5MEM 各恰好 4 处 (每臂各一条正针 + 一条反面证人)。
+#   B7  ByRef 那座桥的**两句发码只许住在一处** (第五腿): `bridgeByRefLateSlotArg(` 恰好 4 处 =
+#       声明 1 + 定义 1 + 站点 2; 进场临时量名 `_vb6_latebox` 与剥回临时量名 `_vb6_lateunbox`
+#       各恰好 1 处且都在定义体内; 剥回那一腿的 `c_.addPostLine` 在本文件里恰好 1 处 (别处再挂
+#       一条就是第二条退路)。「这枚**值**是不是包装器」= vb6_ComObject_IsBoxed: src/backend 恰好
+#       2 处 (桥的两端各一, 都在定义体内) 且 src/rtl 恰好 2 处 (声明 1 + 定义 1) —— 多一处就是
+#       有人绕过 deref 三闸自己去读首字段 (GetInstance 那条 0x20404 崩记录的同族)。
 #
 # 用法:  pwsh -File scripts\check_object_slot_boxing.ps1
 # 退出码: 0 = 全绿; 1 = 红
@@ -74,16 +83,18 @@ function Count-InFiles([string]$dirRel, [string[]]$exts, [string]$pattern, [stri
 
 $boxRel = "src\backend\cgen_base_type.cpp"
 $stationRel = "src\backend\detail\stmt\cgen_setlet_set_rhs.inc"
+$argStn = "src\backend\detail\expr\cgen_expr_call_arg_emit.inc"
+$namedStn = "src\backend\detail\expr\cgen_expr_call_named_args.inc"
 
 # B1
 $nBorrow = Count-InFiles "src\backend" $srcExts "vb6_ComObject_FromBorrowedInstance"
 $nEmit = @([regex]::Matches((Text-Of $boxRel), 'return "\(void\*\)vb6_ComObject_FromBorrowedInstance')).Count
 $nBoxFn = Count-InFiles "src\backend" $srcExts "boxIntoLateSlot\s*\("
 $nSlotParam = Count-InFiles "src\backend" $srcExts "cParamLateSlotType\s*\("
-if ($nBorrow -ne 4) { $script:bad += ("B1 FromBorrowedInstance 在 src/backend 代码行 = $nBorrow (要 4: 发码处 + 站点前缀判据 + getter 2)") }
+if ($nBorrow -ne 5) { $script:bad += ("B1 FromBorrowedInstance 在 src/backend 代码行 = $nBorrow (要 5: 发码处 + ByRef 桥进场 + 站点前缀判据 + getter 2)") }
 if ($nEmit -ne 1) { $script:bad += ("B1 发出包装器那一句 = $nEmit (要 1, 只许住在唯一发码处)") }
 if ($nBoxFn -ne 5) { $script:bad += ("B1 boxIntoLateSlot( = $nBoxFn (要 5: 声明 1 + 定义 1 + 站点 3)") }
-if ($nSlotParam -ne 4) { $script:bad += ("B1 cParamLateSlotType( = $nSlotParam (要 4: 声明 1 + 定义 1 + 实参站点 2)") }
+if ($nSlotParam -ne 5) { $script:bad += ("B1 cParamLateSlotType( = $nSlotParam (要 5: 声明 1 + 定义 1 + ByVal 站点 2 + ByRef 桥 1)") }
 
 # B2
 $symRel = "src\semantics\symbol_table.hpp"
@@ -124,10 +135,9 @@ foreach ($need in @("vb6_hwnd_", "vb6_form_ctrl_", "classHasCoClassDesc", "varHo
     $c = @([regex]::Matches($boxTxt, [regex]::Escape($need))).Count
     if ($c -lt 1) { $script:bad += ("B5 唯一发码处缺负条件件 " + $need + " (= " + $c + ")") }
 }
-foreach ($stn in @("src\backend\detail\expr\cgen_expr_call_arg_emit.inc",
-                   "src\backend\detail\expr\cgen_expr_call_named_args.inc")) {
+foreach ($stn in @($argStn, $namedStn)) {
     $txt = Text-Of $stn
-    foreach ($need in @("isByVal", "cParamLateSlotType")) {
+    foreach ($need in @("isByVal", "cParamLateSlotType", "bridgeByRefLateSlotArg")) {
         $c = @([regex]::Matches($txt, [regex]::Escape($need))).Count
         if ($c -lt 1) { $script:bad += ("B5 实参站点 " + $stn + " 缺闸门件 " + $need) }
     }
@@ -138,6 +148,26 @@ foreach ($need in @("lateBoundSlotTarget", "boxedHere")) {
     if ($c -lt 1) { $script:bad += ("B5 Set 那一站缺 " + $need) }
 }
 
+# B7 — ByRef 那座桥
+$nBridge = Count-InFiles "src\backend" $srcExts "bridgeByRefLateSlotArg\s*\("
+if ($nBridge -ne 4) { $script:bad += ("B7 bridgeByRefLateSlotArg( = $nBridge (要 4: 声明 1 + 定义 1 + 站点 2)") }
+$nBoxTmp = Count-InFiles "src" $srcExts "_vb6_latebox"
+$nUnbTmp = Count-InFiles "src" $srcExts "_vb6_lateunbox"
+$nBoxTmpDef = @([regex]::Matches($boxTxt, "_vb6_latebox")).Count
+$nUnbTmpDef = @([regex]::Matches($boxTxt, "_vb6_lateunbox")).Count
+if ($nBoxTmp -ne 1 -or $nBoxTmpDef -ne 1) {
+    $script:bad += ("B7 进场临时量名 全 src/定义内 = $nBoxTmp/$nBoxTmpDef (要 1/1: 两句发码只许住在桥里)")
+}
+if ($nUnbTmp -ne 1 -or $nUnbTmpDef -ne 1) {
+    $script:bad += ("B7 剥回临时量名 全 src/定义内 = $nUnbTmp/$nUnbTmpDef (要 1/1)")
+}
+$nPost = @([regex]::Matches($boxTxt, "c_\.addPostLine")).Count
+if ($nPost -ne 1) { $script:bad += ("B7 桥里的 addPostLine = $nPost (要 1: 剥回那一腿只许一条退路)") }
+$nIsBoxed = Count-InFiles "src\backend" $srcExts "vb6_ComObject_IsBoxed"
+$nIsBoxedRtl = Count-InFiles "src\rtl" $srcExts "vb6_ComObject_IsBoxed"
+if ($nIsBoxed -ne 2) { $script:bad += ("B7 src/backend 问 vb6_ComObject_IsBoxed = $nIsBoxed (要 2: 桥的两端各一)") }
+if ($nIsBoxedRtl -ne 2) { $script:bad += ("B7 src/rtl 的 vb6_ComObject_IsBoxed = $nIsBoxedRtl (要 2: 声明 1 + 定义 1)") }
+
 # B6
 if (-not (Test-Path -LiteralPath (Join-Path $root "tests\b187_box\B187d.vbp"))) {
     $script:bad += "B6 缺夹具 tests/b187_box/B187d.vbp"
@@ -145,15 +175,22 @@ if (-not (Test-Path -LiteralPath (Join-Path $root "tests\b187_box\B187d.vbp"))) 
 if (-not (Test-Path -LiteralPath (Join-Path $root "tests\b187_box\B187Arg.cls"))) {
     $script:bad += "B6 缺第四臂夹具 tests/b187_box/B187Arg.cls (实参那一站)"
 }
-$nCells = @([regex]::Matches((Text-Of "tests\run_tests.ps1"), "b187_boxed_object_slot")).Count
+if (-not (Test-Path -LiteralPath (Join-Path $root "tests\b187_box\B187Ref.cls"))) {
+    $script:bad += "B6 缺第五臂夹具 tests/b187_box/B187Ref.cls (ByRef 那座桥)"
+}
+$rtTxt = Text-Of "tests\run_tests.ps1"
+$nCells = @([regex]::Matches($rtTxt, "b187_boxed_object_slot")).Count
 if ($nCells -ne 2) { $script:bad += ("B6 b187_boxed_object_slot 在 run_tests.ps1 里 = $nCells (要 2: x64 + x86)") }
-$nArm4 = @([regex]::Matches((Text-Of "tests\run_tests.ps1"), "CREATE4MEM")).Count
+$nArm4 = @([regex]::Matches($rtTxt, "CREATE4MEM")).Count
 if ($nArm4 -ne 4) { $script:bad += ("B6 CREATE4MEM 在 run_tests.ps1 里 = $nArm4 (要 4: 两架构各一正针 + 一反面证人)") }
+$nArm5 = @([regex]::Matches($rtTxt, "CREATE5MEM")).Count
+if ($nArm5 -ne 4) { $script:bad += ("B6 CREATE5MEM 在 run_tests.ps1 里 = $nArm5 (要 4: 两架构各一正针 + 一反面证人)") }
 
 if ($script:bad.Count -eq 0) {
-    Write-Host ("PASS boxing-emits=1 stations=3 borrowed-refs=4 coclass-predicate-sites=" + $nUse `
+    Write-Host ("PASS boxing-emits=1 stations=3 borrowed-refs=5 coclass-predicate-sites=" + $nUse `
         + " wrapper-ask-sites=" + $nAsk + " registry-ins=" + $nIns + " erase=" + $nErase `
-        + " cells=" + $nCells + " arm4=" + $nArm4) -ForegroundColor Green
+        + " bridge-sites=" + $nBridge + " boxed-value-asks=" + $nIsBoxed + "/" + $nIsBoxedRtl `
+        + " cells=" + $nCells + " arm4=" + $nArm4 + " arm5=" + $nArm5) -ForegroundColor Green
     exit 0
 }
 foreach ($b in $script:bad) { Write-Host ("FAIL " + $b) -ForegroundColor Red }
