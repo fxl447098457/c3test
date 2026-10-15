@@ -149,10 +149,11 @@ if ($ast5) {
     # Needles 6 / Absent 1 (「Unhandled error」当反面证人) / -Tail 1 枚 CREATE= 臂
     'b188_terminate_error_frame'          = @(8, 6, 1, 1)
     'b188_terminate_error_frame_x86'     = @(10, 6, 1, 1)
-    # 账 #305 §B187 第二腿 (第八十三刀): 装箱腿的两架构真跑格。位置面 8 (+2 = -Arch),
-    # Needles 5 / Absent 1 (那枚 42000 当反面证人) / -Tail 1 枚 CREATE= 臂 (3 个 CLSID 写在同一条里)
-    'b187_boxed_object_slot'                    = @(8, 5, 1, 1)
-    'b187_boxed_object_slot_x86'               = @(10, 5, 1, 1)
+    # 账 #305 §B187 第二腿 + 第四腿 (第八十三刀装箱 / 第八十四刀实参那一站): 两架构真跑格。
+    # 位置面 8 (+2 = -Arch), Needles 6 / Absent 2 (42000 那枚数在臂 1 与臂 4 各当一面反面证人)
+    # / -Tail 1 枚 CREATE= 臂 (4 个 CLSID 写在同一条里)
+    'b187_boxed_object_slot'                    = @(8, 6, 2, 1)
+    'b187_boxed_object_slot_x86'               = @(10, 6, 2, 1)
 }
 $ds = @($ast5.FindAll({ param($n)
     $n -is [System.Management.Automation.Language.CommandAst] -and

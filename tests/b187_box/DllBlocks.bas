@@ -23,3 +23,8 @@ CoClass Ident
     [Implementation("B187Ident")]
     [ComCreatable(True)]
 End CoClass
+
+CoClass Arg
+    [Implementation("B187Arg")]
+    [ComCreatable(True)]
+End CoClass
