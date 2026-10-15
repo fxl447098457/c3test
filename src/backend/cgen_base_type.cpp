@@ -293,6 +293,61 @@ std::string CCodeGen::deliverToClassSlot(const std::string& clsPtr,
     return argVal;
 }
 
+
+// 账 #305 §B187 第四腿: 「这个形参槽是不是泛对象槽 (void* 里该装 IDispatch*)」。
+// 与 cParamClassPtrType 一样只问定义侧那份映射, 见声明处注释。
+std::string CCodeGen::cParamLateSlotType(const ParameterInfo& p) {
+    if (p.typeRefName.empty()) return {};
+    if (Symbol::toLower(p.typeRefName) != "object") return {};
+    return cTypeForDeclaredTypeName(p.typeRefName) == "void*" ? "void*" : std::string();
+}
+
+// 账 #305 §B187 装箱腿的唯一发码处 —— Set 那一站 (目标槽) 与实参那一站 (形参槽) 都问这一句,
+// 两边不许各抄一份负条件。为什么这一格欠着 (第八十二刀三条实测读数, 台账 §B187):
+//   H = Type=DLL 的驱动实测 result=42000 —— 早绑定那半 42 对, 晚绑定那半 0。
+//     `Set v = o` 发成裸指针赋值 `v = o;  /* Set */` 后，槽里是一枚
+//     `vb6_cls_X*`，首字段 __comObj 被 vb6_ComIsDispatchable 当 vtable 读 → 判否
+//     → GetIDsOfNames 给 DISPID_UNKNOWN → **静默空答** (不崩, 但值永远是 0)。
+//   I = Type=Exe 那台把同一枚槽交给真外部 COM 的实参位 (Dictionary.Add) 直接
+//     0xC0000005 —— 与工程类型无关，是"裸实例指针越过 IDispatch 边界"那一族。
+// 所有权: 这里交出去的是**别人已有的实例** (类变量/字段/形参/返回槽), 销毁权还留在
+// 宿主, 所以必须用 ownsInstance=0 的借用型 (Fix 188 那一档) 而不是 179a 的
+// FromInstance —— 用后者会让客户端 Release 到 0 时把宿主还在用的实例拆掉。
+// desc 判据 (为什么先问 classHasCoClassDesc): 查不中 desc ⇒ FromBorrowedInstance
+// 交回 NULL ⇒ 槽里成了 Nothing，比今天的裸指针**更坏** (裸指针至少早绑定那半
+// 能用)。名单由 driver 与建表那侧同一条 Symbol::isCoClassTableEntry() 扫出。
+// 负条件 (宁可不动，也不把好产物改坏):
+//   · 值自己就是一枚装着包装器的泛对象变量 (varHoldsComWrapper) = 槽 → 槽,
+//     里面已经是 IDispatch 档, 再套一层会把包装器的 vtable 字段当 __comObj 回填
+//     ⇒ 当场把包装器改坏;
+//   · 值里带 vb6_VariantToObjectVal / vb6_ComObject_GetInstance
+//     = 上面那一站刚从槽里剥出来的**已经是** IDispatch/宿主指针, 同上一条;
+//   · cExprIsVariant(值) = 还是枚槽，交回 Variant 那一路处理。
+//   · 控件那一族必须留在闸门外: 窗体上的子控件 (含工程内 UserControl) 在 C 侧的值是
+//     **HWND** (`vb6_hwnd_<名>` / `vb6_form_ctrl_<窗体>_<名>()`)，而 Fix 112 又把 UC
+//     控件名登记进 knownClassVars_ (名字 → .ctl 模块名) —— 只看类名就会把句柄当
+//     `vb6_cls_ucX*` 交给 FromBorrowedInstance，而它头一件事是 `*(void**)instance`
+//     回填 __comObj ⇒ 往窗口句柄那个数当地址写 ⇒ 内存损坏。
+//     实测探针 (.build/k88_uc_probe.py: 复制 tests/Charts 2020/ucChartBar 后在 Form1
+//     里加 `Set oBox = ucChartBar1`)：base/new 都发 `oBox = vb6_hwnd_ucChartBar1` ——
+//     挡下它的是 desc 闸门 (.ctl 头里只有 `Begin VB.UserControl`，没有 CLASS 的
+//     MultiUse 块 ⇒ UC 不进 coclass 表)。这条不把那个巧合当依据，句柄形状显式钉死。
+std::string CCodeGen::boxIntoLateSlot(const std::string& argVal, const ASTNode* argAst) const {
+    if (argVal.empty() || !argAst) return argVal;
+    if (varHoldsComWrapper(argVal)) return argVal;
+    const bool valueIsHostHandle =
+        argVal.find("vb6_hwnd_") != std::string::npos
+        || argVal.find("vb6_form_ctrl_") != std::string::npos;
+    const bool valueAlreadyUnboxed =
+        argVal.find("vb6_VariantToObjectVal") != std::string::npos
+        || argVal.find("vb6_ComObject_GetInstance") != std::string::npos;
+    if (valueIsHostHandle || valueAlreadyUnboxed || cExprIsVariant(argVal)) return argVal;
+    const std::string boxCls = inferClassTypeOfExpr(*argAst);
+    if (boxCls.empty() || !classHasCoClassDesc(boxCls)) return argVal;
+    return "(void*)vb6_ComObject_FromBorrowedInstance(vb6_FindCoClassDesc(\""
+           + boxCls + "\"), (void*)" + argVal + ")";
+}
+
 // <vbeclipse> rev7: 配套 cParamClassPtrType 的**落临时**侧 —— ByRef 类形参收到
 // 右值实参 (函数调用/属性读) 时, `&(vb6_ComObject_GetInstance(...))` 是 C2102
 // (& 右值), 必须先落一个类型正确的局部再取址。

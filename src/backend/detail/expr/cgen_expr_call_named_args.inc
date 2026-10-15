@@ -146,6 +146,12 @@
                 size_t pi = it->second;
                 emitExpr(*named.value);
                 std::string argVal = std::move(lastExpr_);
+                // 账 #305 §B187 第四腿: 命名实参 (`Foo b:=o, a:=1`) 那一格与位置实参同一句
+                // —— 同一档闸门 (ByVal + 泛对象形参) + 同一个唯一发码处 boxIntoLateSlot。
+                if (pi < calleeParams.size() && calleeParams[pi].isByVal
+                    && !cParamLateSlotType(calleeParams[pi]).empty()) {
+                    argVal = boxIntoLateSlot(argVal, named.value.get());
+                }
                 applyByRef(argVal, pi);
                 // Fix 091o: 命名实参 (Name:=expr) 此前只做 ByRef 处理, 漏了 ByVal
                 // 形参类型适配 — ByVal Variant 形参收具体类型实参需

@@ -228,50 +228,14 @@
             }
         }
         // 账 #305 §B187 第二腿 装箱腿: `Set <泛对象槽> = <工程内实例>` (不是 New 那一形)
-        // → 交**借用型**包装器 vb6_ComObject_FromBorrowedInstance。
-        // 为什么这一格欠着 (第八十二刀三条实测读数, 台账 §B187):
-        //   H = Type=DLL 的驱动实测 result=42000 —— 早绑定那半 42 对, 晚绑定那半 0。
-        //     `Set v = o` 发成裸指针赋值 `v = o;  /* Set */` 后，槽里是一枚
-        //     `vb6_cls_X*`，首字段 __comObj 被 vb6_ComIsDispatchable 当 vtable 读 → 判否
-        //     → GetIDsOfNames 给 DISPID_UNKNOWN → **静默空答** (不崩, 但值永远是 0)。
-        //   I = Type=Exe 那台把同一枚槽交给真外部 COM 的实参位 (Dictionary.Add) 直接
-        //     0xC0000005 —— 与工程类型无关，是"裸实例指针越过 IDispatch 边界"那一族。
-        // 所有权: 这里交出去的是**别人已有的实例** (类变量/字段/返回槽), 销毁权还留在
-        // 宿主, 所以必须用 ownsInstance=0 的借用型 (Fix 188 那一档) 而不是 179a 的
-        // FromInstance —— 用后者会让客户端 Release 到 0 时把宿主还在用的实例拆掉。
-        // desc 判据 (为什么先问 classHasCoClassDesc): 查不中 desc ⇒ FromBorrowedInstance
-        // 交回 NULL ⇒ 槽里成了 Nothing，比今天的裸指针**更坏** (裸指针至少早绑定那半
-        // 能用)。名单由 driver 与建表那侧同一条 Symbol::isCoClassTableEntry() 扫出。
-        // 负条件 (宁可不动，也不把好产物改坏):
-        //   · 179a 已经包过的 (New 那一形) 不再二次装箱;
-        //   · 值里带 vb6_VariantToObjectVal / vb6_ComObject_GetInstance = 上面那一站刚从
-        //     槽里剥出来的**已经是** IDispatch/宿主指针, 再套一层会把包装器的 vtable 字段
-        //     当 __comObj 回填 ⇒ 当场把包装器改坏;
-        //   · cExprIsVariant(值) = 还是枚槽，交回下面的 Variant 路径处理。
+        // → 交**借用型**包装器。为什么这一格欠着、哪些值不许动、desc 闸门那一段全部住在唯一
+        // 发码处 boxIntoLateSlot (cgen_base_type.cpp) —— 实参那一站 (§B187 第四腿) 问的就是
+        // 同一句，两处不许各抄一份负条件。
         if (!wrappedBy179a && !targetIsVariant && node.value && lateBoundSlotTarget()) {
-            // 控件那一族必须留在闸门外: 窗体上的子控件 (含工程内 UserControl) 在 C 侧的值是
-            // **HWND** (`vb6_hwnd_<名>` / `vb6_form_ctrl_<窗体>_<名>()`)，而 Fix 112 又把 UC
-            // 控件名登记进 knownClassVars_ (名字 → .ctl 模块名) —— 只看类名就会把句柄当
-            // `vb6_cls_ucX*` 交给 FromBorrowedInstance，而它头一件事是 `*(void**)instance`
-            // 回填 __comObj ⇒ 往窗口句柄那个数当地址写 ⇒ 内存损坏。
-            // 实测探针 (.build/k88_uc_probe.py: 复制 tests/Charts 2020/ucChartBar 后在 Form1
-            // 里加 `Set oBox = ucChartBar1`)：base/new 都发 `oBox = vb6_hwnd_ucChartBar1` ——
-            // 挡下它的是 desc 闸门 (.ctl 头里只有 `Begin VB.UserControl`，没有 CLASS 的
-            // MultiUse 块 ⇒ UC 不进 coclass 表)。这条不把那个巧合当依据，句柄形状显式钉死。
-            const bool valueIsHostHandle =
-                value.find("vb6_hwnd_") != std::string::npos
-                || value.find("vb6_form_ctrl_") != std::string::npos;
-            const bool valueAlreadyUnboxed =
-                value.find("vb6_VariantToObjectVal") != std::string::npos
-                || value.find("vb6_ComObject_GetInstance") != std::string::npos;
-            if (!valueIsHostHandle && !valueAlreadyUnboxed && !cExprIsVariant(value)) {
-                const std::string boxCls = inferClassTypeOfExpr(*node.value);
-                if (!boxCls.empty() && classHasCoClassDesc(boxCls)) {
-                    value = "(void*)vb6_ComObject_FromBorrowedInstance(vb6_FindCoClassDesc(\""
-                          + boxCls + "\"), (void*)" + value + ")";
-                    boxedHere = true;
-                }
-            }
+            value = boxIntoLateSlot(value, node.value.get());
+            // 下面那张登记表要问「这一站刚交的是不是包装器」: 唯一发码处交出的就是这一枚形状
+            // (前缀判据用 rfind(…, 0), 不写长度字面量 —— 那一族的坑是恒假也不报错)。
+            boxedHere = value.rfind("(void*)vb6_ComObject_FromBorrowedInstance(", 0) == 0;
         }
 
         // 登记表的口径: wrappedComVars_ 记的是「这个名字**最后一次** Set 进去的是不是

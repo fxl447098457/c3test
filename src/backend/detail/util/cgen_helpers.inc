@@ -706,6 +706,20 @@
     // 是不分支的一句，不必每个站点各写一遍"是类槽就跳过装箱"。
     std::string deliverToClassSlot(const std::string& clsPtr, const std::string& argVal) const;
 
+    // 账 #305 §B187 第四腿: 与 cParamClassPtrType 对称的另一档 —— 形参声明的是**泛对象槽**
+    // (VB 写 `As Object`, C 侧是 void* 里装 IDispatch*) 时返回 "void*", 其余返回空串。
+    // 判据与那边同一条纪律: 只问定义侧那份映射 (cTypeForDeclaredTypeName → mapTypeRef),
+    // 不拿 p.type 当第二判据 (rev13 那条教训在这一族里一字不改地适用)。名字也要问 =
+    // 只认 Object 关键字本身: `As IPictureDisp` / typelib 里的 coclass 名同样映射成 void*,
+    // 但那一档要的是**接口指针**, 塞一枚 IDispatch 包装器反而是另一种坏指针, 不在本腿范围。
+    std::string cParamLateSlotType(const ParameterInfo& p);
+
+    // 账 #305 §B187 装箱腿的**唯一发码处**: 把一枚工程类实例交给泛对象槽 (void* 里该装
+    // IDispatch*) 时换成借用型包装器。三处站点都问它 = Set 那一站 (目标槽) + 位置实参
+    // 那一站 + 命名实参那一站 (形参槽) —— 条件不齐时原样返回, 所以站点写成一句不分支
+    // (与 deliverToClassSlot 同形)。
+    std::string boxIntoLateSlot(const std::string& argVal, const ASTNode* argAst) const;
+
     // <vbeclipse> rev7: 配套 deliverToClassSlot 的**落临时**侧名生成器。ByRef 类形参
     // 收到右值实参时必须先落局部再取址 (&(右值) = C2102)。名里只保留标识符字符
     // (`vb6_ivref_IScheme*` 截断会带 '*'), 详见 cgen_base_type.cpp 定义处。
