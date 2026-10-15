@@ -546,6 +546,13 @@
     // String / 推不出) 一律 Unknown ⇒ narrowCheckAssign 原样发, 与改前同形。
     Vb6Type narrowTargetTypeOf(Expr* target) const;
 
+    // 账 #305 §B184 (第七十五刀): 「这一档 VB 窄整型要套哪一枚范围闸、闸的位宽是多少」
+    // 的**唯一**答案处。返回 nullptr = 这一档不是窄整型 (调用方原样发)。
+    // 两位主人: ① 赋值路 narrowCheckAssign (还要按**源**宽决定套不套, 所以取 bits);
+    // ② COM 字段写回路的 let 腿 (cgen_com.cpp) —— 值是以 Variant 的 lVal 交回来的,
+    //   恒为 int32, 存进比它窄的那一档就会被 C 静默截断, 所以那一侧只问闸名。
+    const char* narrowCheckFnForVbType(Vb6Type t, int* bits) const;
+
     // P20-42: 窗体控件的**属性返回类型**。见 cgen_util_type.cpp 的 MemberAccessExpr
     // 分支: 那里对 `对象.成员` 的兜底是 lookupModule(memberName), 只按成员**裸名**
     // 查模块符号 —— 于是 `SSTab1.Tab` 会命中返回 BSTR 的内置函数 vb6_Tab 而被判成
