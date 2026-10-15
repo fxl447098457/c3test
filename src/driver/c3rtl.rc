@@ -1,4 +1,25 @@
 // c3rtl.rc - RTL runtime library embedded as resources
+// 2026-10-14 (ComCtlsDemo): 补 CLngLng —— 数值转换阶梯里**有符号 64 位**
+//   那一档此前没登记 (ai/032 落了 CSByte/CUInt/CULng/CULngLng 四档 + CLngPtr, 独缺 CLngLng)。
+//   缺它的后果不是降级而是**链接期现形**: ComCtlsDemo Builds\ProgressBar\ProgressBar.ctl:1328
+//   `#If Win64` 分支里 `CLngLng(PropValue)` / `CLngLng(Me.Max - Me.Min)` 送
+//   ITaskBarList3::SetProgressValue 的两个 ULONGLONG —— cgen 查不到内在函数, 原样发成裸
+//   `CLngLng(...)`, ⇒ `LNK2019: 无法解析的外部符号 CLngLng`。
+//   口径与 CLng 同族 (vb6rtl_conv.c: vb6_FltToLng 的半值远离零 round + 越界 Error 6);
+//   x64 界先于转换挡住 (同 CLngPtr 的 x64 分支, 没有窄缝可倚赖)。
+//   同批补 `vb6_di_SetClassLongPtrW` (手写进 vb6_di_user32_stubs.c, ComCtlsDemo
+//   VirtualComboBase.bas:51 的 `#If Win64` 分支改 ComboLBox 窗口过程要用) ——
+//   两枚都只在 `--arch x64` 下才被要到 (Win64=False 时整段不编译), 所以 32 位目标一直是绿的。
+// 2026-10-14 (ComCtlsDemo): uc_propbag.c 的 .frx StdPicture 解码 —— 位图块常见的是 **DDB**
+//   (颜色位 [+ 1bpp AND 掩码]), `biHeight` 是 DDB 高度 = 图高 ×2, 于是 biSizeImage
+//   ≠ stride*biHeight。旧实现把 biHeight 当图高建 DIB ⇒ 图被拉成两倍高、掩码字节被当
+//   颜色解出来, 症状是图标挤在格子底部、其余全黑 (ImageList1/2/3 全线: Toolbar /
+//   TabStrip / TreeView / ListView / ImageCombo 的图标)。
+//   三种布局都用 biSizeImage 自证 (字节数互不相同), 不猜; 行序是 BMP 自下而上, 保持
+//   biHeight 为正建 DIB 就不必翻转。掩码格涂 &HC0C0C0 银灰 = ComCtls 的默认 MaskColor,
+//   ImageList_AddMasked 正好把它键成透明 (与 VB6 同路)。扩到 24bpp 是因为原调色板里
+//   没有"透明"这一档; **不能**用 32bpp —— Common.bas 的 RenderPicture 见到 32bpp 就改走
+//   GdiAlphaBlend 那一支, 那支在 C3 里从没跑过, 踩了直接报错误 9 退出。
 // 账 #305 §B142(第三十四刀): Decimal 这一档的两处根因都是「格式」不是「数值」。
 //   ① `DECIMAL.wReserved` 这两字节其实是 oleaut32 自己的 vt 标签(它造的那些也写 14 = VT_DECIMAL)。
 //   vb6_CDec 的**手填字段**那两路以前把它留成 0 —— 字段值全对、格式不对, 于是 oleaut32 不报错地

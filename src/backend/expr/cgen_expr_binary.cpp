@@ -58,6 +58,20 @@ void CCodeGen::visit(BinaryExpr& node) {
             || op == BinaryOp::Gt || op == BinaryOp::Le || op == BinaryOp::Ge;
     };
     auto hint88 = [&](const ExprPtr& sib) -> const char* {
+        // 账 #257 续 / Fix 280: `Is` 是**对象同一性**比较 (映射 C `==`) —— 两侧都
+        // 必须交**指针值**。以前这里对 `Is` 也答 "Long" ⇒ 宿主对象上的对象成员
+        // (典型 `X.Container` / `X.Parent` / `X.Extender`) 被解成
+        // `vb6_ComGetIntProp(X, L"Container")` —— 而那一枚内部是
+        // `VariantChangeType(&tmp, &v, 0, VT_I4)`, OLEAUT32 对该 VARIANT 里的
+        // VT_DISPATCH 会去调 `IDispatch::Invoke`; 宿主模型交回的容器是
+        // Extender (裸结构体, **没有 vtable**) ⇒ 0xC0000005
+        // (实测崩溃栈: DispatchMessage → … → VariantChangeType → OLEAUT32;
+        //  调用点 UpDown.ctl:224 `If ControlEnum.Container Is Extender.Container Then`
+        //  发成 `vb6_ComGetIntProp(ControlEnum, L"Container") == vb6_Extender_Container`,
+        //  而右侧那枚 RTL 全局是 `void*`)。改成 "Object" ⇒ 交回
+        // `vb6_ComGetObjectProp(...)` 的 `void*`, 两侧同类, 比较即指针相等。
+        // 对非 COM-marker 操作数无影响 (resolveComValue 首句 `if (!isComMarker_)`)。
+        if (node.op == BinaryOp::Is) return "Object";
         if (!sib || !isCmp88(node.op)) return "Long";
         if (sib->kind == ASTNodeKind::LiteralExpr
             && static_cast<const LiteralExpr&>(*sib).literalKind == LiteralKind::String) {
