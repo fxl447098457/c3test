@@ -692,3 +692,10 @@
  *   消费点一处 = vb6rtl_conv.c 的 vb6_TypeName 在 VT_DISPATCH 那一支、排在宿主那一问之后
  *   （tests/setobj 两枚针钉着控件名那一档，顺序不许倒）。
  *   touch 本文件 = 让 RCDATA 重嵌一次（§B99②）。 */
+
+
+/* 账 #305 §B189 第二格（2026-10-16 第八十七刀）：vb6rtl_conv.c 的 vb6_TypeName 多一支
+ *   「一枚对象变量但不指向任何对象」（VT_DISPATCH 且 pdispVal == NULL）→ 交 "Nothing"，
+ *   改前那一格落进标量表按 VT_DISPATCH 答 "Object"（真语料 8 处拿它当守卫）。
+ *   只吃这一支：VT_EMPTY 照旧答 Empty，宿主那一问与 §B189 第一档那两问的位置没动。
+ *   touch 本文件 = 让 RCDATA 重嵌一次（§B99②）。 */
