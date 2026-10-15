@@ -133,11 +133,43 @@ static ULONG STDMETHODCALLTYPE ComObj_Release(vb6_ComObject* self) {
         // 拥有型里, 实现了新式接口的类走 claim 那条: 包装器退掉自己的"底座引用",
         // 实例若有薄引用在世则不销毁 (由最后一个薄引用的 Release 收尾), 否则当场销毁;
         // 没有这道 claim 的类 (存量/无接口) 结果与原来直接 destroyFunc 完全一致。
+        //
+        // 账 #305 §B188 (第八十刀): 上面这两条腿都会**踏进 VB 代码** (Class_Terminate), 以前
+        // 是本文件里三站中唯一没接错误边界的一站 —— 体里没人接住的错走到 vb6_RaiseError,
+        // 那里没有帧 ⇒ 打一行 stderr 再 ExitProcess(错误号), 把**正在放手的客户端进程**打死
+        // (x64 实测: 一枚 terminate 里只写 Err.Raise 234 的类 ⇒ 探针 exit=234, 后面那枚干净
+        // 对象的 CREATE=2 与 DONE 全都没打出来)。
+        // 这一趟与 §B185/§B186 那两趟有一处实质差别: **没有一条通道能把号带回去** —— Release
+        // 交回的是 ULONG 引用计数, 也没有 EXCEPINFO, 改返回值 = 破坏 COM 契约。所以这里只做
+        // 底线: 自带帧 + 失败往 stderr 记一条带号诊断 + 照常把包装器拆干净、照常交回引用计数。
+        // 号此刻既不进 Err 也不进客户端 (§B188 出路 (b) 是另一格: 那要先答「谁有权改 Err 的
+        // 清除时机」)。帧的登记顺序照 cgen 的 On Error GoTo 协议 ⇒ 体里自己写了 On Error 的
+        // 照常由体接住, 走到这里的是真没人管的那一类。
         if (self->ownsInstance) {
-            if (self->desc && self->desc->instanceClaimRelease && self->vb6Instance) {
-                self->desc->instanceClaimRelease(self->vb6Instance);
-            } else if (self->desc && self->desc->destroyFunc && self->vb6Instance) {
-                self->desc->destroyFunc(self->vb6Instance);
+            int32_t termErrNum = 0;
+            {
+                jmp_buf termJmp;
+                vb6_SaveErrState();
+                if (setjmp(termJmp) != 0) {
+                    termErrNum = vb6_ErrNumber();
+                } else {
+                    vb6_error_jmp_ptr = &termJmp;
+                    vb6_error_jmp_set = 1;
+                    vb6_err_jmp_active = 1;
+                    vb6_err_resume_next = 0;
+                    if (self->desc && self->desc->instanceClaimRelease && self->vb6Instance) {
+                        self->desc->instanceClaimRelease(self->vb6Instance);
+                    } else if (self->desc && self->desc->destroyFunc && self->vb6Instance) {
+                        self->desc->destroyFunc(self->vb6Instance);
+                    }
+                }
+                vb6_RestoreErrState();
+            }
+            if (termErrNum) {
+                fprintf(stderr, "[C3_COM] Class_Terminate raised error %d in \"%s\"; the client was kept alive (ledger 305 B188)\n",
+                        (int)termErrNum,
+                        (self->desc && self->desc->classVariable) ? self->desc->classVariable : "?");
+                fflush(stderr);
             }
         } else if (self->vb6Instance) {
             *(void**)self->vb6Instance = NULL;

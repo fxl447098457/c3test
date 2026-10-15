@@ -1,4 +1,14 @@
 // c3rtl.rc - RTL runtime library embedded as resources
+// 2026-10-15 (账 #305 §B188, 第八十刀): ComObj_Release 的出厂那条腿 (destroyFunc 与
+//   instanceClaimRelease 两处) 以前是本文件三站里唯一没接错误边界的一站 —— 体里没人接住的
+//   错走到 vb6_RaiseError, 那里没帧 ⇒ 打一行 stderr 再 ExitProcess(错误号), 把正在放手的
+//   **客户端进程**打死 (x64 实测一枚 terminate 里只写 Err.Raise 234 的类 = 探针 exit=234,
+//   后面那枚干净对象的 CREATE=2 与 DONE 都没打出来)。现在两腿套同一枚帧, 失败只往 stderr
+//   记一条带号诊断, 包装器照常拆、引用计数照常交回。
+//   为什么这里不能像 §B186 那样把号编进返回值: Release 交回的是 ULONG, 也没有 EXCEPINFO,
+//   动它 = 破坏 COM 契约 ⇒ 号交不回任何人 (§B188 出路 b「写进进程级 Err」另开一格)。
+//   改的是 RTL 行为面 (只影响 terminate 真抛错那一路, 存量工程里该路 0 处 ⇒ 产品产物不变),
+//   发码一行没动 ⇒ emit 清单不该移动; 下面 §B187 那两条注脚照旧有效。
 // 2026-10-15 (账 #305 §B187 第二格, 第八十一刀): 登记腿改成只在 ActiveX 那一档发 (后端读 isDll_),
 //   非 ActiveX 工程从此不喂这张表 —— 零行为改动 (读者 0 枚), 动的是发码; 本轮 RTL 只改注释两处:
 //   ① 那张表头部订正掉「EXE 里没 CoClass 块 ⇒ 实例没进表」那句被 com_entry.c 推翻的解释, 记下拍定的
