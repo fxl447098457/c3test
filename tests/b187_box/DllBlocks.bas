@@ -38,3 +38,8 @@ CoClass Name
     [Implementation("B187Name")]
     [ComCreatable(True)]
 End CoClass
+
+CoClass Nil
+    [Implementation("B187Nil")]
+    [ComCreatable(True)]
+End CoClass

@@ -45,6 +45,10 @@
 #       一条就是第二条退路)。「这枚**值**是不是包装器」= vb6_ComObject_IsBoxed: src/backend 恰好
 #       2 处 (桥的两端各一, 都在定义体内) 且 src/rtl 恰好 3 处 (声明 1 + 定义 1 + 类名那一问 1,
 #       见 B8) —— 多一处就是有人绕过 deref 三闸自己去读首字段 (GetInstance 那条 0x20404 崩记录的同族)。
+#   B9  「一枚对象变量不指向任何对象」那一问只许答一处 (§B189 第二格, 第八十七刀):
+#       vb6_BSTR_FromStr(L"Nothing") 在 src/rtl 恰好 1 处, 且它那一行必须排在 vb6_Host_TypeNameOf
+#       之前 (NULL 不许递给宿主那一路); 标表里 case vb6_vtEmpty 仍必须恰好答 L"Empty" 一次
+#       —— 从没赋值的 Variant 那一形本刀不许顺手动。
 #   B8  「这枚包装器是哪一枚工程类」(§B189 第一档, 第八十六刀) 只许一处定义、一处消费:
 #       vb6_ComObject_ClassNameBStr 在 src/rtl 恰好 4 处 = 出口声明 1 + 定义 1 + 消费方 extern 1
 #       + 调用 1; 在 src/backend 必须 0 处 —— 类名是运行期的值, 发码侧不许自己再拼这一问 (那等于把
@@ -188,6 +192,9 @@ if (-not (Test-Path -LiteralPath (Join-Path $root "tests\b187_box\B187Ref.cls"))
 if (-not (Test-Path -LiteralPath (Join-Path $root "tests\b187_box\B187Name.cls"))) {
     $script:bad += "B6 缺第六臂夹具 tests/b187_box/B187Name.cls (TypeName 认包装器)"
 }
+if (-not (Test-Path -LiteralPath (Join-Path $root "tests\b187_box\B187Nil.cls"))) {
+    $script:bad += "B6 缺第七臂夹具 tests/b187_box/B187Nil.cls (TypeName 对 Nothing 那一形)"
+}
 $rtTxt = Text-Of "tests\run_tests.ps1"
 $nCells = @([regex]::Matches($rtTxt, "b187_boxed_object_slot")).Count
 if ($nCells -ne 2) { $script:bad += ("B6 b187_boxed_object_slot 在 run_tests.ps1 里 = $nCells (要 2: x64 + x86)") }
@@ -197,6 +204,8 @@ $nArm5 = @([regex]::Matches($rtTxt, "CREATE5MEM")).Count
 if ($nArm5 -ne 4) { $script:bad += ("B6 CREATE5MEM 在 run_tests.ps1 里 = $nArm5 (要 4: 两架构各一正针 + 一反面证人)") }
 $nArm6 = @([regex]::Matches($rtTxt, "CREATE6MEM")).Count
 if ($nArm6 -ne 4) { $script:bad += ("B6 CREATE6MEM 在 run_tests.ps1 里 = $nArm6 (要 4: 两架构各一正针 + 一反面证人)") }
+$nArm7 = @([regex]::Matches($rtTxt, "CREATE7MEM")).Count
+if ($nArm7 -ne 4) { $script:bad += ("B6 CREATE7MEM 在 run_tests.ps1 里 = $nArm7 (要 4: 两架构各一正针 + 一反面证人)") }
 
 # B8 — TypeName 认自家包装器 (§B189 第一档): 一处出口、一处消费, 且排在宿主那一问之后
 $convRel = "src\rtl\core\vb6rtl\vb6rtl_conv.c"
@@ -221,12 +230,34 @@ if ($iHost -ge 0 -and $iCls -ge 0 -and $iHost -gt $iCls) {
     $script:bad += ("B8 类名那一问排到了宿主那一问之前 (类名行 $iCls < 宿主行 $iHost) —— 控件那一档会被改错")
 }
 
+# B9 — TypeName 对「一枚不指向对象的对象变量」只答一处，且 NULL 不进宿主那一路
+$nilRel = "src\rtl\core\vb6rtl\vb6rtl_conv.c"
+$nNothing = Count-InFiles "src\rtl" $srcExts 'vb6_BSTR_FromStr\(L"Nothing"'
+$nilTxt = Text-Of $nilRel
+$nEmptyArm = @([regex]::Matches($nilTxt, 'case vb6_vtEmpty:\s+return L"Empty";')).Count
+$iNil = -1
+$iHost9 = -1
+$nilLines = $nilTxt -split "`r?`n"
+for ($i = 0; $i -lt $nilLines.Count; $i++) {
+    $t = $nilLines[$i].TrimStart()
+    if ($t.StartsWith("//") -or $t.StartsWith("*")) { continue }
+    if ($iNil -lt 0 -and $nilLines[$i].Contains('vb6_BSTR_FromStr(L"Nothing")')) { $iNil = $i }
+    if ($iHost9 -lt 0 -and $nilLines[$i].Contains("vb6_Host_TypeNameOf")) { $iHost9 = $i }
+}
+if ($nNothing -ne 1) { $script:bad += ("B9 src/rtl 答 Nothing 的地方 = $nNothing 处 (要 1: 那一问只许住在 vb6_TypeName 这一支)") }
+if ($iNil -lt 0) { $script:bad += "B9 找不到 Nothing 那一支 (被搬走了还是改了字面量?)" }
+if ($iHost9 -ge 0 -and $iNil -ge 0 -and $iNil -gt $iHost9) {
+    $script:bad += ("B9 Nothing 那一支排到了宿主那一问之后 (NULL 行 $iNil > 宿主行 $iHost9) —— 会把 NULL 递给宿主那一路")
+}
+if ($nEmptyArm -ne 1) { $script:bad += ("B9 标表里 case vb6_vtEmpty 那一行 = $nEmptyArm (要 1: 从没赋值的 Variant 照旧答 Empty)") }
+
 if ($script:bad.Count -eq 0) {
     Write-Host ("PASS boxing-emits=1 stations=3 borrowed-refs=5 coclass-predicate-sites=" + $nUse `
         + " wrapper-ask-sites=" + $nAsk + " registry-ins=" + $nIns + " erase=" + $nErase `
         + " bridge-sites=" + $nBridge + " boxed-value-asks=" + $nIsBoxed + "/" + $nIsBoxedRtl `
         + " cells=" + $nCells + " arm4=" + $nArm4 + " arm5=" + $nArm5 + " arm6=" + $nArm6 `
-        + " classname-rtl=" + $nClsRtl + " classname-backend=" + $nClsBackend + " order=" + $iHost + "<" + $iCls) -ForegroundColor Green
+        + " classname-rtl=" + $nClsRtl + " classname-backend=" + $nClsBackend + " order=" + $iHost + "<" + $iCls `
+        + " arm7=" + $nArm7 + " nothing-site=" + $nNothing + "@line" + $iNil + " empty-arm=" + $nEmptyArm) -ForegroundColor Green
     exit 0
 }
 foreach ($b in $script:bad) { Write-Host ("FAIL " + $b) -ForegroundColor Red }
