@@ -1,4 +1,14 @@
 // c3rtl.rc - RTL runtime library embedded as resources
+// 2026-10-15 (账 #305 §B187 第一格, 第七十九刀): 工程类那张 512 格登记表上「扫到哪儿」这一问以前
+//   有两个答案 —— 登记腿那圈只按 g_vb6_projClassCount 走, 查表腿那圈另外夹住 VB6_PROJCLASS_MAX; 而计数
+//   是在夹界检查**之前**自增、放弃登记那一路不回退 ⇒ 计数无上界, 从第 514 枚实例起登记腿就在读数组外面
+//   的相邻静态数据(巧合命中时还会往外面写)。现在两圈都只问一枚 vb6_ProjClassScanLimit()。零行为改动:
+//   表没满时两圈的答案与改前一字不差。顺带把那句「命中后还要用 vb6_ProjClassVerify 复核(见
+//   vb6com_invoke.c 的分派处)」订正成实情 —— 那两个名字在整棵树与全部历史里都不存在, 查表的读者一直是
+//   0 枚。撤掉整格、还是反过来把读者接上(= 台账 W2/#64 工程内对象走晚绑定那一问)属口径待拍, 本刀不并;
+//   读数已经把「接上」单独这条路挡掉一半: EXE 里没有 CoClass 块 ⇒ vb6_FindCoClassDesc 恒 NULL ⇒ 那声
+//   if (_d) 把工程内实例挡在表外, 而 Set v = <工程内对象> 之后整面成员空答且 Err=0(两台逐行相同,
+//   .build/k79_late/)。哨兵 scripts/check_projclass_scan_bound.ps1 钉「两圈同一问、答案只住一处」。
 // 2026-10-15 (账 #305 §B186, 第七十八刀): 上一格记下「Class_Initialize 里 raise 也 RC=5, 那一站
 //   今天仍没接」—— 本刀接的就是那一站。`IClassFactory::CreateInstance` → `vb6_ComObject_Create`
 //   → `desc->factoryFunc()` 是服务端走进 VB 代码的**第二处**进门点, 它同样没有错误边界:

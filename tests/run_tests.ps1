@@ -1463,6 +1463,21 @@ function Test-ComServerErrorFrame {
     }
 }
 
+# ai/022 §B187 (第七十九刀): 工程类登记表「扫到哪儿」只许一处答 + 读者普查
+function Test-ProjClassScanBound {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] projclass_scan_bound ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\check_projclass_scan_bound.ps1" 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        $out | Select-Object -First 8 | ForEach-Object { Write-Host "  $_" }
+    }
+}
+
 # === 编译冒烟测试 (编译+链接, 不运行生成物) ===
 function Test-Run {
     param(
@@ -7052,6 +7067,7 @@ if ($Category -in @("all", "compile")) {
     Test-SetRhsObjectContext
     Test-UdtMemberDims
     Test-ComServerErrorFrame
+    Test-ProjClassScanBound
 
     Write-Host ""
 
