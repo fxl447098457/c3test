@@ -528,6 +528,10 @@
     // ---- 表达式类型推断 ----
     // 推断表达式的Vb6Type（简化版，用于Select Case等需要类型判断的场景）
     Vb6Type inferExprType(Expr& expr) const;
+    // ai/030 续 (§性能): 上面那枚是按节点缓存的薄包装, 真身在这里。缓存 epoch 由
+    // bumpInferEpoch 推进 (过程入口 / emitStmtList 的语句边界), 见 cgen_util_type.cpp。
+    Vb6Type inferExprTypeImpl(Expr& expr) const;
+    static void bumpInferEpoch();
 
     // ai/009 §5.10 (P3): 给**窄整型目标**的赋值右值套上溢出检查 (vb6_ChkByte/
     // ChkInt/ChkLong), 越界即 run-time error 6。原先这类赋值是裸 `t = v;`, 由 C
@@ -541,6 +545,13 @@
     // 只许答 Byte / Integer / Long; 认不出 (Array 旗标 / UDT 整体 / Variant / 对象 /
     // String / 推不出) 一律 Unknown ⇒ narrowCheckAssign 原样发, 与改前同形。
     Vb6Type narrowTargetTypeOf(Expr* target) const;
+
+    // 账 #305 §B184 (第七十五刀): 「这一档 VB 窄整型要套哪一枚范围闸、闸的位宽是多少」
+    // 的**唯一**答案处。返回 nullptr = 这一档不是窄整型 (调用方原样发)。
+    // 两位主人: ① 赋值路 narrowCheckAssign (还要按**源**宽决定套不套, 所以取 bits);
+    // ② COM 字段写回路的 let 腿 (cgen_com.cpp) —— 值是以 Variant 的 lVal 交回来的,
+    //   恒为 int32, 存进比它窄的那一档就会被 C 静默截断, 所以那一侧只问闸名。
+    const char* narrowCheckFnForVbType(Vb6Type t, int* bits) const;
 
     // P20-42: 窗体控件的**属性返回类型**。见 cgen_util_type.cpp 的 MemberAccessExpr
     // 分支: 那里对 `对象.成员` 的兜底是 lookupModule(memberName), 只按成员**裸名**
@@ -576,6 +587,55 @@
     // 「槽的函数结果」只能复制, 对「槽字段本身」可以直传 &(...)。判据 = 尾注里那个
     // ` variant` 词, 由两条成员读的发码路按 classFieldKind (§B169 的唯一出口) 盖上。
     bool cExprIsVariantSlotFieldRead(const std::string& cExpr) const;
+
+    // 账 #305 §B172 (第六十三刀): 上面那个词的**唯一作者** —— 「把一枚类数据字段的读发出去」
+    // 这一件事收成一枚出口。三条成员读的发码路 (点号走 knownClassVars_ 的那一站 / 点号走
+    // Fix 088c 由 AST 推类的那一站 / With 体内那一站) 都调它, 尾注与 ` variant` 词因此
+    // 只有一个来源。测量在案的教训: 本函数落地前只有前两条调得到那个词, 第三条 (类形参
+    // `UseAll(h As K63Holder)` 发 `(*h)->PV`) 不写尾注 ⇒ 「按文本认槽」一律答否 ⇒
+    // InStr(h.PV, …) 把整只 vb6_VARIANT 递给 BSTR 形参 = C2440, 两台都没 exe。
+    std::string classFieldReadExpr(const std::string& objC, const std::string& clsName,
+                                   const std::string& memberName, bool isVoidPtr,
+                                   const std::string& markerLabel) const;
+
+    // 账 #305 §B174 (第六十五刀): 「数值实参交进 VB 的字符串形参 ⇒ 按 VB6 的隐式 CStr 折」这一条
+    // 规则的三个问句, 各一处答案, 站点只有一位 (Fix 175, cgen_expr_call_arg_emit.inc):
+    //   哪一位算字符串形参 = 形参表 (工程过程 + 92 枚带表的内在函数), 表没有的那族问
+    //                      builtinNoParamTableStringSlot (InStr 一族 —— 它故意没形参表);
+    //   哪一档要折           = typeTakesImplicitCStr (两位旧主人两份清单的并集);
+    //   折成哪一种 CStr      = wrapToBSTR (全仓唯一的 数值→BSTR 形状出口)。
+    // 原来第二、三问还有另一位主人 = Fix 108c 那张 13 枚名单 (在 argList 拼成串之后做文本替换),
+    // 本刀整段撤掉。
+    // 账 #305 §B176 (第六十七刀): 「没有形参表的那一族, 第 pos 位要什么 C 档」收成**一枚出口**
+    // (builtinNoParamTableFormalCType, 按**写出来的** arity 数位号), 上面那枚「是不是字符串位」
+    // 降级成它在 BSTR 档上的投影; 读者 = 这一位出口自己 (投影) + arg_variant 那条臂 (Fix 038b-2),
+    // 而 `getRuntimeParamCType` 那张按 callee 名登的 C 签名表**不再答位号** —— 它的 InStr 行是
+    // 按 VB 两参形登的, 按发码位号问就会把 int32_t 的 start 位答成 BSTR (§B176 形②)。
+    bool typeTakesImplicitCStr(Vb6Type t) const;
+    std::string builtinNoParamTableFormalCType(const std::string& callee, size_t argc, size_t pos,
+                                               Vb6Type firstArgType) const;
+    bool builtinNoParamTableStringSlot(const std::string& callee, size_t argc, size_t pos,
+                                       Vb6Type firstArgType) const;
+    // 账 #305 §B177 (第六十八刀): 同一张表的**第三问** —— 「这一位是不是那枚 _Generic 宏的分派位」。
+    // 位号只在 builtinNoParamTableDispatchSlot 里数一遍, 上面「第 pos 位要什么档」与这一问都是它的
+    // 投影: needle 那一位对**数值**实参答 BSTR (要折, §B175), 对 **Variant** 实参要**裸交**
+    // (宏自己选 vb6_InStrVar 解包并 free) ⇒ 一枚 C 档串表达不了这一位, 六十七刀就是被这一维绊住的
+    // (它按「裸交」把整格答成空, 数值那一半跟着掉了, `InStr(2, s, 7)` 当场 AV)。
+    // 读者 = arg_variant 那条臂一枚 (Fix 038b-2), 站点数不许增加。
+    size_t builtinNoParamTableDispatchSlot(const std::string& callee, size_t argc,
+                                           Vb6Type firstArgType) const;
+    bool builtinNoParamTableVariantMayStayRaw(const std::string& callee, size_t argc, size_t pos,
+                                              Vb6Type firstArgType) const;
+    // 账 #305 §B180 (第六十九刀): 「这一位要不要收**整枚槽**而不是收串」—— 一枚出口三件一起答
+    // (callee + 位号 + **实参本身是不是槽**)，读者**恰好两枚**：arg_variant 用它撤回 Variant→BSTR
+    // 的解包，builtin_fixup 用它把 callee 换成收槽的那枚出口 (`vb6_StrPtr` → `vb6_StrPtrVar`)。
+    // 为什么不并进上面那张按位号答档的表: `vb6_StrPtr(` 在语料里 1720 次调用有 1478 次交的是
+    // **普通 String 变量** (§B180 的普查) ⇒ 无条件按 callee+位号答 `vb6_VARIANT` 会把那 1679 处
+    // 打成 BSTR 进 vb6_VARIANT 形参 = C2440；这一问必须**看实参**。
+    // 只认 AST 那一半 (`isDefinitelyVariantExpr`)：文本那一半 (`cExprIsVariant`) 今天还含
+    // 「裸 COM 结果」一类形状，那些形状下的解包是 Fix 113c 的活，没量过就不撤。
+    bool builtinWantsRawSlotFromVariant(const std::string& callee, size_t argc, size_t pos,
+                                        Expr& actual) const;
 
     // 账 #305 §B147: 「这枚 C 表达式是不是整只 vb6_VARIANT 槽」的 **AST 那一半** ——
     // 与上面 cExprIsVariant (文本前缀表) 合起来回答同一个问句。为什么必须分两头供出：
@@ -994,6 +1054,30 @@
     bool findClassMemberGetParams(const std::string& className,
                                   const std::string& memberName,
                                   std::vector<ParameterInfo>& outParams) const;
+
+    // ---- ai/030 续 (§性能, 2026-10-14): 类成员解析三张实例级 memo ----
+    // 上面三个 helper 每次调用都在 moduleScope 上全表扫 (N 千符号), 全仓 50 处调用点;
+    // 实测 calleeParams 一段 (2.5s / 16.7k 次调用) 的大头就是它们。结果只依赖
+    // (className, memberName) 与**本实例 lifespan 内固定的**符号表 (cgen 在语义分析
+    // 之后运行, 符号表不再变) ⇒ 命中一次终身复用。跨模块 scope 内容不同, 缓存按
+    // 实例 (每模块一个 CCodeGen) 存放, 不跨实例共享。
+    struct ClassMemberParamsMemo {
+        bool found = false;
+        bool isBuiltin = false;
+        std::vector<ParameterInfo> params;
+    };
+    mutable std::unordered_map<std::string, std::string> classMemberCallMemo_;                 // resolveClassMemberCall
+    mutable std::unordered_map<std::string, ClassMemberParamsMemo> classMemberCallParamsMemo_; // findClassMemberCallParams
+    mutable std::unordered_map<std::string, ClassMemberParamsMemo> classMemberGetParamsMemo_;  // findClassMemberGetParams
+    std::string resolveClassMemberCallUncached(const std::string& className,
+                                               const std::string& memberName) const;
+    bool findClassMemberCallParamsUncached(const std::string& className,
+                                           const std::string& memberName,
+                                           std::vector<ParameterInfo>& outParams,
+                                           bool& outIsBuiltin) const;
+    bool findClassMemberGetParamsUncached(const std::string& className,
+                                          const std::string& memberName,
+                                          std::vector<ParameterInfo>& outParams) const;
 
     // ---- Fix 015: Method chaining 解析辅助 ----
     // 给定一个表达式 AST 节点, 推断其在运行时返回的类名 (如果它返回类实例)

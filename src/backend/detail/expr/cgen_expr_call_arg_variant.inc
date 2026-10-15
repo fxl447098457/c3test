@@ -277,10 +277,69 @@
             || calleeParams[i].type == Vb6Type::Variant
             || calleeParams[i].type == Vb6Type::Empty;
         if (!isByRef && rtParamTypeUsable) {
-            std::string rtParamType = getRuntimeParamCType(callee, i);
+            // 账 #305 §B176 (第六十七刀): 「这一位要什么 C 档」先问**那一位权威** ——
+            // 没有类型化形参表的那族内在函数由 `builtinNoParamTableFormalCType` 按**写出来的**
+            // arity 答档 (Fix 175 与它同源, §B174/§B175 那张名单现在就是这张表)。它答得出就用它,
+            // 答不出才回落到 `getRuntimeParamCType` (按 callee 名登的 C 签名表)。
+            // 为什么这个次序是要紧的: 那张表的行是**按 VB 写出来的 arity 里"串在哪几位"**登的,
+            // 而这一臂问的是**发码位号** —— `vb6_InStr {"BSTR","BSTR"}` 对两参形正好, 对
+            // `InStr(start, s1, s2)` 就把 `int32_t start` 那位答成 BSTR ⇒ 把该转数值的 Variant
+            // 实参解成串交进 int 形参 (cl 只 warning, 运行时 start = 被截断的指针 ⇒ 静默答 0)。
+            // 同一位权威反过来也管 BSTR: Variant 交进 GetSetting/MsgBox 标题/InputBox 那几形
+            // 以前**没人问** (那张表里根本没有这些名字) ⇒ 裸结构体交进 BSTR 形参 = cl C2440。
+            std::string rtParamType;
+            {
+                const Vb6Type first176 = node.positional.empty()
+                    ? Vb6Type::Empty
+                    : (node.positional[0] ? inferExprType(*node.positional[0]) : Vb6Type::Empty);
+                std::string kind176 = builtinNoParamTableFormalCType(
+                    callee, node.positional.size(), i, first176);
+                // 账 #305 §B177 (第六十八刀): 宏的分派位(= InStr 的 needle) 上 **Variant 裸交**。
+                // `vb6_InStr` / `vb6_InStrC` 是按 needle 分派的 _Generic 宏, needle 是
+                // vb6_VARIANT 时选 `vb6_InStrVar` / `vb6_InStrVarC` —— 那里自己
+                // `vb6_VariantToString` 再 `vb6_BSTR_Free` (vb6rtl_string.c:235-247)。
+                // 发码侧抢先解一层语义同值, 但多一份没人回收的临时串 (两台实测:
+                // 20000 次 `InStr(hay, v)` 比同形状的串实参多 753664 字节, `.build/k68_lp2_x64` /
+                // `_x86` 修前 753664、修后 0) ⇒ 把这一位的答案换成「形参本来就是槽」,
+                // 复用下面那条既有的闸 —— 不新开一站、不新写一种形状。
+                // 同格另一半年: 这一位对**数值**实参照旧要折 (§B174/§B175 那一站看的是
+                // `builtinNoParamTableFormalCType` 的 BSTR 档, 六十七刀把它答成空过, 于是
+                // `InStr(2, s, 7)` 发裸 int 进 `wchar_t*` —— cl 不报, 两台跑到那行都崩)。
+                // 位号两问同源: 都走 builtinNoParamTableDispatchSlot 那一处, 不许在这里再数一遍。
+                if (kind176 == "BSTR"
+                    && builtinNoParamTableVariantMayStayRaw(
+                           callee, node.positional.size(), i, first176)) {
+                    kind176 = "vb6_VARIANT";
+                }
+                rtParamType = kind176.empty() ? getRuntimeParamCType(callee, i) : kind176;
+                // 账 #305 §B180 (第六十九刀): 这一位要不要**收整枚槽**（= 不解包），一处问句
+                // 两站同归 —— 这里撤回解包，`builtin_fixup` 那一站照着同一问句把 callee 换成
+                // 收槽的出口 `vb6_StrPtrVar`。撤掉的病形是 `vb6_StrPtr(vb6_VariantToString(v))`：
+                // 每次调用现造一枚 BSTR 把地址交出去、那枚串没人回收 (两台实测 1089536/909312
+                // 字节每 18000 次；真语料 41 处)。⚠ 这一问**看实参不看位号** —— 同一个
+                // `vb6_StrPtr` 在全语料另有 1478 处交的是普通 String 变量，按位号无条件答槽
+                // 会把它们全打成 C2440 (读数与理由见 cgen_util_type.cpp 那一问)。
+                if (rtParamType == "BSTR" && node.positional[i]
+                    && builtinWantsRawSlotFromVariant(callee, node.positional.size(), i,
+                                                      *node.positional[i])) {
+                    rtParamType = "vb6_VARIANT";
+                }
+            }
             if (!rtParamType.empty() && rtParamType != "vb6_VARIANT"
                  && rtParamType != "vb6_VARIANT*") {
-                bool argIsVariant = cExprIsVariant(argVal);
+                // 账 #305 §B173 (第六十四刀): 「这枚实参是不是整只槽」在本文件里由**两条臂**
+                // 回答 —— 上面那条 Fix 029「形参类型已知」的臂先问 AST (`isDefinitelyVariantExpr`)
+                // 再问文本; 这一臂 (内置/运行时, calleeParams 空或档为 Variant) 此前**只问文本**。
+                // 同一枚 UDT 的 Variant 成员 `u.UV` 因此两种命运: `Left`/`Len`/`Replace`/`Val`
+                // 在 builtin_funcs.inc 里带**类型化形参表** ⇒ 落上臂 ⇒ 被 AST (Fix 090l) 认出 ⇒
+                // `vb6_VariantToString(u.UV)`; 而 `InStr` 只登记返回档 (`addBuiltinFunc("InStr",
+                // Vb6Type::Long)`, 形参表为空因为 start 可选) ⇒ 落这一臂 ⇒ 文本认不出 ⇒ 裸
+                // `vb6_InStr(1, u.UV, …)` = cl C2440 (vb6_VARIANT → BSTR), x64/x86 都编不过。
+                // 口径 = §B147「改道吃 AST ∪ 文本」: 下面那三枚手抄 (COM 前缀 / knownVariantVars_
+                // / Fix 089i 符号返回档) 全是 AST 那一位已覆盖的子集, 刻意**留着**当并集的另一半,
+                // 撤它们要另一格读数 (089i 对模块 Function 的 Unknown 档比 AST 宽)。
+                bool argIsVariant = isDefinitelyVariantExpr(*node.positional[i])
+                                    || cExprIsVariant(argVal);
                 // Fix 113c: 实参是裸 COM 结果 (void* 承载 COM VARIANT*) 时, 语义即
                 // Variant — 必须判为 Variant 才能触发下方 Variant→具体类型提取
                 // (vb6_VariantFromComResult + 按 rtParamType 提取). 否则 void* 裸传

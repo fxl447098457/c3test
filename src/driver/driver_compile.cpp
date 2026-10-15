@@ -3,6 +3,7 @@
 //   原第 182~544 行
 
 #include "driver/driver.hpp"
+#include "driver/detail/phase_timing.hpp"   // ai/030 续: C3_TIMING=1 的相位计时
 #include "common/diagnostics.hpp"
 #include "common/encoding.hpp"
 #include "common/sha1.hpp"
@@ -575,6 +576,7 @@ CompileResult Driver::compile(const CompileOptions& options) {
         return result;
     }
 
+    c3PhaseMark("vbp+expand");  // ai/030 续: C3_TIMING 相位计时 (下同)
     // === 阶段1: 词法分析 ===
     if (!runLexer(effectiveOpts)) {
         std::cerr << diag_->toString();
@@ -589,6 +591,7 @@ CompileResult Driver::compile(const CompileOptions& options) {
         return result;
     }
 
+    c3PhaseMark("lex");
     // === 阶段1.5: 预处理 (条件编译) ===
     if (!runPreprocess(effectiveOpts)) {
         std::cerr << diag_->toString();
@@ -603,6 +606,7 @@ CompileResult Driver::compile(const CompileOptions& options) {
         return result;
     }
 
+    c3PhaseMark("preprocess");
     // === 阶段2: 语法分析 ===
     if (!runParser(effectiveOpts)) {
         std::cerr << diag_->toString();
@@ -617,6 +621,7 @@ CompileResult Driver::compile(const CompileOptions& options) {
         return result;
     }
 
+    c3PhaseMark("parse");
     // === 阶段2.5: TypeLib导入 (P6.3, 前期绑定) ===
     if (!runTypeLibImport(effectiveOpts)) {
         // TypeLib加载失败不阻断编译, 仅降级为后期绑定
@@ -664,6 +669,7 @@ CompileResult Driver::compile(const CompileOptions& options) {
         return result;
     }
 
+    c3PhaseMark("typelib+prepasses");
     // === 阶段3: 语义分析 ===
     if (!runSemanticAnalysis(effectiveOpts)) {
         std::cerr << diag_->toString();
@@ -672,6 +678,7 @@ CompileResult Driver::compile(const CompileOptions& options) {
         return result;
     }
 
+    c3PhaseMark("semantic");
     // === 阶段3.4: 继承成员合并 (tB 扩展, B07b) — 祖先自有成员并进派生类 Class 符号.
     // 必须早于 3.5: driver_crossmod.cpp 把 Class 符号的成员表逐字段拷给外部工程副本.
     // 工程无 Inherits 时立即 return true (2.8 未建表), 生成物逐字节不变.
@@ -703,6 +710,7 @@ CompileResult Driver::compile(const CompileOptions& options) {
         return result;
     }
 
+    c3PhaseMark("inherit-merge");
     // === 阶段3.5: 跨模块符号链接 ===
     // 多模块项目: 解析跨模块Public符号引用
     if (modules_.size() > 1) {
@@ -750,6 +758,7 @@ CompileResult Driver::compile(const CompileOptions& options) {
         }
     }
 
+    c3PhaseMark("crossmod+generics+marks");
     // 如果只做语法检查, 到此结束
     if (effectiveOpts.syntaxOnly) {
         result.success = true;
@@ -793,6 +802,7 @@ CompileResult Driver::compile(const CompileOptions& options) {
     }
     // Intermediates (.c/.h/.obj) go to session root dir; RTL is in session_dir/rtl/
     std::string intermediatesDir = session.sessionDir();
+    c3PhaseMark("unpack-rtl");
     // === Stage 4: Code Generation ===
     if (!runCodeGeneration(effectiveOpts, intermediatesDir)) {
         std::cerr << diag_->toString();
@@ -803,6 +813,7 @@ CompileResult Driver::compile(const CompileOptions& options) {
         return result;
     }
 
+    c3PhaseMark("codegen");
     // === Stage 5: Link ===
     if (!runLinker(effectiveOpts, outputDir, intermediatesDir, session)) {
         std::cerr << diag_->toString();
@@ -814,6 +825,7 @@ CompileResult Driver::compile(const CompileOptions& options) {
         return result;
     }
 
+    c3PhaseMark("link");
     // Success: clean up intermediates (unless --keep-for-debug)
     if (!effectiveOpts.keepTemps) {
         session.cleanup();

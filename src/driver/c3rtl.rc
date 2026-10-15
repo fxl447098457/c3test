@@ -1,4 +1,52 @@
 // c3rtl.rc - RTL runtime library embedded as resources
+// 2026-10-15 (账 #305 §B186, 第七十八刀): 上一格记下「Class_Initialize 里 raise 也 RC=5, 那一站
+//   今天仍没接」—— 本刀接的就是那一站。`IClassFactory::CreateInstance` → `vb6_ComObject_Create`
+//   → `desc->factoryFunc()` 是服务端走进 VB 代码的**第二处**进门点, 它同样没有错误边界:
+//   体里一条没人接住的运行期错误把**客户端进程**打死 (两台实测一枚 `Err.Raise 123` 的类 =
+//   RC=123 + stderr `Unhandled error 123`, 客户端连 CREATE 那一行都没打出来)。
+//   这一条通道与 §B185 不同的一面: `IClassFactory::CreateInstance` 的签名里**没有 EXCEPINFO**,
+//   所以错误号只能编进交回的那枚 HRESULT —— 「造」那一问仍只住 vb6com.c 的 `vb6_ComVbHresult`
+//   (与 `vb6_ComFailExcep` 填 scode 用的是同一枚答案, 0x800A0000 那个数全 RTL 还是只出现一处),
+//   「认」那一问只住 `vb6_ComVbErrFromHr`, 客户端 create 腿据此把服务端自己 raise 的那条折回
+//   原号(与同一个类在客户进程里直接 New、调用方 On Error 拿到的就是那一号对齐),
+//   认不出的 0x8004xxxx/0x8007xxxx 这些真·激活失败照旧 429。
+//   帧的登记顺序照 §B185 那一趟(先 setjmp 再登记 ⇒ 体里自带 On Error 的照常由体接住);
+//   错误路径回收 `obj` 之后才 return; 类实例那一格拿不到(factoryFunc 没返回), 另立 §B187。
+
+// 2026-10-15 (账 #305 §B185, 第七十七刀): IDispatch 服务端进门那趟**从来没有错误边界** ——
+//   `ComObj_Invoke` 收下 pExcepInfo 却从不碰、`invokeFunc` 返回 void、末尾无条件 return S_OK,
+//   于是 VB 体里没人接住的一条运行期错误一路走到 `vb6_RaiseError` ⇒ 那里没帧 ⇒ 打一行 stderr
+//   再 `exit(错误号)`, **把调用它的客户端进程打死**。两台实测(不查注册表的进程内客户端,
+//   `.build/k76_cli/`): 越界写 Public Integer 字段 RC=6、体里一句 `Err.Raise 5` RC=5,
+//   `Class_Initialize` 里 raise 也 RC=5 (那一站今天仍没接, 记在台账里没并进本刀)。
+//   本刀只改一处 = 那一趟自带一枚帧(顺序照 cgen 的 On Error GoTo 协议 ⇒ 体里自己写了
+//   On Error 的那些照常由体接住、交回 S_OK 与空 EXCEPINFO), 失败时交回的形状收成一枚新出口
+//   `vb6_ComFailExcep`(定义在 vb6com.c, 是客户端接收腿 vb6_ComCheckError 的镜像):
+//   内置 Collection 的 `coll_fail` 从此转调它, 工程类的服务端也问它 —— 0x800A0000|err 那一
+//   形状不再住两遍。客户端拿到的是 DISP_E_EXCEPTION + scode + 描述, 折回成一条 VB 错误,
+//   所以客户的 On Error 拿得到错误号 —— 与真 VB6 同一口径。
+
+// 2026-10-14 (ComCtlsDemo): 补 CLngLng —— 数值转换阶梯里**有符号 64 位**
+//   那一档此前没登记 (ai/032 落了 CSByte/CUInt/CULng/CULngLng 四档 + CLngPtr, 独缺 CLngLng)。
+//   缺它的后果不是降级而是**链接期现形**: ComCtlsDemo Builds\ProgressBar\ProgressBar.ctl:1328
+//   `#If Win64` 分支里 `CLngLng(PropValue)` / `CLngLng(Me.Max - Me.Min)` 送
+//   ITaskBarList3::SetProgressValue 的两个 ULONGLONG —— cgen 查不到内在函数, 原样发成裸
+//   `CLngLng(...)`, ⇒ `LNK2019: 无法解析的外部符号 CLngLng`。
+//   口径与 CLng 同族 (vb6rtl_conv.c: vb6_FltToLng 的半值远离零 round + 越界 Error 6);
+//   x64 界先于转换挡住 (同 CLngPtr 的 x64 分支, 没有窄缝可倚赖)。
+//   同批补 `vb6_di_SetClassLongPtrW` (手写进 vb6_di_user32_stubs.c, ComCtlsDemo
+//   VirtualComboBase.bas:51 的 `#If Win64` 分支改 ComboLBox 窗口过程要用) ——
+//   两枚都只在 `--arch x64` 下才被要到 (Win64=False 时整段不编译), 所以 32 位目标一直是绿的。
+// 2026-10-14 (ComCtlsDemo): uc_propbag.c 的 .frx StdPicture 解码 —— 位图块常见的是 **DDB**
+//   (颜色位 [+ 1bpp AND 掩码]), `biHeight` 是 DDB 高度 = 图高 ×2, 于是 biSizeImage
+//   ≠ stride*biHeight。旧实现把 biHeight 当图高建 DIB ⇒ 图被拉成两倍高、掩码字节被当
+//   颜色解出来, 症状是图标挤在格子底部、其余全黑 (ImageList1/2/3 全线: Toolbar /
+//   TabStrip / TreeView / ListView / ImageCombo 的图标)。
+//   三种布局都用 biSizeImage 自证 (字节数互不相同), 不猜; 行序是 BMP 自下而上, 保持
+//   biHeight 为正建 DIB 就不必翻转。掩码格涂 &HC0C0C0 银灰 = ComCtls 的默认 MaskColor,
+//   ImageList_AddMasked 正好把它键成透明 (与 VB6 同路)。扩到 24bpp 是因为原调色板里
+//   没有"透明"这一档; **不能**用 32bpp —— Common.bas 的 RenderPicture 见到 32bpp 就改走
+//   GdiAlphaBlend 那一支, 那支在 C3 里从没跑过, 踩了直接报错误 9 退出。
 // 账 #305 §B142(第三十四刀): Decimal 这一档的两处根因都是「格式」不是「数值」。
 //   ① `DECIMAL.wReserved` 这两字节其实是 oleaut32 自己的 vt 标签(它造的那些也写 14 = VT_DECIMAL)。
 //   vb6_CDec 的**手填字段**那两路以前把它留成 0 —— 字段值全对、格式不对, 于是 oleaut32 不报错地

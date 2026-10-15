@@ -44,7 +44,8 @@ function Test-DispatchInvoke {
         [string[]]$Needles,
         [string[]]$Absent = @(),
         [string]$ExtraIid = "",       # 非空 = 再问一次这枚 IID，看服务器答的是哪份指针
-        [string]$Arch = ""            # "" = 默认(x64) | x86 —— B16 起同一批断言在 x86 上也真跑一遍
+        [string]$Arch = "",           # "" = 默认(x64) | x86 —— B16 起同一批断言在 x86 上也真跑一遍
+        [string[]]$Tail = @()         # 账 #305 SB186: 追在探针命令行之后的臂参数 (CREATE=<clsid,...>)
     )
     # vbp 分片: 本片不跑这例 (闸门在 run_tests.ps1 里定义)。
     if (-not (Enter-VbpShard)) { return }
@@ -72,8 +73,10 @@ function Test-DispatchInvoke {
         Write-Host "FAIL (no probe)" -ForegroundColor Red
         return
     }
-    if ($ExtraIid) { $text = ((& $probe $dllPath $Clsid $ExtraIid) | Out-String) }
-    else { $text = ((& $probe $dllPath $Clsid) | Out-String) }
+    # 账 #305 SB186 (第七十八刀): $Tail 里放的是探针自己的臂参数 (CREATE=<clsid[,clsid]>)，
+    # 不是第二枚主 CLSID。空数组按位置展开成零个参数 ⇒ 既有各格的命令行一个字节没变。
+    if ($ExtraIid) { $text = ((& $probe $dllPath $Clsid $ExtraIid @Tail) | Out-String) }
+    else { $text = ((& $probe $dllPath $Clsid @Tail) | Out-String) }
     if ($LASTEXITCODE -ne 0) {
         $script:fail++
         Write-Host "FAIL (probe exit=$LASTEXITCODE)" -ForegroundColor Red

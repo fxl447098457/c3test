@@ -244,6 +244,11 @@ void CCodeGen::visit(VariableDecl& node) {
             std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
             knownClassVars_[lower] = projCls;
             knownObjectVars_.erase(lower);
+            // Fix 运行期第二十六层同批: 同名 `Dim Item As Variant` (TvwNodes.cls:53)
+            // 把 "item" 登记进 knownVariantVars_, 同模块 :132 `Dim Item As TvwNode`
+            // 遮蔽它时, 不擦掉 ⇒ ObjPtr(Item) 的 void* 形参分支误套
+            // vb6_VariantToObjectVal(Item) (按值收 vb6_VARIANT) → C2440.
+            knownVariantVars_.erase(lower);
             if (node.isWithEvents) knownWithEventsVars_[lower] = projCls;
             if (node.isNew) {
                 knownNewVars_[lower] = cIdent(projCls);
@@ -264,6 +269,15 @@ void CCodeGen::visit(VariableDecl& node) {
             knownIfaceVars_.find(lower) == knownIfaceVars_.end()) {
             knownObjectVars_.insert(lower);
         }
+        // Fix 运行期第二十六层同批: 局部 `Dim X As Control/Object` 遮蔽同名
+        // `Property Get X() As Variant` 时, 属性那一档的返回类型 Variant 已把
+        // "x" 登记进 knownVariantVars_ (cgen_decl_proc.cpp:343). 不擦掉 ⇒ 后续
+        // CallByName(X, ...) / ObjPtr(X) 的 void* 形参分支按"实参是 Variant"
+        // 套 vb6_VariantToObjectVal(X) (按值收 16B vb6_VARIANT) → C2440.
+        // (ComCtlsDemo Builds/UpDown/UpDown.ctl:803 `Dim BuddyControl As Control`
+        // 遮蔽 :719 `Property Get BuddyControl() As Variant`; 同理
+        // TvwNodes.cls:132 `Dim Item As TvwNode` 遮蔽 :53 `Dim Item As Variant`.)
+        knownVariantVars_.erase(lower);
     }
 
     // Fix 082: COM interface pointer types (vb6_ComIface_*) are pointer-sized on x64

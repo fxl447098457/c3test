@@ -133,6 +133,20 @@ static inline int8_t   vb6_CSByteV(vb6_VARIANT v) { return vb6_CSByte(vb6_Varian
 static inline uint16_t vb6_CUIntV(vb6_VARIANT v)  { return vb6_CUInt(vb6_VariantToDouble(v)); }
 static inline uint32_t vb6_CULngV(vb6_VARIANT v)  { return vb6_CULng(vb6_VariantToDouble(v)); }
 static inline uint64_t vb6_CULngLngV(vb6_VARIANT v) { return vb6_CULngLng(vb6_VariantToDouble(v)); }
+// CLngLng — 阶梯里有符号的 64 位那一档 (CInt/CLng 的 32 位往上数第三级)。
+// 与 CLng 同口径: 收 double, 半值远离零 (vb6_FltToLng), 越界按 VB6 语义报 Error 6。
+// 用途 (ComCtlsDemo ProgressBar.ctl 的 `#If Win64` 分支): 给
+// ITaskBarList3::SetProgressValue(HWND, ULONGLONG, ULONGLONG) 送 64 位值 ——
+// VB6 没有 LongLong 类型, 只能用转换函数把值凑成 64 位整数送进 vtable 调用。
+int64_t vb6_CLngLng(double x);
+static inline int64_t vb6_CLngLngV(vb6_VARIANT v) { return vb6_CLngLng(vb6_VariantToDouble(v)); }
+// twinBASIC 形 CLngPtr (doc.twinbasic.vb6.pro .../Conversion/CLngPtr.html): 转 LongPtr
+// (x86 = Long / x64 = LongLong), 越界 Error 6 —— 与上面四档同族 (FltToLng + OvfChk)。
+intptr_t vb6_CLngPtr(double x);
+static inline intptr_t vb6_CLngPtrV(vb6_VARIANT v) { return vb6_CLngPtr(vb6_VariantToDouble(v)); }
+// CLngPtr 的 void* 实参档 (StrPtr / 裸 COM 结果的指针值): 精确转指针宽度整数,
+// 不给这一档会被 default 的 double 形参拒收 (C2440)。
+static inline intptr_t vb6_CLngPtrFromPtr(void* p) { return (intptr_t)(uintptr_t)p; }
 
 // 类型检查
 int32_t vb6_IsNumeric(vb6_VARIANT v);
@@ -439,6 +453,11 @@ BSTR   vb6_ByteArrayToString(struct vb6_SafeArray1D* arr);
 void*  vb6_SafeArrayDataPtr(struct vb6_SafeArray1D* arr);
 struct vb6_SafeArray1D* vb6_Filter(struct vb6_SafeArray1D* source, BSTR match, int32_t include, int32_t compare);
 void*    vb6_StrPtr(BSTR s);          // StrPtr: address of string data
+// 账 #305 §B180 (第六十九刀): StrPtr 收**整枚槽**那一档 —— vt 已是串时**借**槽里那枚 BSTR，
+// 不再像 `vb6_StrPtr(vb6_VariantToString(v))` 那样每调用现造一枚没人回收的临时串。
+// 发码侧由 arg_variant (撤回解包) 与 builtin_fixup (改 callee 名) 两站同归一处新问句决定，
+// 只有「实参本身是槽」时才走这一枚 (理由与读数见 §B180 —— 无条件按位号答槽会打坏 1679 处)。
+void*    vb6_StrPtrVar(vb6_VARIANT v);
 uintptr_t vb6_ObjPtr(void* obj);       // ObjPtr: address of object
 BSTR   vb6_LSet(BSTR str, int32_t length);  // LSet: left-justify
 BSTR   vb6_RSet(BSTR str, int32_t length);  // RSet: right-justify
@@ -500,12 +519,17 @@ uint64_t vb6_CULngLngBSTR(BSTR s);
 uint32_t vb6_CULngBSTR(BSTR s);
 uint16_t vb6_CUIntBSTR(BSTR s);
 int8_t   vb6_CSByteBSTR(BSTR s);
+intptr_t vb6_CLngPtrBSTR(BSTR s);   // twinBASIC 形 CLngPtr 的字符串入口 (同族口径)
+// CLngLng (阶梯里有符号 64 位那一档) 的字符串入口 —— 与上面四档同口径, 走 vb6_Val。
+int64_t  vb6_CLngLngBSTR(BSTR s);
 // ai/032: CStrULong/CStrULongLong 的 Variant 解包入口 (与 Fix 158q 同款)
 BSTR vb6_CStrULongFromVariant(vb6_VARIANT x);
 BSTR vb6_CStrULongLongFromVariant(vb6_VARIANT x);
 static inline double vb6_CCurV(vb6_VARIANT v) { return vb6_CCur(vb6_VariantToDouble(v)); }
 // Fix 160w: CLng(指针) 分派目标 — 截断为 int32_t (VB6 Long = 地址低半).
-static inline int32_t vb6_CLngPtr(void* p) { return (int32_t)(intptr_t)p; }
+// (更名 vb6_CLngFromPtr: 原 vb6_CLngPtr 这个名字让给下方 CLngPtr 转换函数 ——
+//  与 VB 内置同名; 旧名只在本头两处出现, 一处定义一处 _Generic。)
+static inline int32_t vb6_CLngFromPtr(void* p) { return (int32_t)(intptr_t)p; }
 #ifndef __cplusplus
 #define vb6_CStrLong(x) _Generic((x), \
     vb6_VARIANT: vb6_CStrLongFromVariant, \
@@ -528,7 +552,7 @@ static inline int32_t vb6_CLngPtr(void* p) { return (int32_t)(intptr_t)p; }
 #define vb6_CLng(x) _Generic((x), \
     vb6_VARIANT: vb6_CLngV, \
     BSTR: vb6_CLngBSTR, \
-    void*: vb6_CLngPtr, \
+    void*: vb6_CLngFromPtr, \
     default: vb6_CLng)((x))
 #define vb6_CDbl(x) _Generic((x), \
     vb6_VARIANT: vb6_CDblV, \
@@ -566,6 +590,17 @@ static inline int32_t vb6_CLngPtr(void* p) { return (int32_t)(intptr_t)p; }
     vb6_VARIANT: vb6_CULngLngV, \
     BSTR: vb6_CULngLngBSTR, \
     default: vb6_CULngLng)((x))
+#define vb6_CLngLng(x) _Generic((x), \
+    vb6_VARIANT: vb6_CLngLngV, \
+    BSTR: vb6_CLngLngBSTR, \
+    default: vb6_CLngLng)((x))
+// twinBASIC 形 CLngPtr: 三档分派 + void* 档 (指针值精确转, 见 vb6_CLngPtrFromPtr)。
+// 返回 intptr_t, 宽度随目标架构 (x86 4 / x64 8)。
+#define vb6_CLngPtr(x) _Generic((x), \
+    vb6_VARIANT: vb6_CLngPtrV, \
+    BSTR: vb6_CLngPtrBSTR, \
+    void*: vb6_CLngPtrFromPtr, \
+    default: vb6_CLngPtr)((x))
 #endif
 
 // Fix 158s: vb6_InStr 的 needle 实参是 vb6_VARIANT 时 (For 循环里对每个 Buffer 判

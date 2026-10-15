@@ -130,11 +130,21 @@ if ($err5.Count -gt 0) {
 }
 if ($ast5) {
     $wantD = @{
-    # 名字 = @(位置实参个数, Needles 针数, Absent 针数) —— 加针/加调用点要同时改这张名单
+    # 名字 = @(element数-助手名, Needles 针数, Absent 针数, -Tail 针数) —— 加针/加调用点要同时改这张名单
     # 账 #305 §B159/§B162 (第五十刀): 两台各加一条 CALL=ECHOARR (真 SAFEARRAY 进服务端、再交回客户端)。
-    'ax_dll_dispatch_invoke'         = @(6, 6, 1)
-    'cc_dll_dispatch_iface_only'     = @(7, 11, 1)
-    'cc_dll_dispatch_iface_only_x86' = @(8, 11, 1)
+    'ax_dll_dispatch_invoke'         = @(6, 6, 1, 0)
+    'cc_dll_dispatch_iface_only'     = @(7, 11, 1, 0)
+    'cc_dll_dispatch_iface_only_x86' = @(8, 11, 1, 0)
+    # 账 #305 §B185 (第七十七刀): IDispatch 服务端进门那枚错误边界, 两台各一条真跑用例。
+    # 针面各写一份(见 run_tests.ps1 那两条的理由); x86 那格多出的两枚元素是 `-Arch "x86"`
+    # 这一对**命名**实参 —— AST 里它们各算一格 CommandElement, 所以是 8 而不是 7。
+    'b185_server_error_frame'        = @(6, 12, 1, 0)
+    'b185_server_error_frame_x86'    = @(8, 12, 1, 0)
+    # 账 #305 §B186 (第七十八刀): 类工厂那辙门的错误边界, 两台各一条真跑用例。
+    # 第四格 = -Tail 那枚数组里的针数 (没有这一档就写 0): 这一族用例给助手新增了一个
+    # 命名数组实参, 「数组实参恰好两枚」那句话从此只管**位置**那两档。
+    'b186_factory_error_frame'         = @(8, 5, 2, 1)
+    'b186_factory_error_frame_x86'    = @(10, 5, 2, 1)
 }
 $ds = @($ast5.FindAll({ param($n)
     $n -is [System.Management.Automation.Language.CommandAst] -and
@@ -146,10 +156,27 @@ if ($ds.Count -ne $wantD.Count) {
 foreach ($c in $ds) {
     $els = @($c.CommandElements)
     $nm = ($els[1].Extent.Text -replace '"', '')
-    $arrays = @($els | Where-Object { $_.GetType().Name -eq 'ArrayExpressionAst' })
+    # 账 #305 §B186 (第七十八刀): 数组实参分两档。紧跟在**命名参数**后面的那档不是针面,
+    # 是给助手的参数据的 (今天只认 -Tail 这一枚); 位置那两档才是 Needles 与 Absent。
+    # 之前那句「数组实参恰好 2 枚」把两档混在一起数, 加了 -Tail 就会永远红 ——
+    # 要钉的其实是「位置两档各自的针数 + 命名那档叫什么、里面几条」。
+    $pos = @(); $named = @()
+    for ($e = 0; $e -lt $els.Count; $e++) {
+        if ($els[$e].GetType().Name -ne 'ArrayExpressionAst') { continue }
+        if ($e -gt 0 -and $els[$e - 1].GetType().Name -eq 'CommandParameterAst') {
+            $named += , @($els[$e - 1].Extent.Text, $els[$e])
+        } else {
+            $pos += $els[$e]
+        }
+    }
     # 注释行里也写引号(那几行是给人读的)，先丢掉再数针的条数
-    $counts = @($arrays | ForEach-Object {
+    $counts = @($pos | ForEach-Object {
         $clean = ($_.Extent.Text -split '\r?\n' | Where-Object { $_.TrimStart() -notmatch '^#' }) -join "`n"
+        ([regex]::Matches($clean, '"[^"\r\n]*"')).Count
+    })
+    $tailNames = @($named | ForEach-Object { $_[0] })
+    $tailCounts = @($named | ForEach-Object {
+        $clean = ($_[1].Extent.Text -split '\r?\n' | Where-Object { $_.TrimStart() -notmatch '^#' }) -join "`n"
         ([regex]::Matches($clean, '"[^"\r\n]*"')).Count
     })
     if (-not $wantD.ContainsKey($nm)) { $fails += ('H5 没登记过的调用点 ' + $nm); continue }
@@ -158,8 +185,19 @@ foreach ($c in $ds) {
         $fails += ('H5 ' + $nm + ' 位置实参 ' + ($els.Count - 1) + ' != ' + $w[0] +
                    ' —— 数组收尾被吃掉时后面的实参会整体往前挪')
     }
-    if ($arrays.Count -ne 2) {
-        $fails += ('H5 ' + $nm + ' 数组实参 ' + $arrays.Count + ' != 2 (Needles + Absent)')
+    if ($pos.Count -ne 2) {
+        $fails += ('H5 ' + $nm + ' 位置数组实参 ' + $pos.Count + ' != 2 (Needles + Absent)')
+    }
+    if ($tailNames.Count -gt 1 -or ($tailNames.Count -eq 1 -and $tailNames[0] -ne '-Tail')) {
+        $fails += ('H5 ' + $nm + ' 不认得的命名数组实参: ' + ($tailNames -join ',') +
+                   ' —— 名单只认 -Tail 这一档')
+    }
+    $tailN = 0
+    if ($tailCounts.Count -eq 1) { $tailN = $tailCounts[0] }
+    if ($w.Count -lt 4) {
+        $fails += ('H5 名单 ' + $nm + ' 只有 ' + $w.Count + ' 个数 —— 第四格是 -Tail 的针数 (没有写 0)')
+    } elseif ($tailN -ne $w[3]) {
+        $fails += ('H5 ' + $nm + ' -Tail 针数 ' + $tailN + ' != ' + $w[3])
     }
     if ($counts.Count -eq 2 -and ($counts[0] -ne $w[1] -or $counts[1] -ne $w[2])) {
         $fails += ('H5 ' + $nm + ' 针数 ' + ($counts -join '/') + ' != ' + $w[1] + '/' + $w[2])

@@ -296,5 +296,29 @@ AfterIIf:
     ll = 4294967296
     Debug.Print "VE-promote-ll-wide=" & CStr(ll + l)        ' 4294967300
 
+    ' ---- ai/032 §6.6/§6.7 收口: 无符号两档的 Variant 装箱真值 + Eqv/Imp 64 位路径 ----
+    ' 改前: unsigned 值经 _Generic 装箱一律进 vb6_VariantLong(int32) —— &HFFFFFFFF 读回 -1;
+    ' 且进制字面量超 32 位被 lexer 以 int32 截断 (&H123456789A 砍成 0x3456789A, 同刀修)。
+    ' 装箱档位改 VT_UI4/VT_UI8, 读取侧全部表 (ToLong/LongPtr/Bool/Double/比较/Format/
+    ' TypeName/IsNumeric/CDec/com/host/属性包) 补齐; Eqv/Imp 的 64 位取值同时钉住。
+    Dim vUb As Variant
+    Dim uB As ULong
+    Dim u3B As ULongLong
+    uB = &HFFFFFFFF
+    vUb = uB
+    Debug.Print "VE-ubox-u=" & CStr(vUb)                 ' 4294967295
+    Debug.Print "VE-ubox-u-tn=" & TypeName(vUb)          ' ULong
+    Debug.Print "VE-ubox-u-vt=" & CStr(VarType(vUb))     ' 19 (VT_UI4)
+    Debug.Print "VE-ubox-u-cmp=" & CStr(vUb = uB)        ' True (比较走 UI4 格)
+    Debug.Print "VE-ubox-u-fmt=" & Format(vUb)           ' 4294967295
+    u3B = &H123456789A
+    vUb = u3B
+    Debug.Print "VE-ubox-u3=" & CStr(vUb)                ' 78187493530 (进制字面量超 32 位不截断)
+    Debug.Print "VE-ubox-u3-vt=" & CStr(VarType(vUb))    ' 21 (VT_UI8)
+    Debug.Print "VE-ei-u3-eqvsame=" & CStr(u3B Eqv u3B)  ' 18446744073709551615
+    Debug.Print "VE-ei-u3-eqv0=" & CStr(u3B Eqv 0)       ' 18446743995522058085
+    Debug.Print "VE-ei-u3-imp0=" & CStr(u3B Imp 0)       ' 18446743995522058085
+    Debug.Print "VE-ei-u-imp0=" & CStr(uB Imp 0)         ' 0
+
     Debug.Print "VE-DONE"
 End Sub

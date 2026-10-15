@@ -224,12 +224,43 @@ uint64_t vb6_CULngLng(double x) {
     if (x < 0) (void)vb6_OvfChk(-1, 0, 0);   // 负数 → 走既有溢出通道报 Error 6
     return (uint64_t)vb6_FltToLng(x);
 }
+// CLngLng: 阶梯里有符号的 64 位那一档。x64 的界 (int64 全域) 装得下 double 的整数域,
+// 故不能像 CULngLng 那样只挡一侧 —— 与 CLngPtr 的 x64 分支同款: 界先于转换挡住
+// (round/(int64_t) 对越界 double 是 UB, 没有窄缝可倚赖)。
+#ifdef vb6_CLngLng
+#undef vb6_CLngLng
+#endif
+int64_t vb6_CLngLng(double x) {
+    if (x >= 9223372036854775808.0 || x < -9223372036854775808.0)
+        (void)vb6_OvfChk(-1, 0, 0);   // 越界 → 走既有溢出通道报 Error 6
+    return vb6_FltToLng(x);
+}
 // ai/032: 字符串实参入口 (口径同 Fix 158r 的 vb6_CLngBSTR)。十进制走 vb6_Val;
 // "&H"/"&O" 前缀式由 cgen 那侧改发 vb6_NumVal, 到不了这里。
 int8_t   vb6_CSByteBSTR(BSTR s)   { return vb6_CSByte(vb6_Val(s)); }
 uint16_t vb6_CUIntBSTR(BSTR s)    { return vb6_CUInt(vb6_Val(s)); }
 uint32_t vb6_CULngBSTR(BSTR s)    { return vb6_CULng(vb6_Val(s)); }
 uint64_t vb6_CULngLngBSTR(BSTR s) { return vb6_CULngLng(vb6_Val(s)); }
+int64_t  vb6_CLngLngBSTR(BSTR s)  { return vb6_CLngLng(vb6_Val(s)); }
+
+// twinBASIC 形 CLngPtr (doc.twinbasic.vb6.pro .../Conversion/CLngPtr.html): 转 LongPtr。
+// 值域按目标架构: x86 = Long (文档 "Long on 32-bit"), x64 = 整个 int64 ("LongLong")。
+// 同族口径: vb6_FltToLng (round) + vb6_OvfChk (越界 Error 6)。
+// x64 的界先于转换挡住: round/(int64_t) 对越界 double 是 UB; CLng 那侧倚赖"UB 值
+// 必落 int32 界外"过 OvfChk, 这里界就是 int64 全域, 没有可倚赖的窄缝。 */
+#ifdef vb6_CLngPtr
+#undef vb6_CLngPtr   // vb6rtl_builtin.h 的 _Generic 宏在定义处必须关闭
+#endif
+intptr_t vb6_CLngPtr(double x) {
+#ifdef _WIN64
+    if (x >= 9223372036854775808.0 || x < -9223372036854775808.0)
+        (void)vb6_OvfChk(-1, 0, 0);   // 越界 → 走既有溢出通道报 Error 6
+    return (intptr_t)vb6_FltToLng(x);
+#else
+    return (intptr_t)vb6_OvfChk(vb6_FltToLng(x), -2147483647LL - 1, 2147483647LL);
+#endif
+}
+intptr_t vb6_CLngPtrBSTR(BSTR s) { return vb6_CLngPtr(vb6_Val(s)); }
 
 BSTR vb6_CStr(vb6_VARIANT x) {
     return vb6_Format(x, NULL, 1, 1);
@@ -371,6 +402,9 @@ int32_t vb6_IsNumeric(vb6_VARIANT v) {
         /* 账 #305 (§B138 尾巴): §B138 之后 x64 的 VarPtr/StrPtr/ObjPtr 交出去的就是这一档,
          * 它与 Long 同族 —— 少这一行就是同一份 VB 源码在两台机器上两个答案。 */
         case VT_I8:
+        /* ai/032 §6.6: 无符号两档也是数值子类型 (同一条口径: 问的是「是不是数」)。 */
+        case (vb6_vartype)VT_UI4:
+        case (vb6_vartype)VT_UI8:
         /* 账 #305 (§B141): Decimal 也是数值子类型 —— VB6 的 IsNumeric(CDec(...)) 恒真。
          * 与上面那档同一条口径（这一族问的是「这枚 Variant 里是不是数」）。 */
         case vb6_vtDecimal:
@@ -431,6 +465,10 @@ static const wchar_t* vb6_TypeNameScalar(int32_t vt) {
         case vb6_vtBoolean:  return L"Boolean";
         case vb6_vtByte:     return L"Byte";
         case VT_I8:          return L"Long";      /* 账 #305: 与 vb6_IsNumeric 同一条口径 */
+        /* ai/032 §6.6: 无符号两档——按 C3/twinBASIC 的类型名答, 不吞掉无符号性
+         * (这两档只会由显式无符号类型的表达式装箱而来, 答 "Long" 才是误导)。 */
+        case (vb6_vartype)VT_UI4: return L"ULong";
+        case (vb6_vartype)VT_UI8: return L"ULongLong";
         case vb6_vtDecimal:  return L"Decimal";  /* 账 #305 §B141: 此前落 default 答 "Variant" */
         default:             return L"Variant";
     }

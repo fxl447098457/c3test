@@ -361,6 +361,22 @@ void* vb6_StrPtr(BSTR s) {
     return (void*)s;  // BSTR points directly to string data
 }
 
+// 账 #305 §B180 (第六十九刀): StrPtr 收 **Variant** 时借槽里那枚 BSTR。
+// 发码侧原来走 `vb6_StrPtr(vb6_VariantToString(v))`，而 `vb6_VariantToString` 的定义就一句
+// `return vb6_CStr(v)` (vb6rtl.c:484) = `vb6_Format(x, NULL, 1, 1)` (vb6rtl_conv.c:253)
+// ⇒ 每次调用**现造一枚新 BSTR** 把地址交出去，那枚串没人回收。实测 (`.build/k69sp`，
+// 18000 次减去同形状普通 String 的零分配基线窗) = x64 1089536 / x86 909312 字节，
+// 而真语料里这一形有 18 份文件 41 处，全坐在 Win32 的指针交接位上
+// (`lpszIcon` / `pszText` / `CreateWindowExW` / `FindFirstFileW` / `VarI8FromStr` / `dwTypeData`)。
+// 这一枚只在「`vt` 已是串」那一档改借 —— 空串/NULL 仍由上面的 `vb6_StrPtr` 统一答 0，
+// 与账 #257 第十三层那条口径一字不差。⚠ **其余各档照旧 mint**：非串的 Variant 交给 StrPtr
+// 本来就是「按串算」的强制转换 (VB6 那三枚指针函数是 undocumented，运行时里 `StrPtr` 那格的
+// 形参声明就是 `[in] BSTR`)，那一档漏的那枚临时串归 §B164 形① 的带权临时量名单，不在本刀撤。
+void* vb6_StrPtrVar(vb6_VARIANT v) {
+    if (v.vt == (uint16_t)vb6_vtBSTR) return vb6_StrPtr(v.bstrVal);
+    return vb6_StrPtr(vb6_CStr(v));
+}
+
 uintptr_t vb6_ObjPtr(void* obj) {
     return (uintptr_t)obj;
 }

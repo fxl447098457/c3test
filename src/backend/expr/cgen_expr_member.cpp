@@ -7,6 +7,7 @@
 #include <cstdlib>
 #include <functional>
 #include <cstdio>
+#include "driver/detail/phase_timing.hpp"   // ai/030 续: member 分段打点 (c3StatSplit; 必须在 namespace 外)
 
 namespace vb6c3 {
 
@@ -62,13 +63,21 @@ void CCodeGen::visit(MemberAccessExpr& node) {
             }
         }
     }
+    std::chrono::steady_clock::time_point _c3sMem = std::chrono::steady_clock::now();
 #include "backend/detail/expr/cgen_expr_member_precheck.inc"
+    c3StatSplit(13, _c3sMem);   // ai/030 续: member:precheck
 #include "backend/detail/expr/cgen_expr_member_form_builtin.inc"
+    c3StatSplit(14, _c3sMem);   // mForm
 #include "backend/detail/expr/cgen_expr_member_obj_dispatch.inc"
+    c3StatSplit(15, _c3sMem);   // mObj
 #include "backend/detail/expr/cgen_expr_member_class_module.inc"
+    c3StatSplit(16, _c3sMem);   // mCls
 #include "backend/detail/expr/cgen_expr_member_m22_module.inc"
+    c3StatSplit(17, _c3sMem);   // mM22
 #include "backend/detail/expr/cgen_expr_member_generic_access.inc"
+    c3StatSplit(18, _c3sMem);   // mGen
 #include "backend/detail/expr/cgen_expr_member_voidptr_com.inc"
+    c3StatSplit(19, _c3sMem);   // mVoid
 #include "backend/detail/expr/cgen_expr_member_class_fallback.inc"
 }
 

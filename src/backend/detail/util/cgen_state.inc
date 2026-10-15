@@ -251,6 +251,10 @@
     // 防止类方法内对me->m_Xxx的BSTR赋值无法识别类型
     std::unordered_set<std::string> classBstrMembers_;
     std::unordered_set<std::string> classLongMembers_;
+
+    // 账 #305 §B183: Integer 类字段的窄档名单（两种拼法都登，同上面那张表）。
+    // 唯一消费者是 narrowTargetTypeOf，它只问「这枚左值有多窄」。
+    std::unordered_set<std::string> classIntMembers_;
     std::unordered_set<std::string> classDoubleMembers_;
     // Fix 037: 类 Variant 成员变量集合 (As Variant 字段, 含 m_ 前缀格式).
     // 用于 IndexOrCallExpr 处理 `me->VarField(idx)` 或 `obj.VarField(args)` 模式:

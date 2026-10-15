@@ -309,6 +309,9 @@ int32_t vb6_VariantToLong(vb6_VARIANT v) {
         case vb6_vtInteger: return (int32_t)v.iVal;
         case vb6_vtLong:    return v.lVal;
         case VT_I8:         return (int32_t)v.llVal;  /* Task #44: VT_I8 进 Long 按 C 截断语义 */
+        /* ai/032 §6.6: 无符号两档 —— 同 C 截断语义 (UI8 以前落 default 答 0)。 */
+        case (vb6_vartype)VT_UI4: return (int32_t)v.ulVal;
+        case (vb6_vartype)VT_UI8: return (int32_t)v.ullVal;
         case vb6_vtSingle:  return (int32_t)round(v.fltVal);
         case vb6_vtDate:    return (int32_t)round(v.dblVal);  /* <vbeclipse>: VT_DATE 的数值面就是序列号 */
         case vb6_vtDouble:  return (int32_t)round(v.dblVal);
@@ -339,6 +342,7 @@ intptr_t vb6_VariantToLongPtr(vb6_VARIANT v) {
         case vb6_vtCurrency:return (intptr_t)(v.cyVal / 10000);
         case vb6_vtBSTR:    return (intptr_t)vb6_Val(v.bstrVal);
         case VT_I8:         return (intptr_t)v.llVal;
+        case (vb6_vartype)VT_UI4: return (intptr_t)v.ulVal;   /* ai/032 §6.6: 零扩展 */
         case VT_UI8: {      /* 位模式按无符号解释 */
             uint64_t uv;
             memcpy(&uv, &v.llVal, sizeof(uv));
@@ -357,6 +361,8 @@ int16_t vb6_VariantToBool(vb6_VARIANT v) {
         case vb6_vtInteger:  return v.iVal ? -1 : 0;
         case vb6_vtLong:     return v.lVal ? -1 : 0;
         case VT_I8:          return v.llVal ? -1 : 0;  /* Task #44: LongLong/LongPtr 64 位 */
+        case (vb6_vartype)VT_UI4: return v.ulVal ? -1 : 0;   /* ai/032 §6.6: 非零即真 */
+        case (vb6_vartype)VT_UI8: return v.ullVal ? -1 : 0;
         case vb6_vtSingle:   return v.fltVal != 0.0f ? -1 : 0;
         case vb6_vtDate:     return v.dblVal != 0.0 ? -1 : 0;  /* <vbeclipse>: 同上 */
         case vb6_vtDouble:   return v.dblVal != 0.0 ? -1 : 0;
@@ -460,6 +466,8 @@ double vb6_VariantToDouble(vb6_VARIANT v) {
         case vb6_vtInteger: return (double)v.iVal;
         case vb6_vtLong:    return (double)v.lVal;
         case VT_I8:         return (double)v.llVal;  /* Task #44: LongLong/LongPtr 64 位 */
+        case (vb6_vartype)VT_UI4: return (double)v.ulVal;   /* ai/032 §6.6 */
+        case (vb6_vartype)VT_UI8: return (double)v.ullVal;
         case vb6_vtSingle:  return (double)v.fltVal;
         case vb6_vtDate:    return v.dblVal;  /* <vbeclipse>: 同上 */
         case vb6_vtDouble:  return v.dblVal;
@@ -790,6 +798,9 @@ static double vb6_VarToDouble_internal(vb6_VARIANT* v) {
          * （Fix 082 那条装箱本身就是 VT_I8），句柄进 Variant 槽之后与它自己比也答不等。
          * 取数一侧 (VariantToLong/ToBoolean/ToDouble/ToIntPtr) 早就有 VT_I8 档，只有这里漏了。 */
         case (vb6_vartype)VT_I8: return (double)v->llVal;
+        /* ai/032 §6.6: 无符号两档同格 —— 缺档同样把整档抹成 0.0 (VT_I8/VT_DECIMAL 同款坑)。 */
+        case (vb6_vartype)VT_UI4: return (double)v->ulVal;
+        case (vb6_vartype)VT_UI8: return (double)v->ullVal;
         /* 账 #305 §B143: 这一处是「比较走哪个数值」的口(第二十九刀给它补的是 VT_I8)。
          * Decimal 没档 ⇒ default 交 0.0，`(CDec(5) = 5)` 实测 False。补这一格就同时
          * 通六条比较与它们的 Long 形 —— Eq/Ne/Lt/Gt/Le/Ge 全从这里取数，

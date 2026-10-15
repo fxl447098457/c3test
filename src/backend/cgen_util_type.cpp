@@ -1,4 +1,5 @@
 #include "backend/cgen.hpp"
+#include "driver/detail/phase_timing.hpp"   // ai/030 续: inferExprType 累计统计
 #include <algorithm>
 #include <cctype>
 #include <iostream>
@@ -122,7 +123,31 @@ Vb6Type CCodeGen::intDivResultType(Vb6Type lt, Vb6Type rt) const {
 // 表达式类型推断 (简化版, 用于Select Case等场景)
 // ============================================================
 
+// ai/030 续 (§性能, 2026-10-14): inferExprType 的按节点缓存。
+// 背景 (VBFlexGridDemo 读数): inferExprType 263,641 次 / 18.4s —— 70µs/次。根因是
+// 同一枚节点在一条语句里被反复下潜重推 (对象子树 × 若干辅助各推一遍, 每推一遍还带
+// 全符号表线性扫描与 toLower 分配)。缓存口径:
+//   · epoch 单调不减且**全局** —— AST 节点可能被两个 CCodeGen 实例先后访问 (EXE 的
+//     逐模块实例与 DLL 的 dll_entry 实例), 各实例自行计数会撞车;
+//   · 推 epoch 的两个边界: 每个过程入口 (visit(Sub/Function/Property)) 与
+//     emitStmtList 的每条语句 —— 会改推断答案的表 (known*Vars_) 在体内中途的注册
+//     (Dim/For Each/With 临时) 全落在语句边界上, 语句内表格不动, 正是缓存可复用的窗口;
+//   · epoch==0 (首次推之前) 只算不存 —— 该窗口的表格状态不保证稳定。
+static uint32_t g_inferCacheEpoch = 0;
+
+void CCodeGen::bumpInferEpoch() { ++g_inferCacheEpoch; }
+
 Vb6Type CCodeGen::inferExprType(Expr& expr) const {
+    C3ScopeTimer _c3t(1);   // ai/030 续: 累计统计计在包装层 (缓存命中也算一次问)
+    const uint32_t ep = g_inferCacheEpoch;
+    if (ep != 0 && expr.inferCacheEpoch == ep) return static_cast<Vb6Type>(expr.inferCacheType);
+    Vb6Type t = inferExprTypeImpl(expr);
+    expr.inferCacheEpoch = ep;
+    expr.inferCacheType = static_cast<uint16_t>(t);
+    return t;
+}
+
+Vb6Type CCodeGen::inferExprTypeImpl(Expr& expr) const {
     switch (expr.kind) {
         case ASTNodeKind::IdentifierExpr: {
             auto& id = static_cast<IdentifierExpr&>(expr);
@@ -603,6 +628,7 @@ Vb6Type CCodeGen::inferExprType(Expr& expr) const {
 // 与 inferExprType 的差异: 内置函数 (sym==null) 与 UDT 字段访问 (lookupModule 失败) 等
 // 通过 fallback 返回 Variant 的情形, 此处视为非 Variant, 避免对 int/BSTR 等实参误包装.
 bool CCodeGen::isDefinitelyVariantExpr(Expr& expr, bool* isArrOut) const {
+    C3ScopeTimer _c3t(3);   // ai/030 续: isDefinitelyVariantExpr 累计统计 (slot 3)
     if (isArrOut) *isArrOut = false;
     uint16_t variantArrRaw = static_cast<uint16_t>(Vb6Type::Variant)
                            | static_cast<uint16_t>(Vb6Type::Array);
@@ -662,13 +688,21 @@ bool CCodeGen::isDefinitelyVariantExpr(Expr& expr, bool* isArrOut) const {
             // 账 #123: 补 Byte 那一档。缺它时局部 `Dim bt As Byte` 掉到下面的符号表回退 ⇒
             // 被判成 Variant ⇒ 比较发成 vb6_VarCmpLongEq(&bt, …) (拿 1 字节对象的地址当
             // vb6_VARIANT* 传) ⇒ 实测 `(bt = 65)` 返回 False。
+            // Fix 运行期第二十六层同批: knownObjectVars_ (Dim X As Control/Object) 与
+            // knownClassVars_ (Dim X As <项目类>) 同样必须在符号表回退之前挡掉 ——
+            // 否则同名 Property Get X() As Variant 的符号被 checkSym 命中 ⇒ 返回 true
+            // ⇒ void* 形参分支误套 vb6_VariantToObjectVal(X) → C2440。
+            // (ComCtlsDemo TvwNodes.cls:132 `Dim Item As TvwNode` 遮蔽 :53 `Dim Item As Variant`;
+            //  UpDown.ctl:803 `Dim BuddyControl As Control` 遮蔽 :719 `Property Get BuddyControl() As Variant`.)
             if (knownBstrVars_.count(lower) || knownLongVars_.count(lower)
                 || knownDoubleVars_.count(lower) || knownSingleVars_.count(lower)
                 || knownByteVars_.count(lower)
                 // ai/032: SByte/UInteger/ULong/ULongLong 的局部/形参/返回槽同样是
                 // 具体标量, 不是 Variant —— 不显式挡一道的话会落到下面的符号表回退,
                 // 命中不住时虽然仍答 false, 但命中同名 Variant 符号时就会误包装。
-                || knownNarrowIntVars_.count(lower)) {
+                || knownNarrowIntVars_.count(lower)
+                || knownObjectVars_.count(lower)
+                || knownClassVars_.count(lower)) {
                 return false;
             }
             // 符号表查询
@@ -801,6 +835,179 @@ bool CCodeGen::cmpOperandMayTakeAddr(const std::string& c, Expr* ast) const {
 // 补充 isDefinitelyVariantExpr 的 AST 级检测. 当 codegen 生成的 C 表达式
 // 包含已知返回 vb6_VARIANT 的函数调用时, 判定为 Variant.
 // 仅检查顶层表达式 (去除前导括号/空白后), 避免对子表达式误判.
+
+// 账 #305 §B172 (第六十三刀): 「把一枚类数据字段的读发出去」的唯一出口 —— 尾注由这一处拼,
+// 三站只递参数。为什么必须收在这里: §B171 把「认槽」那一问教成「看尾注那个 variant 词」,
+// 而词当时只有**两条**发码路会盖 (点号走 knownClassVars_ 的那一站 + With 体内那一站);
+// 第三条 (Fix 088c: 接收者是"文本没进 knownClassVars_ 的类实例" —— 类形参 `UseAll(h As K63Holder)`
+// 的标识符发成 `(*h)`) 连尾注都不写, 于是同一枚字段换一种接收者声明方式就一律答「不是槽」,
+// InStr(h.PV, …) 直接把整只 vb6_VARIANT 递给 BSTR 形参 = C2440 (两台实测, 都没 exe)。
+// 档位与 voidptr 都仍由 §B169 那张表回答: 本函数只是把那张表的答案**投影**成 C 文本。
+std::string CCodeGen::classFieldReadExpr(const std::string& objC, const std::string& clsName,
+                                         const std::string& memberName, bool isVoidPtr,
+                                         const std::string& markerLabel) const {
+    // Fix 092p 的口径留在这一处: VB6 大小写不敏感, 源码拼写要规范化回声明名, 否则
+    // `...->socket` (声明 Socket) 是 C2039。
+    const std::string base = objC + "->" + cIdent(canonicalClassFieldName(clsName, memberName));
+    if (isVoidPtr) {
+        return base + "  /* " + markerLabel + " ." + memberName + " field voidptr */";
+    }
+    return base + "  /* " + markerLabel + " ." + memberName + " field"
+         + (classFieldIsVariantSlot(clsName, memberName) ? " variant" : "") + " */";
+}
+
+// 账 #305 §B174 (第六十五刀): 「数值实参交进 VB 的字符串形参 ⇒ VB6 会隐式 CStr」这一条规则,
+// 发码侧此前有**两位主人**，本刀收成一位：
+//   主人一 = Fix 175 (cgen_expr_call_arg_emit.inc) —— 按**形参表**那一档答的 (ByVal String)，
+//             形状走 wrapToBSTR (全仓唯一的"数值→BSTR"形状出口)。
+//   主人二 = Fix 108c (cgen_expr_call_builtin_argtype.inc) —— 按一张 13 枚名单答的, 形状自己
+//             写了一遍 if/else, 而且做在 argList **已拼成一整串之后** (靠"从上次命中往后找下
+//             一次出现"对齐实参下标)。
+// 本站点只留主人一，且它以前答不到的那一格补上了：InStr 这类**故意不声明形参表**的内在函数
+// (builtin_funcs.inc:74-76 写明原因 = 可选 start 会让位号错位) 没有形参可问 ⇒ 改问下面那张表。
+// 档位集合 = 两位主人原来两份清单的**并集** (13 枚名单的 SByte/UInteger/ULong/ULongLong/Decimal
+// + Fix 175 的 Byte/LongPtr) —— 每一档都有一条现成的清单作底, 没量过的 (如 LongLong) 不加。
+// 返回 false = 这一档不折 (串 / 对象 / 数组 / Variant / 未知, 以及清单外没量过的档)。
+bool CCodeGen::typeTakesImplicitCStr(Vb6Type t) const {
+    switch (t) {
+        case Vb6Type::Date:
+        case Vb6Type::Double:
+        case Vb6Type::Single:
+        case Vb6Type::Currency:
+        case Vb6Type::Decimal:
+        case Vb6Type::Long:
+        case Vb6Type::Integer:
+        case Vb6Type::Byte:
+        case Vb6Type::Boolean:
+        case Vb6Type::LongPtr:
+        case Vb6Type::SByte:
+        case Vb6Type::UInteger:
+        case Vb6Type::ULong:
+        case Vb6Type::ULongLong:
+            return true;
+        default:
+            return false;
+    }
+}
+
+// 账 #305 §B174 (第六十五刀): 「**没有形参表**的内在函数 callee 的第 pos 位 (VB 实参下标) 是不是
+// VB 语义上的字符串形参」。只管 builtin_funcs.inc 里用 addBuiltinFunc (只登记返回类型) 那一族,
+// 带类型化形参表的内在函数与工程过程都由 Fix 175 直接问形参表, 不吃这张表。
+// 这一问**不许**从运行时 C 签名表 (getRuntimeParamCType) 反推, 两条都在本刀里实测过:
+//  ① `vb6_LenB` 在表里那格 "BSTR" 只是 _Generic 宏的第一个分支 (vb6rtl_builtin.h:19) —— VB6 的
+//     Len/LenB 对数值交**字节宽度**、不做 CStr, 发码侧另有按类型的 sizeof 分派 (Fix 065/084h/125/160w)。
+//     草稿按那张表裸答时, A/B 在 VBFlexGridDemo 上当场打出 `LenB(Version)` 的
+//     `sizeof(vb6_type_DLLVERSIONINFO)` 变成 `sizeof(int32_t)` (折出来的串让那条按名字认 UDT 的分派失手)。
+//  ② 那张表也答不对**位号**: InStr 的 C 签名是 (start, haystack, needle), 而 VB 写两个实参时 cgen
+//     要补 start=1、写三个而首参是串时又换一条路 (见 builtin_fixup 选 InStr/InStrC 那段)。
+// ⇒ 表按 VB 手册一枚枚写, 每行都是"这一位收了数值实参 VB6 会隐式 CStr"那条事实。
+// Len / LenB / Asc / StrPtr 刻意**不进表** —— ①就是理由, 不是来不及。
+// InStrB 不进表: RTL 那两形是 void* (Byte() 或 BSTR), 数值进不去也就没人折; 没量过 = 不加。
+// 账 #305 §B176 (第六十七刀): 「**没有类型化形参表**的那批内在函数, 第 pos 位(按**写出来的**
+// arity 数)要什么 C 档」 —— 这一问现在只有这一位主人。返回 "" = 这一位我不知道 (调用方维持原样)。
+// 为什么必须是「档」而不是「是不是字符串位」: 上一格 (§B175) 那只答了 BSTR 的一半, 于是同一站
+// 剩下的方向 (Variant 交进**数值**形参) 没人答, 而 `getRuntimeParamCType` 那张按 callee 名登的
+// C 签名表**按写出来的位号**答 InStr 的 start 位时给出 BSTR (它的行是按 VB 两参形登的) ⇒
+// `InStr(vA, s1, "7")` 把该转数值的实参解成了串, 交进 `int32_t start` —— cl 只是 warning,
+// 运行时 start 是个被截断的指针 ⇒ 静默答 0 (`.build/k67_probe2.bas` 五形实测, 见 §B176)。
+// 账 #305 §B177 (第六十八刀): 「这一位是不是那枚 _Generic 宏的**分派位**」—— 位号只在这里数
+// **一遍**, 上面那两问 (档 / Variant 能不能裸交) 都只是它的投影。为什么要有第三问:
+// needle 这一位对两种实参要两种答案 —— 数值实参 VB6 会隐式 CStr (要折), 而 Variant 实参宏自己
+// 选 `vb6_InStrVar` 解包**并 free** (`vb6rtl_string.c:235-247`) (要裸交)。一枚 C 档串说不完,
+// 六十七刀按「裸交」那一半把这一位答成空, 于是**数值那一半跟着掉了** ——
+// `InStr(2, s, 7)` 发成 `vb6_InStr(2, s, 7)` (裸 int 进 `wchar_t*`, cl 不报, x64 跑到那行 AV,
+// RC=139; `.build/k68_probe4.bas` 两台对照: 六十六刀那台答 4、六十七刀这台崩),
+// 而两参形 `InStr(s, v)` 反过来还**多折一层** (20000 次调用漏 753664 字节, `.build/k68_lp`)。
+// 全仓 21 枚 `_Generic` 宏里「分派位不是第一参」的就 `vb6_InStr` / `vb6_InStrC` 两枚
+// (§B176 ①.1 量的), 而 `vb6_InStrC` 这一形在**改道之前**的 callee 名仍是 `vb6_InStr`
+// (`builtin_fixup` 才换成 InStrC), 所以这一问只认这一个名字。返回 SIZE_MAX = 这一族以外。
+size_t CCodeGen::builtinNoParamTableDispatchSlot(const std::string& callee, size_t argc,
+                                                 Vb6Type firstArgType) const {
+    if (callee != "vb6_InStr") return SIZE_MAX;
+    if (argc == 2) return 1;                                              // InStr(hay, needle)
+    if (argc == 3) return firstArgType == Vb6Type::String ? 1 : 2;        // (hay, needle, cmp)
+                                                                            // 或 (start, hay, needle)
+    if (argc == 4) return 2;                                              // (start, hay, needle, cmp)
+    return SIZE_MAX;
+}
+
+bool CCodeGen::builtinNoParamTableVariantMayStayRaw(const std::string& callee, size_t argc,
+                                                    size_t pos, Vb6Type firstArgType) const {
+    const size_t slot = builtinNoParamTableDispatchSlot(callee, argc, firstArgType);
+    return slot != SIZE_MAX && slot == pos;
+}
+
+// 账 #305 §B180 (第六十九刀): 「这一位要不要收整枚槽而不是收串」= 一枚出口，读者恰好两枚
+// (arg_variant 撤回解包 / builtin_fixup 改 callee 名，见 cgen_helpers.inc 那一问的注释)。
+// 病在发码形状 `vb6_StrPtr(vb6_VariantToString(v))`：`vb6_VariantToString` 的定义就一句
+// `return vb6_CStr(v)` (vb6rtl.c:484) = `vb6_Format(...)` ⇒ **每调用现造一枚 BSTR**，
+// 地址交给 Win32 之后那枚串没人回收 (实测 18000 次 = x64 1089536 / x86 909312 字节，
+// 同形状普通 String 基线增量 0；真语料 18 份文件 41 处，全在指针交接位)。
+// 为什么不能并进 §B176 那张按位号答档的表 (那是本节上面两问的家): `vb6_StrPtr(` 全语料 1720 处
+// 里 **1478 处交的是普通 String 变量** (`.build/k69_strptr_census.txt`) —— 按位号无条件答槽会把
+// 它们一并打坏 (BSTR 进 vb6_VARIANT 形参 = C2440)。所以这一问**看实参**，且只认 AST 那一半。
+bool CCodeGen::builtinWantsRawSlotFromVariant(const std::string& callee, size_t argc, size_t pos,
+                                              Expr& actual) const {
+    if (callee != "vb6_StrPtr") return false;
+    if (argc != 1 || pos != 0) return false;
+    return isDefinitelyVariantExpr(actual);
+}
+
+std::string CCodeGen::builtinNoParamTableFormalCType(const std::string& callee, size_t argc,
+                                                     size_t pos, Vb6Type firstArgType) const {
+    // §B174 的正主: InStr 的位随"有没有写 start"整体移位, 依据与 builtin_fixup 选
+    // vb6_InStr / vb6_InStrC 时那一问同源 (首参是不是串 —— 那里问 AST, 这里也问 AST)。
+    //   InStr(s1, s2)                   → 0,1 = BSTR
+    //   InStr(s1, s2, compare)          → 0,1 = BSTR, 2 = int32_t
+    //   InStr(start, s1, s2)            → 0 = int32_t (start), 1,2 = BSTR
+    //   InStr(start, s1, s2, compare)   → 0,3 = int32_t, 1,2 = BSTR
+    // 位号由上面那一问给出; needle 这一位**照答 BSTR** (数值实参要折, §B175 那一站),
+    // Variant 实参则在那一站里被 `builtinNoParamTableVariantMayStayRaw` 拦下裸交。
+    if (callee == "vb6_InStr") {
+        const size_t needle177 = builtinNoParamTableDispatchSlot(callee, argc, firstArgType);
+        if (needle177 == SIZE_MAX || pos >= argc) return "";
+        // 位号只从那一问推: needle 与其前一位 (haystack) 都是 VB 语义上的串, 剩下的位就是
+        // start / compare 那一类数值位。`firstArgType` 因此只在那一枚出口里用一次 ——
+        // 这一族每一位的答案都由「有没有写 start」决定, 而那个问句只有一处 (§B177)。
+        if (pos == needle177 || pos == needle177 - 1) return "BSTR";
+        return "int32_t";
+    }
+    // 账 #305 §B175 (第六十六刀) 那张「哪几位是字符串」的名单, 这一格按同一批读数**扩成档**:
+    // 每一行的依据 = ① RTL 的 C 形参 (vb6rtl_registry.h / vb6rtl_dialog.h / vb6rtl_builtin.h 实读),
+    // ② `--emit-c` 实测这一形今天裸送 (`.build/k66_probe{2,3}.bas`、`.build/k67_probe.bas`),
+    // ③ VB6 收了数值/Variant 会隐式折算 (手册口径 + 真语料写法)。
+    // 刻意**不进**这张表的, 每条都有理由:
+    //   vb6_AppActivate —— 数值那一形到底是「CStr 当标题」还是「按 PID 激活」没定 (RTL 另有
+    //     `vb6_AppActivateByPid`、全仓 0 调用者; 语料 8 处实写全是串) ⇒ 口径等拍, §B175 记着。
+    //   Len / LenB / Asc / StrPtr —— 字节宽度那一问 (§B174 教训①: 这张表按 C 签名反推会答错)。
+    //   InStrB —— RTL 两形是 void* (Byte() 或 BSTR), 数值进不去。
+    //   带类型化形参表的那一族 (InStrRev / Mid / Filter / Left / Right …) —— 它们不落这张表,
+    //     Fix 175 与 arg_variant 那一站直接问 `calleeParams`。
+    static const std::unordered_map<std::string, std::vector<std::string>> kNoTableFormalKinds176 = {
+        {"vb6_GetSetting",    {"BSTR", "BSTR", "BSTR", "BSTR"}},   // (app, section, key[, default])
+        {"vb6_SaveSetting",   {"BSTR", "BSTR", "BSTR", "BSTR"}},   // (app, section, key, setting)
+        {"vb6_DeleteSetting", {"BSTR", "BSTR", "BSTR"}},           // (app, section[, key])
+        {"vb6_GetAllSettings", {"BSTR", "BSTR"}},                  // (app[, section])
+        {"vb6_MsgBox",        {"BSTR", "int32_t", "BSTR"}},        // 1 = buttons; helpfile/context
+                                                                    //   两形 C 出口不收 (MsgBox1)
+        {"vb6_InputBox",      {"BSTR", "BSTR", "BSTR", "int32_t", "int32_t", "BSTR", "int32_t"}},
+        {"vb6_SendKeys",      {"BSTR", "int32_t"}},                // 1 = wait
+        {"vb6_SetAttr",       {"BSTR", "int32_t"}},                // 1 = attributes
+        {"vb6_SavePicture",   {"", "BSTR"}},                      // 0 = picture(void*) —— 不是串也不是数值
+        {"vb6_Format",        {"", "BSTR", "int32_t", "int32_t"}}, // 0 是 VARIANT 形参, 由 conv_output
+                                                                    //   的装箱那腿办, 这里刻意留空
+    };
+    auto it176 = kNoTableFormalKinds176.find(callee);
+    if (it176 == kNoTableFormalKinds176.end()) return "";
+    if (pos >= it176->second.size()) return "";
+    return it176->second[pos];
+}
+
+bool CCodeGen::builtinNoParamTableStringSlot(const std::string& callee, size_t argc, size_t pos,
+                                             Vb6Type firstArgType) const {
+    // 「哪一位是字符串形参」= 上面那一问在 BSTR 档上的投影 (不是第二份名单)。
+    return builtinNoParamTableFormalCType(callee, argc, pos, firstArgType) == "BSTR";
+}
 
 // 账 #305 §B171 (第六十二刀): 「按 C 文本认槽」这一问漏认的那一族 —— 类字段的 Variant 槽读。
 // 两条发码路 (§B168/§B169 那张表的两处成员读) 现在在尾注里带上 ` variant` 这个词, 而**只有**
@@ -1080,6 +1287,11 @@ std::string CCodeGen::getRuntimeParamCType(const std::string& funcName, size_t p
         {"vb6_CUInt",           {"double"}},
         {"vb6_CULng",           {"double"}},
         {"vb6_CULngLng",        {"double"}},
+        // CLngLng: 同族的有符号 64 位档 (ComCtlsDemo ProgressBar.ctl 的 #If Win64 分支)
+        {"vb6_CLngLng",         {"double"}},
+        // twinBASIC 形 CLngPtr: 转 LongPtr, 同族 double 入口 (Variant 实参由
+        // cgen_expr_call_conv_numeric.inc 改写为 *V 版本)。
+        {"vb6_CLngPtr",         {"double"}},
         // 数组操作
         {"vb6_UBound",          {"vb6_SafeArray1D*", "int32_t"}},
         {"vb6_LBound",          {"vb6_SafeArray1D*", "int32_t"}},
@@ -1381,6 +1593,39 @@ Vb6Type CCodeGen::narrowTargetTypeOf(Expr* target) const {
         Vb6Type ft = inferUdtFieldVb6Type(target, &fldIsArray);
         if (fldIsArray) return Vb6Type::Unknown;
         if (ft == Vb6Type::Byte || ft == Vb6Type::Integer || ft == Vb6Type::Long) return ft;
+        // 账 #305 §B184 (第七十五刀): 上面那一问只认 `SymbolKind::UserDefinedType`
+        // (cgen_util_classtype.cpp:448-497), **类实例**的字段一条都不答 ⇒ 这一族的直接
+        // 存值从来没问过范围。探针 `.build/k75b_probe` 在 BASE 上实测四种接收者拼法全落
+        // 在同一条裸存站: `me->ci  /* class var .ci field */ = 40000;` / `h->ci … = t;` /
+        // `_vb6_with_0->ci = 40000;` / `(*h)->ci … = 40000;` ⇒ 40000 静默存成 -25536,
+        // 而真 VB6 交 error 6 且保住上一个合法值 (§B183 那一条腿只管**裸名**, 这四种拼法
+        // 走的是本分支, 所以那张按名表帮不上)。
+        // 这里补问 §B169 收成一处的那张工程级类字段表 —— 与 §B170 修**读**路同一枚问句、
+        // 同一枚否决 (`resolveClassMemberCall` 非空 = 这名字是方法/属性, 不许被字段答案
+        // 抢走: 类里 `Private m_ci` + `Property Let Ci()` 那种同族拼法正是它挡的)。
+        // 宿主名: 点号那一路交 `inferClassTypeOfExpr` (它已认 `Me` = 当前类模块,
+        // cgen_util_classtype.cpp:211-213); With 那一路的宿主类名在元信息栈里
+        // (winfo.className, Fix 011r-1, 只有类实例那一档非空 ⇒ 控件/COM/UDT 一档答案不动)。
+        // ⚠ 窗体模块的 `Me.<字段>` 仍交空 (inferClassTypeOfExpr 的 MeExpr 一支只认
+        //   isClassModule_) —— 与 §B170 同一口径, 记在案不并批。
+        {
+            std::string cls184;
+            std::string mem184;
+            if (target->kind == ASTNodeKind::MemberAccessExpr) {
+                auto& ma184 = static_cast<const MemberAccessExpr&>(*target);
+                if (ma184.object) cls184 = inferClassTypeOfExpr(*ma184.object);
+                mem184 = ma184.memberName;
+            } else if (!withObjectInfoStack_.empty()) {
+                cls184 = withObjectInfoStack_.back().className;
+                mem184 = static_cast<const WithMemberExpr&>(*target).memberName;
+            }
+            if (!cls184.empty() && !mem184.empty()
+                && resolveClassMemberCall(cls184, mem184).empty()) {
+                const Vb6Type ct184 = classFieldKind(cls184, mem184);
+                if (ct184 == Vb6Type::Byte || ct184 == Vb6Type::Integer
+                    || ct184 == Vb6Type::Long) return ct184;
+            }
+        }
         return Vb6Type::Unknown;
     }
 
@@ -1475,6 +1720,23 @@ Vb6Type CCodeGen::narrowTargetTypeOf(Expr* target) const {
     return inferExprType(*target);
 }
 
+// 账 #305 §B184 (第七十五刀): 窄整型那一族的**范围闸**只有这一张表。
+// 之前它抄在两处 —— 这里 (narrowCheckAssign 的 switch) 与 COM 字段写回路那一条按 VB 档
+// 排的链; 而**第二处根本不知道有这张表**, 它发的是裸 C cast:
+//   me->ci = (int16_t)value.lVal;   // 40000 静默存成 -25536, 真 VB6 交 error 6
+// 两位主人问的不是同一件事, 所以表只管闸名与位宽, 不管"套不套":
+//   ① 赋值路还比较**源**宽 (同宽的源套上去是恒真噪声), 所以取 bits;
+//   ② 写回路收到的值恒是 Variant 的 lVal (int32), 只要目标比它窄就会被截 ⇒ 一律套。
+// Long 那一档留着闸是给①的 (`l = 某 LongPtr` 在 x64 是 64 位源), ②不用它。
+const char* CCodeGen::narrowCheckFnForVbType(Vb6Type t, int* bits) const {
+    switch (t) {
+    case Vb6Type::Byte:    if (bits) *bits = 8;  return "vb6_ChkByte";
+    case Vb6Type::Integer: if (bits) *bits = 16; return "vb6_ChkInt";
+    case Vb6Type::Long:    if (bits) *bits = 32; return "vb6_ChkLong";
+    default:               if (bits) *bits = 0;  return nullptr;
+    }
+}
+
 std::string CCodeGen::narrowCheckAssign(Expr* target, Expr* value,
                                         const std::string& cValue) const {
     if (!target || cValue.empty()) return cValue;
@@ -1482,14 +1744,10 @@ std::string CCodeGen::narrowCheckAssign(Expr* target, Expr* value,
     // `kind != IdentifierExpr` 的闸门, 成员/数组元素两形因此整片不经检查)。
     Vb6Type tt = narrowTargetTypeOf(target);
 
-    const char* fn = nullptr;
+    // 账 #305 §B184: 闸名与位宽只从下面那张表答 (改前这里手抄一遍 switch)。
     int tgtBits = 0;
-    switch (tt) {
-    case Vb6Type::Byte:    fn = "vb6_ChkByte"; tgtBits = 8;  break;
-    case Vb6Type::Integer: fn = "vb6_ChkInt";  tgtBits = 16; break;
-    case Vb6Type::Long:    fn = "vb6_ChkLong"; tgtBits = 32; break;
-    default: return cValue;
-    }
+    const char* fn = narrowCheckFnForVbType(tt, &tgtBits);
+    if (!fn) return cValue;
 
     Vb6Type vt = value ? inferExprType(*value) : Vb6Type::Unknown;
     // 账 #248: 浮点源**必须在这一套检查之前先过那一份取整出口**。

@@ -247,14 +247,41 @@
         // (`ShowStr(d)` / `ShowStr(n)`)。VB6 按 CStr 隐式转字符串; C 侧形参是 BSTR,
         // 裸传 double → C2440, 裸传 int32_t → 只报 C4047 警告, 运行期把整数当指针
         // 解引用 (0xC0000005 或读到垃圾字符串)。按形参类型补 wrapToBSTR。
-        if (!isDeclareAnsiCall && i < calleeParams.size() && calleeParams[i].isByVal
-            && calleeParams[i].type == Vb6Type::String && node.positional[i]
-            && !cExprIsVariant(argVal)) {
-            Vb6Type at175 = inferExprType(*node.positional[i]);
-            if (at175 == Vb6Type::Date || at175 == Vb6Type::Double || at175 == Vb6Type::Single
-                || at175 == Vb6Type::Currency || at175 == Vb6Type::Long
-                || at175 == Vb6Type::Integer || at175 == Vb6Type::Byte
-                || at175 == Vb6Type::Boolean || at175 == Vb6Type::LongPtr) {
+        // 账 #305 §B174 (第六十五刀): 这条规则从此是**唯一站点** —— 原第二主人 Fix 108c
+        // (一张 13 枚名单 + 自己一套折算形状, 做在 argList 拼成串之后的文本替换里) 整段撤掉。
+        // 同刀补上本站以前管不着的一族: **故意不声明形参表**的内在函数 (InStr) —— 它没有
+        // 形参可问, 位号改问 builtinNoParamTableStringSlot; 档位问 typeTakesImplicitCStr
+        // (两位旧主人两份清单的并集); 形状仍走 wrapToBSTR (全仓唯一的 数值→BSTR 出口,
+        // Boolean 那档它给 vb6_CStrBool = VB6 的 "True"/"False", 与 Fix 108c 的 "-1" 不同口径,
+        // 收成一位之后只剩这一个口径)。
+        // 账 #305 §B175 (第六十六刀): 这条闸多问一句「这一位是不是用户**写**出来的实参」。
+        // Fix 142 那段 (本站上面 8 行) 对**有形参表**的 callee 已经把省略位拦下 (填缺省值后
+        // continue), 但对 builtin (calleeIsBuiltin) 不拦 —— 省略位带着解析器留的占位 0 落进
+        // 本站。两处实物 (都在本仓语料里, 都是 --emit-c 逐行看过):
+        //   `Opacity = InputBox("...", , 100)` (tests/Charts 2020/ucProgressCircular/
+        //     ppProgressCircular.pag:351) —— 本刀把 InputBox 接进来之后, 省略的**标题位**被折成
+        //     vb6_CStrLong(0L), 标题从「没写」(NULL ⇒ 用应用标题) 变成字符串 "0"; 同一条调用里
+        //     写出来的 100 该折 ⇒ 一头不许多吃、另一头不许漏。
+        //   Set xl = GetObject(, "Excel.Application")` (tests/test_p24_04b/test_getobject.bas:18
+        //     + VBFlexGridDemo) —— 这一形**不是本刀带进来的**: 六十五刀的 BASE 那台
+        //     (C3_base_k65.exe, 不含六十五刀) 实测就发
+        //     `vb6_GetObject(vb6_CStrLong(0L), ...)` (Fix 175 出生起就有), 而 RTL 的分支是
+        //     「pathName 非空 ⇒ IPersistFile::Load(拿 "0" 当文件名)」/「空 ⇒ GetActiveObject」
+        //     (vb6com/vb6com.c:705) ⇒ 折一下正好挑错那一支。本刀的闸把它改回 `0L`。
+        // 省略位到底该交 NULL 还是 vb6_BSTR_Empty() 是 §B149 那张缺省表那一格的事, 本刀不动。
+        if (!isDeclareAnsiCall && node.positional[i] && !cExprIsVariant(argVal)
+            && !node.omittedArgs.count(i)) {
+            bool strSlot175 = false;
+            if (i < calleeParams.size()) {
+                strSlot175 = calleeParams[i].isByVal
+                    && calleeParams[i].type == Vb6Type::String;
+            } else if (calleeParams.empty()) {
+                const Vb6Type first175 = node.positional[0]
+                    ? inferExprType(*node.positional[0]) : Vb6Type::Empty;
+                strSlot175 = builtinNoParamTableStringSlot(
+                    callee, node.positional.size(), i, first175);
+            }
+            if (strSlot175 && typeTakesImplicitCStr(inferExprType(*node.positional[i]))) {
                 argVal = wrapToBSTR(argVal, *node.positional[i]);
             }
         }
