@@ -1448,6 +1448,21 @@ function Test-AddressOfThunkSites {
     }
 }
 
+# 账 #305 §B185(第七十七刀): 服务端进门那趟的错误边界 + 交回形状只住一处
+function Test-ComServerErrorFrame {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] com_server_error_frame ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\check_com_server_error_frame.ps1" 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        $out | Select-Object -First 8 | ForEach-Object { Write-Host "  $_" }
+    }
+}
+
 # === 编译冒烟测试 (编译+链接, 不运行生成物) ===
 function Test-Run {
     param(
@@ -6711,6 +6726,54 @@ if ($Category -in @("all", "run", "vbp")) {
         "DONE") @(
         "CALL=ADD") "{F5CEF988-3217-6173-94B7-BB99C4B8CB81}" "x86"
 
+    # 账 #305 §B185 (第七十七刀): IDispatch 服务端进门那趟的错误边界。
+    # 为什么这一格值得单独两条用例：改前 `ComObj_Invoke` 收下 pExcepInfo 却从不碰、invokeFunc 返回
+    # void、末尾无条件 return S_OK ⇒ 服务端里**任何**没人接住的运行期错误一路走到 vb6_RaiseError,
+    # 那里没帧 ⇒ 打一行 stderr 再 exit(错误号) —— **打死的是客户端进程**。两台实测(BASE):
+    #   越界写 Public Integer 字段 ⇒ probe exit=6；体里一句 Err.Raise 5 ⇒ probe exit=5。
+    # ⇒ 判据的形状是「一台进程活到底 + 十三行读数」：BASE 上第一臂 PUTRANGE 就把进程打死,
+    #   后面每一行都不存在, 所以这些针在 BASE 上必红（不需要反着写期望）。
+    # 针面：
+    #   - 两头 = 合法值经客户真落位(GETLEGAL num=7) + 越界不许静默截断(GETRANGE 读回**上一个**
+    #     合法值 7, 既不是 -25536 也不是 0)；GETSEED/GETSEEDLONG 先证种子真存进去过(防「空=空」蒙)。
+    #   - scode 必须单独钉：DISP_E_EXCEPTION 只说「服务端抛了一条 VB 错误」, 错误号住在
+    #     EXCEPINFO.scode —— 只比 hr 就等于把「hr 是 0x80020009」当结论(§B144 那条同形)。
+    #   - 证人身 = 三次 Long 档写(40000/30000)照落, 且 PUTLONG2 证「不是只有第一次生效」；
+    #     CALL=HANDLED hr=0 证新帧没抢走体里自己那枚 On Error(那一臂还会打 B185-handled-raised=5)。
+    #   - desc 只在 ASCII 那一形钉(Overflow)；Err.Raise 那一臂的描述来自那张中文表, 针面不碰字节。
+    # 针面两台各写一份(不提成变量): H5 那道哨兵按 AST 数「每条调用点自带的数组实参」,
+    # 提给变量它就只看得见一份, 与这一族既有形状(各自一份)不同形。
+    Test-DispatchInvoke "b185_server_error_frame" "$Tests\b185_srv\B185d.vbp" "B185d" `
+        "{11112222-3333-4444-5555-6666777788A0}" @(
+        "CALL=SEED hr=0x00000000",
+        "CALL=GETSEED hr=0x00000000 resultvt=2 num=12345",
+        "CALL=GETSEEDLONG hr=0x00000000 result=999",
+        "CALL=PUTLEGAL hr=0x00000000",
+        "CALL=GETLEGAL hr=0x00000000 resultvt=2 num=7",
+        "CALL=PUTRANGE hr=0x80020009 scode=0x800A0006 desc=Overflow",
+        "CALL=GETRANGE hr=0x00000000 resultvt=2 num=7",
+        "CALL=GETLONG hr=0x00000000 result=40000",
+        "CALL=GETLONG2 hr=0x00000000 result=30000",
+        "CALL=BOOM hr=0x80020009 scode=0x800A0005",
+        "CALL=HANDLED hr=0x00000000",
+        "DONE") @(
+        "CALL=PUTRANGE hr=0x00000000")
+    Test-DispatchInvoke "b185_server_error_frame_x86" "$Tests\b185_srv\B185d.vbp" "B185d" `
+        "{11112222-3333-4444-5555-6666777788A0}" @(
+        "CALL=SEED hr=0x00000000",
+        "CALL=GETSEED hr=0x00000000 resultvt=2 num=12345",
+        "CALL=GETSEEDLONG hr=0x00000000 result=999",
+        "CALL=PUTLEGAL hr=0x00000000",
+        "CALL=GETLEGAL hr=0x00000000 resultvt=2 num=7",
+        "CALL=PUTRANGE hr=0x80020009 scode=0x800A0006 desc=Overflow",
+        "CALL=GETRANGE hr=0x00000000 resultvt=2 num=7",
+        "CALL=GETLONG hr=0x00000000 result=40000",
+        "CALL=GETLONG2 hr=0x00000000 result=30000",
+        "CALL=BOOM hr=0x80020009 scode=0x800A0005",
+        "CALL=HANDLED hr=0x00000000",
+        "DONE") @(
+        "CALL=PUTRANGE hr=0x00000000") -Arch "x86"
+
     # --- ai/022 B17: 外部激活（注册 -> 系统那条路 -> 反注册后不留键）---
     # 上面两条走的是**进程内**独立客户端（LoadLibrary + DllGetClassObject，刻意不查注册表）；
     # 这两条走的是系统那条路：DllRegisterServer 真写注册表，再按 CLSID/ProgID 让 COM 自己去找
@@ -6938,6 +7001,7 @@ if ($Category -in @("all", "compile")) {
     Test-ComMarkerWriteSites
     Test-SetRhsObjectContext
     Test-UdtMemberDims
+    Test-ComServerErrorFrame
 
     Write-Host ""
 
