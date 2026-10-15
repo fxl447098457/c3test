@@ -1478,6 +1478,21 @@ function Test-ProjClassScanBound {
     }
 }
 
+# ai/022 §B187 第二腿 (第八十三刀): 泛对象槽的装箱腿只许一站 + coclass 判据只许一处答
+function Test-ObjectSlotBoxing {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] object_slot_boxing ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\check_object_slot_boxing.ps1" 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        $out | Select-Object -First 8 | ForEach-Object { Write-Host "  $_" }
+    }
+}
+
 # === 编译冒烟测试 (编译+链接, 不运行生成物) ===
 function Test-Run {
     param(
@@ -6848,6 +6863,36 @@ if ($Category -in @("all", "run", "vbp")) {
         "Unhandled error") `
         -Tail @("CREATE={11112222-3333-4444-5555-6666777788D1},{11112222-3333-4444-5555-6666777788D2}") -Arch "x86"
 
+    # 账 #305 §B187 第二腿 (第八十三刀): 装箱腿一处 —— `Set <泛对象槽> = <工程内实例>`。
+    # 改前这一问的答案是"什么都不交": 槽里躺着一枚裸 `vb6_cls_X*`, 于是同一枚槽被两条读路各读各的 ——
+    # vb6_ComCall 认不出它 (实测 `method "Twice" not found` 之后静默空答 42000), 而把它当 IDispatch*
+    # 交给外部 COM 实参的那一路直接在 OLE 的 VariantClear 里 0xC0000005 (BASE 上探针 exit=-1073741819,
+    # x64/x86 两架构皆然)。现在交的是**借用型**包装器 (ownsInstance=0, 不接管实例生命周期), 闸门只有一问:
+    # 这枚类在运行期 coclass 表里占不占一行 (Symbol::isCoClassTableEntry, 与建表那侧同一条)。
+    # 三条臂各交一个数, 编码见 tests\b187_box\*.cls:
+    #   42042  = 早绑定 + 晚绑定两条腿都真 (42000 = 晚绑定那半又空了),
+    #   999    = 只有把槽里那枚对象**交给外部 IDispatch 客户端当实参**才可能出的数 (BASE 在这里崩),
+    #   101042 = 同一枚实例包装器进槽、解包回typed形参后仍是它自己 (Is 那一路的类型归一)。
+    # 反面证人 = Absent 里那枚 42000: 装箱没落地它就回来了。
+    Test-DispatchInvoke "b187_boxed_object_slot" "$Tests\b187_box\B187d.vbp" "B187d" `
+        "{11112222-3333-4444-5555-6666777788E3}" @(
+        "CREATE hr=0x00000000 ptr=OK",
+        "CALL=CREATE1MEM hr=0x00000000 result=42042",
+        "CALL=CREATE2MEM hr=0x00000000 result=999",
+        "CALL=CREATE3MEM hr=0x00000000 result=101042",
+        "DONE") @(
+        "CALL=CREATE1MEM hr=0x00000000 result=42000") `
+        -Tail @("CREATE={11112222-3333-4444-5555-6666777788E3},{11112222-3333-4444-5555-6666777788E4},{11112222-3333-4444-5555-6666777788E5}")
+    Test-DispatchInvoke "b187_boxed_object_slot_x86" "$Tests\b187_box\B187d.vbp" "B187d" `
+        "{11112222-3333-4444-5555-6666777788E3}" @(
+        "CREATE hr=0x00000000 ptr=OK",
+        "CALL=CREATE1MEM hr=0x00000000 result=42042",
+        "CALL=CREATE2MEM hr=0x00000000 result=999",
+        "CALL=CREATE3MEM hr=0x00000000 result=101042",
+        "DONE") @(
+        "CALL=CREATE1MEM hr=0x00000000 result=42000") `
+        -Tail @("CREATE={11112222-3333-4444-5555-6666777788E3},{11112222-3333-4444-5555-6666777788E4},{11112222-3333-4444-5555-6666777788E5}") -Arch "x86"
+
     # 账 #305 SB186 第二头: VB 客户那一头　「口径」的唯一读数面　—— 探针是 C 客户, 它只能读 hr;
     # 「服务端自己那条错折回原号」还是「一律 429」这一问, 只有真的 VB 客户点得到。
     # BC1 = 抛错的那枚: 客户活着(rc=0)且 On Error 拿到 123(不是 429, 也不是 exit(123)), 对象仍是 Nothing;
@@ -7097,6 +7142,7 @@ if ($Category -in @("all", "compile")) {
     Test-UdtMemberDims
     Test-ComServerErrorFrame
     Test-ProjClassScanBound
+    Test-ObjectSlotBoxing
 
     Write-Host ""
 
