@@ -3418,6 +3418,64 @@ if ($Category -in @("all", "run", "bas")) {
         'vb6_ChkInt(me->cl)',
         'me->cb = vb6_ChkInt'
     )
+    # <vbeclipse> 账 #305 §B184（第七十五刀）：「这枚左值有多窄」那一问收成一张表、四站都问它。
+    # 改前这条问句在发码侧住两家：① 赋值站 narrowCheckAssign 自己手抄了一遍宽度 switch，
+    # ② COM 字段写回那条链压根不知道有这张表（`me->ci = (int16_t)value.lVal;` 是裸 C 截断）。
+    # 另一大片缺的是**接收者拼写出来**的那一族 —— narrowTargetTypeOf 的成员臂只认
+    # SymbolKind::UserDefinedType，于是 `Me.ci` / `h.ci`（类形参）/ `k.ci`（局部对象变量）/
+    # `With h : .ci` 四种拼法全落同一句裸存：40000 存进 int16_t 变 -25536，而真 VB6 交 error 6
+    # **且保住上一个合法值**（第七十四刀 §B183 只修了类内那个裸名拼法 ci = 40000）。
+    # 修法 = 表 narrowCheckFnForVbType（Byte/Integer/Long → 检查名 + 位宽，一处声明一处定义）
+    # + 字段档权威 classFieldKind（§B169 那趟工程级预扫描）+ §B170 同一条否决（类里有同名
+    # 方法/属性时这一句归属性那一路）；With 那一站补上同一个包装。⚠ Long / Boolean 两臂刻意不动：
+    # 前者源本就 32 位不截，后者是归一不是截断。
+    # BASE 读数（两台逐行相同，.build/k75_base_{x64,x86}/）= P1/P5/P3/P7/P13 一声不响、
+    # ci 读回 -25536、cb 读回 44、P12 读回 6（C 截断，VB6 是四舍五入）；修后：五处报 6、
+    # 三处读回保住上一次那个合法值、P12 = 7。证人 = P9/P9b（Long 字段不许被卷进新闸）、
+    # P10（Boolean 归一）、P15（同名属性仍走 prop_let = 否决生效）。
+    $b184Needles = @("C3ProbeB184-P0-seed=12345|200|7", "C3ProbeB184-P1-me-raised=6",
+        "C3ProbeB184-P2-ci-kept=12345", "C3ProbeB184-P5-with-raised=6",
+        "C3ProbeB184-P6-ci-kept2=12345", "C3ProbeB184-P3-mebyte-raised=6",
+        "C3ProbeB184-P4-cb-kept=200", "C3ProbeB184-P7-param-raised=6",
+        "C3ProbeB184-P8-ci-kept3=12345", "C3ProbeB184-P12-float-round=7",
+        "C3ProbeB184-P13-local-raised=6|1111", "C3ProbeB184-P15-prop=7",
+        "C3ProbeB184-P9-long-noerr", "C3ProbeB184-P9b-cl=40000",
+        "C3ProbeB184-P10-bool-noerr", "C3ProbeB184-DONE")
+    Test-Vbp 'b184_field_narrow' "$Tests\b184_fieldw\B184.vbp" $b184Needles
+    Test-Vbp 'b184_field_narrow_x86' "$Tests\b184_fieldw\B184.vbp" $b184Needles -Arch "x86"
+    # 发码针：前六枚 = 四条病形（Me. / With / 类形参 / 局部对象变量）+ COM 写回 + 浮点那一路
+    # 都上了表里那枚检查；后三枚 = 证人形状（Long、Boolean 字段仍是裸存，同名属性仍走 prop_let），
+    # 这两类在 BASE 与 NEW 都在场（钉「本刀不许把它们卷进来」的发码那一半）。
+    Test-EmitcShape 'b184_fieldw_shape' @(
+        "$Tests\b184_fieldw\B184Main.bas",
+        "$Tests\b184_fieldw\B184Holder.cls",
+        "$Tests\b184_fieldw\B184Peer.cls") @(
+        'me->ci  /* class var .ci field */ = vb6_ChkInt(40000);',
+        '_vb6_with_0->ci = vb6_ChkInt(40000);  /* With class field write */',
+        '(*h)->ci  /* class var .ci field */ = vb6_ChkInt(t);',
+        'k->ci  /* class var .ci field */ = vb6_ChkInt(40000);',
+        'me->ci = vb6_ChkInt(value.lVal);',
+        'me->ci  /* class var .ci field */ = vb6_ChkInt(vb6_FltToLng(d));',
+        'me->cl  /* class var .cl field */ = 40000;',
+        'me->bl  /* class var .bl field */ = 300;',
+        'vb6_B184Holder_prop_let_Pi(k, 7);'
+    )
+    # 反针：前六枚 = 病形本体（BASE 上各命中一次，NEW 全 0）；后两枚 = 过度形状的闸
+    # （Long 字段不许被挪进 ChkInt，Byte 字段那一档的答案也不许改成 ChkInt —— 那是把别的
+    # 宽度答案改嫁过来）。
+    Test-EmitcAbsent 'b184_fieldw_lesion' @(
+        "$Tests\b184_fieldw\B184Main.bas",
+        "$Tests\b184_fieldw\B184Holder.cls",
+        "$Tests\b184_fieldw\B184Peer.cls") @(
+        'me->ci  /* class var .ci field */ = 40000;',
+        'me->cb  /* class var .cb field */ = 300;',
+        '_vb6_with_0->ci = 40000;',
+        '(*h)->ci  /* class var .ci field */ = t;',
+        'k->ci  /* class var .ci field */ = 40000;',
+        'me->ci = (int16_t)value.lVal;',
+        'vb6_ChkInt(me->cl',
+        'me->cb = vb6_ChkInt'
+    )
 
     # <vbeclipse> 账 #305 §B154（第四十二刀）：ReDim 重建一枚动态数组时，元素档**问声明**，不是问 ReDim 自己
     # 的 As 子句。修前 cgen_redim.cpp 只问 asType，没写 As 就交 vb6_sa_variant，而访问侧（VB6_SA_AT /

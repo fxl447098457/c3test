@@ -34,6 +34,10 @@
 #   R14 类字段那一腿（账 #305 §B183）：窄档表 classIntMembers_ 只许一份声明；扫描里按模块 clear、
 #      两拼法各登一次，且这一登必须**住在放宽臂内**（把 Integer 从那张表里摘走会饿着放宽档的其他
 #      消费者）；三处过程入口放宽档与窄档同数。
+#   R15 「这枚左值有多窄 / 这一档要套哪只范围闸」只许有一个答案（账 #305 §B184，第七十五刀）：
+#      三只闸的名字串只住那张表（3 处 / 1 文件）；表是被**问**的不是被抄的（3 个调用点，改前那枚
+#      手写 cast 在注释剥净的代码里绝迹）；narrowCheckAssign 被 3 站问到（赋值两腿 + With 那一腿）；
+#      成员臂的类字段一问恰好 1 次且住在 §B170 否决之后；With 那一站的裸形状绝迹而站点本身还在。
 # 用法: powershell -File scripts\check_implicit_cstr_station.ps1 [-RootOverride <目录>]  (PASS = exit 0)
 #   -RootOverride 是给负控用的: 把 src\backend 抄到别处再判, 真树一字不动。
 
@@ -415,5 +419,151 @@ if ($r14Bad.Count -gt 0) {
     exit 1
 }
 Write-Host ('  R14 class-field-Integer narrow registration OK (1 table, widened+narrow in lockstep at ' + $wideTotal + ' entries)')
-Write-Host 'PASS implicit_cstr_station (R1..R14)'
+# --- R15 (knife 75, ledger #305 B184): 「这枚左值有多窄 / 这一档窄存要套哪只范围闸」只许有一个答案,
+# 四个站点只许去问它, 不许各自写形状. 改前这一族有四位主人: narrowCheckAssign 里的那个 switch、COM
+# 字段写回路那一条按 VB 档自己 cast 的臂、narrowTargetTypeOf 的成员臂（它对**类实例**一律答 Unknown,
+# 所以typed 直接字段存值压根没被问过范围）、以及 With 那一站（直接从 lastExpr_ 发 temp->f = <expr>）。
+#   R15a 三只闸的**函数名串**是那张表独有的: 注释剥净后的整个 src 里恰好 3 处, 且全住
+#        cgen_util_type.cpp。第二位主人手写名字 = 重新长出表要消掉的那种漂移。
+#   R15b 表是被**问**的, 不是被抄的: narrowCheckFnForVbType 恰好 3 个调用点
+#        (1 = narrowCheckAssign 自己那一问, 2 = COM 的 Integer/Byte 两臂), 且改前那枚手写
+#        (int16_t)value.lVal 已从**注释剥净**的代码里绝迹 —— 它还活在一条 WHY 注释里, 而这一族的
+#        尺子量的正是"注释绝不允许是唯一撑着判据的东西"。
+#   R15c narrowCheckAssign 恰好被 3 站问到, 且分配已知: 赋值两腿 2 + With 那一腿 1（第七十五刀新增）。
+#   R15d narrowTargetTypeOf 的成员臂里, 类字段那一问恰好 1 次, 且必须住在 §B170 那枚否决
+#        (resolveClassMemberCall) **之后** —— 方法/属性名永不被字段表的答案抢走。
+#   R15e With 那一站的裸形状 (" = " + lastExpr_ + ";  /* With class field write */") 已绝迹, 而那一站
+#        本身还在 —— 读的是**原文**（/* */ 会被 $codeByFile 剥掉）, 两头钉, 所以删掉整站也绿不了 R15e。
+$propWriteInc = Join-Path $backend 'detail\stmt\cgen_assign_prop_write.inc'
+if (-not (Test-Path -LiteralPath $propWriteInc)) {
+    Write-Host 'FAIL implicit_cstr_station R15: neither the With station file nor its raw text is readable'
+    exit 1
+}
+# 「Strip-CComments」把 /**/ 按全文成对匹配, 而这一族文件里有 **C 字符串字面量**
+# 里面就写着「/* ... */」(实物: cgen_util_type.cpp:853/855 那两条 marker 拼接) ——
+# 它会从那个「/*」一直吞到下一个真正的「*/」, 吞掉整段函数 (在 cgen_util_type.cpp 上实测少 55292 字符,
+# narrowTargetTypeOf 的定义被整段吃掉)。后果是双向的: 拿它定义锚点会报不到,
+# 拿它数禁忌（「这个形状已绝迹」）会因为违规代码恰巧落在被吞的那段里而假绿。
+# R15 自己的那把尺子只剥同一行内的块注释 + 整行/行尾的 //, 从不跨行配对。
+function Strip-CComments15([string]$t) {
+    $t = [regex]::Replace($t, '/\*[^\r\n]*?\*/', ' ')
+    $t = [regex]::Replace($t, '(?m)//.*$', ' ')
+    return $t
+}
+$srcCodeByFile = @{}
+foreach ($f in @(Get-ChildItem -Path (Join-Path $Root 'src') -Recurse -File |
+                 Where-Object { $_.Extension -in @('.cpp', '.inc', '.h', '.hpp') })) {
+    $srcCodeByFile[$f.FullName] = Strip-CComments15 ([IO.File]::ReadAllText($f.FullName))
+}
+# R15 自己的调用点尺子: 排除「定义 (CCodeGen::)」与「声明」, 而声明档要含 `const char*` ——
+# 表返回的正是 const char*, 上面那把 Get-CallSites 的名单 (bool|std::string|size_t) 认不到它。
+function Get-CallSites15([string]$name) {
+    $rx = [regex]([regex]::Escape($name) + '\(')
+    $hits = @()
+    foreach ($path in $srcCodeByFile.Keys) {
+        $t = $srcCodeByFile[$path]
+        foreach ($m in $rx.Matches($t)) {
+            $pre = $t.Substring(0, $m.Index)
+            if ($pre -match 'CCodeGen::\s*$') { continue }
+            if ($pre -match '(bool|std::string|size_t|const char\*)\s*$') { continue }
+            $hits += $path
+        }
+    }
+    return $hits
+}
+function Count-ByLeaf($sites) {
+    $h = @{}
+    foreach ($p in $sites) {
+        $k = Split-Path -Leaf $p
+        if ($h.ContainsKey($k)) { $h[$k] = $h[$k] + 1 } else { $h[$k] = 1 }
+    }
+    return $h
+}
+$r15Bad = @()
+
+# ---- R15a ----
+$chkByFile = @{}
+foreach ($path in $srcCodeByFile.Keys) {
+    $n = ([regex]::Matches($srcCodeByFile[$path], '"vb6_Chk[A-Za-z]*"')).Count
+    if ($n -gt 0) { $chkByFile[$path] = $n }
+}
+$chkTotal = 0
+foreach ($v in $chkByFile.Values) { $chkTotal += $v }
+$chkFiles = @($chkByFile.Keys | ForEach-Object { Split-Path -Leaf $_ } | Sort-Object)
+if ($chkTotal -ne 3 -or $chkFiles.Count -ne 1 -or $chkFiles[0] -ne 'cgen_util_type.cpp') {
+    $r15Bad += ('R15a quoted vb6_Chk* names = ' + $chkTotal + ' in [' + ($chkFiles -join ', ') +
+                '], want 3 in [cgen_util_type.cpp] (the table is the only owner of the names)')
+}
+
+# ---- R15b ----
+$tblByFile = Count-ByLeaf @(Get-CallSites15 'narrowCheckFnForVbType')
+$tblTotal = 0
+foreach ($v in $tblByFile.Values) { $tblTotal += $v }
+if ($tblTotal -ne 3 -or $tblByFile['cgen_util_type.cpp'] -ne 1 -or $tblByFile['cgen_com.cpp'] -ne 2) {
+    $r15Bad += ('R15b narrowCheckFnForVbType call sites = ' + $tblTotal +
+                ' (util=' + $tblByFile['cgen_util_type.cpp'] + ' com=' + $tblByFile['cgen_com.cpp'] +
+                '), want 3 (1 ask + the 2 COM field arms) - the table is asked, never copied')
+}
+$castTotal = 0
+foreach ($path in $srcCodeByFile.Keys) {
+    $castTotal += ([regex]::Matches($srcCodeByFile[$path],
+                  [regex]::Escape('(int16_t)value.lVal'))).Count
+}
+if ($castTotal -ne 0) {
+    $r15Bad += ('R15b the hand-written (int16_t)value.lVal cast is back in comment-stripped code: ' +
+                $castTotal + ' site(s) - ask the table instead')
+}
+
+# ---- R15c ----
+$ncaByFile = Count-ByLeaf @(Get-CallSites15 'narrowCheckAssign')
+$ncaTotal = 0
+foreach ($v in $ncaByFile.Values) { $ncaTotal += $v }
+if ($ncaTotal -ne 3 -or $ncaByFile['cgen_assign_value_sem.inc'] -ne 2 -or
+    $ncaByFile['cgen_assign_prop_write.inc'] -ne 1) {
+    $r15Bad += ('R15c narrowCheckAssign call sites = ' + $ncaTotal + ' (assign-legs=' +
+                $ncaByFile['cgen_assign_value_sem.inc'] + ' With=' +
+                $ncaByFile['cgen_assign_prop_write.inc'] +
+                '), want 3 = 2 + 1 - a station that writes its own shape instead of asking')
+}
+
+# ---- R15d ----
+$util15 = Strip-CComments15 ([IO.File]::ReadAllText($utilCpp))
+$defNTO = $util15.IndexOf('Vb6Type CCodeGen::narrowTargetTypeOf(')
+if ($defNTO -lt 0) {
+    $r15Bad += 'R15d narrowTargetTypeOf definition not found in cgen_util_type.cpp'
+} else {
+    $obNTO = $util15.IndexOf('{', $defNTO)
+    $bodyNTO = $null
+    if ($obNTO -ge 0) { $bodyNTO = Get-BlockBody $util15 $obNTO }
+    if ($null -eq $bodyNTO) {
+        $r15Bad += 'R15d the body of narrowTargetTypeOf is not brace-balanced - cannot read the member arm'
+    } else {
+        $cfkN = ([regex]::Matches($bodyNTO, 'classFieldKind\(')).Count
+        $vetN = ([regex]::Matches($bodyNTO, 'resolveClassMemberCall\(')).Count
+        if ($cfkN -ne 1 -or $vetN -lt 1 -or
+            $bodyNTO.IndexOf('resolveClassMemberCall(') -gt $bodyNTO.IndexOf('classFieldKind(')) {
+            $r15Bad += ('R15d member arm asks classFieldKind ' + $cfkN + ' time(s) with ' + $vetN +
+                        ' veto ask(s) BEFORE it - want exactly 1 ask, after the B170 veto')
+        }
+    }
+}
+
+# ---- R15e ----
+$propRaw = [IO.File]::ReadAllText($propWriteInc)
+if ($propRaw.Contains('" = " + lastExpr_ + ";  /* With class field write */"')) {
+    $r15Bad += 'R15e the With station emits lastExpr_ bare again - wrap it with narrowCheckAssign'
+}
+$shapeN = ([regex]::Matches($propRaw, [regex]::Escape('/* With class field write */'))).Count
+if ($shapeN -ne 1) {
+    $r15Bad += ('R15e the With class-field station itself is gone: shape marker count = ' + $shapeN +
+                ', want 1 (R15e may not be greened by deleting the station)')
+}
+
+if ($r15Bad.Count -gt 0) {
+    Write-Host ('FAIL implicit_cstr_station R15 (the narrow-store question has one answer and every station asks it): ' + ($r15Bad -join ' | '))
+    exit 1
+}
+Write-Host ('  R15 narrow-store single authority OK (names 3/1 file, table asked at ' + $tblTotal +
+            ' sites, assigned at ' + $ncaTotal + ', veto-ordered class-field ask, With leg wrapped)')
+Write-Host 'PASS implicit_cstr_station (R1..R15)'
 exit 0
