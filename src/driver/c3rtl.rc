@@ -1,4 +1,17 @@
 // c3rtl.rc - RTL runtime library embedded as resources
+// 2026-10-15 (账 #305 §B185, 第七十七刀): IDispatch 服务端进门那趟**从来没有错误边界** ——
+//   `ComObj_Invoke` 收下 pExcepInfo 却从不碰、`invokeFunc` 返回 void、末尾无条件 return S_OK,
+//   于是 VB 体里没人接住的一条运行期错误一路走到 `vb6_RaiseError` ⇒ 那里没帧 ⇒ 打一行 stderr
+//   再 `exit(错误号)`, **把调用它的客户端进程打死**。两台实测(不查注册表的进程内客户端,
+//   `.build/k76_cli/`): 越界写 Public Integer 字段 RC=6、体里一句 `Err.Raise 5` RC=5,
+//   `Class_Initialize` 里 raise 也 RC=5 (那一站今天仍没接, 记在台账里没并进本刀)。
+//   本刀只改一处 = 那一趟自带一枚帧(顺序照 cgen 的 On Error GoTo 协议 ⇒ 体里自己写了
+//   On Error 的那些照常由体接住、交回 S_OK 与空 EXCEPINFO), 失败时交回的形状收成一枚新出口
+//   `vb6_ComFailExcep`(定义在 vb6com.c, 是客户端接收腿 vb6_ComCheckError 的镜像):
+//   内置 Collection 的 `coll_fail` 从此转调它, 工程类的服务端也问它 —— 0x800A0000|err 那一
+//   形状不再住两遍。客户端拿到的是 DISP_E_EXCEPTION + scode + 描述, 折回成一条 VB 错误,
+//   所以客户的 On Error 拿得到错误号 —— 与真 VB6 同一口径。
+
 // 2026-10-14 (ComCtlsDemo): 补 CLngLng —— 数值转换阶梯里**有符号 64 位**
 //   那一档此前没登记 (ai/032 落了 CSByte/CUInt/CULng/CULngLng 四档 + CLngPtr, 独缺 CLngLng)。
 //   缺它的后果不是降级而是**链接期现形**: ComCtlsDemo Builds\ProgressBar\ProgressBar.ctl:1328
