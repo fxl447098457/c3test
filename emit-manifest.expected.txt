@@ -75,7 +75,7 @@ sha256=daa5e56d11811ca4f933eb9ab9cac9b2444e7e0191d12a345d486d779e732f64 ascii256
 sha256=3c41af9865044662f1f42f36ed732bfb600190b4def5c104368701e8b318bdb0 ascii256=7efddb4c899b35c83af5a73ee8be9c3c0f01f33ee009f752903f90617433a8b0 rc=0 bytes=17912 tests/c29listview/C29ListView.vbp
 sha256=26fe78449275d24c16486a6039e7a7f9c864c0d562b99f978407b684396aae7d ascii256=a6e3c8f64d93e95471d7d5ab8176b9430e8ea0d149a67f8a012da1adf8347e30 rc=0 bytes=10895 tests/c29statusbarevt/SbEvent.vbp
 sha256=f4a9a06c188bdee3606a4c05288cff97143ffea7b959f5b1f624ba3741cb40d2 ascii256=bc12e7dd4f275455506b29b4838c46607ccc101d31ac4cc207a839fea54c18aa rc=0 bytes=20227 tests/c29timer/TmApp.vbp
-sha256=77b123aa5a8d8d4e771b4c91205b9d947fd36f0302b73304070b0136321499c0 ascii256=01e6b5b5a708b3ea90e4092c52ea7fc412927de5cafe44964670b72c4a1778ec rc=0 bytes=25004 tests/cc_act/Act.vbp
+sha256=d14c66d621dd0981652528d983eb1604b0d61943245cdc6092823155998604a3 ascii256=318999023ae4aae5a41478ef4fb7a9e136f8ad688494605da0ab6a1d15c85d63 rc=0 bytes=25038 tests/cc_act/Act.vbp
 sha256=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 ascii256=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 rc=1 bytes=0 tests/cc_act/ActBlocks.bas
 sha256=796d987263b0ccd812b366c7a71b8296792107d2f26ff4354429d36c0d56c860 ascii256=02dbf94d38b2f6a154c979b22bafa704ce1fec0265b8d05b64a827465f67719a rc=0 bytes=8683 tests/cc_act/ActMain.bas
 sha256=2c05602830b165aaf38b1a38adf93538c615d3d468c1b3f9570cf19b1a565ff3 ascii256=1e31cf2eaffa565956e326ea21a28e884427a89c45da37212f5dcaf5f9bfb6b5 rc=0 bytes=1709 tests/cc_cn/CnMain.bas
@@ -84,7 +84,7 @@ sha256=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 ascii256
 sha256=0f05a2e7b6fcf4693d542e71bd8a639e50eda9bf4f9b2bf869b4c6bac39b664b ascii256=f4a893f94be67de185db86741b241eee3306342c60945592e28b453f88ac48fe rc=0 bytes=2295 tests/cc_demo/DemoClient.bas
 sha256=0f05a2e7b6fcf4693d542e71bd8a639e50eda9bf4f9b2bf869b4c6bac39b664b ascii256=f4a893f94be67de185db86741b241eee3306342c60945592e28b453f88ac48fe rc=0 bytes=2295 tests/cc_demo/DemoClient.vbp
 sha256=d4a4110a440e56b7ccbf05369b56e8e25b7e5b625b18b34b882b2c1001f8d8b0 ascii256=72b708b53fad96474c27ac72a1c3944e87872e161ff5564f1a48033abba1b578 rc=0 bytes=37443 tests/cc_demo/DemoDll.vbp
-sha256=a9f3a41362726183a9526c88a443659ab66ab8cdb58f18d074e38c06f8785d8a ascii256=8679aeb6d8b9b2a837b70ed7f69a3b1d8d86af727ff00eca745bd32387ed0197 rc=0 bytes=46351 tests/cc_demo/DemoExe.vbp
+sha256=6e51d6aadf780ba9d7077a34622830a87e5df9eeba16d2245e4d43c027a41c27 ascii256=fd8ec429846ad7ebfc9f5d26c0abe8d7a7050649847e15073193fded2f1145ae rc=0 bytes=46385 tests/cc_demo/DemoExe.vbp
 sha256=af8ebd7f810836fbb9ce1a3969157771cf013ed0859c6dd93bf1fe79944e4e2a ascii256=09c3854675adb00a27b186cd82f24620b5b856950299e00a6247f3da6bf6c52d rc=0 bytes=7799 tests/cc_demo/DemoMain.bas
 sha256=d0c320fc43bdf74227a458f37e611b26cf6fe9883008ccbb2cc37e0f51f8e9cf ascii256=65e1a63a5712559aee7afbbfdf39c44cf4226c266405e7d9995eb39b73d8a391 rc=0 bytes=2925 tests/cc_dll_client/LateClient.vbp
 sha256=d0c320fc43bdf74227a458f37e611b26cf6fe9883008ccbb2cc37e0f51f8e9cf ascii256=65e1a63a5712559aee7afbbfdf39c44cf4226c266405e7d9995eb39b73d8a391 rc=0 bytes=2925 tests/cc_dll_client/LateMain.bas
@@ -467,6 +467,8 @@ sha256=2a11e1ad37482d993f1805228f963bb1cc7d7f43469e2a9d386b2981435593a7 ascii256
 sha256=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 ascii256=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 rc=1 bytes=0 tests/b186_srv/DllBlocks.bas
 sha256=66456d9571f2c6577eb94a088d478f334863112dfcdfaf68cc63f3c35b73b7ac ascii256=fbe4a56fa5423e72badd32be8929a8d402ef888ef656964e2f476be492082c0e rc=0 bytes=7394 tests/b188_term/B188d.vbp
 sha256=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 ascii256=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 rc=1 bytes=0 tests/b188_term/DllBlocks.bas
+sha256=dd8304dec4f4ba02bf41e6eccf1f88bcbe90b491042c55569499b5a8f1d96918 ascii256=dd7c5132cbb73c0e781119067835cf96e05c0df8d732e5dbdd683c2410daa1f4 rc=0 bytes=14664 tests/b187_box/B187d.vbp
+sha256=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 ascii256=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 rc=1 bytes=0 tests/b187_box/DllBlocks.bas
 # 账 #305 §B188 (第八十刀判据): 新增 2 行 = tests/b188_term 那两枚输入, 哈希取 CI 为同一 head 33320a1d 自己交的 9c33fdca;
 #   本轮 RTL 只动 ComObj_Release 一处 ⇒ 438 枚存量行**一行没移动** (本机与 CI 两边同读数), 形状门只报「新增未登记」这一族。
 # 账 #305 §B184 (第七十五刀) 的登记来源：门 **#640**（run 38682492970、head 8000e440、attempt 1）= 12 job 里 10 绿 + 两条**预期**红（这道形状门报「存量 5 份哈希不同 + 新增 2 份没登记」、`Tests (compile)` 里同源那句 [STATIC] manifest_coverage）。新增的两行 = 本刀夹具 `tests/b184_fieldw/{B184.vbp,B184Main.bas}`；移动的两行归本刀（Charts 2020/Proyecto1.vbp 31 处、b183_intfield/B183.vbp 2 处，逐行都是 `me-><f> = (int16_t|uint8_t)value.lVal;` → `= vb6_ChkInt|ChkByte(value.lVal);`）。**另外三行移动不是本刀**（ucTreeMaps/Proyecto1.vbp、VBFlexGridDemo/Common/VisualStyles.bas、VBFlexGridDemo/VBFlexGridDemo.vbp）：用「只含本刀、不含 merge」那一对编译器（C3_k74new vs C3_k75new，md5 d74d8b3b/2a24013d）并排重发这三份，移动行数 = 0，而本刀那两份移动 31/2 行 —— 所以这三行是 `a6b05e7d` 带进来的别人那两笔欠的登记，按 CI 为同一个 head 自己交的清单（github/ci/emit-manifest 的 7dea8d25）一并落账。
