@@ -6819,6 +6819,35 @@ if ($Category -in @("all", "run", "vbp")) {
         "CREATE=1[{11112222-3333-4444-5555-6666777788B1}] hr=0x00000000") `
         -Tail @("CREATE={11112222-3333-4444-5555-6666777788B1},{11112222-3333-4444-5555-6666777788B3}") -Arch "x86"
 
+    # 账 #305 §B188 (第八十刀): 服务端进门**第三站** = 出厂那一趟。ComObj_Release 走到零 ⇒ destroyFunc ⇒
+    # Class_Terminate, 以前是本文件三站里唯一没接边界的一站, 而它比前两站更狠: 这条通道**没有带号的载体**
+    # (Release 交回 ULONG 引用计数, 也没有 EXCEPINFO), 所以改前是「体里一句没人接住的错 = 客户端的死法」:
+    # 两台实测一枚 terminate 只写 Err.Raise 234 的类 ⇒ 探针 exit=234, 后面那枚干净对象的 CREATE=2 与 DONE
+    # 全都没打出来。修完的口径 = 只保证客户端不死 + 一条带号诊断(见 stderr), 号交不回任何人。
+    # 主 CLSID 用干净那枚(D2): 「不是所有出厂都坏」的证人; 抛错那枚(D1)走 -Tail 的 CREATE= 臂, 排在前面造、
+    # 最后放 —— 两枚都造成功之后才轮到 Release, 所以 D1 的 Release 一旦打死进程, DONE 就出不来(= 本针会红)。
+    # 臂里两枚都点一次成员(42): 否则「服务器压根没建成对象」也能蒙过前两条。
+    Test-DispatchInvoke "b188_terminate_error_frame" "$Tests\b188_term\B188d.vbp" "B188d" `
+        "{11112222-3333-4444-5555-6666777788D2}" @(
+        "CREATE hr=0x00000000 ptr=OK",
+        "CREATE=1[{11112222-3333-4444-5555-6666777788D1}] hr=0x00000000 ptr=OK",
+        "CALL=CREATE1MEM hr=0x00000000 result=42",
+        "CREATE=2[{11112222-3333-4444-5555-6666777788D2}] hr=0x00000000 ptr=OK",
+        "CALL=CREATE2MEM hr=0x00000000 result=42",
+        "DONE") @(
+        "Unhandled error") `
+        -Tail @("CREATE={11112222-3333-4444-5555-6666777788D1},{11112222-3333-4444-5555-6666777788D2}")
+    Test-DispatchInvoke "b188_terminate_error_frame_x86" "$Tests\b188_term\B188d.vbp" "B188d" `
+        "{11112222-3333-4444-5555-6666777788D2}" @(
+        "CREATE hr=0x00000000 ptr=OK",
+        "CREATE=1[{11112222-3333-4444-5555-6666777788D1}] hr=0x00000000 ptr=OK",
+        "CALL=CREATE1MEM hr=0x00000000 result=42",
+        "CREATE=2[{11112222-3333-4444-5555-6666777788D2}] hr=0x00000000 ptr=OK",
+        "CALL=CREATE2MEM hr=0x00000000 result=42",
+        "DONE") @(
+        "Unhandled error") `
+        -Tail @("CREATE={11112222-3333-4444-5555-6666777788D1},{11112222-3333-4444-5555-6666777788D2}") -Arch "x86"
+
     # 账 #305 SB186 第二头: VB 客户那一头　「口径」的唯一读数面　—— 探针是 C 客户, 它只能读 hr;
     # 「服务端自己那条错折回原号」还是「一律 429」这一问, 只有真的 VB 客户点得到。
     # BC1 = 抛错的那枚: 客户活着(rc=0)且 On Error 拿到 123(不是 429, 也不是 exit(123)), 对象仍是 Nothing;

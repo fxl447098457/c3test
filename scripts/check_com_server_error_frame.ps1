@@ -225,9 +225,52 @@ if ($externVb -ne 1) { $fail += "R6 cross-family extern of vb6_ComVbHresult in v
 $hVb = ([regex]::Matches((Strip-Comments185 ((Read-Lines $hPath) -join "`n")), 'HRESULT vb6_ComVbHresult\s*\(')).Count
 if ($hVb -ne 1) { $fail += "R6 declaration of vb6_ComVbHresult in vb6com_internal.h = $hVb (want 1)" }
 
+# ---- R7 (账 #305 §B188, 第八十刀): 服务端进门的**第三站** = 出厂那一趟也要问过同一枚帧 ----
+# ComObj_Release 走到零时那两条腿 (desc->instanceClaimRelease / desc->destroyFunc) 都踏进 VB 代码
+# (Class_Terminate), 而这条通道没有带号的载体 (Release 交回 ULONG, 也没有 EXCEPINFO) => 底线是
+# 「不许打死客户端」: 体内必须有一枚帧把两腿一起包住, 且两者都排在 setjmp 之后。
+$relStart = -1
+$relEnd = -1
+for ($i = 0; $i -lt $obj.Count; $i++) {
+    if ($relStart -lt 0 -and $obj[$i] -match 'static ULONG STDMETHODCALLTYPE ComObj_Release\(') { $relStart = $i }
+    elseif ($relStart -ge 0 -and $obj[$i] -match '^}$') { $relEnd = $i; break }
+}
+if ($relStart -lt 0 -or $relEnd -lt 0) {
+    $fail += ("R7 cannot locate the ComObj_Release body in vb6comserver_obj.c - the way-out station " +
+              "was renamed or moved; §B188's reading lives there")
+} else {
+    $relBody = Strip-Comments185 (($obj[$relStart..($relEnd - 1)]) -join "`n")
+    $relSetjmp = ([regex]::Matches($relBody, 'setjmp\s*\(')).Count
+    $relClaim = ([regex]::Matches($relBody, 'desc->instanceClaimRelease\s*\(')).Count
+    $relDestroy = ([regex]::Matches($relBody, 'desc->destroyFunc\s*\(')).Count
+    $relSave = ([regex]::Matches($relBody, 'vb6_SaveErrState\s*\(')).Count
+    $relRestore = ([regex]::Matches($relBody, 'vb6_RestoreErrState\s*\(')).Count
+    if ($relSetjmp -ne 1) {
+        $fail += ("R7 setjmp() inside ComObj_Release = " + $relSetjmp + " (want 1) - an unframed " +
+                  "Class_Terminate reaches vb6_RaiseError with no frame => ExitProcess(number) kills the client")
+    }
+    $relReg = ([regex]::Matches($relBody, 'vb6_error_jmp_ptr = &')).Count
+    if ($relReg -ne 1) {
+        $fail += ("R7 frame registered inside ComObj_Release = " + $relReg + " (want 1) - a setjmp that nobody " +
+                  "registers as the active handler cannot catch the raise: vb6_RaiseError still exits the process")
+    }
+    if ($relSave -ne 1 -or $relRestore -ne 1) {
+        $fail += ("R7 Save/RestoreErrState in ComObj_Release = " + $relSave + "/" + $relRestore + " (want 1/1)")
+    }
+    if ($relClaim -ne 1 -or $relDestroy -ne 1) {
+        $fail += ("R7 way-out legs in ComObj_Release = claim:" + $relClaim + " destroy:" + $relDestroy +
+                  " (want 1/1) - both legs must sit inside the same one frame")
+    }
+    $iSj = $relBody.IndexOf('setjmp')
+    $iDe = $relBody.IndexOf('desc->destroyFunc')
+    if ($iSj -ge 0 -and $iDe -ge 0 -and $iDe -lt $iSj) {
+        $fail += "R7 destroyFunc is called BEFORE setjmp in ComObj_Release - outside the frame, so it still kills the client"
+    }
+}
+
 if ($fail.Count -gt 0) {
     foreach ($f in $fail) { Write-Host ("FAIL " + $f) }
     exit 1
 }
-Write-Host ("PASS check_com_server_error_frame: frames=2 registration-ordered shape=1 callers=2 cleanup-before-return factory-shapes-split")
+Write-Host ("PASS check_com_server_error_frame: frames=3 way-out-framed=1 registration-ordered shape=1 callers=2 cleanup-before-return factory-shapes-split")
 exit 0
