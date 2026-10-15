@@ -688,13 +688,21 @@ bool CCodeGen::isDefinitelyVariantExpr(Expr& expr, bool* isArrOut) const {
             // 账 #123: 补 Byte 那一档。缺它时局部 `Dim bt As Byte` 掉到下面的符号表回退 ⇒
             // 被判成 Variant ⇒ 比较发成 vb6_VarCmpLongEq(&bt, …) (拿 1 字节对象的地址当
             // vb6_VARIANT* 传) ⇒ 实测 `(bt = 65)` 返回 False。
+            // Fix 运行期第二十六层同批: knownObjectVars_ (Dim X As Control/Object) 与
+            // knownClassVars_ (Dim X As <项目类>) 同样必须在符号表回退之前挡掉 ——
+            // 否则同名 Property Get X() As Variant 的符号被 checkSym 命中 ⇒ 返回 true
+            // ⇒ void* 形参分支误套 vb6_VariantToObjectVal(X) → C2440。
+            // (ComCtlsDemo TvwNodes.cls:132 `Dim Item As TvwNode` 遮蔽 :53 `Dim Item As Variant`;
+            //  UpDown.ctl:803 `Dim BuddyControl As Control` 遮蔽 :719 `Property Get BuddyControl() As Variant`.)
             if (knownBstrVars_.count(lower) || knownLongVars_.count(lower)
                 || knownDoubleVars_.count(lower) || knownSingleVars_.count(lower)
                 || knownByteVars_.count(lower)
                 // ai/032: SByte/UInteger/ULong/ULongLong 的局部/形参/返回槽同样是
                 // 具体标量, 不是 Variant —— 不显式挡一道的话会落到下面的符号表回退,
                 // 命中不住时虽然仍答 false, 但命中同名 Variant 符号时就会误包装。
-                || knownNarrowIntVars_.count(lower)) {
+                || knownNarrowIntVars_.count(lower)
+                || knownObjectVars_.count(lower)
+                || knownClassVars_.count(lower)) {
                 return false;
             }
             // 符号表查询
@@ -1279,6 +1287,8 @@ std::string CCodeGen::getRuntimeParamCType(const std::string& funcName, size_t p
         {"vb6_CUInt",           {"double"}},
         {"vb6_CULng",           {"double"}},
         {"vb6_CULngLng",        {"double"}},
+        // CLngLng: 同族的有符号 64 位档 (ComCtlsDemo ProgressBar.ctl 的 #If Win64 分支)
+        {"vb6_CLngLng",         {"double"}},
         // twinBASIC 形 CLngPtr: 转 LongPtr, 同族 double 入口 (Variant 实参由
         // cgen_expr_call_conv_numeric.inc 改写为 *V 版本)。
         {"vb6_CLngPtr",         {"double"}},
