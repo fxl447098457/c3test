@@ -145,6 +145,10 @@ if ($ast5) {
     # 命名数组实参, 「数组实参恰好两枚」那句话从此只管**位置**那两档。
     'b186_factory_error_frame'         = @(8, 5, 2, 1)
     'b186_factory_error_frame_x86'    = @(10, 5, 2, 1)
+    # 账 #305 §B188 (第八十刀判据): 出厂那一趟的格子, 两枚一类各一台; 位置面 6 (+2 = -Arch),
+    # Needles 6 / Absent 1 (「Unhandled error」当反面证人) / -Tail 1 枚 CREATE= 臂
+    'b188_terminate_error_frame'          = @(8, 6, 1, 1)
+    'b188_terminate_error_frame_x86'     = @(10, 6, 1, 1)
 }
 $ds = @($ast5.FindAll({ param($n)
     $n -is [System.Management.Automation.Language.CommandAst] -and
