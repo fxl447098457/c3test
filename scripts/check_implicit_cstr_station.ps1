@@ -29,6 +29,11 @@
 #
 #   R11 字节数组的两位主人登记路数相等（各 7 条：模块级 2 + 局部 2 + 形参 3）。
 #   R12 字节数组那两站的剥壳闸 = 2 条 `>= 4`，且 builtin_fixup 里不许再留 `> 4`。
+#   R13 形参那一腿：三份声明文件里「按 VB 类型的裸 knownLongVars_.insert(pLower)」与
+#      「knownIntVars_.insert(pLower)」必须同数（guarded 兜底臂只接 enum/未知档，不计入）。
+#   R14 类字段那一腿（账 #305 §B183）：窄档表 classIntMembers_ 只许一份声明；扫描里按模块 clear、
+#      两拼法各登一次，且这一登必须**住在放宽臂内**（把 Integer 从那张表里摘走会饿着放宽档的其他
+#      消费者）；三处过程入口放宽档与窄档同数。
 # 用法: powershell -File scripts\check_implicit_cstr_station.ps1 [-RootOverride <目录>]  (PASS = exit 0)
 #   -RootOverride 是给负控用的: 把 src\backend 抄到别处再判, 真树一字不动。
 
@@ -338,5 +343,77 @@ if ($r13Bad.Count -gt 0) {
     exit 1
 }
 Write-Host ('  R13 formal-Integer narrow registration OK ({0} files, bare-widened + narrow in lockstep)' -f $intFormalFiles.Count)
-Write-Host 'PASS implicit_cstr_station (R1..R13)'
+# --- R14 (knife 74, ledger #305 B183): the class-FIELD leg of the same narrow/widened question.
+# The class-member scan folds Long, Integer and Boolean into ONE widened table (classLongMembers_)
+# and that table is the only thing a procedure entry restores, so inside its own class module a bare
+# member name answered tgtBits=32: `ci = 40000` skipped vb6_ChkInt - VB6 raises error 6 and keeps the
+# old value, C truncated it to -25536. Integer is therefore ALSO registered in a narrow table
+# (classIntMembers_) WITHOUT being removed from the widened one; double registration is this file
+# family's existing caliber (Byte = ledger 123, Boolean = ai/022 W1, Date = Fix 175). Every pin below
+# reads comment-stripped code text, so a WHY comment can never be what keeps this gate green.
+#   R14a the narrow table has exactly one declaration (one owner);
+#   R14b the scan clears it per module and fills BOTH spellings (m_ + bare), and that fill sits
+#        INSIDE the widened arm: move Integer out of the arm and the widened table's other consumers
+#        lose the answer, so the position is pinned, not only the count;
+#   R14c exactly 3 sites restore the widened table into knownLongVars_ and each of them restores the
+#        narrow table into knownIntVars_ in the same breath (function / sub / property entry).
+$scanInc = Join-Path $backend 'detail\base\cgen_base_generate_state_scan.inc'
+$stateInc = Join-Path $backend 'detail\util\cgen_state.inc'
+if (-not (Test-Path -LiteralPath $scanInc) -or -not (Test-Path -LiteralPath $stateInc)) {
+    Write-Host 'FAIL implicit_cstr_station R14: read neither the class-member scan nor the state file'
+    exit 1
+}
+$scanCode = $codeByFile[$scanInc]
+$stateCode = $codeByFile[$stateInc]
+$r14Bad = @()
+$declN = ([regex]::Matches($stateCode, 'std::unordered_set<std::string>\s+classIntMembers_')).Count
+if ($declN -ne 1) { $r14Bad += ('R14a classIntMembers_ declared in ' + $declN + ' places, want 1') }
+$clearN = ([regex]::Matches($scanCode, 'classIntMembers_\.clear\(\)')).Count
+$insM = ([regex]::Matches($scanCode, 'classIntMembers_\.insert\(mLower\)')).Count
+$insO = ([regex]::Matches($scanCode, 'classIntMembers_\.insert\(oLower\)')).Count
+if ($clearN -ne 1) { $r14Bad += ('R14b classIntMembers_ cleared ' + $clearN + ' times in the scan, want 1') }
+if ($insM -ne 1 -or $insO -ne 1) {
+    $r14Bad += ('R14b narrow class-field spellings registered m_=' + $insM + ' bare=' + $insO + ', want 1/1')
+}
+# The widened arm must STILL name Integer (that is the double registration: the widened table keeps
+# its answer for its other consumers) and the narrow fill must sit inside that same arm body, which
+# is what this ordering pins - the four inserts of that arm appear as wide m_ / wide bare / narrow m_
+# / narrow bare, and the next arm (Double) only starts after them.
+$wideArm = 'vtype == Vb6Type::Long || vtype == Vb6Type::Integer || vtype == Vb6Type::Boolean'
+$wideArmN = ([regex]::Matches($scanCode, [regex]::Escape($wideArm))).Count
+if ($wideArmN -ne 1) {
+    $r14Bad += ('R14b widened arm naming Long+Integer+Boolean found ' + $wideArmN + ' times, want 1 ' +
+                '(Integer must stay in the widened table too)')
+}
+$iWideM = $scanCode.IndexOf('classLongMembers_.insert(mLower)')
+$iWideO = $scanCode.IndexOf('classLongMembers_.insert(oLower)')
+$iNarrowM = $scanCode.IndexOf('classIntMembers_.insert(mLower)')
+$iNarrowO = $scanCode.IndexOf('classIntMembers_.insert(oLower)')
+$iNextArm = $scanCode.IndexOf('classDoubleMembers_.insert(mLower)')
+if ($iWideM -lt 0 -or $iWideO -lt 0 -or $iNarrowM -lt 0 -or $iNarrowO -lt 0 -or $iNextArm -lt 0 -or
+    -not ($iWideM -lt $iWideO -and $iWideO -lt $iNarrowM -and $iNarrowM -lt $iNarrowO -and $iNarrowO -lt $iNextArm)) {
+    $r14Bad += 'R14b the Integer narrow registration must sit inside the widened Long/Integer/Boolean arm'
+}
+$wideRx = 'knownLongVars_\.insert\(classLongMembers_\.begin\(\), classLongMembers_\.end\(\)\)'
+$narrowRx = 'knownIntVars_\.insert\(classIntMembers_\.begin\(\), classIntMembers_\.end\(\)\)'
+$wideByFile = @{}
+foreach ($path in $codeByFile.Keys) {
+    $n = ([regex]::Matches($codeByFile[$path], $wideRx)).Count
+    if ($n -gt 0) { $wideByFile[$path] = $n }
+}
+$wideTotal = 0
+foreach ($v in $wideByFile.Values) { $wideTotal += $v }
+if ($wideTotal -ne 3) { $r14Bad += ('R14c widened class-member restore sites = ' + $wideTotal + ', want 3') }
+foreach ($path in $wideByFile.Keys) {
+    $m = ([regex]::Matches($codeByFile[$path], $narrowRx)).Count
+    if ($m -ne $wideByFile[$path]) {
+        $r14Bad += ('R14c ' + (Split-Path -Leaf $path) + ': narrow restore ' + $m + ' vs widened restore ' + $wideByFile[$path])
+    }
+}
+if ($r14Bad.Count -gt 0) {
+    Write-Host ('FAIL implicit_cstr_station R14 (Integer class field must reach the narrow table at every proc entry): ' + ($r14Bad -join ' | '))
+    exit 1
+}
+Write-Host ('  R14 class-field-Integer narrow registration OK (1 table, widened+narrow in lockstep at ' + $wideTotal + ' entries)')
+Write-Host 'PASS implicit_cstr_station (R1..R14)'
 exit 0

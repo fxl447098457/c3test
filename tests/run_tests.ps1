@@ -3376,6 +3376,49 @@ if ($Category -in @("all", "run", "bas")) {
         'vb6_ChkInt((*fi) +'
     )
 
+    # <vbeclipse> 账 #305 §B183（第七十四刀）：Integer **类字段**的存值也不查 16 位范围 —— 类成员扫描
+    # 把 Long/Integer/Boolean 一起折进放宽档 classLongMembers_，而那张表全仓只有三处过程入口整份拷回
+    # knownLongVars_；于是一枚类自己的代码里，裸名成员左值在窄档表之前先被放宽档答成 32 位 ⇒
+    # `ci = 40000` 发成裸存：VB6 给 run-time error 6 **且保留旧值**，C 静默截成 -25536 并写回字段。
+    # 修法 = 同一条折叠臂旁另立窄档表 classIntMembers_（m_ 与裸名两拼都记）+ 三处入口各补一行恢复；
+    # **不摘**放宽档里的 Integer（它另有消费方，双登记是本文件族既有口径：Byte 账 #123 / Boolean
+    # ai/022 W1 / Date Fix 175）。窄表全仓只有一位消费点 narrowTargetTypeOf ⇒ 本刀唯一后果 = 越界存值多套一层 vb6_ChkInt。
+    # BASE 读数（两台逐行相同）= P1/P2/P7 一声不响、P3/P4 都是 -25536；修后：三处报 6、两处读回保住
+    # 上一次那个合法值。P0 = 合法存值照旧落位（检查不许改答案）；P5/P6/P8 = 证人（Byte 字段本来就响、
+    # Long 字段不许被卷进窄检查）。
+    $b183Needles = @("C3ProbeB183-P0-seed=12345|23456", "C3ProbeB183-P1-bare-raised=6",
+        "C3ProbeB183-P2-fromlong-raised=6", "C3ProbeB183-P7-private-raised=6",
+        "C3ProbeB183-P3-ci-kept=12345", "C3ProbeB183-P4-pf-kept=23456",
+        "C3ProbeB183-P5-byte-raised=6", "C3ProbeB183-P6-long-noerr",
+        "C3ProbeB183-P8-cl=40000", "C3ProbeB183-DONE")
+    Test-Vbp 'b183_int_field' "$Tests\b183_intfield\B183.vbp" $b183Needles
+    Test-Vbp 'b183_int_field_x86' "$Tests\b183_intfield\B183.vbp" $b183Needles -Arch "x86"
+    # 发码针：前三枚 = 三条病形（裸名 / 来源是 Long 变量 / 私有字段）都上了 vb6_ChkInt；中间两枚 =
+    # 合法值那一趟也被套上但答案不变（钉「检查不改数」）；后两枚 = 证人形状（Byte 仍走 ChkByte、
+    # Long 仍是裸存），BASE 与 NEW 都在场。
+    Test-EmitcShape 'b183_intfield_shape' @(
+        "$Tests\b183_intfield\B183Main.bas",
+        "$Tests\b183_intfield\B183Holder.cls") @(
+        'me->ci = vb6_ChkInt(40000);',
+        'me->ci = vb6_ChkInt(t);',
+        'me->pf = vb6_ChkInt(40000);',
+        'me->ci = vb6_ChkInt(12345);',
+        'me->cb = vb6_ChkByte(300);',
+        'me->cl = 40000;'
+    )
+    # 反针：前四枚 = 病形本体（BASE 产物各命中一次，NEW 全 0）；后两枚 = 过度形状的闸（Long 字段、
+    # Byte 字段都不许被挪进 ChkInt——那是把别一档的宽度答案改嫁过来）。
+    Test-EmitcAbsent 'b183_intfield_lesion' @(
+        "$Tests\b183_intfield\B183Main.bas",
+        "$Tests\b183_intfield\B183Holder.cls") @(
+        'me->ci = 40000;',
+        'me->ci = t;',
+        'me->pf = 40000;',
+        'me->pf = 23456;',
+        'vb6_ChkInt(me->cl)',
+        'me->cb = vb6_ChkInt'
+    )
+
     # <vbeclipse> 账 #305 §B154（第四十二刀）：ReDim 重建一枚动态数组时，元素档**问声明**，不是问 ReDim 自己
     # 的 As 子句。修前 cgen_redim.cpp 只问 asType，没写 As 就交 vb6_sa_variant，而访问侧（VB6_SA_AT /
     # VB6_SA_ND_AT2）问的是声明表 arrayElemTypes_ —— 同一枚描述符两个答案：造出来 24 字节一步（x64），
