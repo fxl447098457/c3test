@@ -113,19 +113,6 @@ if (GetEnvironmentVariableW(L"C3_COM_TRACE", NULL, 0) > 0) { fprintf(stderr, "[C
         r->ready = 1;   // Fix 112: 之后窗口消息 (Resize/Show/Paint) 才允许进入实例
         vb6_uc_trace("instance.ready", desc->typeName, r->me);
         vb6_uc_pop(&saved);
-        /* Fix 294: VB6 的顺序是 Initialize -> ReadProperties -> Show -> **Resize**。
-           宿主的初始尺寸在 CreateWindowEx 时就定死了, 那一��� WM_SIZE 到达时
-           r->ready 还是 0, 被 uc_host_window.c 的 `if (!r || !r->ready) break;`
-           丢掉 ⇒ ToolBar.ctl:1185 / MonthView.ctl:634 的 UserControl_Resize
-           从没跑过。而这两个控件正是在 Resize 里算自己的"自然高度"
-           (ToolBar: ButtonHeight + SM_CYEDGE -> 32px; MonthView: Req*+Extra)。
-           这里补一次初始 Resize。 */
-        if (r->desc && r->desc->resize) {
-            vb6_UCSaved saved294;
-            vb6_uc_push(r, &saved294);
-            r->desc->resize(r->me);
-            vb6_uc_pop(&saved294);
-        }
         if (vb6_ucHoCount) vb6_ucHo[vb6_ucHoCount - 1].instance = r->me;
     }
 
