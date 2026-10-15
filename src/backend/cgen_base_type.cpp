@@ -294,6 +294,49 @@ std::string CCodeGen::deliverToClassSlot(const std::string& clsPtr,
 }
 
 
+// 账 #305 §B187 第五腿 = ByRef 泛对象形参那一座桥。第八十四刀只接了 ByVal 那一档
+// (`ByVal p As Object` 收到裸实例时在实参位装箱)，因为 ByRef 那一路 C 侧是 `void**`:
+// 落一枚临时就把被调方的写回整个丢了，所以它欠的不是一个 if 而是一座桥 ——
+//   · 调用前: 把实参那枚**裸工程类实例就地装箱进它自己的槽** (实参地址原样交给形参，
+//     被调方 `Set p = Nothing` 与 `Set p.Prop = …` 那两形都照常落回调用方这一格);
+//   · 调用后: 槽里的值若还是我们那族包装器就剥回裸实例 (被调方换成别的实例也照剥，
+//     换出去的那一枚由这里 Release 收回)，外部 IDispatch / NULL 一律原样留着。
+// 两端都只许问**运行期的值**「这枚指针是不是包装器」= 新 RTL 出口 vb6_ComObject_IsBoxed。
+// 为什么这里不能按名字问登记表 (§B187 第三腿那三处读者的老路子): 值刚被**另一个过程**
+// 的 Set 语句改过，而那张表只由本过程的 Set 站写 —— 它压根没听说过形参。
+// 为什么装箱只许问运行期还要留负条件: 泛对象槽里装的可能是控件 HWND (`Set <槽> = <控件名>`
+// 那条路交的就是 vb6_hwnd_*)，而往一枚 HWND 上跑 FromBorrowedInstance 的 __comObj 回填
+// = 拿窗口句柄当地址写 = 内存损坏 (第八十三刀那条负条件的同一族)。
+// 发码只有这一处 (哨兵 check_object_slot_boxing 钉死): 站点只许调本函数，别处不许再抄。
+bool CCodeGen::bridgeByRefLateSlotArg(const ParameterInfo& p, const std::string& slot,
+                                      const ASTNode* actualAst) {
+    if (slot.empty() || !actualAst) return false;
+    if (p.isByVal) return false;
+    if (cParamLateSlotType(p).empty()) return false;   // 形参声明档: 与 ByVal 那一腿同一把尺
+    // 只有"实参自己那枚槽是工程类类型的左值"才桥得起来:
+    //   · 泛对象变量 (`Dim v As Object`) 里装的本来就是交换档，剥回去等于把装箱腿
+    //     (§B187 第二腿) 写进槽里的那份答案拆掉;
+    //   · 非左值实参在站点上游就走复合字面量那一支了，传不到这里 (站点在 `&<名字>` 那一支)。
+    const std::string cls = inferClassTypeOfExpr(*actualAst);
+    if (cls.empty() || !classHasCoClassDesc(cls)) return false;
+    const std::string cty = cTypeForDeclaredTypeName(cls);
+    if (cty.compare(0, 8, "vb6_cls_") != 0) return false;
+    if (slot.find("vb6_hwnd_") != std::string::npos
+        || slot.find("vb6_form_ctrl_") != std::string::npos) return false;
+    const std::string ask = "vb6_ComObject_IsBoxed((void*)" + slot + ")";
+    // 装箱交回 NULL 时**不许**覆盖这枚槽: 那是把一枚活对象打成 Nothing (装箱腿那条
+    // "查不中 desc 一律不装箱"的判据在桥上同样成立，这里再兜一层)。
+    const std::string boxTmp = "_vb6_latebox" + std::to_string(tempCounter_++);
+    c_.addPending("if (!" + ask + ") { void* " + boxTmp
+        + " = vb6_ComObject_FromBorrowedInstance(vb6_FindCoClassDesc(\"" + cls
+        + "\"), (void*)" + slot + "); if (" + boxTmp + ") " + slot + " = (" + cty + ")" + boxTmp + "; }");
+    const std::string unboxTmp = "_vb6_lateunbox" + std::to_string(tempCounter_++);
+    c_.addPostLine("{ void* " + unboxTmp + " = (void*)" + slot + "; if (vb6_ComObject_IsBoxed("
+        + unboxTmp + ")) { " + slot + " = (" + cty + ")vb6_ComObject_GetInstance(" + unboxTmp
+        + "); vb6_ReleaseObject(&" + unboxTmp + "); } }");
+    return true;
+}
+
 // 账 #305 §B187 第四腿: 「这个形参槽是不是泛对象槽 (void* 里该装 IDispatch*)」。
 // 与 cParamClassPtrType 一样只问定义侧那份映射, 见声明处注释。
 std::string CCodeGen::cParamLateSlotType(const ParameterInfo& p) {

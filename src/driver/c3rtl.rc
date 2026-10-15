@@ -676,3 +676,11 @@
  *   再补 §B162 那一臂（同批）：vb6_VariantBorrowIntoSlot 遇到真 SAFEARRAY 现在换成我们自己的描述符
  *   （拷，白名单与出站同一张；认不出的档交回 vtEmpty），服务端 free 槽阵列前经 vb6_VariantSlotRelease 回收。
  *   touch 本文件 = 让 125 份 RCDATA 重嵌一次（§B99②）。 */
+
+
+/* 账 #305 §B187 第五腿（2026-10-16 第八十五刀）：vb6comserver 多一枚出口
+ *   vb6_ComObject_IsBoxed —— 「这枚指针是不是我们自家的包装器」：三闸 IsWindow /
+ *   IsBadReadPtr / 首字段身份，判据与 vb6_ComIsDispatchable 同族，但答的是身份而不是"像不像"。
+ *   调用点是 cgen 新落的那座桥（ByRef 泛对象形参：调用前就地装箱、调用后剥回），它拿到的是
+ *   "一枚槽里此刻装着什么"，可能是裸 HWND，所以 deref 之前必须先证明可读。
+ *   touch 本文件 = 让 RCDATA 重嵌一次（§B99②）。 */

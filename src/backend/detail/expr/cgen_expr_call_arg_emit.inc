@@ -1079,6 +1079,13 @@
                         }
                         argVal = "&" + vref;
                     } else {
+                        // 账 #305 §B187 第五腿: ByRef 泛对象形参那一座桥 —— 判据与两句发码
+                        // 全在 bridgeByRefLateSlotArg 一处 (为什么这里得按**运行期的值**问、
+                        // 为什么装箱与剥回都只许动调用方自己那一格, 见定义处注释)。
+                        if (i < calleeParams.size() && i < node.positional.size()) {
+                            bridgeByRefLateSlotArg(calleeParams[i], argVal,
+                                                   node.positional[i].get());
+                        }
                         argVal = "&" + argVal;
                     }
                 } else {

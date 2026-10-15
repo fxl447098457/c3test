@@ -714,6 +714,13 @@
     // 但那一档要的是**接口指针**, 塞一枚 IDispatch 包装器反而是另一种坏指针, 不在本腿范围。
     std::string cParamLateSlotType(const ParameterInfo& p);
 
+    // 账 #305 §B187 第五腿: ByRef 泛对象形参那一座桥 —— 调用前就地装箱、调用后剥回。
+    // 判据、所有权与两条负条件全在定义处 (cgen_base_type.cpp)。站点只有把实参按
+    // `&<名字>` 交付那一支能调它 (实参必须自己拥有存储，否则写回没处落)，两处
+    // (位置实参 / 命名实参) 同问这一句，别处不许再抄一份。
+    bool bridgeByRefLateSlotArg(const ParameterInfo& p, const std::string& slot,
+                                const ASTNode* actualAst);
+
     // 账 #305 §B187 装箱腿的**唯一发码处**: 把一枚工程类实例交给泛对象槽 (void* 里该装
     // IDispatch*) 时换成借用型包装器。三处站点都问它 = Set 那一站 (目标槽) + 位置实参
     // 那一站 + 命名实参那一站 (形参槽) —— 条件不齐时原样返回, 所以站点写成一句不分支

@@ -661,6 +661,15 @@ void* vb6_ComObject_GetInstance(void* pdisp) {
     return obj->vb6Instance;
 }
 
+/* 账 #305 §B187 第五腿: 「这枚值是不是我们那族包装器」—— deref 之前先证明可读,
+ * 论证见 vb6comserver.h 声明处。命中 ⇒ 交回身份判据真; 其余一律 0 (原样交回调用点)。 */
+int32_t vb6_ComObject_IsBoxed(void* v) {
+    if (!v) return 0;
+    if (IsWindow((HWND)v)) return 0;
+    if (IsBadReadPtr(v, sizeof(void*))) return 0;
+    return ((vb6_ComObject*)v)->vtable == &g_ComObjectVtable;
+}
+
 // ============================================================
 // ExeComBridge 03: 工程类实例 → COM 调用实参 (VT_DISPATCH VARIANT*)
 // ============================================================
