@@ -40,6 +40,11 @@ void vb6_ComCheckError(HRESULT hr, EXCEPINFO* excep, const wchar_t* context);
 // VB6标准错误号 -> 中文描述 (查不到返回NULL)
 // 供手写COM对象(如 vb6com_collection.c)填 EXCEPINFO.bstrDescription
 const wchar_t* vb6_StdErrorDesc(int32_t errNum);
+// 账 #305 §B185: 服务端进门那趟失败时交回的形状 (定义在 vb6com.c, 是 vb6_ComCheckError 的镜像)。
+// 两位主人: 内置 Collection 的 coll_fail 与工程类的 ComObj_Invoke。
+HRESULT vb6_ComFailExcep(EXCEPINFO* pexcep, int32_t errNum,
+                         const wchar_t* desc, const wchar_t* fallback);
+
 
 // IUnknown 的 C 风格 vtable 辅助 (避免 C++ IUnknown 方法调用问题)
 HRESULT vb6_UnknownQI(void* obj, REFIID riid, void** ppv);

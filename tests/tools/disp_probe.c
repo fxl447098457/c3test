@@ -56,11 +56,49 @@ static void call_member(IDispatch *disp, const wchar_t *name, VARIANT *argv, int
 
     dp.rgvarg = argv;          /* DISPPARAMS 是逆序，调用方按逆序摆好 */
     dp.cArgs = (UINT)argc;
+    if (wFlags & (DISPATCH_PROPERTYPUT | DISPATCH_PROPERTYPUTREF)) {
+        /* Acct #305 SB185 (knife 77): a property write carries its own name slot. The old
+         * probe never set it because it only ever called methods. */
+        static DISPID s_putName = DISPID_PROPERTYPUT;
+        dp.rgdispidNamedArgs = &s_putName;
+        dp.cNamedArgs = 1;
+    }
     hr = IDispatch_Invoke(disp, id, &IID_NULL, LOCALE_USER_DEFAULT, wFlags, &dp,
                           &res, &ei, &err);
     printf("CALL=%s hr=0x%08lX", tag, (unsigned long)hr);
+    /* Acct #305 SB185 (knife 77): DISP_E_EXCEPTION only says "the server raised a VB error" --
+     * the error number lives in EXCEPINFO.scode. Printing just the hr would let 0x80020009 be
+     * read as a conclusion while the number it carries stayed unseen (same shape as SB144's
+     * "right tag, garbage value"). VB runtime descriptions are ASCII, so they go out as bytes.
+     * Ownership: the server handed this BSTR over, so the probe frees it below. */
+    if (FAILED(hr)) {
+        int di, dl = 0;
+        printf(" scode=0x%08lX desc=", (unsigned long)ei.scode);
+        if (ei.bstrDescription) {
+            int asciiOnly = 1;
+            dl = (int)SysStringLen(ei.bstrDescription);
+            for (di = 0; di < dl && di < 40; di++)
+                if (ei.bstrDescription[di] >= 0x80) { asciiOnly = 0; break; }
+            /* The VB standard-description table is Chinese, and this probe prints bytes: dumping the
+             * low half of those UTF-16 units produces mojibake that no needle can name. Say whether
+             * the server handed back the raiser's own ASCII message, or the table's text -- the
+             * error number is already pinned by scode. */
+            if (asciiOnly) {
+                for (di = 0; di < dl && di < 40; di++) printf("%c", (char)ei.bstrDescription[di]);
+            } else {
+                printf("(non-ascii)");
+            }
+        } else {
+            printf("(null)");
+        }
+    }
     if (SUCCEEDED(hr) && res.vt == VT_I4) printf(" result=%ld", (long)V_I4(&res));
-    else if (SUCCEEDED(hr) && res.vt != VT_EMPTY) printf(" resultvt=%u", (unsigned)res.vt);
+    else if (SUCCEEDED(hr)) printf(" resultvt=%u", (unsigned)res.vt);
+    /* Acct #305 SB185 (knife 77): a class field getter answers VT_I2 / VT_I1, and "a tag came back"
+     * is not the reading -- the two heads of that pin are which NUMBER landed. */
+    if (SUCCEEDED(hr) && (res.vt == VT_I2 || res.vt == VT_I1 || res.vt == VT_UI1))
+        printf(" num=%ld", (long)(res.vt == VT_I2 ? (long)res.iVal
+                    : (res.vt == VT_I1 ? (long)res.cVal : (long)res.bVal)));
     /* Acct #305 SB144: a Decimal reply used to print only "resultvt=14" -- the tag was
      * right while the value was garbage, which is exactly why this cell hid for so long.
      * Two locale-free readings: VT_CY (fixed point, 1/10000) and VT_I8. If oleaut32
@@ -105,6 +143,7 @@ static void call_member(IDispatch *disp, const wchar_t *name, VARIANT *argv, int
         }
     }
     printf("\n");
+    if (ei.bstrDescription) { SysFreeString(ei.bstrDescription); ei.bstrDescription = NULL; }
     VariantClear(&res);
     for (i = 0; i < argc; i++) VariantClear(&argv[i]);
 }
@@ -308,6 +347,31 @@ int main(int argc, char **argv) {
         aargs[0] = mk_sa_i4(av, 3);
         call_member(disp, L"EchoVal", aargs, 1, DISPATCH_METHOD, "ECHOARR");
     }
+    /* Acct #305 SB185 (knife 77): the IDispatch server used to have no error boundary at all, so
+     * a runtime error raised inside a VB body killed the CLIENT process (measured on both
+     * architectures: exit code 6 for an out-of-range Public Integer field store, 5 for a plain
+     * Err.Raise). These arms need a class publishing ci/cl plus the two Sub bodies; on any other
+     * fixture the names just answer NAMES=<tag> hr=0x80020006 and no earlier needle moves. */
+    call_member(disp, L"SeedLegal", args, 0, DISPATCH_METHOD, "SEED");
+    /* Every put sets its own argument immediately before the call: a shared args[] slot that is
+     * read after the previous call cleared it is a probe bug, not a product reading. */
+    call_member(disp, L"ci", args, 0, DISPATCH_PROPERTYGET, "GETSEED");
+    call_member(disp, L"cl", args, 0, DISPATCH_PROPERTYGET, "GETSEEDLONG");
+    args[0] = mk_i4(7);
+    call_member(disp, L"ci", args, 1, DISPATCH_PROPERTYPUT, "PUTLEGAL");
+    call_member(disp, L"ci", args, 0, DISPATCH_PROPERTYGET, "GETLEGAL");
+    args[0] = mk_i4(40000);
+    call_member(disp, L"ci", args, 1, DISPATCH_PROPERTYPUT, "PUTRANGE");
+    call_member(disp, L"ci", args, 0, DISPATCH_PROPERTYGET, "GETRANGE");
+    args[0] = mk_i4(40000);
+    call_member(disp, L"cl", args, 1, DISPATCH_PROPERTYPUT, "PUTLONG");
+    call_member(disp, L"cl", args, 0, DISPATCH_PROPERTYGET, "GETLONG");
+    args[0] = mk_i4(30000);
+    call_member(disp, L"cl", args, 1, DISPATCH_PROPERTYPUT, "PUTLONG2");
+    call_member(disp, L"cl", args, 0, DISPATCH_PROPERTYGET, "GETLONG2");
+    call_member(disp, L"BoomNoHandler", args, 0, DISPATCH_METHOD, "BOOM");
+    call_member(disp, L"HandledBoom", args, 0, DISPATCH_METHOD, "HANDLED");
+
     {
         DISPID id = DISPID_UNKNOWN;
         LPOLESTR names[1];

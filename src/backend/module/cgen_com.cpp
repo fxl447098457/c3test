@@ -387,11 +387,18 @@ void CCodeGen::emitClassFieldAccessors(Module& module) {
             fe.getLines.push_back("r = vb6_VariantBool(me->" + fld + " ? -1 : 0);");
             fe.letLines.push_back("me->" + fld + " = (value.lVal != 0) ? -1 : 0;");
         } else if (fvt == Vb6Type::Integer) {
+            // 账 #305 §B184: 写回收到的 `value.lVal` 恒是 int32, 存进比它窄的这一档
+            // 以前发的是裸 C cast ⇒ 40000 静默变 -25536, 而真 VB6 交 error 6 且保住
+            // 旧值。范围闸只从 narrowCheckFnForVbType 那一处答 (改前这条链根本不知道
+            // 有那张表); 闸的返回类型正是字段类型 (int16_t / uint8_t) ⇒ cast 一并撤掉。
+            // ⚠ Long / Boolean 两臂刻意不动: 前者源本就 32 位不截, 后者是归一不是截断。
             fe.getLines.push_back("r = vb6_VariantInt(me->" + fld + ");");
-            fe.letLines.push_back("me->" + fld + " = (int16_t)value.lVal;");
+            fe.letLines.push_back("me->" + fld + " = "
+                                  + narrowCheckFnForVbType(fvt, nullptr) + "(value.lVal);");
         } else if (fvt == Vb6Type::Byte) {
             fe.getLines.push_back("r = vb6_VariantByte(me->" + fld + ");");
-            fe.letLines.push_back("me->" + fld + " = (uint8_t)value.lVal;");
+            fe.letLines.push_back("me->" + fld + " = "
+                                  + narrowCheckFnForVbType(fvt, nullptr) + "(value.lVal);");
         } else if (fvt == Vb6Type::Long || fieldCT == "int32_t") {
             // (d) Long / 枚举 (mapTypeRef 对 EnumType 返回 int32_t, 底层即 Long)
             fe.getLines.push_back("r = vb6_VariantLong(me->" + fld + ");");

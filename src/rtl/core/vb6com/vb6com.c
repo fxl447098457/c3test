@@ -307,6 +307,34 @@ void vb6_ComCheckError(HRESULT hr, EXCEPINFO* excep, const wchar_t* context) {
 
     vb6_RaiseError(errNum, desc);
 }
+
+/* 账 #305 §B185: 「服务端这一趟进门失败了, 该交回什么形状」的答案。
+ *   上面 vb6_ComCheckError 是客户端的接收腿 (从 excep->scode 取错误号、接管 bstrDescription),
+ *   这一枚是它的镜像 —— 服务端的发腿。此前这一形状只有内置 Collection 一位主人 (coll_fail),
+ *   工程类的 IDispatch 服务端 (ComObj_Invoke) 压根没有出口: 服务端里没人接住的运行期错误会
+ *   直接把调用它的进程打死。两处从此都问这一枚, 不再各自抄一遍 0x800A0000|err。
+ * desc 由调用方给 (可以是 NULL): 服务端传 vb6_ErrDescription() —— 那是**借来的指针**, 这里
+ * SysAllocString 一份交出去, 所有权按接收腿那句 excep->bstrDescription = NULL 的既有约定转移。
+ * 不填 pExcepInfo 里没用的那三格就会把调用方的垃圾交给接收腿去 SysFreeString ⇒ 堆损坏,
+ * 所以这里把它们一律归零。
+ */
+HRESULT vb6_ComFailExcep(EXCEPINFO* pexcep, int32_t errNum,
+                         const wchar_t* desc, const wchar_t* fallback) {
+    if (pexcep) {
+        pexcep->scode = (SCODE)(0x800A0000u | (unsigned)(errNum & 0xFFFF));
+        pexcep->bstrSource = NULL;
+        pexcep->bstrHelpFile = NULL;
+        pexcep->dwHelpContext = 0;
+        /* 三级缺省:  raiser 自己带的那句(服务端传进来的 vb6_ErrDescription) -> 那张 VB 标准错误号
+         *  描述表 -> 调用方给的兜底。中间这一级不许跳: 没有 Err.Raise 描述的那一形(内在错误,
+         *  如服务端里 raise 的 5)在真 VB6 里交回的不是空串, 而是那一号的默认描述。
+         *  表交的是中文, 所以判据只钉 scode, 不钉这一句的字节。 */
+        if (!desc) desc = vb6_StdErrorDesc(errNum);
+        if (!desc) desc = fallback;
+        pexcep->bstrDescription = SysAllocString(desc ? desc : L"");
+    }
+    return DISP_E_EXCEPTION;
+}
 // C-style vtable helpers for IUnknown (avoid C++ IUnknown method call issues)
 // ============================================================
 HRESULT vb6_UnknownQI(void* obj, REFIID riid, void** ppv) {

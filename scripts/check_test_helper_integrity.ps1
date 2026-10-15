@@ -135,6 +135,11 @@ if ($ast5) {
     'ax_dll_dispatch_invoke'         = @(6, 6, 1)
     'cc_dll_dispatch_iface_only'     = @(7, 11, 1)
     'cc_dll_dispatch_iface_only_x86' = @(8, 11, 1)
+    # 账 #305 §B185 (第七十七刀): IDispatch 服务端进门那枚错误边界, 两台各一条真跑用例。
+    # 针面各写一份(见 run_tests.ps1 那两条的理由); x86 那格多出的两枚元素是 `-Arch "x86"`
+    # 这一对**命名**实参 —— AST 里它们各算一格 CommandElement, 所以是 8 而不是 7。
+    'b185_server_error_frame'        = @(6, 12, 1)
+    'b185_server_error_frame_x86'    = @(8, 12, 1)
 }
 $ds = @($ast5.FindAll({ param($n)
     $n -is [System.Management.Automation.Language.CommandAst] -and

@@ -1448,6 +1448,21 @@ function Test-AddressOfThunkSites {
     }
 }
 
+# 账 #305 §B185(第七十七刀): 服务端进门那趟的错误边界 + 交回形状只住一处
+function Test-ComServerErrorFrame {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] com_server_error_frame ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\check_com_server_error_frame.ps1" 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        $out | Select-Object -First 8 | ForEach-Object { Write-Host "  $_" }
+    }
+}
+
 # === 编译冒烟测试 (编译+链接, 不运行生成物) ===
 function Test-Run {
     param(
@@ -3416,6 +3431,64 @@ if ($Category -in @("all", "run", "bas")) {
         'me->pf = 40000;',
         'me->pf = 23456;',
         'vb6_ChkInt(me->cl)',
+        'me->cb = vb6_ChkInt'
+    )
+    # <vbeclipse> 账 #305 §B184（第七十五刀）：「这枚左值有多窄」那一问收成一张表、四站都问它。
+    # 改前这条问句在发码侧住两家：① 赋值站 narrowCheckAssign 自己手抄了一遍宽度 switch，
+    # ② COM 字段写回那条链压根不知道有这张表（`me->ci = (int16_t)value.lVal;` 是裸 C 截断）。
+    # 另一大片缺的是**接收者拼写出来**的那一族 —— narrowTargetTypeOf 的成员臂只认
+    # SymbolKind::UserDefinedType，于是 `Me.ci` / `h.ci`（类形参）/ `k.ci`（局部对象变量）/
+    # `With h : .ci` 四种拼法全落同一句裸存：40000 存进 int16_t 变 -25536，而真 VB6 交 error 6
+    # **且保住上一个合法值**（第七十四刀 §B183 只修了类内那个裸名拼法 ci = 40000）。
+    # 修法 = 表 narrowCheckFnForVbType（Byte/Integer/Long → 检查名 + 位宽，一处声明一处定义）
+    # + 字段档权威 classFieldKind（§B169 那趟工程级预扫描）+ §B170 同一条否决（类里有同名
+    # 方法/属性时这一句归属性那一路）；With 那一站补上同一个包装。⚠ Long / Boolean 两臂刻意不动：
+    # 前者源本就 32 位不截，后者是归一不是截断。
+    # BASE 读数（两台逐行相同，.build/k75_base_{x64,x86}/）= P1/P5/P3/P7/P13 一声不响、
+    # ci 读回 -25536、cb 读回 44、P12 读回 6（C 截断，VB6 是四舍五入）；修后：五处报 6、
+    # 三处读回保住上一次那个合法值、P12 = 7。证人 = P9/P9b（Long 字段不许被卷进新闸）、
+    # P10（Boolean 归一）、P15（同名属性仍走 prop_let = 否决生效）。
+    $b184Needles = @("C3ProbeB184-P0-seed=12345|200|7", "C3ProbeB184-P1-me-raised=6",
+        "C3ProbeB184-P2-ci-kept=12345", "C3ProbeB184-P5-with-raised=6",
+        "C3ProbeB184-P6-ci-kept2=12345", "C3ProbeB184-P3-mebyte-raised=6",
+        "C3ProbeB184-P4-cb-kept=200", "C3ProbeB184-P7-param-raised=6",
+        "C3ProbeB184-P8-ci-kept3=12345", "C3ProbeB184-P12-float-round=7",
+        "C3ProbeB184-P13-local-raised=6|1111", "C3ProbeB184-P15-prop=7",
+        "C3ProbeB184-P9-long-noerr", "C3ProbeB184-P9b-cl=40000",
+        "C3ProbeB184-P10-bool-noerr", "C3ProbeB184-DONE")
+    Test-Vbp 'b184_field_narrow' "$Tests\b184_fieldw\B184.vbp" $b184Needles
+    Test-Vbp 'b184_field_narrow_x86' "$Tests\b184_fieldw\B184.vbp" $b184Needles -Arch "x86"
+    # 发码针：前六枚 = 四条病形（Me. / With / 类形参 / 局部对象变量）+ COM 写回 + 浮点那一路
+    # 都上了表里那枚检查；后三枚 = 证人形状（Long、Boolean 字段仍是裸存，同名属性仍走 prop_let），
+    # 这两类在 BASE 与 NEW 都在场（钉「本刀不许把它们卷进来」的发码那一半）。
+    Test-EmitcShape 'b184_fieldw_shape' @(
+        "$Tests\b184_fieldw\B184Main.bas",
+        "$Tests\b184_fieldw\B184Holder.cls",
+        "$Tests\b184_fieldw\B184Peer.cls") @(
+        'me->ci  /* class var .ci field */ = vb6_ChkInt(40000);',
+        '_vb6_with_0->ci = vb6_ChkInt(40000);  /* With class field write */',
+        '(*h)->ci  /* class var .ci field */ = vb6_ChkInt(t);',
+        'k->ci  /* class var .ci field */ = vb6_ChkInt(40000);',
+        'me->ci = vb6_ChkInt(value.lVal);',
+        'me->ci  /* class var .ci field */ = vb6_ChkInt(vb6_FltToLng(d));',
+        'me->cl  /* class var .cl field */ = 40000;',
+        'me->bl  /* class var .bl field */ = 300;',
+        'vb6_B184Holder_prop_let_Pi(k, 7);'
+    )
+    # 反针：前六枚 = 病形本体（BASE 上各命中一次，NEW 全 0）；后两枚 = 过度形状的闸
+    # （Long 字段不许被挪进 ChkInt，Byte 字段那一档的答案也不许改成 ChkInt —— 那是把别的
+    # 宽度答案改嫁过来）。
+    Test-EmitcAbsent 'b184_fieldw_lesion' @(
+        "$Tests\b184_fieldw\B184Main.bas",
+        "$Tests\b184_fieldw\B184Holder.cls",
+        "$Tests\b184_fieldw\B184Peer.cls") @(
+        'me->ci  /* class var .ci field */ = 40000;',
+        'me->cb  /* class var .cb field */ = 300;',
+        '_vb6_with_0->ci = 40000;',
+        '(*h)->ci  /* class var .ci field */ = t;',
+        'k->ci  /* class var .ci field */ = 40000;',
+        'me->ci = (int16_t)value.lVal;',
+        'vb6_ChkInt(me->cl',
         'me->cb = vb6_ChkInt'
     )
 
@@ -6653,6 +6726,54 @@ if ($Category -in @("all", "run", "vbp")) {
         "DONE") @(
         "CALL=ADD") "{F5CEF988-3217-6173-94B7-BB99C4B8CB81}" "x86"
 
+    # 账 #305 §B185 (第七十七刀): IDispatch 服务端进门那趟的错误边界。
+    # 为什么这一格值得单独两条用例：改前 `ComObj_Invoke` 收下 pExcepInfo 却从不碰、invokeFunc 返回
+    # void、末尾无条件 return S_OK ⇒ 服务端里**任何**没人接住的运行期错误一路走到 vb6_RaiseError,
+    # 那里没帧 ⇒ 打一行 stderr 再 exit(错误号) —— **打死的是客户端进程**。两台实测(BASE):
+    #   越界写 Public Integer 字段 ⇒ probe exit=6；体里一句 Err.Raise 5 ⇒ probe exit=5。
+    # ⇒ 判据的形状是「一台进程活到底 + 十三行读数」：BASE 上第一臂 PUTRANGE 就把进程打死,
+    #   后面每一行都不存在, 所以这些针在 BASE 上必红（不需要反着写期望）。
+    # 针面：
+    #   - 两头 = 合法值经客户真落位(GETLEGAL num=7) + 越界不许静默截断(GETRANGE 读回**上一个**
+    #     合法值 7, 既不是 -25536 也不是 0)；GETSEED/GETSEEDLONG 先证种子真存进去过(防「空=空」蒙)。
+    #   - scode 必须单独钉：DISP_E_EXCEPTION 只说「服务端抛了一条 VB 错误」, 错误号住在
+    #     EXCEPINFO.scode —— 只比 hr 就等于把「hr 是 0x80020009」当结论(§B144 那条同形)。
+    #   - 证人身 = 三次 Long 档写(40000/30000)照落, 且 PUTLONG2 证「不是只有第一次生效」；
+    #     CALL=HANDLED hr=0 证新帧没抢走体里自己那枚 On Error(那一臂还会打 B185-handled-raised=5)。
+    #   - desc 只在 ASCII 那一形钉(Overflow)；Err.Raise 那一臂的描述来自那张中文表, 针面不碰字节。
+    # 针面两台各写一份(不提成变量): H5 那道哨兵按 AST 数「每条调用点自带的数组实参」,
+    # 提给变量它就只看得见一份, 与这一族既有形状(各自一份)不同形。
+    Test-DispatchInvoke "b185_server_error_frame" "$Tests\b185_srv\B185d.vbp" "B185d" `
+        "{11112222-3333-4444-5555-6666777788A0}" @(
+        "CALL=SEED hr=0x00000000",
+        "CALL=GETSEED hr=0x00000000 resultvt=2 num=12345",
+        "CALL=GETSEEDLONG hr=0x00000000 result=999",
+        "CALL=PUTLEGAL hr=0x00000000",
+        "CALL=GETLEGAL hr=0x00000000 resultvt=2 num=7",
+        "CALL=PUTRANGE hr=0x80020009 scode=0x800A0006 desc=Overflow",
+        "CALL=GETRANGE hr=0x00000000 resultvt=2 num=7",
+        "CALL=GETLONG hr=0x00000000 result=40000",
+        "CALL=GETLONG2 hr=0x00000000 result=30000",
+        "CALL=BOOM hr=0x80020009 scode=0x800A0005",
+        "CALL=HANDLED hr=0x00000000",
+        "DONE") @(
+        "CALL=PUTRANGE hr=0x00000000")
+    Test-DispatchInvoke "b185_server_error_frame_x86" "$Tests\b185_srv\B185d.vbp" "B185d" `
+        "{11112222-3333-4444-5555-6666777788A0}" @(
+        "CALL=SEED hr=0x00000000",
+        "CALL=GETSEED hr=0x00000000 resultvt=2 num=12345",
+        "CALL=GETSEEDLONG hr=0x00000000 result=999",
+        "CALL=PUTLEGAL hr=0x00000000",
+        "CALL=GETLEGAL hr=0x00000000 resultvt=2 num=7",
+        "CALL=PUTRANGE hr=0x80020009 scode=0x800A0006 desc=Overflow",
+        "CALL=GETRANGE hr=0x00000000 resultvt=2 num=7",
+        "CALL=GETLONG hr=0x00000000 result=40000",
+        "CALL=GETLONG2 hr=0x00000000 result=30000",
+        "CALL=BOOM hr=0x80020009 scode=0x800A0005",
+        "CALL=HANDLED hr=0x00000000",
+        "DONE") @(
+        "CALL=PUTRANGE hr=0x00000000") -Arch "x86"
+
     # --- ai/022 B17: 外部激活（注册 -> 系统那条路 -> 反注册后不留键）---
     # 上面两条走的是**进程内**独立客户端（LoadLibrary + DllGetClassObject，刻意不查注册表）；
     # 这两条走的是系统那条路：DllRegisterServer 真写注册表，再按 CLSID/ProgID 让 COM 自己去找
@@ -6880,6 +7001,7 @@ if ($Category -in @("all", "compile")) {
     Test-ComMarkerWriteSites
     Test-SetRhsObjectContext
     Test-UdtMemberDims
+    Test-ComServerErrorFrame
 
     Write-Host ""
 

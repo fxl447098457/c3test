@@ -1593,6 +1593,39 @@ Vb6Type CCodeGen::narrowTargetTypeOf(Expr* target) const {
         Vb6Type ft = inferUdtFieldVb6Type(target, &fldIsArray);
         if (fldIsArray) return Vb6Type::Unknown;
         if (ft == Vb6Type::Byte || ft == Vb6Type::Integer || ft == Vb6Type::Long) return ft;
+        // 账 #305 §B184 (第七十五刀): 上面那一问只认 `SymbolKind::UserDefinedType`
+        // (cgen_util_classtype.cpp:448-497), **类实例**的字段一条都不答 ⇒ 这一族的直接
+        // 存值从来没问过范围。探针 `.build/k75b_probe` 在 BASE 上实测四种接收者拼法全落
+        // 在同一条裸存站: `me->ci  /* class var .ci field */ = 40000;` / `h->ci … = t;` /
+        // `_vb6_with_0->ci = 40000;` / `(*h)->ci … = 40000;` ⇒ 40000 静默存成 -25536,
+        // 而真 VB6 交 error 6 且保住上一个合法值 (§B183 那一条腿只管**裸名**, 这四种拼法
+        // 走的是本分支, 所以那张按名表帮不上)。
+        // 这里补问 §B169 收成一处的那张工程级类字段表 —— 与 §B170 修**读**路同一枚问句、
+        // 同一枚否决 (`resolveClassMemberCall` 非空 = 这名字是方法/属性, 不许被字段答案
+        // 抢走: 类里 `Private m_ci` + `Property Let Ci()` 那种同族拼法正是它挡的)。
+        // 宿主名: 点号那一路交 `inferClassTypeOfExpr` (它已认 `Me` = 当前类模块,
+        // cgen_util_classtype.cpp:211-213); With 那一路的宿主类名在元信息栈里
+        // (winfo.className, Fix 011r-1, 只有类实例那一档非空 ⇒ 控件/COM/UDT 一档答案不动)。
+        // ⚠ 窗体模块的 `Me.<字段>` 仍交空 (inferClassTypeOfExpr 的 MeExpr 一支只认
+        //   isClassModule_) —— 与 §B170 同一口径, 记在案不并批。
+        {
+            std::string cls184;
+            std::string mem184;
+            if (target->kind == ASTNodeKind::MemberAccessExpr) {
+                auto& ma184 = static_cast<const MemberAccessExpr&>(*target);
+                if (ma184.object) cls184 = inferClassTypeOfExpr(*ma184.object);
+                mem184 = ma184.memberName;
+            } else if (!withObjectInfoStack_.empty()) {
+                cls184 = withObjectInfoStack_.back().className;
+                mem184 = static_cast<const WithMemberExpr&>(*target).memberName;
+            }
+            if (!cls184.empty() && !mem184.empty()
+                && resolveClassMemberCall(cls184, mem184).empty()) {
+                const Vb6Type ct184 = classFieldKind(cls184, mem184);
+                if (ct184 == Vb6Type::Byte || ct184 == Vb6Type::Integer
+                    || ct184 == Vb6Type::Long) return ct184;
+            }
+        }
         return Vb6Type::Unknown;
     }
 
@@ -1687,6 +1720,23 @@ Vb6Type CCodeGen::narrowTargetTypeOf(Expr* target) const {
     return inferExprType(*target);
 }
 
+// 账 #305 §B184 (第七十五刀): 窄整型那一族的**范围闸**只有这一张表。
+// 之前它抄在两处 —— 这里 (narrowCheckAssign 的 switch) 与 COM 字段写回路那一条按 VB 档
+// 排的链; 而**第二处根本不知道有这张表**, 它发的是裸 C cast:
+//   me->ci = (int16_t)value.lVal;   // 40000 静默存成 -25536, 真 VB6 交 error 6
+// 两位主人问的不是同一件事, 所以表只管闸名与位宽, 不管"套不套":
+//   ① 赋值路还比较**源**宽 (同宽的源套上去是恒真噪声), 所以取 bits;
+//   ② 写回路收到的值恒是 Variant 的 lVal (int32), 只要目标比它窄就会被截 ⇒ 一律套。
+// Long 那一档留着闸是给①的 (`l = 某 LongPtr` 在 x64 是 64 位源), ②不用它。
+const char* CCodeGen::narrowCheckFnForVbType(Vb6Type t, int* bits) const {
+    switch (t) {
+    case Vb6Type::Byte:    if (bits) *bits = 8;  return "vb6_ChkByte";
+    case Vb6Type::Integer: if (bits) *bits = 16; return "vb6_ChkInt";
+    case Vb6Type::Long:    if (bits) *bits = 32; return "vb6_ChkLong";
+    default:               if (bits) *bits = 0;  return nullptr;
+    }
+}
+
 std::string CCodeGen::narrowCheckAssign(Expr* target, Expr* value,
                                         const std::string& cValue) const {
     if (!target || cValue.empty()) return cValue;
@@ -1694,14 +1744,10 @@ std::string CCodeGen::narrowCheckAssign(Expr* target, Expr* value,
     // `kind != IdentifierExpr` 的闸门, 成员/数组元素两形因此整片不经检查)。
     Vb6Type tt = narrowTargetTypeOf(target);
 
-    const char* fn = nullptr;
+    // 账 #305 §B184: 闸名与位宽只从下面那张表答 (改前这里手抄一遍 switch)。
     int tgtBits = 0;
-    switch (tt) {
-    case Vb6Type::Byte:    fn = "vb6_ChkByte"; tgtBits = 8;  break;
-    case Vb6Type::Integer: fn = "vb6_ChkInt";  tgtBits = 16; break;
-    case Vb6Type::Long:    fn = "vb6_ChkLong"; tgtBits = 32; break;
-    default: return cValue;
-    }
+    const char* fn = narrowCheckFnForVbType(tt, &tgtBits);
+    if (!fn) return cValue;
 
     Vb6Type vt = value ? inferExprType(*value) : Vb6Type::Unknown;
     // 账 #248: 浮点源**必须在这一套检查之前先过那一份取整出口**。
