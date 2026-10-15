@@ -465,6 +465,10 @@ sha256=2a11e1ad37482d993f1805228f963bb1cc7d7f43469e2a9d386b2981435593a7 ascii256
 sha256=fb3aa00c3a7649cf663d3b221bdb2b77737f5cbc5242cee55a390c1a8b60bb18 ascii256=57731fe1e68a4cbb397a3999818401cdfc431070f7b405e490c00a2b869b6c20 rc=0 bytes=11052 tests/b186_srv/B186d.vbp
 sha256=2a11e1ad37482d993f1805228f963bb1cc7d7f43469e2a9d386b2981435593a7 ascii256=de0433b8ed574bc4fe13887a4f621818010d27c66cc7d66d7b84d53b1fecc116 rc=0 bytes=3447 tests/b186_srv/BoomMain.bas
 sha256=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 ascii256=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 rc=1 bytes=0 tests/b186_srv/DllBlocks.bas
+sha256=66456d9571f2c6577eb94a088d478f334863112dfcdfaf68cc63f3c35b73b7ac ascii256=fbe4a56fa5423e72badd32be8929a8d402ef888ef656964e2f476be492082c0e rc=0 bytes=7394 tests/b188_term/B188d.vbp
+sha256=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 ascii256=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 rc=1 bytes=0 tests/b188_term/DllBlocks.bas
+# 账 #305 §B188 (第八十刀判据): 新增 2 行 = tests/b188_term 那两枚输入, 哈希取 CI 为同一 head 33320a1d 自己交的 9c33fdca;
+#   本轮 RTL 只动 ComObj_Release 一处 ⇒ 438 枚存量行**一行没移动** (本机与 CI 两边同读数), 形状门只报「新增未登记」这一族。
 # 账 #305 §B184 (第七十五刀) 的登记来源：门 **#640**（run 38682492970、head 8000e440、attempt 1）= 12 job 里 10 绿 + 两条**预期**红（这道形状门报「存量 5 份哈希不同 + 新增 2 份没登记」、`Tests (compile)` 里同源那句 [STATIC] manifest_coverage）。新增的两行 = 本刀夹具 `tests/b184_fieldw/{B184.vbp,B184Main.bas}`；移动的两行归本刀（Charts 2020/Proyecto1.vbp 31 处、b183_intfield/B183.vbp 2 处，逐行都是 `me-><f> = (int16_t|uint8_t)value.lVal;` → `= vb6_ChkInt|ChkByte(value.lVal);`）。**另外三行移动不是本刀**（ucTreeMaps/Proyecto1.vbp、VBFlexGridDemo/Common/VisualStyles.bas、VBFlexGridDemo/VBFlexGridDemo.vbp）：用「只含本刀、不含 merge」那一对编译器（C3_k74new vs C3_k75new，md5 d74d8b3b/2a24013d）并排重发这三份，移动行数 = 0，而本刀那两份移动 31/2 行 —— 所以这三行是 `a6b05e7d` 带进来的别人那两笔欠的登记，按 CI 为同一个 head 自己交的清单（github/ci/emit-manifest 的 7dea8d25）一并落账。
 # 账 #305 §B174 (第六十五刀) 登记: 数值实参交进 VB 的字符串形参 ⇒ 隐式 CStr 这条规则收成一位站点 (新增 b174 两行; 数字取自 CI head=e78e3bee 自己交的清单)
 #   b174 两行的哈希相同 = B174.vbp 里只有 B174Main 这一份模块, --emit-c 两条入口发的就是同一份 C
