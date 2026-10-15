@@ -325,6 +325,11 @@ HRESULT vb6_ComFailExcep(EXCEPINFO* pexcep, int32_t errNum,
         pexcep->bstrSource = NULL;
         pexcep->bstrHelpFile = NULL;
         pexcep->dwHelpContext = 0;
+        /* 三级缺省:  raiser 自己带的那句(服务端传进来的 vb6_ErrDescription) -> 那张 VB 标准错误号
+         *  描述表 -> 调用方给的兜底。中间这一级不许跳: 没有 Err.Raise 描述的那一形(内在错误,
+         *  如服务端里 raise 的 5)在真 VB6 里交回的不是空串, 而是那一号的默认描述。
+         *  表交的是中文, 所以判据只钉 scode, 不钉这一句的字节。 */
+        if (!desc) desc = vb6_StdErrorDesc(errNum);
         if (!desc) desc = fallback;
         pexcep->bstrDescription = SysAllocString(desc ? desc : L"");
     }
