@@ -149,11 +149,11 @@ if ($ast5) {
     # Needles 6 / Absent 1 (「Unhandled error」当反面证人) / -Tail 1 枚 CREATE= 臂
     'b188_terminate_error_frame'          = @(8, 6, 1, 1)
     'b188_terminate_error_frame_x86'     = @(10, 6, 1, 1)
-    # 账 #305 §B187 第二腿 + 第四腿 + 第五腿 (八十三刀装箱 / 八十四刀实参那一站 / 第八十五刀 ByRef 那座桥): 两架构真跑格。
-    # 位置面 8 (+2 = -Arch), Needles 7 / Absent 3 (装箱腿 / 实参站 / ByRef 桥 三处各留一枚"没落地就回来"的数)
-    # / -Tail 1 枚 CREATE= 臂 (5 个 CLSID 写在同一条里)
-    'b187_boxed_object_slot'                    = @(8, 7, 3, 1)
-    'b187_boxed_object_slot_x86'               = @(10, 7, 3, 1)
+    # 账 #305 §B187 第二腿 + 第四腿 + 第五腿 (八十三刀装箱 / 八十四刀实参那一站 / 第八十五刀 ByRef 那座桥 / 八十六刀 TypeName 认包装器): 两架构真跑格。
+    # 位置面 8 (+2 = -Arch), Needles 8 / Absent 4 (装箱腿 / 实参站 / ByRef 桥 / 类名那一问 四处各留一枚"没落地就回来"的数)
+    # / -Tail 1 枚 CREATE= 臂 (6 个 CLSID 写在同一条里)
+    'b187_boxed_object_slot'                    = @(8, 8, 4, 1)
+    'b187_boxed_object_slot_x86'               = @(10, 8, 4, 1)
 }
 $ds = @($ast5.FindAll({ param($n)
     $n -is [System.Management.Automation.Language.CommandAst] -and

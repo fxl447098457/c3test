@@ -36,14 +36,21 @@
 #       (ByVal 那一档) 与 bridgeByRefLateSlotArg (ByRef 那一档) —— 两边少一个就会互相吃进来;
 #       Set 那一站必须还问 lateBoundSlotTarget 并给登记表写 boxedHere。
 #   B6  夹具与两架构的真跑格都在: tests/b187_box/B187d.vbp 与 B187Arg.cls (第四臂 = 实参那一站)、
-#       B187Ref.cls (第五臂 = ByRef 那座桥) 存在, run_tests.ps1 里 b187_boxed_object_slot 恰好
-#       2 处 (x64 + x86)、CREATE4MEM 与 CREATE5MEM 各恰好 4 处 (每臂各一条正针 + 一条反面证人)。
+#       B187Ref.cls (第五臂 = ByRef 那座桥)、B187Name.cls (第六臂 = TypeName 认包装器) 存在,
+#       run_tests.ps1 里 b187_boxed_object_slot 恰好 2 处 (x64 + x86)、CREATE4MEM / CREATE5MEM
+#       / CREATE6MEM 各恰好 4 处 (每臂各一条正针 + 一条反面证人)。
 #   B7  ByRef 那座桥的**两句发码只许住在一处** (第五腿): `bridgeByRefLateSlotArg(` 恰好 4 处 =
 #       声明 1 + 定义 1 + 站点 2; 进场临时量名 `_vb6_latebox` 与剥回临时量名 `_vb6_lateunbox`
 #       各恰好 1 处且都在定义体内; 剥回那一腿的 `c_.addPostLine` 在本文件里恰好 1 处 (别处再挂
 #       一条就是第二条退路)。「这枚**值**是不是包装器」= vb6_ComObject_IsBoxed: src/backend 恰好
-#       2 处 (桥的两端各一, 都在定义体内) 且 src/rtl 恰好 2 处 (声明 1 + 定义 1) —— 多一处就是
-#       有人绕过 deref 三闸自己去读首字段 (GetInstance 那条 0x20404 崩记录的同族)。
+#       2 处 (桥的两端各一, 都在定义体内) 且 src/rtl 恰好 3 处 (声明 1 + 定义 1 + 类名那一问 1,
+#       见 B8) —— 多一处就是有人绕过 deref 三闸自己去读首字段 (GetInstance 那条 0x20404 崩记录的同族)。
+#   B8  「这枚包装器是哪一枚工程类」(§B189 第一档, 第八十六刀) 只许一处定义、一处消费:
+#       vb6_ComObject_ClassNameBStr 在 src/rtl 恰好 4 处 = 出口声明 1 + 定义 1 + 消费方 extern 1
+#       + 调用 1; 在 src/backend 必须 0 处 —— 类名是运行期的值, 发码侧不许自己再拼这一问 (那等于把
+#       那张 512 格反查表重新拉来当运行期读者)。且 vb6rtl_conv.c 里它那一行必须排在
+#       vb6_Host_TypeNameOf **之后**: 宿主 (窗体 / 控件) 那一问在前是硬口径, 倒了就把 tests/setobj
+#       钉着的 TextBox / CheckBox 两枚针改错。
 #
 # 用法:  pwsh -File scripts\check_object_slot_boxing.ps1
 # 退出码: 0 = 全绿; 1 = 红
@@ -166,7 +173,7 @@ if ($nPost -ne 1) { $script:bad += ("B7 桥里的 addPostLine = $nPost (要 1: �
 $nIsBoxed = Count-InFiles "src\backend" $srcExts "vb6_ComObject_IsBoxed"
 $nIsBoxedRtl = Count-InFiles "src\rtl" $srcExts "vb6_ComObject_IsBoxed"
 if ($nIsBoxed -ne 2) { $script:bad += ("B7 src/backend 问 vb6_ComObject_IsBoxed = $nIsBoxed (要 2: 桥的两端各一)") }
-if ($nIsBoxedRtl -ne 2) { $script:bad += ("B7 src/rtl 的 vb6_ComObject_IsBoxed = $nIsBoxedRtl (要 2: 声明 1 + 定义 1)") }
+if ($nIsBoxedRtl -ne 3) { $script:bad += ("B7 src/rtl 的 vb6_ComObject_IsBoxed = $nIsBoxedRtl (要 3: 声明 1 + 定义 1 + 类名那一问 1)") }
 
 # B6
 if (-not (Test-Path -LiteralPath (Join-Path $root "tests\b187_box\B187d.vbp"))) {
@@ -178,6 +185,9 @@ if (-not (Test-Path -LiteralPath (Join-Path $root "tests\b187_box\B187Arg.cls"))
 if (-not (Test-Path -LiteralPath (Join-Path $root "tests\b187_box\B187Ref.cls"))) {
     $script:bad += "B6 缺第五臂夹具 tests/b187_box/B187Ref.cls (ByRef 那座桥)"
 }
+if (-not (Test-Path -LiteralPath (Join-Path $root "tests\b187_box\B187Name.cls"))) {
+    $script:bad += "B6 缺第六臂夹具 tests/b187_box/B187Name.cls (TypeName 认包装器)"
+}
 $rtTxt = Text-Of "tests\run_tests.ps1"
 $nCells = @([regex]::Matches($rtTxt, "b187_boxed_object_slot")).Count
 if ($nCells -ne 2) { $script:bad += ("B6 b187_boxed_object_slot 在 run_tests.ps1 里 = $nCells (要 2: x64 + x86)") }
@@ -185,12 +195,38 @@ $nArm4 = @([regex]::Matches($rtTxt, "CREATE4MEM")).Count
 if ($nArm4 -ne 4) { $script:bad += ("B6 CREATE4MEM 在 run_tests.ps1 里 = $nArm4 (要 4: 两架构各一正针 + 一反面证人)") }
 $nArm5 = @([regex]::Matches($rtTxt, "CREATE5MEM")).Count
 if ($nArm5 -ne 4) { $script:bad += ("B6 CREATE5MEM 在 run_tests.ps1 里 = $nArm5 (要 4: 两架构各一正针 + 一反面证人)") }
+$nArm6 = @([regex]::Matches($rtTxt, "CREATE6MEM")).Count
+if ($nArm6 -ne 4) { $script:bad += ("B6 CREATE6MEM 在 run_tests.ps1 里 = $nArm6 (要 4: 两架构各一正针 + 一反面证人)") }
+
+# B8 — TypeName 认自家包装器 (§B189 第一档): 一处出口、一处消费, 且排在宿主那一问之后
+$convRel = "src\rtl\core\vb6rtl\vb6rtl_conv.c"
+$nClsRtl = Count-InFiles "src\rtl" $srcExts "vb6_ComObject_ClassNameBStr"
+$nClsBackend = Count-InFiles "src\backend" $srcExts "vb6_ComObject_ClassNameBStr"
+if ($nClsRtl -ne 4) {
+    $script:bad += ("B8 vb6_ComObject_ClassNameBStr 在 src/rtl = $nClsRtl (要 4: 出口声明 1 + 定义 1 + extern 1 + 调用 1)")
+}
+if ($nClsBackend -ne 0) { $script:bad += ("B8 发码侧自己拼了类名那一问 = $nClsBackend (要 0: 类名是运行期的值)") }
+$convLines = (Text-Of $convRel) -split "`r?`n"
+$iHost = -1
+$iCls = -1
+for ($i = 0; $i -lt $convLines.Count; $i++) {
+    $t = $convLines[$i].TrimStart()
+    if ($t.StartsWith("//") -or $t.StartsWith("*")) { continue }
+    if ($iHost -lt 0 -and $convLines[$i].Contains("vb6_Host_TypeNameOf")) { $iHost = $i }
+    if ($iCls -lt 0 -and $convLines[$i].Contains("vb6_ComObject_ClassNameBStr(v.pdispVal)")) { $iCls = $i }
+}
+if ($iHost -lt 0) { $script:bad += "B8 找不到宿主那一问 vb6_Host_TypeNameOf (消费点被搬走了)" }
+if ($iCls -lt 0) { $script:bad += "B8 找不到类名那一问的调用点 (消费点被搬走了)" }
+if ($iHost -ge 0 -and $iCls -ge 0 -and $iHost -gt $iCls) {
+    $script:bad += ("B8 类名那一问排到了宿主那一问之前 (类名行 $iCls < 宿主行 $iHost) —— 控件那一档会被改错")
+}
 
 if ($script:bad.Count -eq 0) {
     Write-Host ("PASS boxing-emits=1 stations=3 borrowed-refs=5 coclass-predicate-sites=" + $nUse `
         + " wrapper-ask-sites=" + $nAsk + " registry-ins=" + $nIns + " erase=" + $nErase `
         + " bridge-sites=" + $nBridge + " boxed-value-asks=" + $nIsBoxed + "/" + $nIsBoxedRtl `
-        + " cells=" + $nCells + " arm4=" + $nArm4 + " arm5=" + $nArm5) -ForegroundColor Green
+        + " cells=" + $nCells + " arm4=" + $nArm4 + " arm5=" + $nArm5 + " arm6=" + $nArm6 `
+        + " classname-rtl=" + $nClsRtl + " classname-backend=" + $nClsBackend + " order=" + $iHost + "<" + $iCls) -ForegroundColor Green
     exit 0
 }
 foreach ($b in $script:bad) { Write-Host ("FAIL " + $b) -ForegroundColor Red }
