@@ -20,6 +20,7 @@ extern int32_t vb6_ErrNumber(void);
 extern BSTR vb6_ErrDescription(void);   /* 借来的指针, 交出去前要自己拷一份 (见 vb6_ComFailExcep) */
 extern HRESULT vb6_ComFailExcep(EXCEPINFO* pexcep, int32_t errNum,
                                 const wchar_t* desc, const wchar_t* fallback);
+extern HRESULT vb6_ComVbHresult(int32_t errNum);  /* §B186: 类工厂那一趟的交回形状 (定义在 vb6com.c) */
 
 /* [PROBE189] 临时探针: 包装器引用计数轨迹 (C3_COM_RC_TRACE=1 时输出到 stderr) */
 #include <stdio.h>
@@ -351,16 +352,52 @@ static const vb6_IDispatchVtable g_ComObjectVtable = {
 };
 
 // Create VB6 COM object
-vb6_ComObject* vb6_ComObject_Create(const vb6_CoClassDesc* desc) {
-    if (!desc || !desc->factoryFunc) return NULL;
+vb6_ComObject* vb6_ComObject_Create(const vb6_CoClassDesc* desc, HRESULT* pFailHr) {
+    if (!desc || !desc->factoryFunc) {
+        if (pFailHr) *pFailHr = CLASS_E_CLASSNOTAVAILABLE;
+        return NULL;
+    }
     
     vb6_ComObject* obj = (vb6_ComObject*)CoTaskMemAlloc(sizeof(vb6_ComObject));
-    if (!obj) return NULL;
+    if (!obj) {
+        if (pFailHr) *pFailHr = E_OUTOFMEMORY;
+        return NULL;
+    }
     
     obj->vtable = &g_ComObjectVtable;
     obj->refCount = 1;
     obj->desc = desc;
-    obj->vb6Instance = desc->factoryFunc();  // Call vb6_cls_<Name>_New()
+    obj->vb6Instance = NULL;
+    /* 账 #305 §B186 (第七十八刀): 服务端进门的**第二站** —— 下面这一步走进 VB 代码, 而且走的是
+     * Class_Initialize (§B185 那一趟是方法/属性/字段那三类)。它过去同样没有错误边界: 体里没人接住
+     * 的运行期错误一路走到 vb6_RaiseError, 那里没有帧 ⇒ 打一行 stderr 再 exit(错误号), 把**客户端**
+     * 进程打死 (两台实测一枚只写 Err.Raise 7 的类 = RC=7, CREATE 那一行根本没打出来)。
+     * 帧的登记顺序照 cgen 的 On Error GoTo 协议 (先 setjmp, 成功后再登记 ptr/set/active 并清
+     * resume_next), 于是体里自己写了 On Error 的那些照常由体接住、照旧构造成功。
+     * 交回形状只能编进 HRESULT: IClassFactory::CreateInstance 的签名里没有 EXCEPINFO 通道,
+     * 所以「造」那一问问 vb6_ComVbHresult (vb6com.c, §B185 已在用同一枚答案), 不在这里抄形状。
+     * 回收只到 obj 为止: 类实例指针是 factoryFunc 的返回值, 抛错时永远拿不到, 要回收它得动类工厂
+     * 的发码 —— 那是另一问, 已另立 §B187 登记读数。 */
+    int32_t srvErrNum = 0;
+    {
+        jmp_buf srvJmpC;
+        vb6_SaveErrState();
+        if (setjmp(srvJmpC) != 0) {
+            srvErrNum = vb6_ErrNumber();
+        } else {
+            vb6_error_jmp_ptr = &srvJmpC;
+            vb6_error_jmp_set = 1;
+            vb6_err_jmp_active = 1;
+            vb6_err_resume_next = 0;
+            obj->vb6Instance = desc->factoryFunc();  // Call vb6_cls_<Name>_New()
+        }
+        vb6_RestoreErrState();
+    }
+    if (srvErrNum) {
+        CoTaskMemFree(obj);
+        if (pFailHr) *pFailHr = vb6_ComVbHresult(srvErrNum);
+        return NULL;
+    }
     P189("[189] CREATE W=%p inst=%p cls=%s\n", (void*)obj, (void*)obj->vb6Instance,
          desc->classVariable ? desc->classVariable : "?");
     obj->ownsInstance = 1;  // Fix 188: 类工厂创建的实例归客户端所有
@@ -374,6 +411,7 @@ vb6_ComObject* vb6_ComObject_Create(const vb6_CoClassDesc* desc) {
     
     if (!obj->vb6Instance) {
         CoTaskMemFree(obj);
+        if (pFailHr) *pFailHr = E_OUTOFMEMORY;
         return NULL;
     }
     

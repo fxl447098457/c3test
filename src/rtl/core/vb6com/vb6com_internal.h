@@ -44,6 +44,12 @@ const wchar_t* vb6_StdErrorDesc(int32_t errNum);
 // 两位主人: 内置 Collection 的 coll_fail 与工程类的 ComObj_Invoke。
 HRESULT vb6_ComFailExcep(EXCEPINFO* pexcep, int32_t errNum,
                          const wchar_t* desc, const wchar_t* fallback);
+// 账 #305 §B185/§B186: 「VB 错误号 <-> 交回服务边界的 HRESULT」这一问的唯一答案 (定义在 vb6com.c)。
+// 造: vb6_ComFailExcep 填 scode + 类工厂那趟 (没有 EXCEPINFO 通道, 只能把号编进 hr)。
+// 认: vb6_ComCheckError 所在的转换腿 + vb6_CreateObject 那条 create 腿。认不出那一档答 0,
+// 调用方据此分得开「服务端里 raise 的一条」与「真·激活失败」。
+HRESULT vb6_ComVbHresult(int32_t errNum);
+int32_t vb6_ComVbErrFromHr(HRESULT hr);
 
 
 // IUnknown 的 C 风格 vtable 辅助 (避免 C++ IUnknown 方法调用问题)

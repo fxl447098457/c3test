@@ -142,7 +142,11 @@ typedef struct vb6_IDispatchVtable {
 } vb6_IDispatchVtable;
 
 // 创建VB6 COM对象 (包装VB6实例为IDispatch)
-vb6_ComObject* vb6_ComObject_Create(const vb6_CoClassDesc* desc);
+// 账 #305 §B186: 这一步会走进类体的 Class_Initialize, 所以它自带一枚错误边界 ——
+// pFailHr 交回「这一趟进门失败该给客户端哪个 HRESULT」: 体里没人接住的运行期错误折成
+// 0x800A0000|错误号 (这一条通道没有 EXCEPINFO), 真·分配失败交回 E_OUTOFMEMORY, 认不出
+// 的档不许冒充前者。成功时不动 *pFailHr。可传 NULL (调用方不关心失败形状)。
+vb6_ComObject* vb6_ComObject_Create(const vb6_CoClassDesc* desc, HRESULT* pFailHr);
 
 // Fix 099: 包装一个**已存在**的 VB6 类实例 (不调 factoryFunc).
 // 用于 Public 对象字段 getter —— 字段实例在类内部创建, 是裸结构体指针.
