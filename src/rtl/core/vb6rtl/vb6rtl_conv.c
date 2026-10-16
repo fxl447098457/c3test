@@ -45,6 +45,7 @@ extern void* vb6_ComGetProp(void* disp, const wchar_t* propName);
 extern void vb6_ComSetProp(void* disp, const wchar_t* propName, void* value);
 extern void vb6_ComSetRef(void* disp, const wchar_t* propName, void* objRef);
 extern void vb6_ComInit(void);
+extern BSTR vb6_ComObject_ClassNameBStr(void* v);   /* 账 #305 §B189: vb6comserver 那一族, 认不出交 NULL */
 extern void vb6_ComExit(void);
 
 // ============================================================
@@ -475,10 +476,29 @@ static const wchar_t* vb6_TypeNameScalar(int32_t vt) {
 }
 
 BSTR vb6_TypeName(vb6_VARIANT v) {
+    /* 账 #305 §B189 第二格 (第八十七刀): 「一枚不指向任何对象的对象变量」VB6 答 **Nothing**,
+     * 而这一支改前根本没人答 —— 值是 NULL 时下面那一整段宿主 / 类名那一问都进不去 (它们的
+     * 条件写着 `&& v.pdispVal`), 于是落进 vb6_TypeNameScalar 按 VT_DISPATCH 交 "Object"
+     * (三形两台同读数: typed 变量从没 Set /
+     * `As Object` 从没 Set / Set 过又置回 Nothing, 尺 .build/k93_t 的 B/C/D 三臂都交 42060)。
+     * 真语料有 8 处拿这句当守卫 (`While TypeName(Node) <> "Nothing"` 一族 + 两处空对象守卫,
+     * 清单 .build/k93_nothing_sites.txt) ⇒ 恒不等就是走错那一支, 不是外观。
+     * 只吃这一格: VT_EMPTY 照旧答 "Empty" (同一台实测那一臂 42051 已经对, 别顺手动它)。 */
+    if (v.vt == vb6_vtDispatch && !v.pdispVal) return vb6_BSTR_FromStr(L"Nothing");
     /* Fix 112: 宿主对象 (窗体/控件 HWND, Controls 集合, Font) 返回 VB6 类型名 */
     if (v.vt == vb6_vtDispatch && v.pdispVal) {
         const wchar_t* hostName = vb6_Host_TypeNameOf(v.pdispVal);
         if (hostName) return vb6_BSTR_FromStr(hostName);
+        /* 账 #305 §B189 第一档: 自家那枚 vb6_ComObject 包装器 —— VB6 的 TypeName 对工程内
+         * 类实例答**类模块名**, 而 vb6_TypeNameScalar 按 VT_DISPATCH 只会答 "Object"
+         * (实测基线: `Set v = <工程实例>` 之后 TypeName(v) = "Object", 两台同读数)。
+         * 顺序是硬口径: 宿主那一问 (窗体 / 控件 HWND) 必须仍排在前面 —— tests/setobj 里两枚
+         * 现成门禁针钉的就是 `TypeName(o) = "TextBox"` 与 `TypeName(v) = "CheckBox"`, 插队就
+         * 把控件那一档改错。刻意留白的另两档 (同一台实测都还答 "Object"): 裸工程实例
+         * (那该问编译期的声明档, 不该把那张 512 格反查表拉来当运行期读者 —— 那条口径待拍)、
+         * 外部 IDispatch (VB6 答 "Dictionary", 要另开 ITypeInfo 那条腿)。 */
+        { BSTR vb6_clsName = vb6_ComObject_ClassNameBStr(v.pdispVal);
+          if (vb6_clsName) return vb6_clsName; }
     }
     /* 账 #305 §B155 格②（第四十六刀）: 数组那一支以前压根没有 —— 8204 落 default 答 "Variant"。
        VB6 答 "<元素名>()"（String 数组 "String()"、Variant 数组 "Variant()"）。元素名问上面那张表。 */

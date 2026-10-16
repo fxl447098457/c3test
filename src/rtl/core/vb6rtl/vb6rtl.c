@@ -674,6 +674,28 @@ void vb6_RestoreErrState(void) {
     }
 }
 
+// 账 #305 §B188 (第九十刀): 一截 VB 体跑在自己带的帧里, 抛出来的号交回调用方(声明见 vb6rtl_array.h)。
+// 登记顺序照 §B188 第八十刀那三行协议: 先 setjmp, 成功了才登记帧 —— 体里自己写了 On Error 的照常由
+// 体接住, 走到这里的是真没人管的那一类。Save/Restore 只管帧那一族, 不动 vb6_err 的内容, 所以返回时
+// 号与描述都还在 Err 里, 调用方要交回去不必另存。
+int32_t vb6_RunVbProtected(void (*body)(void*), void* me) {
+    jmp_buf frame;
+    int32_t thrown = 0;
+    if (!body) return 0;
+    vb6_SaveErrState();
+    if (setjmp(frame) != 0) {
+        thrown = vb6_ErrNumber();
+    } else {
+        vb6_error_jmp_ptr = &frame;
+        vb6_error_jmp_set = 1;
+        vb6_err_jmp_active = 1;
+        vb6_err_resume_next = 0;
+        body(me);
+    }
+    vb6_RestoreErrState();
+    return thrown;
+}
+
 int32_t vb6_ErrNumber(void) { return vb6_err.number; }
 BSTR vb6_ErrDescription(void) { return vb6_err.description; }
 // Fix <vbeclipse> 2026-10-06: Err.Clear 清空 **全部** 属性 —— 含 LastDllError。

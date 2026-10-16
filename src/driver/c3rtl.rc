@@ -1,4 +1,29 @@
 // c3rtl.rc - RTL runtime library embedded as resources
+// 2026-10-15 (账 #305 §B188, 第八十刀): ComObj_Release 的出厂那条腿 (destroyFunc 与
+//   instanceClaimRelease 两处) 以前是本文件三站里唯一没接错误边界的一站 —— 体里没人接住的
+//   错走到 vb6_RaiseError, 那里没帧 ⇒ 打一行 stderr 再 ExitProcess(错误号), 把正在放手的
+//   **客户端进程**打死 (x64 实测一枚 terminate 里只写 Err.Raise 234 的类 = 探针 exit=234,
+//   后面那枚干净对象的 CREATE=2 与 DONE 都没打出来)。现在两腿套同一枚帧, 失败只往 stderr
+//   记一条带号诊断, 包装器照常拆、引用计数照常交回。
+//   为什么这里不能像 §B186 那样把号编进返回值: Release 交回的是 ULONG, 也没有 EXCEPINFO,
+//   动它 = 破坏 COM 契约 ⇒ 号交不回任何人 (§B188 出路 b「写进进程级 Err」另开一格)。
+//   改的是 RTL 行为面 (只影响 terminate 真抛错那一路, 存量工程里该路 0 处 ⇒ 产品产物不变),
+//   发码一行没动 ⇒ emit 清单不该移动; 下面 §B187 那两条注脚照旧有效。
+// 2026-10-15 (账 #305 §B187 第二格, 第八十一刀): 登记腿改成只在 ActiveX 那一档发 (后端读 isDll_),
+//   非 ActiveX 工程从此不喂这张表 —— 零行为改动 (读者 0 枚), 动的是发码; 本轮 RTL 只改注释两处:
+//   ① 那张表头部订正掉「EXE 里没 CoClass 块 ⇒ 实例没进表」那句被 com_entry.c 推翻的解释, 记下拍定的
+//   分档口径; ② vb6_ComObject_FromInstance 头上那句「__comObj 只在 DLL 工程生成」自 ExeComBridge 01
+//   起就是错的, 一并订正。下面第一格那条注脚照旧有效, 不动它。
+// 2026-10-15 (账 #305 §B187 第一格, 第七十九刀): 工程类那张 512 格登记表上「扫到哪儿」这一问以前
+//   有两个答案 —— 登记腿那圈只按 g_vb6_projClassCount 走, 查表腿那圈另外夹住 VB6_PROJCLASS_MAX; 而计数
+//   是在夹界检查**之前**自增、放弃登记那一路不回退 ⇒ 计数无上界, 从第 514 枚实例起登记腿就在读数组外面
+//   的相邻静态数据(巧合命中时还会往外面写)。现在两圈都只问一枚 vb6_ProjClassScanLimit()。零行为改动:
+//   表没满时两圈的答案与改前一字不差。顺带把那句「命中后还要用 vb6_ProjClassVerify 复核(见
+//   vb6com_invoke.c 的分派处)」订正成实情 —— 那两个名字在整棵树与全部历史里都不存在, 查表的读者一直是
+//   0 枚。撤掉整格、还是反过来把读者接上(= 台账 W2/#64 工程内对象走晚绑定那一问)属口径待拍, 本刀不并;
+//   读数已经把「接上」单独这条路挡掉一半: EXE 里没有 CoClass 块 ⇒ vb6_FindCoClassDesc 恒 NULL ⇒ 那声
+//   if (_d) 把工程内实例挡在表外, 而 Set v = <工程内对象> 之后整面成员空答且 Err=0(两台逐行相同,
+//   .build/k79_late/)。哨兵 scripts/check_projclass_scan_bound.ps1 钉「两圈同一问、答案只住一处」。
 // 2026-10-15 (账 #305 §B186, 第七十八刀): 上一格记下「Class_Initialize 里 raise 也 RC=5, 那一站
 //   今天仍没接」—— 本刀接的就是那一站。`IClassFactory::CreateInstance` → `vb6_ComObject_Create`
 //   → `desc->factoryFunc()` 是服务端走进 VB 代码的**第二处**进门点, 它同样没有错误边界:
@@ -651,3 +676,37 @@
  *   再补 §B162 那一臂（同批）：vb6_VariantBorrowIntoSlot 遇到真 SAFEARRAY 现在换成我们自己的描述符
  *   （拷，白名单与出站同一张；认不出的档交回 vtEmpty），服务端 free 槽阵列前经 vb6_VariantSlotRelease 回收。
  *   touch 本文件 = 让 125 份 RCDATA 重嵌一次（§B99②）。 */
+
+
+/* 账 #305 §B187 第五腿（2026-10-16 第八十五刀）：vb6comserver 多一枚出口
+ *   vb6_ComObject_IsBoxed —— 「这枚指针是不是我们自家的包装器」：三闸 IsWindow /
+ *   IsBadReadPtr / 首字段身份，判据与 vb6_ComIsDispatchable 同族，但答的是身份而不是"像不像"。
+ *   调用点是 cgen 新落的那座桥（ByRef 泛对象形参：调用前就地装箱、调用后剥回），它拿到的是
+ *   "一枚槽里此刻装着什么"，可能是裸 HWND，所以 deref 之前必须先证明可读。
+ *   touch 本文件 = 让 RCDATA 重嵌一次（§B99②）。 */
+
+
+/* 账 #305 §B189 第一档（2026-10-16 第八十六刀）：vb6comserver 再多一枚出口
+ *   vb6_ComObject_ClassNameBStr —— 「这枚包装器是哪一枚工程类」，交 desc->classVariable
+ *   （类模块名）；只认 vb6_ComObject_IsBoxed 说"是"的值，其余交 NULL。
+ *   消费点一处 = vb6rtl_conv.c 的 vb6_TypeName 在 VT_DISPATCH 那一支、排在宿主那一问之后
+ *   （tests/setobj 两枚针钉着控件名那一档，顺序不许倒）。
+ *   touch 本文件 = 让 RCDATA 重嵌一次（§B99②）。 */
+
+
+/* 账 #305 §B189 第二格（2026-10-16 第八十七刀）：vb6rtl_conv.c 的 vb6_TypeName 多一支
+ *   「一枚对象变量但不指向任何对象」（VT_DISPATCH 且 pdispVal == NULL）→ 交 "Nothing"，
+ *   改前那一格落进标量表按 VT_DISPATCH 答 "Object"（真语料 8 处拿它当守卫）。
+ *   只吃这一支：VT_EMPTY 照旧答 Empty，宿主那一问与 §B189 第一档那两问的位置没动。
+ *   touch 本文件 = 让 RCDATA 重嵌一次（§B99②）。 */
+/* 账 #305 §B188 第九十刀 (2026-10-16): 新 RTL 出口 vb6_RunVbProtected —— 把一截 VB 体跑在
+ *   自己带着的错误帧里, 交回抛出来的号。消费者一处 = 发码里的 vb6_cls_<X>_Destroy,
+ *   为的是 Class_Terminate 抛错时"字段 BSTR / 数组字段 / vb6_Free(me)"那三截尾巴照旧走完
+ *   (实测每枚抛错的出厂漏一份实例资源, 尺已搬进仓 = tests/tools/leak_probe.c, 判据
+ *    b188_way_out_tail_releases 两台各钉一头)。
+ *   touch 本文件 = 让 RCDATA 重编一次（§B99②）。 */
+/* 账 #305 §B188 第九十一刀 (2026-10-16): ComObj_Release 那条 [C3_COM] 诊断原先每出厂一枚实例
+ *   打一行 —— 新搬进回归的判据一轮 5000 次 create/release 就是 5000 行, 本机 20 万轮实测
+ *   19.3 MB stderr 把现场盖掉。改成同一枚类只记第一次 (vb6_TermErrClaim, 口径照 §B181 的
+ *   vb6_CrashTraceClaim: 拿不准一律放行, 漏一条真诊断比多打十条贵)。
+ *   touch 本文件 = 让 RCDATA 重编一次（§B99②）。 */

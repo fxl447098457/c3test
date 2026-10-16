@@ -121,6 +121,28 @@ static ULONG STDMETHODCALLTYPE ComObj_AddRef(vb6_ComObject* self) {
     return count;
 }
 
+/* 账 #305 §B188 (第九十一刀): 下面那条 [C3_COM] 诊断原先**每出厂一枚实例打一行**。
+ * 它是一指, 不是流水 —— 判据 (tests\tools\leak_probe.c) 一轮 5000 次 create/release
+ * 就是 5000 行, 本机 20 万轮实测 19.3 MB stderr 把现场盖掉。口径照 §B181 的
+ * vb6_CrashTraceClaim: **同一枚类只记第一次**, 拿不准的一律放行 (指针没有 desc 的空值,
+ * 表满也照打) —— 漏掉一条真诊断比多打十条贵。表是进程内的定长小表, 不回收。 */
+#define VB6_TERM_ERR_LOG_MAX 4
+static const void* volatile vb6_termErrLogged[VB6_TERM_ERR_LOG_MAX];
+
+static int vb6_TermErrClaim(const void* desc) {
+    int i;
+    if (!desc) return 1;
+    for (i = 0; i < VB6_TERM_ERR_LOG_MAX; i++) {
+        if (vb6_termErrLogged[i] == desc) return 0;
+        if (vb6_termErrLogged[i] == NULL &&
+            InterlockedCompareExchangePointer((void* volatile*)&vb6_termErrLogged[i],
+                                              (void*)desc, NULL) == NULL) {
+            return 1;
+        }
+    }
+    return 1;
+}
+
 static ULONG STDMETHODCALLTYPE ComObj_Release(vb6_ComObject* self) {
     ULONG count = InterlockedDecrement(&self->refCount);
     P189("[189] RELEASE W=%p cnt=%u owns=%d inst=%p\n", (void*)self, (unsigned)count,
@@ -133,11 +155,43 @@ static ULONG STDMETHODCALLTYPE ComObj_Release(vb6_ComObject* self) {
         // 拥有型里, 实现了新式接口的类走 claim 那条: 包装器退掉自己的"底座引用",
         // 实例若有薄引用在世则不销毁 (由最后一个薄引用的 Release 收尾), 否则当场销毁;
         // 没有这道 claim 的类 (存量/无接口) 结果与原来直接 destroyFunc 完全一致。
+        //
+        // 账 #305 §B188 (第八十刀): 上面这两条腿都会**踏进 VB 代码** (Class_Terminate), 以前
+        // 是本文件里三站中唯一没接错误边界的一站 —— 体里没人接住的错走到 vb6_RaiseError,
+        // 那里没有帧 ⇒ 打一行 stderr 再 ExitProcess(错误号), 把**正在放手的客户端进程**打死
+        // (x64 实测: 一枚 terminate 里只写 Err.Raise 234 的类 ⇒ 探针 exit=234, 后面那枚干净
+        // 对象的 CREATE=2 与 DONE 全都没打出来)。
+        // 这一趟与 §B185/§B186 那两趟有一处实质差别: **没有一条通道能把号带回去** —— Release
+        // 交回的是 ULONG 引用计数, 也没有 EXCEPINFO, 改返回值 = 破坏 COM 契约。所以这里只做
+        // 底线: 自带帧 + 失败往 stderr 记一条带号诊断 + 照常把包装器拆干净、照常交回引用计数。
+        // 号此刻既不进 Err 也不进客户端 (§B188 出路 (b) 是另一格: 那要先答「谁有权改 Err 的
+        // 清除时机」)。帧的登记顺序照 cgen 的 On Error GoTo 协议 ⇒ 体里自己写了 On Error 的
+        // 照常由体接住, 走到这里的是真没人管的那一类。
         if (self->ownsInstance) {
-            if (self->desc && self->desc->instanceClaimRelease && self->vb6Instance) {
-                self->desc->instanceClaimRelease(self->vb6Instance);
-            } else if (self->desc && self->desc->destroyFunc && self->vb6Instance) {
-                self->desc->destroyFunc(self->vb6Instance);
+            int32_t termErrNum = 0;
+            {
+                jmp_buf termJmp;
+                vb6_SaveErrState();
+                if (setjmp(termJmp) != 0) {
+                    termErrNum = vb6_ErrNumber();
+                } else {
+                    vb6_error_jmp_ptr = &termJmp;
+                    vb6_error_jmp_set = 1;
+                    vb6_err_jmp_active = 1;
+                    vb6_err_resume_next = 0;
+                    if (self->desc && self->desc->instanceClaimRelease && self->vb6Instance) {
+                        self->desc->instanceClaimRelease(self->vb6Instance);
+                    } else if (self->desc && self->desc->destroyFunc && self->vb6Instance) {
+                        self->desc->destroyFunc(self->vb6Instance);
+                    }
+                }
+                vb6_RestoreErrState();
+            }
+            if (termErrNum && vb6_TermErrClaim(self->desc)) {
+                fprintf(stderr, "[C3_COM] Class_Terminate raised error %d in \"%s\"; the client was kept alive (ledger 305 B188)\n",
+                        (int)termErrNum,
+                        (self->desc && self->desc->classVariable) ? self->desc->classVariable : "?");
+                fflush(stderr);
             }
         } else if (self->vb6Instance) {
             *(void**)self->vb6Instance = NULL;
@@ -430,8 +484,9 @@ vb6_ComObject* vb6_ComObject_Create(const vb6_CoClassDesc* desc, HRESULT* pFailH
 //
 // 复用规则: 实例首个字段 __comObj 已指向包装对象时直接 AddRef 复用 (同一实例
 // 每次读出返回同一 IDispatch, 引用计数正确), 否则新建包装并回填 __comObj.
-// 前置条件: 实例所在类的结构体首字段必须是 __comObj —— cgen 仅在 ActiveX DLL
-// 工程 (isDll_) 的类结构体里生成该字段, 故本函数只能用于 DLL 侧的字段 getter.
+// 前置条件: 实例所在类的结构体首字段必须是 __comObj —— 自 ExeComBridge 01 起**所有**类模块
+// 的结构体都有这一格 (工厂里那句 me->__comObj = NULL 是无条件发的), 所以本函数不只服务 DLL
+// 侧的字段 getter; 但 EXE 里今天既不装箱也没人查登记表 (§B187), 真走到它的仍只有 ActiveX 那一路。
 vb6_ComObject* vb6_ComObject_FromInstance(const vb6_CoClassDesc* desc, void* instance) {
     void** ppComObj;
     vb6_ComObject* existing;
@@ -536,19 +591,43 @@ const vb6_CoClassDesc* vb6_FindCoClassDesc(const char* classVariable) {
 //
 // 生命周期: 实例销毁时不注销 (表是"弱"映射, 只按指针查)。工程类实例都是
 // vb6_Alloc 分配的, 指针值不会被复用成别的类实例之前就一直有效; 真正的风险是
-// **同一个堆地址先释放后被别的类复用**。为避免误命中, 命中后还要用
-// `vb6_ProjClassVerify` 复核 (见 vb6com_invoke.c 的分派处), 且本表只在
-// "该指针的工厂确实登记过" 时才算命中 —— 复用后的新实例会覆盖旧登记, 不会指向
-// 错误的类。
+// **同一个堆地址先释放后被别的类复用**; 复用后的新实例会覆盖旧登记, 所以不会指向错误的类。
+//
+// 2026-10-15 (账 #305 §B187) 两条订正, 都按读码/真跑核过:
+//   ① 这里原来写的是「命中后还要用 vb6_ProjClassVerify 复核 (见 vb6com_invoke.c 的分派
+//      处)」—— 那一枚复核函数与那个分派处在整棵树与全部历史里都不存在 (git log -S 对两个
+//      名字都只命中引入本表那一笔), 所以它是一个从来没接上的打算, 不是现有机制。今天
+//      查表的读者是 0 枚: vb6_FindProjectClassDesc / ...Raw 全仓无调用点 ⇒ 本表只有登记
+//      这一腿在跑。2026-10-15 口径已拍 (§B187 第二格): **按工程类型分档** —— ActiveX 那一档
+//      (Type=DLL / Type=Control, 后端读 isDll_) 走 (b) = 接读者 + 配注销腿, 其余走 (a) =
+//      连登记都不发。订正一条旧解释: 先前写的「EXE 里没有 CoClass 块 ⇒ vb6_FindCoClassDesc
+//      恒 NULL ⇒ 这类实例压根没进表」是**错的** —— EXE 也链一张完整 coclass 表 (com_entry.c,
+//      ExeComBridge 01), 收集判据是类的 Instancing 而非有没有手写 CoClass 块, 那张表在 EXE 里
+//      天天被写。真断点在两条腿都没接: Set v = <工程内对象> 发成**裸指针赋值** (不装箱、不查
+//      表), 晚绑定那站 vb6_ComIsDispatchable 判否 ⇒ DISPID_UNKNOWN ⇒ 恒 VT_EMPTY (实测
+//      .build/k79_late/ 与 .build/k81_run.bat, 两台逐行相同: v.Twice(21) 空答、Err=0)。
+//   ② 「扫到哪儿」这一问以前有两个答案: 登记腿那圈只按 g_vb6_projClassCount 走, 查表腿
+//      那圈另外夹住 VB6_PROJCLASS_MAX; 而计数是在夹界检查之前自增、放弃登记那一路不回退
+//      ⇒ 计数无上界, 从第 514 枚实例起登记腿就在读数组外面的相邻静态数据 (巧合命中时还会
+//      往外面写)。现在两圈都只问 vb6_ProjClassScanLimit() 这一处。
 #define VB6_PROJCLASS_MAX 512
 static struct { void* inst; const vb6_CoClassDesc* desc; } g_vb6_projClass[VB6_PROJCLASS_MAX];
 static volatile LONG g_vb6_projClassCount = 0;
+
+/* 「扫到哪儿」这一问的唯一答案 (账 #305 §B187): 登记腿与查表腿以前各写各的边界, 登记那一遍
+ * 漏了夹界, 而计数在夹界检查之前自增且不回退 ⇒ 表满之后每登记一枚就往数组外多读一格。 */
+static LONG vb6_ProjClassScanLimit(void) {
+    LONG n = g_vb6_projClassCount;
+    if (n > VB6_PROJCLASS_MAX) n = VB6_PROJCLASS_MAX;
+    if (n < 0) n = 0;
+    return n;
+}
 
 void vb6_RegisterProjectClassInstance(void* inst, const vb6_CoClassDesc* desc) {
     LONG i;
     if (!inst || !desc) return;
     /* 先线性找: 同一实例可能被重复登记 (DllMain + 工厂各一次), 直接覆盖即可。*/
-    for (i = 0; i < g_vb6_projClassCount; i++) {
+    for (i = 0; i < vb6_ProjClassScanLimit(); i++) {
         if (g_vb6_projClass[i].inst == inst) {
             g_vb6_projClass[i].desc = desc;
             return;
@@ -563,7 +642,7 @@ void vb6_RegisterProjectClassInstance(void* inst, const vb6_CoClassDesc* desc) {
 const vb6_CoClassDesc* vb6_FindProjectClassDesc(const void* inst) {
     LONG i;
     if (!inst) return NULL;
-    for (i = 0; i < g_vb6_projClassCount && i < VB6_PROJCLASS_MAX; i++)
+    for (i = 0; i < vb6_ProjClassScanLimit(); i++)
         if (g_vb6_projClass[i].inst == inst) return g_vb6_projClass[i].desc;
     return NULL;
 }
@@ -602,6 +681,35 @@ void* vb6_ComObject_GetInstance(void* pdisp) {
         fflush(stderr);
     }
     return obj->vb6Instance;
+}
+
+/* 账 #305 §B187 第五腿: 「这枚值是不是我们那族包装器」—— deref 之前先证明可读,
+ * 论证见 vb6comserver.h 声明处。命中 ⇒ 交回身份判据真; 其余一律 0 (原样交回调用点)。 */
+int32_t vb6_ComObject_IsBoxed(void* v) {
+    if (!v) return 0;
+    if (IsWindow((HWND)v)) return 0;
+    if (IsBadReadPtr(v, sizeof(void*))) return 0;
+    return ((vb6_ComObject*)v)->vtable == &g_ComObjectVtable;
+}
+
+/* 账 #305 §B189 第一档: 见 vb6comserver.h 声明处的论证。char*→BSTR 走 CP_ACP 那一条,
+ * 与本文件上方 progId / 类名那几处同一口径 (VB 的类模块名允许非 ASCII 标识符)。
+ * 认不出 (不是我们的包装器 / desc 缺 / 名为空) 一律 NULL —— 调用方那一路要交回原答案。 */
+BSTR vb6_ComObject_ClassNameBStr(void* v) {
+    const vb6_ComObject* obj;
+    const char* s;
+    int wlen;
+    BSTR r;
+    if (!vb6_ComObject_IsBoxed(v)) return NULL;
+    obj = (const vb6_ComObject*)v;
+    s = obj->desc ? obj->desc->classVariable : NULL;
+    if (!s || !s[0]) return NULL;
+    wlen = MultiByteToWideChar(CP_ACP, 0, s, -1, NULL, 0);  /* -1 = 输入以 NUL 结尾 */
+    if (wlen <= 1) return NULL;
+    r = SysAllocStringLen(NULL, (UINT)wlen - 1);
+    if (!r) return NULL;
+    MultiByteToWideChar(CP_ACP, 0, s, -1, r, wlen);
+    return r;
 }
 
 // ============================================================

@@ -320,6 +320,15 @@
     // Fix 010r-10: 从 unordered_set 改为 unordered_map 以支持类名查找
     std::unordered_map<std::string, std::string> knownClassVars_;
 
+    // 账 #305 #408: 本过程形参表里声明成 As Object 的名字 (小写)。
+    // 每张过程入口清空, 只描述当前过程的作用域 —— 用来挡住上面那张表跨过程漏答案。
+    std::unordered_set<std::string> procObjectFormals_;
+
+    // 账 #305 #408: knownClassVars_ 里模块级那一档登记的持久快照 (模块级 Dim As 类、类字段、窗体上的
+    // UserControl 子控件、跨模块实例变量)。每张过程入口恢复一份 —— 与 moduleNewVars_ / moduleFixedStringLen_
+    // 同一条形状; 形参那一档不进快照, 所以形参遮蔽只影响本过程。
+    std::unordered_map<std::string, std::string> moduleClassVars_;
+
     // Fix 037b: 标记最近一次 IndexOrCallExpr 生成的表达式是否为返回 VARIANT 的
     // 项目类 Item 属性调用 — Set 语句需要将其转换为 void* 对象引用.
     bool lastExprNeedsObjectUnpack_ = false;
@@ -1010,6 +1019,17 @@
     // 工程级类名表 (小写类名 → 原大小写类名, driver 注入). 本模块符号表会被同名成员
     // 遮蔽, 判"某类型名是不是工程类"只能问这张表 (详见 setProjectClassNames 注释).
     const std::unordered_map<std::string, std::string>* projClassNames_ = nullptr;
+
+    // 账 #305 §B187 第二腿: 工程级「在运行期 coclass 描述表里占一行」的类名名单
+    // (小写, driver 与建表那侧同一条判据扫出 —— 见 driver_codegen_voidfield_scan.inc)。
+    // 装箱腿发每一句 vb6_FindCoClassDesc("<类>") 之前先问它: 表里没有这行 ⇒ desc=NULL
+    // ⇒ 包装器=NULL ⇒ 槽里成了 Nothing, 比裸指针还差, 所以那种形状一律不装箱。
+    const std::unordered_set<std::string>* projCoclassNames_ = nullptr;
+
+    // 账 #305 §B189 第二档: 工程级「被谁 Implements 过」的名单 (小写, driver 从语义层那份
+    // Symbol::implementsNames 注入)。 TypeName 按声明档折叠那一刀用它挡掉接口视图 (注释见
+    // driver_codegen_voidfield_scan.inc)。
+    const std::unordered_set<std::string>* projImplementedNames_ = nullptr;
 
     // CoClass 身份 (tB, ai/022 B13b): stage 2.7 Pass E 求出的唯一出口 (coclassIds_)。
     // 只有 generateDllEntry 读它 —— 产品里的 CLSID / 默认接口 IID / 组名 ProgID 一律

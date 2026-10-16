@@ -283,7 +283,112 @@ std::string CCodeGen::deliverToClassSlot(const std::string& clsPtr,
         return "(" + clsPtr + ")vb6_ComObject_GetInstance("
                "vb6_VariantToObjectVal(" + argVal + "))";
     }
+    // 账 #305 §B187 装箱腿的读者②: 实参是一枚**装箱过的泛对象变量** (void* 槽里现在
+    // 装的是 vb6_ComObject 包装器) 时也必须剥回裸实例 —— C 里 void* 喂给 vb6_cls_X*
+    // 形参不报错 (隐式转换)，把包装器当实例用就是静默的坏指针。判据问 varHoldsComWrapper
+    // (唯一那张登记表)，与 Fix 179b / Is 那一站同一个问句。
+    if (!clsPtr.empty() && clsPtr.compare(0, 8, "vb6_cls_") == 0 && varHoldsComWrapper(argVal)) {
+        return "(" + clsPtr + ")" + unwrapComVarExpr(argVal);
+    }
     return argVal;
+}
+
+
+// 账 #305 §B187 第五腿 = ByRef 泛对象形参那一座桥。第八十四刀只接了 ByVal 那一档
+// (`ByVal p As Object` 收到裸实例时在实参位装箱)，因为 ByRef 那一路 C 侧是 `void**`:
+// 落一枚临时就把被调方的写回整个丢了，所以它欠的不是一个 if 而是一座桥 ——
+//   · 调用前: 把实参那枚**裸工程类实例就地装箱进它自己的槽** (实参地址原样交给形参，
+//     被调方 `Set p = Nothing` 与 `Set p.Prop = …` 那两形都照常落回调用方这一格);
+//   · 调用后: 槽里的值若还是我们那族包装器就剥回裸实例 (被调方换成别的实例也照剥，
+//     换出去的那一枚由这里 Release 收回)，外部 IDispatch / NULL 一律原样留着。
+// 两端都只许问**运行期的值**「这枚指针是不是包装器」= 新 RTL 出口 vb6_ComObject_IsBoxed。
+// 为什么这里不能按名字问登记表 (§B187 第三腿那三处读者的老路子): 值刚被**另一个过程**
+// 的 Set 语句改过，而那张表只由本过程的 Set 站写 —— 它压根没听说过形参。
+// 为什么装箱只许问运行期还要留负条件: 泛对象槽里装的可能是控件 HWND (`Set <槽> = <控件名>`
+// 那条路交的就是 vb6_hwnd_*)，而往一枚 HWND 上跑 FromBorrowedInstance 的 __comObj 回填
+// = 拿窗口句柄当地址写 = 内存损坏 (第八十三刀那条负条件的同一族)。
+// 发码只有这一处 (哨兵 check_object_slot_boxing 钉死): 站点只许调本函数，别处不许再抄。
+bool CCodeGen::bridgeByRefLateSlotArg(const ParameterInfo& p, const std::string& slot,
+                                      const ASTNode* actualAst) {
+    if (slot.empty() || !actualAst) return false;
+    if (p.isByVal) return false;
+    if (cParamLateSlotType(p).empty()) return false;   // 形参声明档: 与 ByVal 那一腿同一把尺
+    // 只有"实参自己那枚槽是工程类类型的左值"才桥得起来:
+    //   · 泛对象变量 (`Dim v As Object`) 里装的本来就是交换档，剥回去等于把装箱腿
+    //     (§B187 第二腿) 写进槽里的那份答案拆掉;
+    //   · 非左值实参在站点上游就走复合字面量那一支了，传不到这里 (站点在 `&<名字>` 那一支)。
+    const std::string cls = inferClassTypeOfExpr(*actualAst);
+    if (cls.empty() || !classHasCoClassDesc(cls)) return false;
+    const std::string cty = cTypeForDeclaredTypeName(cls);
+    if (cty.compare(0, 8, "vb6_cls_") != 0) return false;
+    if (slot.find("vb6_hwnd_") != std::string::npos
+        || slot.find("vb6_form_ctrl_") != std::string::npos) return false;
+    const std::string ask = "vb6_ComObject_IsBoxed((void*)" + slot + ")";
+    // 装箱交回 NULL 时**不许**覆盖这枚槽: 那是把一枚活对象打成 Nothing (装箱腿那条
+    // "查不中 desc 一律不装箱"的判据在桥上同样成立，这里再兜一层)。
+    const std::string boxTmp = "_vb6_latebox" + std::to_string(tempCounter_++);
+    c_.addPending("if (!" + ask + ") { void* " + boxTmp
+        + " = vb6_ComObject_FromBorrowedInstance(vb6_FindCoClassDesc(\"" + cls
+        + "\"), (void*)" + slot + "); if (" + boxTmp + ") " + slot + " = (" + cty + ")" + boxTmp + "; }");
+    const std::string unboxTmp = "_vb6_lateunbox" + std::to_string(tempCounter_++);
+    c_.addPostLine("{ void* " + unboxTmp + " = (void*)" + slot + "; if (vb6_ComObject_IsBoxed("
+        + unboxTmp + ")) { " + slot + " = (" + cty + ")vb6_ComObject_GetInstance(" + unboxTmp
+        + "); vb6_ReleaseObject(&" + unboxTmp + "); } }");
+    return true;
+}
+
+// 账 #305 §B187 第四腿: 「这个形参槽是不是泛对象槽 (void* 里该装 IDispatch*)」。
+// 与 cParamClassPtrType 一样只问定义侧那份映射, 见声明处注释。
+std::string CCodeGen::cParamLateSlotType(const ParameterInfo& p) {
+    if (p.typeRefName.empty()) return {};
+    if (Symbol::toLower(p.typeRefName) != "object") return {};
+    return cTypeForDeclaredTypeName(p.typeRefName) == "void*" ? "void*" : std::string();
+}
+
+// 账 #305 §B187 装箱腿的唯一发码处 —— Set 那一站 (目标槽) 与实参那一站 (形参槽) 都问这一句,
+// 两边不许各抄一份负条件。为什么这一格欠着 (第八十二刀三条实测读数, 台账 §B187):
+//   H = Type=DLL 的驱动实测 result=42000 —— 早绑定那半 42 对, 晚绑定那半 0。
+//     `Set v = o` 发成裸指针赋值 `v = o;  /* Set */` 后，槽里是一枚
+//     `vb6_cls_X*`，首字段 __comObj 被 vb6_ComIsDispatchable 当 vtable 读 → 判否
+//     → GetIDsOfNames 给 DISPID_UNKNOWN → **静默空答** (不崩, 但值永远是 0)。
+//   I = Type=Exe 那台把同一枚槽交给真外部 COM 的实参位 (Dictionary.Add) 直接
+//     0xC0000005 —— 与工程类型无关，是"裸实例指针越过 IDispatch 边界"那一族。
+// 所有权: 这里交出去的是**别人已有的实例** (类变量/字段/形参/返回槽), 销毁权还留在
+// 宿主, 所以必须用 ownsInstance=0 的借用型 (Fix 188 那一档) 而不是 179a 的
+// FromInstance —— 用后者会让客户端 Release 到 0 时把宿主还在用的实例拆掉。
+// desc 判据 (为什么先问 classHasCoClassDesc): 查不中 desc ⇒ FromBorrowedInstance
+// 交回 NULL ⇒ 槽里成了 Nothing，比今天的裸指针**更坏** (裸指针至少早绑定那半
+// 能用)。名单由 driver 与建表那侧同一条 Symbol::isCoClassTableEntry() 扫出。
+// 负条件 (宁可不动，也不把好产物改坏):
+//   · 值自己就是一枚装着包装器的泛对象变量 (varHoldsComWrapper) = 槽 → 槽,
+//     里面已经是 IDispatch 档, 再套一层会把包装器的 vtable 字段当 __comObj 回填
+//     ⇒ 当场把包装器改坏;
+//   · 值里带 vb6_VariantToObjectVal / vb6_ComObject_GetInstance
+//     = 上面那一站刚从槽里剥出来的**已经是** IDispatch/宿主指针, 同上一条;
+//   · cExprIsVariant(值) = 还是枚槽，交回 Variant 那一路处理。
+//   · 控件那一族必须留在闸门外: 窗体上的子控件 (含工程内 UserControl) 在 C 侧的值是
+//     **HWND** (`vb6_hwnd_<名>` / `vb6_form_ctrl_<窗体>_<名>()`)，而 Fix 112 又把 UC
+//     控件名登记进 knownClassVars_ (名字 → .ctl 模块名) —— 只看类名就会把句柄当
+//     `vb6_cls_ucX*` 交给 FromBorrowedInstance，而它头一件事是 `*(void**)instance`
+//     回填 __comObj ⇒ 往窗口句柄那个数当地址写 ⇒ 内存损坏。
+//     实测探针 (.build/k88_uc_probe.py: 复制 tests/Charts 2020/ucChartBar 后在 Form1
+//     里加 `Set oBox = ucChartBar1`)：base/new 都发 `oBox = vb6_hwnd_ucChartBar1` ——
+//     挡下它的是 desc 闸门 (.ctl 头里只有 `Begin VB.UserControl`，没有 CLASS 的
+//     MultiUse 块 ⇒ UC 不进 coclass 表)。这条不把那个巧合当依据，句柄形状显式钉死。
+std::string CCodeGen::boxIntoLateSlot(const std::string& argVal, const ASTNode* argAst) const {
+    if (argVal.empty() || !argAst) return argVal;
+    if (varHoldsComWrapper(argVal)) return argVal;
+    const bool valueIsHostHandle =
+        argVal.find("vb6_hwnd_") != std::string::npos
+        || argVal.find("vb6_form_ctrl_") != std::string::npos;
+    const bool valueAlreadyUnboxed =
+        argVal.find("vb6_VariantToObjectVal") != std::string::npos
+        || argVal.find("vb6_ComObject_GetInstance") != std::string::npos;
+    if (valueIsHostHandle || valueAlreadyUnboxed || cExprIsVariant(argVal)) return argVal;
+    const std::string boxCls = inferClassTypeOfExpr(*argAst);
+    if (boxCls.empty() || !classHasCoClassDesc(boxCls)) return argVal;
+    return "(void*)vb6_ComObject_FromBorrowedInstance(vb6_FindCoClassDesc(\""
+           + boxCls + "\"), (void*)" + argVal + ")";
 }
 
 // <vbeclipse> rev7: 配套 cParamClassPtrType 的**落临时**侧 —— ByRef 类形参收到

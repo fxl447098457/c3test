@@ -1483,6 +1483,36 @@ function Test-ComServerErrorFrame {
     }
 }
 
+# ai/022 §B187 (第七十九刀): 工程类登记表「扫到哪儿」只许一处答 + 读者普查
+function Test-ProjClassScanBound {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] projclass_scan_bound ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\check_projclass_scan_bound.ps1" 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        $out | Select-Object -First 8 | ForEach-Object { Write-Host "  $_" }
+    }
+}
+
+# ai/022 §B187 第二腿 (第八十三刀): 泛对象槽的装箱腿只许一站 + coclass 判据只许一处答
+function Test-ObjectSlotBoxing {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] object_slot_boxing ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\check_object_slot_boxing.ps1" 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        $out | Select-Object -First 8 | ForEach-Object { Write-Host "  $_" }
+    }
+}
+
 # === 编译冒烟测试 (编译+链接, 不运行生成物) ===
 function Test-Run {
     param(
@@ -6824,6 +6854,181 @@ if ($Category -in @("all", "run", "vbp")) {
         "CREATE=1[{11112222-3333-4444-5555-6666777788B1}] hr=0x00000000") `
         -Tail @("CREATE={11112222-3333-4444-5555-6666777788B1},{11112222-3333-4444-5555-6666777788B3}") -Arch "x86"
 
+    # 账 #305 §B188 (第八十刀): 服务端进门**第三站** = 出厂那一趟。ComObj_Release 走到零 ⇒ destroyFunc ⇒
+    # Class_Terminate, 以前是本文件三站里唯一没接边界的一站, 而它比前两站更狠: 这条通道**没有带号的载体**
+    # (Release 交回 ULONG 引用计数, 也没有 EXCEPINFO), 所以改前是「体里一句没人接住的错 = 客户端的死法」:
+    # 两台实测一枚 terminate 只写 Err.Raise 234 的类 ⇒ 探针 exit=234, 后面那枚干净对象的 CREATE=2 与 DONE
+    # 全都没打出来。修完的口径 = 只保证客户端不死 + 一条带号诊断(见 stderr), 号交不回任何人。
+    # 主 CLSID 用干净那枚(D2): 「不是所有出厂都坏」的证人; 抛错那枚(D1)走 -Tail 的 CREATE= 臂, 排在前面造、
+    # 最后放 —— 两枚都造成功之后才轮到 Release, 所以 D1 的 Release 一旦打死进程, DONE 就出不来(= 本针会红)。
+    # 臂里两枚都点一次成员(42): 否则「服务器压根没建成对象」也能蒙过前两条。
+    Test-DispatchInvoke "b188_terminate_error_frame" "$Tests\b188_term\B188d.vbp" "B188d" `
+        "{11112222-3333-4444-5555-6666777788D2}" @(
+        "CREATE hr=0x00000000 ptr=OK",
+        "CREATE=1[{11112222-3333-4444-5555-6666777788D1}] hr=0x00000000 ptr=OK",
+        "CALL=CREATE1MEM hr=0x00000000 result=42",
+        "CREATE=2[{11112222-3333-4444-5555-6666777788D2}] hr=0x00000000 ptr=OK",
+        "CALL=CREATE2MEM hr=0x00000000 result=42",
+        "DONE") @(
+        "Unhandled error") `
+        -Tail @("CREATE={11112222-3333-4444-5555-6666777788D1},{11112222-3333-4444-5555-6666777788D2}")
+    Test-DispatchInvoke "b188_terminate_error_frame_x86" "$Tests\b188_term\B188d.vbp" "B188d" `
+        "{11112222-3333-4444-5555-6666777788D2}" @(
+        "CREATE hr=0x00000000 ptr=OK",
+        "CREATE=1[{11112222-3333-4444-5555-6666777788D1}] hr=0x00000000 ptr=OK",
+        "CALL=CREATE1MEM hr=0x00000000 result=42",
+        "CREATE=2[{11112222-3333-4444-5555-6666777788D2}] hr=0x00000000 ptr=OK",
+        "CALL=CREATE2MEM hr=0x00000000 result=42",
+        "DONE") @(
+        "Unhandled error") `
+        -Tail @("CREATE={11112222-3333-4444-5555-6666777788D1},{11112222-3333-4444-5555-6666777788D2}") -Arch "x86"
+
+    # 账 #305 §B187 第二腿 (第八十三刀): 装箱腿一处 —— `Set <泛对象槽> = <工程内实例>`。
+    # 改前这一问的答案是"什么都不交": 槽里躺着一枚裸 `vb6_cls_X*`, 于是同一枚槽被两条读路各读各的 ——
+    # vb6_ComCall 认不出它 (实测 `method "Twice" not found` 之后静默空答 42000), 而把它当 IDispatch*
+    # 交给外部 COM 实参的那一路直接在 OLE 的 VariantClear 里 0xC0000005 (BASE 上探针 exit=-1073741819,
+    # x64/x86 两架构皆然)。现在交的是**借用型**包装器 (ownsInstance=0, 不接管实例生命周期), 闸门只有一问:
+    # 这枚类在运行期 coclass 表里占不占一行 (Symbol::isCoClassTableEntry, 与建表那侧同一条)。
+    # 八条臂各交一个数, 编码见 tests\b187_box\*.cls:
+    #   42042  = 早绑定 + 晚绑定两条腿都真 (42000 = 晚绑定那半又空了),
+    #   999    = 只有把槽里那枚对象**交给外部 IDispatch 客户端当实参**才可能出的数 (BASE 在这里崩),
+    #   101042 = 同一枚实例包装器进槽、解包回typed形参后仍是它自己 (Is 那一路的类型归一)。
+    #   42042 (第四臂) = ByVal 泛对象形参收到工程内实例也点得动晚绑定 (第八十四刀),
+    #   42014201 (第五臂) = ByRef 那一座桥的四形一数同台: 实形参位晚绑定 42 / 被调方 Set p = Nothing 落回调用方 /
+    #              Set p = <实例> 之后早绑定 42 / Set p = CreateObject 那枚活对象没被判成 Nothing; BASE 那一台交 14201 (第一形 = 0)
+    #   42081 (第六臂, §B189 第一档 / 第八十六刀) = TypeName 认出自家包装器是哪一枚工程类。编码 = 早绑定 42e3
+    #              + 名字长度*10 + (名字等 B187Good 那一形); 长度那一项就是没有换成别的非空名字的证人,
+    #              BASE 那一台交 42060 (长度 6 = Object)
+    #   42717151 (第七臂, §B189 第二格 / 第八十七刀) = 一枚对象变量不指向任何对象时 TypeName 答
+    #              Nothing 而不是 Object。一臂三形同台, 每形 = 名字长度*10 + (命中 VB6 那个答案):
+    #              从没 Set 的泛对象槽 / Set 过又置回 Nothing 的 typed 实例 / 从没赋值的 Variant
+    #              (最后一形是别把它顺手动了的证人, 两台都该是 Empty 长度 5 且命中) ⇒ BASE 42606051
+    #   501717181 (第八臂, §B189 第二档 / 第八十八刀) = TypeName 吃一枚**声明成工程类**的变量时答**类名**
+    #              而不是 Object —— 答案按声明档在编译期折出三元式。一臂四形同台, 每形 = 名字长度*10 + 命中:
+    #              Set 过的 typed 实例 (BASE 60 "Object" / 本刀 81 "B187Good") / 置回 Nothing 的那一枚 (两台 71) /
+    #              从没 Set 的 typed 实例 (两台 71, 走的就是折叠那支的 NULL 那一头) / **另一枚声明档**
+    #              (tx As B187Name, Set 过: BASE 60 / 本刀 81) —— 最后这一形钉的是"折的是声明, 不是写死的一个名字"
+    #              ⇒ BASE 480717160, 本刀 501717181 (四形里只有两形动, 另两形是本刀的证人)
+    # 反面证人 = Absent 里那枚 42000: 装箱没落地它就回来了。
+    Test-DispatchInvoke "b187_boxed_object_slot" "$Tests\b187_box\B187d.vbp" "B187d" `
+        "{11112222-3333-4444-5555-6666777788E3}" @(
+        "CREATE hr=0x00000000 ptr=OK",
+        "CALL=CREATE1MEM hr=0x00000000 result=42042",
+        "CALL=CREATE2MEM hr=0x00000000 result=999",
+        "CALL=CREATE3MEM hr=0x00000000 result=101042",
+        "CALL=CREATE4MEM hr=0x00000000 result=42042",
+        "CALL=CREATE5MEM hr=0x00000000 result=42014201",
+        "CALL=CREATE6MEM hr=0x00000000 result=42081",
+        "CALL=CREATE7MEM hr=0x00000000 result=42717151",
+        "CALL=CREATE8MEM hr=0x00000000 result=501717181",
+        "DONE") @(
+        "CALL=CREATE1MEM hr=0x00000000 result=42000",
+        "CALL=CREATE4MEM hr=0x00000000 result=42000",
+        "CALL=CREATE5MEM hr=0x00000000 result=14201",
+        "CALL=CREATE6MEM hr=0x00000000 result=42060",
+        "CALL=CREATE7MEM hr=0x00000000 result=42606051",
+        "CALL=CREATE8MEM hr=0x00000000 result=480717160") `
+        -Tail @("CREATE={11112222-3333-4444-5555-6666777788E3},{11112222-3333-4444-5555-6666777788E4},{11112222-3333-4444-5555-6666777788E5},{11112222-3333-4444-5555-6666777788E6},{11112222-3333-4444-5555-6666777788E7},{11112222-3333-4444-5555-6666777788E8},{11112222-3333-4444-5555-6666777788E9},{11112222-3333-4444-5555-6666777788EA}")
+    Test-DispatchInvoke "b187_boxed_object_slot_x86" "$Tests\b187_box\B187d.vbp" "B187d" `
+        "{11112222-3333-4444-5555-6666777788E3}" @(
+        "CREATE hr=0x00000000 ptr=OK",
+        "CALL=CREATE1MEM hr=0x00000000 result=42042",
+        "CALL=CREATE2MEM hr=0x00000000 result=999",
+        "CALL=CREATE3MEM hr=0x00000000 result=101042",
+        "CALL=CREATE4MEM hr=0x00000000 result=42042",
+        "CALL=CREATE5MEM hr=0x00000000 result=42014201",
+        "CALL=CREATE6MEM hr=0x00000000 result=42081",
+        "CALL=CREATE7MEM hr=0x00000000 result=42717151",
+        "CALL=CREATE8MEM hr=0x00000000 result=501717181",
+        "DONE") @(
+        "CALL=CREATE1MEM hr=0x00000000 result=42000",
+        "CALL=CREATE4MEM hr=0x00000000 result=42000",
+        "CALL=CREATE5MEM hr=0x00000000 result=14201",
+        "CALL=CREATE6MEM hr=0x00000000 result=42060",
+        "CALL=CREATE7MEM hr=0x00000000 result=42606051",
+        "CALL=CREATE8MEM hr=0x00000000 result=480717160") `
+        -Tail @("CREATE={11112222-3333-4444-5555-6666777788E3},{11112222-3333-4444-5555-6666777788E4},{11112222-3333-4444-5555-6666777788E5},{11112222-3333-4444-5555-6666777788E6},{11112222-3333-4444-5555-6666777788E7},{11112222-3333-4444-5555-6666777788E8},{11112222-3333-4444-5555-6666777788E9},{11112222-3333-4444-5555-6666777788EA}") -Arch "x86"
+
+    # 账 #305 §B189 第二档 (第八十八刀): 折叠那一刀**是发码改动** ⇒ 形状要在产物上钉住。
+    # 正针三枚 = 三枚 typed 工程类变量各自折成的三元式 (tg 那一枚出现两次: Set 过与置回 Nothing 之后,
+    # 这里只钉一次; tn = 从没 Set, 走的就是折叠那支的 NULL 那一头; tx 折的是**另一枚类名** ⇒ 钉的是
+    # "折的是声明档"而不是一个写死的名字)。
+    Test-EmitcShape "b189_decl_fold_shape" @("$Tests\b187_box\B187d.vbp") @(
+        '(((tg) != NULL) ? vb6_BSTR_FromStr(L"B187Good") : vb6_BSTR_FromStr(L"Nothing"))',
+        '(((tn) != NULL) ? vb6_BSTR_FromStr(L"B187Good") : vb6_BSTR_FromStr(L"Nothing"))',
+        '(((tx) != NULL) ? vb6_BSTR_FromStr(L"B187Name") : vb6_BSTR_FromStr(L"Nothing"))')
+    # 闸门那一问的两侧同站同台 (tests\b189_gate, 两份声明只差"这个类有没有被谁 Implements"):
+    # 没被 implements 的那一枚照折 (正针), 被 implements 的那一枚**一口都不许折** (反针) —— 视图那一头
+    # VB6 答的是实体真身类名, 按声明折就是把接口名当成对象的名字。
+    # ⚠ 这份夹具只发码、不进 cl: 接口档变量进 Variant 期望的那一站今天交的是**整枚视图结构体**
+    #   (vb6_iface_X 是 {vtbl,obj} 的值类型, _Generic 落 default ⇒ vb6_VariantObject(结构体) = cl C2172),
+    #   两台都一样 —— 那一格是独立的缺陷, 已另立任务 (#407), 本刀不并批。
+    Test-EmitcShape "b189_gate_plain_class_folds" @("$Tests\b189_gate\B189g.vbp") @(
+        '(((m) != NULL) ? vb6_BSTR_FromStr(L"B189Impl") : vb6_BSTR_FromStr(L"Nothing"))')
+    Test-EmitcAbsent "b189_gate_interface_view_not_folded" @("$Tests\b189_gate\B189g.vbp") @(
+        '(((o) != NULL) ? vb6_BSTR_FromStr(L"B189Iface")')
+    # 第四道闸 = 实参是整枚槽 ⇒ 那是运行期的问句。F4 与 F3 **同名 (Value) 而声明档不同**:
+    # 一枚 As 工程类 (要折)、一枚 As Variant (不许折)。这一双钉的就是"按名那张类表会跨过程漏"
+    # —— 实物 = 本刀护栏那台 A/B 上唯一一处真语料移动 (VBFlexGrid.ctl 的 `ByVal Value As Variant`
+    # 被另一过程同名的 `As IVBFlexDataSource` 折成了常量, `TypeName(Value) = "ImageList"` 变恒假)。
+    Test-EmitcShape "b189_gate_same_name_slot_pair" @("$Tests\b189_gate\B189g.vbp") @(
+        'AssignMove(&vb6_ret_F4, (((Value) != NULL) ? vb6_BSTR_FromStr(L"B189Impl") : vb6_BSTR_FromStr(L"Nothing")))',
+        'AssignMove(&vb6_ret_F3, vb6_TypeName(')
+
+    # 账 #305 #408 (第八十九刀第五试): 按名那张类表 (knownClassVars_) 全程不清空, 于是**上一过程**
+    # 里 `ByVal Item As <工程类>` 登记的 "item" 会替**本过程**那枚 `ByVal Item As Object` 答题。两形病灶
+    # (夹具 tests\b190_scope, 两台实测): ① 成员读发成 `Item->Alpha` 而这枚形参的 C 类型是 void* =
+    #   cl C2223, 整棵工程压根编不出 exe (改前两台都 rc=1 且无产物); ② 第八十八刀把 TypeName(Thing)
+    #   折成了上一过程的类名常量。
+    # 修法两半同批: 读侧否决 (procObjectFormals_ 那一问排在按名的表与符号表退路**之前**, 治折叠那一形)
+    # 再 + 形参遮蔽那一站把表里那条撤掉 (治成员读那一形, 形状照仓里现成的 UDT 形参那一格); 撤表要有底 =
+    # moduleClassVars_ 那份**模块级**快照每张过程入口恢复一次, 否则后面过程里同名模块级类变量的原生
+    # 字段读会跟着掉 (P5 与上面那枚 Thing->Alpha 针钉的就是这一条)。
+    Test-EmitcShape "b190_object_formal_goes_late" @("$Tests\b190_scope\B190.vbp") @(
+        'vb6_BSTR_Assign(&vb6_ret_ShadowParam, vb6_ComGetStringProp(Item, L"Alpha"));',
+        'vb6_BSTR_Assign(&vb6_ret_UsesObj, vb6_ComGetStringProp(Thing, L"Alpha"));',
+        'vb6_BSTR_Assign(&vb6_ret_UsesModuleVar, Thing->Alpha  /* class var .Alpha field */);')
+    Test-EmitcAbsent "b190_object_formal_keeps_no_stale_class_answer" @("$Tests\b190_scope\B190.vbp") @(
+        'vb6_ret_ShadowParam, Item->Alpha',
+        'vb6_ret_UsesObj, Thing->Alpha',
+        '(((Thing) != NULL) ? vb6_BSTR_FromStr(L"B190A")')
+    Test-EmitcShape "b190_typename_of_object_formal_stays_runtime" @("$Tests\b190_scope\B190.vbp") @(
+        'vb6_BSTR_AssignMove(&vb6_ret_TnShadow, vb6_TypeName(')
+    # 两台真跑只钉 VB6 也答得出的那五条: P1/P2 = 类形参照旧早绑定 (负条件, 否决不许过界),
+    # P5 = 模块级同名变量没被撤走, P6 = 折叠那一支的 NULL 头, DONE = 进程活着。
+    # P3/P4/P7-P12 今天交空串与 "Object" —— 那不是本刀的靶子, 是 #412 (Type=Exe 工程里 Set 工程实例
+    # 进 Object 槽从不发包器 ⇒ Object 那一路晚绑定全落空) 的读数, 故意不钉成针。
+    $b190Needles = @("C3ProbeB190-P1-classparam=A1", "C3ProbeB190-P2-classparamB=B2",
+                     "C3ProbeB190-P5-modulevar=A1", "C3ProbeB190-P6-typename-nothing=Nothing",
+                     "C3ProbeB190-DONE")
+    Test-Vbp 'b190_object_formal_scope' "$Tests\b190_scope\B190.vbp" $b190Needles
+    Test-Vbp 'b190_object_formal_scope_x86' "$Tests\b190_scope\B190.vbp" $b190Needles -Arch "x86"
+    # 账 #305 §B188 ④ (第九十刀): 出厂那一腿的**尾巴**。`Class_Terminate` 抛错时, `_Destroy` 里体之后
+    # 那三截(字段 BSTR / 数组字段 / vb6_Free(me))曾被 ComObj_Release 的帧一起 longjmp 跳掉 —— 实测每枚
+    # 抛错的出厂漏一份实例资源: x64 每枚 35~37 字节、x86 每枚 17 字节, 多一枚 20 字符 String 字段就涨到
+    # 120~123 字节, 而出厂干净那枚恒 0 (尺已搬进仓 = tests/tools/leak_probe.c, 当年读数 .build/k108_*.txt +
+    # .build/k109_x64.txt; 改后两台四档全 0 = .build/k117_x64.txt / .build/k117_x86.txt)。
+    # 改法 = 帧装在 `_Destroy` 自己身上(新出口 vb6_RunVbProtected, 出厂两腿都汇到这一处), 尾巴走完才把
+    # 号交回外层帧: COM 出厂那层照旧记一条 [C3_COM] 诊断、进程内的 `Set x = Nothing` 照旧由调用方的
+    # On Error 接住 —— 两台跑完客户端都不死。(那条诊断自第九十一刀起**同一枚类只记一次**, 原先每枚出厂一行。)
+    Test-EmitcShape "b188_destroy_tail_is_reachable" @("$Tests\b188_term\B188d.vbp") @(
+        'vb6_termErr = vb6_RunVbProtected((void(*)(void*))vb6_T88Boom_Class_Terminate, me);',
+        'if (vb6_termErr) vb6_RaiseError(vb6_termErr, vb6_ErrDescription());')
+    Test-EmitcAbsent "b188_destroy_keeps_no_bare_terminate_call" @("$Tests\b188_term\B188d.vbp") @(
+        'vb6_T88Boom_Class_Terminate(me);',
+        'vb6_T88Good_Class_Terminate(me);')
+    # 运行期那一头（任务 #414 的判据升格）: 两台各跑一遍「抛错那枚 vs 干净那枚」各造各放 5000 次,
+    # 两头都要 verdict=OK —— 抛错那枚钉的是本刀修的漏, 干净那枚是反面证人 (它一直 OK 才说明读数不是别的
+    # 形状带来的)。`verdict=LEAK` 同时钉成 Absent: 工具自己判的红也看得见。
+    Test-InstanceLeak "b188_way_out_tail_releases" "$Tests\b188_term\B188d.vbp" "B188d" `
+        "{11112222-3333-4444-5555-6666777788D1}" "{11112222-3333-4444-5555-6666777788D2}" 5000 `
+        @("LEAK-BOOM verdict=OK", "LEAK-GOOD verdict=OK", "LEAK-DONE") @("verdict=LEAK", "verdict=BROKEN")
+    Test-InstanceLeak "b188_way_out_tail_releases_x86" "$Tests\b188_term\B188d.vbp" "B188d" `
+        "{11112222-3333-4444-5555-6666777788D1}" "{11112222-3333-4444-5555-6666777788D2}" 5000 `
+        @("LEAK-BOOM verdict=OK", "LEAK-GOOD verdict=OK", "LEAK-DONE") @("verdict=LEAK", "verdict=BROKEN") `
+        -Arch "x86"
+
+
     # 账 #305 SB186 第二头: VB 客户那一头　「口径」的唯一读数面　—— 探针是 C 客户, 它只能读 hr;
     # 「服务端自己那条错折回原号」还是「一律 429」这一问, 只有真的 VB 客户点得到。
     # BC1 = 抛错的那枚: 客户活着(rc=0)且 On Error 拿到 123(不是 429, 也不是 exit(123)), 对象仍是 Nothing;
@@ -7074,6 +7279,8 @@ if ($Category -in @("all", "compile")) {
     Test-SetRhsObjectContext
     Test-UdtMemberDims
     Test-ComServerErrorFrame
+    Test-ProjClassScanBound
+    Test-ObjectSlotBoxing
 
     Write-Host ""
 

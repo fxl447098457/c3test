@@ -74,6 +74,10 @@ void CCodeGen::visit(FunctionDecl& node) {
     earlyBoundSym_ = nullptr;
     withObjectVars_.clear();
     withObjectInfoStack_.clear();
+    // 账 #305 #408: 形参名册按过程重开 (上面那张表全程不清空)。
+    procObjectFormals_.clear();
+    // 账 #305 #408: 模块级那一档先恢复进来, 下面形参那一档的遮蔽才只吃本过程。
+    knownClassVars_.insert(moduleClassVars_.begin(), moduleClassVars_.end());
     // Fix 010r/010r-10: 类模块中注册me到knownClassVars_ (使Me.Method()正确分发)
     // 改为map赋值: me → 当前模块名(类名)
     if (isClassModule_) knownClassVars_["me"] = moduleName_;
@@ -133,6 +137,14 @@ void CCodeGen::visit(FunctionDecl& node) {
             auto& simpleP = static_cast<SimpleTypeRef&>(*p->asType);
             std::string pLower = p->name;
             std::transform(pLower.begin(), pLower.end(), pLower.begin(), ::tolower);
+
+            // 账 #305 #408: 这一档形参在 C 侧是裸对象指针 (void*), 把名字记进本过程名册, 让类推断先落空。
+            if (Symbol::toLower(simpleP.name) == "object") {
+                procObjectFormals_.insert(pLower);
+                // 账 #305 #408: 同上面 UDT 形参那一格的形状 —— 名字在本过程是裸对象指针,
+                // 把按名那张表里**别的**登记撤掉 (成员读那几站是直接查表的)。
+                knownClassVars_.erase(pLower);
+            }
             // P20-44: `As DataObject` 形参 → 记入 dataObjectParams_, 成员访问改道 RTL
             if (Symbol::toLower(simpleP.name) == "dataobject")
                 dataObjectParams_.insert(pLower);

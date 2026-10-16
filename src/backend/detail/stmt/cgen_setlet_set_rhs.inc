@@ -191,33 +191,91 @@
     // 仅 void* 目标包装; typed 目标保持裸指针; Variant 走上方 _Generic 路径.
     bool fix179bUnwrapped = false;
     {
+        // 「这枚目标槽是不是后期绑定的泛对象槽 (void* 里该装 IDispatch*)」——
+        // Fix 179a 与下面的装箱腿**同一问**，所以收成一条 lambda 问一次:
+        //   me-> 字段 → classVoidFieldMap_ (driver 预扫描, 含 As Object / As New)
+        //   其余      → knownObjectVars_   (本过程登记过的晚绑定变量/参数)
+        auto lateBoundSlotTarget = [&]() -> bool {
+            if (target.rfind("me->", 0) == 0) {
+                if (!classVoidFieldMap_) return false;
+                auto itV = classVoidFieldMap_->find(moduleName_);
+                return itV != classVoidFieldMap_->end()
+                    && itV->second.count(targetLower) > 0;
+            }
+            return knownObjectVars_.count(targetLower) > 0;
+        };
+
+        // 进站时的值 (下面几条臂会改写 value, 登记表那一问要吃**原样**那一枚)
+        const std::string rawSrcForReg = value;
+
         // value 形如 "(vb6_cls_<X>_New())"
         std::string bare179;
         if (value.size() > 16 && value.compare(0, 9, "(vb6_cls_") == 0
             && value.compare(value.size() - 7, 7, "_New())") == 0) {
             bare179 = value.substr(9, value.size() - 16);
         }
+        bool wrappedBy179a = false;   // 179a: New 那一形交回**拥有型**包装器
+        bool boxedHere = false;       // 装箱腿: 借用型包装器
         if (!bare179.empty()
             && bare179.find_first_not_of(
                    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_")
                    == std::string::npos
             && !targetIsVariant) {
-            bool targetIsCom179 = false;
-            if (target.rfind("me->", 0) == 0) {
-                if (classVoidFieldMap_) {
-                    auto itV179 = classVoidFieldMap_->find(moduleName_);
-                    if (itV179 != classVoidFieldMap_->end()
-                        && itV179->second.count(targetLower)) {
-                        targetIsCom179 = true;
-                    }
-                }
-            } else {
-                targetIsCom179 = knownObjectVars_.count(targetLower) > 0;
-            }
-            if (targetIsCom179) {
+            if (lateBoundSlotTarget()) {
                 value = "(void*)vb6_ComObject_FromInstance(vb6_FindCoClassDesc(\""
                       + bare179 + "\"), (void*)" + value.substr(1, value.size() - 2) + ")";
-                wrappedComVars_.insert(targetLower);
+                wrappedBy179a = true;
+            }
+        }
+        // 账 #305 §B187 第二腿 装箱腿: `Set <泛对象槽> = <工程内实例>` (不是 New 那一形)
+        // → 交**借用型**包装器。为什么这一格欠着、哪些值不许动、desc 闸门那一段全部住在唯一
+        // 发码处 boxIntoLateSlot (cgen_base_type.cpp) —— 实参那一站 (§B187 第四腿) 问的就是
+        // 同一句，两处不许各抄一份负条件。
+        if (!wrappedBy179a && !targetIsVariant && node.value && lateBoundSlotTarget()) {
+            value = boxIntoLateSlot(value, node.value.get());
+            // 下面那张登记表要问「这一站刚交的是不是包装器」: 唯一发码处交出的就是这一枚形状
+            // (前缀判据用 rfind(…, 0), 不写长度字面量 —— 那一族的坑是恒假也不报错)。
+            boxedHere = value.rfind("(void*)vb6_ComObject_FromBorrowedInstance(", 0) == 0;
+        }
+
+        // 登记表的口径: wrappedComVars_ 记的是「这个名字**最后一次** Set 进去的是不是
+        // 一枚包装器」—— 只有那一次交的是包装器才许登记，交了别的东西 (裸实例 / 外部
+        // IDispatch / Nothing) 一律注销。收不拢就会留一枚过期答案给三处读者:
+        //   Set o = New Foo          → 登记 (179a 交的是包装器)
+        //   Set o = CreateObject(…)  → 这一站既不装箱也不注销 ⇒ 表里还挂着"o 装着包装器"
+        //   If o Is Nothing          → 拿着旧答案去 GetInstance 一枚活着的外部 IDispatch
+        //                              ⇒ 认不出 vtable ⇒ 交回 NULL ⇒ **真对象被判成 Nothing**
+        // 原来只有 `Set x = Nothing` 一条注销, 那本来就是这条规则的一个特例。
+        // 复制 (`Set v2 = v1`, v1 装着包装器) 也算"最后一次交的是包装器" —— 槽里换的
+        // 就是同一枚指针，不登记会让读者② / ③ 在 v2 上漏一次剥壳。
+        if (!targetIsVariant) {
+            bool holdsWrapper = wrappedBy179a || boxedHere
+                || (lateBoundSlotTarget() && varHoldsComWrapper(rawSrcForReg));
+            if (holdsWrapper) wrappedComVars_.insert(targetLower);
+            else              wrappedComVars_.erase(targetLower);
+        } else {
+            // Variant 槽里的值是 vb6_VARIANT 那份存储，不是裸包装器指针 —— 名字不许进
+            // 登记表 (否则读者② / ③ 会把它当指针剥壳)。`Set v = Nothing` 那半直译自这里。
+            wrappedComVars_.erase(targetLower);
+        }
+
+        // 账 #305 §B187 装箱腿的读者①: Set <typed 工程类**局部/形参**目标> = <装箱过的
+        // 泛对象变量> → 剥回裸实例。Fix 179b 只接了 me-> 字段那一格 (且限类模块), 局部
+        // 那一格漏着: 装箱腿把这枚变量的内容从裸实例换成了包装器, 原样赋给 typed 目标
+        // 就是把包装器当实例用 (读字段整排错位)。判据问 varHoldsComWrapper (唯一那张
+        // 登记表), 目标类名问 knownClassVars_ (与 Fix 084g / deliverToClassSlot 同一条)。
+        {
+            std::string srcBoxed = value;
+            if (srcBoxed.size() >= 2 && srcBoxed.front() == '(' && srcBoxed.back() == ')') {
+                srcBoxed = srcBoxed.substr(1, srcBoxed.size() - 2);
+            }
+            if (!targetIsVariant && varHoldsComWrapper(srcBoxed)
+                && target.rfind("me->", 0) != 0) {
+                auto itTgtCls = knownClassVars_.find(targetLower);
+                if (itTgtCls != knownClassVars_.end() && !itTgtCls->second.empty()) {
+                    value = "(vb6_cls_" + cIdent(itTgtCls->second) + "*)"
+                          + unwrapComVarExpr(srcBoxed);
+                }
             }
         }
         // Fix 179b: Set <typed工程类目标> = <179a包装的Object变量> → 解包回裸实例
@@ -230,11 +288,10 @@
             && !src179.empty()
             && src179.find_first_of(" ()+*/,") == std::string::npos
             && !targetIsVariant) {
-            std::string srcLower179 = src179;
-            std::transform(srcLower179.begin(), srcLower179.end(), srcLower179.begin(), ::tolower);
-            std::string srcField179 = srcLower179;
-            if (srcField179.rfind("me->", 0) == 0) srcField179 = srcField179.substr(4);
-            if (wrappedComVars_.count(srcField179)) {
+            // 账 #305 §B187: 「这枚源变量此刻装着包装器吗」收成一条问句
+            // (varHoldsComWrapper) —— 别名复制、类槽实参交付、`Is` 同一性那三站问的
+            // 就是同一句话，这里不再手抄「lowercase + 剥 me-> + 查表」那一段。
+            if (varHoldsComWrapper(src179)) {
                 std::string tgtClass179;
                 if (classTypedFieldMap_) {
                     auto itT179 = classTypedFieldMap_->find(moduleName_);
@@ -254,10 +311,8 @@
                 }
             }
         }
-        // Set Nothing 清除跟踪
-        if (value == "NULL" || value == "0") {
-            wrappedComVars_.erase(targetLower);
-        }
+        // (原来这条 "Set Nothing 清除跟踪" 已并入上面那条"最后一次 Set 交的是不是包装器"
+        //  —— Nothing 那一形本来就落在它的 else 分支上，两条并着就是一处问。)
     }
 
     if (!fix179bUnwrapped) {
