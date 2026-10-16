@@ -6955,6 +6955,36 @@ if ($Category -in @("all", "run", "vbp")) {
         'AssignMove(&vb6_ret_F4, (((Value) != NULL) ? vb6_BSTR_FromStr(L"B189Impl") : vb6_BSTR_FromStr(L"Nothing")))',
         'AssignMove(&vb6_ret_F3, vb6_TypeName(')
 
+    # 账 #305 #408 (第八十九刀第五试): 按名那张类表 (knownClassVars_) 全程不清空, 于是**上一过程**
+    # 里 `ByVal Item As <工程类>` 登记的 "item" 会替**本过程**那枚 `ByVal Item As Object` 答题。两形病灶
+    # (夹具 tests\b190_scope, 两台实测): ① 成员读发成 `Item->Alpha` 而这枚形参的 C 类型是 void* =
+    #   cl C2223, 整棵工程压根编不出 exe (改前两台都 rc=1 且无产物); ② 第八十八刀把 TypeName(Thing)
+    #   折成了上一过程的类名常量。
+    # 修法两半同批: 读侧否决 (procObjectFormals_ 那一问排在按名的表与符号表退路**之前**, 治折叠那一形)
+    # 再 + 形参遮蔽那一站把表里那条撤掉 (治成员读那一形, 形状照仓里现成的 UDT 形参那一格); 撤表要有底 =
+    # moduleClassVars_ 那份**模块级**快照每张过程入口恢复一次, 否则后面过程里同名模块级类变量的原生
+    # 字段读会跟着掉 (P5 与上面那枚 Thing->Alpha 针钉的就是这一条)。
+    Test-EmitcShape "b190_object_formal_goes_late" @("$Tests\b190_scope\B190.vbp") @(
+        'vb6_BSTR_Assign(&vb6_ret_ShadowParam, vb6_ComGetStringProp(Item, L"Alpha"));',
+        'vb6_BSTR_Assign(&vb6_ret_UsesObj, vb6_ComGetStringProp(Thing, L"Alpha"));',
+        'vb6_BSTR_Assign(&vb6_ret_UsesModuleVar, Thing->Alpha  /* class var .Alpha field */);')
+    Test-EmitcAbsent "b190_object_formal_keeps_no_stale_class_answer" @("$Tests\b190_scope\B190.vbp") @(
+        'vb6_ret_ShadowParam, Item->Alpha',
+        'vb6_ret_UsesObj, Thing->Alpha',
+        '(((Thing) != NULL) ? vb6_BSTR_FromStr(L"B190A")')
+    Test-EmitcShape "b190_typename_of_object_formal_stays_runtime" @("$Tests\b190_scope\B190.vbp") @(
+        'vb6_BSTR_AssignMove(&vb6_ret_TnShadow, vb6_TypeName(')
+    # 两台真跑只钉 VB6 也答得出的那五条: P1/P2 = 类形参照旧早绑定 (负条件, 否决不许过界),
+    # P5 = 模块级同名变量没被撤走, P6 = 折叠那一支的 NULL 头, DONE = 进程活着。
+    # P3/P4/P7-P12 今天交空串与 "Object" —— 那不是本刀的靶子, 是 #412 (Type=Exe 工程里 Set 工程实例
+    # 进 Object 槽从不发包器 ⇒ Object 那一路晚绑定全落空) 的读数, 故意不钉成针。
+    $b190Needles = @("C3ProbeB190-P1-classparam=A1", "C3ProbeB190-P2-classparamB=B2",
+                     "C3ProbeB190-P5-modulevar=A1", "C3ProbeB190-P6-typename-nothing=Nothing",
+                     "C3ProbeB190-DONE")
+    Test-Vbp 'b190_object_formal_scope' "$Tests\b190_scope\B190.vbp" $b190Needles
+    Test-Vbp 'b190_object_formal_scope_x86' "$Tests\b190_scope\B190.vbp" $b190Needles -Arch "x86"
+
+
     # 账 #305 SB186 第二头: VB 客户那一头　「口径」的唯一读数面　—— 探针是 C 客户, 它只能读 hr;
     # 「服务端自己那条错折回原号」还是「一律 429」这一问, 只有真的 VB 客户点得到。
     # BC1 = 抛错的那枚: 客户活着(rc=0)且 On Error 拿到 123(不是 429, 也不是 exit(123)), 对象仍是 Nothing;

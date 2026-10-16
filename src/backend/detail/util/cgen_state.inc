@@ -320,6 +320,15 @@
     // Fix 010r-10: 从 unordered_set 改为 unordered_map 以支持类名查找
     std::unordered_map<std::string, std::string> knownClassVars_;
 
+    // 账 #305 #408: 本过程形参表里声明成 As Object 的名字 (小写)。
+    // 每张过程入口清空, 只描述当前过程的作用域 —— 用来挡住上面那张表跨过程漏答案。
+    std::unordered_set<std::string> procObjectFormals_;
+
+    // 账 #305 #408: knownClassVars_ 里模块级那一档登记的持久快照 (模块级 Dim As 类、类字段、窗体上的
+    // UserControl 子控件、跨模块实例变量)。每张过程入口恢复一份 —— 与 moduleNewVars_ / moduleFixedStringLen_
+    // 同一条形状; 形参那一档不进快照, 所以形参遮蔽只影响本过程。
+    std::unordered_map<std::string, std::string> moduleClassVars_;
+
     // Fix 037b: 标记最近一次 IndexOrCallExpr 生成的表达式是否为返回 VARIANT 的
     // 项目类 Item 属性调用 — Set 语句需要将其转换为 void* 对象引用.
     bool lastExprNeedsObjectUnpack_ = false;

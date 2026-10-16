@@ -70,6 +70,17 @@
 #       VBFlexGrid.ctl 的 `ByVal Value As Variant` 被另一过程同名的 `As IVBFlexDataSource` 漏过来折成了
 #       常量, 把 `TypeName(Value) = "ImageList"` 那一支变成恒假 (行为改动, 不是外观改动)。
 #
+#   B11 「一枚形参名在本过程里是 As Object」这一问只许答一处 (#408, 第八十九刀):
+#       knownClassVars_ 是一张按名索引、全程不清空的表, 于是上一过程登记的 `Item As <工程类>`#       会替本过程的 `Item As Object` 答题 —— 两形病灶 (夹具 tests\b190_scope): 成员读发成`Item->Alpha`
+#       而这枚形参的 C 类型是 void* (cl C2223, 整棵工程编不出 exe) + 第八十八刀把 TypeName(Item) 折成上一过程的类名常量。
+#       修法两半: ① 读侧否决住在 inferClassTypeOfExpr 的标识符那一支, 且必须排在**按名的表**与#       符号表退路之前 (只挡表治不了折叠那一形 —— 表落空后那条退路会认下同名的模块级变量);#       ② 形参遮蔽那一站把表里那条 erase 掉 (治成员读那一形, 形状照仓里现成的 UDT 形参那一格)。
+#       ②要有底: 模块级那一档登记同步进 moduleClassVars_ 快照, 每张过程入口恢复一份 —— 少了这一句,
+#       被擦掉的名字在**后面**的过程里也一起没了 (P5 那枚模块级类变量的原生字段读就是这一条的针)。
+#       钉死: procObjectFormals_ 的 insert/clear/count = 3/3/1; 快照写者 6 + 恢复 3;
+#       `knownClassVars_.erase(pLower)` 恰好 6 = UDT 形参 3 + Object 形参 3 (这张表的遮蔽站点只许这两族);
+#       否决那一行必须排在 knownClassVars_.find 与 symTab_.lookup(id.name) 之前; 夹具 + 三枚发码针
+#       + 两架构真跑都在 run_tests.ps1 里。
+
 # 用法:  pwsh -File scripts\check_object_slot_boxing.ps1
 # 退出码: 0 = 全绿; 1 = 红
 
@@ -321,6 +332,48 @@ if ($nSlotAsk -ne 1) { $script:bad += ("B10 折叠那一问问槽的权威 varia
 $nSlotCopy = @([regex]::Matches($foldText, "isDefinitelyVariantExpr")).Count
 if ($nSlotCopy -ne 0) { $script:bad += ("B10 折叠那一问自己抄了槽判据 isDefinitelyVariantExpr = $nSlotCopy 处 (要 0: 权威是 variantOperandAST)") }
 
+# B11 - 形参作用域 (#408, 第八十九刀): 按名那张类表的遮蔽只许两族站点, 且读侧否决要排在两条退路之前。
+$ctRel11 = "src\backend\cgen_util_classtype.cpp"
+$nFormalIns = Count-InFiles "src\backend" $srcExts "procObjectFormals_\.insert"
+$nFormalClr = Count-InFiles "src\backend" $srcExts "procObjectFormals_\.clear\(\)"
+$nFormalAsk = Count-InFiles "src\backend" $srcExts "procObjectFormals_\.count"
+$nSnapWrite = Count-InFiles "src\backend" $srcExts "moduleClassVars_\["
+$nSnapRestore = Count-InFiles "src\backend" $srcExts "knownClassVars_\.insert\(moduleClassVars_"
+$nShadowErase = Count-InFiles "src\backend" $srcExts "knownClassVars_\.erase\(pLower\)"
+if ($nFormalIns -ne 3) { $script:bad += ("B11 procObjectFormals_.insert = $nFormalIns (要 3: 三张形参循环各一处)") }
+if ($nFormalClr -ne 3) { $script:bad += ("B11 procObjectFormals_.clear = $nFormalClr (要 3: 每张过程入口重开一次)") }
+if ($nFormalAsk -ne 1) { $script:bad += ("B11 那一问的否决点数 = $nFormalAsk (要 1: 只许住在 inferClassTypeOfExpr)") }
+if ($nSnapWrite -ne 6) { $script:bad += ("B11 快照写者 = $nSnapWrite (要 6: 模块级 Dim As 类 3 + 跨模块 2 + UserControl 子控件 1)") }
+if ($nSnapRestore -ne 3) { $script:bad += ("B11 过程入口恢复快照 = $nSnapRestore (要 3: 少了它, 形参擦的那条会在后面的过程一起没)") }
+if ($nShadowErase -ne 6) { $script:bad += ("B11 knownClassVars_.erase(pLower) = $nShadowErase (要 6: UDT 形参 3 + Object 形参 3; 这张表的遮蔽站点不许多)") }
+$ctTxt11 = Text-Of $ctRel11
+$ctLines11 = $ctTxt11 -split "`r?`n"
+$iVeto11 = -1
+$iTable11 = -1
+$iSymLeg11 = -1
+for ($i = 0; $i -lt $ctLines11.Count; $i++) {
+    $t = $ctLines11[$i].TrimStart()
+    if ($t.StartsWith("//") -or $t.StartsWith("*")) { continue }
+    if ($iVeto11 -lt 0 -and $ctLines11[$i].Contains("procObjectFormals_.count(lower)")) { $iVeto11 = $i }
+    if ($iTable11 -lt 0 -and $ctLines11[$i].Contains("knownClassVars_.find(lower)")) { $iTable11 = $i }
+    if ($iSymLeg11 -lt 0 -and $ctLines11[$i].Contains("symTab_.lookup(id.name)")) { $iSymLeg11 = $i }
+}
+if ($iVeto11 -lt 0) { $script:bad += "B11 找不到读侧否决那一行 (被撤了?)" }
+if ($iTable11 -lt 0 -or $iSymLeg11 -lt 0) { $script:bad += ("B11 inferClassTypeOfExpr 的两条退路读不到 (表行=" + $iTable11 + " 符号表行=" + $iSymLeg11 + ")") }
+if ($iVeto11 -ge 0 -and ($iVeto11 -gt $iTable11 -or $iVeto11 -gt $iSymLeg11)) {
+    $script:bad += ("B11 否决排到了退路之后 (否决行 $iVeto11 / 表行 $iTable11 / 符号表行 $iSymLeg11) —— 折叠那一形会退回原病")
+}
+if (-not (Test-Path -LiteralPath (Join-Path $root "tests\b190_scope\B190.vbp"))) {
+    $script:bad += "B11 缺夹具 tests/b190_scope/B190.vbp (按名漏答案那两形)"
+}
+$nB190Cells = @([regex]::Matches($rtTxt, "b190_object_formal_scope")).Count
+if ($nB190Cells -ne 2) { $script:bad += ("B11 b190_object_formal_scope 真跑格 = $nB190Cells (要 2: x64 + x86)") }
+foreach ($c11 in @("b190_object_formal_goes_late", "b190_object_formal_keeps_no_stale_class_answer",
+                   "b190_typename_of_object_formal_stays_runtime")) {
+    $k = @([regex]::Matches($rtTxt, $c11)).Count
+    if ($k -ne 1) { $script:bad += ("B11 发码判据 " + $c11 + " = $k 处 (要 1)") }
+}
+
 if ($script:bad.Count -eq 0) {
     Write-Host ("PASS boxing-emits=1 stations=3 borrowed-refs=5 coclass-predicate-sites=" + $nUse `
         + " wrapper-ask-sites=" + $nAsk + " registry-ins=" + $nIns + " erase=" + $nErase `
@@ -330,7 +383,7 @@ if ($script:bad.Count -eq 0) {
         + " arm7=" + $nArm7 + " nothing-site=" + $nNothing + "@line" + $iNil + " empty-arm=" + $nEmptyArm `
         + " gate-sites=" + $nGateBackend + "/" + $nGateOther + " gate-table=" + $nGateState + "/" + $nGateInject + "/" + $nGateScan `
         + " fold-emit=" + $nTernary + " order=" + $iGate10 + "<" + $iTern10 `
-        + " arm8=" + $nArm8 + " gate-cells=" + $nGateCells) -ForegroundColor Green
+        + " arm8=" + $nArm8 + " gate-cells=" + $nGateCells + " veto-sites=" + $nFormalIns + "/" + $nFormalClr + "/" + $nFormalAsk + "/snap=" + $nSnapWrite + "/" + $nSnapRestore + "/erase=" + $nShadowErase) -ForegroundColor Green
     exit 0
 }
 foreach ($b in $script:bad) { Write-Host ("FAIL " + $b) -ForegroundColor Red }

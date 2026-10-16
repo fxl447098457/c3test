@@ -18,6 +18,11 @@ std::string CCodeGen::inferClassTypeOfExpr(const ASTNode& expr) const {
             // base case: 变量 → knownClassVars_
             auto& id = static_cast<const IdentifierExpr&>(expr);
             std::string lower = Symbol::toLower(id.name);
+            // 账 #305 #408 (第八十九刀第五试): 本过程把这个名字声明成 As Object = 一枚裸对象指针, 不是任何工程类的实例。
+            // 那张按名索引、全程不清空的表 (knownClassVars_) 会把另一个过程里同名形参或模块级声明的类答案漏过来
+            // (实测: 成员读发成 Thing->Alpha 而 Thing 的 C 类型是 void* = cl C2223; 第八十八刀又把 TypeName(Thing)
+            // 折成上一过程的类名常量), 而符号表那条退路会认下同名的模块级变量 —— 所以这一问排在这两问之前。
+            if (procObjectFormals_.count(lower)) return "";
             auto it = knownClassVars_.find(lower);
             if (it != knownClassVars_.end()) return it->second;
             if (std::getenv("C3_DBG110") && lower == "usercontrol") {
