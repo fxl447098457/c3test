@@ -11,6 +11,19 @@
         }
     }
 
+    /* Fix 296 / 4a: 目标就是本 Property Get / Function 的返回槽, 而右值是发射出去的
+       `vb6_Extender_*` 全局 ⇒ 换实例感知读入口 (写侧 3a 的镜像)。**只改右边**:
+       vb6_ret_<Prop> 这个名字来自 currentReturnVar_ (decl/cgen_decl_func.cpp:325), 不动;
+       外层的 vb6_ChkInt / vb6_BSTR_Assign 也照旧套在上面 —— 数值与字符串两种右值都成立。
+       ComCtlsDemo 实测 333 处走的是这枚 push/pop 副本, 而权威值在 vb6_UCRec.ext*。
+       `target == currentReturnVar_` 只可能来自上面那次改写 (AST 目标就是本过程名),
+       即"这句在填返回值槽"; 自由表达式 (ToolBar/CoolBar/StatusBar 等 6 处
+       `Align = vb6_ChkInt(vb6_Extender_Align)` / `_vb6_select_10 = vb6_Extender_Align`
+       / `onHeightChanged(..., vb6_Extender_Height)`) 走不到这里 —— 那是另一刀, 刻意留着。 */
+    if (!currentReturnVar_.empty() && target == currentReturnVar_) {
+        value = extenderMemberReadExpr(value);
+    }
+
     // BSTR赋值检测: 如果目标是BSTR变量, 使用vb6_BSTR_Assign防止悬垂指针和双重释放
     bool targetIsBstr = false;
     // 账 #118: "这个目标是不是定长串, 定长多少" —— 在下面 targetIsBstr 块内算一次,

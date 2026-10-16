@@ -940,6 +940,21 @@
     bool hostPseudoIsNumeric(const std::string& pseudoObj,
                              const std::string& memberName) const;
 
+    // Fix 296 / 4a: `Extender.<成员>` 作**右值**时的实例感知入口 —— 写侧 (3a) 的镜像。
+    //
+    // 3a 把写拉进了通道, 读还发裸全局。`Property Get Left() As Single` 体内那句
+    // `Left = Extender.Left` 生成 `vb6_ret_Left = vb6_Extender_Left;` —— 读的是
+    // push/pop 一直在同步的那枚副本, 而权威值在 `vb6_UCRec.ext*`。
+    //
+    // 入参是**发射出去的符号** (hostPseudoRtlSymbol 的产物), 闸门是它的 `vb6_Extender_`
+    // 前缀 —— 不是 hostPseudoBareName(它不覆盖 Extender 成员, 拿它当闸门会静默漏掉,
+    // 3a 踩过一次)。类型答案只从 kHostPseudoRows 问; 答不出来的行 (对象成员
+    // Container/DragIcon 与方法行) 原样返回, 不硬换。
+    //
+    // 返回**数值与字符串两个入口之一**而不是一个 void*: 读要参与算术和字符串表达式,
+    // 单一 void* getter 会把每个调用点都变成强制转换, 比原来更脏。
+    std::string extenderMemberReadExpr(const std::string& rtlSymbol) const;
+
     // 账 #257 第十九层: `With UserControl` 体内 `.成员` 的**内建**判定。
     //
     // VB6 里 `UserControl.Picture` 与控件自己声明的 `Public Property Set Picture`

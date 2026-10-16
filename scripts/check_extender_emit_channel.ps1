@@ -11,17 +11,28 @@
 #   2. 代码生成侧确实改道到实例入口
 #   3. RTL 定义了入口, 且头文件声明了它(生成码直接调, 漏声明就 C2065)
 #   4. 入口内部走 vb6_UC_ExtenderField(否则又变回只写全局)
+#
+# 4a 追加**读侧**的两条发射路径 + 共用出口的闸门, 各带负控:
+#   5. Property Get 返回槽那一站(value_sem 的 `target = currentReturnVar_` 之后)改道
+#   6. withHostPseudoIntrinsic 那一站(With 语境)改道
+#   7. 共用出口 extenderMemberReadExpr 的闸门仍是发射符号前缀, 且两个读入口都被挑到
 
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 $cg = Join-Path $root 'src/backend/detail/stmt/cgen_assign_host_pseudo.inc'
+$val = Join-Path $root 'src/backend/detail/stmt/cgen_assign_value_sem.inc'
+$withP = Join-Path $root 'src/backend/expr/cgen_expr_with.cpp'
+$com = Join-Path $root 'src/backend/cgen_util_com.cpp'
 $rtl = Join-Path $root 'src/rtl/core/vb6forms/uc/uc_controls.c'
 $hdr = Join-Path $root 'src/rtl/core/vb6rtl/vb6rtl_userctl.h'
 
-foreach ($p in @($cg, $rtl, $hdr)) {
+foreach ($p in @($cg, $val, $withP, $com, $rtl, $hdr)) {
     if (-not (Test-Path -LiteralPath $p)) { Write-Host "missing file: $p" -ForegroundColor Red; exit 1 }
 }
 $cgT = [System.IO.File]::ReadAllText($cg)
+$valT = [System.IO.File]::ReadAllText($val)
+$withT = [System.IO.File]::ReadAllText($withP)
+$comT = [System.IO.File]::ReadAllText($com)
 $rtlT = [System.IO.File]::ReadAllText($rtl)
 $hdrT = [System.IO.File]::ReadAllText($hdr)
 
@@ -76,6 +87,40 @@ foreach ($fn in @('vb6_UC_GetExtenderMemberNum', 'vb6_UC_GetExtenderMemberStr'))
     $ok = (-not $mnr.Success) -or (-not ($mnr.Groups['b'].Value -match '=\s*vb6_UC_ExtenderField\s*\('))
     Check "negative control: neutering the channel makes $fn red" $ok 'sentinel is vacuous if neutering the channel call still passes'
 }
+
+# --- 4a: 读侧 ---
+# 3a 只把**写**拉进了通道。读还发裸全局 (`vb6_ret_Left = vb6_Extender_Left;`),
+# 而权威值在 vb6_UCRec.ext* 里 —— getter 读到的是 push/pop 同步的副本, 不是实例记录。
+# 4a 把两条读发射路径接到同一个实例感知出口 extenderMemberReadExpr 上。
+$getterRx = 'extenderMemberReadExpr\s*\(\s*value\s*\)'
+$getterOk = $valT -match $getterRx
+Check 'Property Get read path redirects through the instance-aware entry' $getterOk 'vb6_ret_<Prop> = vb6_Extender_<M>; still reads a bare global (4a)'
+$negG = $valT -replace '(?m)^[^\n]*extenderMemberReadExpr\s*\(\s*value\s*\)[^\n]*\n', ''
+Check 'negative control (restoring the original getter line must go red)' (-not ($negG -match $getterRx)) 'sentinel is vacuous if deleting the redirect still passes'
+
+$withRx = 'extenderMemberReadExpr\s*\(\s*hpRtlW\s*\)'
+$withOk = $withT -match $withRx
+Check 'withHostPseudoIntrinsic read path is covered' $withOk 'With <pseudo>.<member> whose RTL symbol is vb6_Extender_* must use the same entry point'
+$negW = $withT -replace '(?m)^[^\n]*extenderMemberReadExpr\s*\(\s*hpRtlW\s*\)[^\n]*\n', ''
+Check 'negative control (restoring the original With line must go red)' (-not ($negW -match $withRx)) 'sentinel is vacuous if deleting the With redirect still passes'
+
+# 共用出口: 闸门必须是**发射符号前缀** (hostPseudoBareName 不覆盖 Extender 成员,
+# 拿它当闸门会静默漏掉 —— 3a 踩过一次, 生成码 bare=9 new=0)。
+$gateRx = 'extenderMemberReadExpr[\s\S]{0,3000}?rfind\(\s*"vb6_Extender_"\s*,\s*0\s*\)'
+Check 'shared read exit gates on the emitted symbol prefix' ($comT -match $gateRx) 'gate must be rfind("vb6_Extender_", 0) on the emitted symbol'
+$negC = $comT -replace 'rfind\(\s*"vb6_Extender_"\s*,\s*0\s*\)', 'rfind("vb6_ExtenderX_", 0)'
+Check 'negative control (renaming the prefix gate must go red)' (-not ($negC -match $gateRx)) 'sentinel is vacuous if neutering the prefix gate still passes'
+
+# 两个读入口都必须被共用出口挑到 (kind 约定 0=BSTR / 2=int16 / 3=int32 都走 Num)
+function Has-Dock($text, $name) { return $text.Contains('"' + $name + '"') }
+$numOk = Has-Dock $comT 'vb6_UC_GetExtenderMemberNum'
+$strOk = Has-Dock $comT 'vb6_UC_GetExtenderMemberStr'
+Check 'shared read exit offers both docks' ($numOk -and $strOk) 'read side needs a numeric and a string entry point (a single void* getter would force a cast per call site)'
+$negD = $comT -replace '"vb6_UC_GetExtenderMemberStr"', '"vb6_UC_GetExtenderMemberStrX"'
+$negNum = Has-Dock $negD 'vb6_UC_GetExtenderMemberNum'
+$negStr = Has-Dock $negD 'vb6_UC_GetExtenderMemberStr'
+Check 'negative control (unhooking the string dock must go red)' (-not ($negNum -and $negStr)) 'sentinel is vacuous if either dock can go unreferenced'
+
 if ($bad) { Write-Host "check_extender_emit_channel: FAIL ($bad)"; exit 1 }
 Write-Host 'check_extender_emit_channel: PASS'
 exit 0
