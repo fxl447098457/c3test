@@ -728,3 +728,12 @@
  *   vb6_NumVal 与 vb6_DateVal/vb6_DateParse 一字未改其答案, 只是改问下面那层。
  *   后果实物 = VBFlexGrid 那两处 If IsDate(Text) Then CDate(Text) 的 Then 从没执行过。
  *   touch 本文件 = 让 RCDATA 重编一次（§B99②）。 */
+/* 账 #305 §B193 第九十六刀 (2026-10-17): Hour / Minute / Second 与 DateAdd 把 DATE 的小数
+ *   半边**直接截断** => 同一份 VB 源码两台机器两个读数 (Minute(CDate("2026/1/1 14:30")) 本仓答
+ *   29, 本机 VB-family 运行期答 30; Second(CDate("2026/1/1 23:59:59")) 本仓答 58 而不是 59)。
+ *   尺 .build/k272_timeparts.vbs + k277_round.vbs + k278_roll.vbs: 运行期是**四舍五入到整秒**
+ *   (+0.4 秒不进位、+0.6 秒进位; 23:59:59.9 那一格日内秒归零)。86400 个「一天里的第几秒」里
+ *   按截断算有 43136 个落错一档 (≈一半)。DateAdd 更疼: 它拆完还要写回去, 少的那一秒永久留在
+ *   存下的值里。收成一条唯一出口 vb6_SecondsOfDay(double), 读者 = 三枚 getter + DateAdd 分解站
+ *   (DatePart 的 h/n/s 三档本来就转调那三枚 getter, 跟着一起好)。
+ *   touch 本文件 = 让 RCDATA 重编一次（§B99②）。 */

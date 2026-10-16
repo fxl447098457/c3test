@@ -127,22 +127,32 @@ int32_t vb6_Day(double date) {
     return d;
 }
 
+// 账 #419 (§B193): 「这一枚 DATE 的双半边怎么切」的唯一出口。DATE 是「整天数 + 一天的分数」，
+// 而分数在二进制里落不整 (14:30 = 0.6041666666666666)，所以拆之前必须**四舍五入到整秒** ——
+// 直接截断会把这一格少掉一秒的几分之一，实测口径 (本机 VB-family 运行期，尺
+// .build/k272_timeparts.vbs + k277_round.vbs + k278_roll.vbs):
+//   Minute(CDate("2026/1/1 14:30")) = 30 (截断那一条答 29)；+0.4/+0.5 秒不进位、+0.6/+0.99 进位；
+//   23:59:59.9 那一格日内秒归零 (运行期连日期那一半也进了一天，日期那一半本刀不动，另记一格)。
+// 一条出口，读者 = Hour / Minute / Second 三枚 getter 与 DateAdd 分解那一站 (DatePart 的 h/n/s
+// 三档本来就转调这三枚 getter，跟着一起好)。
+static int32_t vb6_SecondsOfDay(double date) {
+    double t = date - (double)(int32_t)date;
+    if (t < 0) t += 1.0;                       // 与 DateAdd 原有的归一保持同一条口径
+    int32_t sod = (int32_t)(t * 86400.0 + 0.5);
+    if (sod >= 86400) sod -= 86400;             // 一天末尾那一格: 只归零，不动日期那一半
+    return sod;
+}
+
 int32_t vb6_Hour(double time) {
-    double t = time - (double)(int32_t)time;
-    if (t < 0) t += 1.0;
-    return (int32_t)(t * 24.0) % 24;
+    return vb6_SecondsOfDay(time) / 3600;
 }
 
 int32_t vb6_Minute(double time) {
-    double t = time - (double)(int32_t)time;
-    if (t < 0) t += 1.0;
-    return (int32_t)(t * 1440.0) % 60;
+    return (vb6_SecondsOfDay(time) / 60) % 60;
 }
 
 int32_t vb6_Second(double time) {
-    double t = time - (double)(int32_t)time;
-    if (t < 0) t += 1.0;
-    return (int32_t)(t * 86400.0) % 60;
+    return vb6_SecondsOfDay(time) % 60;
 }
 
 // ============================================================
@@ -192,9 +202,12 @@ double vb6_DateAdd(BSTR interval, double number, double date) {
     
     int32_t y, m, d;
     vb6_serial_to_date(datePart, &y, &m, &d);
-    int32_t hh = (int32_t)(timePart * 24.0) % 24;
-    int32_t mm = (int32_t)(timePart * 1440.0) % 60;
-    int32_t ss = (int32_t)(timePart * 86400.0) % 60;
+    // 账 #419 (§B193): 这三行原本各抄一份截断 —— DateAdd 是「改完之后还要写回去」的那一站，
+    // 截断掉的那一秒会**永久留在结果里** (DateAdd("d", 1, #2026/1/1 14:30#) 少一分钟)。
+    int32_t sod = vb6_SecondsOfDay(date);
+    int32_t hh = sod / 3600;
+    int32_t mm = (sod / 60) % 60;
+    int32_t ss = sod % 60;
     
     int32_t n = (int32_t)number;
     
