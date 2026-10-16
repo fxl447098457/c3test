@@ -344,6 +344,34 @@ int32_t vb6_UC_IsExtender(const void* p) {
 // kind 编码与 vb6_UC_FontField 一致: 0=BSTR, 1=float, 2=int16, 3=int32
 void* vb6_UC_ExtenderField(void* p, const wchar_t* name, int32_t* kind) {
     if (!vb6_UC_IsExtender(p) || !name || !kind) return NULL;
+    /* Fix 294: 几何四项走**当前实例**的记录, 不再走裸全局。
+       `vb6_UCRec.extLeft/extTop/extWidth/extHeight` 本来就在(建宿主时写的设计值),
+       但之前**没有任何东西读它们** —— 于是 `Extender.Height` 读回来是全局槽位里的
+       另一个值(或 0), `.Extender.Height = v` 写进去也只落在全局上, 与宿主实际尺寸
+       脱节。这里让 COM Extender 通道直接指向记录字段: 读写都落在"这个控件自己的"
+       那一份上, 天然不怕 push/pop 互相盖。
+       没有当前记录时(理论上不该发生)退回全局, 保持原行为。 */
+    {
+        vb6_UCRec* rc = vb6_ucCurrent;
+        if (rc) {
+            if (_wcsicmp(name, L"Width")  == 0) { *kind = 3; return &rc->extWidth;  }
+            if (_wcsicmp(name, L"Height") == 0) { *kind = 3; return &rc->extHeight; }
+            if (_wcsicmp(name, L"Left")   == 0) { *kind = 3; return &rc->extLeft;   }
+            if (_wcsicmp(name, L"Top")    == 0) { *kind = 3; return &rc->extTop;    }
+            /* Fix 294 第二片: 其余成员同样走记录。名字与全局一一对应, 保证行为不变。 */
+            if (_wcsicmp(name, L"Align")           == 0) { *kind = 3; return &rc->extAlign;           }
+            if (_wcsicmp(name, L"DragMode")        == 0) { *kind = 3; return &rc->extDragMode;        }
+            if (_wcsicmp(name, L"HelpContextID")   == 0) { *kind = 3; return &rc->extHelpContextID;   }
+            if (_wcsicmp(name, L"WhatsThisHelpID") == 0) { *kind = 3; return &rc->extWhatsThisHelpID; }
+            if (_wcsicmp(name, L"Visible")         == 0) { *kind = 2; return &rc->extVisible;         }
+            if (_wcsicmp(name, L"vb6_Default")     == 0) { *kind = 2; return &rc->extVb6Default;      }
+            if (_wcsicmp(name, L"Cancel")          == 0) { *kind = 2; return &rc->extCancel;          }
+            if (_wcsicmp(name, L"Tag")             == 0) { *kind = 0; return &rc->extTag;             }
+            if (_wcsicmp(name, L"ToolTipText")     == 0) { *kind = 0; return &rc->extToolTipText;     }
+            if (_wcsicmp(name, L"Container")       == 0) { *kind = 0; return &rc->extContainer;       }
+            if (_wcsicmp(name, L"DragIcon")        == 0) { *kind = 0; return &rc->extDragIcon;        }
+        }
+    }
     if (_wcsicmp(name, L"Width") == 0)           { *kind = 3; return &vb6_Extender_Width; }
     if (_wcsicmp(name, L"Height") == 0)          { *kind = 3; return &vb6_Extender_Height; }
     if (_wcsicmp(name, L"Left") == 0)            { *kind = 3; return &vb6_Extender_Left; }
