@@ -55,6 +55,20 @@
 #       那张 512 格反查表重新拉来当运行期读者)。且 vb6rtl_conv.c 里它那一行必须排在
 #       vb6_Host_TypeNameOf **之后**: 宿主 (窗体 / 控件) 那一问在前是硬口径, 倒了就把 tests/setobj
 #       钉着的 TextBox / CheckBox 两枚针改错。
+#   B10 「这枚声明档的类名在本工程里被当接口用过没有」(§B189 第二档, 第八十八刀) 一处定义、一处
+#       消费、一处发射, 且闸门必须排在发射之前: classUsedAsInterface 在 src/backend 恰好 2 处
+#       (出口定义 1 + 折叠那一问 1)、src/driver 与 src/rtl 必须 0 处 (这问的是"本工程里有没有人
+#       Implements 它", 只许发码侧问一次); 那张名单 projImplementedNames_ 在 src/backend 恰好 4 处
+#       (字段 1 + 注入 1 + 两道闸 2), setProjectImplementedNames 全 src 恰好 2 处 (定义 + driver 注入),
+#       driver 侧 projectImplementedNames 恰好 3 处 (声明 + insert + 注入实参), 且取数腿只问语义层
+#       那一份 implementsNames (本文件里恰好 2 处: 注释那一问 + 循环那一问 —— 重扫 AST 就是第二份权威)。
+#       发射点 '!= NULL) ? vb6_BSTR_FromStr(L' 在 src/backend 恰好 1 处, 且它那一行必须排在闸门之后
+#       (先问视图、后折名字, 倒了就是把接口名当对象名)。控件那一路的两枚文本闸 (vb6_hwnd_ /
+#       vb6_form_ctrl_) 必须都还在: 控件的答案属于宿主那一问, 不属声明档。第四道闸 = 实参是整枚槽
+#       ⇒ 那是运行期的问句, 只许问 §B147 那条权威 variantOperandAST (折叠那一问的文件里恰好 1 处),
+#       不许自己抄 isDefinitelyVariantExpr (0 处) —— 实物是 A/B 上唯一一处真语料移动:
+#       VBFlexGrid.ctl 的 `ByVal Value As Variant` 被另一过程同名的 `As IVBFlexDataSource` 漏过来折成了
+#       常量, 把 `TypeName(Value) = "ImageList"` 那一支变成恒假 (行为改动, 不是外观改动)。
 #
 # 用法:  pwsh -File scripts\check_object_slot_boxing.ps1
 # 退出码: 0 = 全绿; 1 = 红
@@ -206,6 +220,16 @@ $nArm6 = @([regex]::Matches($rtTxt, "CREATE6MEM")).Count
 if ($nArm6 -ne 4) { $script:bad += ("B6 CREATE6MEM 在 run_tests.ps1 里 = $nArm6 (要 4: 两架构各一正针 + 一反面证人)") }
 $nArm7 = @([regex]::Matches($rtTxt, "CREATE7MEM")).Count
 if ($nArm7 -ne 4) { $script:bad += ("B6 CREATE7MEM 在 run_tests.ps1 里 = $nArm7 (要 4: 两架构各一正针 + 一反面证人)") }
+$nArm8 = @([regex]::Matches($rtTxt, "CREATE8MEM")).Count
+if ($nArm8 -ne 4) { $script:bad += ("B6 CREATE8MEM 在 run_tests.ps1 里 = $nArm8 (要 4: 两架构各一正针 + 一反面证人)") }
+if (-not (Test-Path -LiteralPath (Join-Path $root "tests\b187_box\B187Decl.cls"))) {
+    $script:bad += "B6 缺第八臂夹具 tests/b187_box/B187Decl.cls (TypeName 按声明档折叠)"
+}
+if (-not (Test-Path -LiteralPath (Join-Path $root "tests\b189_gate\B189g.vbp"))) {
+    $script:bad += "B6 缺闸门夹具 tests/b189_gate/B189g.vbp (折叠那问的接口视图那一头, 只发码不建)"
+}
+$nGateCells = @([regex]::Matches($rtTxt, "b189_gate_")).Count
+if ($nGateCells -ne 3) { $script:bad += ("B6 b189_gate_ 那三枚发码判据 = $nGateCells (要 3: 视图反针 + 实体正针 + 同名槽那一双)") }
 
 # B8 — TypeName 认自家包装器 (§B189 第一档): 一处出口、一处消费, 且排在宿主那一问之后
 $convRel = "src\rtl\core\vb6rtl\vb6rtl_conv.c"
@@ -251,13 +275,62 @@ if ($iHost9 -ge 0 -and $iNil -ge 0 -and $iNil -gt $iHost9) {
 }
 if ($nEmptyArm -ne 1) { $script:bad += ("B9 标表里 case vb6_vtEmpty 那一行 = $nEmptyArm (要 1: 从没赋值的 Variant 照旧答 Empty)") }
 
+# B10 — 「这枚声明档的类名在本工程里被当接口用过没有」(§B189 第二档, 第八十八刀):
+#        一处定义、一处消费、一处发射, 且闸门必须排在发射之前。
+#        折叠那一支是**编译期按声明折**的, 所以它有两个天生要钉死的地方: ① 答案的名字来自声明档
+#        (不是写死的一枚) —— 靠夹具 tx As B187Name 那一形钉行为, 这里钉"发码点只许一处";
+#        ② 接口视图那一头不许折 (VB6 答实体真身, 按声明折就是把接口名当对象名) —— 靠那张
+#        工程级 implements 名单, 名单只许语义层那一份做权威。
+$foldRel = "src\backend\detail\expr\cgen_expr_call_builtin_pre.inc"
+$nGateBackend = Count-InFiles "src\backend" $srcExts "classUsedAsInterface"
+$nGateOther = (Count-InFiles "src\driver" $srcExts "classUsedAsInterface") + (Count-InFiles "src\rtl" $srcExts "classUsedAsInterface")
+if ($nGateBackend -ne 2) { $script:bad += ("B10 classUsedAsInterface 在 src/backend = $nGateBackend (要 2: 出口定义 1 + 折叠那一问 1)") }
+if ($nGateOther -ne 0) { $script:bad += ("B10 发码侧之外有人自己抄了接口视图那一问 = $nGateOther (要 0)") }
+$nGateState = Count-InFiles "src\backend" $srcExts "projImplementedNames_"
+if ($nGateState -ne 4) { $script:bad += ("B10 projImplementedNames_ 在 src/backend = $nGateState (要 4: 字段 1 + 注入 1 + 两道闸 2)") }
+$nGateInject = Count-InFiles "src" $srcExts "setProjectImplementedNames"
+if ($nGateInject -ne 2) { $script:bad += ("B10 setProjectImplementedNames 全 src = $nGateInject (要 2: 出口定义 1 + driver 注入 1)") }
+$nGateScan = Count-InFiles "src\driver" $srcExts "projectImplementedNames"
+if ($nGateScan -ne 3) { $script:bad += ("B10 driver 侧 projectImplementedNames = $nGateScan (要 3: 名单声明 1 + insert 1 + 注入实参 1)") }
+$nGateSemantic = @([regex]::Matches((Text-Of "src\driver\detail\driver_codegen_voidfield_scan.inc"), "implementsNames")).Count
+if ($nGateSemantic -ne 2) { $script:bad += ("B10 那份名单的取数腿问语义层 implementsNames = $nGateSemantic 处 (要 2: 注释里那一问 + 循环那一问; 只认这一份权威, 不许重扫 AST)") }
+$nTernary = Count-InFiles "src\backend" $srcExts '!= NULL\) \? vb6_BSTR_FromStr\(L'
+if ($nTernary -ne 1) { $script:bad += ("B10 折叠那支的发射点 '!= NULL) ? vb6_BSTR_FromStr(L' 在 src/backend = $nTernary (要 1: 一处发射, 别处再拼一遍就是第二份答案源)") }
+$foldLines = (Text-Of $foldRel) -split "`r?`n"
+$iGate10 = -1
+$iTern10 = -1
+for ($i = 0; $i -lt $foldLines.Count; $i++) {
+    $t = $foldLines[$i].TrimStart()
+    if ($t.StartsWith("//") -or $t.StartsWith("*")) { continue }
+    if ($iGate10 -lt 0 -and $foldLines[$i].Contains("classUsedAsInterface(")) { $iGate10 = $i }
+    if ($iTern10 -lt 0 -and $foldLines[$i].Contains('!= NULL) ? vb6_BSTR_FromStr(L')) { $iTern10 = $i }
+}
+if ($iGate10 -lt 0) { $script:bad += "B10 折叠那一问找不到闸门 (被撤了?)" }
+if ($iGate10 -ge 0 -and $iTern10 -le $iGate10) {
+    $script:bad += ("B10 闸门排到了发射之后/同处 (闸门行 $iGate10, 发射行 $iTern10) —— 视图那一头会被折")
+}
+foreach ($guard in @("vb6_hwnd_", "vb6_form_ctrl_")) {
+    $c = @([regex]::Matches((Text-Of $foldRel), [regex]::Escape($guard))).Count
+    if ($c -lt 1) { $script:bad += ("B10 折叠那一问缺控件那一路的文本闸 " + $guard + " (控件的答案属于宿主那一问)") }
+}
+# 第四道闸: 实参是整枚槽 ⇒ 运行期的问句, 不许按声明档折。这一问只许问那一条权威 (§B147 收成的
+# variantOperandAST), 在本文件里恰好 1 处; 直接抄 isDefinitelyVariantExpr 就是第二份判据, 0 处。
+$foldText = Text-Of $foldRel
+$nSlotAsk = @([regex]::Matches($foldText, "variantOperandAST")).Count
+if ($nSlotAsk -ne 1) { $script:bad += ("B10 折叠那一问问槽的权威 variantOperandAST = $nSlotAsk 处 (要 1: 那一问只许走 §B147 那一条)") }
+$nSlotCopy = @([regex]::Matches($foldText, "isDefinitelyVariantExpr")).Count
+if ($nSlotCopy -ne 0) { $script:bad += ("B10 折叠那一问自己抄了槽判据 isDefinitelyVariantExpr = $nSlotCopy 处 (要 0: 权威是 variantOperandAST)") }
+
 if ($script:bad.Count -eq 0) {
     Write-Host ("PASS boxing-emits=1 stations=3 borrowed-refs=5 coclass-predicate-sites=" + $nUse `
         + " wrapper-ask-sites=" + $nAsk + " registry-ins=" + $nIns + " erase=" + $nErase `
         + " bridge-sites=" + $nBridge + " boxed-value-asks=" + $nIsBoxed + "/" + $nIsBoxedRtl `
         + " cells=" + $nCells + " arm4=" + $nArm4 + " arm5=" + $nArm5 + " arm6=" + $nArm6 `
         + " classname-rtl=" + $nClsRtl + " classname-backend=" + $nClsBackend + " order=" + $iHost + "<" + $iCls `
-        + " arm7=" + $nArm7 + " nothing-site=" + $nNothing + "@line" + $iNil + " empty-arm=" + $nEmptyArm) -ForegroundColor Green
+        + " arm7=" + $nArm7 + " nothing-site=" + $nNothing + "@line" + $iNil + " empty-arm=" + $nEmptyArm `
+        + " gate-sites=" + $nGateBackend + "/" + $nGateOther + " gate-table=" + $nGateState + "/" + $nGateInject + "/" + $nGateScan `
+        + " fold-emit=" + $nTernary + " order=" + $iGate10 + "<" + $iTern10 `
+        + " arm8=" + $nArm8 + " gate-cells=" + $nGateCells) -ForegroundColor Green
     exit 0
 }
 foreach ($b in $script:bad) { Write-Host ("FAIL " + $b) -ForegroundColor Red }

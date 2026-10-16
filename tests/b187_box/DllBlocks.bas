@@ -43,3 +43,8 @@ CoClass Nil
     [Implementation("B187Nil")]
     [ComCreatable(True)]
 End CoClass
+
+CoClass Decl
+    [Implementation("B187Decl")]
+    [ComCreatable(True)]
+End CoClass

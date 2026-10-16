@@ -6869,7 +6869,7 @@ if ($Category -in @("all", "run", "vbp")) {
     # 交给外部 COM 实参的那一路直接在 OLE 的 VariantClear 里 0xC0000005 (BASE 上探针 exit=-1073741819,
     # x64/x86 两架构皆然)。现在交的是**借用型**包装器 (ownsInstance=0, 不接管实例生命周期), 闸门只有一问:
     # 这枚类在运行期 coclass 表里占不占一行 (Symbol::isCoClassTableEntry, 与建表那侧同一条)。
-    # 七条臂各交一个数, 编码见 tests\b187_box\*.cls:
+    # 八条臂各交一个数, 编码见 tests\b187_box\*.cls:
     #   42042  = 早绑定 + 晚绑定两条腿都真 (42000 = 晚绑定那半又空了),
     #   999    = 只有把槽里那枚对象**交给外部 IDispatch 客户端当实参**才可能出的数 (BASE 在这里崩),
     #   101042 = 同一枚实例包装器进槽、解包回typed形参后仍是它自己 (Is 那一路的类型归一)。
@@ -6883,6 +6883,12 @@ if ($Category -in @("all", "run", "vbp")) {
     #              Nothing 而不是 Object。一臂三形同台, 每形 = 名字长度*10 + (命中 VB6 那个答案):
     #              从没 Set 的泛对象槽 / Set 过又置回 Nothing 的 typed 实例 / 从没赋值的 Variant
     #              (最后一形是别把它顺手动了的证人, 两台都该是 Empty 长度 5 且命中) ⇒ BASE 42606051
+    #   501717181 (第八臂, §B189 第二档 / 第八十八刀) = TypeName 吃一枚**声明成工程类**的变量时答**类名**
+    #              而不是 Object —— 答案按声明档在编译期折出三元式。一臂四形同台, 每形 = 名字长度*10 + 命中:
+    #              Set 过的 typed 实例 (BASE 60 "Object" / 本刀 81 "B187Good") / 置回 Nothing 的那一枚 (两台 71) /
+    #              从没 Set 的 typed 实例 (两台 71, 走的就是折叠那支的 NULL 那一头) / **另一枚声明档**
+    #              (tx As B187Name, Set 过: BASE 60 / 本刀 81) —— 最后这一形钉的是"折的是声明, 不是写死的一个名字"
+    #              ⇒ BASE 480717160, 本刀 501717181 (四形里只有两形动, 另两形是本刀的证人)
     # 反面证人 = Absent 里那枚 42000: 装箱没落地它就回来了。
     Test-DispatchInvoke "b187_boxed_object_slot" "$Tests\b187_box\B187d.vbp" "B187d" `
         "{11112222-3333-4444-5555-6666777788E3}" @(
@@ -6894,13 +6900,15 @@ if ($Category -in @("all", "run", "vbp")) {
         "CALL=CREATE5MEM hr=0x00000000 result=42014201",
         "CALL=CREATE6MEM hr=0x00000000 result=42081",
         "CALL=CREATE7MEM hr=0x00000000 result=42717151",
+        "CALL=CREATE8MEM hr=0x00000000 result=501717181",
         "DONE") @(
         "CALL=CREATE1MEM hr=0x00000000 result=42000",
         "CALL=CREATE4MEM hr=0x00000000 result=42000",
         "CALL=CREATE5MEM hr=0x00000000 result=14201",
         "CALL=CREATE6MEM hr=0x00000000 result=42060",
-        "CALL=CREATE7MEM hr=0x00000000 result=42606051") `
-        -Tail @("CREATE={11112222-3333-4444-5555-6666777788E3},{11112222-3333-4444-5555-6666777788E4},{11112222-3333-4444-5555-6666777788E5},{11112222-3333-4444-5555-6666777788E6},{11112222-3333-4444-5555-6666777788E7},{11112222-3333-4444-5555-6666777788E8},{11112222-3333-4444-5555-6666777788E9}")
+        "CALL=CREATE7MEM hr=0x00000000 result=42606051",
+        "CALL=CREATE8MEM hr=0x00000000 result=480717160") `
+        -Tail @("CREATE={11112222-3333-4444-5555-6666777788E3},{11112222-3333-4444-5555-6666777788E4},{11112222-3333-4444-5555-6666777788E5},{11112222-3333-4444-5555-6666777788E6},{11112222-3333-4444-5555-6666777788E7},{11112222-3333-4444-5555-6666777788E8},{11112222-3333-4444-5555-6666777788E9},{11112222-3333-4444-5555-6666777788EA}")
     Test-DispatchInvoke "b187_boxed_object_slot_x86" "$Tests\b187_box\B187d.vbp" "B187d" `
         "{11112222-3333-4444-5555-6666777788E3}" @(
         "CREATE hr=0x00000000 ptr=OK",
@@ -6911,13 +6919,41 @@ if ($Category -in @("all", "run", "vbp")) {
         "CALL=CREATE5MEM hr=0x00000000 result=42014201",
         "CALL=CREATE6MEM hr=0x00000000 result=42081",
         "CALL=CREATE7MEM hr=0x00000000 result=42717151",
+        "CALL=CREATE8MEM hr=0x00000000 result=501717181",
         "DONE") @(
         "CALL=CREATE1MEM hr=0x00000000 result=42000",
         "CALL=CREATE4MEM hr=0x00000000 result=42000",
         "CALL=CREATE5MEM hr=0x00000000 result=14201",
         "CALL=CREATE6MEM hr=0x00000000 result=42060",
-        "CALL=CREATE7MEM hr=0x00000000 result=42606051") `
-        -Tail @("CREATE={11112222-3333-4444-5555-6666777788E3},{11112222-3333-4444-5555-6666777788E4},{11112222-3333-4444-5555-6666777788E5},{11112222-3333-4444-5555-6666777788E6},{11112222-3333-4444-5555-6666777788E7},{11112222-3333-4444-5555-6666777788E8},{11112222-3333-4444-5555-6666777788E9}") -Arch "x86"
+        "CALL=CREATE7MEM hr=0x00000000 result=42606051",
+        "CALL=CREATE8MEM hr=0x00000000 result=480717160") `
+        -Tail @("CREATE={11112222-3333-4444-5555-6666777788E3},{11112222-3333-4444-5555-6666777788E4},{11112222-3333-4444-5555-6666777788E5},{11112222-3333-4444-5555-6666777788E6},{11112222-3333-4444-5555-6666777788E7},{11112222-3333-4444-5555-6666777788E8},{11112222-3333-4444-5555-6666777788E9},{11112222-3333-4444-5555-6666777788EA}") -Arch "x86"
+
+    # 账 #305 §B189 第二档 (第八十八刀): 折叠那一刀**是发码改动** ⇒ 形状要在产物上钉住。
+    # 正针三枚 = 三枚 typed 工程类变量各自折成的三元式 (tg 那一枚出现两次: Set 过与置回 Nothing 之后,
+    # 这里只钉一次; tn = 从没 Set, 走的就是折叠那支的 NULL 那一头; tx 折的是**另一枚类名** ⇒ 钉的是
+    # "折的是声明档"而不是一个写死的名字)。
+    Test-EmitcShape "b189_decl_fold_shape" @("$Tests\b187_box\B187d.vbp") @(
+        '(((tg) != NULL) ? vb6_BSTR_FromStr(L"B187Good") : vb6_BSTR_FromStr(L"Nothing"))',
+        '(((tn) != NULL) ? vb6_BSTR_FromStr(L"B187Good") : vb6_BSTR_FromStr(L"Nothing"))',
+        '(((tx) != NULL) ? vb6_BSTR_FromStr(L"B187Name") : vb6_BSTR_FromStr(L"Nothing"))')
+    # 闸门那一问的两侧同站同台 (tests\b189_gate, 两份声明只差"这个类有没有被谁 Implements"):
+    # 没被 implements 的那一枚照折 (正针), 被 implements 的那一枚**一口都不许折** (反针) —— 视图那一头
+    # VB6 答的是实体真身类名, 按声明折就是把接口名当成对象的名字。
+    # ⚠ 这份夹具只发码、不进 cl: 接口档变量进 Variant 期望的那一站今天交的是**整枚视图结构体**
+    #   (vb6_iface_X 是 {vtbl,obj} 的值类型, _Generic 落 default ⇒ vb6_VariantObject(结构体) = cl C2172),
+    #   两台都一样 —— 那一格是独立的缺陷, 已另立任务 (#407), 本刀不并批。
+    Test-EmitcShape "b189_gate_plain_class_folds" @("$Tests\b189_gate\B189g.vbp") @(
+        '(((m) != NULL) ? vb6_BSTR_FromStr(L"B189Impl") : vb6_BSTR_FromStr(L"Nothing"))')
+    Test-EmitcAbsent "b189_gate_interface_view_not_folded" @("$Tests\b189_gate\B189g.vbp") @(
+        '(((o) != NULL) ? vb6_BSTR_FromStr(L"B189Iface")')
+    # 第四道闸 = 实参是整枚槽 ⇒ 那是运行期的问句。F4 与 F3 **同名 (Value) 而声明档不同**:
+    # 一枚 As 工程类 (要折)、一枚 As Variant (不许折)。这一双钉的就是"按名那张类表会跨过程漏"
+    # —— 实物 = 本刀护栏那台 A/B 上唯一一处真语料移动 (VBFlexGrid.ctl 的 `ByVal Value As Variant`
+    # 被另一过程同名的 `As IVBFlexDataSource` 折成了常量, `TypeName(Value) = "ImageList"` 变恒假)。
+    Test-EmitcShape "b189_gate_same_name_slot_pair" @("$Tests\b189_gate\B189g.vbp") @(
+        'AssignMove(&vb6_ret_F4, (((Value) != NULL) ? vb6_BSTR_FromStr(L"B189Impl") : vb6_BSTR_FromStr(L"Nothing")))',
+        'AssignMove(&vb6_ret_F3, vb6_TypeName(')
 
     # 账 #305 SB186 第二头: VB 客户那一头　「口径」的唯一读数面　—— 探针是 C 客户, 它只能读 hr;
     # 「服务端自己那条错折回原号」还是「一律 429」这一问, 只有真的 VB 客户点得到。
