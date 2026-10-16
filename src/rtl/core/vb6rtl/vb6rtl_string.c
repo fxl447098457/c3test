@@ -416,11 +416,26 @@ double vb6_Val(BSTR s) {
 // 抓不到写反，只能这样验)。
 double vb6_NumVal(BSTR s) {
     double d = 0.0;
-    if (!s || FAILED(VarR8FromStr(s, LOCALE_USER_DEFAULT, 0, &d))) {
+    if (!vb6_NumTryParse(s, &d)) {
         vb6_RaiseError(13, vb6_BSTR_FromStr(L"Type mismatch"));
         return 0.0;
     }
     return d;
+}
+
+// 账 #418 (§B192): 上面那一句「认不认作一个数」本来直接长在 vb6_NumVal 里，于是
+// `IsNumeric` 这一问没处可问 —— 它只看 Variant 的 vt 标签，对文本一律答否（VB6 实测
+// IsNumeric("123") = True、IsNumeric("123abc") = False，尺 .build/k253_isfam.vbs）。
+// 拆成「问一句」+「答一个值/报一声错」两层之后，这一位主人仍只有一条 oleaut32 站点，
+// 而 IsNumeric 问的是**成功与否**、不许报错（它是一问判据，不是一次转换）。
+int32_t vb6_NumTryParse(BSTR s, double* out) {
+    return (s && SUCCEEDED(VarR8FromStr(s, LOCALE_USER_DEFAULT, 0, out))) ? -1 : 0;
+}
+
+// 与 vb6_DateCanParse 同一条形状：IsNumeric 的文本档 = vb6_NumTryParse 的成功本身。
+int32_t vb6_IsNumericText(BSTR s) {
+    double d = 0.0;
+    return vb6_NumTryParse(s, &d);
 }
 
 // 账 #416 的第二问：Boolean 那一档问的不是数值。尺同 k205：VarBoolFromStr 收 "True"/"False"

@@ -411,6 +411,12 @@ int32_t vb6_IsNumeric(vb6_VARIANT v) {
          * 与上面那档同一条口径（这一族问的是「这枚 Variant 里是不是数」）。 */
         case vb6_vtDecimal:
             return -1;  // VB6 True
+        /* 账 #418 (§B192): 文本档以前根本不在这一族里 —— IsNumeric 只看 vt 标签，
+         * 于是 IsNumeric("123") 答 False，而 VB6 答 True (实测尺 .build/k253_isfam.vbs:
+         * "123"/"&HFF" 真、"123abc"/"abc"/"" 假)。问的就是 #416 那一位主人的**成功与否**，
+         * 所以这里不许报错 —— 判据不是转换。 */
+        case vb6_vtBSTR:
+            return vb6_IsNumericText(v.bstrVal);
         default:
             return 0;
     }
@@ -433,7 +439,16 @@ int32_t vb6_IsObject(vb6_VARIANT v) {
     return (v.vt == vb6_vtDispatch) ? -1 : 0;
 }
 int32_t vb6_IsArray(vb6_VARIANT v) { return (v.vt & 0x2000) ? -1 : 0; }  // VT_ARRAY=0x2000
-int32_t vb6_IsDate(vb6_VARIANT v) { return v.vt == vb6_vtDate ? -1 : 0; }
+int32_t vb6_IsDate(vb6_VARIANT v) {
+    if (v.vt == vb6_vtDate) return -1;
+    /* 账 #418 (§B192): 文本那一档以前直接落进「不是日期」—— VB6 的 IsDate 判的是
+     * 「这串折不折得成日期」(实测 IsDate("2026/1/1") 真、IsDate("46000") 假、
+     * IsDate("abc") 假，尺 .build/k253_isfam.vbs)。后果是实物：VBFlexGrid 那两形
+     * `If IsDate(Text) Then … = CDate(Text)` 的 Then 那一支在本仓从没执行过
+     * (#417 修好了 CDate，可这一扇门一直没人开)。问的是成功、不报错。 */
+    if (v.vt == vb6_vtBSTR) return vb6_DateCanParse(v.bstrVal);
+    return 0;
+}
 int32_t vb6_IsError(vb6_VARIANT v) { return v.vt == vb6_vtError ? -1 : 0; }
 // P21-09: CVErr — create VT_ERROR Variant
 vb6_VARIANT vb6_CVErr(int32_t errorNumber) {

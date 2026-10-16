@@ -61,6 +61,10 @@ double vb6_Val(BSTR s);
 // 账 #416: 严格转换族 (CByte/CInt/CLng/CSng/CDbl/CCur/... 的字符串实参) 的那一句解析 ——
 // 政策交给 oleaut32, 解析不出就报 13; Val 的宽松口径与它刻意不同, 别合。
 double vb6_NumVal(BSTR s);
+// 账 #418 (§B192): 「认不认作一个数」与「认不出报几号」是两问，拆成两层 ⇒ 全仓那条
+// oleaut32 数值解析站点仍只有一处（住在 vb6_NumTryParse 里），而 IsNumeric 问的是前者。
+int32_t vb6_NumTryParse(BSTR s, double* out);
+int32_t vb6_IsNumericText(BSTR s);   // = vb6_NumTryParse 的成功本身，**不许报错**
 int16_t vb6_BoolVal(BSTR s);      // 账 #416: Boolean 那一档问的是 VarBoolFromStr ("True" 算话)
 BSTR vb6_Str(int32_t n);
 BSTR vb6_Format(vb6_VARIANT expr, BSTR fmt, int32_t firstDayOfWeek, int32_t firstWeekOfYear);
@@ -348,6 +352,9 @@ double vb6_TimeValue(BSTR timeStr);
 // 实测口径见 .build/k234_cdate.vbs / k235_datescan.vbs / k236_datefail.vbs。
 double vb6_DateParse(BSTR s);
 double vb6_DateVal(BSTR s);
+// 账 #418 (§B192): 同一句问「像不像」而不是「折出几号」—— IsDate 的文本档问这一枚，
+// 它**不报错**（判据不是一次转换），收下集合就是那条唯一解析站点的成功集。
+int32_t vb6_DateCanParse(BSTR s);
 
 // P14.3.4: App全局对象属性
 BSTR vb6_App_Path(void);     // App.Path - EXE所在目录

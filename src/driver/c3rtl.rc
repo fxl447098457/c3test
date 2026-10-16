@@ -720,3 +720,11 @@
  *   CDate("abc") 静默 0 而同一份程序里 DateValue 是对的; 口径按本机 VB-family 运行期实测
  *   (尺 .build/k233_dateconv.c / k234_cdate.vbs / k235_datescan.vbs / k236_datefail.vbs)。
  *   touch 本文件 = 让 RCDATA 重编一次（§B99②）。 */
+/* 账 #305 §B192 第九十五刀 (2026-10-17): IsDate / IsNumeric 那一族以前只看 Variant 的 vt
+ *   标签 => 文本一律答否 (IsNumeric("123")=False、IsDate("2026/1/1")=False, 本机 VB-family
+ *   运行期两句都答 True, 尺 .build/k253_isfam.vbs)。拆两层把「认不认得出」与「认不出报几号」
+ *   分开: 数值那一位新增 vb6_NumTryParse (全仓唯一那条 VarR8FromStr 站点搬进它) +
+ *   vb6_IsNumericText, 日期那一位新增 vb6_DateCanParse (转调第九十四刀那条唯一站点);
+ *   vb6_NumVal 与 vb6_DateVal/vb6_DateParse 一字未改其答案, 只是改问下面那层。
+ *   后果实物 = VBFlexGrid 那两处 If IsDate(Text) Then CDate(Text) 的 Then 从没执行过。
+ *   touch 本文件 = 让 RCDATA 重编一次（§B99②）。 */
