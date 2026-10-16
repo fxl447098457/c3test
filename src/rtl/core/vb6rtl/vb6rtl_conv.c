@@ -190,12 +190,14 @@ int32_t vb6_CLng(double x) {
 double vb6_CDbl(double x) {
     return x;
 }
-// Fix 158r: CLng 的 BSTR 实参 (UDT 单元格 .Text 等) 需先 vb6_Val 解析为 double
-int32_t vb6_CLngBSTR(BSTR s) { return (int32_t)round(vb6_Val(s)); }
+// Fix 158r: CLng 的 BSTR 实参 (UDT 单元格 .Text 等) 需先解析为 double
+// 账 #416: 解析那一句改问 vb6_NumVal (唯一那位主人) —— 以前这四枚直接吃 vb6_Val(宽松)，
+// 于是 `CLng(s)` 里 s 是 String 变量时报 13、而 .Text 这类**同样形状**的文本静默给 0。
+int32_t vb6_CLngBSTR(BSTR s) { return (int32_t)round(vb6_NumVal(s)); }
 // Fix 158q: CDbl/CInt/CCur 的 BSTR 实参 (UDT 单元格 .Text 等) —— 同 CLngBSTR.
-double  vb6_CDblBSTR(BSTR s) { return vb6_Val(s); }
-int16_t vb6_CIntBSTR(BSTR s) { return (int16_t)round(vb6_Val(s)); }
-double  vb6_CCurBSTR(BSTR s) { double d = vb6_Val(s); return round(d * 10000.0) / 10000.0; }
+double  vb6_CDblBSTR(BSTR s) { return vb6_NumVal(s); }
+int16_t vb6_CIntBSTR(BSTR s) { return (int16_t)round(vb6_NumVal(s)); }
+double  vb6_CCurBSTR(BSTR s) { double d = vb6_NumVal(s); return round(d * 10000.0) / 10000.0; }
 
 // ai/032: 无符号/窄整型转换函数 (CSByte/CUInt/CULng/CULngLng)。
 // 口径与上面 CInt/CLng/CByte 一致:
@@ -236,13 +238,15 @@ int64_t vb6_CLngLng(double x) {
         (void)vb6_OvfChk(-1, 0, 0);   // 越界 → 走既有溢出通道报 Error 6
     return vb6_FltToLng(x);
 }
-// ai/032: 字符串实参入口 (口径同 Fix 158r 的 vb6_CLngBSTR)。十进制走 vb6_Val;
-// "&H"/"&O" 前缀式由 cgen 那侧改发 vb6_NumVal, 到不了这里。
-int8_t   vb6_CSByteBSTR(BSTR s)   { return vb6_CSByte(vb6_Val(s)); }
-uint16_t vb6_CUIntBSTR(BSTR s)    { return vb6_CUInt(vb6_Val(s)); }
-uint32_t vb6_CULngBSTR(BSTR s)    { return vb6_CULng(vb6_Val(s)); }
-uint64_t vb6_CULngLngBSTR(BSTR s) { return vb6_CULngLng(vb6_Val(s)); }
-int64_t  vb6_CLngLngBSTR(BSTR s)  { return vb6_CLngLng(vb6_Val(s)); }
+// ai/032: 字符串实参入口 (口径同 Fix 158r 的 vb6_CLngBSTR)。
+// 账 #416: 这一族也改问 vb6_NumVal —— 十进制、"&H"/"&O" 前缀、区域分隔符全由那一位主人答，
+// 这里不再留第二条解析路 (以前注释说「前缀式到不了这里」，那是 vb6_Val 自己抄了一份 &H 解析
+// 造成的假象，两处两份答案)。
+int8_t   vb6_CSByteBSTR(BSTR s)   { return vb6_CSByte(vb6_NumVal(s)); }
+uint16_t vb6_CUIntBSTR(BSTR s)    { return vb6_CUInt(vb6_NumVal(s)); }
+uint32_t vb6_CULngBSTR(BSTR s)    { return vb6_CULng(vb6_NumVal(s)); }
+uint64_t vb6_CULngLngBSTR(BSTR s) { return vb6_CULngLng(vb6_NumVal(s)); }
+int64_t  vb6_CLngLngBSTR(BSTR s)  { return vb6_CLngLng(vb6_NumVal(s)); }
 
 // twinBASIC 形 CLngPtr (doc.twinbasic.vb6.pro .../Conversion/CLngPtr.html): 转 LongPtr。
 // 值域按目标架构: x86 = Long (文档 "Long on 32-bit"), x64 = 整个 int64 ("LongLong")。
@@ -261,7 +265,7 @@ intptr_t vb6_CLngPtr(double x) {
     return (intptr_t)vb6_OvfChk(vb6_FltToLng(x), -2147483647LL - 1, 2147483647LL);
 #endif
 }
-intptr_t vb6_CLngPtrBSTR(BSTR s) { return vb6_CLngPtr(vb6_Val(s)); }
+intptr_t vb6_CLngPtrBSTR(BSTR s) { return vb6_CLngPtr(vb6_NumVal(s)); }
 
 BSTR vb6_CStr(vb6_VARIANT x) {
     return vb6_Format(x, NULL, 1, 1);
