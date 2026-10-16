@@ -268,9 +268,56 @@ if ($relStart -lt 0 -or $relEnd -lt 0) {
     }
 }
 
+# ---- R8 (账 #305 §B188 第九十刀): 出厂那一腿的**尾巴**也要走完 ----
+# vb6_RunVbProtected = 「把一截 VB 体跑在自己带的帧里, 交回抛出来的号」这一问的唯一答案;
+# 写者只许一个 = 发码里 `_Destroy` 那一行, 且顺序必须 帧 < vb6_Free(me) < 把号交出去 ——
+# 号先走、尾巴后拆 与 尾巴没拆 是同一枚缺陷的两种拼法, 所以这一格钉的是顺序不是存在。
+$rtlPath = Join-Path $Root 'src\rtl\core\vb6rtl\vb6rtl.c'
+$rtlHdr  = Join-Path $Root 'src\rtl\core\vb6rtl\vb6rtl_array.h'
+$cgenP   = Join-Path $Root 'src\backend\module\cgen_com.cpp'
+$rtPath  = Join-Path $Root 'tests\run_tests.ps1'
+$r8Missing = @($rtlPath, $rtlHdr, $cgenP, $rtPath) | Where-Object { -not (Test-Path $_) }
+if ($r8Missing) {
+    foreach ($m in $r8Missing) { $fail += ("R8 missing file " + $m) }
+} else {
+    $rtlCode = Strip-Comments185 ((Read-Lines $rtlPath) -join "`n")
+    $hdrCode = Strip-Comments185 ((Read-Lines $rtlHdr) -join "`n")
+    $cgenCode = Strip-Comments185 ((Read-Lines $cgenP) -join "`n")
+    $rtCode = Strip-Comments185 ((Read-Lines $rtPath) -join "`n")
+    $r8Def = ([regex]::Matches($rtlCode, 'int32_t\s+vb6_RunVbProtected\s*\(')).Count
+    $r8Dec = ([regex]::Matches($hdrCode, 'vb6_RunVbProtected')).Count
+    $r8Emit = ([regex]::Matches($cgenCode, 'vb6_RunVbProtected')).Count
+    $r8Raise = ([regex]::Matches($cgenCode, 'vb6_RaiseError\(vb6_termErr')).Count
+    $r8Free = ([regex]::Matches($cgenCode, 'vb6_Free\(me\);')).Count
+    $r8CellA = ([regex]::Matches($rtCode, 'b188_destroy_tail_is_reachable')).Count
+    $r8CellB = ([regex]::Matches($rtCode, 'b188_destroy_keeps_no_bare_terminate_call')).Count
+    if ($r8Def -ne 1)   { $fail += ("R8 vb6_RunVbProtected definition in vb6rtl.c = " + $r8Def + " (want 1)") }
+    if ($r8Dec -ne 1)   { $fail += ("R8 declaration in vb6rtl_array.h = " + $r8Dec + " (want 1)") }
+    if ($r8Emit -ne 1)  { $fail += ("R8 emit sites of vb6_RunVbProtected in cgen_com.cpp = " + $r8Emit +
+                  " (want 1) - 一截尾巴有两处写法就等于没有那一处") }
+    if ($r8Raise -ne 1) { $fail += ("R8 emit site handing the number back = " + $r8Raise + " (want 1)") }
+    if ($r8Free -ne 1)  { $fail += ("R8 emit site vb6_Free(me) = " + $r8Free + " (want 1)") }
+    if ($r8CellA -ne 1) { $fail += ("R8 run_tests cell b188_destroy_tail_is_reachable = " + $r8CellA + " (want 1)") }
+    if ($r8CellB -ne 1) { $fail += ("R8 run_tests cell b188_destroy_keeps_no_bare_terminate_call = " + $r8CellB + " (want 1)") }
+    # 帧那一半的形状必须齐: 一枚 setjmp + 一次登记 + Save/Restore 各一 + 转调 body(me) + 读号
+    $r8Sj   = ([regex]::Matches($rtlCode, 'setjmp\s*\(frame\)')).Count
+    $r8Reg = ([regex]::Matches($rtlCode, 'vb6_error_jmp_ptr = &frame')).Count
+    $r8Call = ([regex]::Matches($rtlCode, 'body\s*\(\s*me\s*\)\s*;')).Count
+    if ($r8Sj -ne 1 -or $r8Reg -ne 1 -or $r8Call -ne 1) {
+        $fail += ("R8 helper internals setjmp/register/call = " + $r8Sj + "/" + $r8Reg + "/" + $r8Call +
+                  " (want 1/1/1) - 只 setjmp 不登记就接不住 raise, 不转调体就是空帧")
+    }
+    $i1 = $cgenCode.IndexOf('vb6_RunVbProtected')
+    $i2 = $cgenCode.IndexOf('vb6_Free(me);')
+    $i3 = $cgenCode.IndexOf('vb6_RaiseError(vb6_termErr')
+    if ($i1 -ge 0 -and $i2 -ge 0 -and $i3 -ge 0 -and -not ($i1 -lt $i2 -and $i2 -lt $i3)) {
+        $fail += ("R8 ordering in cgen_com.cpp = frame:" + $i1 + " free:" + $i2 + " hand-back:" + $i3 +
+                  " (want frame < free < hand-back) - 号先交出去, 尾巴照旧没人拆 = 本刀没落地")
+    }
+}
 if ($fail.Count -gt 0) {
     foreach ($f in $fail) { Write-Host ("FAIL " + $f) }
     exit 1
 }
-Write-Host ("PASS check_com_server_error_frame: frames=3 way-out-framed=1 registration-ordered shape=1 callers=2 cleanup-before-return factory-shapes-split")
+Write-Host ("PASS check_com_server_error_frame: frames=3 way-out-framed=1 registration-ordered shape=1 callers=2 cleanup-before-return factory-shapes-split destroy-tail-framed=1 tail-order=frame<free<hand-back")
 exit 0
