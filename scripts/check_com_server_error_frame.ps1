@@ -315,9 +315,62 @@ if ($r8Missing) {
                   " (want frame < free < hand-back) - 号先交出去, 尾巴照旧没人拆 = 本刀没落地")
     }
 }
+# ---- R9 (账 #305 §B188 第九十一刀): 运行期那一头进了回归, 且那条诊断不再每枚实例打一行 ----
+# 第八十九/九十刀把「尾巴走完」钉在发码形状上, 形状针证不了"实例真被拆掉": 判据升格 =
+# tests\tools\leak_probe.c (不查注册表的进程内客户, 量 N 轮 create/release 窗口里本进程 commit 的涨量)
+# + disp_invoke.ps1 里的 Test-InstanceLeak + run_tests.ps1 里两台各一格。
+# 读数吃工具自己给的 verdict (容差一枚页) 而不是字节数: 改前 x64 208896 / x86 90112 字节 = 50 倍/22 倍
+# 的带余量, 而 CI 的堆噪声在一页以内。两头同批钉, 因为**判据会随尺漂**——工具改了打印顺序,
+# 针就断在这里, 而不是等门红才发现。
+# 同一趟还钉节流那一格: [C3_COM] 那一行只有**一枚出口**, 且它的写条件带着 vb6_TermErrClaim ——
+# 裸 `if (termErrNum) {` 复原 = 5000 轮 5000 行 stderr, 把现场盖掉的正是 §B181 那条老教训。
+$leakTool = Join-Path $Root 'tests\tools\leak_probe.c'
+$dispHelp = Join-Path $Root 'tests\disp_invoke.ps1'
+$objPath  = Join-Path $Root 'src\rtl\core\vb6comserver\vb6comserver_obj.c'
+$r9Missing = @($leakTool, $dispHelp, $objPath) | Where-Object { -not (Test-Path $_) }
+if ($r9Missing) {
+    foreach ($m in $r9Missing) { $fail += ("R9 missing file " + $m) }
+} else {
+    $toolCode = Strip-Comments185 ((Read-Lines $leakTool) -join "`n")
+    $helpCode = Strip-Comments185 ((Read-Lines $dispHelp) -join "`n")
+    $objCode  = Strip-Comments185 ((Read-Lines $objPath) -join "`n")
+
+    $r9Tol = ([regex]::Matches($toolCode, 'LEAK_TOLERANCE_BYTES')).Count
+    $r9Warm = ([regex]::Matches($toolCode, 'LEAK_WARMUP_CYCLES')).Count
+    $r9Verdicts = ([regex]::Matches($toolCode, 'verdict=(OK|LEAK|BROKEN)')).Count
+    if ($r9Tol -ne 3)  { $fail += ("R9 leak_probe.c LEAK_TOLERANCE_BYTES sites = " + $r9Tol +
+                  " (want 3: define + the two compares) - 判据不带容差就是让 CI 的堆噪声当裁判") }
+    if ($r9Warm -ne 2) { $fail += ("R9 leak_probe.c LEAK_WARMUP_CYCLES sites = " + $r9Warm +
+                  " (want 2: define + the pre-window loop) - 窗口里混进首次一次性分配就会把改好的构建判成 LEAK") }
+    if ($r9Verdicts -lt 3) { $fail += ("R9 leak_probe.c verdict literals = " + $r9Verdicts +
+                  " (want >=3) - tag 与 verdict 必须**相邻**印, run_tests 的针读的就是那一串") }
+
+    $r9Func = ([regex]::Matches($helpCode, 'function Test-InstanceLeak')).Count
+    $r9Get  = ([regex]::Matches($helpCode, 'Get-LeakProbeExe')).Count
+    $r9Cell = ([regex]::Matches($rtCode, 'b188_way_out_tail_releases\b')).Count
+    $r9CellX = ([regex]::Matches($rtCode, 'b188_way_out_tail_releases_x86\b')).Count
+    if ($r9Func -ne 1 -or $r9Get -ne 2) {
+        $fail += ("R9 helper Test-InstanceLeak/Get-LeakProbeExe = " + $r9Func + "/" + $r9Get +
+                  " (want 1/2) - 尺搬进回归之前它只是本机的一次性读数")
+    }
+    if ($r9Cell -ne 1 -or $r9CellX -ne 1) {
+        $fail += ("R9 run_tests cells (x64/x86) = " + $r9Cell + "/" + $r9CellX +
+                  " (want 1/1) - 漏一份实例资源是**按指针宽度**算的, 单架构判据不够")
+    }
+
+    $r9Claim = ([regex]::Matches($objCode, 'vb6_TermErrClaim')).Count
+    $r9Max = ([regex]::Matches($objCode, 'VB6_TERM_ERR_LOG_MAX')).Count
+    $r9Log = ([regex]::Matches($objCode, 'fprintf\(stderr, "\[C3_COM\]')).Count
+    $r9Bare = ([regex]::Matches($objCode, 'if\s*\(\s*termErrNum\s*\)\s*\{')).Count
+    if ($r9Claim -ne 2) { $fail += ("R9 vb6_TermErrClaim sites = " + $r9Claim + " (want 2: definition + the one guard)") }
+    if ($r9Max -ne 3)   { $fail += ("R9 VB6_TERM_ERR_LOG_MAX sites = " + $r9Max + " (want 3: define + table + bound)") }
+    if ($r9Log -ne 1)   { $fail += ("R9 [C3_COM] diagnostic outlets = " + $r9Log + " (want 1) - 第二枚出口必定是条没节流的流水") }
+    if ($r9Bare -ne 0)  { $fail += ("R9 un-throttled `if (termErrNum)` sites = " + $r9Bare +
+                  " (want 0) - 每出厂一枚实例打一行, 5000 轮的判据会把真现场盖掉") }
+}
 if ($fail.Count -gt 0) {
     foreach ($f in $fail) { Write-Host ("FAIL " + $f) }
     exit 1
 }
-Write-Host ("PASS check_com_server_error_frame: frames=3 way-out-framed=1 registration-ordered shape=1 callers=2 cleanup-before-return factory-shapes-split destroy-tail-framed=1 tail-order=frame<free<hand-back")
+Write-Host ("PASS check_com_server_error_frame: frames=3 way-out-framed=1 registration-ordered shape=1 callers=2 cleanup-before-return factory-shapes-split destroy-tail-framed=1 tail-order=frame<free<hand-back leak-cell-framed=2 term-diag-throttled=1")
 exit 0
