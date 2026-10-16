@@ -1017,6 +1017,11 @@
     // ⇒ 包装器=NULL ⇒ 槽里成了 Nothing, 比裸指针还差, 所以那种形状一律不装箱。
     const std::unordered_set<std::string>* projCoclassNames_ = nullptr;
 
+    // 账 #305 §B189 第二档: 工程级「被谁 Implements 过」的名单 (小写, driver 从语义层那份
+    // Symbol::implementsNames 注入)。 TypeName 按声明档折叠那一刀用它挡掉接口视图 (注释见
+    // driver_codegen_voidfield_scan.inc)。
+    const std::unordered_set<std::string>* projImplementedNames_ = nullptr;
+
     // CoClass 身份 (tB, ai/022 B13b): stage 2.7 Pass E 求出的唯一出口 (coclassIds_)。
     // 只有 generateDllEntry 读它 —— 产品里的 CLSID / 默认接口 IID / 组名 ProgID 一律
     // 从这里取，prelude 里那两枚 lambda 退成"读不到块的类"的兜底路径。

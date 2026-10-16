@@ -55,6 +55,27 @@
         }
     }
 
+    // 账 #305 §B189 第二档 (第八十八刀): 工程级「被谁 Implements 过」的名字名单 (小写)。
+    // 为什么发码期要它: TypeName 按声明档折叠那一刀 (cgen_expr_call_builtin_pre.inc) 折的是
+    // **声明的那个类**，而 VB6 交的是**实体自己的真身类名** —— 一枚 `Dim o As IThing` 装了
+    // Thing 实例时 VB6 答 "Thing" 不是 "IThing"。真语料 9949 份里 65 处拿 TypeName 比工程内
+    // 类名，其中 56 处比的就是自己那个类 (可折)，剩下那 9 处 (CEmployeeCol 那一族) 正是接口
+    // 视图 (不可折) —— 这份名单就是那两拨的分界线。
+    // 答案只问语义层那一份 (Symbol::implementsNames, stage 2 收集), 这里不重扫 AST。
+    std::unordered_set<std::string> projectImplementedNames;
+    for (const auto& impAn : analyzers_) {
+        if (!impAn) continue;
+        Scope* impMs = impAn->symbolTable().moduleScope();
+        if (!impMs) continue;
+        for (const auto& impKv : impMs->symbols()) {
+            if (!impKv.second) continue;
+            for (const auto& ifaceNm : impKv.second->implementsNames) {
+                if (!ifaceNm.empty())
+                    projectImplementedNames.insert(Symbol::toLower(ifaceNm));
+            }
+        }
+    }
+
     // Fix 023: 预扫描所有模块的 AST, 构建 className → void* 字段集 映射.
     // 这个映射在 cgen_expr.cpp 的 knownClassVars_ fallback 路径用于判断
     // obj->member 是否返回 void* COM 指针 (例: cDataBase.Rs As New ADODB.Recordset,

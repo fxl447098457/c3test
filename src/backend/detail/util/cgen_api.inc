@@ -263,6 +263,17 @@
         return projCoclassNames_ && !className.empty()
             && projCoclassNames_->count(Symbol::toLower(className)) > 0;
     }
+    // 账 #305 §B189 第二档: 注入「本工程里被谁 Implements 过」的名单 (小写)。
+    void setProjectImplementedNames(const std::unordered_set<std::string>* s) {
+        projImplementedNames_ = s;
+    }
+    // 「这个名字在本工程里被当接口用过没有」—— 这一问的**唯一**出口。
+    // 只要有任何一枚类 Implements 它，按声明档答 TypeName 就是错的 (VB6 答实体的真身类名)，
+    // 那一族一律不折，留在原来问运行期的那一路。
+    bool classUsedAsInterface(const std::string& className) const {
+        return projImplementedNames_ && !className.empty()
+            && projImplementedNames_->count(Symbol::toLower(className)) > 0;
+    }
 
     // ---- 账 #305 §B187 装箱腿的"读者那一问" ------------------------------------
     // 「这枚 C 表达式现在装的是不是一枚 vb6_ComObject 包装器」—— 判据只问
