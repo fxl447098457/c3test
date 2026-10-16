@@ -1558,6 +1558,21 @@ function Test-IsPredText {
     }
 }
 
+# 账 #305 (#419, 第九十六刀): DATE 双半边的拆分只许住在一枚四舍五入的出口里。
+function Test-TimeSplit {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] time_split ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\check_time_split.ps1" 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        $out | Select-Object -First 8 | ForEach-Object { Write-Host "  $_" }
+    }
+}
+
 # === 编译冒烟测试 (编译+链接, 不运行生成物) ===
 function Test-Run {
     param(
@@ -7176,6 +7191,40 @@ if ($Category -in @("all", "run", "vbp")) {
     Test-Vbp 'b418_ispred_text' "$Tests\b418\B418.vbp" $b418Expected
     Test-Vbp 'b418_ispred_text_x86' "$Tests\b418\B418.vbp" $b418Expected -Arch "x86"
 
+    # <vbeclipse> 回归夹子 (b419_time_split, 账 #305 #419 第九十六刀): DATE 的小数半边怎么拆。
+    # 以前三枚 getter 与 DateAdd 分解站各自抄一份「小数 * 24/1440/86400 然后截断」，而 14:30 那种
+    # 分数在二进制里落不整 => 本仓 Minute(CDate("2026/1/1 14:30")) 答 29、Second(…23:59:59) 答 58，
+    # 一天 86400 秒按截断算 43136 个落错一档。本机 VB-family 运行期实测是**四舍五入到整秒**
+    # (+0.4/+0.5 不进位、+0.6/+0.99 进位; 尺 .build/k272_timeparts.vbs + k277_round.vbs +
+    # k278_roll.vbs)，收成一条唯一出口 vb6_SecondsOfDay，三枚 getter 与 DateAdd 都问它
+    # (DatePart 的 h/n/s 三档本来就转调那三枚 getter，跟着一起好)。
+    # 两台实测读数逐行相同 (.build/k289_run64.txt 与 k289_run32.txt)。负控 = 本刀之前那台编译器
+    # (C3_k270_base.exe) 编同一份夹具 (.build/k289_runbase.txt): 移动 10 行
+    # (02/03/04/09/11/12/13/14/15/16)，其余 6 行 (01/05/06/07/08/10) 两台一致 = 「别把对的答改成
+    # 错的」的证人 (12:45 那种落得整的分数、14:30:45、纯日期、+0.4 不进位、Hour 那一半本来就对)。
+    # 刻意不钉的两形 (各自另立一格账): 23:59:59.9 那格运行期连**日期**半边也进一天 (本刀只把日内秒
+    # 归零)，以及 1899-12-30 之前那种负数序列的分数符号口径。
+    $b419Expected = @(
+        "B419-01=14",
+        "B419-02=30",
+        "B419-03=0",
+        "B419-04=23/59/59",
+        "B419-05=14/30/45",
+        "B419-06=45/0",
+        "B419-07=0/0/0",
+        "B419-08=2026-1-1",
+        "B419-09=46",
+        "B419-10=45",
+        "B419-11=14/30",
+        "B419-12=15/30/0",
+        "B419-13=23/30 day=31-12-2025",
+        "B419-14=0/0/0 day=2",
+        "B419-15=30/0",
+        "B419-16=6/15/30",
+        "B419-DONE")
+    Test-Vbp 'b419_time_split' "$Tests\b419\B419.vbp" $b419Expected
+    Test-Vbp 'b419_time_split_x86' "$Tests\b419\B419.vbp" $b419Expected -Arch "x86"
+
 
     # 账 #305 SB186 第二头: VB 客户那一头　「口径」的唯一读数面　—— 探针是 C 客户, 它只能读 hr;
     # 「服务端自己那条错折回原号」还是「一律 429」这一问, 只有真的 VB 客户点得到。
@@ -7432,6 +7481,7 @@ if ($Category -in @("all", "compile")) {
     Test-ConvStrictParse
     Test-DateConv
     Test-IsPredText
+    Test-TimeSplit
 
     Write-Host ""
 
