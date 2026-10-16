@@ -1528,6 +1528,21 @@ function Test-ConvStrictParse {
     }
 }
 
+# 账 #305 (#417, 第九十四刀): 文本→日期只许一条解析站点、报错那一句只许两位主人各答一次。
+function Test-DateConv {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] date_conv ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\check_date_conv.ps1" 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        $out | Select-Object -First 8 | ForEach-Object { Write-Host "  $_" }
+    }
+}
+
 # === 编译冒烟测试 (编译+链接, 不运行生成物) ===
 function Test-Run {
     param(
@@ -7080,6 +7095,40 @@ if ($Category -in @("all", "run", "vbp")) {
     Test-EmitcAbsent 'b416_cbool_no_longer_asks_the_number' @("$Tests\b416\B416Main.bas") @(
         'vb6_CBool(vb6_NumVal(')
 
+    # <vbeclipse> 回归夹子 (b417_dateconv, 账 #305 #417 第九十四刀): 文本进日期转换的那一句解析。
+    # 改前 vb6_CDate 收文本那一支问的是**数值**解析 (它自己那行注释写的却是「字符串按日期解析」)，
+    # 而日期那三位主人 (vb6_DateValue / vb6_TimeValue / CStr(日期形文本) 入口) 各自抄了一份
+    # VarDateFromStr、解析不出全静默返 0。两台实测读数逐行相同 (.build/k239_run64.txt 与
+    # .build/k239_run32.txt)；负控 = 本刀之前那台编译器 (C3_k212_merged.exe) 编的同一份夹具
+    # (.build/k242_runbase.txt)：01 与 15 答 2026 (那一年、不是那一天)，02/03 答 0，
+    # 06/07/08/11/12 答 0 且 Err 也是 0，17 答 1905-7-18；其余八行两台一致 —— 那八行是
+    # 「别把对的答改成错的」的证人 (CDate 的纯数字串兜底两档、DateValue 砍成整天、
+    # TimeValue 只留小数、Val 仍宽松、Date 进槽再 CDate 那一路、认得出的文本不许报错)。
+    # 夹具用 12:45 而不是 14:30: 14:30 的一天小数在二进制里落不整，而 Hour/Minute/Second 三枚
+    # getter 直接截断乘积 (本机 VB-family 运行期答 30，本仓答 29 —— 尺 .build/k240_minute.vbs)，
+    # 那是另一格 (新账 #418)，不许混进本针的判据里。
+    $b417Expected = @(
+        "B417-01=46023",
+        "B417-02=12",
+        "B417-03=45",
+        "B417-04=46000",
+        "B417-05=1",
+        "B417-06=13",
+        "B417-07=13",
+        "B417-08=13",
+        "B417-09=46023",
+        "B417-10=12",
+        "B417-11=13",
+        "B417-12=13",
+        "B417-13=46023",
+        "B417-14=123",
+        "B417-15=46023",
+        "B417-16=0",
+        "B417-17=2026-1-1",
+        "B417-DONE")
+    Test-Vbp 'b417_date_conv' "$Tests\b417\B417.vbp" $b417Expected
+    Test-Vbp 'b417_date_conv_x86' "$Tests\b417\B417.vbp" $b417Expected -Arch "x86"
+
 
     # 账 #305 SB186 第二头: VB 客户那一头　「口径」的唯一读数面　—— 探针是 C 客户, 它只能读 hr;
     # 「服务端自己那条错折回原号」还是「一律 429」这一问, 只有真的 VB 客户点得到。
@@ -7334,6 +7383,7 @@ if ($Category -in @("all", "compile")) {
     Test-ProjClassScanBound
     Test-ObjectSlotBoxing
     Test-ConvStrictParse
+    Test-DateConv
 
     Write-Host ""
 
