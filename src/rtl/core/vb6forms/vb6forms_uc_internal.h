@@ -86,6 +86,19 @@ typedef struct vb6_UCRec {
     // `Extender.Width` 恒为 0; UserControl.Width/Height 则连声明都没有 → C2065。
     int32_t extWidth;
     int32_t extHeight;
+    // Fix 294 第二片: Extender 其余成员也搬进记录, 与上面 extLeft/Top/Width/Height
+    // 同一个道理 —— 它们本来也是**每控件一份**的状态, 却是裸全局。
+    int32_t extAlign;
+    int32_t extDragMode;
+    int32_t extHelpContextID;
+    int32_t extWhatsThisHelpID;
+    int16_t extVisible;
+    int16_t extVb6Default;
+    int16_t extCancel;
+    void*   extTag;
+    void*   extToolTipText;
+    void*   extContainer;
+    void*   extDragIcon;
     int32_t index;        // 控件数组下标, -1=非数组
     wchar_t ctrlName[VB6_UC_NAME_LEN];
     BSTR    displayNameBstr;   // Fix 116: Ambient.DisplayName 缓存 (控件实例名)
@@ -137,6 +150,19 @@ typedef struct vb6_HostObjRec {
     wchar_t name[VB6_UC_NAME_LEN];
     wchar_t typeName[VB6_UC_NAME_LEN];
     int32_t isForm;
+    // Fix 294 第二片: Extender 其余成员也搬进记录, 与上面 extLeft/Top/Width/Height
+    // 同一个道理 —— 它们本来也是**每控件一份**的状态, 却是裸全局。
+    int32_t extAlign;
+    int32_t extDragMode;
+    int32_t extHelpContextID;
+    int32_t extWhatsThisHelpID;
+    int16_t extVisible;
+    int16_t extVb6Default;
+    int16_t extCancel;
+    void*   extTag;
+    void*   extToolTipText;
+    void*   extContainer;
+    void*   extDragIcon;
     int32_t index;        // 控件数组下标 (-1=非数组)
     void*   instance;     // 工程 UserControl 实例, 否则 NULL
 } vb6_HostObjRec;

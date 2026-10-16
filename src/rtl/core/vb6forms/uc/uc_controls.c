@@ -358,6 +358,18 @@ void* vb6_UC_ExtenderField(void* p, const wchar_t* name, int32_t* kind) {
             if (_wcsicmp(name, L"Height") == 0) { *kind = 3; return &rc->extHeight; }
             if (_wcsicmp(name, L"Left")   == 0) { *kind = 3; return &rc->extLeft;   }
             if (_wcsicmp(name, L"Top")    == 0) { *kind = 3; return &rc->extTop;    }
+            /* Fix 294 第二片: 其余成员同样走记录。名字与全局一一对应, 保证行为不变。 */
+            if (_wcsicmp(name, L"Align")           == 0) { *kind = 3; return &rc->extAlign;           }
+            if (_wcsicmp(name, L"DragMode")        == 0) { *kind = 3; return &rc->extDragMode;        }
+            if (_wcsicmp(name, L"HelpContextID")   == 0) { *kind = 3; return &rc->extHelpContextID;   }
+            if (_wcsicmp(name, L"WhatsThisHelpID") == 0) { *kind = 3; return &rc->extWhatsThisHelpID; }
+            if (_wcsicmp(name, L"Visible")         == 0) { *kind = 2; return &rc->extVisible;         }
+            if (_wcsicmp(name, L"vb6_Default")     == 0) { *kind = 2; return &rc->extVb6Default;      }
+            if (_wcsicmp(name, L"Cancel")          == 0) { *kind = 2; return &rc->extCancel;          }
+            if (_wcsicmp(name, L"Tag")             == 0) { *kind = 0; return &rc->extTag;             }
+            if (_wcsicmp(name, L"ToolTipText")     == 0) { *kind = 0; return &rc->extToolTipText;     }
+            if (_wcsicmp(name, L"Container")       == 0) { *kind = 0; return &rc->extContainer;       }
+            if (_wcsicmp(name, L"DragIcon")        == 0) { *kind = 0; return &rc->extDragIcon;        }
         }
     }
     if (_wcsicmp(name, L"Width") == 0)           { *kind = 3; return &vb6_Extender_Width; }
