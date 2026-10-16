@@ -1573,6 +1573,21 @@ function Test-TimeSplit {
     }
 }
 
+# 账 #305 (#422, 第九十七刀): DatePart 的两条臂 —— 「d」与「y」是两问、「年第几周」只许住一处。
+function Test-DatePartArms {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] datepart_arms ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\check_datepart_arms.ps1" 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        $out | Select-Object -First 8 | ForEach-Object { Write-Host "  $_" }
+    }
+}
+
 # === 编译冒烟测试 (编译+链接, 不运行生成物) ===
 function Test-Run {
     param(
@@ -7225,6 +7240,46 @@ if ($Category -in @("all", "run", "vbp")) {
     Test-Vbp 'b419_time_split' "$Tests\b419\B419.vbp" $b419Expected
     Test-Vbp 'b419_time_split_x86' "$Tests\b419\B419.vbp" $b419Expected -Arch "x86"
 
+    # <vbeclipse> 回归夹子 (b422_datepart_arms, 账 #305 #422 第九十七刀): vb6_DatePart 的两条臂。
+    # ① case vb6_di_day 直接掉进「一年里第几天」那条臂 => DatePart(「d」, 2026/3/1) 本仓答 60、
+    # 本机运行期答 1 (答 60 的那一档叫「y」; 尺 .build/k309_datepart.vbs)。②「ww」那一臂就地抄了
+    # 一条 (dayOfYear-1)/7+1 且把 firstDayOfWeek / firstWeekOfYear 用 (void) 丢掉 => 与运行期逐日
+    # 比对 2026 年 365 天里 208 天不同、2024 年 366 天里 52 天不同 (.build/k310_ww.vbs)，而语料那
+    # 4 处「ww」全在 ComCtlsDemo 的 DTPicker/MonthView 里、四处分节符都把 vbFirstFourDays 传出来。
+    # 收成一条唯一出口 vb6_WeekOfYear: 口径 = 运行期 14 年 × 21 组合 = 107394 天逐日拟合零失配
+    # (尺 .build/k321/k324/k330_ww_grid*.vbs，拟合与复核 k323_ww_fit.py，报告 k329/k330)。
+    # B422-14..16 是闰年那半的证人: 2023-12-29 是周五 (fdow=6 的周首)，它那一周在 2024 里有 4 天，
+    # 本该算来年的第 1 周，运行期却把周首那一天自己留在 2023 的末周里 —— 因为来年是闰年 (实测)。
+    # 刻意不钉: DateDiff(「ww」) 还在数整段七天、同样不吃那两条形参 (自成一格账)。
+    $b422Expected = @(
+        "B422-01=1/1",
+        "B422-02=60",
+        "B422-03=3",
+        "B422-04=1",
+        "B422-05=2026",
+        "B422-06=1",
+        "B422-07=1",
+        "B422-08=2",
+        "B422-09=2",
+        "B422-10=10",
+        "B422-11=24",
+        "B422-12=53/1/52",
+        "B422-13=53/1/52",
+        "B422-14=53",
+        "B422-15=1",
+        "B422-16=1/53",
+        "B422-17=1/53/52",
+        "B422-18=53",
+        "B422-19=53",
+        "B422-20=9/9",
+        "B422-21=9",
+        "B422-22=53",
+        "B422-23=53",
+        "B422-24=9/9",
+        "B422-DONE")
+    Test-Vbp 'b422_datepart_arms' "$Tests\b422\B422.vbp" $b422Expected
+    Test-Vbp 'b422_datepart_arms_x86' "$Tests\b422\B422.vbp" $b422Expected -Arch "x86"
+
 
     # 账 #305 SB186 第二头: VB 客户那一头　「口径」的唯一读数面　—— 探针是 C 客户, 它只能读 hr;
     # 「服务端自己那条错折回原号」还是「一律 429」这一问, 只有真的 VB 客户点得到。
@@ -7482,6 +7537,7 @@ if ($Category -in @("all", "compile")) {
     Test-DateConv
     Test-IsPredText
     Test-TimeSplit
+    Test-DatePartArms
 
     Write-Host ""
 
