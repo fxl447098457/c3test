@@ -342,6 +342,24 @@ int32_t vb6_UC_IsExtender(const void* p) {
 }
 
 // kind 编码与 vb6_UC_FontField 一致: 0=BSTR, 1=float, 2=int16, 3=int32
+/* Fix 294 / 3a: `Extender.<成员> = v` 的实例感知写入口。
+   cgen 过去对 Extender 成员发的是裸全局赋值 `vb6_Extender_X = v;` —— 而通道
+   (vb6_UC_ExtenderField) 已经改指 `vb6_UCRec.ext*`, 裸写进不去, 用户代码改
+   Extender.Height/Width/Left/Top 会**静默不生效**。这里按 `vb6_ucCurrent` 落进记录。
+   没有当前记录时退回全局, 与 ExtenderField 的兜底保持一致。
+   kind 约定同 vb6_UC_ExtenderField: 0=BSTR, 2=int16, 3=int32。 */
+void vb6_UC_SetExtenderMember(const wchar_t* name, void* value) {
+    extern void* vb6_UC_ExtenderField(void* p, const wchar_t* n, int32_t* k);
+    void* p = (void*)&vb6_UserControl_Extender;
+    int32_t kind = -1;
+    void* fp = vb6_UC_ExtenderField(p, name, &kind);
+    if (!fp || !value) return;
+    switch (kind) {
+        case 0: *(BSTR*)fp  = (BSTR)value; break;                 // BSTR: 搬指针
+        case 2: *(int16_t*)fp = (int16_t)(intptr_t)value; break;
+        default: *(int32_t*)fp = (int32_t)(intptr_t)value; break;
+    }
+}
 void* vb6_UC_ExtenderField(void* p, const wchar_t* name, int32_t* kind) {
     if (!vb6_UC_IsExtender(p) || !name || !kind) return NULL;
     /* Fix 294: 几何四项走**当前实例**的记录, 不再走裸全局。
