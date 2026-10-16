@@ -107,6 +107,23 @@ typedef struct vb6_UCSaved {
     void*   ambientFont;
     int32_t extLeft, extTop;
     int32_t extWidth, extHeight;  // Fix 162
+    // Fix 294: Extender 上其余成员也必须存取 —— 过去只存了 Left/Top/Width/Height,
+    // Align/Visible/DragMode/HelpContextID/WhatsThisHelpID/Tag/ToolTipText/Container/
+    // DragIcon/vb6_Default/Cancel 全是**裸全局**, 出栈没人还原 ⇒ 控件之间互相污染。
+    // 实测: ToolBar 在 ReadProperties 里 Extender.Align = vbAlignTop(ToolBar.ctl:879),
+    // 之后 StatusBar 读到的就是 1 而不是它 .frm 里的 Align=2(AlignBottom), 于是走错
+    // 分支 —— 只因为 StatusBar 的设计期高度恰好等于自然高度, 肉眼看不出来。
+    int32_t extAlign;
+    int32_t extDragMode;
+    int32_t extHelpContextID;
+    int32_t extWhatsThisHelpID;
+    int16_t extVisible;
+    int16_t extVb6Default;
+    int16_t extCancel;
+    void*   extTag;
+    void*   extToolTipText;
+    void*   extContainer;
+    void*   extDragIcon;
     void*   hWnd;                 // Fix 133u: UserControl.hWnd
     int16_t autoRedraw;           // Fix 133u: UserControl.AutoRedraw
     struct vb6_UserControl_Extender_Type ext; // Fix 133u: Extender.Visible/Height

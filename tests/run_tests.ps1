@@ -701,6 +701,13 @@ function Test-VbpSourceExt {
         $out | Select-Object -First 6 | ForEach-Object { Write-Host "  $_" }
     }
 }
+function Test-ExtenderPushPop {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] extender_push_pop ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\check_extender_push_pop.ps1" 2>&1
+    if ($LASTEXITCODE -eq 0) { $script:pass++; Write-Host "PASS" -ForegroundColor Green }
+    else { $script:fail++; Write-Host "FAIL" -ForegroundColor Red; $out | Select-Object -First 6 | ForEach-Object { Write-Host "  $_" } }
+}
 function Test-ControlDC {
     $script:total++
     Write-Host -NoNewline "  [STATIC] control_dc ... "
@@ -7014,6 +7021,7 @@ if ($Category -in @("all", "compile")) {
     Test-IntSuffixSites
     Test-ScaleModeWriters
     Test-VbpSourceExt
+    Test-ExtenderPushPop
     Test-ControlDC
     Test-SaAccess
     Test-BitwiseAuthority
