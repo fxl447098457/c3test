@@ -15,8 +15,10 @@
 #
 # 规则:
 #   R1  date.c 里解析那一句只许问 oleaut32 一次: VarDateFromStr 恰好 1 次 (住在唯一那条
-#       vb6_TryDateFromStr 里，站点合计 3 = 定义 + 两位主人各一次转调)，交回 13 的那句恰好
-#       1 次 (在 vb6_DateParse 里)，两位主人的定义各 1 次，旧的「(int32_t) 砍成整天」不许回来。
+#       vb6_TryDateFromStr 里，站点合计 4 = 定义 + 三位主人各一次转调 (DateParse / DateVal /
+#       DateCanParse，第三枚是第九十五刀的 #418 给 IsDate 开的口))，交回 13 的那句恰好
+#       1 次 (在 vb6_DateParse 里)，两位转换主人的定义各 1 次 (第三枚主人是判据，形状由
+#       check_ispred_text 钉)，旧的「(int32_t) 砍成整天」不许回来。
 #   R2  全仓 RTL 再不许有第二条日期解析路: src\rtl 整棵树里 VarDateFromStr 合计恰好 1；
 #       conv.c 里日期那一族不许再出现 vb6_Val(v.bstrVal) 或 vb6_CStrDate(vb6_Val(...)。
 #   R3  CDate 的文本分支问的是 vb6_DateVal；CStr(日期形文本) 入口问的是 vb6_DateParse。
@@ -50,7 +52,7 @@ $r1dp = N '^double vb6_DateParse\(BSTR s\) \{' $D
 $r1dv = N '^double vb6_DateVal\(BSTR s\) \{' $D
 $r1old = N '\(double\)\(int32_t\)result' $D
 if ($r1parse -ne 1) { $fail += ('R1 VarDateFromStr in date.c = ' + $r1parse + ' (want 1)') }
-if ($r1try -ne 3) { $fail += ('R1 vb6_TryDateFromStr sites = ' + $r1try + ' (want 3 = def + two owners)') }
+if ($r1try -ne 4) { $fail += ('R1 vb6_TryDateFromStr sites = ' + $r1try + ' (want 4 = def + the three owners)') }
 if ($r1raise -ne 1) { $fail += ('R1 raise-13 outlet in date.c = ' + $r1raise + ' (want 1, inside vb6_DateParse)') }
 if ($r1dp -ne 1) { $fail += ('R1 vb6_DateParse definition = ' + $r1dp + ' (want 1)') }
 if ($r1dv -ne 1) { $fail += ('R1 vb6_DateVal definition = ' + $r1dv + ' (want 1)') }

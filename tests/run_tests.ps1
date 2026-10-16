@@ -1543,6 +1543,21 @@ function Test-DateConv {
     }
 }
 
+# 账 #305 (#418, 第九十五刀): Is* 那一族问文本只许问「认不认得出」那一层，且不许报错。
+function Test-IsPredText {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] ispred_text ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\check_ispred_text.ps1" 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        $out | Select-Object -First 8 | ForEach-Object { Write-Host "  $_" }
+    }
+}
+
 # === 编译冒烟测试 (编译+链接, 不运行生成物) ===
 function Test-Run {
     param(
@@ -7129,6 +7144,38 @@ if ($Category -in @("all", "run", "vbp")) {
     Test-Vbp 'b417_date_conv' "$Tests\b417\B417.vbp" $b417Expected
     Test-Vbp 'b417_date_conv_x86' "$Tests\b417\B417.vbp" $b417Expected -Arch "x86"
 
+    # <vbeclipse> 回归夹子 (b418_ispred, 账 #305 #418 第九十五刀): IsDate / IsNumeric 那两问
+    # 以前只看 Variant 的 vt 标签 ⇒ 文本一律答否 (IsNumeric("123")=False、IsDate("2026/1/1")=False)，
+    # 而 VB6 两句都吃「这串折不折得出来」。改后问的是第九十三/九十四刀那两位主人的**成功与否**，
+    # 所以既不报错、也不许再长出第二份解析。两台实测读数逐行相同 (.build/k263_run64.txt 与
+    # .build/k263_run32.txt)；负控 = 本刀之前那台编译器 (C3_k259_base) 编同一份夹具
+    # (.build/k263_runbase.txt)：01/02/08/09/14/15 全答 False、17 答 -1 (那扇门根本没开)，
+    # 其余十一行两台一致 —— 那十一行是「别把对的答改成错的」的证人：非文本档 (06/07/12/13)、
+    # 认不出的文本 (03/04/05/10/11 = 含「日期串不是数」这一条两档确实不同的读数)、
+    # 判据不许报错 (16)、以及 DONE。17 那一针是给 VBFlexGrid 那形 If IsDate(Text) Then CDate(Text)
+    # 开的门 (第九十四刀修好了 CDate，可门一直没开) —— 承面尺 .build/k254_isnum_census.py。
+    $b418Expected = @(
+        "B418-01=True",
+        "B418-02=True",
+        "B418-03=False",
+        "B418-04=False",
+        "B418-05=False",
+        "B418-06=True",
+        "B418-07=False",
+        "B418-08=True",
+        "B418-09=True",
+        "B418-10=False",
+        "B418-11=False",
+        "B418-12=True",
+        "B418-13=False",
+        "B418-14=True/True",
+        "B418-15=True/True",
+        "B418-16=0/0",
+        "B418-17=46023",
+        "B418-DONE")
+    Test-Vbp 'b418_ispred_text' "$Tests\b418\B418.vbp" $b418Expected
+    Test-Vbp 'b418_ispred_text_x86' "$Tests\b418\B418.vbp" $b418Expected -Arch "x86"
+
 
     # 账 #305 SB186 第二头: VB 客户那一头　「口径」的唯一读数面　—— 探针是 C 客户, 它只能读 hr;
     # 「服务端自己那条错折回原号」还是「一律 429」这一问, 只有真的 VB 客户点得到。
@@ -7384,6 +7431,7 @@ if ($Category -in @("all", "compile")) {
     Test-ObjectSlotBoxing
     Test-ConvStrictParse
     Test-DateConv
+    Test-IsPredText
 
     Write-Host ""
 
