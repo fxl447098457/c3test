@@ -215,20 +215,37 @@ void CCodeGen::emitClassFactory(Module& module) {
     }
 
     // _Destroy: 终止+释放
-    c_.emitBlank();
-    c_.emitLine("void " + clsStruct + "_Destroy(" + clsStruct + "* me) {");
-    c_.indent();
-    c_.emitLine("if (!me) return;");
-
-    // 检查是否有 Class_Terminate 方法
+    // 账 #305 §B188 (第九十刀): terminate 那一步跑在自带帧里(`vb6_RunVbProtected`), 抛出来的号
+    // 先接住, 等下面那三截尾巴(字段 BSTR / 数组字段 / vb6_Free(me))走完再交回外层帧。以前的做法
+    // 是把整趟 destroyFunc 包进 ComObj_Release 的帧里(第八十刀), 那一趟 longjmp 会连尾巴一起跳掉:
+    // 实测每枚抛错的出厂漏一份实例资源(x64 约 35 字节、x86 约 17 字节, 带一枚 String 字段约 120,
+    // 出厂干净那枚恒 0; 尺 .build/k107_leak_probe.c / 读数 .build/k108_*.txt .build/k109_x64.txt)。
+    // 出厂两腿都汇到 `_Destroy` 这一处(`instanceClaimRelease` 的末尾就直接调它), 所以边界装在这里
+    // 是一份答案; 装在两条腿上就是两份。
+    std::string destroyTermCall;
     for (auto& decl : module.declarations) {
         if (decl->kind == ASTNodeKind::SubDecl) {
             auto& sub = static_cast<SubDecl&>(*decl);
             if (sub.name == "Class_Terminate") {
-                c_.emitLine(cProcName("Class_Terminate", sub.access, isClassModule_ ? moduleName_ : "") + "(me);");
+                destroyTermCall = cProcName("Class_Terminate", sub.access,
+                                            isClassModule_ ? moduleName_ : "");
                 break;
             }
         }
+    }
+    const bool destroyHasTerm = !destroyTermCall.empty();
+    c_.emitBlank();
+    c_.emitLine("void " + clsStruct + "_Destroy(" + clsStruct + "* me) {");
+    c_.indent();
+    if (destroyHasTerm) {
+        // 声明必须在 `if (!me) return;` 之前: 生成的 C 要按 C89 的"块首声明"排
+        c_.emitLine("int32_t vb6_termErr = 0;  /* 账 305 B188: terminate 抛出来的号 */");
+    }
+    c_.emitLine("if (!me) return;");
+
+    if (destroyHasTerm) {
+        c_.emitLine("vb6_termErr = vb6_RunVbProtected((void(*)(void*))" + destroyTermCall +
+                    ", me);  /* 账 305 B188: 体抛错也要把下面的尾巴走完 */");
     }
 
     // 释放BSTR字段
@@ -245,6 +262,12 @@ void CCodeGen::emitClassFactory(Module& module) {
     }
 
     c_.emitLine("vb6_Free(me);");
+    if (destroyHasTerm) {
+        // 尾巴拆完了, 号才交出去: COM 出厂那一腿由 ComObj_Release 的帧接住(照旧记一条带号诊断),
+        // 进程内的 `Set x = Nothing` 那一腿由调用方自己的 On Error 接住 —— 两条都跟改前同形,
+        // 区别只在实例这回真被拆掉了。
+        c_.emitLine("if (vb6_termErr) vb6_RaiseError(vb6_termErr, vb6_ErrDescription());  /* 账 305 B188: 号在尾巴之后交回外层帧 */");
+    }
     c_.dedent();
     c_.emitLine("}");
 
