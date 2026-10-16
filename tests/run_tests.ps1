@@ -1493,6 +1493,21 @@ function Test-ObjectSlotBoxing {
     }
 }
 
+# 账 #305 #416 (第九十三刀): 文本进严格转换的那一句解析只许问 oleaut32 一次 + 两位桥分开
+function Test-ConvStrictParse {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] conv_strict_parse ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\check_conv_strict_parse.ps1" 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        $out | Select-Object -First 8 | ForEach-Object { Write-Host "  $_" }
+    }
+}
+
 # === 编译冒烟测试 (编译+链接, 不运行生成物) ===
 function Test-Run {
     param(
@@ -7008,6 +7023,43 @@ if ($Category -in @("all", "run", "vbp")) {
         @("LEAK-BOOM verdict=OK", "LEAK-GOOD verdict=OK", "LEAK-DONE") @("verdict=LEAK", "verdict=BROKEN") `
         -Arch "x86"
 
+    # <vbeclipse> 回归夹子 (b416_convstr, 账 #305 #416 第九十三刀): 文本进严格转换的那一句解析。
+    # 改前 C3 对非数字文本一律静默给 0 —— CInt("abc")=0、CInt("")=0、CInt("123abc")=123(吞尾巴)，
+    # 而 VB6 三句全是 13 Type mismatch；越界那一支本来就报 6，那是 vb6_OvfChk 的答案，本刀一字没动。
+    # 两台实测读数逐行相同 (.build/k208_run64.txt 与 .build/k208_run32.txt)。
+    # 负控 = BASE 那台编译器编的同一份夹具 (.build/k208_run64_base.txt)：01/02/03/12/13/14 答 0、
+    # 11 答 False，其余十行两台一致 —— 那十行是「别把对的答改成错的」的证人 (Val 仍宽松、
+    # &H 前缀仍认、Empty 仍答 0 且不许开始报错)。
+    $b416Expected = @(
+        "B416-01=13",
+        "B416-02=13",
+        "B416-03=13",
+        "B416-04=6",
+        "B416-05=255",
+        "B416-06=123",
+        "B416-07=255",
+        "B416-08=42",
+        "B416-09=123",
+        "B416-10=0",
+        "B416-11=True",
+        "B416-12=13",
+        "B416-13=13",
+        "B416-14=13",
+        "B416-15=42",
+        "B416-16=0/0",
+        "B416-DONE")
+    Test-Vbp 'b416_conv_strict' "$Tests\b416\B416.vbp" $b416Expected
+    Test-Vbp 'b416_conv_strict_x86' "$Tests\b416\B416.vbp" $b416Expected -Arch "x86"
+    # 发码那一头: 两位桥各归各的档 —— 数值族吃 vb6_NumVal, Boolean 那一档吃 vb6_BoolVal,
+    # Val 那一枚证人继续吃 vb6_Val (宽松是它的口径, 不是漏的帧)。
+    Test-EmitcShape 'b416_conv_bridge_split' @("$Tests\b416\B416Main.bas") @(
+        'vb6_CBool(vb6_BoolVal(',
+        'vb6_CInt(vb6_NumVal(',
+        'vb6_CLng(vb6_NumVal(',
+        'vb6_CStrDbl(vb6_Val(')
+    Test-EmitcAbsent 'b416_cbool_no_longer_asks_the_number' @("$Tests\b416\B416Main.bas") @(
+        'vb6_CBool(vb6_NumVal(')
+
 
     # 账 #305 SB186 第二头: VB 客户那一头　「口径」的唯一读数面　—— 探针是 C 客户, 它只能读 hr;
     # 「服务端自己那条错折回原号」还是「一律 429」这一问, 只有真的 VB 客户点得到。
@@ -7259,6 +7311,7 @@ if ($Category -in @("all", "compile")) {
     Test-ComServerErrorFrame
     Test-ProjClassScanBound
     Test-ObjectSlotBoxing
+    Test-ConvStrictParse
 
     Write-Host ""
 
