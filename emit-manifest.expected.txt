@@ -96,13 +96,13 @@ sha256=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 ascii256
 sha256=f399c0b54563cea57b03778cc5dd4fb897babde657ba2e0cf6c8f5d696875521 ascii256=0bef3fb393415329d48b55357b44dff12bc560d4f51fb66a758aa8f54b9e934f rc=0 bytes=4188 tests/cc_id/IdFold.vbp
 sha256=5347c812cabfff37c6592c899919a1f7a5422934682daa250fa1e2260c2e9341 ascii256=acf9b53b1834c0153f02a7a6cbfa391ae0e4ac35b513cceb3e3c9cb611ad5811 rc=0 bytes=3681 tests/cc_id/IdIfaces.bas
 sha256=ecb2d1df992330a8b4b7c7f4cdc26c13e2af28fd166f5c99ebf9889f91dc68b5 ascii256=530a8b0161884482dfedd034a6f65d69602ca71ee69a5f0e2b75c01c1711bf3f rc=0 bytes=1382 tests/cc_id/IdMain.bas
-sha256=ac687943f2c3df20dcf46db273e7d6667a59f96d04c749fd66910c6c41a993d2 ascii256=9ee2a2b4f64583220aacb4544e68b5a1fe23cb0441efb5b88b24d59fc7ae188c rc=0 bytes=2106717 tests/Charts 2020/Proyecto1.vbp
-sha256=baccaff308f92c17c8ecb5dbe076bd982577a1ad9b70b7d2d1709d185c7eceb2 ascii256=ff893436ad5928f068d299d6622bc65de6dc7f00261fd92a64b8858d1ee8575f rc=0 bytes=272926 tests/Charts 2020/ucChartArea/Proyecto1.vbp
-sha256=9aea29a26bec6579ba9f9f2069cd4975003a29ea53ae00348efc9e23d20d6077 ascii256=12ca54108a92e991d4873dab64600b88062c39fa77930acc0a3c8c3b662c8a1d rc=0 bytes=492009 tests/Charts 2020/ucChartBar/Proyecto1.vbp
+sha256=8598310d58b9224be2d2ac43f4b60f965b482dd45f36c595821f4d9f532758e6 ascii256=b7d4fea6faa46d4f4b655b4efe9478472fbe9dc83d81e8b25b7ba20cb794f663 rc=0 bytes=2107097 tests/Charts 2020/Proyecto1.vbp
+sha256=f0d912ef7a117094856a7286d6d3f0dabc9708845ddd6f233595b4167ac753d0 ascii256=0041801483770d28f14581a19b638497fa2fc6e04ed3f83f35c0570d528c71bd rc=0 bytes=273002 tests/Charts 2020/ucChartArea/Proyecto1.vbp
+sha256=b88800ecdd6a6dc640d9ba7dab0135334b9bf88c11519da80586b858d0b2a1db ascii256=1c6541f440910e454065c25342ffb0294206be6f40ac010d3ea46660618a8476 rc=0 bytes=492085 tests/Charts 2020/ucChartBar/Proyecto1.vbp
 sha256=3ca810b0c9eac0b02e84ce405ada0ebc041251ad687081f8c4deba96ca2c0b82 ascii256=0d52a6d71b36345cc8ec50038f9e0ffe12bcbd38ef5d1a46d30c1432467703a5 rc=0 bytes=2846 tests/Charts 2020/ucPieChart/Module1.bas
-sha256=8a849aa9af60de078eb53b952887cc71e58fc7e27be8210779b40e67ab611b8d ascii256=ffda677caa3048e5ba29b157347782e90b05405b6bff8c709012e2dbd9bf1a56 rc=0 bytes=279611 tests/Charts 2020/ucPieChart/Proyecto1.vbp
+sha256=cea716afbed9728ac140da342fe44ab61b7e7bd98bec9a5e8739dfd6bfe5cf17 ascii256=791b9ecc385fd2c87128598edfe337aed23db58d1f41e266608a88544d708e5d rc=0 bytes=279687 tests/Charts 2020/ucPieChart/Proyecto1.vbp
 sha256=b2f52bc8b0123b23a3174aae62a4729c4e315417738649a77c234a516ec016eb ascii256=253626b11522f3cf60b3d0057d47d0f2aff01e4afbf2afca1d6e99ba1caaaef0 rc=0 bytes=341604 tests/Charts 2020/ucProgressCircular/Proyecto1.vbp
-sha256=90a817bd5c6b040c91feb4e08654fca95d3bfc314f447f913ee7311aa69ebb30 ascii256=3963b2d2e75f5f4999829e71dc1e2d599f3ccb6d5263acb73c9ea6f05abd553a rc=0 bytes=966667 tests/Charts 2020/ucTreeMaps/Proyecto1.vbp
+sha256=2d00c7794cd97d6201609e9ddbc7bff2d43199e09996a289f601bb71edd8cd7d ascii256=a47872edf46c121e4555ccb7a3af37f3951a5374bd869179328723d85d781c48 rc=0 bytes=966743 tests/Charts 2020/ucTreeMaps/Proyecto1.vbp
 sha256=ce873c48aa07ecf7242a9a9efc453c833a84e9214f4a1efba423b617ceb7dcb2 ascii256=246c5a9139ae91285cbcfaed629ca9eb782d4a088166611bcbdf99f575730329 rc=0 bytes=81977 tests/cls_inh/Inh.vbp
 sha256=48ebc28f3b381f1b36feada918214643029f54e358de3de9fef04b4e03d193d8 ascii256=2940656b45f4b06590a3762b1b06ed684fa10f5d512d6533f8ccea967656d4a7 rc=0 bytes=32419 tests/cls_inh/InhMain.bas
 sha256=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 ascii256=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 rc=1 bytes=0 tests/cls_neg/ci_n02_not_class.bas
@@ -506,3 +506,13 @@ sha256=010a2af5e17095d64e3c432f6f1a0d5578cdc4fed6d51e1694ca8da38e9416ba ascii256
 # 账 #305 §B185 (第七十七刀) 的登记来源：门 **#642**（run 38698594552、head ffdce3c0、attempt 1）= 12 job 里 10 绿 + **两条预期登记红**（`Emit manifest (shape oracle)` 与 `Tests (compile)` 里同一道 [STATIC] manifest_coverage，同源同一句）。本刀只动 RTL（IDispatch 服务端进门那趟的错误边界），发码形状零移动：与上一份期望逐路径对照 = 移动 0 / 新增 2，两份都按 CI 那台的读数原样抄。`tests/b185_srv/DllBlocks.bas` 那一行交 rc=1 bytes=0（空产物的哈希就是 e3b0c442 那一串）—— 一枚单独递进去的 CoClass 块本就产不出 C，与 `tests/cc_dll/DllBlocks.bas` 同形，不是新缺陷。登记 = 手 splice（两行数据接在最后一条数据行之后 + 这一行注脚接在末尾注脚块之后），不走 rebless -Bless（整表重写会搬中段注脚）。
 # 账 #305 #408 (第八十九刀) 的登记来源：门 **#674**（run 38858617520、head 56ed1dd9、attempt 1）= 12 job 里 10 绿 + 两条**预期登记红**（`Emit manifest (shape oracle)` 与 `Tests (compile)` 里同一道 [STATIC] manifest_coverage，同一句同源：本刀的夹具是两份还没哈希的新输入）。本刀动发码（形参作用域那一站），对照结果 = 移动 0 / 新增 2，只有这两行多出来 —— 仓内 445 台 A/B（BASE=C3_k96 / NEW=C3_k102）本来就是 same=444 / moved=1，而那唯一一台就是新夹具自己；外语料 1231 台 same=784 / moved=2 的两处**逐行看过**：DllPrint 的 `SelAllTxt(text As Object)` 里那句 `(*text)->SelStart = 0` 改前压根编不出（text 传进来是个 HWND），cPieChart 的 `Set m_oCanvas = n` 改前把一枚本来就是 IDispatch 的实参又包了一层 borrowed cSections 包装器 —— 两处都是病灶本身，且都不在这 445 台的清单里。登记走 `scripts/emit_manifest.ps1 -Bless`（本机 C3.exe 与 head 同源：md5 53b8d0bcef8e648b6317055482d92f11 = .build/C3_k102.exe），工具保住了头 29 + 尾 32 的注脚（注脚行 60 → 60，两行数据落在最后一条数据行之后），登记完复算 expectation-check=PASS。
 # 2026-10-16 第九十刀的登记来源：门 #676（run 38870725408、head 28831535、attempt 1）= 12 job 里 11 绿 + 唯一红 `Emit manifest (shape oracle)`，红因 = 本刀那三行发码还没登记：`vb6_cls_<X>_Destroy` 里 `Class_Terminate` 那一行改走新出口 `vb6_RunVbProtected`（自带帧、交回号），尾巴拆完后再加一行 `vb6_RaiseError` 把号交回外层帧 ⇒ 移动的四行正是仓里那五份带 `Class_Terminate` 的类模块里进了清单的那四份输入（b188_term / BalloonTooltips / dbgdlg / itf_xmod；第五份 `tests/itf_xmod/CWriter.cls` 跟着工程那一行走、不单独成行），bytes 每行各 +312/+328/+316/+331，其余 441 行一字未动（本机 445 台 A/B 同读数 = .build/k98_ab_report.txt moved=4，逐行归因见 .build/k130_reg_diff.txt）。四行的四个字段全取 CI 为同一 head 自己交的那一份 `c1601a9c`。
+# 2026-10-17 读侧第三步 (4b, Fix 296) 登记来源: `ci: emit manifest head=5c1c461b` —— 5 行哈希不同,
+#   全部是 Charts 2020 那一族 (Proyecto1 / ucChartArea / ucChartBar / ucPieChart / ucTreeMaps),
+#   本地逐行看过, 共 36 行, 形状全同:
+#     vb6_UserControl_ScaleX(vb6_Extender_Left, 10, vb6_UserControl_ScaleMode)
+#       -> vb6_UserControl_ScaleX(vb6_UC_GetExtenderMemberNum(L"Left"), 10, vb6_UserControl_ScaleMode)
+#   即 VB6 的 `Extender.Left / ScaleX(10, ScaleMode)` —— 那枚**实参**走 4b 新加的实参闸
+#   (cgen_expr_call_arg_emit.inc)。这一族 **4a 也没接上**, 而且是静默的: 4a 之后这些行哈希
+#   没变, 看上去"4a 管过了", 实为压根没碰到 (整条右值不是裸符号, 而 4a 的问带着
+#   `target == currentReturnVar_` 窄条件)。所以是修正, 不是回归。
+#   本地 emit 与 CI 交回来的清单这两行 sha256/ascii256 逐位相同, 判定是本地做的, 登记吃的是 CI 的数。
