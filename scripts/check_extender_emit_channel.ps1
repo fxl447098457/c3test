@@ -21,16 +21,22 @@ $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 $cg = Join-Path $root 'src/backend/detail/stmt/cgen_assign_host_pseudo.inc'
 $val = Join-Path $root 'src/backend/detail/stmt/cgen_assign_value_sem.inc'
+$argP = Join-Path $root 'src/backend/detail/expr/cgen_expr_call_arg_emit.inc'
+$selP = Join-Path $root 'src/backend/stmt/cgen_select.cpp'
+$evtP = Join-Path $root 'src/backend/module/cgen_com_events.cpp'
 $withP = Join-Path $root 'src/backend/expr/cgen_expr_with.cpp'
 $com = Join-Path $root 'src/backend/cgen_util_com.cpp'
 $rtl = Join-Path $root 'src/rtl/core/vb6forms/uc/uc_controls.c'
 $hdr = Join-Path $root 'src/rtl/core/vb6rtl/vb6rtl_userctl.h'
 
-foreach ($p in @($cg, $val, $withP, $com, $rtl, $hdr)) {
+foreach ($p in @($cg, $val, $withP, $argP, $selP, $evtP, $com, $rtl, $hdr)) {
     if (-not (Test-Path -LiteralPath $p)) { Write-Host "missing file: $p" -ForegroundColor Red; exit 1 }
 }
 $cgT = [System.IO.File]::ReadAllText($cg)
 $valT = [System.IO.File]::ReadAllText($val)
+$argT = [System.IO.File]::ReadAllText($argP)
+$selT = [System.IO.File]::ReadAllText($selP)
+$evtT = [System.IO.File]::ReadAllText($evtP)
 $withT = [System.IO.File]::ReadAllText($withP)
 $comT = [System.IO.File]::ReadAllText($com)
 $rtlT = [System.IO.File]::ReadAllText($rtl)
@@ -121,6 +127,62 @@ $negNum = Has-Dock $negD 'vb6_UC_GetExtenderMemberNum'
 $negStr = Has-Dock $negD 'vb6_UC_GetExtenderMemberStr'
 Check 'negative control (unhooking the string dock must go red)' (-not ($negNum -and $negStr)) 'sentinel is vacuous if either dock can go unreferenced'
 
+# --- 4b: 自由表达式读 ---
+# 4a 只接了"目标 == 返回槽"那一问, 于是四种**目标不是返回槽**的形状还发着裸全局。
+# ComCtlsDemo 实测 6 处, 分属**三个消费点** + 一个自带发码路径:
+#   赋值右值    `Align = vb6_ChkInt(vb6_Extender_Align);`          CoolBar/StatusBar×2/ToolBar
+#   Select 临时量 `int32_t _vb6_select_10 = vb6_Extender_Align;`   ToolBar
+#   实参        <不适用>  (本语料无)
+#   RaiseEvent 实参 `onHeightChanged(h, vb6_Extender_Height);`     CoolBar
+# 每道闸用的都是同一根 extenderMemberReadExpr (按发射符号前缀判); 换道一律放在**消费点**,
+# 不放在 hostPseudoRtlSymbol 里 —— 与 4a 同形 (符号只作真源, 不作发射点)。
+
+# 判"窄条件没了"的两道讲究:
+#  1) 先**剥注释** —— 断言的是代码, 注释里**提到**那串字(说明为什么曾经有)不算数。
+#     两层 Replace 都要**各自加作用域**: (?s) 是全局开关, 漏进后半个分支会让 `.` 吃掉换行,
+#     `//.*$` 贪到文件尾 (实测把第一个 // 之后的内容全删了)。
+#  2) 只认**紧挨着这个调用**的那种 if —— 那个文件下面本来就有两处无关的
+#     `target == currentReturnVar_` 判断, 全局搜那串字会误伤。
+$valCode = [regex]::Replace([regex]::Replace($valT, '(?s:\/\*.*?\*\/)', ''), '(?m://[^\n]*)', '')
+$getterWideRx = 'extenderMemberReadExpr\s*\(\s*value\s*\)'
+$guardedRx = 'if\s*\([^;{]*target\s*==\s*currentReturnVar_[^;{]*\)\s*\{\s*value\s*=\s*extenderMemberReadExpr'
+Check '4b: assignment RHS gate is no longer narrowed to the return slot' `
+    (($valCode -match $getterWideRx) -and (-not ($valCode -match $guardedRx))) `
+    'a free-standing `Align = Extender.Align` has a plain local target, so the 4a condition never fires'
+$guardLine = '    value = extenderMemberReadExpr(value);'
+$reGuarded = $valCode.Replace($guardLine, "    if (!currentReturnVar_.empty() && target == currentReturnVar_) {`r`n        value = extenderMemberReadExpr(value);`r`n    }")
+Check 'negative control (re-narrowing the gate to the return slot must go red)' `
+    ((-not ($valCode -match $guardedRx)) -and ($reGuarded -match $guardedRx)) `
+    'sentinel is vacuous if re-narrowing the gate to the return slot still passes'
+
+# (2) 实参: 换道在 boxIntoLateSlot / VariantToString / wrapToBSTR / boxToVariant **之前**,
+#     那一层包装于是套在读入口外面 —— 与 4a "外层 vb6_ChkInt 照旧" 同款。
+$argRx = 'extenderMemberReadExpr\s*\(\s*argVal\s*\)'
+Check '4b: call-argument gate present' ($argT -match $argRx) `
+    'a free-standing call argument reading Extender.<member> still passes a bare global'
+$negB2 = $argT -replace '(?m)^[^\n]*extenderMemberReadExpr\s*\(\s*argVal\s*\)[^\n]*\r?\n', ''
+Check 'negative control (restoring the original argument line must go red)' (-not ($negB2 -match $argRx)) `
+    'sentinel is vacuous if deleting the argument redirect still passes'
+
+# (3) Select Case 临时量: 换道落在**临时量的初始化**上, 不落 testVar 的每个用处 ——
+#     下游 cond / switch 读的都是 tempVar, 所以 getter 只调一次, 不会每个 Case 调一遍。
+$selRx = 'extenderMemberReadExpr\s*\(\s*lastExpr_\s*\)'
+Check '4b: Select Case temp initializer gate present' ($selT -match $selRx) `
+    'int32_t _vb6_select_N = vb6_Extender_Align; still reads a bare global'
+$negB3 = $selT -replace '(?m)^[^\n]*extenderMemberReadExpr\s*\(\s*lastExpr_\s*\)[^\n]*\r?\n', ''
+Check 'negative control (restoring the original Select initializer must go red)' (-not ($negB3 -match $selRx)) `
+    'sentinel is vacuous if deleting the Select redirect still passes'
+
+# (4) RaiseEvent 的**事件实参**: 这一路**不走** call_arg_emit —— RaiseEvent 自带一条发码
+#     (cgen_com_events.cpp: `emitExpr(arg); argVal = lastExpr_;`), 所以 (2) 那道闸够不着。
+#     ComCtlsDemo 实测就栽在这里: CoolBar.ctl `RaiseEvent HeightChanged(Extender.Height)`
+#     发成 `onHeightChanged(h, vb6_Extender_Height)`。这是**第四条**消费路径, 少一道就漏。
+$evtRx = 'extenderMemberReadExpr\s*\(\s*argVal\s*\)'
+Check '4b: RaiseEvent argument gate present' ($evtT -match $evtRx) `
+    'RaiseEvent <E>(Extender.<member>) passes a bare global as the event argument'
+$negB4 = $evtT -replace '(?m)^[^\n]*extenderMemberReadExpr\s*\(\s*argVal\s*\)[^\n]*\r?\n', ''
+Check 'negative control (restoring the original RaiseEvent argument line must go red)' (-not ($negB4 -match $evtRx)) `
+    'sentinel is vacuous if deleting the RaiseEvent redirect still passes'
 if ($bad) { Write-Host "check_extender_emit_channel: FAIL ($bad)"; exit 1 }
 Write-Host 'check_extender_emit_channel: PASS'
 exit 0

@@ -1,4 +1,4 @@
-﻿// cgen_assign_value_sem.inc - visit(AssignmentStmt&) 函数体片段：值语义（返回值变量 / BSTR / Variant 赋值）
+// cgen_assign_value_sem.inc - visit(AssignmentStmt&) 函数体片段：值语义（返回值变量 / BSTR / Variant 赋值）
 // 由 src/backend/stmt/cgen_assign.cpp 拆出（2026-09-17），在函数体内被 #include，非独立编译单元。
 // 内容 = 原文件第 1056~1362 行，逐行未改。
 
@@ -16,13 +16,12 @@
        vb6_ret_<Prop> 这个名字来自 currentReturnVar_ (decl/cgen_decl_func.cpp:325), 不动;
        外层的 vb6_ChkInt / vb6_BSTR_Assign 也照旧套在上面 —— 数值与字符串两种右值都成立。
        ComCtlsDemo 实测 333 处走的是这枚 push/pop 副本, 而权威值在 vb6_UCRec.ext*。
-       `target == currentReturnVar_` 只可能来自上面那次改写 (AST 目标就是本过程名),
-       即"这句在填返回值槽"; 自由表达式 (ToolBar/CoolBar/StatusBar 等 6 处
-       `Align = vb6_ChkInt(vb6_Extender_Align)` / `_vb6_select_10 = vb6_Extender_Align`
-       / `onHeightChanged(..., vb6_Extender_Height)`) 走不到这里 —— 那是另一刀, 刻意留着。 */
-    if (!currentReturnVar_.empty() && target == currentReturnVar_) {
-        value = extenderMemberReadExpr(value);
-    }
+       4a 时这一问还带着 `target == currentReturnVar_` 的**窄**条件 (只接"填返回值槽"),
+       4b 放开到**任何目标**: 自由表达式 `Align = Extender.Align` 的目标是个普通局部量,
+       窄条件下永远不触发 (ComCtlsDemo ToolBar/CoolBar/StatusBar 共 4 处)。放开是安全的 ——
+       闸门只在整条右值**就是**一枚 vb6_Extender_<已知成员> 时才动手, 而表里 type=Unknown 的
+       Container/DragIcon 原样返回, 所以对象成员不会被塞进 int32 入口。 */
+    value = extenderMemberReadExpr(value);
 
     // BSTR赋值检测: 如果目标是BSTR变量, 使用vb6_BSTR_Assign防止悬垂指针和双重释放
     bool targetIsBstr = false;
