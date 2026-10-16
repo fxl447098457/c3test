@@ -392,15 +392,39 @@ int32_t vb6_Weekday(double date, int32_t firstDayOfWeek) {
     return shifted;
 }
 
-double vb6_DateValue(BSTR dateStr) {
-    /* VB6 DateValue(datestring) -> date serial (double)
-       Parses a date string using Windows OLE Automation */
-    if (!dateStr) return 0.0;
-    DATE result = 0.0;
-    if (SUCCEEDED(VarDateFromStr(dateStr, LOCALE_USER_DEFAULT, 0, &result))) {
-        return (double)(int32_t)result;
-    }
+// 账 #417 (§B191): 「这串文本是哪一天」这一问原先有三家各自抄写 (vb6_DateValue、
+// vb6_TimeValue、vb6rtl_conv.c 的 CStr(Date 形文本) 入口)，「解析不出算几号」那句又各自
+// 沉默。解析政策继续交给 oleaut32 (§B142 同口径)，这里只留一条 VarDateFromStr 站点；
+// 「认不出是不是错」不再由这一层答，交给上面两位主人各按自己的档定 (VB6 实测两档不同)。
+// 参数位次同 vb6_NumVal：slot2 是 LCID、slot3 是 dwFlags (尺 .build/k207_olearg.c)。
+static int32_t vb6_TryDateFromStr(BSTR s, DATE* out) {
+    return (s && SUCCEEDED(VarDateFromStr(s, LOCALE_USER_DEFAULT, 0, out))) ? -1 : 0;
+}
+
+// DateValue / TimeValue / CStr(日期形文本) 那一档的主人：只认日期时间写法，
+// 落不到报 13。VB6 实测 (尺 .build/k236_datefail.vbs) DateValue("abc")、DateValue("46000")
+// 全是 13 —— 纯数字串不收，那是 CDate 独有的兜底 (见 vb6_DateVal)。
+double vb6_DateParse(BSTR s) {
+    DATE d = 0.0;
+    if (vb6_TryDateFromStr(s, &d)) return d;
+    vb6_RaiseError(13, vb6_BSTR_FromStr(L"Type mismatch"));
     return 0.0;
+}
+
+// CDate 那一档 = 日期写法 ∪ 严格数值，且**保留时间小数**。VB6 实测 (尺 .build/k234_cdate.vbs
+// 与 k235_datescan.vbs)：CDate("2026/1/1 14:30") = 46023.60416667、CDate("46000") = 46000、
+// CDate("&H1") = 1、CDate("1e2") = 100，而 CDate("123abc") 与 CDate("abc") 都是 13 ——
+// 兜底不是 Val 那种吞尾巴的宽松档，正是账 #416 收成一位主人的 vb6_NumVal。
+double vb6_DateVal(BSTR s) {
+    DATE d = 0.0;
+    if (vb6_TryDateFromStr(s, &d)) return d;
+    return vb6_NumVal(s);
+}
+
+double vb6_DateValue(BSTR dateStr) {
+    /* VB6 DateValue(datestring) -> 只留日期那一位。实测 DateValue("2026/1/1 14:30") = 46023、
+       DateValue("12:00") = 0；认不出由 vb6_DateParse 报 13，不再静默 0。 */
+    return floor(vb6_DateParse(dateStr));
 }
 
 double vb6_TimeSerial(int32_t hour, int32_t minute, int32_t second) {
@@ -414,17 +438,11 @@ double vb6_TimeSerial(int32_t hour, int32_t minute, int32_t second) {
 }
 
 double vb6_TimeValue(BSTR timeStr) {
-    /* VB6 TimeValue(timestring) -> date serial (double)
-       Parses a time string using Windows OLE Automation */
-    if (!timeStr) return 0.0;
-    DATE result = 0.0;
-    if (SUCCEEDED(VarDateFromStr(timeStr, LOCALE_USER_DEFAULT, 0, &result))) {
-        double datePart = (double)(int32_t)result;
-        double timePart = result - datePart;
-        if (timePart < 0) timePart += 1.0;
-        return timePart;
-    }
-    return 0.0;
+    /* VB6 TimeValue(timestring) -> 只留一天里的那一小段。实测 TimeValue("2026/1/1 14:30") =
+       0.60416667、TimeValue("2026/1/1") = 0；小数恒在 [0,1)，负序列 (1899-12-30 之前) 也一样。
+       认不出由 vb6_DateParse 报 13，不再静默 0。 */
+    double d = vb6_DateParse(timeStr);
+    return d - floor(d);
 }
 
 vb6_SafeArray1D* vb6_ArrayCreate(int32_t count) {

@@ -385,15 +385,12 @@ BSTR vb6_CStrDate(double x) {
 // (PPDTPickerGeneral.c 208/209、PPMonthViewGeneral.c 207/208; 来源是
 //  .pag 里 `TextMinDate.Text = .MinDate` 这条「Date 写进 Text」的读方向).
 // 与 vb6_CStrDblFromBSTR 同款思路: 补一个 BSTR 入口, 由 vb6rtl_builtin.h 的
-// _Generic 按实参 C 类型分派. 差别在于解析口径: 数值档用 vb6_Val, 而这里是
-// 日期串, 走 VarDateFromStr (与 vb6_DateValue 同一条), 否则 "2026/1/1" 会答 0.
+// _Generic 按实参 C 类型分派. 差别在于解析口径: 数值档用 vb6_NumVal, 而这里交给日期那一档
+// 的主人 vb6_DateParse (账 #417 §B191: 文本→日期的解析站点全仓只留那一条), 否则 "2026/1/1"
+// 会答 0. 落不到日期的 (空串/非日期文本) 由它报 13 —— 以前这里兜底问 vb6_Val, 那句「与
+// vb6_CDate 保持一致」在 #417 之后已经不成立 (CDate 那一档改问 vb6_DateVal), 不再留第二套.
 BSTR vb6_CStrDateFromBSTR(BSTR s) {
-    DATE d = 0.0;
-    if (s && SUCCEEDED(VarDateFromStr(s, LOCALE_USER_DEFAULT, 0, &d)))
-        return vb6_CStrDate(d);
-    // 落不到日期解析的 (空串/非日期文本) 按 vb6_CDate 的 BSTR 口径兜底:
-    // 那一档本来就是 vb6_Val, 这里保持一致, 不另立第二套.
-    return vb6_CStrDate(vb6_Val(s));
+    return vb6_CStrDate(vb6_DateParse(s));
 }
 // ============================================================
 // 类型检查
@@ -764,7 +761,7 @@ double vb6_CDate(vb6_VARIANT v) {
     // 这里只排除"非数值"的几档, 免得又写一份平行表。
     if (v.vt == vb6_vtEmpty || v.vt == vb6_vtNull
         || v.vt == vb6_vtDispatch || v.vt == vb6_vtError) return 0.0;
-    if (v.vt == vb6_vtBSTR) return vb6_Val(v.bstrVal);   /* 字符串按日期解析 */
+    if (v.vt == vb6_vtBSTR) return vb6_DateVal(v.bstrVal);   /* 账 #417: 文本按日期解析，落不到再按严格数值 */
     return vb6_VariantToDouble(v);
 }
 

@@ -341,6 +341,13 @@ int32_t vb6_Weekday(double date, int32_t firstDayOfWeek);
 double vb6_DateValue(BSTR dateStr);
 double vb6_TimeSerial(int32_t hour, int32_t minute, int32_t second);
 double vb6_TimeValue(BSTR timeStr);
+// 账 #417 (§B191): 文本→日期序列的解析只有 vb6rtl_date.c 里那一条 VarDateFromStr 站点,
+// 「认不出算几号」由下面两位主人各按自己的档答 (全是 13, 但**认不认纯数字串**两档不同):
+//   vb6_DateParse = DateValue / TimeValue / CStr(日期形文本) 那一档, 只认日期时间写法;
+//   vb6_DateVal   = CDate 那一档 = 日期写法 ∪ 严格数值 (vb6_NumVal), 且保留时间小数。
+// 实测口径见 .build/k234_cdate.vbs / k235_datescan.vbs / k236_datefail.vbs。
+double vb6_DateParse(BSTR s);
+double vb6_DateVal(BSTR s);
 
 // P14.3.4: App全局对象属性
 BSTR vb6_App_Path(void);     // App.Path - EXE所在目录

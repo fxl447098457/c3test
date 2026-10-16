@@ -712,3 +712,11 @@
  *   touch æœ¬æ–‡ä»¶ = è®© RCDATA é‡ç¼–ä¸€æ¬¡ï¼ˆÂ§B99â‘¡ï¼‰ã€‚ */
 
 /* ÕË #305 #416 µÚ¾ÅÊ®Èıµ¶ (2026-10-16): ÑÏ¸ñ×ª»»×å¶ÁÎÄ±¾ÄÇÒ»¾äÊÕ³ÉÁ½Î»Ö÷ÈË ¡ª¡ª vb6_NumVal ¸ÄÎÊ oleaut32 µÄ VarR8FromStr(½âÎö²»³ö±¨ 13, ²»×Ô¼ºĞ´µÚ¶ş±é, ¡ìB142 Í¬¿Ú¾¶), ĞÂÔö vb6_BoolVal ÎÊ VarBoolFromStr(CBool ÈÏ "True" Õâ¾ä»°), Ê®Ã¶ vb6_*BSTR Èë¿ÚÓëÊ®ÈıÃ¶ *V ±¡¿ÇÈ«²¿¸ÄÎÊÕâÒ»¾ä; ·¢ÂëÄÇ²à cgen_expr_call_conv_numeric.inc ¶Ô CBool ·¢ vb6_BoolVal ÇÅ¡£¸ÄÇ° CInt("abc") Óë CInt(¿Õ´®) ¾²Ä¬¸ø 0¡¢CInt("123abc") ÍÌÎ²°Í, VB6 Èı¾äÈ«ÊÇ 13 (³ß .build/k205_oleconv.c / k207_olearg.c)¡£ touch ±¾ÎÄ¼ş = ÈÃ RCDATA ÖØ±àÒ»´Î£¨¡ìB99¢Ú£©¡£ */
+/* ÕË #305 ¡ìB191 µÚ¾ÅÊ®ËÄµ¶ (2026-10-16): ¡¸Õâ´®ÎÄ±¾ÊÇÄÄÒ»Ìì¡¹ÄÇÒ»ÎÊÔ­ÏÈÓĞÈı¼Ò¸÷×Ô³­
+ *   (vb6_DateValue¡¢vb6_TimeValue¡¢vb6rtl_conv.c µÄ CStr(ÈÕÆÚĞÎÎÄ±¾) Èë¿Ú), ¶ø¡¸ÈÏ²»³öËã¼¸ºÅ¡¹
+ *   ÄÇ¾äÈı¼ÒÈ«³ÁÄ¬¡£½âÎöÕ¾µãÊÕ³ÉÒ»Ìõ vb6_TryDateFromStr, ±¨´íÄÇÒ»¾ä½»¸øÁ½Î»Ö÷ÈË:
+ *   vb6_DateParse = DateValue/TimeValue/CStr ÄÇÒ»µµ (Ö»ÈÏÈÕÆÚÊ±¼äĞ´·¨), vb6_DateVal = CDate
+ *   ÄÇÒ»µµ (ÈÕÆÚ ¡È ÑÏ¸ñÊıÖµ vb6_NumVal, ÇÒ±£ÁôÊ±¼äĞ¡Êı)¡£¸ÄÇ° CDate("2026/1/1") ´ğ 2026¡¢
+ *   CDate("abc") ¾²Ä¬ 0 ¶øÍ¬Ò»·İ³ÌĞòÀï DateValue ÊÇ¶ÔµÄ; ¿Ú¾¶°´±¾»ú VB-family ÔËĞĞÆÚÊµ²â
+ *   (³ß .build/k233_dateconv.c / k234_cdate.vbs / k235_datescan.vbs / k236_datefail.vbs)¡£
+ *   touch ±¾ÎÄ¼ş = ÈÃ RCDATA ÖØ±àÒ»´Î£¨¡ìB99¢Ú£©¡£ */
