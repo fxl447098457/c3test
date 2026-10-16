@@ -38,6 +38,14 @@ static int32_t vb6_date_to_serial(int32_t year, int32_t month, int32_t day) {
     // 调整到VB6的基准(1899-12-30 = 0)
 }
 
+// 「一枚年月日折成 VB/OLE 序列号」这一问在这里收成一个出口。
+// vb6_date_to_serial 答的是儒略日数，要再减掉基准 1899-12-30 (= 2415019) 才是 VB 的序列号；
+// 这个减法原先在本文件抄了四遍，把儒略日数当成序列号直接用会把每个日期整体抬高 2415019
+// (账 #422 的第一发读数就是这样：DatePart("ww", …) 答 -2415012 那一档)。
+static int32_t vb6_SerialOf(int32_t year, int32_t month, int32_t day) {
+    return vb6_date_to_serial(year, month, day) - vb6_date_to_serial(1899, 12, 30);
+}
+
 // Excel序列号 → 年月日 (Julian Date Number逆运算)
 // 基于 vb6_date_to_serial 的逆运算, 含Lotus 1900-02-29 bug兼容
 static void vb6_serial_to_date(int32_t serial, int32_t* year, int32_t* month, int32_t* day) {
@@ -61,9 +69,7 @@ static double vb6_now_serial(void) {
     time_t t = time(NULL);
     struct tm* lt = localtime(&t);
     // OLE日期: serial = JD(date) - JD(1899-12-30), 无Lotus bug
-    int32_t jd_date = vb6_date_to_serial(1900 + lt->tm_year, 1 + lt->tm_mon, lt->tm_mday);
-    int32_t jd_base = vb6_date_to_serial(1899, 12, 30);
-    int32_t datePart = jd_date - jd_base;
+    int32_t datePart = vb6_SerialOf(1900 + lt->tm_year, 1 + lt->tm_mon, lt->tm_mday);
     double timePart = (lt->tm_hour * 3600.0 + lt->tm_min * 60.0 + lt->tm_sec) / 86400.0;
     return (double)datePart + timePart;
 }
@@ -157,9 +163,7 @@ int32_t vb6_Second(double time) {
 
 // ============================================================
 double vb6_DateSerial(int32_t year, int32_t month, int32_t day) {
-    int32_t jd_date = vb6_date_to_serial(year, month, day);
-    int32_t jd_base = vb6_date_to_serial(1899, 12, 30);
-    return (double)(jd_date - jd_base);
+    return (double)vb6_SerialOf(year, month, day);
 }
 
 // P14.2.4: DateAdd/DateDiff/DatePart 日期函数
@@ -262,9 +266,7 @@ double vb6_DateAdd(BSTR interval, double number, double date) {
         if (m == 2 && (y % 4 == 0 && (y % 100 != 0 || y % 400 == 0))) maxDay = 29;
         if (d > maxDay) d = maxDay;
         // Rebuild serial
-        int32_t jd_date = vb6_date_to_serial(y, m, d);
-        int32_t jd_base = vb6_date_to_serial(1899, 12, 30);
-        datePart = jd_date - jd_base;
+        datePart = vb6_SerialOf(y, m, d);
     }
 rebuild:
     {
@@ -316,9 +318,49 @@ int64_t vb6_DateDiff(BSTR interval, double date1, double date2, int32_t firstDay
     return 0;
 }
 
+// 账 #422 (§B196): 「这一年里第几周」这一问的主人 (原先这问在 vb6_DatePart 里就地抄了一条公式)。
+// 对齐周由 firstDayOfWeek 定死: b = 年内第一个该星期几之前已有的天数 (0..6)，也就是开头那条
+// 不满整周的长度。firstWeekOfYear 只决定「哪条周算第 1 周」和年两端那几条不满整周的归谁:
+//   1 = 开头那条不满的周就是第 1 周;
+//   2 = 它满 4 天才算第 1 周，不满就改从第一个 fdow 起算，开头那几天交回上一年的最后一周;
+//   3 = 第一条满整周才算第 1 周。
+// 年末那一半只有档 2 会被来年抢走 (抢走的那些天答 1)，而且**来年正好是闰年时，抢走的起点要往后挪
+// 一天** —— 这一条同样是实测读数 (2023/2027 两年各三格)，别当笔误删。
+// 口径 = 本机 VB-family 运行期 14 年 × 21 组合 = 107394 天逐日拟合，零失配 (尺
+// .build/k321_ww_grid.vbs + k324_ww_grid2.vbs + k330_ww_grid3.vbs，拟合与复核 .build/k323_ww_fit.py，
+// 读数报告 .build/k329_fit_report.txt + k330_fit_report.txt)。
+static int32_t vb6_LeadingPartialDays(int32_t year, int32_t fdow) {
+    int32_t wd = vb6_Weekday((double)vb6_SerialOf(year, 1, 1), 1);  // 1=Sun..7=Sat，与 fdow 同一套编号
+    int32_t b = (fdow - wd) % 7;
+    return b < 0 ? b + 7 : b;
+}
+
+static int32_t vb6_WeekOfYear(int32_t serial, int32_t fdow, int32_t fwoy) {
+    int32_t y, mo, dd;
+    vb6_serial_to_date(serial, &y, &mo, &dd);
+    if (fdow < 1 || fdow > 7) fdow = 1;   // 0 = vbGeneral 交系统 (本机实测落在周一)，跨机器不可复现 => 统一按 vbSunday
+    if (fwoy != 2 && fwoy != 3) fwoy = 1;  // 实测 0 与 1 同档; 4 以上运行期直接报错，这里不装死
+    int32_t doy = serial - vb6_SerialOf(y, 1, 1) + 1;
+    int32_t n = vb6_SerialOf(y, 12, 31) - vb6_SerialOf(y, 1, 1) + 1;
+    int32_t b = vb6_LeadingPartialDays(y, fdow);
+    if (fwoy == 2) {
+        int32_t bn = vb6_LeadingPartialDays(y + 1, fdow);
+        if (bn >= 4) {
+            int32_t ny = y + 1;
+            int32_t leap_next = (ny % 4 == 0 && ny % 100 != 0) || (ny % 400 == 0);
+            if (doy > n - (7 - bn) + (leap_next ? 1 : 0)) return 1;
+        }
+    }
+    if (fwoy == 1 || (fwoy == 2 && b >= 4)) {
+        if (b == 0) return 1 + (doy - 1) / 7;
+        if (doy <= b) return 1;
+        return 2 + (doy - b - 1) / 7;
+    }
+    if (doy <= b) return vb6_WeekOfYear(vb6_SerialOf(y - 1, 12, 31), fdow, fwoy);
+    return 1 + (doy - b - 1) / 7;
+}
+
 int32_t vb6_DatePart(BSTR interval, double date, int32_t firstDayOfWeek, int32_t firstWeekOfYear) {
-    (void)firstDayOfWeek;
-    (void)firstWeekOfYear;
     vb6_date_interval di = vb6_parse_interval(interval);
     int32_t d = (int32_t)date;
     
@@ -338,14 +380,15 @@ int32_t vb6_DatePart(BSTR interval, double date, int32_t firstDayOfWeek, int32_t
             vb6_serial_to_date(d, &y, &m, &dd);
             return m;
         }
-        case vb6_di_day:
+        case vb6_di_day: {
+            int32_t y, m, dd;
+            vb6_serial_to_date(d, &y, &m, &dd);
+            return dd;              // 「d」= 月内第几天，与「一年里第几天」是两问 (账 #422)
+        }
         case vb6_di_dayofyear: {
             int32_t y, m, dd;
             vb6_serial_to_date(d, &y, &m, &dd);
-            // Day of year: simple approximation (days since start of year)
-            int32_t jd_this = vb6_date_to_serial(y, m, dd);
-            int32_t jd_jan1 = vb6_date_to_serial(y, 1, 1);
-            return jd_this - jd_jan1 + 1;
+            return vb6_SerialOf(y, m, dd) - vb6_SerialOf(y, 1, 1) + 1;
         }
         case vb6_di_weekday: {
             // Sunday=1, Monday=2, ..., Saturday=7
@@ -357,15 +400,8 @@ int32_t vb6_DatePart(BSTR interval, double date, int32_t firstDayOfWeek, int32_t
             if (wd == 0) return 7;  // Saturday
             return wd;              // Sunday=1, Monday=2, etc.
         }
-        case vb6_di_week: {
-            // ISO 8601 simplified: week 1 contains Jan 4
-            int32_t y, m, dd;
-            vb6_serial_to_date(d, &y, &m, &dd);
-            int32_t jd_this = vb6_date_to_serial(y, m, dd);
-            int32_t jd_jan1 = vb6_date_to_serial(y, 1, 1);
-            int32_t dayOfYear = jd_this - jd_jan1 + 1;
-            return (dayOfYear - 1) / 7 + 1;
-        }
+        case vb6_di_week:
+            return vb6_WeekOfYear(d, firstDayOfWeek, firstWeekOfYear);
         case vb6_di_hour:
             return vb6_Hour(date);
         case vb6_di_minute:

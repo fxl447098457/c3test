@@ -737,3 +737,16 @@
  *   存下的值里。收成一条唯一出口 vb6_SecondsOfDay(double), 读者 = 三枚 getter + DateAdd 分解站
  *   (DatePart 的 h/n/s 三档本来就转调那三枚 getter, 跟着一起好)。
  *   touch 本文件 = 让 RCDATA 重编一次（§B99②）。 */
+/* 账 #305 §B196 第九十七刀 (2026-10-17): vb6_DatePart 的两条臂答错。① case vb6_di_day 直接
+ *   掉进「一年里第几天」那一条臂 => DatePart("d", 2026/3/1) 本仓答 60, 本机运行期答 1 (而 "y" 才
+ *   该答 60, 尺 .build/k309_datepart.vbs)。②「ww」那一条就地抄了一条 (dayOfYear-1)/7+1 => 与运行期
+ *   逐日比对 2026 年 365 天里 208 天不同、2024 年 366 天里 52 天不同。③ 两条形参 firstDayOfWeek /
+ *   firstWeekOfYear 被 (void) 丢掉, 而语料 4 处 "ww" 全在 ComCtlsDemo 的 DTPicker/MonthView 里、
+ *   四处分节符都把 vbFirstFourDays 传了出来 => 不是纸面缺口 (同一份源里还留着作者自写的一句
+ *   "DatePart function can return wrong week number")。收成一条唯一出口 vb6_WeekOfYear, 口径 =
+ *   运行期 14 年 × 21 组合 = 107394 天逐日拟合零失配 (尺 .build/k321/k324/k330_ww_grid*.vbs +
+ *   k323_ww_fit.py)。④ 顺带一格本刀自己踩的雷: vb6_date_to_serial 答的是「儒略日数」，要再减 1899-12-30
+ *   (= 2415019) 才是 VB/OLE 序列号，而这一道减法原先在本文件抄了四遍 —— 第一版新代码直接拿它当序列号用，
+ *   实测读数就是 DatePart("ww") 答 -2415012 那一档 (尺 .build/k354_proj + k354_run.txt)。现在收成唯一
+ *   出口 vb6_SerialOf，四遍手抄并进来，哨兵 check_datepart_arms.ps1 的 R7 钉住 (裸 helper 站点 3、出口站点 11)。
+ *   touch 本文件 = 让 RCDATA 重编一次（§B99②）。 */
