@@ -702,5 +702,11 @@
 /* 账 #305 §B188 第九十刀 (2026-10-16): 新 RTL 出口 vb6_RunVbProtected —— 把一截 VB 体跑在
  *   自己带着的错误帧里, 交回抛出来的号。消费者一处 = 发码里的 vb6_cls_<X>_Destroy,
  *   为的是 Class_Terminate 抛错时"字段 BSTR / 数组字段 / vb6_Free(me)"那三截尾巴照旧走完
- *   (实测每枚抛错的出厂漏一份实例资源, 尺 .build/k107_leak_probe.c)。
+ *   (实测每枚抛错的出厂漏一份实例资源, 尺已搬进仓 = tests/tools/leak_probe.c, 判据
+ *    b188_way_out_tail_releases 两台各钉一头)。
+ *   touch 本文件 = 让 RCDATA 重编一次（§B99②）。 */
+/* 账 #305 §B188 第九十一刀 (2026-10-16): ComObj_Release 那条 [C3_COM] 诊断原先每出厂一枚实例
+ *   打一行 —— 新搬进回归的判据一轮 5000 次 create/release 就是 5000 行, 本机 20 万轮实测
+ *   19.3 MB stderr 把现场盖掉。改成同一枚类只记第一次 (vb6_TermErrClaim, 口径照 §B181 的
+ *   vb6_CrashTraceClaim: 拿不准一律放行, 漏一条真诊断比多打十条贵)。
  *   touch 本文件 = 让 RCDATA 重编一次（§B99②）。 */

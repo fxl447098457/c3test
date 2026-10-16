@@ -6997,6 +6997,16 @@ if ($Category -in @("all", "run", "vbp")) {
     Test-EmitcAbsent "b188_destroy_keeps_no_bare_terminate_call" @("$Tests\b188_term\B188d.vbp") @(
         'vb6_T88Boom_Class_Terminate(me);',
         'vb6_T88Good_Class_Terminate(me);')
+    # 运行期那一头（任务 #414 的判据升格）: 两台各跑一遍「抛错那枚 vs 干净那枚」各造各放 5000 次,
+    # 两头都要 verdict=OK —— 抛错那枚钉的是本刀修的漏, 干净那枚是反面证人 (它一直 OK 才说明读数不是别的
+    # 形状带来的)。`verdict=LEAK` 同时钉成 Absent: 工具自己判的红也看得见。
+    Test-InstanceLeak "b188_way_out_tail_releases" "$Tests\b188_term\B188d.vbp" "B188d" `
+        "{11112222-3333-4444-5555-6666777788D1}" "{11112222-3333-4444-5555-6666777788D2}" 5000 `
+        @("LEAK-BOOM verdict=OK", "LEAK-GOOD verdict=OK", "LEAK-DONE") @("verdict=LEAK", "verdict=BROKEN")
+    Test-InstanceLeak "b188_way_out_tail_releases_x86" "$Tests\b188_term\B188d.vbp" "B188d" `
+        "{11112222-3333-4444-5555-6666777788D1}" "{11112222-3333-4444-5555-6666777788D2}" 5000 `
+        @("LEAK-BOOM verdict=OK", "LEAK-GOOD verdict=OK", "LEAK-DONE") @("verdict=LEAK", "verdict=BROKEN") `
+        -Arch "x86"
 
 
     # 账 #305 SB186 第二头: VB 客户那一头　「口径」的唯一读数面　—— 探针是 C 客户, 它只能读 hr;

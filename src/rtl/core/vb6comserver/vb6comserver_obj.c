@@ -121,6 +121,28 @@ static ULONG STDMETHODCALLTYPE ComObj_AddRef(vb6_ComObject* self) {
     return count;
 }
 
+/* 账 #305 §B188 (第九十一刀): 下面那条 [C3_COM] 诊断原先**每出厂一枚实例打一行**。
+ * 它是一指, 不是流水 —— 判据 (tests\tools\leak_probe.c) 一轮 5000 次 create/release
+ * 就是 5000 行, 本机 20 万轮实测 19.3 MB stderr 把现场盖掉。口径照 §B181 的
+ * vb6_CrashTraceClaim: **同一枚类只记第一次**, 拿不准的一律放行 (指针没有 desc 的空值,
+ * 表满也照打) —— 漏掉一条真诊断比多打十条贵。表是进程内的定长小表, 不回收。 */
+#define VB6_TERM_ERR_LOG_MAX 4
+static const void* volatile vb6_termErrLogged[VB6_TERM_ERR_LOG_MAX];
+
+static int vb6_TermErrClaim(const void* desc) {
+    int i;
+    if (!desc) return 1;
+    for (i = 0; i < VB6_TERM_ERR_LOG_MAX; i++) {
+        if (vb6_termErrLogged[i] == desc) return 0;
+        if (vb6_termErrLogged[i] == NULL &&
+            InterlockedCompareExchangePointer((void* volatile*)&vb6_termErrLogged[i],
+                                              (void*)desc, NULL) == NULL) {
+            return 1;
+        }
+    }
+    return 1;
+}
+
 static ULONG STDMETHODCALLTYPE ComObj_Release(vb6_ComObject* self) {
     ULONG count = InterlockedDecrement(&self->refCount);
     P189("[189] RELEASE W=%p cnt=%u owns=%d inst=%p\n", (void*)self, (unsigned)count,
@@ -165,7 +187,7 @@ static ULONG STDMETHODCALLTYPE ComObj_Release(vb6_ComObject* self) {
                 }
                 vb6_RestoreErrState();
             }
-            if (termErrNum) {
+            if (termErrNum && vb6_TermErrClaim(self->desc)) {
                 fprintf(stderr, "[C3_COM] Class_Terminate raised error %d in \"%s\"; the client was kept alive (ledger 305 B188)\n",
                         (int)termErrNum,
                         (self->desc && self->desc->classVariable) ? self->desc->classVariable : "?");
