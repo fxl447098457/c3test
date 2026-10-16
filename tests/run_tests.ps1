@@ -6986,11 +6986,11 @@ if ($Category -in @("all", "run", "vbp")) {
     # 账 #305 §B188 ④ (第九十刀): 出厂那一腿的**尾巴**。`Class_Terminate` 抛错时, `_Destroy` 里体之后
     # 那三截(字段 BSTR / 数组字段 / vb6_Free(me))曾被 ComObj_Release 的帧一起 longjmp 跳掉 —— 实测每枚
     # 抛错的出厂漏一份实例资源: x64 每枚 35~37 字节、x86 每枚 17 字节, 多一枚 20 字符 String 字段就涨到
-    # 120~123 字节, 而出厂干净那枚恒 0 (尺 .build/k107_leak_probe.c, 读数 .build/k108_*.txt +
+    # 120~123 字节, 而出厂干净那枚恒 0 (尺已搬进仓 = tests/tools/leak_probe.c, 当年读数 .build/k108_*.txt +
     # .build/k109_x64.txt; 改后两台四档全 0 = .build/k117_x64.txt / .build/k117_x86.txt)。
     # 改法 = 帧装在 `_Destroy` 自己身上(新出口 vb6_RunVbProtected, 出厂两腿都汇到这一处), 尾巴走完才把
     # 号交回外层帧: COM 出厂那层照旧记一条 [C3_COM] 诊断、进程内的 `Set x = Nothing` 照旧由调用方的
-    # On Error 接住 —— 两台跑完客户端都不死, 20 枚出厂 = 21 行诊断(含预热那一枚), 一字没少。
+    # On Error 接住 —— 两台跑完客户端都不死。(那条诊断自第九十一刀起**同一枚类只记一次**, 原先每枚出厂一行。)
     Test-EmitcShape "b188_destroy_tail_is_reachable" @("$Tests\b188_term\B188d.vbp") @(
         'vb6_termErr = vb6_RunVbProtected((void(*)(void*))vb6_T88Boom_Class_Terminate, me);',
         'if (vb6_termErr) vb6_RaiseError(vb6_termErr, vb6_ErrDescription());')
