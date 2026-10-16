@@ -57,6 +57,25 @@ if ($m.Success) {
     Check 'negative control (deleting the channel call must go red)' $negFails 'sentinel is vacuous if neutering the call still passes'
 }
 
+# 读侧: 两个入口都要有, 且都必须走通道
+foreach ($fn in @('vb6_UC_GetExtenderMemberNum', 'vb6_UC_GetExtenderMemberStr')) {
+    $defR = $rtlT -match ("int32_t\s+" + $fn + "\s*\(|BSTR\s+" + $fn + "\s*\(")
+    Check "RTL defines $fn" $defR 'read-side entry point missing from uc_controls.c'
+    $protR = $hdrT -match ([regex]::Escape($fn) + '\s*\([^;]*\)\s*;')
+    Check "header declares $fn" $protR 'generated code calls it directly; without the prototype MSVC gives C2065'
+}
+# 读侧刻意不跟写侧同形: 返回 void* 会逼所有调用点写强制转换
+$voidRead = $rtlT -match 'void\*\s+vb6_UC_GetExtenderMember\s*\('
+Check 'read side is NOT a single void* getter' (-not $voidRead) 'one void* getter would force a cast at every arithmetic call site'
+
+# 负控: 两个读入口都必须真的调通道
+foreach ($fn in @('vb6_UC_GetExtenderMemberNum', 'vb6_UC_GetExtenderMemberStr')) {
+    $mr = [regex]::Match($rtlT, ([regex]::Escape($fn) + '\s*\([^)]*\)\s*\{(?<b>.*?)\r?\n\}'), 'Singleline')
+    $negR = $rtlT -replace 'void\*\s+fp\s*=\s*vb6_UC_ExtenderField\([^;]*\);', 'void* fp = 0;'
+    $mnr = [regex]::Match($negR, ([regex]::Escape($fn) + '\s*\([^)]*\)\s*\{(?<b>.*?)\r?\n\}'), 'Singleline')
+    $ok = (-not $mnr.Success) -or (-not ($mnr.Groups['b'].Value -match '=\s*vb6_UC_ExtenderField\s*\('))
+    Check "negative control: neutering the channel makes $fn red" $ok 'sentinel is vacuous if neutering the channel call still passes'
+}
 if ($bad) { Write-Host "check_extender_emit_channel: FAIL ($bad)"; exit 1 }
 Write-Host 'check_extender_emit_channel: PASS'
 exit 0

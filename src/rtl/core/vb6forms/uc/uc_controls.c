@@ -348,6 +348,28 @@ int32_t vb6_UC_IsExtender(const void* p) {
    Extender.Height/Width/Left/Top 会**静默不生效**。这里按 `vb6_ucCurrent` 落进记录。
    没有当前记录时退回全局, 与 ExtenderField 的兜底保持一致。
    kind 约定同 vb6_UC_ExtenderField: 0=BSTR, 2=int16, 3=int32。 */
+/* Fix 296 读侧: `Extender.<成员>` 作右值时的实例感知入口(与写侧对称)。
+   与写侧刻意不同形: 读侧要参与算术/字符串表达式, 返回 void* 会把每个调用点都
+   变成强制转换, 比原来更脏。所以拆成数值型 / 字符串型两个, 由调用方按成员类型选。
+   kind 约定同 vb6_UC_ExtenderField: 0=BSTR / 2=int16 / 3=int32。 */
+int32_t vb6_UC_GetExtenderMemberNum(const wchar_t* name) {
+    extern void* vb6_UC_ExtenderField(void* p, const wchar_t* n, int32_t* k);
+    void* p = (void*)&vb6_UserControl_Extender;
+    int32_t kind = -1;
+    void* fp = vb6_UC_ExtenderField(p, name, &kind);
+    if (!fp) return 0;
+    if (kind == 2) return (int32_t)(*(int16_t*)fp);
+    return (int32_t)(*(int32_t*)fp);
+}
+
+BSTR vb6_UC_GetExtenderMemberStr(const wchar_t* name) {
+    extern void* vb6_UC_ExtenderField(void* p, const wchar_t* n, int32_t* k);
+    void* p = (void*)&vb6_UserControl_Extender;
+    int32_t kind = -1;
+    void* fp = vb6_UC_ExtenderField(p, name, &kind);
+    if (!fp || kind != 0) return NULL;
+    return *(BSTR*)fp;
+}
 void vb6_UC_SetExtenderMember(const wchar_t* name, void* value) {
     extern void* vb6_UC_ExtenderField(void* p, const wchar_t* n, int32_t* k);
     void* p = (void*)&vb6_UserControl_Extender;
