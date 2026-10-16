@@ -86,6 +86,19 @@ typedef struct vb6_UCRec {
     // `Extender.Width` 恒为 0; UserControl.Width/Height 则连声明都没有 → C2065。
     int32_t extWidth;
     int32_t extHeight;
+    // Fix 294 第二片: Extender 其余成员也搬进记录, 与上面 extLeft/Top/Width/Height
+    // 同一个道理 —— 它们本来也是**每控件一份**的状态, 却是裸全局。
+    int32_t extAlign;
+    int32_t extDragMode;
+    int32_t extHelpContextID;
+    int32_t extWhatsThisHelpID;
+    int16_t extVisible;
+    int16_t extVb6Default;
+    int16_t extCancel;
+    void*   extTag;
+    void*   extToolTipText;
+    void*   extContainer;
+    void*   extDragIcon;
     int32_t index;        // 控件数组下标, -1=非数组
     wchar_t ctrlName[VB6_UC_NAME_LEN];
     BSTR    displayNameBstr;   // Fix 116: Ambient.DisplayName 缓存 (控件实例名)
@@ -107,6 +120,23 @@ typedef struct vb6_UCSaved {
     void*   ambientFont;
     int32_t extLeft, extTop;
     int32_t extWidth, extHeight;  // Fix 162
+    // Fix 294: Extender 上其余成员也必须存取 —— 过去只存了 Left/Top/Width/Height,
+    // Align/Visible/DragMode/HelpContextID/WhatsThisHelpID/Tag/ToolTipText/Container/
+    // DragIcon/vb6_Default/Cancel 全是**裸全局**, 出栈没人还原 ⇒ 控件之间互相污染。
+    // 实测: ToolBar 在 ReadProperties 里 Extender.Align = vbAlignTop(ToolBar.ctl:879),
+    // 之后 StatusBar 读到的就是 1 而不是它 .frm 里的 Align=2(AlignBottom), 于是走错
+    // 分支 —— 只因为 StatusBar 的设计期高度恰好等于自然高度, 肉眼看不出来。
+    int32_t extAlign;
+    int32_t extDragMode;
+    int32_t extHelpContextID;
+    int32_t extWhatsThisHelpID;
+    int16_t extVisible;
+    int16_t extVb6Default;
+    int16_t extCancel;
+    void*   extTag;
+    void*   extToolTipText;
+    void*   extContainer;
+    void*   extDragIcon;
     void*   hWnd;                 // Fix 133u: UserControl.hWnd
     int16_t autoRedraw;           // Fix 133u: UserControl.AutoRedraw
     struct vb6_UserControl_Extender_Type ext; // Fix 133u: Extender.Visible/Height
@@ -120,6 +150,19 @@ typedef struct vb6_HostObjRec {
     wchar_t name[VB6_UC_NAME_LEN];
     wchar_t typeName[VB6_UC_NAME_LEN];
     int32_t isForm;
+    // Fix 294 第二片: Extender 其余成员也搬进记录, 与上面 extLeft/Top/Width/Height
+    // 同一个道理 —— 它们本来也是**每控件一份**的状态, 却是裸全局。
+    int32_t extAlign;
+    int32_t extDragMode;
+    int32_t extHelpContextID;
+    int32_t extWhatsThisHelpID;
+    int16_t extVisible;
+    int16_t extVb6Default;
+    int16_t extCancel;
+    void*   extTag;
+    void*   extToolTipText;
+    void*   extContainer;
+    void*   extDragIcon;
     int32_t index;        // 控件数组下标 (-1=非数组)
     void*   instance;     // 工程 UserControl 实例, 否则 NULL
 } vb6_HostObjRec;
