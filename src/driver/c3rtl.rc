@@ -778,3 +778,95 @@
  *   本刀只补声明，故意不动口径: 命名格式五档走 LOCALE_USER_DEFAULT，字串随机器 locale 变(本机 zh-CN、CI en-US)
  *   => 判据只钉关系、不钉字面串; 零头为何多一枚尾随空格、越界 namedFormat 与异型实参的口径另入账。
  *   touch 本文件 = 让 RCDATA 重编一次（§B99②）。 */
+
+/* ============================================================
+   touch: 2026-10-17 第一百刀 = 账 #427 (§B201) Format 的日期面还欠的五枚令牌
+   ------------------------------------------------------------
+   读数 (尺 .build/k504_proj -> k504_x64_run.txt / k504_x86_run.txt, 两台同读数;
+   另一发 .build/k505_proj -> k505_x64_run.txt):
+     Format(2026/1/5 14:30:45, 「w」)      = 46027.6046875  (DatePart「w」= 2 / Weekday = 2)
+     Format(同上, 「ww」)                  = 46027.6046875  (DatePart「ww」= 2)
+     Format(同上, 「q」)                   = 46027.6046875  (DatePart「q」= 1)
+     Format(同上, 「ttttt」)               = 46027.6046875  (FormatDateTime(d,3) = 14:30:45)
+     Format(同上, 「ddddd」)               = Monday         (FormatDateTime(d,2) = 2026/1/5)
+     Format(同上, 「ddddd ttttt」)         = Monday ttttt   (语料这一串写了 36 处)
+   根因两格: ① 门票 vb6_fmtIsDateFormat 的字母表只有 y/d/h/m/s/n (+ AM/PM 记号), w/q/t 进不了日期臂
+             就掉回数值臂把 VariantTime 当 double 打出来; ② 日档写的是 cnt >= 4 认长周名, 五连 d 被四连吞。
+   修法收成三处: ① 门票加一档 allowWQT —— 只有「值真是 VB6 Date」那条臂多认 w/ww/q/ttttt, 数值兜底那条臂
+             字母表不动。为什么要分档: 语料里格式串含 w/q/t 的字面量 218 处全是裸写 (没有一处把单位文本
+             用引号包起来), 其中「数值 + 单位」那一族 15 处 (#,##0 Twip 3 / Settings 4 / T0 2 / #### Byte 1 /
+             #,# bytes 4 / ISO 串那枚字面 T 1) 吃的正是数值兜底那条臂 —— 裸字母一视同仁就把那 15 处从「那个数」
+             改成「一个日期」 (尺 .build/k496_census.txt + k497_wqt_where.txt)。
+             ② t 只认五连 (ttttt): 现状 Format(d,「yyyy-mm-ddTHH:mm:ss」) 交 2026-01-05T14:30:45, 那枚字面 T
+             靠游程长度保住 (1..4 枚按字面量交)。③ 周数与星期序号不许再抄一遍: 定义不再 static 的
+             vb6_WeekOfYear 声明进 vb6rtl_builtin.h (第二个读者 = Format 的 ww), DatePart 的「w」臂改问早就存在的
+             vb6_Weekday (那里原先是第二份抄写); locale 短日期/长时间两问在 Format 家族里收成
+             vb6_fmtLocaleShortDate / vb6_fmtLocaleLongTime 一条出口 (六处站点: general date 两半 + short date /
+             long time 两档 + 无格式串那条兜底臂 + 新认的 ddddd / ttttt)。vb6_Format 那两条形参从 (void) 丢掉
+             变成真被读, 与 vb6_DatePart 同一位主人; 0 = vbUseSystem 由那一位归到 vbSunday + vbFirstJan1。
+   刻意不并的两格 (另立账, 读数已到手): ① vb6_DateSerial 交的是 double 不是 VT_DATE (实测 VarType = 5, 而
+             Now/Date/CDate/TimeSerial/DateAdd 全是 7), 所以 Format(DateSerial(...),「ww」) 仍落数值臂 —— 那一格
+             要动的是 DateSerial 的类型档, 不是 Format; ② 跨文件的 locale 短日期/长时间第三家在
+             vb6rtl_system.c 的 vb6_FormatDateTime, 与 §B203 那三格越界口径同批。
+   ============================================================ */
+
+
+/* ============================================================
+   touch: 2026-10-17 第一百零一刀 = 账 #429 ①+④ (§B203) general date 那一问从三个答案收成一条出口
+   ------------------------------------------------------------
+   改前同一枚「零头为 0 的日期」三户各答一次 (尺 .build/k541_proj -> k541_x64_run.txt / k541_x86_run.txt,
+   两台同读; 引擎本人 = .build/k559_olefdt3.c -> k559_out.txt):
+     FormatDateTime(#1/5/2026#, vbGeneralDate) = "2026/1/5 "          len 9  (一枚孤儿尾随空格)
+     Format(#1/5/2026#, "General Date")        = "2026/1/5 0:00:00"   len 16
+     CStr(#1/5/2026#)                          = "2026/1/5"           len 8  (只有这一条与引擎一字不差)
+   病机制 (①): vb6rtl_system.c 里 `buf[len - 1] = L' '` 是**无条件**做的, 而 GetDateFormatW 交回的长度
+             含结束符 => 那一句把结束符改成了空格; 只有拼时间那一段才判零头 => 零头为 0 就留下一枚空格。
+        (④): 「locale 的短日期 / 长日期 / 长时间 / general date」这条问句在 RTL 里住了三户 ——
+             format.c 两条出口 (第一百刀并到一处) / system.c 各抄一份 Get*FormatW / conv.c 的 vb6_CStrDate
+             自己又判一次零头。本刀把后两户接回同一批出口; 出口不再是 file-static, 声明在 vb6rtl_builtin.h。
+   收成一条: 「general date 到底给不给时间段」只住 vb6_fmtLocaleGeneralDate; 读者 = named case 1 /
+             extract.inc 的 !fmt 兜底 / vb6_FormatDateTime 的 vbGeneralDate 档 / vb6_CStrDate (只剩转调)。
+             三户现在的读数一字不差 (尺 .build/k568_run_x64.txt / k568_run_x86.txt, 两台同读):
+               零头为 0      三户全交 "2026/1/5" (len 8, 无尾随空格、无冒号)
+               零头 14:30:45 三户全交 "2026/1/5 14:30:45" 且 = 短日期 + 空格 + 长时间
+   引擎口径 (本刀逐点量出来的, 不是猜的; **两发合起来**才是这一条): 零头四入到整秒之后**当日时分秒全为零**
+             就不给时间段 —— 1e-11 / 1e-10 / 1e-9 / 1e-8 日 与 50 / 200 / 400 / 499 / 500 毫秒一律只给日期,
+             600 毫秒 (0.6 秒) 起才给; 600 毫秒交 "0:00:01", 59.4 秒交 "0:00:59", 59.6 秒交 "0:01:00"
+             => 渲染那一段也是四入的 (VariantTimeToSystemTime 交回的 SYSTEMTIME 已四入过) => 判「给不给」与
+             渲染「给什么」吃同一个四入, 这一问连序列号本体都不需要 (出口少一条形参)。
+             最锋利的一格: **午夜前一毫秒交 "2026/1/6" len=8** —— 四入越过午夜就整段不给、连日期一起进位。
+             这一格把两条旧答案一起判死: 半秒以下的容差 (Fix 175 留在 conv.c 的 1e-9) 在 500 毫秒答错,
+             「零头 != 0」(system.c 原来那条) 在这一格答错。
+   刻意不并 (欠口径, 留在账 #429): ③ 序列号 0 与负值 —— vb6_FormatDateTime 落本机钟
+             (dateSerial == 0.0 -> GetLocalTime, 原样没动), Format 那一家落 1899-12-30; 引擎本人在 0
+             那一档自己也有一格怪 (交 "1899-12-30 0:00:00" 而不是纯日期) => 那两条谁也不许替谁作答。
+   判据面: tests/b431 (两台各钉一针面, 全关系式 / locale 无关) + 哨兵 scripts/check_general_date_outlets.ps1。
+   touch 本文件 = 让 142 份 RCDATA 重嵌一次 (§B99②)。
+   ============================================================ */
+
+/* ============================================================
+   第一百零二刀 (账 #431 §B205) —— DateSerial 的返回档从「数值」改回「日期」
+   ------------------------------------------------------------
+   病: src/semantics/builtin/builtin_funcs.inc 那张内置函数表里, DateSerial 的返回档写的是
+       Vb6Type::Double, 而同表的 Now / Date / Time / DateAdd / DateValue / TimeSerial /
+       TimeValue / FileDateTime 全写 Vb6Type::Date; RTL 这一边这九枚的 C 返回都是 double,
+       所以「返回值进槽时贴哪枚标签」完全由那一格决定。实测两台同读 (尺
+       .build/k607_run_x64.txt / k607_x86_run.txt) vs 同机 oracle (.build/k607_oracle_out.txt):
+       VarType 5 / TypeName "Double" / IsDate False / IsNumeric True / CStr [46027] / Len 5
+       —— 六档全与引擎相反 (引擎 = 7 / Date / True / False / [2026/1/5] / 8)。
+   顺带补的旧洞: 发码那侧 narrowCheckAssign 的取整闸 (账 #248 那一处) 原来只认
+       Single / Double / Currency, 换档之后 `n = DateSerial(...)` 会掉进「装得下, 不套」那一条、
+       把 double 裸递进 vb6_ChkLong(int64_t) => C 在调用边界上截断。Date 一并接进那条闸 ——
+       Now / DateAdd 本来就答 Date, 这一格在改档之前就欠着。
+   本文件的 RTL 改动 = 一条注释的 rationale 过期: vb6rtl_format_parse.inc 里「数值 + 日期字母」那条
+       兜底臂从前是为「DateSerial 交数值档」才登记的。**改档之后那一形并没有换站** —— Format 的首参
+       由账 #430 那张手抄装箱表决定 (Date 档仍交 vb6_VariantDouble)，实测 Charts 2020 与 b432 的
+       Format(DateSerial(…), "mmm") 改前改后都走数值臂 (尺 .build/k636_charts_diff.txt /
+       k639_b432_newemit.txt)。换站的是「值先落进一枚槽再交给 Format」那一形: Format(槽) 交
+       [2026/1/5] 而改前交 [46027] (尺 .build/k638_base_run.txt / k638_new_run.txt)。
+       臂本身是 Format(43831, "mmm") 那族真数值的唯一出口 —— **臂不撤, 只改理由**。
+   刻意不动: 账 #432 (FormatDateTime 吃一枚槽 => 裸槽进 double 形参, cl C2440) 是第九十九刀补
+       声明之后露出的第二层病, 与本刀不同站, 欠一句「先补这一站还是整族 census」的口径。
+   判据面: tests/b432 (两台各钉一针面) + 哨兵 scripts/check_dateserial_tag.ps1。
+   touch 本文件 = 让整批 RCDATA 重嵌一次 (§B99②)。
+   ============================================================ */

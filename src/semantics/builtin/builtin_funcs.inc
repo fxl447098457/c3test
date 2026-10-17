@@ -223,7 +223,10 @@
     addBuiltinFuncWithParams("DatePart", Vb6Type::Long,
         {{"interval", Vb6Type::String, true, false}, {"date", Vb6Type::Double, true, false},
          {"firstDayOfWeek", Vb6Type::Long, true, true}, {"firstWeekOfYear", Vb6Type::Long, true, true}});
-    addBuiltinFuncWithParams("DateSerial", Vb6Type::Double,
+    // 返回档必须是 Date 而不是 Double: 这一格就是「这枚返回值进槽时贴哪枚标签」的唯一答案
+    // (账 #431 §B205, 第一百零二刀)。写成 Double 时 DateSerial 交进 Variant 槽是 VT_R8 ⇒
+    // VarType 5 / TypeName "Double" / IsDate False / CStr 打序列号, 与引擎六档全反。
+    addBuiltinFuncWithParams("DateSerial", Vb6Type::Date,
         {{"year", Vb6Type::Long, true, false}, {"month", Vb6Type::Long, true, false},
          {"day", Vb6Type::Long, true, false}});
     addBuiltinFuncWithParams("DateValue", Vb6Type::Date, {{"dateStr", Vb6Type::String, true, false}});
