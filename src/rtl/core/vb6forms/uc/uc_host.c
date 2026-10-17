@@ -212,6 +212,8 @@ void vb6_uc_push(vb6_UCRec* r, vb6_UCSaved* saved) {
     saved->enabled = vb6_UserControl_Enabled;
     saved->font = vb6_UserControl_Font;
     saved->ambientFont = vb6_Ambient_Font;
+    saved->userWidth = vb6_UserControl_Width;
+    saved->userHeight = vb6_UserControl_Height;
     /* Fix 296 / 3b: Extender 那 15 枚全局**刻意不**存取。发码侧全部走实例通道
        (vb6_UC_GetExtenderMemberNum/Str/Obj + vb6_UC_SetExtenderMember, 内部统一经
        vb6_UC_ExtenderField 落到当前实例记录 vb6_UCRec.ext*), 生成码里已经**一处**都
@@ -281,8 +283,8 @@ void vb6_uc_pop(const vb6_UCSaved* saved) {
        生成码一处都不再读它们(push 也不再存/publish), Extender 的权威值是当前实例记录
        vb6_UCRec.ext*, 经 vb6_UC_ExtenderField 取。下一行是 **UserControl** 那一族,
        与 Extender 无关, 保留。 */
-    vb6_UserControl_Width = saved->extWidth;         // Fix 162
-    vb6_UserControl_Height = saved->extHeight;       // Fix 162
+    vb6_UserControl_Width = saved->userWidth;        // Fix 162
+    vb6_UserControl_Height = saved->userHeight;      // Fix 162
     vb6_UserControl_hWnd = saved->hWnd;              // Fix 133u
     vb6_UserControl_AutoRedraw = saved->autoRedraw;  // Fix 133u
     vb6_UserControl_Extender = saved->ext;           // Fix 133u
@@ -334,6 +336,8 @@ static void vb6_uc_snapshot(vb6_UCSaved* s) {
     s->enabled = vb6_UserControl_Enabled;
     s->font = vb6_UserControl_Font;
     s->ambientFont = vb6_Ambient_Font;
+    s->userWidth = vb6_UserControl_Width;
+    s->userHeight = vb6_UserControl_Height;
     /* Fix 296 / 3b: 这里曾把 15 枚 vb6_Extender_* 全局拷进 s。**已删除**, 两个理由:
        1) vb6_UCSaved 里那 15 个字段跟着一起删了(Clean Slate), 留着这半截编不过;
        2) 更根本 —— 这条分支把 g_uc_ctxReal[slot] 置 0, 而 g_uc_ctxStack[slot] 全仓

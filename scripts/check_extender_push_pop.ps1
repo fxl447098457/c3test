@@ -84,6 +84,31 @@ else {
                 $bad += "$n no longer restored in vb6_uc_pop (3b must not touch the Scale/Font/hDC family)"
             }
         }
+        # --- 对称性: 剩下那一族全局, push 存了哪些 pop 就必须还原哪些, 反之亦然 ---
+        # 这条是 3b 真正该有的护栏。踩过的坑: pop 里
+        #   `vb6_UserControl_Width = saved->extWidth;`
+        # 借的是 **Extender** 的存档位, push 那边存的却是 `saved->extWidth =
+        # vb6_Extender_Width`(另一枚)。3b 把 Extender 那套拆掉后, 这个借位断了 ——
+        # pop 读到已删除的字段, 整个 RTL 编译不过, 82 道 compile 里 10 道 UserControl/
+        # form 类全红。逐个名字查是查不出来的(两边拼写都不一样), 只能按**集合**比。
+        $fam = 'vb6_(?:UserControl|Ambient)_\w+'
+        $pushSaves = @([regex]::Matches($push, ('saved->\w+\s*=\s*\(?[^;]*?\b(' + $fam + ')\b')) | ForEach-Object { $_.Groups[1].Value } | Sort-Object -Unique)
+        $popRestores = @([regex]::Matches($pop, ('\b(' + $fam + ')\b\s*=\s*\(?[^;]*?saved->\w+')) | ForEach-Object { $_.Groups[1].Value } | Sort-Object -Unique)
+        foreach ($g in $pushSaves) {
+            if ($popRestores -notcontains $g) { $bad += "$g saved in push but never restored in pop (asymmetric -> leaks into the next control)" }
+        }
+        foreach ($g in $popRestores) {
+            if ($pushSaves -notcontains $g) { $bad += "$g restored in pop but never saved in push (asymmetric, or borrowed a field that no longer exists)" }
+        }
+        # 负控: 只在 push 侧加一枚, 必须转红
+        $neg = $pushSaves + 'vb6_UserControl_NegOnly'
+        if (($neg | Sort-Object -Unique) -notcontains 'vb6_UserControl_NegOnly') {
+            $bad += "sentinel is vacuous: a push-only global is not detected as asymmetric"
+        }
+        # --- 不许有悬空字段引用: saved->/s-> 上那 15 个字段已经删了 ---
+        foreach ($m in [regex]::Matches(($push + "`r`n" + $pop + "`r`n" + $snap), '\b(?:saved|s)\s*->\s*(ext[A-Z]\w*)')) {
+            $bad += "dangling field reference '$($m.Groups[1].Value)' on a vb6_UCSaved (Fix 296 / 3b deleted all 15 ext* fields)"
+        }
     }
     # --- vb6_UCSaved 不得再声明那 15 个 ext* 字段(Clean Slate) ---
     # ⚠ 别把 `struct vb6_UserControl_Extender_Type ext;`(Fix 133u 的 Extender.Visible/Height
@@ -97,14 +122,18 @@ else {
         if ($i0 -lt 0 -or $i1 -lt 0) { $bad += "cannot locate the vb6_UCSaved struct" }
         else {
             $savedBody = $ih.Substring($i0, $i1 - $i0)
+            # 注释里会**故意**引用被删掉的字段名(解释为什么删), 所以先剥注释再扫字段
+            $savedCode = $savedBody
+            $savedCode = [regex]::Replace($savedCode, '(?s)/\*.*?\*/', ' ')
+            $savedCode = [regex]::Replace($savedCode, '(?m)//.*$', ' ')
             foreach ($f2 in @('extLeft','extTop','extWidth','extHeight','extAlign','extDragMode',
                               'extHelpContextID','extWhatsThisHelpID','extVisible','extVb6Default',
                               'extCancel','extTag','extToolTipText','extContainer','extDragIcon')) {
-                if ($savedBody -match ('\b' + $f2 + '\b')) {
+                if ($savedCode -match ('\b' + $f2 + '\b')) {
                     $bad += "vb6_UCSaved still declares $f2 (Clean Slate removed all 15 ext* fields)"
                 }
             }
-            if ($savedBody -notmatch 'vb6_UserControl_Extender_Type\s+ext\b') {
+            if ($savedCode -notmatch 'vb6_UserControl_Extender_Type\s+ext\b') {
                 $bad += "vb6_UCSaved lost its 'ext' member of type vb6_UserControl_Extender_Type (Fix 133u Extender.Visible/Height -- NOT one of the 15)"
             }
         }

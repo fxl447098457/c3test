@@ -118,6 +118,12 @@ typedef struct vb6_UCSaved {
     int16_t enabled;
     void*   font;
     void*   ambientFont;
+    /* Fix 296 / 3b 补: 外框尺寸的存档位。以前 push/pop 是拿 **Extender** 那两枚全局当
+       存档位的(pop 里 `vb6_UserControl_Width = saved->extWidth`), 因为 cgen 把
+       UserControl.<Member> 和 Extender.<Member> 发成两个不同标识符但同值。3b 把 Extender
+       那套存取整个拆掉之后, 这个借位就断了(pop 读到已删除的字段 -> 整个 RTL 编译不过)。
+       UserControl.<Member> 自己那两枚发码读了 1450 处, 必须自己存档, 所以单列。 */
+    int32_t userWidth, userHeight;
     /* Fix 296 / 3b: 这里曾有 15 个 ext* 字段(Left/Top/Width/Height/Align/Visible/
        DragMode/HelpContextID/WhatsThisHelpID/vb6_Default/Cancel/Tag/ToolTipText/
        Container/DragIcon), 用来在 push/pop 之间存取那 15 枚 vb6_Extender_* 全局。
