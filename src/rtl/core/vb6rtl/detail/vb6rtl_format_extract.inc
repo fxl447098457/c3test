@@ -74,14 +74,13 @@
             if (fmt && vb6_BSTR_Len(fmt) > 0 && vb6_fmtIsDateFormat(fmt, 1))
                 return vb6_fmtDateSerial(expr.dblVal, fmt, firstDayOfWeek, firstWeekOfYear);
             if (!fmt) {
+                // 没有格式串 = general date 那一档。原先这里无条件拼「短 + 空格 + 长」⇒ 零头为 0 时多发
+                // 一枚空格与 0:00:00 (第一百零一刀 §B203 的①: 这一问的答案住在 vb6_fmtLocaleGeneralDate 里)
                 SYSTEMTIME st;
                 if (VariantTimeToSystemTime(expr.dblVal, &st)) {
-                    wchar_t dateBuf[64], timeBuf[64];
-                    vb6_fmtLocaleShortDate(&st, dateBuf, 64);
-                    vb6_fmtLocaleLongTime(&st, timeBuf, 64);
-                    wchar_t fullBuf[128];
-                    swprintf(fullBuf, 128, L"%s %s", dateBuf, timeBuf);
-                    return vb6_BSTR_FromStr(fullBuf);
+                    wchar_t genBuf[128];
+                    vb6_fmtLocaleGeneralDate(expr.dblVal, &st, genBuf, 128);
+                    return vb6_BSTR_FromStr(genBuf);
                 }
             }
             numVal = expr.dblVal; isNumeric = 1; break;

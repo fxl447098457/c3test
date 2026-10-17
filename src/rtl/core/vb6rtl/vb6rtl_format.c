@@ -79,18 +79,44 @@ static int vb6_fmtNamedDateTimeKind(BSTR fmt) {
     return 0;
 }
 
-// 「locale 的短日期 / 长时间」这两问在 Format 家族里只许住一处 (账 #427 §B201)。
-// 吃它的有六处: general date 那一档的两半、short date / long time 两档、没有格式串那条兜底臂、
-// 以及本刀新认的 ddddd / ttttt 两枚令牌 —— GetDateFormatW 的 flag 与 GetTimeFormatW 的 pat 参数
-// 就是这两问的答案, 抄第二遍迟早漂。(跨文件的第三家在 vb6rtl_system.c 的 vb6_FormatDateTime,
-// 那一格记在台账 §B203, 本刀刻意不并。)
-static void vb6_fmtLocaleShortDate(const SYSTEMTIME* st, wchar_t* out, size_t cap) {
+// 「locale 的短日期 / 长日期 / 长时间」这三问在 RTL 里只许住一处 (账 #427 §B201 起，第一百零一刀 §B203 补全)。
+// 吃它的: general date 那一档、short date / long date / long time 三档、没有格式串那条兜底臂、
+// dddd / ddddd / ttttt 三枚令牌，再加**跨文件**的两位读者 —— vb6rtl_system.c 的 vb6_FormatDateTime 与
+// vb6rtl_conv.c 的 vb6_CStrDate（第一百零一刀把它俩接回来；此前每家各抄一份 GetDateFormatW，同一问三个答案）。
+// 所以这一族不再是 file-static，声明在 vb6rtl_builtin.h。
+void vb6_fmtLocaleShortDate(const SYSTEMTIME* st, wchar_t* out, size_t cap) {
     out[0] = 0;
     GetDateFormatW(LOCALE_USER_DEFAULT, DATE_SHORTDATE, st, NULL, out, (int)cap);
 }
-static void vb6_fmtLocaleLongTime(const SYSTEMTIME* st, wchar_t* out, size_t cap) {
+void vb6_fmtLocaleLongDate(const SYSTEMTIME* st, wchar_t* out, size_t cap) {
+    out[0] = 0;
+    GetDateFormatW(LOCALE_USER_DEFAULT, DATE_LONGDATE, st, NULL, out, (int)cap);
+}
+void vb6_fmtLocaleLongTime(const SYSTEMTIME* st, wchar_t* out, size_t cap) {
     out[0] = 0;
     GetTimeFormatW(LOCALE_USER_DEFAULT, 0, st, NULL, out, (int)cap);
+}
+// 「general date 这一档到底给不给时间」这一问只住这里 (账 #429 ①, 第一百零一刀)。
+// 引擎本人的读数 (发问表 .build/k559_olefdt3.c → k559_out.txt; 逐点定带 .build/k564_oleband.c → k564_out.txt):
+// 零头为 0 ⇒ 只给短日期、**不带尾随空格** (`2026/1/5` len=8)；带时间的答案是 `短日期 + 空格 + 长时间` (len=17)。
+// 那条闸不在 0 上, 也不在任何浮点 epsilon 上, 而是在**半秒**上: 1e-11 / 1e-10 / 1e-9 / 1e-8 日 与
+// 50 / 200 / 400 / 499 / 500 毫秒全只给日期, 600 毫秒 (0.6 秒) 起才给时间。同一枚 0.5 秒的零头在两发探针里
+// 一个可表示位之差分别落在两侧 (一侧带一侧不带) ⇒ 分界正是 0.5 秒。Fix 175 留在 conv.c 里那条 1e-9 因此作废:
+// 它在 500 毫秒那一档答「带时间」, 而引擎答「只给日期」。
+// 渲染那一段不用另改: SYSTEMTIME 是 VariantTimeToSystemTime 交回的, 它自己就**四入到整秒**
+// ⇒ 实测 0.75 秒这一档本仓与引擎同答 `0:00:01` (两台同读, 尺 .build/k568_run_x64.txt / _x86.txt)。
+// 所以本出口与引擎之间没有亚秒那一格: 判「给不给」与渲染「给什么」吃的是同一个四入。
+void vb6_fmtLocaleGeneralDate(double serial, const SYSTEMTIME* st, wchar_t* out, size_t cap) {
+    double frac = serial - floor(serial);
+    size_t n;
+    if (frac < 0) frac = -frac;
+    vb6_fmtLocaleShortDate(st, out, cap);
+    if (frac < 0.5 / 86400.0) return;
+    n = wcslen(out);
+    if (n + 2 > cap) return;
+    out[n] = L' ';
+    out[n + 1] = 0;
+    vb6_fmtLocaleLongTime(st, out + n + 1, cap - n - 1);
 }
 
 // Fix 162b-extlist: 命名日期/时间格式 → 按各规格取值。
@@ -106,13 +132,9 @@ static BSTR vb6_fmtNamedDateTime(double serial, BSTR fmt) {
     wchar_t buf[128];
     buf[0] = 0;
     switch (kind) {
-        case 1: {  // general date
-            wchar_t d[64], t[64];
-            vb6_fmtLocaleShortDate(&st, d, 64);
-            vb6_fmtLocaleLongTime(&st, t, 64);
-            swprintf(buf, 128, L"%s %s", d, t);
+        case 1:  // general date = 短日期，零头不为 0 才加「 长时间」(第一百零一刀: 改问那条出口)
+            vb6_fmtLocaleGeneralDate(serial, &st, buf, 128);
             break;
-        }
         case 2: {  // medium date —— locale 相关: zh-CN = yy-MM-dd (参考图 "26-12-14"),
                    // 西文 = d-mmm-yy ("28-Dec-26")。按用户主语言分流。
             wchar_t md[16] = L"d-MMM-yy";
@@ -127,7 +149,7 @@ static BSTR vb6_fmtNamedDateTime(double serial, BSTR fmt) {
             GetTimeFormatW(LOCALE_USER_DEFAULT, 0, &st, L"hh:mm tt", buf, 128);
             break;
         case 4:  // long date
-            GetDateFormatW(LOCALE_USER_DEFAULT, DATE_LONGDATE, &st, NULL, buf, 128);
+            vb6_fmtLocaleLongDate(&st, buf, 128);
             break;
         case 5:  // short date
             vb6_fmtLocaleShortDate(&st, buf, 128);
