@@ -1129,11 +1129,21 @@ bool CCodeGen::cExprIsVariant(const std::string& cExpr) const {
         "vb6_GetAllSettings(",     // 注册表一组值 -> vb6_VARIANT (vb6rtl_registry.c:113)
         "vb6_IIfVariant(",         // IIf 的两个分支都是槽时选中的那一族
         "vb6_VariantArrayGetVal(", // 晚绑定数组元素读值 (vb6rtl_com.c:698)
-        "vb6_VariantByte(",
-        "vb6_VariantInt(",
-        "vb6_VariantSingle(",
-        "vb6_VariantDate(",
-        "vb6_VariantIdentity(",
+"vb6_VariantByte(",
+          "vb6_VariantInt(",
+          "vb6_VariantSingle(",
+          "vb6_VariantDate(",
+          "vb6_VariantIdentity(",
+          // ai/032 §6.6 / §6.9: C3 扩展的整数族装箱出口。boxToVariant 现在**点名**调它们
+          //   (SByte / UInteger / ULong / ULongLong / LongLong 五档), 所以每一枚都得登记 ——
+          //   登记的含义是「消费点按 Variant 接」, 漏一枚就是消费点按裸标量发码 (C2440/C2088)。
+          //   ⚠ 这五枚以前全靠 boxToVariant 的 default→vb6_VariantFromValue 的 _Generic 猜,
+          //   猜不中 SByte/UInteger (char:/wchar_t: 两档都装成 VT_I4), 丢的是类型身份。见 §6.9。
+          "vb6_VariantLongLong(",
+          "vb6_VariantULong(",
+          "vb6_VariantULongLong(",
+          "vb6_VariantSByte(",
+          "vb6_VariantUInteger(",
         //   ↑ 上面五枚是构造器 (vb6rtl_variant.h 的 static inline)。表里本来就有 Empty/Long/
         //     Double/String/Bool/Null/Object/Array 那一批, 缺的正是这五档 ——
         //     cgen_util_ctrl.cpp:2419 早就写着「vb6_VariantByte( 不在 cExprIsVariant 的清单里」
