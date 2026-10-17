@@ -843,3 +843,30 @@
    判据面: tests/b431 (两台各钉一针面, 全关系式 / locale 无关) + 哨兵 scripts/check_general_date_outlets.ps1。
    touch 本文件 = 让 142 份 RCDATA 重嵌一次 (§B99②)。
    ============================================================ */
+
+/* ============================================================
+   第一百零二刀 (账 #431 §B205) —— DateSerial 的返回档从「数值」改回「日期」
+   ------------------------------------------------------------
+   病: src/semantics/builtin/builtin_funcs.inc 那张内置函数表里, DateSerial 的返回档写的是
+       Vb6Type::Double, 而同表的 Now / Date / Time / DateAdd / DateValue / TimeSerial /
+       TimeValue / FileDateTime 全写 Vb6Type::Date; RTL 这一边这九枚的 C 返回都是 double,
+       所以「返回值进槽时贴哪枚标签」完全由那一格决定。实测两台同读 (尺
+       .build/k607_run_x64.txt / k607_x86_run.txt) vs 同机 oracle (.build/k607_oracle_out.txt):
+       VarType 5 / TypeName "Double" / IsDate False / IsNumeric True / CStr [46027] / Len 5
+       —— 六档全与引擎相反 (引擎 = 7 / Date / True / False / [2026/1/5] / 8)。
+   顺带补的旧洞: 发码那侧 narrowCheckAssign 的取整闸 (账 #248 那一处) 原来只认
+       Single / Double / Currency, 换档之后 `n = DateSerial(...)` 会掉进「装得下, 不套」那一条、
+       把 double 裸递进 vb6_ChkLong(int64_t) => C 在调用边界上截断。Date 一并接进那条闸 ——
+       Now / DateAdd 本来就答 Date, 这一格在改档之前就欠着。
+   本文件的 RTL 改动 = 一条注释的 rationale 过期: vb6rtl_format_parse.inc 里「数值 + 日期字母」那条
+       兜底臂从前是为「DateSerial 交数值档」才登记的。**改档之后那一形并没有换站** —— Format 的首参
+       由账 #430 那张手抄装箱表决定 (Date 档仍交 vb6_VariantDouble)，实测 Charts 2020 与 b432 的
+       Format(DateSerial(…), "mmm") 改前改后都走数值臂 (尺 .build/k636_charts_diff.txt /
+       k639_b432_newemit.txt)。换站的是「值先落进一枚槽再交给 Format」那一形: Format(槽) 交
+       [2026/1/5] 而改前交 [46027] (尺 .build/k638_base_run.txt / k638_new_run.txt)。
+       臂本身是 Format(43831, "mmm") 那族真数值的唯一出口 —— **臂不撤, 只改理由**。
+   刻意不动: 账 #432 (FormatDateTime 吃一枚槽 => 裸槽进 double 形参, cl C2440) 是第九十九刀补
+       声明之后露出的第二层病, 与本刀不同站, 欠一句「先补这一站还是整族 census」的口径。
+   判据面: tests/b432 (两台各钉一针面) + 哨兵 scripts/check_dateserial_tag.ps1。
+   touch 本文件 = 让整批 RCDATA 重嵌一次 (§B99②)。
+   ============================================================ */
