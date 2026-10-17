@@ -11,6 +11,8 @@
 #   ③ 「locale 的短日期 / 长时间」在 Format 家族里收成一条出口, 六处读者共吃它;
 #      vb6_Format 那两条形参不许再被 (void) 丢掉。
 #
+# 第一百零一刀订正了 R5 那一组: 「locale 短日期 / 长时间」的读者从 4+4 变成 2+2 再各加一枚新出口的读者 ——
+#   general date 那一档与无格式串那条兜底臂现在都吃 vb6_fmtLocaleGeneralDate, 由它去问这两条出口 (§B203)。
 # 判据面: tests/b430 二十七针 (两台逐字节相同)。B430-24/25 是「数值臂没被牵连」的反面证人,
 # B430-19/20/21 是「两条形参真被读」的证人, B430-23 是「单枚 t 仍是字面量」的证人。
 # 本文件里不写反斜杠字面量: 字面计数走 [regex]::Escape, 真正则的转义符全部由 [char]92 现拼
@@ -84,10 +86,12 @@ Want 'R4 five-run arms' (C 'if (cnt >= 5) {' $F) 2 '五连只有两处: 日档 d
 Want 'R4 dddd intact' (C 'else if (cnt == 4) vb6_fmtAppendW(out, 256, &o, kDayLong[dow]);' $F) 1 'dddd 那一档不许被牵连'
 
 # ---- R5 locale 两问各一条出口, 六处读者共吃 ----
-Want 'R5 short-date outlet' (C 'static void vb6_fmtLocaleShortDate' $F) 1 '一条出口'
-Want 'R5 long-time outlet' (C 'static void vb6_fmtLocaleLongTime' $F) 1 '一条出口'
-Want 'R5 short-date readers' (C 'vb6_fmtLocaleShortDate(&st' $BOTH) 4 '读者 = general date + short date + 无格式串兜底 + ddddd'
-Want 'R5 long-time readers' (C 'vb6_fmtLocaleLongTime(&st' $BOTH) 4 '读者 = general date + long time + 无格式串兜底 + ttttt'
+Want 'R5 short-date outlet' (C 'void vb6_fmtLocaleShortDate(' $F) 1 '一条出口 (第一百零一刀起不再是 static)'
+Want 'R5 long-time outlet' (C 'void vb6_fmtLocaleLongTime(' $F) 1 '一条出口 (第一百零一刀起不再是 static)'
+Want 'R5 short-date readers' (C 'vb6_fmtLocaleShortDate(&st' $BOTH) 2 '读者 = short date 那一档 + ddddd (第一百零一刀: general date 与无格式串兜底改吃那条新出口)'
+Want 'R5 short-date via new outlet' (C 'vb6_fmtLocaleShortDate(st,' $BOTH) 1 '新出口自己也是这一问的读者, 且只此一处'
+Want 'R5 long-time readers' (C 'vb6_fmtLocaleLongTime(&st' $BOTH) 2 '读者 = long time 那一档 + ttttt (同上, general date 那两站搬到新出口里去了)'
+Want 'R5 long-time via new outlet' (C 'vb6_fmtLocaleLongTime(st, out + n + 1' $BOTH) 1 '新出口拼时间那一段只许这一处'
 Want 'R5 raw short-date' (C 'GetDateFormatW(LOCALE_USER_DEFAULT, DATE_SHORTDATE' $BOTH) 1 'DATE_SHORTDATE 只许住在那条出口里'
 Want 'R5 raw long-time' (C 'GetTimeFormatW(LOCALE_USER_DEFAULT, 0, st, NULL' $BOTH) 1 'locale 默认时间格式只许住在那条出口里'
 

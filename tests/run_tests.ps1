@@ -1636,6 +1636,20 @@ function Test-FormatDateTokens {
         $out | Select-Object -First 12 | ForEach-Object { Write-Host "  $_" }
     }
 }
+# 账 #305 #429 ①+④ (§B203) 的结构性哨兵: 「general date 给不给时间段」与「locale 那四问由谁答」各只许住一处。
+function Test-GeneralDateOutlets {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] general_date_outlets ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\check_general_date_outlets.ps1" 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        $out | Select-Object -First 12 | ForEach-Object { Write-Host "  $_" }
+    }
+}
 # === 编译冒烟测试 (编译+链接, 不运行生成物) ===
 function Test-Run {
     param(
@@ -7440,6 +7454,36 @@ if ($Category -in @("all", "run", "vbp")) {
     Test-Vbp 'b430_format_date' "$Tests\b430\B430.vbp" $b430Expected
     Test-Vbp 'b430_format_date_x86' "$Tests\b430\B430.vbp" $b430Expected -Arch "x86"
 
+    # <vbeclipse> 第一百零一刀 (账 #429 ①+④ / §B203): 「general date 这一档到底给不给时间」以前有三位主人、三个答案。
+    # 改前三户对同一枚零头为 0 的日期各答一次 (尺 .build/k541_proj -> k541_x64_run.txt / k541_x86_run.txt, 两台同读):
+    #   FormatDateTime(d0, vbGeneralDate) = "2026/1/5 "        len 9  (一枚孤儿尾随空格)
+    #   Format(d0, "General Date")        = "2026/1/5 0:00:00" len 16
+    #   CStr(d0)                          = "2026/1/5"         len 8  (只有这一条与引擎一字不差)
+    # 机制: vb6_FormatDateTime 里那句 `buf[len - 1] = 空格` 是**无条件**做的, 而 GetDateFormatW 交回的长度含结束符
+    #   => 那一句把结束符改成了空格; 只有拼时间那一段才判零头。conv.c 又另抄一份 1e-9 容差 (Fix 175) 住在第二家。
+    # 判据口径: 本机 zh-CN、CI en-US 交回同一份 .out (第一百/九十九刀两台逐字节验过这条纪律), 所以这里只钉关系式 ——
+    #   尾随空格、冒号有无、长度、以及「三户交同一枚串」与「= 短日期 + 一枚空格 + 长时间」; 一枚日期拼写都不钉。
+    # B431-07/08/09 钉引擎本人那条闸 (尺 .build/k564_oleband.c -> k564_out.txt): 零头四入到整秒为 0 就不给时间段 ——
+    #   50/200/400/499/500 毫秒只给日期, 600 毫秒起才给。既不是「零头 != 0」(system.c 那条) 也不是 1e-9 (conv.c 那条)。
+    # B431-12/13 是反面的爆炸半径证人: 数值那一臂 (Format(1234, "0")) 与第一百刀的 ddddd / ttttt 双生不许被牵连。
+    $b431Expected = @(
+        "B431-01=True/True",
+        "B431-02=True/True",
+        "B431-03=True/True/True",
+        "B431-04=True/True",
+        "B431-05=True/True",
+        "B431-06=True/True/True",
+        "B431-07=True/True",
+        "B431-08=True/True",
+        "B431-09=True/True",
+        "B431-10=True/True",
+        "B431-11=True/True/True",
+        "B431-12=True/True/True",
+        "B431-13=True/True",
+        "B431-DONE")
+    Test-Vbp 'b431_general_date' "$Tests\b431\B431.vbp" $b431Expected
+    Test-Vbp 'b431_general_date_x86' "$Tests\b431\B431.vbp" $b431Expected -Arch "x86"
+
 
     # 账 #305 SB186 第二头: VB 客户那一头　「口径」的唯一读数面　—— 探针是 C 客户, 它只能读 hr;
     # 「服务端自己那条错折回原号」还是「一律 429」这一问, 只有真的 VB 客户点得到。
@@ -7702,6 +7746,7 @@ if ($Category -in @("all", "compile")) {
     Test-FormatAmPm
     Test-EmittedDeclared
     Test-FormatDateTokens
+    Test-GeneralDateOutlets
 
     Write-Host ""
 
