@@ -412,7 +412,7 @@ sha256=459ec010f1fa3cea34eb01c222ca3babbe3b9d49d8bd64b8b3111bf09e6331e0 ascii256
 sha256=dccb4e0eefb33ea5aa039969cbc2afbd9910c440ed53be1095b02c2aae27bfe4 ascii256=4e60e08bbf5ea4370142f00d5de69a2666d6a0e4f0e017131e17f25fa5c5f3df rc=0 bytes=187492 tests/VBFlexGridDemo/Common/Common.bas
 sha256=e2dad590e783b18ba71f929ae0333c8e635141af2f2e3bf9696231b6073a0d10 ascii256=cd876129e57f397197b6167aa70733fb4561904d53ef68e6b05f7ff64ddbb569 rc=0 bytes=4189 tests/VBFlexGridDemo/Common/Startup.bas
 sha256=b754061ccdc65a189a68b809a85968e579808179fa0c648b3a5dc07d2d53d9d6 ascii256=4dfc425bea7b3922e61ea7bd9211088235cc6ea04de4c9b62c0e9305899a7d4e rc=0 bytes=67832 tests/VBFlexGridDemo/Common/VisualStyles.bas
-sha256=eca67d4a693a60fc234b9fc89eb4a89f0f48f09a9004d0f622b2b475190f3483 ascii256=a5254dce79ca2fe796baf17b19fc676089c69a93da1170375e6a61370d47b0f9 rc=0 bytes=5496561 tests/VBFlexGridDemo/VBFlexGridDemo.vbp
+sha256=95b6560c93c89e3dfabc46aac82846a163f29b16c25965e2449b552b173506de ascii256=44e5497fc566e5418a23fe97be040e27ace5dc00c2184d525665b4a8cea0e9b1 rc=0 bytes=5496570 tests/VBFlexGridDemo/VBFlexGridDemo.vbp
 sha256=49d51878943fce03c7516b3cf06727555d1c5b6bc1aed8db368e9fcfd1f4f690 ascii256=9d9840c51015c8a6e63aa923404f47d99cee82835b9fa92a76c73cd7317fddc8 rc=0 bytes=3245 tests/vbman_host/run_host.bas
 sha256=49d51878943fce03c7516b3cf06727555d1c5b6bc1aed8db368e9fcfd1f4f690 ascii256=9d9840c51015c8a6e63aa923404f47d99cee82835b9fa92a76c73cd7317fddc8 rc=0 bytes=3245 tests/vbman_host/vbman_host.vbp
 sha256=5f6d4159602806680561963237b24008263b38246332b50b3e814a333009d1a5 ascii256=5cd8103e73a1c07e2fece83539770603407213236bbf9822bd9b08ea74e7d778 rc=0 bytes=1763 tests/vbp_project/MainMod.bas
@@ -472,6 +472,20 @@ sha256=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 ascii256
 sha256=250c8463b49bd3417961c200270a82be8a8dadbea9a2c45c8819e74a30866a6d ascii256=bfddd8c6a7adc8f96e2e1da06c2cfed4460a15dc051d7fec264cce231a4bc69b rc=0 bytes=8937 tests/b189_gate/B189g.vbp
 sha256=cf3c5312c3b4b87656f00c79a0fd4418f57fbbeb1478ae15b6420d2a686dcfc4 ascii256=7ecd599f1e65a615aed6938640a7afa455d1635278a50d7badba749f47380c70 rc=0 bytes=13050 tests/b190_scope/B190.vbp
 sha256=010a2af5e17095d64e3c432f6f1a0d5578cdc4fed6d51e1694ca8da38e9416ba ascii256=23059d5e457ddc7ffaa54797fc6b14521a7a9a35b8ca132f83808d118d46cdc2 rc=0 bytes=5738 tests/b190_scope/B190Main.bas
+sha256=9856821f501d1fb32b94f3775eeee20aefad677e76560171af213e087bcfe870 ascii256=1f03619bd7313fe80a35d38f4049714818125b87f224cb2be74e6d02566c3f11 rc=0 bytes=5051 tests/b416/B416.vbp
+sha256=9856821f501d1fb32b94f3775eeee20aefad677e76560171af213e087bcfe870 ascii256=1f03619bd7313fe80a35d38f4049714818125b87f224cb2be74e6d02566c3f11 rc=0 bytes=5051 tests/b416/B416Main.bas
+sha256=7cb57615e8a176fc258749e9044ccee666db6cc45405528dd02bbd0f8ba08913 ascii256=ffc244f3a004e2a81da7f82dced9da7e05d31b64836999e4272584a18a4b23a0 rc=0 bytes=5491 tests/b417/B417.vbp
+sha256=7cb57615e8a176fc258749e9044ccee666db6cc45405528dd02bbd0f8ba08913 ascii256=ffc244f3a004e2a81da7f82dced9da7e05d31b64836999e4272584a18a4b23a0 rc=0 bytes=5491 tests/b417/B417Main.bas
+sha256=1c4792a6e9a3df45e7ec1e21dbc72e20f9bc55ce8ff69c5f1777dbca1c54b83a ascii256=06ba0da652de7b9441ac9d15ba14955c5638108c6418f9e074e7ba7c90e6b5ac rc=0 bytes=6105 tests/b418/B418.vbp
+sha256=1c4792a6e9a3df45e7ec1e21dbc72e20f9bc55ce8ff69c5f1777dbca1c54b83a ascii256=06ba0da652de7b9441ac9d15ba14955c5638108c6418f9e074e7ba7c90e6b5ac rc=0 bytes=6105 tests/b418/B418Main.bas
+sha256=a0cd2b6782a67074e65fdada0124d5cc3630772a353b979a5d04bb3e6b7426a3 ascii256=a3d4a45f978c1dcf252a49f7a581413137d90ccb687fed60e7fcfd39ef460fb4 rc=0 bytes=7445 tests/b419/B419.vbp
+sha256=a0cd2b6782a67074e65fdada0124d5cc3630772a353b979a5d04bb3e6b7426a3 ascii256=a3d4a45f978c1dcf252a49f7a581413137d90ccb687fed60e7fcfd39ef460fb4 rc=0 bytes=7445 tests/b419/B419Main.bas
+sha256=dfa8903d18a886775ad659424745ce1814300dc32ee9ac9f5fd5560a3f448ca7 ascii256=de3e432d3a4c2b7891f2ce1c4f8f62d658cbd04f0ac8e03a89fc7233ed7f3988 rc=0 bytes=8392 tests/b422/B422.vbp
+sha256=dfa8903d18a886775ad659424745ce1814300dc32ee9ac9f5fd5560a3f448ca7 ascii256=de3e432d3a4c2b7891f2ce1c4f8f62d658cbd04f0ac8e03a89fc7233ed7f3988 rc=0 bytes=8392 tests/b422/B422Main.bas
+sha256=910aa8a8e84d7bd9a621df988ef5988806ebcbfba1cd4c8d9c458a94c33885c0 ascii256=b6c64aa7c2275f06d2a59c0b9277791fe05e06261abff7e67159a16ccd61e314 rc=0 bytes=8396 tests/b426/B426.vbp
+sha256=910aa8a8e84d7bd9a621df988ef5988806ebcbfba1cd4c8d9c458a94c33885c0 ascii256=b6c64aa7c2275f06d2a59c0b9277791fe05e06261abff7e67159a16ccd61e314 rc=0 bytes=8396 tests/b426/B426Main.bas
+sha256=89607e06667f46da4c1823578456cdd41b83d303077fabf4dd8950d1806a7c00 ascii256=de8605d0d27f66660047c2bbb3ba6d3810445d06dad494dcf0c77cd62cde6c3a rc=0 bytes=6180 tests/b429/B429.vbp
+sha256=89607e06667f46da4c1823578456cdd41b83d303077fabf4dd8950d1806a7c00 ascii256=de8605d0d27f66660047c2bbb3ba6d3810445d06dad494dcf0c77cd62cde6c3a rc=0 bytes=6180 tests/b429/B429Main.bas
 # 账 #305 §B188 (第八十刀判据): 新增 2 行 = tests/b188_term 那两枚输入, 哈希取 CI 为同一 head 33320a1d 自己交的 9c33fdca;
 #   本轮 RTL 只动 ComObj_Release 一处 ⇒ 438 枚存量行**一行没移动** (本机与 CI 两边同读数), 形状门只报「新增未登记」这一族。
 # 账 #305 §B184 (第七十五刀) 的登记来源：门 **#640**（run 38682492970、head 8000e440、attempt 1）= 12 job 里 10 绿 + 两条**预期**红（这道形状门报「存量 5 份哈希不同 + 新增 2 份没登记」、`Tests (compile)` 里同源那句 [STATIC] manifest_coverage）。新增的两行 = 本刀夹具 `tests/b184_fieldw/{B184.vbp,B184Main.bas}`；移动的两行归本刀（Charts 2020/Proyecto1.vbp 31 处、b183_intfield/B183.vbp 2 处，逐行都是 `me-><f> = (int16_t|uint8_t)value.lVal;` → `= vb6_ChkInt|ChkByte(value.lVal);`）。**另外三行移动不是本刀**（ucTreeMaps/Proyecto1.vbp、VBFlexGridDemo/Common/VisualStyles.bas、VBFlexGridDemo/VBFlexGridDemo.vbp）：用「只含本刀、不含 merge」那一对编译器（C3_k74new vs C3_k75new，md5 d74d8b3b/2a24013d）并排重发这三份，移动行数 = 0，而本刀那两份移动 31/2 行 —— 所以这三行是 `a6b05e7d` 带进来的别人那两笔欠的登记，按 CI 为同一个 head 自己交的清单（github/ci/emit-manifest 的 7dea8d25）一并落账。
@@ -506,37 +520,59 @@ sha256=010a2af5e17095d64e3c432f6f1a0d5578cdc4fed6d51e1694ca8da38e9416ba ascii256
 # 账 #305 §B185 (第七十七刀) 的登记来源：门 **#642**（run 38698594552、head ffdce3c0、attempt 1）= 12 job 里 10 绿 + **两条预期登记红**（`Emit manifest (shape oracle)` 与 `Tests (compile)` 里同一道 [STATIC] manifest_coverage，同源同一句）。本刀只动 RTL（IDispatch 服务端进门那趟的错误边界），发码形状零移动：与上一份期望逐路径对照 = 移动 0 / 新增 2，两份都按 CI 那台的读数原样抄。`tests/b185_srv/DllBlocks.bas` 那一行交 rc=1 bytes=0（空产物的哈希就是 e3b0c442 那一串）—— 一枚单独递进去的 CoClass 块本就产不出 C，与 `tests/cc_dll/DllBlocks.bas` 同形，不是新缺陷。登记 = 手 splice（两行数据接在最后一条数据行之后 + 这一行注脚接在末尾注脚块之后），不走 rebless -Bless（整表重写会搬中段注脚）。
 # 账 #305 #408 (第八十九刀) 的登记来源：门 **#674**（run 38858617520、head 56ed1dd9、attempt 1）= 12 job 里 10 绿 + 两条**预期登记红**（`Emit manifest (shape oracle)` 与 `Tests (compile)` 里同一道 [STATIC] manifest_coverage，同一句同源：本刀的夹具是两份还没哈希的新输入）。本刀动发码（形参作用域那一站），对照结果 = 移动 0 / 新增 2，只有这两行多出来 —— 仓内 445 台 A/B（BASE=C3_k96 / NEW=C3_k102）本来就是 same=444 / moved=1，而那唯一一台就是新夹具自己；外语料 1231 台 same=784 / moved=2 的两处**逐行看过**：DllPrint 的 `SelAllTxt(text As Object)` 里那句 `(*text)->SelStart = 0` 改前压根编不出（text 传进来是个 HWND），cPieChart 的 `Set m_oCanvas = n` 改前把一枚本来就是 IDispatch 的实参又包了一层 borrowed cSections 包装器 —— 两处都是病灶本身，且都不在这 445 台的清单里。登记走 `scripts/emit_manifest.ps1 -Bless`（本机 C3.exe 与 head 同源：md5 53b8d0bcef8e648b6317055482d92f11 = .build/C3_k102.exe），工具保住了头 29 + 尾 32 的注脚（注脚行 60 → 60，两行数据落在最后一条数据行之后），登记完复算 expectation-check=PASS。
 # 2026-10-16 第九十刀的登记来源：门 #676（run 38870725408、head 28831535、attempt 1）= 12 job 里 11 绿 + 唯一红 `Emit manifest (shape oracle)`，红因 = 本刀那三行发码还没登记：`vb6_cls_<X>_Destroy` 里 `Class_Terminate` 那一行改走新出口 `vb6_RunVbProtected`（自带帧、交回号），尾巴拆完后再加一行 `vb6_RaiseError` 把号交回外层帧 ⇒ 移动的四行正是仓里那五份带 `Class_Terminate` 的类模块里进了清单的那四份输入（b188_term / BalloonTooltips / dbgdlg / itf_xmod；第五份 `tests/itf_xmod/CWriter.cls` 跟着工程那一行走、不单独成行），bytes 每行各 +312/+328/+316/+331，其余 441 行一字未动（本机 445 台 A/B 同读数 = .build/k98_ab_report.txt moved=4，逐行归因见 .build/k130_reg_diff.txt）。四行的四个字段全取 CI 为同一 head 自己交的那一份 `c1601a9c`。
-# 2026-10-17 读侧第三步 (4b, Fix 296) 登记来源: `ci: emit manifest head=5c1c461b` —— 5 行哈希不同,
-#   全部是 Charts 2020 那一族 (Proyecto1 / ucChartArea / ucChartBar / ucPieChart / ucTreeMaps),
-#   本地逐行看过, 共 36 行, 形状全同:
-#     vb6_UserControl_ScaleX(vb6_Extender_Left, 10, vb6_UserControl_ScaleMode)
-#       -> vb6_UserControl_ScaleX(vb6_UC_GetExtenderMemberNum(L"Left"), 10, vb6_UserControl_ScaleMode)
-#   即 VB6 的 `Extender.Left / ScaleX(10, ScaleMode)` —— 那枚**实参**走 4b 新加的实参闸
-#   (cgen_expr_call_arg_emit.inc)。这一族 **4a 也没接上**, 而且是静默的: 4a 之后这些行哈希
-#   没变, 看上去"4a 管过了", 实为压根没碰到 (整条右值不是裸符号, 而 4a 的问带着
-#   `target == currentReturnVar_` 窄条件)。所以是修正, 不是回归。
-#   本地 emit 与 CI 交回来的清单这两行 sha256/ascii256 逐位相同, 判定是本地做的, 登记吃的是 CI 的数。
-# ---- Fix 296 / 3b 最后一格: Container / DragIcon 走实例入口 ----
-# 移动 **1 行**: tests/VBFlexGridDemo/VBFlexGridDemo.vbp (5496377 -> 5496561, +184 = 4 行)。
-# 逐行看过, 形状全同 (Container / DragIcon 各一对存取器):
-#   读  vb6_ret_Container = vb6_Extender_Container;
-#       -> vb6_ret_Container = vb6_UC_GetExtenderMemberObj(L"Container");
-#   写  vb6_Extender_Container = Value;
-#       -> vb6_UC_SetExtenderMember(L"Container", (void*)(intptr_t)Value);
-# 其余 444 行逐字节未动。Charts 2020 那一族本刀**一行没变**(2107097, 与 4b 登记后同值)。
+# 第九十三刀登记来源: CI 那台为 head f8da6f79 自己交的清单 (github/ci/emit-manifest 2c95f904, c3-exe sha256=f08cd688852f68b9846ef94cd1e8ac30984915f440c0a1f877536be32548294b, inputs=447)。只动本刀那 3 行 —— b416 两行新登记 + VBFlexGridDemo 那 9 处 CBool(文本) 换桥。czUI-main/czFormDemo.vbp 那一行哈希也不同但**不是本刀动的**: 本机三台 --emit-c 对照, BASE=278d5b87 那台与本刀那台逐字节相同 (7efd5c75f2566ae5), 只有并了 PR#23 的那台不同 (ac43d8ed99c4cf1d) ⇒ 那一行留给那一刀的 owner 登记。
+# 第九十四刀登记来源: 本机清单 (.build/k247_local_manifest.txt, arch=x64, inputs=449, c3-exe sha256=da076eb76a26…) 只加本刀那两行新夹具 b417 两台各一行 —— 本刀只改 RTL 函数体, 447 份共享输入的 --emit-c 逐字节与 BASE(本刀之前那台) 相同 (尺 .build/k246_ab.py: same=449 / MOVED=0), 所以没有任何一行旧输入该跟着动。czUI-main/czFormDemo.vbp 那一行仍与期望不同: 那是并进 dev 的 PR#23 的移动, 第九十三刀已用三台对照归因过, 留给那一刀的 owner, 本刀不替别人覆写形状。
+# 第九十五刀登记来源: CI 那台为 head 74bac138 自己交的清单 (github/ci/emit-manifest b3d0f4ca, arch=x64 inputs=451) —— 只加 tests/b418 两行; 别人那一行 (tests/czUI-main/czFormDemo.vbp fd5e2425->39eb14ab, 他们那条线 2dbef487 已登记) 刻意留着不动。
+# 第九十六刀登记来源: CI 那台为 head 07bd12cb 自己交的清单 (github/ci/emit-manifest 0c714f79, arch=x64 inputs=453) —— 只加 tests/b419 两行; 别人那一行 (tests/czUI-main/czFormDemo.vbp fd5e2425->39eb14ab, 他们那条线 2dbef487 已登记) 刻意留着不动。
+# 第九十七刀登记来源: CI 那台为 head f57b2def 自己交的清单 (github/ci/emit-manifest, arch=x64 inputs=455) —— 只加 tests/b422 这两行; 别人的那一行 tests/czUI-main/czFormDemo.vbp 仍按原样留着没动 (CI 与本机现在都交 39eb14ab…, 期望里还是 fd5e2425… = 那一格归它自己的刀)。
+# 第九十八刀登记来源: CI 那台为 head 22d7a1a2 自己交的清单 (github/ci/emit-manifest 49a1fcf3, arch=x64 inputs=457) —— 只加 tests/b426 这两行; 别人的那一行 tests/czUI-main/czFormDemo.vbp 仍按原样留着没动。本刀只改 RTL 的格式串一面 (AM/PM 记号 + 12/24 小时), 457 份共享输入的 --emit-c 两台编译器逐行相同 (尺 .build/k414_base_manifest.txt vs k414_new_manifest.txt: base=457 new=457 位置差 0 行), 所以没有任何一行旧输入该跟着动。
+# ---- vbe-line -> dev 合并后的登记 (Fix 296 Extender 读侧 3a/4a/4b + 3b 前置) ----
+# 冲突只在**末尾注脚区**(两侧都往最后一行后面追加), 数据行没有真冲突。取 **dev 那一版**
+# 作底(更新的那份, 且带着 b417..b426 的新夹具行; 取 vbe-line 那版会把它们丢掉,
+# check_manifest_coverage 的 K1..K3 立刻红), 再按合并后的 head 重登。
+# 结果: inputs=457 / registered=457 / 移动 7 行 / 新增 0 行。
 #
-# **这一刀踩过一个大坑, 记在这里**: 最初还把闸门加在**成员表达式出生地**
-# (cgen_expr_member_m22_module.inc, `Pseudo.<成员>` 符号成形处)。看着像"读侧总出口",
-# 换道之后比较式那 4 处确实接上了 —— 但那个出生地**也服务左值/赋值目标**: 合成出来的
-# `Property Set Container` 存取器体, 它的**目标**是从同一个成员表达式算出来的。换过去以后
-# 目标变成 `vb6_UC_GetExtenderMemberObj(L"Container")` —— 一个**函数调用**, 于是 Fix 098
-# 那道"Set 到不可赋值函数引用"闸把它当非左值, 整个赋值**静默丢**成 `(void)(Value);`。
-#   * ComCtlsDemo 全绿(VBFlexGrid 那条属性走的是另一条发码路径, 没暴露)
-#   * VBFlexGridDemo 的 `Property Set Container/DragIcon` 两个写**当场消失**
-#   * run_tests compile 75/75 + syntax 171/171 **照样全绿** —— 没有任何一条用例断言
-#     Set 存取器真的存进去了。是形状清单把这 1 行哈希变化逐行对出来才发现的。
-# 定位手段: 给 Fix 098 那句注上它丢掉的 target, 一次就看清了
-# (`DIAGTARGET=[vb6_UC_GetExtenderMemberObj(L"Container")]`), 不必再猜。
-# ⇒ 出生地那道闸已**撤掉**, 并且在哨兵里反钉一条: 出生地**不许**再换道(附负控)。
-#   比较式那 4 处(UpDown 的 `vb6_ComGetObjectProp(x, L"Container") == vb6_Extender_Container`)
-#   因此留着没接 —— 宁可留一处有记录的缺口, 也不换一处静默丢写。留给它们自己那一刀。
+# **移动 7 行, 逐条归因 (字节增量与形状行数一一对上)**
+#   变 5 行  Charts 2020 那一族 (Proyecto1 / ucChartArea / ucChartBar / ucPieChart /
+#          ucTreeMaps): 2106717->2107097(+380, 20 行) / +76 / +76 / +76 / +76,
+#          合计 **36 行**。形状全同, 逐行看过:
+#            vb6_UserControl_ScaleX(vb6_Extender_Left, 10, vb6_UserControl_ScaleMode)
+#          -> vb6_UserControl_ScaleX(vb6_UC_GetExtenderMemberNum(L"Left"), 10, …)
+#          即 VB6 的 `Extender.Left / ScaleX(10, ScaleMode)` —— 4b 新加的**实参闸**接住的。
+#          这一族 4a 也**没**接上, 而且是静默的(4a 之后这些行哈希没变, 看着像管过了)。
+#   变 1 行  tests/VBFlexGridDemo/VBFlexGridDemo.vbp: 5495673->5496386(**+713**)。
+#          其中 Extender 可归因的是 **23 行**(+621, 读 11 + 写 12); 余下 +92 是 dev 自己
+#          那边的历史漂移(在合并之前就没登记过), 不是本次合并带来的形状变化。
+#   变 1 行  tests/czUI-main/czFormDemo.vbp: 227283->227399(+116, 2 行)。
+#          **与 Extender 无关** —— 4a/4b 在它身上一行都没动(合并前后 emit 逐字节相同);
+#          这 2 行是 35b3334d「同名 UserControl 属性写入不许走内置 shim」那一半:
+#            vb6_SetControlForeColor(vb6_hwnd_czLabel3, …)
+#          -> vb6_czControl_prop_let_ForeColor((vb6_cls_czControl*)vb6_UC_InstanceOf(…), …)
+#          35b3334d 在 dev 上, 但 dev 从没为它重登过清单, 属**旧账**, 这次一并补上。
+#
+# ⚠ 这一份是**本机** C3.exe 算出来的, 不是 CI 那台的。按惯例登记应当吃 CI 交回来的清单;
+#   本机这份能不能替代, 依据是本会话前两轮实测: 445 行与 CI 的清单**逐位相同**(含
+#   ascii256), 即发码形状不随工具链变。推上去之后 CI 会自己交一份: 对得上说明这条依据在
+#   合并后的 head 上依然成立; 对不上就是依据失效, 那时以 CI 为准。这条没有替 CI 先验。
+# 第九十九刀登记来源: CI 那台为 head 68003497 自己交的清单 (github/ci/emit-manifest 5f4edb25, arch=x64 inputs=459) —— 只加 tests/b429 这两行。门 #704 的两条红 (Emit manifest 与 Tests (compile) 里同一道 [STATIC] manifest_coverage) 红因按 annotation 原文取回: 「新增 2 份输入没有登记哈希 (不是发码回归): tests/b429/B429.vbp, tests/b429/B429Main.bas」, 没有第三条。本刀只往头文件里加一句声明 (BSTR vb6_FormatDateTime(double dateSerial, int32_t namedFormat)), 457 份共享输入一行没动: 本机整表复算 (尺 .build/k484_local_manifest.txt 对这份期望, 读数 .build/k485_cmp.txt) = 期望 457 / 实得 459 / 相同 457 / 哈希不同 0 / 缺席 0 / 新增 2; 再用「同树只差这一句声明」那两台 (C3_k99_base2 vs C3.exe, 6665216 / 6666240 字节) 对四份日期面夹具并排 --emit-c, 差异 0 份 (尺 .build/k482_emit_ab_small.py)。b429 两台真跑的 .out 也从门上取回 (test-logs-vbp-1 / -vbp-2, 十七针 + DONE 两架构逐字相同, 含 B429-16=True/True)。别人的那一行 tests/czUI-main/czFormDemo.vbp 现在也对上了 —— 它归合并那一轮登记, 本刀没碰。
+# ---- vbe-line 追平 dev (把 dev 的 33 个提交并进 vbe-line) ----
+# inputs 445 -> 459 (dev 侧新夹具 b416..b429 一族进来)。相对 **dev 那一版**移动 **1 行**:
+#   tests/VBFlexGridDemo/VBFlexGridDemo.vbp  5496386(dev) -> 5496570(合并后), **+184 = 4 行**
+#     读 vb6_ret_Container = vb6_Extender_Container;
+#        -> vb6_ret_Container = vb6_UC_GetExtenderMemberObj(L"Container");   (DragIcon 同)
+#     写 vb6_Extender_Container = Value;
+#        -> vb6_UC_SetExtenderMember(L"Container", (void*)(intptr_t)Value);  (DragIcon 同)
+#   逐行看过, 形状全同; 其余 **458 行逐字节未动**。
+#   (dev 那一版自己已经是 5496386 —— 3a/4a 那 +713 在上一次往 dev 合时就登记进去了, 本刀
+#    只再叠自己那 4 行。两笔不要混: 5496570 - 5496386 = 184, 一行不多。)
+#
+# ⚠ 归因时踩了一个自己的坑, 记在这里: 合并之后我**没有先重新编 C3.exe** 就跑了清单, 于是
+#   tests/b416/{B416.vbp,B416Main.bas} 报出 -2 字节的"变化"。那不是真变化 —— 那台二进制
+#   是合并**之前**编的, 缺了 dev 那 33 个提交里的 RTL 改动(#428 给 vb6_FormatDateTime 补
+#   声明)。重新编过之后那两行回到逐字节相同, 只剩上面 1 行。
+#   **教训**: 合并/切分支之后跑形状清单之前必须重编, 否则清单量的是**旧二进制**的形状 ——
+#   差值极小(2 字节)且看着"像真变化", 正是最容易顺手登记错的那种。
+#
+# 这份清单在合并时取的是 **dev 那一版**作底(它带 b416..b429 的新夹具行; 取 vbe-line 那版会
+# 把它们丢掉, check_manifest_coverage 的 K1..K3 立刻红), 再按合并后的 head 重登。
+# vbe-line 从此是 dev 的**超集**, 往后往 dev 合只剩本分支自己那几个提交。

@@ -190,12 +190,14 @@ int32_t vb6_CLng(double x) {
 double vb6_CDbl(double x) {
     return x;
 }
-// Fix 158r: CLng 的 BSTR 实参 (UDT 单元格 .Text 等) 需先 vb6_Val 解析为 double
-int32_t vb6_CLngBSTR(BSTR s) { return (int32_t)round(vb6_Val(s)); }
+// Fix 158r: CLng 的 BSTR 实参 (UDT 单元格 .Text 等) 需先解析为 double
+// 账 #416: 解析那一句改问 vb6_NumVal (唯一那位主人) —— 以前这四枚直接吃 vb6_Val(宽松)，
+// 于是 `CLng(s)` 里 s 是 String 变量时报 13、而 .Text 这类**同样形状**的文本静默给 0。
+int32_t vb6_CLngBSTR(BSTR s) { return (int32_t)round(vb6_NumVal(s)); }
 // Fix 158q: CDbl/CInt/CCur 的 BSTR 实参 (UDT 单元格 .Text 等) —— 同 CLngBSTR.
-double  vb6_CDblBSTR(BSTR s) { return vb6_Val(s); }
-int16_t vb6_CIntBSTR(BSTR s) { return (int16_t)round(vb6_Val(s)); }
-double  vb6_CCurBSTR(BSTR s) { double d = vb6_Val(s); return round(d * 10000.0) / 10000.0; }
+double  vb6_CDblBSTR(BSTR s) { return vb6_NumVal(s); }
+int16_t vb6_CIntBSTR(BSTR s) { return (int16_t)round(vb6_NumVal(s)); }
+double  vb6_CCurBSTR(BSTR s) { double d = vb6_NumVal(s); return round(d * 10000.0) / 10000.0; }
 
 // ai/032: 无符号/窄整型转换函数 (CSByte/CUInt/CULng/CULngLng)。
 // 口径与上面 CInt/CLng/CByte 一致:
@@ -236,13 +238,15 @@ int64_t vb6_CLngLng(double x) {
         (void)vb6_OvfChk(-1, 0, 0);   // 越界 → 走既有溢出通道报 Error 6
     return vb6_FltToLng(x);
 }
-// ai/032: 字符串实参入口 (口径同 Fix 158r 的 vb6_CLngBSTR)。十进制走 vb6_Val;
-// "&H"/"&O" 前缀式由 cgen 那侧改发 vb6_NumVal, 到不了这里。
-int8_t   vb6_CSByteBSTR(BSTR s)   { return vb6_CSByte(vb6_Val(s)); }
-uint16_t vb6_CUIntBSTR(BSTR s)    { return vb6_CUInt(vb6_Val(s)); }
-uint32_t vb6_CULngBSTR(BSTR s)    { return vb6_CULng(vb6_Val(s)); }
-uint64_t vb6_CULngLngBSTR(BSTR s) { return vb6_CULngLng(vb6_Val(s)); }
-int64_t  vb6_CLngLngBSTR(BSTR s)  { return vb6_CLngLng(vb6_Val(s)); }
+// ai/032: 字符串实参入口 (口径同 Fix 158r 的 vb6_CLngBSTR)。
+// 账 #416: 这一族也改问 vb6_NumVal —— 十进制、"&H"/"&O" 前缀、区域分隔符全由那一位主人答，
+// 这里不再留第二条解析路 (以前注释说「前缀式到不了这里」，那是 vb6_Val 自己抄了一份 &H 解析
+// 造成的假象，两处两份答案)。
+int8_t   vb6_CSByteBSTR(BSTR s)   { return vb6_CSByte(vb6_NumVal(s)); }
+uint16_t vb6_CUIntBSTR(BSTR s)    { return vb6_CUInt(vb6_NumVal(s)); }
+uint32_t vb6_CULngBSTR(BSTR s)    { return vb6_CULng(vb6_NumVal(s)); }
+uint64_t vb6_CULngLngBSTR(BSTR s) { return vb6_CULngLng(vb6_NumVal(s)); }
+int64_t  vb6_CLngLngBSTR(BSTR s)  { return vb6_CLngLng(vb6_NumVal(s)); }
 
 // twinBASIC 形 CLngPtr (doc.twinbasic.vb6.pro .../Conversion/CLngPtr.html): 转 LongPtr。
 // 值域按目标架构: x86 = Long (文档 "Long on 32-bit"), x64 = 整个 int64 ("LongLong")。
@@ -261,7 +265,7 @@ intptr_t vb6_CLngPtr(double x) {
     return (intptr_t)vb6_OvfChk(vb6_FltToLng(x), -2147483647LL - 1, 2147483647LL);
 #endif
 }
-intptr_t vb6_CLngPtrBSTR(BSTR s) { return vb6_CLngPtr(vb6_Val(s)); }
+intptr_t vb6_CLngPtrBSTR(BSTR s) { return vb6_CLngPtr(vb6_NumVal(s)); }
 
 BSTR vb6_CStr(vb6_VARIANT x) {
     return vb6_Format(x, NULL, 1, 1);
@@ -381,15 +385,12 @@ BSTR vb6_CStrDate(double x) {
 // (PPDTPickerGeneral.c 208/209、PPMonthViewGeneral.c 207/208; 来源是
 //  .pag 里 `TextMinDate.Text = .MinDate` 这条「Date 写进 Text」的读方向).
 // 与 vb6_CStrDblFromBSTR 同款思路: 补一个 BSTR 入口, 由 vb6rtl_builtin.h 的
-// _Generic 按实参 C 类型分派. 差别在于解析口径: 数值档用 vb6_Val, 而这里是
-// 日期串, 走 VarDateFromStr (与 vb6_DateValue 同一条), 否则 "2026/1/1" 会答 0.
+// _Generic 按实参 C 类型分派. 差别在于解析口径: 数值档用 vb6_NumVal, 而这里交给日期那一档
+// 的主人 vb6_DateParse (账 #417 §B191: 文本→日期的解析站点全仓只留那一条), 否则 "2026/1/1"
+// 会答 0. 落不到日期的 (空串/非日期文本) 由它报 13 —— 以前这里兜底问 vb6_Val, 那句「与
+// vb6_CDate 保持一致」在 #417 之后已经不成立 (CDate 那一档改问 vb6_DateVal), 不再留第二套.
 BSTR vb6_CStrDateFromBSTR(BSTR s) {
-    DATE d = 0.0;
-    if (s && SUCCEEDED(VarDateFromStr(s, LOCALE_USER_DEFAULT, 0, &d)))
-        return vb6_CStrDate(d);
-    // 落不到日期解析的 (空串/非日期文本) 按 vb6_CDate 的 BSTR 口径兜底:
-    // 那一档本来就是 vb6_Val, 这里保持一致, 不另立第二套.
-    return vb6_CStrDate(vb6_Val(s));
+    return vb6_CStrDate(vb6_DateParse(s));
 }
 // ============================================================
 // 类型检查
@@ -410,6 +411,12 @@ int32_t vb6_IsNumeric(vb6_VARIANT v) {
          * 与上面那档同一条口径（这一族问的是「这枚 Variant 里是不是数」）。 */
         case vb6_vtDecimal:
             return -1;  // VB6 True
+        /* 账 #418 (§B192): 文本档以前根本不在这一族里 —— IsNumeric 只看 vt 标签，
+         * 于是 IsNumeric("123") 答 False，而 VB6 答 True (实测尺 .build/k253_isfam.vbs:
+         * "123"/"&HFF" 真、"123abc"/"abc"/"" 假)。问的就是 #416 那一位主人的**成功与否**，
+         * 所以这里不许报错 —— 判据不是转换。 */
+        case vb6_vtBSTR:
+            return vb6_IsNumericText(v.bstrVal);
         default:
             return 0;
     }
@@ -432,7 +439,16 @@ int32_t vb6_IsObject(vb6_VARIANT v) {
     return (v.vt == vb6_vtDispatch) ? -1 : 0;
 }
 int32_t vb6_IsArray(vb6_VARIANT v) { return (v.vt & 0x2000) ? -1 : 0; }  // VT_ARRAY=0x2000
-int32_t vb6_IsDate(vb6_VARIANT v) { return v.vt == vb6_vtDate ? -1 : 0; }
+int32_t vb6_IsDate(vb6_VARIANT v) {
+    if (v.vt == vb6_vtDate) return -1;
+    /* 账 #418 (§B192): 文本那一档以前直接落进「不是日期」—— VB6 的 IsDate 判的是
+     * 「这串折不折得成日期」(实测 IsDate("2026/1/1") 真、IsDate("46000") 假、
+     * IsDate("abc") 假，尺 .build/k253_isfam.vbs)。后果是实物：VBFlexGrid 那两形
+     * `If IsDate(Text) Then … = CDate(Text)` 的 Then 那一支在本仓从没执行过
+     * (#417 修好了 CDate，可这一扇门一直没人开)。问的是成功、不报错。 */
+    if (v.vt == vb6_vtBSTR) return vb6_DateCanParse(v.bstrVal);
+    return 0;
+}
 int32_t vb6_IsError(vb6_VARIANT v) { return v.vt == vb6_vtError ? -1 : 0; }
 // P21-09: CVErr — create VT_ERROR Variant
 vb6_VARIANT vb6_CVErr(int32_t errorNumber) {
@@ -760,7 +776,7 @@ double vb6_CDate(vb6_VARIANT v) {
     // 这里只排除"非数值"的几档, 免得又写一份平行表。
     if (v.vt == vb6_vtEmpty || v.vt == vb6_vtNull
         || v.vt == vb6_vtDispatch || v.vt == vb6_vtError) return 0.0;
-    if (v.vt == vb6_vtBSTR) return vb6_Val(v.bstrVal);   /* 字符串按日期解析 */
+    if (v.vt == vb6_vtBSTR) return vb6_DateVal(v.bstrVal);   /* 账 #417: 文本按日期解析，落不到再按严格数值 */
     return vb6_VariantToDouble(v);
 }
 
