@@ -764,3 +764,17 @@
  *   E_INVALIDARG (尺 k388_varfmt.c)、.NET 的 Strings.Format 走它自己的令牌表 (尺 k390_vbnet.txt) =>
  *   期望值只由文档 + 语料自身写法钉, 判据来历不许写成「运行期实测」。
  *   touch 本文件 = 让 RCDATA 重编一次（§B99②）。 */
+/* 账 #305 §B202 第九十九刀 (2026-10-17): FormatDateTime 在 x64 第一发就 0xC0000005。
+ *   根因不在口径: vb6_FormatDateTime 住 src/rtl/core/vb6rtl/vb6rtl_system.c:46，而 src/rtl 全树的 .h 里没有它的声明
+ *   —— 内置表点名它，发码把它**直接写进用户 TU**，于是 C 走隐式声明(假定返回 int)。
+ *   x64 把返回的 BSTR 指针折成 32 位再交 vb6_BSTR_AssignMove => 解引用即 AV; x86 指针本来 32 位
+ *   => 同一份源七发全跑完，五档答案还与本机 VBScript 的 FormatDateTime 逐档相同(尺 k423_proj / k424_run.txt /
+ *   k426_new_x86_run.txt)。两条证人: BASE 机(本刀之前那台)x64 同红 = 存量缺陷; 同一枚值走 Format(d,「general date」)
+ *   —— vb6_Format 在 vb6rtl_builtin.h 里本来有声明 —— 在 x64 正常出串。
+ *   census(尺 k428_emit_gap.py): 会发进用户 TU 的字面量名字 882 枚 vs 头文件里出现过的 1587 枚
+ *   => 全仓只缺这一枚，所以修法是补一行声明，判据却按整个问题收(哨兵 check_emitted_declared.ps1)。
+ *   缺声明时 VarType(FormatDateTime(...)) 答 3(VT_I4)、有了才答 8 => 这枚针在 x86 也移，b429 不只靠
+ *   「x64 能跑到 DONE」当证人。
+ *   本刀只补声明，故意不动口径: 命名格式五档走 LOCALE_USER_DEFAULT，字串随机器 locale 变(本机 zh-CN、CI en-US)
+ *   => 判据只钉关系、不钉字面串; 零头为何多一枚尾随空格、越界 namedFormat 与异型实参的口径另入账。
+ *   touch 本文件 = 让 RCDATA 重编一次（§B99②）。 */
