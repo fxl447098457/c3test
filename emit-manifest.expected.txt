@@ -492,6 +492,8 @@ sha256=f64d7050875cbcfc80ca82b30aa974afbca3e4014aefb1333f6da23c3b72a074 ascii256
 sha256=f64d7050875cbcfc80ca82b30aa974afbca3e4014aefb1333f6da23c3b72a074 ascii256=42a10222e611a0087573309e6328b2080ca6ee31001cda98374690a1295a8ede rc=0 bytes=8479 tests/b431/B431Main.bas
 sha256=d25b874c3087ae3ab46279cb1fe94f96d4fd047a513f3b61ecb914b5b7d04712 ascii256=3f6e87b9c676dfb4a1afedb25ad6fb4e18484b116e7b60ec8b8cb737df3ad064 rc=0 bytes=11180 tests/b432/B432.vbp
 sha256=d25b874c3087ae3ab46279cb1fe94f96d4fd047a513f3b61ecb914b5b7d04712 ascii256=3f6e87b9c676dfb4a1afedb25ad6fb4e18484b116e7b60ec8b8cb737df3ad064 rc=0 bytes=11180 tests/b432/B432Main.bas
+sha256=11f7d30f6109635ee8a337ca9c773895ab0c94e54b644a024c38f6bc88edc492 ascii256=14bbe3bc69ca7fad373a03c6d0cee848fe520dc433c53e599dffa71c85b458a0 rc=0 bytes=11147 tests/b433/B433.vbp
+sha256=07e44f4a94e82aedd4628f9008c998c60d3ead687d3f84a2fc4602cb7b7f8f86 ascii256=db2dfec473449dd1d8ab3c3e0d3dadd4d5611e6eb05e8bb3641b543ccbd5cb10 rc=0 bytes=7761 tests/b433/B433Main.bas
 # 账 #305 §B188 (第八十刀判据): 新增 2 行 = tests/b188_term 那两枚输入, 哈希取 CI 为同一 head 33320a1d 自己交的 9c33fdca;
 #   本轮 RTL 只动 ComObj_Release 一处 ⇒ 438 枚存量行**一行没移动** (本机与 CI 两边同读数), 形状门只报「新增未登记」这一族。
 # 账 #305 §B184 (第七十五刀) 的登记来源：门 **#640**（run 38682492970、head 8000e440、attempt 1）= 12 job 里 10 绿 + 两条**预期**红（这道形状门报「存量 5 份哈希不同 + 新增 2 份没登记」、`Tests (compile)` 里同源那句 [STATIC] manifest_coverage）。新增的两行 = 本刀夹具 `tests/b184_fieldw/{B184.vbp,B184Main.bas}`；移动的两行归本刀（Charts 2020/Proyecto1.vbp 31 处、b183_intfield/B183.vbp 2 处，逐行都是 `me-><f> = (int16_t|uint8_t)value.lVal;` → `= vb6_ChkInt|ChkByte(value.lVal);`）。**另外三行移动不是本刀**（ucTreeMaps/Proyecto1.vbp、VBFlexGridDemo/Common/VisualStyles.bas、VBFlexGridDemo/VBFlexGridDemo.vbp）：用「只含本刀、不含 merge」那一对编译器（C3_k74new vs C3_k75new，md5 d74d8b3b/2a24013d）并排重发这三份，移动行数 = 0，而本刀那两份移动 31/2 行 —— 所以这三行是 `a6b05e7d` 带进来的别人那两笔欠的登记，按 CI 为同一个 head 自己交的清单（github/ci/emit-manifest 的 7dea8d25）一并落账。
@@ -594,3 +596,4 @@ sha256=d25b874c3087ae3ab46279cb1fe94f96d4fd047a513f3b61ecb914b5b7d04712 ascii256
 # 本次登记来源: CI 那台为 head 7a4d471b 自己交的清单(github/ci/emit-manifest 2b6bf111,
 # arch=x64 inputs=465), 走rebless_emit_manifest.ps1 -Bless 取回。
 # 登记后复算: 期望 465 / 实得 465 / 相同 465 / 哈希不同 0 / 缺席 0 / 新增 0。
+# 第一百零三刀登记来源: CI 那台为 head 5233975d 自己交的清单 (github/ci/emit-manifest fd42e78f, arch=x64 inputs=467) —— 只加 tests/b433 这两行 (两行哈希相同 = B433.vbp 只有 B433Main 一份代码, B433Holder.cls 不单独进清单; 两行 bytes 差 = 一份是工程文件一份是模块文件)。本刀**没有**移动任何存量行: 那张表新增的那一行只改 `FormatDateTime(<一枚槽>, n)` 的发码，而清单里 467 份输入今天没有这一形 (语料那 13 处在 D:/vb_yqt4qPac，不在门禁输入里) —— 这一点由 CI 那份清单自己证实: 5 加 3 删里，只有那两行 b433 是新增输入，其余四行是 exe 哈希与两份头注 (inputs= / expectation-check=)。

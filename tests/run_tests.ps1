@@ -1671,6 +1671,19 @@ function Test-DateSerialTag {
         $out | Select-Object -First 12 | ForEach-Object { Write-Host "  $_" }
     }
 }
+function Test-FormatDateTimeArgs {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] formatdatetime_args ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\check_formatdatetime_args.ps1" 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        $out | Select-Object -First 12 | ForEach-Object { Write-Host "  $_" }
+    }
+}
 # === 编译冒烟测试 (编译+链接, 不运行生成物) ===
 function Test-Run {
     param(
@@ -7545,6 +7558,33 @@ if ($Category -in @("all", "run", "vbp")) {
     Test-Vbp 'b432_dateserial_tag' "$Tests\b432\B432.vbp" $b432Expected
     Test-Vbp 'b432_dateserial_tag_x86' "$Tests\b432\B432.vbp" $b432Expected -Arch "x86"
 
+    # 账 #305 §B206 第一百零三刀 (#432): FormatDateTime 的两条形参现在问那一位唯一权威。
+    # 改前 kNoTableFormalKinds176 与 getRuntimeParamCType 两级都没 vb6_FormatDateTime 那一行
+    # ⇒ rtParamType 空 ⇒ 不包 ⇒ 整枚 vb6_VARIANT 裸交进 double / int32_t = cl C2440，**整份工程
+    # 编不过** (BASE 那台 14 条 C2440、两台同一行集，尺 .build/k691_base_read.txt)。这一族十二形
+    # 逐形真编译 = 八形硬错误 / 四形编得过 (.build/k672_k103_readings.md)，夹具把其中七形各钉一针，
+    # 今天编得过的那四形当证人 (B433-04)。
+    # 口径与 b431/b432 同一套: 每针要么关系式、要么 locale-free —— 本机 zh-CN、CI 那台 en-US，
+    # 拼出来的日期从不与字面量比，只与「同一枚已经通得过的值问同一档」比 (尺 .build/k689_x64_run.txt
+    # / k689_x86_run.txt，两台 .out 逐字节相同 = md5 54714ae9efc018fb71ee39660691d3ee)。
+    # 文本那一形 (As String 交进来) 刻意不在这里: 它改完仍是硬错误，且正确答案是「按日期解析文本」
+    # 不是「折成数值」⇒ 新账 #433，与 #417 (CDate 收文本) 同批。
+    $b433Expected = @(
+        "B433-01=True/True",
+        "B433-02=True/True",
+        "B433-03=True",
+        "B433-04=True/True/True/True",
+        "B433-05=True/True",
+        "B433-06=True",
+        "B433-07=True/True",
+        "B433-08=True",
+        "B433-09=True",
+        "B433-10=True/True",
+        "B433-11=True/True/True",
+        "B433-DONE")
+    Test-Vbp 'b433_formatdatetime_args' "$Tests\b433\B433.vbp" $b433Expected
+    Test-Vbp 'b433_formatdatetime_args_x86' "$Tests\b433\B433.vbp" $b433Expected -Arch "x86"
+
 
     # 账 #305 SB186 第二头: VB 客户那一头　「口径」的唯一读数面　—— 探针是 C 客户, 它只能读 hr;
     # 「服务端自己那条错折回原号」还是「一律 429」这一问, 只有真的 VB 客户点得到。
@@ -7810,6 +7850,7 @@ if ($Category -in @("all", "compile")) {
     Test-FormatDateTokens
     Test-GeneralDateOutlets
     Test-DateSerialTag
+    Test-FormatDateTimeArgs
 
     Write-Host ""
 

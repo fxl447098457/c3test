@@ -996,6 +996,14 @@ std::string CCodeGen::builtinNoParamTableFormalCType(const std::string& callee, 
         {"vb6_SavePicture",   {"", "BSTR"}},                      // 0 = picture(void*) —— 不是串也不是数值
         {"vb6_Format",        {"", "BSTR", "int32_t", "int32_t"}}, // 0 是 VARIANT 形参, 由 conv_output
                                                                     //   的装箱那腿办, 这里刻意留空
+        // 账 #432 §B206 (第一百零三刀): 这一站之前**两级答案全空** (这张表没有它 +
+        // `getRuntimeParamCType` 也没有), 于是 `FormatDateTime(<一枚槽>, n)` 把整枚
+        // vb6_VARIANT 裸交进 `double` 形参 = cl C2440, **整份工程编不过**。真语料 44 处里
+        // 13 处吃这一格; 逐形真编译读数 = 十二形里**八形硬错误 / 四形编得过**
+        // (`.build/k672_k103_readings.md`)。两档都按 RTL 的 C 形参答
+        // (`vb6rtl_builtin.h:72` `vb6_FormatDateTime(double dateSerial, int32_t namedFormat)`)，
+        // 下游现成会发 `vb6_VariantToDouble` / `vb6_VariantToLong` —— 零新形状。
+        {"vb6_FormatDateTime", {"double", "int32_t"}},
     };
     auto it176 = kNoTableFormalKinds176.find(callee);
     if (it176 == kNoTableFormalKinds176.end()) return "";
