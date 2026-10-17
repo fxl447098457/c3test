@@ -2996,6 +2996,34 @@ marker、重编，之后 `check_rtl_embedded` 报 **125/125 逐字节相同**。
     - x64: 第一发 `s = FormatDateTime(46027.6046875, 0)` 之后就没有输出，RUN-RC=`-1073741819`；**BASE 机 (本刀之前那台) x64 同红** ⇒ 存量缺陷，与第九十八刀无关；**同一份源在 x86 七发全跑完**且五档答案与本机 VBScript 的 `FormatDateTime` **逐档相同** ⇒ 坏的不是口径，是 x64 那一条腿。
     - 根因 (读码 + 两条证人): `vb6_FormatDateTime` 住在 `vb6rtl_system.c:46`，而 `src/rtl` 全树的 `.h` 里**没有它的声明** ⇒ 用户 TU 走 C 的隐式声明 (假定返回 `int`)，x64 把返回的 BSTR 指针折成 32 位再交给 `vb6_BSTR_AssignMove` ⇒ 解引用即 AV；x86 指针本来就 32 位 ⇒ 同一份代码看着「对」。证人一: 同一枚值走 `Format(d,「general date」)` (`vb6_Format` 在 `vb6rtl_builtin.h:70` 有声明) 在 x64 正常出串；证人二: 发码形状本身没错 (`--emit-c` 读到的就是 `vb6_BSTR_AssignMove(&s, vb6_FormatDateTime(d1, 0));`)。
     - 承面 (尺 `.build/k428_emit_gap.py` → `k428_emit_gap.txt`): 把 cgen 侧**以字面量出现**的会发进用户 TU 的名字 (882 枚；口径边界: 靠字符串拼接现拼的那一族如 `vb6_arr_<名>` 不在这张名单里) 与 RTL 头文件里出现过的名字 (1587 枚) 比一次 ⇒ **只缺一枚**，就是它。修法 = `vb6rtl_builtin.h` 照 `vb6_Format` 那一行的位置与形状补一条声明；判据 = b429 两台各钉五档 + 一枚不随 locale 变的**关系** (general date 必须以 short date 开头)；哨兵可把这一问收成一条规则: 内置表点名的每一枚 `vb6_*` 必须在某个 `.h` 里有声明 —— 那条 census 顺带就是它的可达性探针。
+  - **→ 已出 = 第九十九刀**（实施 `756d0324` + 判据 `68003497` + 登记 `6eeda2cc`）:
+    - 门 **#704**（run 38996824089、head `68003497`、attempt 1）= 12 job 里 10 绿 + **两条预期登记红**（`Emit manifest (shape oracle)` 与 `Tests (compile)` 里同一道 `[STATIC] manifest_coverage`）。两条红的 annotation 原文按 API 取回 = 「新增 2 份输入没有登记哈希（**不是发码回归**）: tests/b429/B429.vbp, tests/b429/B429Main.bas」，红面**只有**这两行、没有第三条 ⇒ 登记之后验证轮 **#705**（run 38998029625、head `6eeda2cc`、attempt 1）= **12/12 全绿**。
+    - 修法就一句: `vb6rtl_builtin.h` 照 `vb6_Format` 那一行的位置与形状补一条 `BSTR vb6_FormatDateTime(double dateSerial, int32_t namedFormat);`。**只补声明** —— 那三格越界口径另立新小账 #429（§B203），本刀刻意不动。
+    - census 收成第 71 道哨兵 `scripts/check_emitted_declared.ps1`（R1 = 「发进用户 TU 的名字必须有声明」那条 gap==0；R2a/b/c = emitted / defined / declared 三条地板，防止扫描瞎了却报干净；R3..R9 = 声明形状 / 定义形状 / arity 表行 / 两台夹具各一格 / 期望表名 / x86 那一整行形状 / 禁止 `-Arch "x86"` 后带反斜杠）。绿读数 `emitted=885 defined=2529 declared=1591 gap=0`（**修前 = 882 / 1587 / gap=1**，那唯一一枚就是本刀的名字）。八发假改动 P1..P8 各红自己那一格，植完按 md5 还原、复跑绿。
+    - 判据 = `tests/b429` 十七针 + DONE，x64 与 x86 两台**逐字节相同**（md5 569356e3…），且门后把 CI 那两片作业的 `.out` 取回复核（test-logs-vbp-1 / test-logs-vbp-2）= 与本机那份一字不差、含靶针 `B429-16=True/True`。口径只钉**关系与标签**（VarType、非空、general date 以 short date 开头、五档互不相等、日历数字、Double 与 Date 同值、省略形参的默认档），因为五档全走 `LOCALE_USER_DEFAULT` 而 CI runner 是 en-US。
+    - 负控 = 缺声明那台冷编（`C3_k99_base.exe`）: **x64 直接 0xC0000005、x86 那一格答 3**（`_Generic` 把返回的 BSTR 当整数档装进槽）⇒ 同一枚针在两台**各自能红、红法不同**，这条就是「x86 看着对」的现场证据。
+    - 一条护栏坑（同族第二手，值得记住）: A/B 与负控用的 BASE **必须从合并后的树冷编**。`C3_k99_base.exe` 是合并前那台，拿它做对照会把别人 Extender 那一刀的发码移动算到本刀头上；换成「同树、只差这一句声明」的 `C3_k99_base2.exe`（6665216 对上 6666240，两枚 exe 字节数不同 = 真重编过）之后，四份日期面夹具并排 `--emit-c` 差异 0 份、本机整表 457 份共享输入哈希不同 0 行（尺 `.build/k482_emit_ab_small.py`、`.build/k484_local_manifest.txt` + `k485_cmp.txt`）。
+  - **新小账 #429（§B203）已入账 = FormatDateTime 的三格越界口径 —— 这一格本机**有**运行期 oracle（与 Format 那格相反）**（运行期读数 = 尺 `.build/k463_fdt2.vbs` → `k463_fdt2_out.txt`，两枚时间 = 2026/1/5 14:30:45 与 2026/1/5；本仓读数 = `.build/k471_x64_run.txt` / `k471_x86_run.txt`，缺声明那一头 = `k472_*.txt`）:
+    - ① **零头为 0 的 general date 多发一枚尾随空格**: 运行期 `FormatDateTime(#2026/1/5#, 0)` 交 `2026/1/5`（len 8），
+      本仓交 `2026/1/5 `。机制在 `vb6rtl_system.c` 那条 default 臂: `buf[len-1] = L' '` 是**无条件**做的，只有
+      时间那段才判 `fracPart != 0.0` —— 而这里的 `len` 是 GetDateFormatW 的返回值，**它含结束符**
+      （否则 `2026/1/5` 那枚 5 会被空格吃掉，而实测 A1-after 那格的 5 还在）。所以零头为 0 时尾下多一枚空格。
+      承面 = 语料里 `vbGeneralDate` **3 处**（`ComCtlsDemo/Builds/StatusBar/StatusBar.ctl` 的 1880 / 1894 / 1938），其中 1894
+      那处传的是 `VBA.Date`（纯日期、零头必为 0）⇒ **一定错**的那格有 1 处，另两处（Time / Now）零头非 0 不受影响。
+    - ② **越界的 namedFormat 运行期直接报错**: `FormatDateTime(d, 9)` ⇒ err=5（无效的过程调用或参数），本仓
+      那一臂落 `default:` ⇒ 当 general date 照常交卷。语料 44 处全部用 `vb*` 常量 ⇒ 承面 0，但「越界该不该报错」
+      是本仓内置函数的一贯问题，与 §B202 同一族。
+    - ③ **异型与越界实参静默换成「今天」**: 文本实参 `FormatDateTime("abc", 2)` ⇒ 运行期 err=13，本仓按数值解析
+      得 0 ⇒ 再落 `dateSerial == 0.0` 那条取本机钟的分支 ⇒ 静默答今天；负序列号 `FormatDateTime(CDbl(-1), 2)`
+      ⇒ 运行期交 `1899/12/29`（err=0，它是一个合法的 OLE 日期），本仓 `VariantTimeToSystemTime` 对负值返回失败
+      ⇒ 同样落到本机钟。**两格都与已结的 #416（严格转换要报错）同一条口径**，区别只在这里还多一条
+      「解析失败不许换成今天」。承面: 语料这 44 处里没有一处传文本或负值 ⇒ 纸面缺口。
+    - 顺带一条**结构**读数 (供下一刀钉判据): 本机五档恒满足 `s0 = s2 & " " & s3` 与 `Left(s0, Len(s2)) = s2`
+      （尺 k463 的 REL-cat / REL-prefix 两格都 True）—— 第九十九刀 b429 的关系针就是照它们钉的；修掉①之后
+      两条仍然成立（零头为 0 时变成 `s0 = s2`，前缀那条不变）。
+    - 承面 census（尺 `.build/k464_fdt_census.py` + `k487_fdt_arms.py` → `k487_fdt_arms.txt`）: 真语料 `FormatDateTime`
+      **44 处 / 15 份文件**；第二实参分布 = `vbShortDate` 12 / `vbLongDate` 9 / `vbLongTime` 5 / `vbGeneralDate` 3 /
+      `vbShortTime` 2 / 跨行看不清 13 ⇒ 这一族不是边角。**本刀（第九十九刀）只补声明，①②③ 刻意不动。**
 
 
 ### B187 「§B186 收线时那句『半件实例回收不了』往下读，读出来的却是**整张工程类登记表只写不读** —— 每枚工程类实例往一张 512 格的静态表里塞一格、永不注销，而**全仓没有任何人查它**；同一条「扫到哪儿」在同一份文件里有两个答案，登记那一遍不夹界 ⇒ 从第 514 枚实例起往数组外面读」（2026-10-15 第七十九刀「量」量完 + **第一格已出** = 并表 `abbd6788` → 门 **#651**（run 38725599678、head `abbd6788`、attempt 1）= **12 job 逐格 completed/success**（形状门直接绿 = 「零发码改动」被 CI 那台独立复算证实）；出路 (a)/(b) 仍**待拍**，见下面那三条）
