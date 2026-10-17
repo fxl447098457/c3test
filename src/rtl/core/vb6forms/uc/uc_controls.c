@@ -378,6 +378,19 @@ BSTR vb6_UC_GetExtenderMemberStr(const wchar_t* name) {
     if (!fp || kind != 0) return NULL;
     return *(BSTR*)fp;
 }
+/* Fix 296 / 3b 最后一格: Container/DragIcon 的**读**入口 (对象成员, 返回 void*)。
+   这两个的返回槽实测就是 `void* vb6_ret_Container` (ComCtlsDemo CoolBar.c:1651),
+   指针宽度正好对上 —— 调用点不需要任何强制转换, 与数值/字符串两个入口同一形状。
+   **只认 kind 4**: BSTR 槽 (kind 0) 当指针交出去, 调用方很可能 SysFreeString 掉它 ——
+   那正是引入 kind 4 要挡住的事。 */
+void* vb6_UC_GetExtenderMemberObj(const wchar_t* name) {
+    extern void* vb6_UC_ExtenderField(void* p, const wchar_t* n, int32_t* k);
+    void* p = (void*)&vb6_UserControl_Extender;
+    int32_t kind = -1;
+    void* fp = vb6_UC_ExtenderField(p, name, &kind);
+    if (!fp || kind != 4) return NULL;
+    return *(void**)fp;
+}
 void vb6_UC_SetExtenderMember(const wchar_t* name, void* value) {
     extern void* vb6_UC_ExtenderField(void* p, const wchar_t* n, int32_t* k);
     void* p = (void*)&vb6_UserControl_Extender;

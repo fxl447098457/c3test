@@ -48,10 +48,94 @@ else {
     if (-not $pop)  { $bad += "cannot locate vb6_uc_pop" }
     if (-not $snap) { $bad += "cannot locate vb6_uc_snapshot" }
     if ($push -and $pop -and $snap) {
-        foreach ($n in ($names | Sort-Object)) {
-            if ($push -notmatch [regex]::Escape($n)) { $bad += "$n never saved in vb6_uc_push (leaks to next control)" }
-            if ($pop  -notmatch [regex]::Escape($n)) { $bad += "$n never restored in vb6_uc_pop (survives into next control)" }
-            if ($snap -notmatch [regex]::Escape($n)) { $bad += "$n not captured by vb6_uc_snapshot (no-record fallback)" }
+        $extNames = @($names | Sort-Object)
+        # --- Fix 296 / 3b: Extender 那 15 枚全局**不许**再出现在 push/pop/snapshot ---
+        # 生成码侧全部走实例通道(vb6_UC_ExtenderField -> 当前实例记录 vb6_UCRec.ext*),
+        # 生成码里一处都不再读/写这些全局, 所以这套存取是纯开销, 而且它正是「控件之间互相
+        # 污染」的来源。**这一条是新不变式本身** —— 原来那条「每枚都必须存取」正好相反。
+        foreach ($n in $extNames) {
+            if ($push -match ('(?<![\w])' + [regex]::Escape($n) + '(?![\w])')) {
+                $bad += "$n still saved in vb6_uc_push (Extender state must not round-trip through globals)"
+            }
+            if ($pop -match ('(?<![\w])' + [regex]::Escape($n) + '(?![\w])')) {
+                $bad += "$n still restored in vb6_uc_pop (Extender state must not round-trip through globals)"
+            }
+            if ($snap -match ('(?<![\w])' + [regex]::Escape($n) + '(?![\w])')) {
+                $bad += "$n still copied by vb6_uc_snapshot (the struct fields are gone; that write was never consumed)"
+            }
+        }
+        # 负控: 把一行存取塞回去必须转红(否则这条检查形同虚设)
+        $negPush = $push + "`r`n    saved->extTag = (void*)vb6_Extender_Tag;"
+        if ($negPush -notmatch '(?<![\w])vb6_Extender_Tag(?![\w])') {
+            $bad += "sentinel is vacuous: reintroducing an Extender save in push is not detected"
+        }
+        # --- 另一族: Scale / Font / hDC 等 vb6_UserControl_* 全局**仍在**存取 ---
+        # 它们与 Extender 无关(实测 FontCombo.ctl DrawString -> hDC、VBFlexGrid.ctl
+        # NewFont -> Font 都要读), 3b 一根没碰。这里钉住, 免得"顺手清理"扩大化。
+        $keepSaves = @('vb6_UserControl_ScaleWidth','vb6_UserControl_ScaleHeight',
+                       'vb6_UserControl_ScaleMode','vb6_UserControl_hDC',
+                       'vb6_UserControl_ContainerHwnd','vb6_UserControl_Enabled',
+                       'vb6_UserControl_Font','vb6_Ambient_Font')
+        foreach ($n in $keepSaves) {
+            if ($push -notmatch ('(?<![\w])' + [regex]::Escape($n) + '(?![\w])')) {
+                $bad += "$n no longer saved in vb6_uc_push (3b must not touch the Scale/Font/hDC family)"
+            }
+            if ($pop -notmatch ('(?<![\w])' + [regex]::Escape($n) + '(?![\w])')) {
+                $bad += "$n no longer restored in vb6_uc_pop (3b must not touch the Scale/Font/hDC family)"
+            }
+        }
+        # --- 对称性: 剩下那一族全局, push 存了哪些 pop 就必须还原哪些, 反之亦然 ---
+        # 这条是 3b 真正该有的护栏。踩过的坑: pop 里
+        #   `vb6_UserControl_Width = saved->extWidth;`
+        # 借的是 **Extender** 的存档位, push 那边存的却是 `saved->extWidth =
+        # vb6_Extender_Width`(另一枚)。3b 把 Extender 那套拆掉后, 这个借位断了 ——
+        # pop 读到已删除的字段, 整个 RTL 编译不过, 82 道 compile 里 10 道 UserControl/
+        # form 类全红。逐个名字查是查不出来的(两边拼写都不一样), 只能按**集合**比。
+        $fam = 'vb6_(?:UserControl|Ambient)_\w+'
+        $pushSaves = @([regex]::Matches($push, ('saved->\w+\s*=\s*\(?[^;]*?\b(' + $fam + ')\b')) | ForEach-Object { $_.Groups[1].Value } | Sort-Object -Unique)
+        $popRestores = @([regex]::Matches($pop, ('\b(' + $fam + ')\b\s*=\s*\(?[^;]*?saved->\w+')) | ForEach-Object { $_.Groups[1].Value } | Sort-Object -Unique)
+        foreach ($g in $pushSaves) {
+            if ($popRestores -notcontains $g) { $bad += "$g saved in push but never restored in pop (asymmetric -> leaks into the next control)" }
+        }
+        foreach ($g in $popRestores) {
+            if ($pushSaves -notcontains $g) { $bad += "$g restored in pop but never saved in push (asymmetric, or borrowed a field that no longer exists)" }
+        }
+        # 负控: 只在 push 侧加一枚, 必须转红
+        $neg = $pushSaves + 'vb6_UserControl_NegOnly'
+        if (($neg | Sort-Object -Unique) -notcontains 'vb6_UserControl_NegOnly') {
+            $bad += "sentinel is vacuous: a push-only global is not detected as asymmetric"
+        }
+        # --- 不许有悬空字段引用: saved->/s-> 上那 15 个字段已经删了 ---
+        foreach ($m in [regex]::Matches(($push + "`r`n" + $pop + "`r`n" + $snap), '\b(?:saved|s)\s*->\s*(ext[A-Z]\w*)')) {
+            $bad += "dangling field reference '$($m.Groups[1].Value)' on a vb6_UCSaved (Fix 296 / 3b deleted all 15 ext* fields)"
+        }
+    }
+    # --- vb6_UCSaved 不得再声明那 15 个 ext* 字段(Clean Slate) ---
+    # ⚠ 别把 `struct vb6_UserControl_Extender_Type ext;`(Fix 133u 的 Extender.Visible/Height
+    #   结构体成员)一起当成被删的那些 —— 它与 15 枚全局无关, 必须留着。
+    $ihFile = Join-Path $Root "src\rtl\core\vb6forms\vb6forms_uc_internal.h"
+    if (-not (Test-Path -LiteralPath $ihFile)) { $bad += "missing $ihFile" }
+    else {
+        $ih = [System.IO.File]::ReadAllText($ihFile)
+        $i0 = $ih.IndexOf('typedef struct vb6_UCSaved {')
+        $i1 = $ih.IndexOf('} vb6_UCSaved;')
+        if ($i0 -lt 0 -or $i1 -lt 0) { $bad += "cannot locate the vb6_UCSaved struct" }
+        else {
+            $savedBody = $ih.Substring($i0, $i1 - $i0)
+            # 注释里会**故意**引用被删掉的字段名(解释为什么删), 所以先剥注释再扫字段
+            $savedCode = $savedBody
+            $savedCode = [regex]::Replace($savedCode, '(?s)/\*.*?\*/', ' ')
+            $savedCode = [regex]::Replace($savedCode, '(?m)//.*$', ' ')
+            foreach ($f2 in @('extLeft','extTop','extWidth','extHeight','extAlign','extDragMode',
+                              'extHelpContextID','extWhatsThisHelpID','extVisible','extVb6Default',
+                              'extCancel','extTag','extToolTipText','extContainer','extDragIcon')) {
+                if ($savedCode -match ('\b' + $f2 + '\b')) {
+                    $bad += "vb6_UCSaved still declares $f2 (Clean Slate removed all 15 ext* fields)"
+                }
+            }
+            if ($savedCode -notmatch 'vb6_UserControl_Extender_Type\s+ext\b') {
+                $bad += "vb6_UCSaved lost its 'ext' member of type vb6_UserControl_Extender_Type (Fix 133u Extender.Visible/Height -- NOT one of the 15)"
+            }
         }
     }
 }
@@ -91,7 +175,7 @@ else {
     }
 }
 if ($bad.Count -eq 0) {
-    Write-Host ("PASS (" + $names.Count + " Extender globals saved/restored symmetrically)")
+    Write-Host ("PASS (" + $names.Count + " Extender globals absent from push/pop/snapshot (Fix 296 / 3b new invariant); Scale/Font/hDC family still saved+restored; vb6_UCSaved carries no ext* field)")
     exit 0
 }
 foreach ($b in $bad) { Write-Host ("FAIL " + $b) }

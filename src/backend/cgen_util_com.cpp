@@ -469,9 +469,15 @@ std::string CCodeGen::extenderMemberReadExpr(const std::string& rtlSymbol) const
     for (const HostPseudoRow& r : kHostPseudoRows) {
         if (hostPseudoLower(r.obj) != "extender") continue;
         if (hostPseudoLower(r.rtl) != hostPseudoLower(suffix)) continue;
-        if (r.type == Vb6Type::Unknown) return rtlSymbol;
-        const char* dock296 = (r.type == Vb6Type::String)
-            ? "vb6_UC_GetExtenderMemberStr" : "vb6_UC_GetExtenderMemberNum";
+        /* Fix 296 / 3b 最后一格: 表里 type=Unknown 的行分**两种**, 不能只看 type ——
+           Drag/SetFocus/ZOrder 是 HPF_METHOD, 是**调用**不是读 (换过去会发成一个没人
+           接收的 getter 调用); Container/DragIcon 才是对象成员, 换道到对象入口。
+           少了这道方法行闸, 三个方法会跟着对象成员一起被换掉。 */
+        if (r.flags & HPF_METHOD) return rtlSymbol;
+        const char* dock296;
+        if (r.type == Vb6Type::String)          dock296 = "vb6_UC_GetExtenderMemberStr";
+        else if (r.type == Vb6Type::Unknown)    dock296 = "vb6_UC_GetExtenderMemberObj";
+        else                                    dock296 = "vb6_UC_GetExtenderMemberNum";
         return std::string(dock296) + "(L\"" + escapeWideCString(r.rtl) + "\")";
     }
     return rtlSymbol;

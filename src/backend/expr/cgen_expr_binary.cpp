@@ -95,7 +95,15 @@ void CCodeGen::visit(BinaryExpr& node) {
         else resolveComValue(hint88(node.left));
     }
     std::string right = std::move(lastExpr_);
-
+    /* Fix 296 / 3b 的最后一族: 二元操作数里的宿主伪成员(UpDown.ctl 那 4 处
+       `vb6_ComGetObjectProp(x, L"Container") == vb6_Extender_Container`)。
+       **这一族只能走消费点, 不能回到成员表达式出生地** —— 操作数**永远不是左值**, 而出生地
+       同时服务赋值目标: 上一刀在出生地换道, 把合成出来的 `Property Set Container` 存取器
+       目标变成 `vb6_UC_GetExtenderMemberObj(L"Container")` 这个**函数调用**, Fix 098 随即
+       当它不可赋值, 整个赋值**静默丢**成 `(void)(Value);`。两个操作数都换, `Extender.X` 在
+       左边或右边都接住; 换道在类型合并/装箱**之前**, 下面那一整套按类型收口的逻辑照旧。 */
+    left = extenderMemberReadExpr(left);
+    right = extenderMemberReadExpr(right);
     // 字符串连接运算: VB6 & → vb6_BSTR_Concat / vb6_BSTR_ConcatFree
     // 嵌套Concat时用ConcatFree释放中间临时BSTR，避免内存泄漏
     // M22: 非BSTR操作数自动包装为BSTR (int→vb6_CStr(vb6_CLng(x)), double→vb6_CStr(vb6_CDbl(x)))

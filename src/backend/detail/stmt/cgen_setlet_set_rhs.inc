@@ -323,11 +323,30 @@
         // 本条把两条路径并到 vb6_VariantAssign (Clear + 深拷贝 / AddRef)。
         // 实测 List.cls: `Set m_Items(i) = m_Items(i - 1)` 之后
         // `Set m_Items(i - 1) = Nothing` 会把两只槽共用的那只 BSTR 放掉。
+        /* Fix 296 / 3b 最后一格: Set 语句的**右值**那一问同样要过实例入口。
+           `Property Get Container` 的返回槽那句**也是 Set 语句** —— 行尾那个标记就是证据
+           (目标侧是 vb6_ret_Container, 所以上面那道目标闸正确地没碰它, 但右值
+           `Extender.Container` 还是那枚裸全局)。ComCtlsDemo 实测 66 处。
+           换道放在发码**之前**, 下面 targetIsVariantArraySlot 那一支的 VariantAssign
+           包装、以及写侧那一支的 (void*)(intptr_t) 都照旧套在外面 —— 与 4a 同款。 */
+        value = extenderMemberReadExpr(value);
         bool targetIsVariantArraySlot =
             (target.compare(0, 7, "VB6_SA_") == 0
              && target.find("(vb6_VARIANT,") != std::string::npos);
         if (targetIsVariantArraySlot) {
             c_.emitLine("vb6_VariantAssign(&" + target + ", " + value + ");  /* Set */");
+        } else if (target.rfind("vb6_Extender_", 0) == 0) {
+            /* Fix 296 / 3a 的**镜像**, 但走的是**另一条**发码路径: Property Set 存取器体
+               (`Public Property Set Container(ByVal Value As Object)`) 的那句赋值由
+               visit(SetStmt&) 发出, 不是 visit(AssignmentStmt&) —— 所以 3a 那道闸
+               (cgen_assign_host_pseudo.inc) 压根够不着, 66 处
+               `vb6_Extender_Container = Value;` (line-tail Set marker not pasted: it would close this comment early) 一路活到今天。
+               成员名直接取发射符号的后缀 = 表里那一行的 rtl 列, ExtenderField 按
+               _wcsicmp 匹配, 所以 `vb6_Default` 那行 name/rtl 不同拼法也对得上。 */
+            c_.emitLine("vb6_UC_SetExtenderMember(L\""
+                        + escapeWideCString(target.substr(std::string("vb6_Extender_").size()))
+                        + "\", (void*)(intptr_t)" + value + ");"
+                        "  /* Extender.<prop> = v (per-instance, Set stmt) */");
         } else {
             c_.emitLine(target + " = " + value + ";  /* Set */");
         }
