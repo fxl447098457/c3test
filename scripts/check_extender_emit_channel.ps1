@@ -24,12 +24,14 @@ $val = Join-Path $root 'src/backend/detail/stmt/cgen_assign_value_sem.inc'
 $argP = Join-Path $root 'src/backend/detail/expr/cgen_expr_call_arg_emit.inc'
 $selP = Join-Path $root 'src/backend/stmt/cgen_select.cpp'
 $evtP = Join-Path $root 'src/backend/module/cgen_com_events.cpp'
+$setP = Join-Path $root 'src/backend/detail/stmt/cgen_setlet_set_rhs.inc'
+$m22P = Join-Path $root 'src/backend/detail/expr/cgen_expr_member_m22_module.inc'
 $withP = Join-Path $root 'src/backend/expr/cgen_expr_with.cpp'
 $com = Join-Path $root 'src/backend/cgen_util_com.cpp'
 $rtl = Join-Path $root 'src/rtl/core/vb6forms/uc/uc_controls.c'
 $hdr = Join-Path $root 'src/rtl/core/vb6rtl/vb6rtl_userctl.h'
 
-foreach ($p in @($cg, $val, $withP, $argP, $selP, $evtP, $com, $rtl, $hdr)) {
+foreach ($p in @($cg, $val, $withP, $argP, $selP, $evtP, $setP, $m22P, $com, $rtl, $hdr)) {
     if (-not (Test-Path -LiteralPath $p)) { Write-Host "missing file: $p" -ForegroundColor Red; exit 1 }
 }
 $cgT = [System.IO.File]::ReadAllText($cg)
@@ -37,6 +39,8 @@ $valT = [System.IO.File]::ReadAllText($val)
 $argT = [System.IO.File]::ReadAllText($argP)
 $selT = [System.IO.File]::ReadAllText($selP)
 $evtT = [System.IO.File]::ReadAllText($evtP)
+$setT = [System.IO.File]::ReadAllText($setP)
+$m22T = [System.IO.File]::ReadAllText($m22P)
 $withT = [System.IO.File]::ReadAllText($withP)
 $comT = [System.IO.File]::ReadAllText($com)
 $rtlT = [System.IO.File]::ReadAllText($rtl)
@@ -252,6 +256,74 @@ Check "numeric read entry refuses kind $KIND_OBJ" $gnumOk `
 $negG = $gnum -replace ('kind\s*==\s*' + $KIND_OBJ + '\s*\)'), 'kind == 99)'
 Check "negative control (removing the kind $KIND_OBJ guard from the numeric entry must go red)" (-not ($negG -match ('kind\s*==\s*' + $KIND_OBJ))) `
     'sentinel is vacuous if the numeric guard can be removed and still pass'
+# --- Container/DragIcon 走实例入口 (3b 的最后一格) ---
+# 这两个是**对象**成员 (记录字段 void*), 与数值/字符串都不同 ⇒ 要第三个读入口
+# `void* vb6_UC_GetExtenderMemberObj`。返回槽实测就是 `void* vb6_ret_Container`
+# (ComCtlsDemo CoolBar.c:1651), 指针宽度正好对上, 调用点不需要任何强制转换。
+# 表里 type=Unknown 的**方法**行 (Drag/SetFocus/ZOrder) 是**调用**不是读, 必须原样返回 ——
+# 用 r.flags & HPF_METHOD 分开; 只看 type 会把这三行也换成一个 getter 调用。
+$OBJ = 'vb6_UC_GetExtenderMemberObj'
+Check "RTL defines $OBJ" ($rtlT -match ("void\*\s+" + $OBJ + "\s*\(")) 'object read entry point missing from uc_controls.c'
+Check "header declares $OBJ" ($hdrT -match ([regex]::Escape($OBJ) + '\s*\([^;]*\)\s*;')) 'generated code calls it directly; without the prototype MSVC gives C2065'
+$objBody = BodyOf $ctl ('void* ' + $OBJ + '(const wchar_t* name) {')
+Check "body located: $OBJ" (-not [string]::IsNullOrWhiteSpace($objBody)) 'signature must name the definition, not a declaration'
+# 对象入口只认 kind 4; 别的 kind 一律 NULL, 别把 BSTR / 数值槽当指针交出去
+Check "object read entry accepts only kind 4" ($objBody -match 'kind\s*!=\s*4') `
+    'handing a BSTR or int32 slot back as void* is exactly what kind 4 was introduced to stop'
+$negO = $objBody -replace 'kind\s*!=\s*4', 'kind != 99'
+Check "negative control (widening the kind guard in $OBJ must go red)" (-not ($negO -match 'kind\s*!=\s*4')) `
+    'sentinel is vacuous if the guard can be relaxed and still pass'
+
+# 共享出口: 对象行改道到 Obj, 方法行原样返回
+Check 'shared read exit offers the object dock' ($comT -match ([regex]::Escape($OBJ))) `
+    'Container/DragIcon reads would otherwise keep hitting the bare global'
+Check 'shared read exit still returns method rows unchanged' ($comT -match 'flags\s*&\s*HPF_METHOD') `
+    'Drag/SetFocus/ZOrder are calls, not reads'
+$negM = $comT -replace 'flags\s*&\s*HPF_METHOD', 'flags & 0'
+Check 'negative control (removing the method-row guard must go red)' (-not ($negM -match 'flags\s*&\s*HPF_METHOD')) `
+    'sentinel is vacuous if the guard can be dropped and still pass'
+
+# 写侧: Property Set 的**目标**那一问在另一条发码路径 (cgen_setlet_set_rhs.inc),
+# 3a 那道闸 (cgen_assign_host_pseudo.inc) 够不着 —— 这就是那 66 处
+# `vb6_Extender_Container = Value;  /* Set */` 一路活到今天的原因。
+$setRx = 'rfind\("vb6_Extender_",\s*0\)\s*==\s*0'
+Check 'Set-statement target is redirected to the instance-aware write entry' ($setT -match $setRx) `
+    'vb6_Extender_Container = Value; still writes the bare global'
+Check 'Set-statement redirect uses vb6_UC_SetExtenderMember' ($setT -match 'vb6_UC_SetExtenderMember') `
+    'the target must go through the same write entry 3a uses'
+$negS = $setT -replace 'rfind\("vb6_Extender_",\s*0\)\s*==\s*0', 'rfind("vb6_ExtenderX_", 0) == 0'
+Check 'negative control (renaming the prefix gate in the Set path must go red)' (-not ($negS -match $setRx)) `
+    'sentinel is vacuous if the Set gate can be neutered and still pass'
+# Set 语句的**右值**那一问 (`Property Get Container` 的返回槽那句本身也是 Set 语句 ——
+# 行尾那个标记就是证据; 目标侧是 vb6_ret_*, 所以目标闸正确地没碰它, 右值还是裸全局)。
+$setValRx = 'value\s*=\s*extenderMemberReadExpr\s*\(\s*value\s*\)'
+Check 'Set-statement value side is redirected' ($setT -match $setValRx) `
+    'vb6_ret_Container = vb6_Extender_Container still reads the bare global (66 sites)'
+$negSV = $setT -replace '(?m)^[^\n]*value\s*=\s*extenderMemberReadExpr\s*\(\s*value\s*\)[^\n]*\r?\n', ''
+Check 'negative control (restoring the original Set value line must go red)' (-not ($negSV -match $setValRx)) `
+    'sentinel is vacuous if deleting the Set value redirect still passes'
+
+# ⚠ 成员表达式**出生地**(m22)**刻意不换道** —— 这条是**反**向的钉, 钉的是一个踩过的坑。
+#   出生地 (cgen_expr_member_m22_module.inc) 是 `Pseudo.<成员>` 符号成形的地方, 看着像
+#   "读侧总出口", 换道之后比较式那 4 处确实接上了 —— 但它**也服务左值/赋值目标**:
+#   合成出来的 `Property Set Container` 存取器体, 它的**目标**是从同一个成员表达式
+#   算出来的。换过去以后目标变成 `vb6_UC_GetExtenderMemberObj(L"Container")` —— 一个
+#   **函数调用**, 于是 Fix 098 那道"Set 到不可赋值函数引用"闸把它当非左值, 整个赋值
+#   **静默丢**成 `(void)(Value);`。实测: ComCtlsDemo 全绿(VBFlexGrid 那条外部属性
+#   走的是另一条发码路径, 没暴露), VBFlexGridDemo 的 `Property Set Container/DragIcon`
+#   两个写**当场消失**。compile 75/75 + syntax 171/171 **照样全绿** —— 没有任何一条用例
+#   断言 Set 存取器真的存进去了。是形状清单把那 1 行哈希变化逐行对出来才发现的。
+#   ⇒ 换道只能落在**消费点**, 且要分清这一问是读还是写。比较式那 4 处因此留着没接,
+#   留给它们自己那一刀; 宁可留一处有记录的缺口, 也不换一处静默丢写。
+$m22Body = BodyOf $m22T 'lastExpr_ = hostPseudoRtlSymbol(modName2, varName2);'
+Check 'member-expression birth site is NOT redirected (it also serves lvalue targets)' `
+    ($m22T -notmatch 'extenderMemberReadExpr\s*\(\s*hostPseudoRtlSymbol') `
+    'gating the symbol birth site turns Set-accessor targets into calls; Fix 098 then silently discards the write'
+$negM22 = $m22T -replace 'lastExpr_ = hostPseudoRtlSymbol\(modName2, varName2\);', `
+                              'lastExpr_ = extenderMemberReadExpr(hostPseudoRtlSymbol(modName2, varName2));'
+Check 'negative control (gating the birth site must go red)' `
+    ($negM22 -match 'extenderMemberReadExpr\s*\(\s*hostPseudoRtlSymbol') `
+    'sentinel is vacuous if re-introducing the birth-site gate still passes'
 if ($bad) { Write-Host "check_extender_emit_channel: FAIL ($bad)"; exit 1 }
 Write-Host 'check_extender_emit_channel: PASS'
 exit 0

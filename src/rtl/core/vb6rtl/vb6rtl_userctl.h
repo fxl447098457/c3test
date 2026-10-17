@@ -260,6 +260,7 @@ extern struct vb6_UserControl_Extender_Type vb6_UserControl_Extender;
 /* Fix 294 / 3a: Extender.<成员> = v 的实例感知写入口(代码生成侧调用)。
    内部按当前记录落进 b6_UCRec.ext*; 没有当前记录时退回全局, 与
    b6_UC_ExtenderField 的兜底一致。kind 约定 0=BSTR / 2=int16 / 3=int32。 */
+void* vb6_UC_GetExtenderMemberObj(const wchar_t* name);
 void vb6_UC_SetExtenderMember(const wchar_t* name, void* value);
 int32_t vb6_UC_GetExtenderMemberNum(const wchar_t* name);
 BSTR    vb6_UC_GetExtenderMemberStr(const wchar_t* name);

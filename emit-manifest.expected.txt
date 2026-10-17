@@ -412,7 +412,7 @@ sha256=459ec010f1fa3cea34eb01c222ca3babbe3b9d49d8bd64b8b3111bf09e6331e0 ascii256
 sha256=dccb4e0eefb33ea5aa039969cbc2afbd9910c440ed53be1095b02c2aae27bfe4 ascii256=4e60e08bbf5ea4370142f00d5de69a2666d6a0e4f0e017131e17f25fa5c5f3df rc=0 bytes=187492 tests/VBFlexGridDemo/Common/Common.bas
 sha256=e2dad590e783b18ba71f929ae0333c8e635141af2f2e3bf9696231b6073a0d10 ascii256=cd876129e57f397197b6167aa70733fb4561904d53ef68e6b05f7ff64ddbb569 rc=0 bytes=4189 tests/VBFlexGridDemo/Common/Startup.bas
 sha256=b754061ccdc65a189a68b809a85968e579808179fa0c648b3a5dc07d2d53d9d6 ascii256=4dfc425bea7b3922e61ea7bd9211088235cc6ea04de4c9b62c0e9305899a7d4e rc=0 bytes=67832 tests/VBFlexGridDemo/Common/VisualStyles.bas
-sha256=c6efa82dc1d364508a621381b4bf17d3c40d8e19c4a430b19cf23e9ec5091e5b ascii256=7d868f7379f56d5705b9aa37f79ba8624f31b55f5929eb157debed25139a6dd5 rc=0 bytes=5496377 tests/VBFlexGridDemo/VBFlexGridDemo.vbp
+sha256=eca67d4a693a60fc234b9fc89eb4a89f0f48f09a9004d0f622b2b475190f3483 ascii256=a5254dce79ca2fe796baf17b19fc676089c69a93da1170375e6a61370d47b0f9 rc=0 bytes=5496561 tests/VBFlexGridDemo/VBFlexGridDemo.vbp
 sha256=49d51878943fce03c7516b3cf06727555d1c5b6bc1aed8db368e9fcfd1f4f690 ascii256=9d9840c51015c8a6e63aa923404f47d99cee82835b9fa92a76c73cd7317fddc8 rc=0 bytes=3245 tests/vbman_host/run_host.bas
 sha256=49d51878943fce03c7516b3cf06727555d1c5b6bc1aed8db368e9fcfd1f4f690 ascii256=9d9840c51015c8a6e63aa923404f47d99cee82835b9fa92a76c73cd7317fddc8 rc=0 bytes=3245 tests/vbman_host/vbman_host.vbp
 sha256=5f6d4159602806680561963237b24008263b38246332b50b3e814a333009d1a5 ascii256=5cd8103e73a1c07e2fece83539770603407213236bbf9822bd9b08ea74e7d778 rc=0 bytes=1763 tests/vbp_project/MainMod.bas
@@ -516,3 +516,27 @@ sha256=010a2af5e17095d64e3c432f6f1a0d5578cdc4fed6d51e1694ca8da38e9416ba ascii256
 #   没变, 看上去"4a 管过了", 实为压根没碰到 (整条右值不是裸符号, 而 4a 的问带着
 #   `target == currentReturnVar_` 窄条件)。所以是修正, 不是回归。
 #   本地 emit 与 CI 交回来的清单这两行 sha256/ascii256 逐位相同, 判定是本地做的, 登记吃的是 CI 的数。
+# ---- Fix 296 / 3b 最后一格: Container / DragIcon 走实例入口 ----
+# 移动 **1 行**: tests/VBFlexGridDemo/VBFlexGridDemo.vbp (5496377 -> 5496561, +184 = 4 行)。
+# 逐行看过, 形状全同 (Container / DragIcon 各一对存取器):
+#   读  vb6_ret_Container = vb6_Extender_Container;
+#       -> vb6_ret_Container = vb6_UC_GetExtenderMemberObj(L"Container");
+#   写  vb6_Extender_Container = Value;
+#       -> vb6_UC_SetExtenderMember(L"Container", (void*)(intptr_t)Value);
+# 其余 444 行逐字节未动。Charts 2020 那一族本刀**一行没变**(2107097, 与 4b 登记后同值)。
+#
+# **这一刀踩过一个大坑, 记在这里**: 最初还把闸门加在**成员表达式出生地**
+# (cgen_expr_member_m22_module.inc, `Pseudo.<成员>` 符号成形处)。看着像"读侧总出口",
+# 换道之后比较式那 4 处确实接上了 —— 但那个出生地**也服务左值/赋值目标**: 合成出来的
+# `Property Set Container` 存取器体, 它的**目标**是从同一个成员表达式算出来的。换过去以后
+# 目标变成 `vb6_UC_GetExtenderMemberObj(L"Container")` —— 一个**函数调用**, 于是 Fix 098
+# 那道"Set 到不可赋值函数引用"闸把它当非左值, 整个赋值**静默丢**成 `(void)(Value);`。
+#   * ComCtlsDemo 全绿(VBFlexGrid 那条属性走的是另一条发码路径, 没暴露)
+#   * VBFlexGridDemo 的 `Property Set Container/DragIcon` 两个写**当场消失**
+#   * run_tests compile 75/75 + syntax 171/171 **照样全绿** —— 没有任何一条用例断言
+#     Set 存取器真的存进去了。是形状清单把这 1 行哈希变化逐行对出来才发现的。
+# 定位手段: 给 Fix 098 那句注上它丢掉的 target, 一次就看清了
+# (`DIAGTARGET=[vb6_UC_GetExtenderMemberObj(L"Container")]`), 不必再猜。
+# ⇒ 出生地那道闸已**撤掉**, 并且在哨兵里反钉一条: 出生地**不许**再换道(附负控)。
+#   比较式那 4 处(UpDown 的 `vb6_ComGetObjectProp(x, L"Container") == vb6_Extender_Container`)
+#   因此留着没接 —— 宁可留一处有记录的缺口, 也不换一处静默丢写。留给它们自己那一刀。
