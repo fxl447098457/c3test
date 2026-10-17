@@ -750,3 +750,17 @@
  *   实测读数就是 DatePart("ww") 答 -2415012 那一档 (尺 .build/k354_proj + k354_run.txt)。现在收成唯一
  *   出口 vb6_SerialOf，四遍手抄并进来，哨兵 check_datepart_arms.ps1 的 R7 钉住 (裸 helper 站点 3、出口站点 11)。
  *   touch 本文件 = 让 RCDATA 重编一次（§B99②）。 */
+/* 账 #305 §B200 第九十八刀 (2026-10-17): Format 的日期面三格答错。
+ *   ① h/hh 恒按 12 小时报 (那条算式是 st.wHour % 12) => 语料把「hh:mm:ss」「yyyy-mm-dd hh:mm:ss」
+ *   当**时间戳**用 (尺 .build/k392_fmt_census.py: 日期类格式串 1693 处 / 164 种串, 这两种各 70 / 101 处),
+ *   于是一下午的程序往日志与报表里写的都是半个下午。②「AM/PM」那枚令牌被逐字符循环当成月份吃掉 =>
+ *   Format(d,「AM/PM h:mm」) 交 A1/P1 2:30 (那两枚 1 / 7 就是两个月号, 证人 = 两枚探针时间分别在 1 月与
+ *   7 月, 尺 .build/k391_run.txt) —— 台账里原先记的「数值段分隔吃掉」那句是错的, 同日已订正。③ 只写记号、
+ *   不带任何日期字母的串 (「A/P」「AMPM」) 过不了 vb6_fmtIsDateFormat => 掉回数值臂交裸序列号
+ *   46027.6046875。收成一处三枚: vb6_fmtAmPmLenAt (在哪 / 几长 / 哪一形) + vb6_fmtHasAmPm (有没有这一问的
+ *   唯一答案, 同时就是「小时走 12 还是 24」的判据) + vb6_fmtAppendAmPm (大小写跟随串里写的那一种)。
+ *   口径 = 交**不变英文** AM/PM, 与本函数已有的 January/Sunday 同一档, 不跟 locale。
+ *   注意这一格没有运行期 oracle: VBScript 不带 Format、oleaut32 VarTokenizeFormatString 在本机每串都返
+ *   E_INVALIDARG (尺 k388_varfmt.c)、.NET 的 Strings.Format 走它自己的令牌表 (尺 k390_vbnet.txt) =>
+ *   期望值只由文档 + 语料自身写法钉, 判据来历不许写成「运行期实测」。
+ *   touch 本文件 = 让 RCDATA 重编一次（§B99②）。 */

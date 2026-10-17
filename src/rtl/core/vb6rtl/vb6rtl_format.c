@@ -130,10 +130,35 @@ static BSTR vb6_fmtNamedDateTime(double serial, BSTR fmt) {
 
 // Fix 162b-extlist: vb6_fmtNamedDateTimeKind 定义在上方 (vb6_fmtNamedDateTime 前)。
 
+// 「这枚格式串里有没有上午/下午记号、它怎么写、在哪个位置」这一问收成一处 (账 #426 第九十八刀)。
+// 运行期那张表认三形: AM/PM (或写成 AMPM) 交两位记号、A/P 交一位记号，大小写跟随串里写的那一种；
+// 串里出现任意一枚就把小时切到 12 小时制，否则 h/hh 是 24 小时制 (语料把「hh:mm:ss」当时间戳用、
+// 把「h:nn AMPM」当上下午用，两种写法都存在，所以这一位必须由记号决定而不是固定某一档)。
+static int vb6_fmtAmPmLenAt(BSTR fmt, int i, int n) {
+    static const wchar_t* const kTokens[] = { L"AM/PM", L"AMPM", L"A/P" };
+    for (int k = 0; k < 3; k++) {
+        int tl = (int)wcslen(kTokens[k]);
+        if (i + tl > n) continue;
+        int ok = 1;
+        for (int j = 0; j < tl; j++)
+            if (towlower(fmt[i + j]) != towlower(kTokens[k][j])) { ok = 0; break; }
+        if (ok) return (k == 2) ? -1 : tl;   // 负数 = A/P 那一形 (只交一位字母)
+    }
+    return 0;
+}
+
+static int vb6_fmtHasAmPm(BSTR fmt) {
+    int n = fmt ? SysStringLen(fmt) : 0;
+    for (int i = 0; i < n; i++)
+        if (vb6_fmtAmPmLenAt(fmt, i, n) != 0) return 1;
+    return 0;
+}
+
 static int vb6_fmtIsDateFormat(BSTR fmt) {
     int n = fmt ? SysStringLen(fmt) : 0;
     if (n <= 0) return 0;
     if (vb6_fmtIsNamedFormat(fmt)) return 0;   // 命名格式走既有分支
+    if (vb6_fmtHasAmPm(fmt)) return 1;   // 上午/下午记号也是日期习惯—— 一枚「A/P」串也得进日期分支 (账 #426)
     int hasY = 0, hasD = 0, hasH = 0, hasM = 0, hasS = 0, hasN = 0;
     for (int i = 0; i < n; i++) {
         switch (towlower(fmt[i])) {
@@ -160,6 +185,18 @@ static void vb6_fmtAppendN(wchar_t* out, size_t cap, size_t* o, int value, int d
     vb6_fmtAppendW(out, cap, o, tmp);
 }
 
+static void vb6_fmtAppendAmPm(wchar_t* out, size_t cap, size_t* o, BSTR fmt, int i, int len, int beforeNoon) {
+    const wchar_t* s = (len < 0) ? (beforeNoon ? L"A" : L"P") : (beforeNoon ? L"AM" : L"PM");
+    wchar_t buf[4];
+    size_t k = 0;
+    if (towlower(fmt[i]) == fmt[i]) {                 // 串里写的是小写 => 交小写记号
+        for (; s[k] && k < 3; k++) buf[k] = (wchar_t)towlower(s[k]);
+        buf[k] = 0;
+        s = buf;
+    }
+    vb6_fmtAppendW(out, cap, o, s);
+}
+
 static BSTR vb6_fmtDateSerial(double serial, BSTR fmt) {
     SYSTEMTIME st;
     if (!VariantTimeToSystemTime(serial, &st)) return vb6_BSTR_FromStr(L"");
@@ -175,6 +212,7 @@ static BSTR vb6_fmtDateSerial(double serial, BSTR fmt) {
     if (month < 1) month = 1; if (month > 12) month = 12;
     if (day < 1) day = 1; if (day > 31) day = 31;
     int dow = st.wDayOfWeek; if (dow < 0 || dow > 6) dow = 0;
+    int use12 = vb6_fmtHasAmPm(fmt);   // 12/24 小时那一问只在这里定一次
 
     wchar_t out[256]; out[0] = 0; size_t o = 0;
     int n = SysStringLen(fmt);
@@ -184,6 +222,13 @@ static BSTR vb6_fmtDateSerial(double serial, BSTR fmt) {
         int j = i; while (j < n && fmt[j] == c) j++;
         int cnt = j - i;
         wchar_t lc = towlower(c);
+        int ampmLen = vb6_fmtAmPmLenAt(fmt, i, n);
+        if (ampmLen != 0) {
+            vb6_fmtAppendAmPm(out, 256, &o, fmt, i, ampmLen, st.wHour < 12);
+            i += (ampmLen < 0) ? 3 : ampmLen;
+            prevHour = 0;
+            continue;
+        }
         switch (lc) {
             case L'y':
                 if (cnt >= 4) vb6_fmtAppendN(out, 256, &o, year, 4);
@@ -204,7 +249,7 @@ static BSTR vb6_fmtDateSerial(double serial, BSTR fmt) {
                 prevHour = 0;
                 break;
             case L'h': {
-                int h = st.wHour % 12; if (h == 0) h = 12;
+                int h = use12 ? ((st.wHour % 12) == 0 ? 12 : st.wHour % 12) : st.wHour;
                 vb6_fmtAppendN(out, 256, &o, h, cnt == 2 ? 2 : 1);
                 prevHour = 1;
                 break;
