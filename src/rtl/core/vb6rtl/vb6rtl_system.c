@@ -48,7 +48,7 @@ BSTR vb6_FormatDateTime(double dateSerial, int32_t namedFormat) {
     // general date) 以前各抄一份 GetDateFormatW，与 Format 家族那两条出口并存 ⇒ **同一枚零头为 0 的日期，
     // 这一家交 `2026/1/5 `(len 9 带一枚尾随空格)、Format 那一家交 `2026/1/5 0:00:00`(len 16)、
     // CStr 那一家交 `2026/1/5`(len 8) —— 三个答案**。现在四问全部改问 vb6rtl_format.c 的那几条出口，
-    // 「general date 什么时候该带时间」也只住在那一条出口里 (引擎本人 = `2026/1/5`，尺 k559_out.txt)。
+    // 「general date 什么时候该带时间」也只住在那一条出口里 = 四入后当日时分秒全零就不给 (尺 k559 + k564)。
     // 病机制本身: 以前 `buf[len-1] = L' '` 是**无条件**做的，而 GetDateFormatW 的返回长度**含结束符**
     // ⇒ 那一句是把结束符改成了空格；只有时间那段才判 fracPart ⇒ 零头为 0 就留下一枚孤儿空格。
     SYSTEMTIME st;
@@ -76,7 +76,7 @@ BSTR vb6_FormatDateTime(double dateSerial, int32_t namedFormat) {
             break;
         case 0: // vbGeneralDate
         default:
-            vb6_fmtLocaleGeneralDate(dateSerial, &st, buf, 256);
+            vb6_fmtLocaleGeneralDate(&st, buf, 256);
             break;
     }
     return SysAllocString(buf);

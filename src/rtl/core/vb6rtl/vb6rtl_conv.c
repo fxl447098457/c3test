@@ -366,7 +366,8 @@ BSTR vb6_CStrDate(double x) {
     // vb6_Format(VT_DATE, NULL) 无条件拼「短 + 空格 + 长」。第一百零一刀 (§B203) 把那条规则
     // 搬进了它该住的地方 —— vb6_fmtLocaleGeneralDate（`!fmt` 那一臂现在问它）⇒ 这里的分叉与
     // 那一份手抄的 GetDateFormatW 一起撤掉，只剩一条路。它原来那条 1e-9 的容差也跟着作废 ——
-    // 引擎本人的闸是**半秒** (.build/k564_out.txt: 500 毫秒不给时间段, 600 毫秒才给)，只住在那条出口里。
+    // 引擎本人的闸是「四入到整秒之后当日时分秒全为零」(两发尺: 500 毫秒不给、600 毫秒才给, 午夜前一毫秒
+    // 连日期一起进位还不给)，只住在那条出口里。
     vb6_VARIANT v; memset(&v, 0, sizeof(v)); v.vt = (vb6_vartype)VT_DATE; v.dblVal = x;
     return vb6_Format(v, NULL, 1, 1);
 }

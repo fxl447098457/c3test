@@ -354,7 +354,7 @@ int32_t vb6_WeekOfYear(int32_t serial, int32_t fdow, int32_t fwoy);
 void vb6_fmtLocaleShortDate(const SYSTEMTIME* st, wchar_t* out, size_t cap);
 void vb6_fmtLocaleLongDate(const SYSTEMTIME* st, wchar_t* out, size_t cap);
 void vb6_fmtLocaleLongTime(const SYSTEMTIME* st, wchar_t* out, size_t cap);
-void vb6_fmtLocaleGeneralDate(double serial, const SYSTEMTIME* st, wchar_t* out, size_t cap);
+void vb6_fmtLocaleGeneralDate(const SYSTEMTIME* st, wchar_t* out, size_t cap);
 double vb6_DateValue(BSTR dateStr);
 double vb6_TimeSerial(int32_t hour, int32_t minute, int32_t second);
 double vb6_TimeValue(BSTR timeStr);

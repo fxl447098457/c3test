@@ -19,14 +19,14 @@
 ' segment is dropped when the fraction of a day rounds to ZERO WHOLE SECONDS, i.e. below half a
 ' second - 50/200/400/499/500 ms answer date-only, 600 ms answers with a time. That is neither
 ' "fraction != 0" (system.c) nor "fraction < 1e-9" (conv.c). B431-07/08/09 pin the band on both
-' sides; B431-07 is the one that goes RED on the pre-knife machine (0.25 s used to print a time).
+' sides, B431-14 the midnight carry-over that sinks both rival rules at once.
 ' B431-12/13 are the blast-radius witnesses: the numeric Format arm and knife 100's ddddd / ttttt
 ' twins must not have been dragged into the shared outlet.
 Option Explicit
 
 Sub Main()
     Dim d0 As Date, d1 As Date
-    Dim q1 As Date, q2 As Date, q3 As Date
+    Dim q1 As Date, q2 As Date, q3 As Date, m1 As Date
     Dim v0 As Variant, v1 As Variant
     Dim g0 As String, s0 As String, l0 As String
     Dim g1 As String, s1 As String, t1 As String
@@ -36,6 +36,7 @@ Sub Main()
     q1 = d0 + 0.25 / 86400
     q2 = d0 + 0.6 / 86400
     q3 = d0 + 1 / 86400 / 1000000000
+    m1 = #1/6/2026# - 0.001 / 86400
     v0 = d0
     v1 = d1
 
@@ -60,6 +61,12 @@ Sub Main()
     Debug.Print "B431-07=" & (FormatDateTime(q1, vbGeneralDate) = s0) & "/" & (InStr(FormatDateTime(q1, vbGeneralDate), ":") = 0)
     Debug.Print "B431-08=" & (InStr(FormatDateTime(q2, vbGeneralDate), ":") > 0) & "/" & (FormatDateTime(q2, vbGeneralDate) = s0 & " " & FormatDateTime(q2, vbLongTime))
     Debug.Print "B431-09=" & (FormatDateTime(q3, vbGeneralDate) = s0) & "/" & (Format(q3, "General Date") = s0)
+    ' 14: the sharpest cell of the engine's rule - a fraction ONE MILLISECOND short of midnight rounds UP
+    '        across midnight, so the rounded time-of-day is zero: the whole segment is dropped AND the date
+    '        carries to 1/6. That one row sinks both rival rules (system.c's != 0 prints a time here, and a
+    '        sub-second tolerance prints one too). 15 is the same rounding from the rendering side.
+    Debug.Print "B431-14=" & (FormatDateTime(m1, vbGeneralDate) = FormatDateTime(#1/6/2026#, vbShortDate)) & "/" & (InStr(FormatDateTime(m1, vbGeneralDate), ":") = 0)
+    Debug.Print "B431-15=" & (FormatDateTime(q2, vbLongTime) <> FormatDateTime(d0, vbLongTime)) & "/" & (FormatDateTime(q3, vbLongTime) = FormatDateTime(d0, vbLongTime))
     ' 10/11: the other named arms are still their own answers (long date is not general date,
     '        short date never carries a time, long time is not a date)
     Debug.Print "B431-10=" & (l0 <> g0) & "/" & (InStr(l0, ":") = 0)

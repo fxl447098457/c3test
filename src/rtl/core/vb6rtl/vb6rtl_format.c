@@ -97,21 +97,22 @@ void vb6_fmtLocaleLongTime(const SYSTEMTIME* st, wchar_t* out, size_t cap) {
     GetTimeFormatW(LOCALE_USER_DEFAULT, 0, st, NULL, out, (int)cap);
 }
 // 「general date 这一档到底给不给时间」这一问只住这里 (账 #429 ①, 第一百零一刀)。
-// 引擎本人的读数 (发问表 .build/k559_olefdt3.c → k559_out.txt; 逐点定带 .build/k564_oleband.c → k564_out.txt):
-// 零头为 0 ⇒ 只给短日期、**不带尾随空格** (`2026/1/5` len=8)；带时间的答案是 `短日期 + 空格 + 长时间` (len=17)。
-// 那条闸不在 0 上, 也不在任何浮点 epsilon 上, 而是在**半秒**上: 1e-11 / 1e-10 / 1e-9 / 1e-8 日 与
-// 50 / 200 / 400 / 499 / 500 毫秒全只给日期, 600 毫秒 (0.6 秒) 起才给时间。同一枚 0.5 秒的零头在两发探针里
-// 一个可表示位之差分别落在两侧 (一侧带一侧不带) ⇒ 分界正是 0.5 秒。Fix 175 留在 conv.c 里那条 1e-9 因此作废:
-// 它在 500 毫秒那一档答「带时间」, 而引擎答「只给日期」。
-// 渲染那一段不用另改: SYSTEMTIME 是 VariantTimeToSystemTime 交回的, 它自己就**四入到整秒**
-// ⇒ 实测 0.75 秒这一档本仓与引擎同答 `0:00:01` (两台同读, 尺 .build/k568_run_x64.txt / _x86.txt)。
-// 所以本出口与引擎之间没有亚秒那一格: 判「给不给」与渲染「给什么」吃的是同一个四入。
-void vb6_fmtLocaleGeneralDate(double serial, const SYSTEMTIME* st, wchar_t* out, size_t cap) {
-    double frac = serial - floor(serial);
+// 引擎本人的读数 (发问表 .build/k559_olefdt3.c -> k559_out.txt 二十行; 逐点定带 .build/k564_oleband.c ->
+// k564_out.txt 十九行 —— **两发合起来**才是这一条, 单看任何一发都会读成别的规则):
+//   零头 0 / 1e-11 / 1e-10 / 1e-9 / 1e-8 日, 与 50 / 60 / 70 / 80 / 86.4 / 100 / 150 / 200 / 300 / 400 /
+//   499 / 500 毫秒 => 全只给短日期 (`2026/1/5` len=8, **不带尾随空格**)
+//   600 毫秒 => `0:00:01`; 59.4 秒 => `0:00:59`; 59.6 秒 => `0:01:00`; 29.9 秒 => `0:00:30`
+//                          => 时间那一段是**四入到整秒**交回的 (账 #419 那条「截断」是另一问, 与这里无关)
+//   午夜前一毫秒 (46028 - 1 毫秒) => `2026/1/6` len=8 => 四入**越过午夜**那一档整段不给、连日期一起进位
+// => 那条闸既不在 0 上、也不是任何浮点容差, 而是「四入之后的当日时分秒全为零就不给时间段」: 判「给不给」
+//   与渲染「给什么」吃同一个四入, 而那枚 SYSTEMTIME 已由 VariantTimeToSystemTime 四入过 => 这一问连序列号
+//   本体都不需要, 出口的形参跟着少一条。
+// 两条旧答案一起作废: Fix 175 留在 conv.c 的 1e-9 在 500 毫秒那一档答带时间; vb6rtl_system.c 那条
+//   「零头 != 0」在午夜前一毫秒那一档答带时间 —— 引擎两处都答「只给日期」。
+void vb6_fmtLocaleGeneralDate(const SYSTEMTIME* st, wchar_t* out, size_t cap) {
     size_t n;
-    if (frac < 0) frac = -frac;
     vb6_fmtLocaleShortDate(st, out, cap);
-    if (frac < 0.5 / 86400.0) return;
+    if (st->wHour == 0 && st->wMinute == 0 && st->wSecond == 0) return;
     n = wcslen(out);
     if (n + 2 > cap) return;
     out[n] = L' ';
@@ -132,8 +133,8 @@ static BSTR vb6_fmtNamedDateTime(double serial, BSTR fmt) {
     wchar_t buf[128];
     buf[0] = 0;
     switch (kind) {
-        case 1:  // general date = 短日期，零头不为 0 才加「 长时间」(第一百零一刀: 改问那条出口)
-            vb6_fmtLocaleGeneralDate(serial, &st, buf, 128);
+        case 1:  // general date = 短日期，四入后当日时分秒全零就不加时间段 (第一百零一刀)
+            vb6_fmtLocaleGeneralDate(&st, buf, 128);
             break;
         case 2: {  // medium date —— locale 相关: zh-CN = yy-MM-dd (参考图 "26-12-14"),
                    // 西文 = d-mmm-yy ("28-Dec-26")。按用户主语言分流。

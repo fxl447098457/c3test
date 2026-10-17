@@ -52,12 +52,13 @@ foreach ($k in $files.Keys) {
 $FM = $T['fmt']; $EX = $T['extr']; $SY = $T['sys']; $CV = $T['conv']; $HD = $T['hdr']; $RT = $T['run']; $FX = $T['fx']
 
 $genCall = 'vb6_fmtLocaleGeneralDate('
-$defShape = 'void vb6_fmtLocaleGeneralDate(double serial, const SYSTEMTIME* st, wchar_t* out, size_t cap) {'
+$defShape = 'void vb6_fmtLocaleGeneralDate(const SYSTEMTIME* st, wchar_t* out, size_t cap) {'
 
 # ---- R1 那条闸只住一条出口, 而且住的是量出来的那一个数 ----
 Want 'R1 outlet defined' (C $defShape $FM) 1 'general date 那条出口恰好定义一处'
-Want 'R1 half-second gate' (C ('if (frac < 0.5 ' + [char]47 + ' 86400.0) return;') $FM) 1 '闸 = 半秒 (引擎本人, 尺 k564_out.txt)'
-Want 'R1 no epsilon in fmt' (C 'frac < 1e-9' $FM) 0 'Fix 175 那条 1e-9 的**代码形状**不许回到 format.c'
+Want 'R1 rounded-zero gate' (C 'if (st->wHour == 0 && st->wMinute == 0 && st->wSecond == 0) return;' $FM) 1 '闸 = 四入之后当日时分秒全为零 (尺 k559_out.txt 二十行 + k564_out.txt 十九行, 两发合起来)'
+Want 'R1 no epsilon in fmt' (C 'frac <' $FM) 0 '那条出口不再吃序列号本体: 任何浮点容差的形状都不许留'
+Want 'R1 serial gone from outlet' (C 'vb6_fmtLocaleGeneralDate(double' ($FM + $EX + $SY + $HD)) 0 '这一问只要四入后的那枚 SYSTEMTIME, 形参不许再多一条'
 Want 'R1 no epsilon in conv' (C 'frac < 1e-9' $CV) 0 'conv.c 里那条容差的代码形状不许留着 (它已交给出口)'
 Want 'R1 no bare zero test' (C 'fracPart != 0.0' $SY) 0 'system.c 不许再自己判「零头是否为 0」'
 Want 'R1 gate not duplicated' ((C $genCall $SY) + (C $genCall $EX) + (C $genCall $CV)) 2 'system.c 与 extract.inc 各问一次; conv.c 一律不许自己拼 (它只转调 vb6_Format)'
@@ -70,7 +71,7 @@ foreach ($n in @('ShortDate', 'LongDate', 'LongTime', 'GeneralDate')) {
 Want 'R2 outlets not static' (C 'static void vb6_fmtLocale' $FM) 0 '四条出口全部不再是 file-static (它们有跨文件的读者)'
 
 # ---- R3 system.c 的四档全部改问出口, 手抄的 Get*FormatW 撤干净 ----
-Want 'R3 general asks outlet' (C ('vb6_fmtLocaleGeneralDate(dateSerial, &st, buf, 256)') $SY) 1 'vbGeneralDate 那一档问出口'
+Want 'R3 general asks outlet' (C ('vb6_fmtLocaleGeneralDate(&st, buf, 256)') $SY) 1 'vbGeneralDate 那一档问出口'
 Want 'R3 short asks outlet' (C ('vb6_fmtLocaleShortDate(&st, buf, 256)') $SY) 1 'vbShortDate 那一档问出口'
 Want 'R3 long asks outlet' (C ('vb6_fmtLocaleLongDate(&st, buf, 256)') $SY) 1 'vbLongDate 那一档问出口'
 Want 'R3 longtime asks outlet' (C ('vb6_fmtLocaleLongTime(&st, buf, 256)') $SY) 1 'vbLongTime 那一档问出口'
@@ -89,8 +90,8 @@ Want 'R5 b430 cells' (C ('Test-Vbp ' + $SQ + 'b431_general_date') $RT) 2 '两台
 Want 'R5 x86 cell shape' (C ('Test-Vbp ' + $SQ + 'b431_general_date_x86' + $SQ) $RT) 1 'x86 那一行恰好一处'
 Want 'R5 stray arch backslash' (C ('-Arch ' + $DQ + 'x86' + $DQ + [char]92 + [char]92) $RT) 0 '不许有带反斜杠收尾的 -Arch'
 Want 'R5 expectation table' (C '$b431Expected = @(' $RT) 1 '期望表恰好一张'
-Want 'R5 expectation rows' (C ('"B431-') $RT) 14 '期望表里十三针加一枚证人, 一行不许少 (删掉一行 = 那一针静默不查)'
-Want 'R5 fixture needles' (C ('Debug.Print ' + $DQ + 'B431-') $FX) 14 '十三针加一枚 DONE 证人都在'
+Want 'R5 expectation rows' (C ('"B431-') $RT) 16 '期望表里十五针加一枚证人, 一行不许少 (删掉一行 = 那一针静默不查)'
+Want 'R5 fixture needles' (C ('Debug.Print ' + $DQ + 'B431-') $FX) 16 '十五针加一枚 DONE 证人都在'
 Want 'R5 fixture witness' (C ('Debug.Print ' + $DQ + 'B431-DONE' + $DQ) $FX) 1 '跑到底的那枚证人'
 Want 'R5 sentinel function' (C 'function Test-GeneralDateOutlets ' $RT) 1 '本哨兵的函数恰好定义一处'
 Want 'R5 sentinel called' (C '    Test-GeneralDateOutlets' $RT) 1 '定义了必须被调用'
@@ -101,7 +102,7 @@ if ($fail.Count -gt 0) {
     Write-Output ('FAIL check_general_date_outlets: ' + $fail.Count + ' rule(s) broken')
     exit 1
 }
-Write-Output ('PASS check_general_date_outlets: gate=' + (C ('if (frac < 0.5 ' + [char]47 + ' 86400.0) return;') $FM) +
+Write-Output ('PASS check_general_date_outlets: gate=' + (C 'if (st->wHour == 0 && st->wMinute == 0 && st->wSecond == 0) return;' $FM) +
     ' outlets=' + (C $genCall $FM) + '/' + (C $genCall $EX) + '/' + (C $genCall $SY) +
     ' hand=' + (C 'GetDateFormatW(LOCALE_USER_DEFAULT' $SY) + '/' + (C 'GetDateFormatW(LOCALE_USER_DEFAULT' $CV) +
     ' delegates=' + (C 'return vb6_Format(v, NULL, 1, 1);' $CV) +

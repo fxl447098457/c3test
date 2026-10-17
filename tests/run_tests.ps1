@@ -7463,8 +7463,10 @@ if ($Category -in @("all", "run", "vbp")) {
     #   => 那一句把结束符改成了空格; 只有拼时间那一段才判零头。conv.c 又另抄一份 1e-9 容差 (Fix 175) 住在第二家。
     # 判据口径: 本机 zh-CN、CI en-US 交回同一份 .out (第一百/九十九刀两台逐字节验过这条纪律), 所以这里只钉关系式 ——
     #   尾随空格、冒号有无、长度、以及「三户交同一枚串」与「= 短日期 + 一枚空格 + 长时间」; 一枚日期拼写都不钉。
-    # B431-07/08/09 钉引擎本人那条闸 (尺 .build/k564_oleband.c -> k564_out.txt): 零头四入到整秒为 0 就不给时间段 ——
-    #   50/200/400/499/500 毫秒只给日期, 600 毫秒起才给。既不是「零头 != 0」(system.c 那条) 也不是 1e-9 (conv.c 那条)。
+    # B431-07/08/09/14/15 钉引擎本人那条闸 (尺 .build/k559_out.txt 二十行 + k564_out.txt 十九行, **两发合起来**):
+    #   零头四入到整秒之后**当日时分秒全为零**就不给时间段 —— 50/200/400/499/500 毫秒只给日期, 600 毫秒起才给;
+    #   而**午夜前一毫秒**交的是次日短日期且整段不给 (四入越过午夜) ⇒ 「零头 != 0」(system.c 那条) 与任何亚秒容差
+    #   (conv.c 的 1e-9) 两条一起判死。渲染那一段也是四入的 (VariantTimeToSystemTime 已四入) ⇒ 判与渲染同一个问。
     # B431-12/13 是反面的爆炸半径证人: 数值那一臂 (Format(1234, "0")) 与第一百刀的 ddddd / ttttt 双生不许被牵连。
     $b431Expected = @(
         "B431-01=True/True",
@@ -7480,6 +7482,8 @@ if ($Category -in @("all", "run", "vbp")) {
         "B431-11=True/True/True",
         "B431-12=True/True/True",
         "B431-13=True/True",
+        "B431-14=True/True",
+        "B431-15=True/True",
         "B431-DONE")
     Test-Vbp 'b431_general_date' "$Tests\b431\B431.vbp" $b431Expected
     Test-Vbp 'b431_general_date_x86' "$Tests\b431\B431.vbp" $b431Expected -Arch "x86"
