@@ -11,7 +11,9 @@
 #   S2  那份 round() 也只许有一处: `(int64_t)round(` 在 src/rtl 里恰好 1 次，且住在 vb6_FltToLng 体内
 #       (改前 vb6_CInt / vb6_CLng 各抄了一遍 —— 那正是"两个答案"的另一半)
 #   S3  显式转换与隐式赋值同源: vb6_CInt / vb6_CLng 的体内必须调 vb6_FltToLng (两处)
-#   S4  发码侧浮点档齐: narrowCheckAssign 里那一道浮点分支必须认 Single / Double / Currency 三档
+#   S4  发码侧浮点档齐: narrowCheckAssign 里那一道取整分支必须认 Single / Double / Currency / Date 四档
+#       (第一百零二刀把 Date 接进来: Date 在 C 侧就是 double 的 OLE 序列号，交给窄整型目标时
+#        与浮点同一条命 —— 少它一档就是 `r = DateValue(...)` 在调用边界上截断, 账 #431 §B205)
 #   S5  旧形不回潮: 套检查的两条发射路径写死 —— 浮点那条必须裹 helper，整数那条必须不裹；
 #       出现第三种 `std::string(fn) + ...` 就是又开了一条不经 helper 的路
 #   S6  helper 只住一处: vb6_FltToLng( 在 src/backend 里只许出现在 narrowCheckAssign 那一处，
@@ -122,9 +124,9 @@ foreach ($fn in @("vb6_CInt", "vb6_CLng")) {
 # ---- S4: 发码侧浮点档齐 ----
 # 三道档必须一起在册: cgenIntBits(Single) 答 32，Long 目标也 32 —— 少了 Single 那一档，
 # `l = 某Single` 会被下面那句"装得下, 不套"放过，连截断都省了 (实测 F2L05 那一形)。
-$mGate = [regex]::Match($typeText, 'if\s*\(\s*vt == Vb6Type::Single\s*\|\|\s*vt == Vb6Type::Double\s*\|\|\s*vt == Vb6Type::Currency\s*\)')
+$mGate = [regex]::Match($typeText, 'if\s*\(\s*vt == Vb6Type::Single\s*\|\|\s*vt == Vb6Type::Double\s*\|\|\s*vt == Vb6Type::Currency\s*\|\|\s*vt == Vb6Type::Date\s*\)')
 if (-not $mGate.Success) {
-    $bad += "S4 narrowCheckAssign's float gate no longer names all three of Single / Double / Currency"
+    $bad += "S4 narrowCheckAssign's rounding gate no longer names all four of Single / Double / Currency / Date"
 }
 
 # ---- S5: 两条发射路径写死 ----
@@ -212,4 +214,4 @@ if ($bad.Count -ne 0) {
     foreach ($b in $bad) { Write-Host ("FAIL " + $b) -ForegroundColor Red }
     exit 1
 }
-Write-Host "PASS float_to_int_round (S1 one helper, S2 one round(), S3 CLng/CInt same source, S4 three float types gated, S5 two emission paths, S6 census clean, S7 one target-type answer, S8 no identifier-only gate)"
+Write-Host "PASS float_to_int_round (S1 one helper, S2 one round(), S3 CLng/CInt same source, S4 four float-ish types gated, S5 two emission paths, S6 census clean, S7 one target-type answer, S8 no identifier-only gate)"

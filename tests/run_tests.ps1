@@ -1650,6 +1650,20 @@ function Test-GeneralDateOutlets {
         $out | Select-Object -First 12 | ForEach-Object { Write-Host "  $_" }
     }
 }
+
+function Test-DateSerialTag {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] dateserial_tag ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\check_dateserial_tag.ps1" 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        $out | Select-Object -First 12 | ForEach-Object { Write-Host "  $_" }
+    }
+}
 # === 编译冒烟测试 (编译+链接, 不运行生成物) ===
 function Test-Run {
     param(
@@ -7489,6 +7503,42 @@ if ($Category -in @("all", "run", "vbp")) {
     Test-Vbp 'b431_general_date_x86' "$Tests\b431\B431.vbp" $b431Expected -Arch "x86"
 
 
+    # 账 #305 §B205 第一百零二刀 (#431): DateSerial 的返回档 = 语义表那一格说了算。
+    # 改前那张表里九枚日期构造函数只有它写 Vb6Type::Double ⇒ 进槽贴 VT_R8，六档与引擎相反
+    # (VarType 5 / TypeName "Double" / IsDate False / IsNumeric True / CStr [46027] / Len 5，
+    # 尺 .build/k607_run_x64.txt vs 同机 oracle .build/k607_oracle_out.txt)。
+    # 针面全关系式: 标签与数值钉死、串面只与同一出口的另一枚日期比 (两台 .out 逐字节相同，
+    # 尺 .build/k620_x64_run.txt / k620_x86_run.txt，md5 7550f32d...)；B432-05..10/14/16 是证人
+    # (那些档改前就与引擎同答，换档不许把它们弄坏)，B432-17/18 各钉一格: 17 = Date 进窄整型目标
+    # 要过同一份取整出口 (BASE 在 CDate 那一形上就是红的)，18 = 槽里那枚日期交给无格式串的
+    # Format 之后与第一百零一刀的 general date 出口接上 (改前交 [46027]、改后交 [2026/1/5])；
+    # 18 的第二格是**故意钉下的错答案** (label witness): As Date 局部直接交给 Format 仍走数值臂，
+    # 因为首参由新账 #430 那张手抄装箱表决定 ⇒ 谁修 #430 谁回来把它翻成 True。
+    # (尺 .build/k636_charts_diff.txt / k639_b432_newemit.txt)。
+    $b432Expected = @(
+        "B432-01=True/True/True/True",
+        "B432-02=True/True",
+        "B432-03=True/True",
+        "B432-04=True/True",
+        "B432-05=True/True",
+        "B432-06=True/True",
+        "B432-07=True/True",
+        "B432-08=True/True",
+        "B432-09=True/True",
+        "B432-10=True/True/True/True",
+        "B432-11=True/True",
+        "B432-12=True/True/True",
+        "B432-13=True/True",
+        "B432-14=True/True/True/True",
+        "B432-15=True/True",
+        "B432-16=True/True",
+        "B432-17=True/True",
+        "B432-18=True/False",
+        "B432-DONE")
+    Test-Vbp 'b432_dateserial_tag' "$Tests\b432\B432.vbp" $b432Expected
+    Test-Vbp 'b432_dateserial_tag_x86' "$Tests\b432\B432.vbp" $b432Expected -Arch "x86"
+
+
     # 账 #305 SB186 第二头: VB 客户那一头　「口径」的唯一读数面　—— 探针是 C 客户, 它只能读 hr;
     # 「服务端自己那条错折回原号」还是「一律 429」这一问, 只有真的 VB 客户点得到。
     # BC1 = 抛错的那枚: 客户活着(rc=0)且 On Error 拿到 123(不是 429, 也不是 exit(123)), 对象仍是 Nothing;
@@ -7751,6 +7801,7 @@ if ($Category -in @("all", "compile")) {
     Test-EmittedDeclared
     Test-FormatDateTokens
     Test-GeneralDateOutlets
+    Test-DateSerialTag
 
     Write-Host ""
 
