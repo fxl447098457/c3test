@@ -1,4 +1,4 @@
-﻿// cgen_expr_call_arg_emit.inc - visit(IndexOrCallExpr&) 函数体片段：位置实参发射（一）—— UDT 打包、Declare ANSI 与 ByRef 取地址（位于实参 for 循环内）
+// cgen_expr_call_arg_emit.inc - visit(IndexOrCallExpr&) 函数体片段：位置实参发射（一）—— UDT 打包、Declare ANSI 与 ByRef 取地址（位于实参 for 循环内）
 // 由 src/backend/expr/cgen_expr_call.cpp 拆出（2026-09-17），在函数体内被 #include，非独立编译单元。
 // 内容 = 原文件第 1771~2136 行，逐行未改。
 
@@ -107,6 +107,25 @@
             }
         }
         std::string argVal = std::move(lastExpr_);
+        /* Fix 296 / 4b: 实参位上的 Extender 成员读也走实例入口 (CoolBar.ctl
+           `RaiseEvent HeightChanged` 发成 `onHeightChanged(h, Extender.Height)`,
+           实测 ComCtlsDemo 1 处)。换道放在**捕获的那一刻** —— boxIntoLateSlot /
+           VariantToString / wrapToBSTR / boxToVariant 那一层包装全在下面, 于是包装套在
+           读入口**外面**, 与 4a "外层 vb6_ChkInt 照旧套着" 同款。 */
+        argVal = extenderMemberReadExpr(argVal);
+        // 账 #305 §B187 第四腿 实参那一站: ByVal <泛对象形参> (VB 写 `As Object`, C 侧是
+        // void* 里该装 IDispatch*) 收到工程内实例时交**借用型包装器** —— 与 Set 那一站同一句
+        // (唯一发码处 boxIntoLateSlot)。为什么这一站单独欠着: 装箱腿只管 `Set` 语句那一站，
+        // 而 `argLate = TakeIt(o)` 把 `Dim o As New B89Good` 直接递进形参槽，发码现场是
+        //     vb6_B89Driver_TakeIt((void*)me, o)          (探针 .build/k89_arg 实测)
+        // 被调方 `p.Twice(21)` 落进 vb6_ComCall(p, ...) → 判否 → result=42000 (早绑定那半 42
+        // 一直是对的，红只有晚绑定那一半)。ByRef 那一档**不在本腿**: `ByRef p As Object` 的
+        // C 侧是 void**，装箱必须先落一枚临时，被调方写回就丢 (VB6 交的是写回调用方那一格)
+        // —— 那需要一座桥，先把暴露面量出来再单开一刀，别在这里顺手改坏。
+        if (i < calleeParams.size() && calleeParams[i].isByVal
+            && !cParamLateSlotType(calleeParams[i]).empty()) {
+            argVal = boxIntoLateSlot(argVal, node.positional[i].get());
+        }
 
         // Fix 265: 宿主伪**结构体全局** (`UserControl.Extender` / `UserControl.Ambient`,
         // RTL 侧是结构体**值**而非指针) 交付给**指针形参** (`As Object` / `VB.Control`
@@ -1066,6 +1085,13 @@
                         }
                         argVal = "&" + vref;
                     } else {
+                        // 账 #305 §B187 第五腿: ByRef 泛对象形参那一座桥 —— 判据与两句发码
+                        // 全在 bridgeByRefLateSlotArg 一处 (为什么这里得按**运行期的值**问、
+                        // 为什么装箱与剥回都只许动调用方自己那一格, 见定义处注释)。
+                        if (i < calleeParams.size() && i < node.positional.size()) {
+                            bridgeByRefLateSlotArg(calleeParams[i], argVal,
+                                                   node.positional[i].get());
+                        }
                         argVal = "&" + argVal;
                     }
                 } else {

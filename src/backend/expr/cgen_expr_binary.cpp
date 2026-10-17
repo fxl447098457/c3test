@@ -412,6 +412,13 @@ void CCodeGen::visit(BinaryExpr& node) {
     //   3. 变体 vs 其它标量 → vb6_VarCmpLongEq(取值契形参)
     // 普通对象/指针 Is (void* <=> NULL) 不满足 varLike, 保持原样, 不受影响.
     if (node.op == BinaryOp::Is) {
+        // 账 #305 §B187 装箱腿的读者③: `Is` 落的是 C `==`, 两侧得在**同一档**才答得出
+        // 对象同一性。泛对象槽里现在装的可能是包装器 (vb6_ComObject*, 见 Set 那一站的
+        // 装箱腿 / Fix 179a) 而 typed 变量那侧是裸实例 —— 不剥就是 `If o Is f` 恒假
+        // (VB6 交真)。判据问 varHoldsComWrapper (唯一那张登记表), 只认裸变量名那一形,
+        // 两侧各自独立剥 (都装箱时剥回同一裸实例, 照样相等)。
+        if (varHoldsComWrapper(left))  left  = unwrapComVarExpr(left);
+        if (varHoldsComWrapper(right)) right = unwrapComVarExpr(right);
         auto varLike158n = [&](const std::string& c, Expr* ast) -> bool {
             // Fix <vbeclipse> rev6: `Property Get Foo() As <工程类>` 的返回变量
             // (**vb6_cls_X\* 类型**) 不是 Variant, 尽管 cExprIsVariant /

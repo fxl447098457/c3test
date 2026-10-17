@@ -99,3 +99,94 @@ function Test-DispatchInvoke {
         Write-Host ("        " + $flat.Trim()) -ForegroundColor DarkGray
     }
 }
+
+# ------------------------------------------------------------
+# 账 #305 §B188 (第九十刀的判据升格, 任务 #414): 「出厂那一腿的尾巴拆完了没有」是**运行期**的事实,
+# 发码形状针只能钉住「尾巴在不在必经路径上」。`tests\tools\leak_probe.c` 就是不查注册表的进程内客户:
+# 对一枚 terminate 会抛错的类与一枚干净的类各造各放 N 枚, 量这一段窗口里本进程 commit 的涨量。
+# 判据吃的是工具自己给的 `verdict=OK` (容差一枚页) 而不是字节数 —— 改前那枚漏在 N=5000 上是 175 KB
+# (x64) / 85 KB (x86), 差三个数量级, 所以既红得下来又不会被 CI 的堆噪声误红。
+# ------------------------------------------------------------
+function Get-LeakProbeExe {
+    param([string]$Arch = "")
+    $src = Join-Path $Tests "tools\leak_probe.c"
+    $name = "leak_probe.exe"
+    if ($Arch -eq "x86") { $name = "leak_probe_x86.exe" }
+    $exe = Join-Path $OutDir $name
+    if ((Test-Path $exe) -and ((Get-Item $src).LastWriteTime -le (Get-Item $exe).LastWriteTime)) { return $exe }
+    $prev = (Get-Location).Path
+    Set-Location $OutDir
+    if ($Arch -eq "x86") {
+        # LIB 顺序坑 (同 Get-DispProbeExe): $env:LIB 是 x64 在前 ⇒ 临时换掉, 否则 LNK4272
+        $cl = Join-Path $msvc.BinX86 "cl.exe"
+        $savedLib = $env:LIB
+        $env:LIB = $msvc.LibX86
+        & $cl /nologo /W3 /O1 /utf-8 $src /Fe:$exe /link ole32.lib oleaut32.lib psapi.lib *> $null
+        $env:LIB = $savedLib
+    } else {
+        & cl /nologo /W3 /O1 /utf-8 $src /Fe:$exe /link ole32.lib oleaut32.lib psapi.lib *> $null
+    }
+    Set-Location $prev
+    if (-not (Test-Path $exe)) { return $null }
+    return $exe
+}
+
+function Test-InstanceLeak {
+    param(
+        [string]$Name,
+        [string]$VbpFile,
+        [string]$DllName,
+        [string]$RaisingClsid,     # 体里会抛错的类: 本刀的主角
+        [string]$CleanClsid,       # 出厂干净的类: 反面证人 (它必须一直 OK, 否则读数不是本刀的形状)
+        [long]$Cycles = 5000,
+        [string[]]$Needles,
+        [string[]]$Absent = @(),
+        [string]$Arch = ""
+    )
+    if (-not (Enter-VbpShard)) { return }
+    $script:total++
+    Write-Host -NoNewline "  [LEAK] $Name ... "
+
+    $c3args = @($VbpFile, "--output-dir", $OutDir)
+    if ($Arch) { $c3args = @($VbpFile, "--arch", $Arch, "--output-dir", $OutDir) }
+    $out = & $C3 @c3args 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        $script:fail++
+        Write-Host "FAIL (compile)" -ForegroundColor Red
+        if ($Verbose) { Write-Host (($out | Out-String) -replace '\s+', ' ') }
+        return
+    }
+    $dllPath = Join-Path $OutDir "$DllName.dll"
+    if (-not (Test-Path $dllPath)) {
+        $script:fail++
+        Write-Host "FAIL (no dll)" -ForegroundColor Red
+        return
+    }
+    $probe = Get-LeakProbeExe $Arch
+    if (-not $probe) {
+        $script:fail++
+        Write-Host "FAIL (no probe)" -ForegroundColor Red
+        return
+    }
+    $text = ((& $probe $dllPath $RaisingClsid $CleanClsid $Cycles) | Out-String)
+    if ($LASTEXITCODE -ne 0) {
+        $script:fail++
+        Write-Host "FAIL (probe exit=$LASTEXITCODE)" -ForegroundColor Red
+        Write-Host (($text | Out-String) -replace '\s+', ' ') -ForegroundColor DarkGray
+        return
+    }
+    $flat = $text -replace '\s+', ' '
+    $detail = @()
+    foreach ($n in $Needles) { if (-not $flat.Contains($n)) { $detail += "missing: $n" } }
+    foreach ($x in $Absent)  { if ($flat.Contains($x))     { $detail += "unexpected: $x" } }
+    if ($detail.Count -eq 0) {
+        $script:pass++
+        Write-Host "PASS (way-out tail released, both classes)" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        if ($Verbose) { foreach ($d in $detail) { Write-Host "        $d" -ForegroundColor DarkGray } }
+        else { Write-Host ("        " + ($detail -join '; ')) -ForegroundColor DarkGray }
+        Write-Host ("        " + $flat.Trim()) -ForegroundColor DarkGray
+    }
+}

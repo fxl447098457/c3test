@@ -46,21 +46,30 @@ void CCodeGen::emitClassFactory(Module& module) {
     c_.emitLine("me->__comObj = NULL;  /* P6.6.3: no COM wrapper yet */");
     // Fix <vbeclipse> rev30: 把本实例登记进 RTL 的「裸工程类实例 → coclass 描述」表。
     //
-    // 为什么必须有这一步 (play78 --arch x86, 探针逐级实测):
+    // 这张表**今天还没有读者** (账 #305 §B187 读数 B/G, 2026-09/10 两次普查都是 0 枚),
+    // 所以下面那段"为什么必须有这一步"写的是一条**还没兑现的前提**, 不是既成事实:
     //   晚绑定调用点传进来的是**裸 `vb6_cls_X*`**, 首字段 `__comObj` 恒 NULL ⇒ 没有
     //   真 vtable ⇒ `vb6_ComIsDispatchable` 判否 ⇒ `vb6_getDispid` 返 DISPID_UNKNOWN
-    //   ⇒ `vb6_ComCall` 的返回值永远是 **VT_EMPTY**。
-    //   实证症状: `ucFolder.ContainsView` → `vb6_ComCall(Tabs实例, L"Contains", …)`
-    //   拿到 vt=0 ⇒ `List.Contains` 恒 0 ⇒ `ucPerspective.ShowView` 遍历 5 个 folder
-    //   全部 miss (探针 `PACT … ContainsView=0` ×5) ⇒ 没有 folder 被激活
-    //   ⇒ 停靠面板全空。
+    //   ⇒ `vb6_ComCall` 的返回值永远是 **VT_EMPTY** —— 这一段实测成立;
+    //   但"登记之后晚绑定就能答"不成立, 因为没人来查这张表 (实证: `.build/k81_run.bat`
+    //   那台 EXE 夹具里 `Set v = o` 发成裸指针赋值、`v.Twice(21)` 至今空答)。
+    // 订正一条旧说法: 先前记的"EXE 里没有 CoClass 块 ⇒ `_d` 恒 NULL ⇒ 工程内实例没进表"
+    // 是**错的** —— EXE 也链一张完整 coclass 表 (`com_entry.c`, ExeComBridge 01), 收集判据
+    // 是类的 Instancing (`cgen_util_dllentry_collect.inc`), 与有没有手写 CoClass 块无关。
     //
-    // 登记放在**工厂**里而不是别处: 每个实例必经此处, 零额外成本; 而且 desc 按类
-    // 模块名查 (`vb6_FindCoClassDesc("<模块名>")`), 不需要在类工厂里再存一份 desc。
-    // 未进 coclass 表的类 (无 Public 成员等) 查不到 → 传 NULL → RTL 那边退化成
-    // 改动前行为, 不会更糟。
+    // 2026-10-15 口径 (账 #305 §B187 第二格, 用户拍定): 不给"所有工程内类默认建 COM 元数据",
+    // 而是**按工程类型分档** —— 只有 ActiveX 那一档 (`Type=DLL` / `Type=Control`, 后端读
+    // `isDll_`, 与 `driver_compile.cpp` 里置位的那两条同一个口径) 才喂这张表; 标准 EXE /
+    // OLE Exe 不付这份每实例一格的代价, 于是那条「裸实例 → desc」的读者接上之后也只服务
+    // ActiveX 工程。非 ActiveX 撤掉的是**登记腿**, 类结构体首字段 `__comObj` 照旧无条件初始化。
+    // 登记放在**工厂**里而不是别处: 每个实例必经此处; 而且 desc 按类模块名查
+    // (`vb6_FindCoClassDesc("<模块名>")`), 不需要在类工厂里再存一份 desc。
+    // 未进 coclass 表的类 (Instancing 不是 MultiUse/SingleUse、无 Public 成员等) 查不到
+    // → 传 NULL → 不登记。
+    if (isDll_) {
     c_.emitLine("{ const vb6_CoClassDesc* _d = vb6_FindCoClassDesc(\"" + cIdent(module.moduleName) + "\");");
     c_.emitLine("  if (_d) vb6_RegisterProjectClassInstance((void*)me, _d);  /* Fix <vbeclipse> rev30 */ }");
+    }
     emitIfaceNewInit(module);  // tB Interface 契约 (B04): me->__iv_<I>.vt = &vb6_ivtbl_<I>_for_<C>
     emitClassVirtNewInit(module);  // tB Inherits (B08d): me->__cvtbl = &vb6_cvtbl_<本类>_impl
 
@@ -206,20 +215,37 @@ void CCodeGen::emitClassFactory(Module& module) {
     }
 
     // _Destroy: 终止+释放
-    c_.emitBlank();
-    c_.emitLine("void " + clsStruct + "_Destroy(" + clsStruct + "* me) {");
-    c_.indent();
-    c_.emitLine("if (!me) return;");
-
-    // 检查是否有 Class_Terminate 方法
+    // 账 #305 §B188 (第九十刀): terminate 那一步跑在自带帧里(`vb6_RunVbProtected`), 抛出来的号
+    // 先接住, 等下面那三截尾巴(字段 BSTR / 数组字段 / vb6_Free(me))走完再交回外层帧。以前的做法
+    // 是把整趟 destroyFunc 包进 ComObj_Release 的帧里(第八十刀), 那一趟 longjmp 会连尾巴一起跳掉:
+    // 实测每枚抛错的出厂漏一份实例资源(x64 约 35 字节、x86 约 17 字节, 带一枚 String 字段约 120,
+    // 出厂干净那枚恒 0; 尺 .build/k107_leak_probe.c / 读数 .build/k108_*.txt .build/k109_x64.txt)。
+    // 出厂两腿都汇到 `_Destroy` 这一处(`instanceClaimRelease` 的末尾就直接调它), 所以边界装在这里
+    // 是一份答案; 装在两条腿上就是两份。
+    std::string destroyTermCall;
     for (auto& decl : module.declarations) {
         if (decl->kind == ASTNodeKind::SubDecl) {
             auto& sub = static_cast<SubDecl&>(*decl);
             if (sub.name == "Class_Terminate") {
-                c_.emitLine(cProcName("Class_Terminate", sub.access, isClassModule_ ? moduleName_ : "") + "(me);");
+                destroyTermCall = cProcName("Class_Terminate", sub.access,
+                                            isClassModule_ ? moduleName_ : "");
                 break;
             }
         }
+    }
+    const bool destroyHasTerm = !destroyTermCall.empty();
+    c_.emitBlank();
+    c_.emitLine("void " + clsStruct + "_Destroy(" + clsStruct + "* me) {");
+    c_.indent();
+    if (destroyHasTerm) {
+        // 声明必须在 `if (!me) return;` 之前: 生成的 C 要按 C89 的"块首声明"排
+        c_.emitLine("int32_t vb6_termErr = 0;  /* 账 305 B188: terminate 抛出来的号 */");
+    }
+    c_.emitLine("if (!me) return;");
+
+    if (destroyHasTerm) {
+        c_.emitLine("vb6_termErr = vb6_RunVbProtected((void(*)(void*))" + destroyTermCall +
+                    ", me);  /* 账 305 B188: 体抛错也要把下面的尾巴走完 */");
     }
 
     // 释放BSTR字段
@@ -236,6 +262,12 @@ void CCodeGen::emitClassFactory(Module& module) {
     }
 
     c_.emitLine("vb6_Free(me);");
+    if (destroyHasTerm) {
+        // 尾巴拆完了, 号才交出去: COM 出厂那一腿由 ComObj_Release 的帧接住(照旧记一条带号诊断),
+        // 进程内的 `Set x = Nothing` 那一腿由调用方自己的 On Error 接住 —— 两条都跟改前同形,
+        // 区别只在实例这回真被拆掉了。
+        c_.emitLine("if (vb6_termErr) vb6_RaiseError(vb6_termErr, vb6_ErrDescription());  /* 账 305 B188: 号在尾巴之后交回外层帧 */");
+    }
     c_.dedent();
     c_.emitLine("}");
 
@@ -338,10 +370,11 @@ void CCodeGen::emitClassFieldAccessors(Module& module) {
             size_t nDot = nTarget.find_last_of('.');
             if (nDot != std::string::npos) nTarget = nTarget.substr(nDot + 1);
             Symbol* nSym = lookupModuleDotted(nTarget);
-            const bool nIsCoclass = nSym && nSym->kind == SymbolKind::Class
-                && !nSym->isInterface
-                && (nSym->instancing == VBInstancing::MultiUse
-                    || nSym->instancing == VBInstancing::SingleUse);
+            // 账 #305 §B187 第二腿: 判据问 Symbol::isCoClassTableEntry() (与建表那侧、
+            // 装箱腿那份名单同一把尺子) —— 这里发的正是
+            // vb6_ComObject_FromBorrowedInstance(vb6_FindCoClassDesc(...))，类不在表里
+            // 就会装箱出 NULL 包装器 (= Nothing)。
+            const bool nIsCoclass = nSym && nSym->isCoClassTableEntry();
             if (nIsCoclass) {
                 const std::string tId = cIdent(nSym->name);
                 fe.getLines.push_back("if (!me->" + fld + ") me->" + fld + " = (void*)vb6_cls_"

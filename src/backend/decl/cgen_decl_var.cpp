@@ -158,6 +158,7 @@ void CCodeGen::visit(VariableDecl& node) {
             } else {
                 // Fix 010r-10: map赋值, 存储类名以便方法分发时查找
                 knownClassVars_[lower] = clsSym->name;
+                moduleClassVars_[lower] = clsSym->name;
                 // P14.3.1: Dim As New自动实例化 (模块级)
                 if (node.isNew) {
                     knownNewVars_[lower] = cIdent(clsSym->name);  // Fix 090v reg
@@ -243,6 +244,7 @@ void CCodeGen::visit(VariableDecl& node) {
             std::string lower = node.name;
             std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
             knownClassVars_[lower] = projCls;
+            moduleClassVars_[lower] = projCls;
             knownObjectVars_.erase(lower);
             // Fix 运行期第二十六层同批: 同名 `Dim Item As Variant` (TvwNodes.cls:53)
             // 把 "item" 登记进 knownVariantVars_, 同模块 :132 `Dim Item As TvwNode`
@@ -302,6 +304,7 @@ void CCodeGen::visit(VariableDecl& node) {
             const std::string projClsVar = projectClassNameOf(simple.name);
             if (!projClsVar.empty()) {
                 knownClassVars_[lower] = projClsVar;
+                moduleClassVars_[lower] = projClsVar;
                 knownObjectVars_.erase(lower);
                 if (node.isNew) {
                     knownNewVars_[lower] = cIdent(projClsVar);   // Dim As New 工程类
