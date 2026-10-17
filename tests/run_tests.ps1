@@ -7328,7 +7328,7 @@ if ($Category -in @("all", "run", "vbp")) {
         "B426-17=1234.50|-1234.50",
         "B426-DONE")
     Test-Vbp 'b426_format_ampm' "$Tests\b426\B426.vbp" $b426Expected
-    Test-Vbp 'b426_format_ampm_x86' "$Tests\b426\B426.vbp" $b426Expected -Arch "x86\"
+    Test-Vbp 'b426_format_ampm_x86' "$Tests\b426\B426.vbp" $b426Expected -Arch "x86"
 
 
     # 账 #305 SB186 第二头: VB 客户那一头　「口径」的唯一读数面　—— 探针是 C 客户, 它只能读 hr;

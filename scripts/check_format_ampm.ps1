@@ -25,7 +25,10 @@
 #   R6 邻居不许被牵连: 月份档 case L'm': 与日档 case L'd': 各 1 (按 vb6_fmtDateSerial 体内数 ——
 #      门票函数 vb6_fmtIsDateFormat 里也各写着一次同名 case)、prevHour = 1; (hh:mm 的 mm 是
 #      分钟那一条规则) 1、月份名单 kMonLong[12] 1。
-#   R7 判据两头都在: run_tests.ps1 里 b426 两台各 1、Test-FormatAmPm 被调用 1、本哨兵已登记。
+#   R7 判据两头都在: run_tests.ps1 里 b426 两台各 1、Test-FormatAmPm 被调用 1、本哨兵已登记;
+#      两片的名字各钉成整行形状 —— x86 那一片必须以 -Arch "x86" 收尾, 且全文件不许出现
+#      -Arch "x86\" (门 #700 实测: 多一个反斜杠就把实参传成 x86\, C3 报「--arch must be x86 or
+#      x64」, 那一格就此 FAIL (compile) —— 用例名对、期望表对, 坏的是传参的形状)。
 # ============================================================
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
@@ -94,16 +97,20 @@ if ($r6prev -ne 1) { $fail += ('R6 the hh:mm minute rule = ' + $r6prev + ' (want
 if ($r6tab -ne 1) { $fail += ('R6 month-name table = ' + $r6tab + ' (want 1: the invariant-English caliber stays)') }
 # R7
 $r7cells = N "Test-Vbp 'b426_format_ampm" $T
+$r7x86shape = N 'Test-Vbp ''b426_format_ampm_x86'' [^\r\n]*-Arch "x86"\r?$' $T
+$r7badarch = N '-Arch "x86\\"' $T
 $r7call = N '^\s+Test-FormatAmPm\s*$' $T
 $r7sent = N 'check_format_ampm\.ps1' $T
 if ($r7cells -ne 2) { $fail += ('R7 b426 run cells = ' + $r7cells + ' (want 2 = x64 + x86)') }
 if ($r7call -ne 1) { $fail += ('R7 Test-FormatAmPm call site = ' + $r7call + ' (want 1: a defined-but-never-called cell is a silent non-running cell)') }
 if ($r7sent -ne 1) { $fail += ('R7 this sentinel is not registered in run_tests.ps1 = ' + $r7sent + ' (want 1)') }
+if ($r7x86shape -ne 1) { $fail += ('R7 the x86 cell asks -Arch "x86" exactly = ' + $r7x86shape + ' (want 1)') }
+if ($r7badarch -ne 0) { $fail += ('R7 an arch literal carries a stray backslash = ' + $r7badarch + ' (want 0: CI read it as --arch x86 backslash and the cell died in compile)') }
 
 if ($fail.Count -gt 0) {
     foreach ($m in $fail) { Write-Host ('FAIL ' + $m) }
     exit 1
 }
 Write-Host ('PASS check_format_ampm: table=' + $r1tbl + ' len=' + $r1len + ' has=' + $r1has + ' app=' + $r1app +
-    ' use12=' + $r2use + ' gate=' + $r3gate + ' order-ok cells=' + $r7cells + ' call=' + $r7call)
+    ' use12=' + $r2use + ' gate=' + $r3gate + ' order-ok x86shape=' + $r7x86shape + ' cells=' + $r7cells + ' call=' + $r7call)
 exit 0
