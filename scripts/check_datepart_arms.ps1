@@ -13,7 +13,9 @@
 # 第一发读数就成了 DatePart(「ww」) 答 -2415012 那一档 (尺 .build/k354_proj，逐值回声 k354_run.txt)。
 #
 # 规则:
-#   R1 date.c 里 vb6_WeekOfYear 定义恰好 1、站点恰好 3 (定义 + 年初那一次自调 + DatePart 的读者);
+#   R1 date.c 里 vb6_WeekOfYear 定义恰好 1 (第一百刀起**不再是 static**: 第二个读者 = Format 的「ww」)、
+#      date.c 内站点恰好 3 (定义 + 年初那一次自调 + DatePart 的读者)、format.c 内读者恰好 1、
+#      vb6rtl_builtin.h 里声明恰好 1;
 #      周首那一问 vb6_LeadingPartialDays 定义 1、站点 3 (定义 + 本年 + 来年)。
 #   R2 旧的抄形不许回来: 标识符 dayOfYear 在 date.c 里归零 (「ww」那臂原来就靠它)。
 #   R3 「d」与「y」必须是两问: case vb6_di_day 单独成臂恰好 1、体里就一句 return dd 恰好 1、
@@ -36,11 +38,19 @@ function N([string]$pat, [string]$txt) {
     return ([regex]::Matches($txt, $pat, 'Multiline')).Count
 }
 # R1
-$r1def = N '^static int32_t vb6_WeekOfYear\(' $D
+$FMT = Get-Content -Raw (Join-Path $root 'src\rtl\core\vb6rtl\vb6rtl_format.c')
+$HDR = Get-Content -Raw (Join-Path $root 'src\rtl\core\vb6rtl\vb6rtl_builtin.h')
+$r1def = N '^int32_t vb6_WeekOfYear\(' $D
+$r1static = N '^static int32_t vb6_WeekOfYear\(' $D
 $r1sites = N 'vb6_WeekOfYear\(' $D
 $r1leaddef = N '^static int32_t vb6_LeadingPartialDays\(' $D
 $r1lead = N 'vb6_LeadingPartialDays\(' $D
 if ($r1def -ne 1) { $fail += ('R1 vb6_WeekOfYear definition = ' + $r1def + ' (want 1)') }
+if ($r1static -ne 0) { $fail += ('R1 vb6_WeekOfYear is still file-static = ' + $r1static + ' (want 0: Format is a second reader)') }
+$r1fmt = N 'vb6_WeekOfYear\(\(int32_t\)serial, firstDayOfWeek, firstWeekOfYear\)' $FMT
+$r1decl = N 'int32_t vb6_WeekOfYear\(int32_t serial, int32_t fdow, int32_t fwoy\);' $HDR
+if ($r1fmt -ne 1) { $fail += ('R1 Format asks the same week outlet = ' + $r1fmt + ' (want 1: a second hand-copied formula is what this outlet exists to stop)') }
+if ($r1decl -ne 1) { $fail += ('R1 the week outlet declaration in vb6rtl_builtin.h = ' + $r1decl + ' (want 1)') }
 if ($r1sites -ne 3) { $fail += ('R1 vb6_WeekOfYear sites = ' + $r1sites + ' (want 3 = def + its own head call + DatePart)') }
 if ($r1leaddef -ne 1) { $fail += ('R1 week-start helper definition = ' + $r1leaddef + ' (want 1)') }
 if ($r1lead -ne 3) { $fail += ('R1 week-start helper sites = ' + $r1lead + ' (want 3 = def + this year + next year)') }
@@ -71,6 +81,13 @@ $r6cells = N "Test-Vbp 'b422_datepart_arms" $T
 $r6sent = N 'check_datepart_arms\.ps1' $T
 if ($r6cells -ne 2) { $fail += ('R6 b422 run cells = ' + $r6cells + ' (want 2 = x64 + x86)') }
 if ($r6sent -ne 1) { $fail += ('R6 this sentinel is not registered in run_tests.ps1 = ' + $r6sent + ' (want 1)') }
+# R8 星期序号只许问 vb6_Weekday (第一百刀: DatePart 的「w」臂原先是第二份 remap 抄写)
+$r8ask = N 'return vb6_Weekday\(\(double\)d, 1\);' $D
+$r8old = N 'if \(wd == 0\) return 7;' $D
+$r8dp  = N '\(d % 7 \+ 7\) % 7' $D
+if ($r8ask -ne 1) { $fail += ('R8 DatePart asks vb6_Weekday for the weekday number = ' + $r8ask + ' (want 1)') }
+if ($r8old -ne 0) { $fail += ('R8 the hand-copied Saturday remap is back in DatePart = ' + $r8old + ' (want 0)') }
+if ($r8dp -ne 1) { $fail += ('R8 copies of the mod-7 line = ' + $r8dp + ' (want 1: only vb6_Weekday itself keeps it)') }
 # R7
 $r7def = N '^static int32_t vb6_SerialOf\(' $D
 $r7sites = N 'vb6_SerialOf\(' $D
@@ -87,5 +104,6 @@ if ($fail.Count -gt 0) {
 }
 Write-Host ('PASS check_datepart_arms: outlet-def=' + $r1def + ' sites=' + $r1sites + ' weekstart-def=' + $r1leaddef +
     ' weekstart-sites=' + $r1lead + ' old-form=' + $r2 + ' day-arm=' + $r3day + ' dd=' + $r3dd +
-    ' ask=' + $r4ask + ' void=' + $r4void + ' datediff=' + $r5 + ' cells=' + $r6cells + ' serial=' + $r7def + '/' + $r7sites + ' raw=' + $r7raw + ' jd=' + $r7jd)
+    ' ask=' + $r4ask + ' void=' + $r4void + ' datediff=' + $r5 + ' cells=' + $r6cells + ' serial=' + $r7def + '/' + $r7sites +
+ ' raw=' + $r7raw + ' jd=' + $r7jd + ' fmt=' + $r1fmt + ' decl=' + $r1decl + ' wday=' + $r8ask + '/' + $r8old + '/' + $r8dp)
 exit 0

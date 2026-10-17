@@ -1756,7 +1756,13 @@ std::string CCodeGen::narrowCheckAssign(Expr* target, Expr* value,
     // (vb6_CLng 内部走 round())。同一件事两个答案就是"同一个决定抄了两遍"那一族。
     // 也**不能**靠下面那句"装得下, 不套"放过：cgenIntBits(Single) 答 32，Long 目标 32，
     // 于是 `l = 某Single` 以前连检查都不进 —— 截得更彻底。
-    if (vt == Vb6Type::Single || vt == Vb6Type::Double || vt == Vb6Type::Currency)
+    // 第一百零二刀 (账 #431 §B205) 把 Date 也接进来: Date 在 C 侧就是 double (OLE 序列号)，
+    // 而 VB6 把 Date 交给窄整型目标走的是同一份取整 —— 实测 `n = DateSerial(…)` 在 DateSerial
+    // 的返回档从 Double 改成 Date 之后掉进下面那条"装得下, 不套"，vb6_ChkLong(int64_t)
+    // 在调用边界上截断。DateAdd/Now 那几枚本来就答 Date，因此这一格是**旧洞**、本刀只是把它
+    // 也交给了 DateSerial。
+    if (vt == Vb6Type::Single || vt == Vb6Type::Double || vt == Vb6Type::Currency ||
+        vt == Vb6Type::Date)
         return std::string(fn) + "(vb6_FltToLng(" + cValue + "))";
 
     // §B138b: LongPtr 的宽度跟目标架构走 (x86=32 / x64=64), 见 cgenIntBits 处注释。

@@ -1622,6 +1622,48 @@ function Test-EmittedDeclared {
         $out | Select-Object -First 8 | ForEach-Object { Write-Host "  $_" }
     }
 }
+# 账 #305 #427 (§B201) 的结构性哨兵: 「日期令牌从哪儿进日期臂、周数与星期序号由谁答」这两问各只许住一处。
+function Test-FormatDateTokens {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] format_date_tokens ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\check_format_date_tokens.ps1" 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        $out | Select-Object -First 12 | ForEach-Object { Write-Host "  $_" }
+    }
+}
+# 账 #305 #429 ①+④ (§B203) 的结构性哨兵: 「general date 给不给时间段」与「locale 那四问由谁答」各只许住一处。
+function Test-GeneralDateOutlets {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] general_date_outlets ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\check_general_date_outlets.ps1" 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        $out | Select-Object -First 12 | ForEach-Object { Write-Host "  $_" }
+    }
+}
+
+function Test-DateSerialTag {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] dateserial_tag ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\check_dateserial_tag.ps1" 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        $out | Select-Object -First 12 | ForEach-Object { Write-Host "  $_" }
+    }
+}
 # === 编译冒烟测试 (编译+链接, 不运行生成物) ===
 function Test-Run {
     param(
@@ -7383,6 +7425,119 @@ if ($Category -in @("all", "run", "vbp")) {
     Test-Vbp 'b429_formatdatetime' "$Tests\b429\B429.vbp" $b429Expected
     Test-Vbp 'b429_formatdatetime_x86' "$Tests\b429\B429.vbp" $b429Expected -Arch "x86"
 
+    # 账 #305 #427 (§B201) 第一百刀: Format 的日期面还欠 w / ww / q / ttttt 四枚门票 + ddddd 那一档。
+    # 修前读数 (尺 .build/k504_proj -> k504_x64_run.txt): 前四枚交**裸序列号** 46027.6046875、
+    #   ddddd 交 Monday (日档 cnt>=4 把第五枚 d 当成长周名), 而语料把 ddddd ttttt 写了 36 处。
+    # 命名格式那五档走 LOCALE_USER_DEFAULT ⇒ 字串随机器 locale 变 (本机 zh-CN / CI en-US) ⇒ 期望值只钉
+    # 关系: w/ww/q 与 DatePart 同答、ttttl 与 FormatDateTime(vbLongTime) 同答、ddddd 与 vbShortDate 同答,
+    # 外加两枚与 locale 无关的字面证人 (自家不变英文的周名表 + ISO 串里那枚字面 t)。
+    # 反面的爆炸半径证人 (B430-24/25): 数值臂那条不许被新字母拖进日期臂 —— 语料的「数值 + 单位」串
+    # (#,##0 Twip / T0 / #### Byte, 15 处) 仍交那个数; 门票的 allowWQT + 「串里有 0/# 就不算日期」两条闸
+    # 就是为这一格钉的 (尺 .build/k496_census.txt + k497_wqt_where.txt)。
+    # 负控 = 本刀之前那台冷编 (C3_k100_base.exe) 编同一份夹具: 20 针红、只有 DONE 与 5 针不红
+    # (.build/k512_x64_run.txt vs .build/k511_x64_run.txt)。
+    $b430Expected = @(
+        "B430-01=True/True",
+        "B430-02=True",
+        "B430-03=True",
+        "B430-04=True",
+        "B430-05=True",
+        "B430-06=True",
+        "B430-07=True",
+        "B430-08=True",
+        "B430-09=True",
+        "B430-10=True",
+        "B430-11=True",
+        "B430-12=True",
+        "B430-13=True",
+        "B430-14=True",
+        "B430-15=True",
+        "B430-16=True/True/True",
+        "B430-17=True",
+        "B430-18=True",
+        "B430-19=True",
+        "B430-20=True",
+        "B430-21=True",
+        "B430-22=True",
+        "B430-23=True",
+        "B430-24=True/True",
+        "B430-25=True/True",
+        "B430-26=True/True",
+        "B430-27=True/True",
+        "B430-DONE")
+    Test-Vbp 'b430_format_date' "$Tests\b430\B430.vbp" $b430Expected
+    Test-Vbp 'b430_format_date_x86' "$Tests\b430\B430.vbp" $b430Expected -Arch "x86"
+
+    # <vbeclipse> 第一百零一刀 (账 #429 ①+④ / §B203): 「general date 这一档到底给不给时间」以前有三位主人、三个答案。
+    # 改前三户对同一枚零头为 0 的日期各答一次 (尺 .build/k541_proj -> k541_x64_run.txt / k541_x86_run.txt, 两台同读):
+    #   FormatDateTime(d0, vbGeneralDate) = "2026/1/5 "        len 9  (一枚孤儿尾随空格)
+    #   Format(d0, "General Date")        = "2026/1/5 0:00:00" len 16
+    #   CStr(d0)                          = "2026/1/5"         len 8  (只有这一条与引擎一字不差)
+    # 机制: vb6_FormatDateTime 里那句 `buf[len - 1] = 空格` 是**无条件**做的, 而 GetDateFormatW 交回的长度含结束符
+    #   => 那一句把结束符改成了空格; 只有拼时间那一段才判零头。conv.c 又另抄一份 1e-9 容差 (Fix 175) 住在第二家。
+    # 判据口径: 本机 zh-CN、CI en-US 交回同一份 .out (第一百/九十九刀两台逐字节验过这条纪律), 所以这里只钉关系式 ——
+    #   尾随空格、冒号有无、长度、以及「三户交同一枚串」与「= 短日期 + 一枚空格 + 长时间」; 一枚日期拼写都不钉。
+    # B431-07/08/09/14/15 钉引擎本人那条闸 (尺 .build/k559_out.txt 二十行 + k564_out.txt 十九行, **两发合起来**):
+    #   零头四入到整秒之后**当日时分秒全为零**就不给时间段 —— 50/200/400/499/500 毫秒只给日期, 600 毫秒起才给;
+    #   而**午夜前一毫秒**交的是次日短日期且整段不给 (四入越过午夜) ⇒ 「零头 != 0」(system.c 那条) 与任何亚秒容差
+    #   (conv.c 的 1e-9) 两条一起判死。渲染那一段也是四入的 (VariantTimeToSystemTime 已四入) ⇒ 判与渲染同一个问。
+    # B431-12/13 是反面的爆炸半径证人: 数值那一臂 (Format(1234, "0")) 与第一百刀的 ddddd / ttttt 双生不许被牵连。
+    $b431Expected = @(
+        "B431-01=True/True",
+        "B431-02=True/True",
+        "B431-03=True/True/True",
+        "B431-04=True/True",
+        "B431-05=True/True",
+        "B431-06=True/True/True",
+        "B431-07=True/True",
+        "B431-08=True/True",
+        "B431-09=True/True",
+        "B431-10=True/True",
+        "B431-11=True/True/True",
+        "B431-12=True/True/True",
+        "B431-13=True/True",
+        "B431-14=True/True",
+        "B431-15=True/True",
+        "B431-DONE")
+    Test-Vbp 'b431_general_date' "$Tests\b431\B431.vbp" $b431Expected
+    Test-Vbp 'b431_general_date_x86' "$Tests\b431\B431.vbp" $b431Expected -Arch "x86"
+
+
+    # 账 #305 §B205 第一百零二刀 (#431): DateSerial 的返回档 = 语义表那一格说了算。
+    # 改前那张表里九枚日期构造函数只有它写 Vb6Type::Double ⇒ 进槽贴 VT_R8，六档与引擎相反
+    # (VarType 5 / TypeName "Double" / IsDate False / IsNumeric True / CStr [46027] / Len 5，
+    # 尺 .build/k607_run_x64.txt vs 同机 oracle .build/k607_oracle_out.txt)。
+    # 针面全关系式: 标签与数值钉死、串面只与同一出口的另一枚日期比 (两台 .out 逐字节相同，
+    # 尺 .build/k620_x64_run.txt / k620_x86_run.txt，md5 7550f32d...)；B432-05..10/14/16 是证人
+    # (那些档改前就与引擎同答，换档不许把它们弄坏)，B432-17/18 各钉一格: 17 = Date 进窄整型目标
+    # 要过同一份取整出口 (BASE 在 CDate 那一形上就是红的)，18 = 槽里那枚日期交给无格式串的
+    # Format 之后与第一百零一刀的 general date 出口接上 (改前交 [46027]、改后交 [2026/1/5])；
+    # 18 的第二格是**故意钉下的错答案** (label witness): As Date 局部直接交给 Format 仍走数值臂，
+    # 因为首参由新账 #430 那张手抄装箱表决定 ⇒ 谁修 #430 谁回来把它翻成 True。
+    # (尺 .build/k636_charts_diff.txt / k639_b432_newemit.txt)。
+    $b432Expected = @(
+        "B432-01=True/True/True/True",
+        "B432-02=True/True",
+        "B432-03=True/True",
+        "B432-04=True/True",
+        "B432-05=True/True",
+        "B432-06=True/True",
+        "B432-07=True/True",
+        "B432-08=True/True",
+        "B432-09=True/True",
+        "B432-10=True/True/True/True",
+        "B432-11=True/True",
+        "B432-12=True/True/True",
+        "B432-13=True/True",
+        "B432-14=True/True/True/True",
+        "B432-15=True/True",
+        "B432-16=True/True",
+        "B432-17=True/True",
+        "B432-18=True/False",
+        "B432-DONE")
+    Test-Vbp 'b432_dateserial_tag' "$Tests\b432\B432.vbp" $b432Expected
+    Test-Vbp 'b432_dateserial_tag_x86' "$Tests\b432\B432.vbp" $b432Expected -Arch "x86"
+
 
     # 账 #305 SB186 第二头: VB 客户那一头　「口径」的唯一读数面　—— 探针是 C 客户, 它只能读 hr;
     # 「服务端自己那条错折回原号」还是「一律 429」这一问, 只有真的 VB 客户点得到。
@@ -7644,6 +7799,9 @@ if ($Category -in @("all", "compile")) {
     Test-DatePartArms
     Test-FormatAmPm
     Test-EmittedDeclared
+    Test-FormatDateTokens
+    Test-GeneralDateOutlets
+    Test-DateSerialTag
 
     Write-Host ""
 

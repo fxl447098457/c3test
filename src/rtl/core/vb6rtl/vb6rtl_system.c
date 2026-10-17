@@ -44,44 +44,41 @@ static int vb6_dir_first = 0;
 // P21-10: FormatDateTime — named date/time formatting
 // namedFormat: 0=vbGeneralDate, 1=vbLongDate, 2=vbShortDate, 3=vbLongTime, 4=vbShortTime
 BSTR vb6_FormatDateTime(double dateSerial, int32_t namedFormat) {
+    // <vbeclipse> 第一百零一刀 (账 #429 ①+④ / §B203): 这五档里 locale 那四问 (短日期 / 长日期 / 长时间 /
+    // general date) 以前各抄一份 GetDateFormatW，与 Format 家族那两条出口并存 ⇒ **同一枚零头为 0 的日期，
+    // 这一家交 `2026/1/5 `(len 9 带一枚尾随空格)、Format 那一家交 `2026/1/5 0:00:00`(len 16)、
+    // CStr 那一家交 `2026/1/5`(len 8) —— 三个答案**。现在四问全部改问 vb6rtl_format.c 的那几条出口，
+    // 「general date 什么时候该带时间」也只住在那一条出口里 = 四入后当日时分秒全零就不给 (尺 k559 + k564)。
+    // 病机制本身: 以前 `buf[len-1] = L' '` 是**无条件**做的，而 GetDateFormatW 的返回长度**含结束符**
+    // ⇒ 那一句是把结束符改成了空格；只有时间那段才判 fracPart ⇒ 零头为 0 就留下一枚孤儿空格。
     SYSTEMTIME st;
-    double intPart, fracPart;
-    fracPart = modf(dateSerial, &intPart);
     if (dateSerial == 0.0) {
-        GetLocalTime(&st);
+        GetLocalTime(&st);   // ③那一格（0 与负值该不该落本机钟）仍等口径，本刀不动
     } else {
         if (!VariantTimeToSystemTime(dateSerial, &st)) {
             GetLocalTime(&st);
         }
     }
-    wchar_t buf[256] = {0};
-    int len = 0;
+    wchar_t buf[256];
+    buf[0] = 0;
     switch (namedFormat) {
         case 1: // vbLongDate
-            len = GetDateFormatW(LOCALE_USER_DEFAULT, DATE_LONGDATE, &st, NULL, buf, 256);
+            vb6_fmtLocaleLongDate(&st, buf, 256);
             break;
         case 2: // vbShortDate
-            len = GetDateFormatW(LOCALE_USER_DEFAULT, DATE_SHORTDATE, &st, NULL, buf, 256);
+            vb6_fmtLocaleShortDate(&st, buf, 256);
             break;
         case 3: // vbLongTime
-            len = GetTimeFormatW(LOCALE_USER_DEFAULT, 0, &st, NULL, buf, 256);
+            vb6_fmtLocaleLongTime(&st, buf, 256);
             break;
-        case 4: // vbShortTime
-            len = GetTimeFormatW(LOCALE_USER_DEFAULT, TIME_NOSECONDS, &st, NULL, buf, 256);
+        case 4: // vbShortTime —— locale 的短时间（TIME_NOSECONDS）；Format 那一家是另一档口径，见 §B203
+            GetTimeFormatW(LOCALE_USER_DEFAULT, TIME_NOSECONDS, &st, NULL, buf, 256);
             break;
         case 0: // vbGeneralDate
-        default: {
-            // General date: date + time if time part nonzero
-            len = GetDateFormatW(LOCALE_USER_DEFAULT, DATE_SHORTDATE, &st, NULL, buf, 256);
-            if (len > 0) buf[len-1] = L' ';
-            if (fracPart != 0.0) {
-                GetTimeFormatW(LOCALE_USER_DEFAULT, 0, &st, NULL, buf + len, 256 - len);
-            }
-            len = (int)wcslen(buf);
+        default:
+            vb6_fmtLocaleGeneralDate(&st, buf, 256);
             break;
-        }
     }
-    if (len <= 0) buf[0] = L'\0';
     return SysAllocString(buf);
 }
 BSTR vb6_Dir(BSTR pathname, int32_t attributes) {

@@ -26,12 +26,13 @@ $selP = Join-Path $root 'src/backend/stmt/cgen_select.cpp'
 $evtP = Join-Path $root 'src/backend/module/cgen_com_events.cpp'
 $setP = Join-Path $root 'src/backend/detail/stmt/cgen_setlet_set_rhs.inc'
 $m22P = Join-Path $root 'src/backend/detail/expr/cgen_expr_member_m22_module.inc'
+$binP = Join-Path $root 'src/backend/expr/cgen_expr_binary.cpp'
 $withP = Join-Path $root 'src/backend/expr/cgen_expr_with.cpp'
 $com = Join-Path $root 'src/backend/cgen_util_com.cpp'
 $rtl = Join-Path $root 'src/rtl/core/vb6forms/uc/uc_controls.c'
 $hdr = Join-Path $root 'src/rtl/core/vb6rtl/vb6rtl_userctl.h'
 
-foreach ($p in @($cg, $val, $withP, $argP, $selP, $evtP, $setP, $m22P, $com, $rtl, $hdr)) {
+foreach ($p in @($cg, $val, $withP, $argP, $selP, $evtP, $setP, $m22P, $binP, $com, $rtl, $hdr)) {
     if (-not (Test-Path -LiteralPath $p)) { Write-Host "missing file: $p" -ForegroundColor Red; exit 1 }
 }
 $cgT = [System.IO.File]::ReadAllText($cg)
@@ -41,6 +42,7 @@ $selT = [System.IO.File]::ReadAllText($selP)
 $evtT = [System.IO.File]::ReadAllText($evtP)
 $setT = [System.IO.File]::ReadAllText($setP)
 $m22T = [System.IO.File]::ReadAllText($m22P)
+$binT = [System.IO.File]::ReadAllText($binP)
 $withT = [System.IO.File]::ReadAllText($withP)
 $comT = [System.IO.File]::ReadAllText($com)
 $rtlT = [System.IO.File]::ReadAllText($rtl)
@@ -324,6 +326,21 @@ $negM22 = $m22T -replace 'lastExpr_ = hostPseudoRtlSymbol\(modName2, varName2\);
 Check 'negative control (gating the birth site must go red)' `
     ($negM22 -match 'extenderMemberReadExpr\s*\(\s*hostPseudoRtlSymbol') `
     'sentinel is vacuous if re-introducing the birth-site gate still passes'
+# 二元操作数的消费点 (cgen_expr_binary.cpp): 比较式里那一枚宿主伪成员
+# (UpDown.ctl 那 4 处 `vb6_ComGetObjectProp(x, L"Container") == vb6_Extender_Container`)。
+# 这是 3b 的最后一族, 也是**唯一**能安全换道的地方:
+#   * 操作数**永远不是左值** —— 与成员表达式出生地不同, 那里同时服务赋值目标, 换过去会把
+#     `Property Set` 存取器的目标变成函数调用, Fix 098 随即把整个赋值静默丢成 (void)(Value);
+#   * 所以这一族必须走消费点, 而不是回到出生地 —— 哨兵里那条反向钉就是这个意思。
+$binRxL = 'left\s*=\s*extenderMemberReadExpr\s*\(\s*left\s*\)'
+$binRxR = 'right\s*=\s*extenderMemberReadExpr\s*\(\s*right\s*\)'
+Check 'binary operands are redirected (covers comparison operands)' `
+    (($binT -match $binRxL) -and ($binT -match $binRxR)) `
+    'a host-pseudo member compared against something still reads the bare global'
+$negBin = $binT -replace '(?m)^[^\n]*(left|right)\s*=\s*extenderMemberReadExpr\s*\(\s*(left|right)\s*\);[^\n]*\r?\n', ''
+Check 'negative control (restoring the original binary operand lines must go red)' `
+    ((-not ($negBin -match $binRxL)) -and (-not ($negBin -match $binRxR))) `
+    'sentinel is vacuous if deleting the operand redirect still passes'
 if ($bad) { Write-Host "check_extender_emit_channel: FAIL ($bad)"; exit 1 }
 Write-Host 'check_extender_emit_channel: PASS'
 exit 0

@@ -118,25 +118,19 @@ typedef struct vb6_UCSaved {
     int16_t enabled;
     void*   font;
     void*   ambientFont;
-    int32_t extLeft, extTop;
-    int32_t extWidth, extHeight;  // Fix 162
-    // Fix 294: Extender 上其余成员也必须存取 —— 过去只存了 Left/Top/Width/Height,
-    // Align/Visible/DragMode/HelpContextID/WhatsThisHelpID/Tag/ToolTipText/Container/
-    // DragIcon/vb6_Default/Cancel 全是**裸全局**, 出栈没人还原 ⇒ 控件之间互相污染。
-    // 实测: ToolBar 在 ReadProperties 里 Extender.Align = vbAlignTop(ToolBar.ctl:879),
-    // 之后 StatusBar 读到的就是 1 而不是它 .frm 里的 Align=2(AlignBottom), 于是走错
-    // 分支 —— 只因为 StatusBar 的设计期高度恰好等于自然高度, 肉眼看不出来。
-    int32_t extAlign;
-    int32_t extDragMode;
-    int32_t extHelpContextID;
-    int32_t extWhatsThisHelpID;
-    int16_t extVisible;
-    int16_t extVb6Default;
-    int16_t extCancel;
-    void*   extTag;
-    void*   extToolTipText;
-    void*   extContainer;
-    void*   extDragIcon;
+    /* Fix 296 / 3b 补: 外框尺寸的存档位。以前 push/pop 是拿 **Extender** 那两枚全局当
+       存档位的(pop 里 `vb6_UserControl_Width = saved->extWidth`), 因为 cgen 把
+       UserControl.<Member> 和 Extender.<Member> 发成两个不同标识符但同值。3b 把 Extender
+       那套存取整个拆掉之后, 这个借位就断了(pop 读到已删除的字段 -> 整个 RTL 编译不过)。
+       UserControl.<Member> 自己那两枚发码读了 1450 处, 必须自己存档, 所以单列。 */
+    int32_t userWidth, userHeight;
+    /* Fix 296 / 3b: 这里曾有 15 个 ext* 字段(Left/Top/Width/Height/Align/Visible/
+       DragMode/HelpContextID/WhatsThisHelpID/vb6_Default/Cancel/Tag/ToolTipText/
+       Container/DragIcon), 用来在 push/pop 之间存取那 15 枚 vb6_Extender_* 全局。
+       **已删除**(Clean Slate): 发码侧全走实例通道, 存取那套是纯开销; 留着字段只会让人
+       以为它们还承载"可还原的状态"。
+       注意下面那个 `struct vb6_UserControl_Extender_Type ext;` **不是**被删的那些 ——
+       那是 Fix 133u 的 Extender.Visible/Height 结构体成员, 与 15 枚全局无关, 保留。 */
     void*   hWnd;                 // Fix 133u: UserControl.hWnd
     int16_t autoRedraw;           // Fix 133u: UserControl.AutoRedraw
     struct vb6_UserControl_Extender_Type ext; // Fix 133u: Extender.Visible/Height
