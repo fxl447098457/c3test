@@ -1609,6 +1609,19 @@ function Test-FormatAmPm {
     }
 }
 
+function Test-EmittedDeclared {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] emitted_declared ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\check_emitted_declared.ps1" 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        $out | Select-Object -First 8 | ForEach-Object { Write-Host "  $_" }
+    }
+}
 # === 编译冒烟测试 (编译+链接, 不运行生成物) ===
 function Test-Run {
     param(
@@ -7336,6 +7349,39 @@ if ($Category -in @("all", "run", "vbp")) {
         "B426-DONE")
     Test-Vbp 'b426_format_ampm' "$Tests\b426\B426.vbp" $b426Expected
     Test-Vbp 'b426_format_ampm_x86' "$Tests\b426\B426.vbp" $b426Expected -Arch "x86"
+    # <vbeclipse> 回归夹子 (b429_emitted_declared, 账 #305 #428 第九十九刀): FormatDateTime 在 x64 上
+    # 第一发就 0xC0000005。根因不在口径: vb6_FormatDateTime 住 vb6rtl_system.c:46，被内置表点名、
+    # 发码把它直接写进用户 TU，可 src/rtl 全树的 .h 里没有它的声明 ⇒ C 走隐式声明(假定返回 int)，
+    # x64 把返回的 BSTR 指针折成 32 位再交 vb6_BSTR_AssignMove ⇒ 解引用就死；x86 指针本来 32 位所以看着全对
+    # （同一份源 x86 七发全跑完，五档答案还与本机 VBScript 逐档相同 —— 尺 .build/k423_proj -> k424_run.txt）。
+    # 这一格从发码形状上看不见（隐式声明只是 cl 的忠告，两台都照编照链），所以判据面选了两枚:
+    #   · B429-16 问 VarType(FormatDateTime(…)) —— 缺声明时答 3(VT_I4)、补上才答 8，BASE 机上 x86 也读 False/False
+    #     （尺 .build/k472_x86_run.txt）⇒ 这一针在两台上都会移，不只靠 x64 崩。
+    #   · 能跑到 B429-DONE 本身就是 x64 那条腿活着的证人。
+    # 命名格式五档走 LOCALE_USER_DEFAULT，字串随机器 locale 变（本机 zh-CN、CI 是 en-US）⇒ 期望值只钉
+    # 关系与标签，不钉字面串: general date 以 short date 开头、里面含 long time、长/短格式互不相等。
+    # 负控 (.build/k472_*.txt，同一份夹具两台编译器): BASE 的 x64 只打印两行就死、x86 只有第 16 行不同。
+    $b429Expected = @(
+        "B429-01=8",
+        "B429-02=8/8/8/8",
+        "B429-03=True/True/True",
+        "B429-04=True/True",
+        "B429-05=True",
+        "B429-06=True",
+        "B429-07=True",
+        "B429-08=True",
+        "B429-09=True",
+        "B429-10=True",
+        "B429-11=True",
+        "B429-12=True",
+        "B429-13=True",
+        "B429-14=True",
+        "B429-15=8/True",
+        "B429-16=True/True",
+        "B429-17=True",
+        "B429-DONE")
+    Test-Vbp 'b429_formatdatetime' "$Tests\b429\B429.vbp" $b429Expected
+    Test-Vbp 'b429_formatdatetime_x86' "$Tests\b429\B429.vbp" $b429Expected -Arch "x86"
 
 
     # 账 #305 SB186 第二头: VB 客户那一头　「口径」的唯一读数面　—— 探针是 C 客户, 它只能读 hr;
@@ -7597,6 +7643,7 @@ if ($Category -in @("all", "compile")) {
     Test-TimeSplit
     Test-DatePartArms
     Test-FormatAmPm
+    Test-EmittedDeclared
 
     Write-Host ""
 
