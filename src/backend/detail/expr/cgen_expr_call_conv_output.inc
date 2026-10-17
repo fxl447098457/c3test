@@ -41,7 +41,20 @@
         } else if (argType == Vb6Type::Byte) {
             args[0] = "vb6_VariantInt((int16_t)(" + args[0] + "))";
         } else if (argType == Vb6Type::Date) {
-            args[0] = "vb6_VariantDouble((double)(" + args[0] + "))";
+            // 账 #430（§B204）: 这一臂原来**手抄**了一张"VB 类型 → 装箱出口"的名单, 其中
+            // Date 那一行写的是 vb6_VariantDouble((double)(...)) —— 与唯一权威 boxToVariant
+            // 对同一问的答案 vb6_VariantDate(...) **相反**。两位主人两个答案, 而权威那条从
+            // 这一站**从没被走到**。跟已结的 #428/#431 同一条教训: 表的格子就是口径, 抄表的
+            // 人不会知道自己抄错了。
+            // 实测后果: 一枚 Dim d As Date 局部发成 double, 每一发 Format(d, …) 都贴
+            // VT_R8, 可同一枚 VarType(d) 答 7 ⇒ "这枚值真是日期"在运行期根本读不出来。
+            // 改法 = 改问权威(与上面 Boolean 档 Fix 198 同一个做法, 一处、零新形状)。
+            // ⚠ **只动这一臂**: Long/Integer/Double/Single/String/Byte 那几档与权威**也各不同**
+            //   (它们多数走 VariantFromValue, 而这站刻意发 VariantLong/VariantDouble/…),
+            //   但那些都是**已登记的既存形状**, 且数值臂还得留给真数值
+            //   (Format(43831, "mmm") 那一族, 见 vb6rtl_format_parse.inc:37-44)——
+            //   不在 #430 范围内。**别顺手塌成一句 boxToVariant**, 那会一次性移动六档形状。
+            args[0] = boxToVariant(node.positional[0].get(), args[0]);
         }
         // Fix 036: Format fallback — 未匹配类型 (Currency/Unknown 等, 非 Variant) 用
         // vb6_VariantFromValue 包装. Variant 类型无需包装 (已是 vb6_VARIANT).

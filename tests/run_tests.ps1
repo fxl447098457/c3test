@@ -715,6 +715,13 @@ function Test-ExtenderEmitChannel {
     if ($LASTEXITCODE -eq 0) { $script:pass++; Write-Host "PASS" -ForegroundColor Green }
     else { $script:fail++; Write-Host "FAIL" -ForegroundColor Red; $out | Select-Object -First 6 | ForEach-Object { Write-Host "  $_" } }
 }
+function Test-FormatDateArgArm {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] format_date_arg_arm ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\check_format_date_arg_arm.ps1" 2>&1
+    if ($LASTEXITCODE -eq 0) { $script:pass++; Write-Host "PASS" -ForegroundColor Green }
+    else { $script:fail++; Write-Host "FAIL" -ForegroundColor Red; $out | Select-Object -First 6 | ForEach-Object { Write-Host "  $_" } }
+}
 function Test-ExtenderGlobalCensus {
     $script:total++
     Write-Host -NoNewline "  [STATIC] extender_global_census ... "
@@ -7786,6 +7793,7 @@ if ($Category -in @("all", "compile")) {
     Test-ExtenderEmitChannel
     Test-ExtenderPushPop
     Test-ExtenderGlobalCensus
+    Test-FormatDateArgArm
     Test-ControlDC
     Test-SaAccess
     Test-BitwiseAuthority

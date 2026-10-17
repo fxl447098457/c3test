@@ -96,7 +96,7 @@ sha256=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 ascii256
 sha256=f399c0b54563cea57b03778cc5dd4fb897babde657ba2e0cf6c8f5d696875521 ascii256=0bef3fb393415329d48b55357b44dff12bc560d4f51fb66a758aa8f54b9e934f rc=0 bytes=4188 tests/cc_id/IdFold.vbp
 sha256=5347c812cabfff37c6592c899919a1f7a5422934682daa250fa1e2260c2e9341 ascii256=acf9b53b1834c0153f02a7a6cbfa391ae0e4ac35b513cceb3e3c9cb611ad5811 rc=0 bytes=3681 tests/cc_id/IdIfaces.bas
 sha256=ecb2d1df992330a8b4b7c7f4cdc26c13e2af28fd166f5c99ebf9889f91dc68b5 ascii256=530a8b0161884482dfedd034a6f65d69602ca71ee69a5f0e2b75c01c1711bf3f rc=0 bytes=1382 tests/cc_id/IdMain.bas
-sha256=86f486ca0228e8aadfa7d61d70f628a4a07eb2cc6880f5d0536ed94897d74485 ascii256=caa91782fdf55c7046875fc7fae821878494c91168a759065086b376094a1962 rc=0 bytes=2107117 tests/Charts 2020/Proyecto1.vbp
+sha256=21afdd49d3968f8fe26def939ed569088563d4023696736d6da8bbae95c38b36 ascii256=f880cfa613852934c85ae528bf6c46829b5525509c8daa090f633c85aecae47d rc=0 bytes=2107093 tests/Charts 2020/Proyecto1.vbp
 sha256=f0d912ef7a117094856a7286d6d3f0dabc9708845ddd6f233595b4167ac753d0 ascii256=0041801483770d28f14581a19b638497fa2fc6e04ed3f83f35c0570d528c71bd rc=0 bytes=273002 tests/Charts 2020/ucChartArea/Proyecto1.vbp
 sha256=b88800ecdd6a6dc640d9ba7dab0135334b9bf88c11519da80586b858d0b2a1db ascii256=1c6541f440910e454065c25342ffb0294206be6f40ac010d3ea46660618a8476 rc=0 bytes=492085 tests/Charts 2020/ucChartBar/Proyecto1.vbp
 sha256=3ca810b0c9eac0b02e84ce405ada0ebc041251ad687081f8c4deba96ca2c0b82 ascii256=0d52a6d71b36345cc8ec50038f9e0ffe12bcbd38ef5d1a46d30c1432467703a5 rc=0 bytes=2846 tests/Charts 2020/ucPieChart/Module1.bas
@@ -114,7 +114,7 @@ sha256=175c0e38e892bca2ef52b6272a966db8d0f6409e48c49ff7bfaed5775089e18c ascii256
 sha256=f48df4999b1e2b9e3773046fd0867304e501348659253ccc42037322ae400936 ascii256=f7dd26772994c0c96cecf42bb0ca592ba72171eceab756f12d206f95142f5478 rc=0 bytes=12211 tests/comwith/WithCopy.vbp
 sha256=77957c4a32d757f1bdc6c8bae1aac203c4957e3623449b0684a533759834a9e6 ascii256=5c4206d3353c0c23e6855690bf8e52891ab7f7a80ff2c4b1d347ed132dbb43cd rc=0 bytes=2396 tests/conio/console_demo.bas
 sha256=761a233df8f9f0bba0b062b70f2bcf3254eb60b46d2c401c0fd3baab08fd6545 ascii256=41dccb87f7f8411b4f70d62ba6173ba9c9ff565b6256250605354aac137df45e rc=0 bytes=2127 tests/conio/cp_probe.bas
-sha256=55d0b246d9b13f9474ee6e36c1d17b5b8e7fd19f7b4dab4887bc66735f235482 ascii256=a6a85c7f7d8e2cf611eafbe1064712a9d72632fdc5a604028210581e24fd20e9 rc=0 bytes=3035 tests/conio/fmt_probe.bas
+sha256=3c6e26bb90d398d8e30e163e717183284dd6da3ea7184020bccb75ed277f6d48 ascii256=e8694928c48ff209412fc8889c058537a310449562b6427e50ed51740925ef6e rc=0 bytes=2999 tests/conio/fmt_probe.bas
 sha256=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 ascii256=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 rc=1 bytes=0 tests/ctor/ctor_main.bas
 sha256=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 ascii256=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 rc=1 bytes=0 tests/ctor/ctor_neg_main.bas
 sha256=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 ascii256=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 rc=1 bytes=0 tests/ctor/ctor_neg.vbp
@@ -306,7 +306,7 @@ sha256=75df121ce128f03b1d948ce8a144c7ad2ca138c986a78ab4fb7643d8283351d1 ascii256
 sha256=f80e22007bb5d3b75dd10c06f533a215caf5706f643f47a84465dd17411d9b75 ascii256=b77faa930c5bbda1dbb50f9e67753b9c506a5a57b33735d89bfe7706767de90d rc=0 bytes=4320 tests/test_bodydecl.bas
 sha256=c5b033a076f7f1a5f0bac113b91dc34d715e0be87dd5f9d488063c354c8489d0 ascii256=4aa90c8e8d5d99c120ec5b2b6c3602827a3bf09a0e077292ba2463af497b607d rc=0 bytes=9796 tests/test_bool_display.bas
 sha256=13370df8691652c8949555ef4c1d49cfe05f0499a72064128a738eb682c7647c ascii256=af35d3a1af0bcc844cdafbb3a7c20654673ef996ef89999a98d7ad5785539cc3 rc=0 bytes=6856 tests/test_bstr_concat_scalar.bas
-sha256=3c76b70f831a74117d659984bd6e025e387e413ec29b0e61d42e08d2f67b85cc ascii256=741f440e093dc765e5a109ebee111feaa4e3cbcb1b5de2e48294de215bd83a61 rc=0 bytes=5584 tests/test_builtin_arity.bas
+sha256=04fb3c781cb3ca5a2364e56246191824b49f673b54efbe1080a1c995be72599f ascii256=712f35ff11140dcb51d016d622b9980611a083b1b59dd4f98b95d203f694c393 rc=0 bytes=5572 tests/test_builtin_arity.bas
 sha256=762539f0e719e9f8a8af17657cfcf116815d412863627c85faaf7c8ef4f5e99e ascii256=3c3f7c03dd7bced7832a62fa976d2f905dda1d71c59139848c4aa398dcf38a48 rc=0 bytes=7281 tests/test_byte_visible.bas
 sha256=8cf4f0f4cd9c338c425a5dc075293b11761bc4fb4ad243a006ee52c412aab5e8 ascii256=6cf34deaa38784dc74b639659bd36867973146ff537bd588199e986423029f50 rc=0 bytes=2022 tests/test_caseis_implicit.bas
 sha256=0594301b4ddb0f4e0cee5f0f76863dfb2c0d12ce72cff20fdb101b3308ef2b0a ascii256=988eeeea21561eaf656875b15196c9ce42a49cb5b81830576b557d932197817d rc=0 bytes=1666 tests/test_caseis_neg.bas
@@ -329,7 +329,7 @@ sha256=2dd3a4662bff59df7231ed5954136d775af8360d306b7bdec50edac3be724705 ascii256
 sha256=bd36c8c3b8928cf2b20ae2745e7797baac16d4a18c068f35cc498bf677559ba8 ascii256=f679274ef33acbf9e6c272665fd3209d03bc8541c6377bc32ef00738684ac044 rc=0 bytes=3178 tests/test_concat_leak.bas
 sha256=3f364ed5ed67514e12c4e243e38d8904e335b4c3d52ec069545e965733905ff7 ascii256=fd1b790b7f5b565c431317d1e2f0d0aa614c0e8b510463134923a93046430ec7 rc=0 bytes=2467 tests/test_concat_stress.bas
 sha256=65f5e1429198feab46e4abce74861f24474ec0f78a2dcc406e12523b774ff8ce ascii256=4e68c12ba4cbf8fe5b14f58963c3b7ecd834a9cd4b531030b992de27d2d37406 rc=0 bytes=9524 tests/test_control.bas
-sha256=4171232d310aec143531b17143ead8fca1c8827d81eb20a482bb422ffcad17a8 ascii256=d8126af6c51828a9e967022f2bde1b73502d9c80924528e7806d73a2eccf3dbe rc=0 bytes=4056 tests/test_date_display.bas
+sha256=8c1dca7990e2233584c207f72ea613bb2a44c00d8a4b5581a2fc1f211871750e ascii256=b56417e719da7a9dfd678ec80f395273e26087a7c376e698fe6e567d7ae27ee9 rc=0 bytes=4044 tests/test_date_display.bas
 sha256=257f685c82d3b394c1296303077b2dfefc370664459f76ec1248af86b7f206f5 ascii256=25e965a22e7ef0522ec0ace55dd4ea7757f18cc300f35e0dca9b9d846d6c1f79 rc=0 bytes=2491 tests/test_date.bas
 sha256=901ca236bdfa4073a5425bd2e39a5e5e47961d41a221f9801d7ee6664bd6425e ascii256=ce8262f34c7452f647092ce3d30a006914914c071bfdaaf842a9e7168f158032 rc=0 bytes=2714 tests/test_datefuncs.bas
 sha256=0ad69db406a8936fea7500fd6e732de51c78c03041e6eab339873972a32c4ee6 ascii256=4f9b7ae7c18c056a67d29f0ae35f25c4df645913a98fc5ef19f654b96555ac37 rc=0 bytes=4027 tests/test_datelit.bas
@@ -356,7 +356,7 @@ sha256=ce355050c053fc6e7dbba36dbba4e61688521153c09213a6a3d33e8c4c3a5ca8 ascii256
 sha256=c60fc2c9dce7bcb6c01030e653fc684c522409e1670a7e746afbb9d8dddb0e61 ascii256=48dbc04bc8d22f9614e3097710ff9ba58c69b5a6fb61180352a64bdb868a7560 rc=0 bytes=2794 tests/test_implements.bas
 sha256=26c7eb1d7db95366b074d8a4d6c9951ba5d041853eb55952161490e75328872a ascii256=f27ab9d5605b6c2b0fe57600d12cfb1a0bc9465afde52c174ac346c731d9cb30 rc=0 bytes=18784 tests/test_implements.vbp
 sha256=9c0eb43378c78fa398ee7118b5ff6b40c799cfc88379c2466d8f8be9ec293d7d ascii256=137efc90b4f3ef19bc7bf7a16128973d2ce5fd2eef38ccb0a892ea740aa3363d rc=0 bytes=5844 tests/test_interface.bas
-sha256=0a8e7a7947776931d87234aacd95db8e3e449267e716c65854d2f066ea9a3269 ascii256=701fd90abfc743e7246eece58cbb4a09d62f5266f8eeb0f7857b6b220a472917 rc=0 bytes=7825 tests/test_interp.bas
+sha256=62afdfd3041254d8c6dcfc8ae3deaf3e8c9c6da83c8c2b8a0893a40704dd9a0b ascii256=7206b02f26be5e77fb95825e086550d17bcbcb44116f35468b0406c8b3ee4360 rc=0 bytes=7801 tests/test_interp.bas
 sha256=366828d54fa9e8cc59977a583d20454fbbfb279d18472ea7a0841887429e78ec ascii256=97fd2421e90c95719ddd496caeaa79654878959e1f75d5bede3e226096277a54 rc=0 bytes=5450 tests/test_joinfilter.bas
 sha256=295fae675997a15bf8f7fa6ac0f5095a1040255a2a8333593b210ed11f0d4949 ascii256=ef46b73664b9001a99a40d13bdd736819a4103e4cb32bc3ec8a03a3dc9860468 rc=0 bytes=6104 tests/test_lastdllerror.bas
 sha256=447fb9c33d075143097bde310e102f860469b96f0cb9e7c599c82b7936516bef ascii256=49d4c3e7baf3e252d2a35afcb65018e7981f5e018d699223083bb2d56f7bb205 rc=0 bytes=3803 tests/test_len_width.bas
@@ -482,16 +482,16 @@ sha256=a0cd2b6782a67074e65fdada0124d5cc3630772a353b979a5d04bb3e6b7426a3 ascii256
 sha256=a0cd2b6782a67074e65fdada0124d5cc3630772a353b979a5d04bb3e6b7426a3 ascii256=a3d4a45f978c1dcf252a49f7a581413137d90ccb687fed60e7fcfd39ef460fb4 rc=0 bytes=7445 tests/b419/B419Main.bas
 sha256=dfa8903d18a886775ad659424745ce1814300dc32ee9ac9f5fd5560a3f448ca7 ascii256=de3e432d3a4c2b7891f2ce1c4f8f62d658cbd04f0ac8e03a89fc7233ed7f3988 rc=0 bytes=8392 tests/b422/B422.vbp
 sha256=dfa8903d18a886775ad659424745ce1814300dc32ee9ac9f5fd5560a3f448ca7 ascii256=de3e432d3a4c2b7891f2ce1c4f8f62d658cbd04f0ac8e03a89fc7233ed7f3988 rc=0 bytes=8392 tests/b422/B422Main.bas
-sha256=910aa8a8e84d7bd9a621df988ef5988806ebcbfba1cd4c8d9c458a94c33885c0 ascii256=b6c64aa7c2275f06d2a59c0b9277791fe05e06261abff7e67159a16ccd61e314 rc=0 bytes=8396 tests/b426/B426.vbp
-sha256=910aa8a8e84d7bd9a621df988ef5988806ebcbfba1cd4c8d9c458a94c33885c0 ascii256=b6c64aa7c2275f06d2a59c0b9277791fe05e06261abff7e67159a16ccd61e314 rc=0 bytes=8396 tests/b426/B426Main.bas
+sha256=fe8e673d620948cd035d534ea0d099f46ab57c82ed0efb8b53a943d54b00cb14 ascii256=efe382e17b604298ec7efa73eafa4969b24b170b3c725ba2d55380b2509f4079 rc=0 bytes=7976 tests/b426/B426.vbp
+sha256=fe8e673d620948cd035d534ea0d099f46ab57c82ed0efb8b53a943d54b00cb14 ascii256=efe382e17b604298ec7efa73eafa4969b24b170b3c725ba2d55380b2509f4079 rc=0 bytes=7976 tests/b426/B426Main.bas
 sha256=89607e06667f46da4c1823578456cdd41b83d303077fabf4dd8950d1806a7c00 ascii256=de8605d0d27f66660047c2bbb3ba6d3810445d06dad494dcf0c77cd62cde6c3a rc=0 bytes=6180 tests/b429/B429.vbp
 sha256=89607e06667f46da4c1823578456cdd41b83d303077fabf4dd8950d1806a7c00 ascii256=de8605d0d27f66660047c2bbb3ba6d3810445d06dad494dcf0c77cd62cde6c3a rc=0 bytes=6180 tests/b429/B429Main.bas
-sha256=b209f18530ca49d9df62ebe4b9860f9a63d2a1a45176441a9b4e1de2acb1dc5c ascii256=7178751a97286994113aaa2d55e4623c0d06083c1d5aa49a38e5660c5de9c64c rc=0 bytes=10522 tests/b430/B430.vbp
-sha256=b209f18530ca49d9df62ebe4b9860f9a63d2a1a45176441a9b4e1de2acb1dc5c ascii256=7178751a97286994113aaa2d55e4623c0d06083c1d5aa49a38e5660c5de9c64c rc=0 bytes=10522 tests/b430/B430Main.bas
-sha256=f64d7050875cbcfc80ca82b30aa974afbca3e4014aefb1333f6da23c3b72a074 ascii256=42a10222e611a0087573309e6328b2080ca6ee31001cda98374690a1295a8ede rc=0 bytes=8479 tests/b431/B431.vbp
-sha256=f64d7050875cbcfc80ca82b30aa974afbca3e4014aefb1333f6da23c3b72a074 ascii256=42a10222e611a0087573309e6328b2080ca6ee31001cda98374690a1295a8ede rc=0 bytes=8479 tests/b431/B431Main.bas
-sha256=d25b874c3087ae3ab46279cb1fe94f96d4fd047a513f3b61ecb914b5b7d04712 ascii256=3f6e87b9c676dfb4a1afedb25ad6fb4e18484b116e7b60ec8b8cb737df3ad064 rc=0 bytes=11180 tests/b432/B432.vbp
-sha256=d25b874c3087ae3ab46279cb1fe94f96d4fd047a513f3b61ecb914b5b7d04712 ascii256=3f6e87b9c676dfb4a1afedb25ad6fb4e18484b116e7b60ec8b8cb737df3ad064 rc=0 bytes=11180 tests/b432/B432Main.bas
+sha256=9e15e9fdcebaf755efc23ecffa8043b53cc488c776acc0f2fffd3421b6e8fe5e ascii256=ad0aa4a4da404380ea4e59f4137e7c1c9714822f7c004815a7272ea9f53be098 rc=0 bytes=10126 tests/b430/B430.vbp
+sha256=9e15e9fdcebaf755efc23ecffa8043b53cc488c776acc0f2fffd3421b6e8fe5e ascii256=ad0aa4a4da404380ea4e59f4137e7c1c9714822f7c004815a7272ea9f53be098 rc=0 bytes=10126 tests/b430/B430Main.bas
+sha256=ecf7fca52980f143485d8c4201be775efeddd97de39ef891ad4ee61b9e2fe310 ascii256=023a8c17c07206c140bffdd2983e88c10b32613d29a7a63ba43a169c44872533 rc=0 bytes=8419 tests/b431/B431.vbp
+sha256=ecf7fca52980f143485d8c4201be775efeddd97de39ef891ad4ee61b9e2fe310 ascii256=023a8c17c07206c140bffdd2983e88c10b32613d29a7a63ba43a169c44872533 rc=0 bytes=8419 tests/b431/B431Main.bas
+sha256=024c2e09262d71685f87c33784b069bd2945466a0f81070bde60ff27272c64a7 ascii256=e7336e0f425c04d58c993aef37e3d66c4d352a202c4ee1e5207a69bce62863c7 rc=0 bytes=11144 tests/b432/B432.vbp
+sha256=024c2e09262d71685f87c33784b069bd2945466a0f81070bde60ff27272c64a7 ascii256=e7336e0f425c04d58c993aef37e3d66c4d352a202c4ee1e5207a69bce62863c7 rc=0 bytes=11144 tests/b432/B432Main.bas
 sha256=11f7d30f6109635ee8a337ca9c773895ab0c94e54b644a024c38f6bc88edc492 ascii256=14bbe3bc69ca7fad373a03c6d0cee848fe520dc433c53e599dffa71c85b458a0 rc=0 bytes=11147 tests/b433/B433.vbp
 sha256=07e44f4a94e82aedd4628f9008c998c60d3ead687d3f84a2fc4602cb7b7f8f86 ascii256=db2dfec473449dd1d8ab3c3e0d3dadd4d5611e6eb05e8bb3641b543ccbd5cb10 rc=0 bytes=7761 tests/b433/B433Main.bas
 # 账 #305 §B188 (第八十刀判据): 新增 2 行 = tests/b188_term 那两枚输入, 哈希取 CI 为同一 head 33320a1d 自己交的 9c33fdca;
@@ -597,3 +597,29 @@ sha256=07e44f4a94e82aedd4628f9008c998c60d3ead687d3f84a2fc4602cb7b7f8f86 ascii256
 # arch=x64 inputs=465), 走rebless_emit_manifest.ps1 -Bless 取回。
 # 登记后复算: 期望 465 / 实得 465 / 相同 465 / 哈希不同 0 / 缺席 0 / 新增 0。
 # 第一百零三刀登记来源: CI 那台为 head 5233975d 自己交的清单 (github/ci/emit-manifest fd42e78f, arch=x64 inputs=467) —— 只加 tests/b433 这两行 (两行哈希相同 = B433.vbp 只有 B433Main 一份代码, B433Holder.cls 不单独进清单; 两行 bytes 差 = 一份是工程文件一份是模块文件)。本刀**没有**移动任何存量行: 那张表新增的那一行只改 `FormatDateTime(<一枚槽>, n)` 的发码，而清单里 467 份输入今天没有这一形 (语料那 13 处在 D:/vb_yqt4qPac，不在门禁输入里) —— 这一点由 CI 那份清单自己证实: 5 加 3 删里，只有那两行 b433 是新增输入，其余四行是 exe 哈希与两份头注 (inputs= / expectation-check=)。
+# ---- 第一百零四刀 = 账 #430（§B204）：Format 首参那一臂改问唯一权威 ----
+# inputs 467 不变（无新夹具）。移动 **13** 行，全部同因：那一臂的 Date 档
+#   vb6_VariantDouble((double)(<Date>))  ->  vb6_VariantDate(<Date>)
+# 逐行看过，**每一处**都是这一条替换，没有别的位移。以 tests/conio/fmt_probe.bas 为尺
+#   (BASE vs NEW 两台并排发)：行数 100 = 100 逐行相同，只有 3 行不同，正是 e/f/g 三发
+#   `vb6_Format(vb6_VariantDouble((double)(dt)), …)` -> `vb6_Format(vb6_VariantDate(dt), …)`。
+#   其余 12 份各自探针：`vb6_VariantDouble((double)(` 计数全部归 **0**，
+#   `vb6_VariantDate(` 计数 = 35/33/7/14/2/3/1/1/2（b426/b430/b431/b432/Charts 2020/
+#   fmt_probe/test_builtin_arity/test_date_display/test_interp）。
+#   tests/b432 那两行另外还叠了本刀改判据注释（`Rem` 文本会进发码，见账里 B431 那条）。
+#
+# 为什么这一刀会动形状：改之前 `Dim d As Date` 局部发成 double，交进 vb6_Format 一直
+# 贴 VT_R8，可同一枚 VarType(d) 答 7 —— 值明明真是日期，这一站却不认。第一百刀
+# (allowWQT) 正是用「串里没有数值占位符」把这一格绕过去的；#430 落地后 VT_DATE 臂
+# 的 w/ww/q/ttttt 特权在这一族上才真正拿得到。
+#
+# 判据：tests/b432 的 **B432-18 第二格翻了**（那是第二刀故意钉下的错答案）。
+#   BASE = True/False（那一格问 `Format(<Dim As Date 局部>)`，答的是数值不是日期串）
+#   NEW  = True/True
+#   负控 = 把那一行 stash 掉重编, 读数回到 True/False（尺 .build/ 本刀现场同树两台）。
+#   b432 发码里 `vb6_VariantDouble` 归零。
+#
+# 第 76 道哨兵 `scripts/check_format_date_arg_arm.ps1`（R1 那一臂必须调 boxToVariant /
+#   R2 不许再有 vb6_VariantDouble / R3 权威自己答 vb6_VariantDate / R4 其余五档原样还在
+#   —— 防有人把整条链塌成一句 boxToVariant，那会一次移六档 / R5 判据两头都在）。
+#   负控实测：把手抄写法塞回去 -> R1+R2 双红。
