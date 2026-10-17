@@ -341,7 +341,12 @@ int32_t vb6_UC_IsExtender(const void* p) {
     return p == (const void*)&vb6_UserControl_Extender;
 }
 
-// kind 编码与 vb6_UC_FontField 一致: 0=BSTR, 1=float, 2=int16, 3=int32
+// kind 编码与 vb6_UC_FontField 一致: 0=BSTR, 1=float, 2=int16, 3=int32。
+// Fix 296 / 3b 前置: 补一位 **4 = 对象 (void*)**。
+// Container/DragIcon 的记录字段是 `void*` (vb6forms_uc_internal.h:100-101), 此前通道给的是
+// 0=BSTR —— 类型撒谎。写侧 3a 的闸门不看类型, 已经在往这条路上走; 而 ComGet/ComProp 的
+// Extender 分支会把 kind 0 当 BSTR 走 `SysAllocString(对象指针)`。凡是有 kind switch 的
+// 地方都必须认 4, **指针宽度**存取 —— 落进 default 的 int32 会把 64 位指针截断。
 /* Fix 294 / 3a: `Extender.<成员> = v` 的实例感知写入口。
    cgen 过去对 Extender 成员发的是裸全局赋值 `vb6_Extender_X = v;` —— 而通道
    (vb6_UC_ExtenderField) 已经改指 `vb6_UCRec.ext*`, 裸写进不去, 用户代码改
@@ -359,6 +364,9 @@ int32_t vb6_UC_GetExtenderMemberNum(const wchar_t* name) {
     void* fp = vb6_UC_ExtenderField(p, name, &kind);
     if (!fp) return 0;
     if (kind == 2) return (int32_t)(*(int16_t*)fp);
+    /* 对象成员 (kind 4): 读 32 位就是**截断指针**, 交出去的是半个地址。
+       调用方按类型表挑入口, 正常走不到这里; 这道是给"有人把读闸放开了"兜底。 */
+    if (kind == 4) return 0;
     return (int32_t)(*(int32_t*)fp);
 }
 
@@ -379,6 +387,9 @@ void vb6_UC_SetExtenderMember(const wchar_t* name, void* value) {
     switch (kind) {
         case 0: *(BSTR*)fp  = (BSTR)value; break;                 // BSTR: 搬指针
         case 2: *(int16_t*)fp = (int16_t)(intptr_t)value; break;
+        // 对象 (kind 4): **原样搬指针**, 宽度不变。漏掉这一支会落进 default 的
+        // *(int32_t*) —— x64 上把 64 位指针截成 32 位 (Fix 296 / 3b 前置)。
+        case 4: *(void**)fp = value; break;
         default: *(int32_t*)fp = (int32_t)(intptr_t)value; break;
     }
 }
@@ -408,8 +419,9 @@ void* vb6_UC_ExtenderField(void* p, const wchar_t* name, int32_t* kind) {
             if (_wcsicmp(name, L"Cancel")          == 0) { *kind = 2; return &rc->extCancel;          }
             if (_wcsicmp(name, L"Tag")             == 0) { *kind = 0; return &rc->extTag;             }
             if (_wcsicmp(name, L"ToolTipText")     == 0) { *kind = 0; return &rc->extToolTipText;     }
-            if (_wcsicmp(name, L"Container")       == 0) { *kind = 0; return &rc->extContainer;       }
-            if (_wcsicmp(name, L"DragIcon")        == 0) { *kind = 0; return &rc->extDragIcon;        }
+            // 对象成员: 字段是 void*, **不是** BSTR (Fix 296 / 3b 前置)
+            if (_wcsicmp(name, L"Container")       == 0) { *kind = 4; return &rc->extContainer;       }
+            if (_wcsicmp(name, L"DragIcon")        == 0) { *kind = 4; return &rc->extDragIcon;        }
         }
     }
     if (_wcsicmp(name, L"Width") == 0)           { *kind = 3; return &vb6_Extender_Width; }
@@ -423,6 +435,15 @@ void* vb6_UC_ExtenderField(void* p, const wchar_t* name, int32_t* kind) {
     if (_wcsicmp(name, L"WhatsThisHelpID") == 0) { *kind = 3; return &vb6_Extender_WhatsThisHelpID; }
     if (_wcsicmp(name, L"Tag") == 0)             { *kind = 0; return &vb6_Extender_Tag; }
     if (_wcsicmp(name, L"ToolTipText") == 0)     { *kind = 0; return &vb6_Extender_ToolTipText; }
+    /* Fix 296 / 3b 前置: 兜底段必须把 vb6_uc_push/pop 管的 15 枚**全兜住**。
+       此前漏了 4 枚 (vb6_Default / Cancel / Container / DragIcon) —— 兜不住的那几枚,
+       在**没有当前记录**时 vb6_UC_SetExtenderMember 撞 `if (!fp) return;`,
+       写**静默丢** (改之前那枚全局落地, 改之后没了)。实测 DragIcon 33 个写点、
+       Cancel 2 个。这条也是 3b 的前置: push/pop 一旦不再镜像全局, 兜底就是唯一的退路。 */
+    if (_wcsicmp(name, L"vb6_Default") == 0)     { *kind = 2; return &vb6_Extender_vb6_Default; }
+    if (_wcsicmp(name, L"Cancel") == 0)          { *kind = 2; return &vb6_Extender_Cancel; }
+    if (_wcsicmp(name, L"Container") == 0)       { *kind = 4; return (void*)&vb6_Extender_Container; }
+    if (_wcsicmp(name, L"DragIcon") == 0)        { *kind = 4; return (void*)&vb6_Extender_DragIcon; }
     return NULL;
 }
 

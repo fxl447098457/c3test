@@ -56,6 +56,40 @@ else {
     }
 }
 
+# 同一个普查, 换一个消费点: vb6_UC_ExtenderField 的**全局兜底**那一段。
+# 它必须把普查里每一枚都兜住 —— 兜不住的那几枚, 在**没有当前记录**时
+# vb6_UC_SetExtenderMember 撞 `if (!fp) return;`, 写**静默丢**(改之前那枚全局落地,
+# 改之后没了)。这条也是 3b 的前置: push/pop 一旦不再镜像全局, 兜底就是它们唯一的退路。
+$ctlFile = Join-Path $Root "src\rtl\core\vb6forms\uc\uc_controls.c"
+if (-not (Test-Path -LiteralPath $ctlFile)) { $bad += "missing $ctlFile" }
+else {
+    $ctls = [System.IO.File]::ReadAllText($ctlFile)
+    # 必须点名**定义** (结尾带 `{`); 用 `void* vb6_UC_ExtenderField(` 会先撞上
+    # getter 里那三行 extern 声明 (uc_controls.c:356/366/374), 取到空body,
+    # 于是 15 枚**全都**报"没有兜底" —— 假红。
+    $sigFb = 'void* vb6_UC_ExtenderField(void* p, const wchar_t* name, int32_t* kind) {'
+    $i = $ctls.IndexOf($sigFb)
+    if ($i -lt 0) {
+        $bad += "cannot locate the vb6_UC_ExtenderField definition (signature must include the full parameter list and the opening brace)"
+    } else {
+        $j = $ctls.IndexOf("`n}", $i); if ($j -lt 0) { $j = $ctls.Length }
+        $efBody = $ctls.Substring($i, $j - $i)
+        # 记录段用 L"Width" 之类, 兜底段用 vb6_Extender_Width —— 正好分得开
+        foreach ($n in ($names | Sort-Object)) {
+            if ($efBody -notmatch ('\b' + [regex]::Escape($n) + '\b')) {
+                $bad += "$n has no global fallback in vb6_UC_ExtenderField (write silently dropped when no record is current)"
+            }
+        }
+        # 负控: 抠掉一枚兜底行必须转红。改名必须换成**不含原名**的一串, 否则子串匹配
+        # 照样判过, 负控就恒红而什么也没钉。
+        $negFb = $efBody -replace [regex]::Escape('vb6_Extender_Left'), 'REMOVED_LEFT'
+        $stillCovers = $true
+        foreach ($n in ($names | Sort-Object)) {
+            if ($negFb -notmatch ('\b' + [regex]::Escape($n) + '\b')) { $stillCovers = $false; break }
+        }
+        if ($stillCovers) { $bad += "sentinel is vacuous: deleting a fallback row still passes" }
+    }
+}
 if ($bad.Count -eq 0) {
     Write-Host ("PASS (" + $names.Count + " Extender globals saved/restored symmetrically)")
     exit 0

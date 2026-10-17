@@ -183,6 +183,75 @@ Check '4b: RaiseEvent argument gate present' ($evtT -match $evtRx) `
 $negB4 = $evtT -replace '(?m)^[^\n]*extenderMemberReadExpr\s*\(\s*argVal\s*\)[^\n]*\r?\n', ''
 Check 'negative control (restoring the original RaiseEvent argument line must go red)' (-not ($negB4 -match $evtRx)) `
     'sentinel is vacuous if deleting the RaiseEvent redirect still passes'
+function BodyOf([string]$text, [string]$sig) {
+    $i = $text.IndexOf($sig)
+    if ($i -lt 0) { return "" }
+    $j = $text.IndexOf("`n}", $i)
+    if ($j -lt 0) { return $text.Substring($i) }
+    return $text.Substring($i, $j - $i)
+}
+# --- kind 契约: 对象成员不许再报成 BSTR (3b 的前置, 不是清理) ---
+# Container/DragIcon 在表里 type=Unknown, 记录字段却是 `void*`
+# (vb6forms_uc_internal.h:100-101), 而通道给的是 *kind = 0 = BSTR —— 类型撒谎。
+# 今天没炸只因为**读**侧闸门按 type=Unknown 原样返回; 一旦谁把读闸放开,
+# `*(BSTR*)&rc->extDragIcon` 会把**活着的对象指针**当 BSTR 交出去, 调用方很可能
+# SysFreeString 掉它。**写**侧 3a 的闸门不看类型, 早就在往这条路上走了。
+# 约定扩一位: 4 = 对象 (void*)。凡是有 kind switch 的地方都必须跟上 —— 漏掉一处,
+# default 分支会 `*(int32_t*)` 把 64 位指针截断, 那才是当场炸。
+$KIND_OBJ = 4
+$ctl  = [System.IO.File]::ReadAllText($rtl)
+$invk = [System.IO.File]::ReadAllText((Join-Path (Split-Path -Parent $PSScriptRoot) 'src/rtl/core/vb6com/vb6com_invoke.c'))
+
+$sites = [ordered]@{
+    'vb6_UC_ExtenderField'  = 'void* vb6_UC_ExtenderField(void* p, const wchar_t* name, int32_t* kind) {'
+    'vb6_UC_SetExtenderMember' = 'void vb6_UC_SetExtenderMember(const wchar_t* name, void* value) {'
+    'vb6_ComGetProp'         = 'void* vb6_ComGetProp(void* disp, const wchar_t* propName) {'
+    'vb6_ComSetProp'         = 'void vb6_ComSetProp(void* disp, const wchar_t* propName, void* value_void) {'
+}
+$bodies = @{}
+foreach ($k in $sites.Keys) {
+    $b = ''
+    if ($k -eq 'vb6_ComGetProp' -or $k -eq 'vb6_ComSetProp') { $b = BodyOf $invk $sites[$k] } else { $b = BodyOf $ctl $sites[$k] }
+    $bodies[$k] = $b
+    Check "body located: $k" (-not [string]::IsNullOrWhiteSpace($b)) `
+        'the signature must name the definition, not an extern declaration; an empty body makes every check below meaningless'
+}
+
+$efBody = $bodies['vb6_UC_ExtenderField']
+# (a) 两个对象成员的行必须报对象 kind
+$rowRx = '_wcsicmp\(name,\s*L"(Container|DragIcon)"\)\s*==\s*0\)\s*\{\s*\*kind\s*=\s*(\d+)'
+$rows = [regex]::Matches($efBody, $rowRx)
+# 每个成员现在有**两**行 (记录段 + 兜底段), 所以断的是"**没有一行**报成别的 kind",
+# 不是"恰好几行" —— 数条数会在补上兜底段之后误报 (自己踩过)。
+$objOk = ($rows.Count -ge 2) -and (@($rows | ForEach-Object { $_.Groups[2].Value } | Where-Object { $_ -ne "$KIND_OBJ" }).Count -eq 0)
+Check "kind contract: Container/DragIcon are kind $KIND_OBJ (object), not BSTR" $objOk `
+    'reporting them as BSTR means a live object pointer can be handed out as a BSTR and freed'
+$negK = $efBody -replace '(\{\s*)\*kind\s*=\s*4', '$1*kind = 0'
+$negRows = [regex]::Matches($negK, $rowRx)
+$negKOk = ($negRows.Count -ge 2) -and (@($negRows | ForEach-Object { $_.Groups[2].Value } | Where-Object { $_ -ne "$KIND_OBJ" }).Count -eq 0)
+Check 'negative control (marking the object rows back as BSTR must go red)' (-not $negKOk) `
+    'sentinel is vacuous if the object rows can be re-typed to BSTR and still pass'
+
+# (b) 每个 kind switch 都得认这个 kind, 且用**指针宽度**存/取
+foreach ($k in @('vb6_UC_SetExtenderMember', 'vb6_ComGetProp', 'vb6_ComSetProp')) {
+    $b = $bodies[$k]
+    $okSw = $b -match ('case\s+' + $KIND_OBJ + '\s*:.*\*\(void\*\*\)')
+    Check "kind $KIND_OBJ handled with a pointer-width access in $k" $okSw `
+        'falling through to default uses int32 and truncates a 64-bit pointer'
+    $negSw = $b -replace ('case\s+' + $KIND_OBJ + '\s*:'), 'case 99:'
+    Check "negative control (removing the kind $KIND_OBJ arm from $k must go red)" (-not ($negSw -match ('case\s+' + $KIND_OBJ + '\s*:.*\*\(void\*\*\)'))) `
+        'sentinel is vacuous if the object arm can be dropped and still pass'
+}
+
+# (c) 数值入口不许把对象成员的指针截成 int32 读出来
+$gnum = BodyOf $ctl 'int32_t vb6_UC_GetExtenderMemberNum(const wchar_t* name) {'
+Check 'body located: vb6_UC_GetExtenderMemberNum' (-not [string]::IsNullOrWhiteSpace($gnum)) 'wrong signature'
+$gnumOk = $gnum -match ('kind\s*==\s*' + $KIND_OBJ)
+Check "numeric read entry refuses kind $KIND_OBJ" $gnumOk `
+    'reading 32 bits of an object pointer hands a truncated pointer to arithmetic'
+$negG = $gnum -replace ('kind\s*==\s*' + $KIND_OBJ + '\s*\)'), 'kind == 99)'
+Check "negative control (removing the kind $KIND_OBJ guard from the numeric entry must go red)" (-not ($negG -match ('kind\s*==\s*' + $KIND_OBJ))) `
+    'sentinel is vacuous if the numeric guard can be removed and still pass'
 if ($bad) { Write-Host "check_extender_emit_channel: FAIL ($bad)"; exit 1 }
 Write-Host 'check_extender_emit_channel: PASS'
 exit 0
