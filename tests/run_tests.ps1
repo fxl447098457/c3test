@@ -7560,7 +7560,7 @@ if ($Category -in @("all", "run", "vbp")) {
         "B432-15=True/True",
         "B432-16=True/True",
         "B432-17=True/True",
-        "B432-18=True/False",
+        "B432-18=True/True",
         "B432-DONE")
     Test-Vbp 'b432_dateserial_tag' "$Tests\b432\B432.vbp" $b432Expected
     Test-Vbp 'b432_dateserial_tag_x86' "$Tests\b432\B432.vbp" $b432Expected -Arch "x86"
