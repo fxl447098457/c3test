@@ -1622,6 +1622,20 @@ function Test-EmittedDeclared {
         $out | Select-Object -First 8 | ForEach-Object { Write-Host "  $_" }
     }
 }
+# 账 #305 #427 (§B201) 的结构性哨兵: 「日期令牌从哪儿进日期臂、周数与星期序号由谁答」这两问各只许住一处。
+function Test-FormatDateTokens {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] format_date_tokens ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\check_format_date_tokens.ps1" 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        $out | Select-Object -First 12 | ForEach-Object { Write-Host "  $_" }
+    }
+}
 # === 编译冒烟测试 (编译+链接, 不运行生成物) ===
 function Test-Run {
     param(
@@ -7383,6 +7397,49 @@ if ($Category -in @("all", "run", "vbp")) {
     Test-Vbp 'b429_formatdatetime' "$Tests\b429\B429.vbp" $b429Expected
     Test-Vbp 'b429_formatdatetime_x86' "$Tests\b429\B429.vbp" $b429Expected -Arch "x86"
 
+    # 账 #305 #427 (§B201) 第一百刀: Format 的日期面还欠 w / ww / q / ttttt 四枚门票 + ddddd 那一档。
+    # 修前读数 (尺 .build/k504_proj -> k504_x64_run.txt): 前四枚交**裸序列号** 46027.6046875、
+    #   ddddd 交 Monday (日档 cnt>=4 把第五枚 d 当成长周名), 而语料把 ddddd ttttt 写了 36 处。
+    # 命名格式那五档走 LOCALE_USER_DEFAULT ⇒ 字串随机器 locale 变 (本机 zh-CN / CI en-US) ⇒ 期望值只钉
+    # 关系: w/ww/q 与 DatePart 同答、ttttl 与 FormatDateTime(vbLongTime) 同答、ddddd 与 vbShortDate 同答,
+    # 外加两枚与 locale 无关的字面证人 (自家不变英文的周名表 + ISO 串里那枚字面 t)。
+    # 反面的爆炸半径证人 (B430-24/25): 数值臂那条不许被新字母拖进日期臂 —— 语料的「数值 + 单位」串
+    # (#,##0 Twip / T0 / #### Byte, 15 处) 仍交那个数; 门票的 allowWQT + 「串里有 0/# 就不算日期」两条闸
+    # 就是为这一格钉的 (尺 .build/k496_census.txt + k497_wqt_where.txt)。
+    # 负控 = 本刀之前那台冷编 (C3_k100_base.exe) 编同一份夹具: 20 针红、只有 DONE 与 5 针不红
+    # (.build/k512_x64_run.txt vs .build/k511_x64_run.txt)。
+    $b430Expected = @(
+        "B430-01=True/True",
+        "B430-02=True",
+        "B430-03=True",
+        "B430-04=True",
+        "B430-05=True",
+        "B430-06=True",
+        "B430-07=True",
+        "B430-08=True",
+        "B430-09=True",
+        "B430-10=True",
+        "B430-11=True",
+        "B430-12=True",
+        "B430-13=True",
+        "B430-14=True",
+        "B430-15=True",
+        "B430-16=True/True/True",
+        "B430-17=True",
+        "B430-18=True",
+        "B430-19=True",
+        "B430-20=True",
+        "B430-21=True",
+        "B430-22=True",
+        "B430-23=True",
+        "B430-24=True/True",
+        "B430-25=True/True",
+        "B430-26=True/True",
+        "B430-27=True/True",
+        "B430-DONE")
+    Test-Vbp 'b430_format_date' "$Tests\b430\B430.vbp" $b430Expected
+    Test-Vbp 'b430_format_date_x86' "$Tests\b430\B430.vbp" $b430Expected -Arch "x86"
+
 
     # 账 #305 SB186 第二头: VB 客户那一头　「口径」的唯一读数面　—— 探针是 C 客户, 它只能读 hr;
     # 「服务端自己那条错折回原号」还是「一律 429」这一问, 只有真的 VB 客户点得到。
@@ -7644,6 +7701,7 @@ if ($Category -in @("all", "compile")) {
     Test-DatePartArms
     Test-FormatAmPm
     Test-EmittedDeclared
+    Test-FormatDateTokens
 
     Write-Host ""
 
