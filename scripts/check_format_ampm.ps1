@@ -22,7 +22,8 @@
 #   R4 记号必须赶在令牌 switch 之前被认掉: 在 vb6_fmtDateSerial 函数体内, ampmLen 那一读的位次
 #      早于 switch (lc); 函数体里跳过记号的 i += 那一行 1、交记号那一行 1 (② 的靶子就是「来不及认」)。
 #   R5 大小写跟随串里写的那一种: towlower(fmt[i]) == fmt[i] 恰好 1。
-#   R6 邻居不许被牵连: 月份档 case L'm': 与日档 case L'd': 各 1、prevHour = 1; (hh:mm 的 mm 是
+#   R6 邻居不许被牵连: 月份档 case L'm': 与日档 case L'd': 各 1 (按 vb6_fmtDateSerial 体内数 ——
+#      门票函数 vb6_fmtIsDateFormat 里也各写着一次同名 case)、prevHour = 1; (hh:mm 的 mm 是
 #      分钟那一条规则) 1、月份名单 kMonLong[12] 1。
 #   R7 判据两头都在: run_tests.ps1 里 b426 两台各 1、Test-FormatAmPm 被调用 1、本哨兵已登记。
 # ============================================================
@@ -80,13 +81,15 @@ if ($body) {
 # R5
 $r5case = N 'towlower\(fmt\[i\]\) == fmt\[i\]' $F
 if ($r5case -ne 1) { $fail += ('R5 the case of the written token is echoed = ' + $r5case + ' (want 1)') }
-# R6
-$r6m = N "case L'm':" $F
-$r6d = N "case L'd':" $F
+# R6 邻居不许被牵连 (m/d 两档按 vb6_fmtDateSerial 体内数 —— 门票函数里也各写着一次同名 case)
+if ($body) {
+    $r6m = N "case L'm':" $body
+    $r6d = N "case L'd':" $body
+    if ($r6m -ne 1) { $fail += ('R6 month arm inside the date formatter = ' + $r6m + ' (want 1: the designator branch must not replace it)') }
+    if ($r6d -ne 1) { $fail += ('R6 day arm inside the date formatter = ' + $r6d + ' (want 1)') }
+}
 $r6prev = N 'prevHour = 1;' $F
 $r6tab = N 'static const wchar_t\* kMonLong\[12\]' $F
-if ($r6m -ne 1) { $fail += ('R6 month arm = ' + $r6m + ' (want 1: the designator branch must not replace it)') }
-if ($r6d -ne 1) { $fail += ('R6 day arm = ' + $r6d + ' (want 1)') }
 if ($r6prev -ne 1) { $fail += ('R6 the hh:mm minute rule = ' + $r6prev + ' (want 1)') }
 if ($r6tab -ne 1) { $fail += ('R6 month-name table = ' + $r6tab + ' (want 1: the invariant-English caliber stays)') }
 # R7

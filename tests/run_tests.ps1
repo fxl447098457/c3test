@@ -1588,6 +1588,20 @@ function Test-DatePartArms {
     }
 }
 
+function Test-FormatAmPm {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] format_ampm ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\check_format_ampm.ps1" 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        $out | Select-Object -First 8 | ForEach-Object { Write-Host "  $_" }
+    }
+}
+
 # === 编译冒烟测试 (编译+链接, 不运行生成物) ===
 function Test-Run {
     param(
@@ -7279,6 +7293,42 @@ if ($Category -in @("all", "run", "vbp")) {
         "B422-DONE")
     Test-Vbp 'b422_datepart_arms' "$Tests\b422\B422.vbp" $b422Expected
     Test-Vbp 'b422_datepart_arms_x86' "$Tests\b422\B422.vbp" $b422Expected -Arch "x86"
+    # <vbeclipse> 回归夹子 (b426_format_ampm, 账 #305 #426 第九十八刀): Format 的日期面三格。
+    # ① h/hh 恒按 12 小时报 (那条算式无条件走 st.wHour % 12) => 语料把「hh:mm:ss」「yyyy-mm-dd
+    # hh:mm:ss」当**时间戳**用 (真语料 1693 处日期类格式串里各占 70 / 101, 尺 .build/k392_fmt_census.py),
+    # 一整个下午被写进日志与报表成了半个下午。②「AM/PM」令牌被逐字符循环当成月份吃掉 => Format(d,
+    # 「AM/PM」) 交 A1/P1 —— 那两枚 1 / 7 就是两个月号 (两枚探针时间分别在 1 月与 7 月, 尺 k391_run.txt,
+    # 台账里原先那句「数值段分隔吃掉」是错的, 同日订正)。③ 只写记号、不带日期字母的串 (「A/P」「AMPM」)
+    # 过不了 vb6_fmtIsDateFormat => 掉回数值臂交裸序列号 46027.6046875。收成一处三枚: vb6_fmtAmPmLenAt
+    # (在哪 / 几长 / 哪一形) + vb6_fmtHasAmPm (有没有, 同时就是「小时走 12 还是 24」的判据) +
+    # vb6_fmtAppendAmPm (大小写跟随串里写的那一种; 交**不变英文**记号, 与本函数已有的 January/Sunday
+    # 同一档, 不跟 locale)。
+    # ⚠ 这一格没有运行期 oracle: VBScript 不带 Format、oleaut32 VarTokenizeFormatString 在本机每串返
+    # E_INVALIDARG (尺 k388_varfmt.c)、.NET Strings.Format 走它自己的令牌表 (尺 k390_vbnet.txt) =>
+    # 下面 17 行期望值 = 文档那张表 + 语料自身写法 (先按口径手推、再两台复算全合), **不是运行期实测**。
+    # B426-14/17 是证人: mm 的两问 (月 vs 分) 与「没有日期字母的串走数值」都不许被本刀牵动。
+    # 负控 (.build/k408_negctl.txt, 同一份夹具两台编译器): 16 行移动、B426-17 与 DONE 两行不动。
+    $b426Expected = @(
+        "B426-01=14:30:45|00:05:00",
+        "B426-02=14:30|0:05",
+        "B426-03=2026-01-05 14:30:45|2026-07-04 00:05:00",
+        "B426-04=02:30 PM|12:05 AM",
+        "B426-05=2:30:45 p|12:05:00 a",
+        "B426-06=2:30 PM|12:05 AM",
+        "B426-07=023045 PM|120500 AM",
+        "B426-08=2:30 pm|12:05 am",
+        "B426-09=PM|AM",
+        "B426-10=P|A",
+        "B426-11=pm|am",
+        "B426-12=5-Jan-26 2:30 PM|4-Jul-26 12:05 AM",
+        "B426-13=2026-01-05 02:30:45 PM|2026-07-04 12:05:00 AM",
+        "B426-14=2026-01-05|01/05/2026|14:30",
+        "B426-15=12:00 PM|12:00 AM|12:00|00:00",
+        "B426-16=11:00 PM|13",
+        "B426-17=1234.50|-1234.50",
+        "B426-DONE")
+    Test-Vbp 'b426_format_ampm' "$Tests\b426\B426.vbp" $b426Expected
+    Test-Vbp 'b426_format_ampm_x86' "$Tests\b426\B426.vbp" $b426Expected -Arch "x86\"
 
 
     # 账 #305 SB186 第二头: VB 客户那一头　「口径」的唯一读数面　—— 探针是 C 客户, 它只能读 hr;
@@ -7538,6 +7588,7 @@ if ($Category -in @("all", "compile")) {
     Test-IsPredText
     Test-TimeSplit
     Test-DatePartArms
+    Test-FormatAmPm
 
     Write-Host ""
 
