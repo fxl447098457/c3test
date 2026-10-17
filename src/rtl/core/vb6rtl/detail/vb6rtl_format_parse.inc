@@ -37,9 +37,11 @@
         // (VB6 把数值当日期序列号; 且本 RTL 的 DateSerial 返回 VT_R8, 故不能只靠
         //  extract.inc 里的 VT_DATE 分支。Charts 2020 的 X 轴月份标签即此场景:)
         //   Format(DateSerial(2020,1,1), "mmm") 期望 "Jan")
-        if (vb6_fmtIsDateFormat(fmt)) {
+        // allowWQT=0: 这条臂是「数值 + 日期字母」的兜底 (DateSerial 交 R8 才需要它), 不许扩到 w/q/t ——
+        // 语料里「#,##0 Twip」「T0」「#### Byte」那一族 15 处吃的就是这条臂 (账 #427 §B201)
+        if (vb6_fmtIsDateFormat(fmt, 0)) {
             free(fmtStr);
-            return vb6_fmtDateSerial(numVal, fmt);
+            return vb6_fmtDateSerial(numVal, fmt, firstDayOfWeek, firstWeekOfYear);
         }
         // Named numeric formats
         if (strcmp(fmtLower, "general number") == 0) {

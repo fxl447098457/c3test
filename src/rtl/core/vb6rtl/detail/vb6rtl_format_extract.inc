@@ -70,14 +70,15 @@
             // 格式返回 0 (排除语义), 原先会漏到这里落数值分支输出 "45331"。
             if (fmt && vb6_BSTR_Len(fmt) > 0 && vb6_fmtNamedDateTimeKind(fmt))
                 return vb6_fmtNamedDateTime(expr.dblVal, fmt);
-            if (fmt && vb6_BSTR_Len(fmt) > 0 && vb6_fmtIsDateFormat(fmt))
-                return vb6_fmtDateSerial(expr.dblVal, fmt);
+            // 值真是日期 => 这条臂多认 w/ww/q/ttttt (账 #427 §B201 的 allowWQT=1)
+            if (fmt && vb6_BSTR_Len(fmt) > 0 && vb6_fmtIsDateFormat(fmt, 1))
+                return vb6_fmtDateSerial(expr.dblVal, fmt, firstDayOfWeek, firstWeekOfYear);
             if (!fmt) {
                 SYSTEMTIME st;
                 if (VariantTimeToSystemTime(expr.dblVal, &st)) {
                     wchar_t dateBuf[64], timeBuf[64];
-                    GetDateFormatW(LOCALE_USER_DEFAULT, DATE_SHORTDATE, &st, NULL, dateBuf, 64);
-                    GetTimeFormatW(LOCALE_USER_DEFAULT, 0, &st, NULL, timeBuf, 64);
+                    vb6_fmtLocaleShortDate(&st, dateBuf, 64);
+                    vb6_fmtLocaleLongTime(&st, timeBuf, 64);
                     wchar_t fullBuf[128];
                     swprintf(fullBuf, 128, L"%s %s", dateBuf, timeBuf);
                     return vb6_BSTR_FromStr(fullBuf);

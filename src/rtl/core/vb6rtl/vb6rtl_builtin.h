@@ -345,6 +345,9 @@ int32_t vb6_DatePart(BSTR interval, double date, int32_t firstDayOfWeek, int32_t
 
 // P21-B: Weekday/DateValue/TimeSerial/TimeValue
 int32_t vb6_Weekday(double date, int32_t firstDayOfWeek);
+// 账 #427 (§B201): 「这一年里第几周」这一问的唯一出口 (定义在 vb6rtl_date.c)。
+// 读者两位: vb6_DatePart 的「ww」臂与 vb6_Format 的「ww」档 —— 所以它不再是 date.c 的内部静态函数。
+int32_t vb6_WeekOfYear(int32_t serial, int32_t fdow, int32_t fwoy);
 double vb6_DateValue(BSTR dateStr);
 double vb6_TimeSerial(int32_t hour, int32_t minute, int32_t second);
 double vb6_TimeValue(BSTR timeStr);

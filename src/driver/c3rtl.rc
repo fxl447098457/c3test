@@ -778,3 +778,34 @@
  *   本刀只补声明，故意不动口径: 命名格式五档走 LOCALE_USER_DEFAULT，字串随机器 locale 变(本机 zh-CN、CI en-US)
  *   => 判据只钉关系、不钉字面串; 零头为何多一枚尾随空格、越界 namedFormat 与异型实参的口径另入账。
  *   touch 本文件 = 让 RCDATA 重编一次（§B99②）。 */
+
+/* ============================================================
+   touch: 2026-10-17 第一百刀 = 账 #427 (§B201) Format 的日期面还欠的五枚令牌
+   ------------------------------------------------------------
+   读数 (尺 .build/k504_proj -> k504_x64_run.txt / k504_x86_run.txt, 两台同读数;
+   另一发 .build/k505_proj -> k505_x64_run.txt):
+     Format(2026/1/5 14:30:45, 「w」)      = 46027.6046875  (DatePart「w」= 2 / Weekday = 2)
+     Format(同上, 「ww」)                  = 46027.6046875  (DatePart「ww」= 2)
+     Format(同上, 「q」)                   = 46027.6046875  (DatePart「q」= 1)
+     Format(同上, 「ttttt」)               = 46027.6046875  (FormatDateTime(d,3) = 14:30:45)
+     Format(同上, 「ddddd」)               = Monday         (FormatDateTime(d,2) = 2026/1/5)
+     Format(同上, 「ddddd ttttt」)         = Monday ttttt   (语料这一串写了 36 处)
+   根因两格: ① 门票 vb6_fmtIsDateFormat 的字母表只有 y/d/h/m/s/n (+ AM/PM 记号), w/q/t 进不了日期臂
+             就掉回数值臂把 VariantTime 当 double 打出来; ② 日档写的是 cnt >= 4 认长周名, 五连 d 被四连吞。
+   修法收成三处: ① 门票加一档 allowWQT —— 只有「值真是 VB6 Date」那条臂多认 w/ww/q/ttttt, 数值兜底那条臂
+             字母表不动。为什么要分档: 语料里格式串含 w/q/t 的字面量 218 处全是裸写 (没有一处把单位文本
+             用引号包起来), 其中「数值 + 单位」那一族 15 处 (#,##0 Twip 3 / Settings 4 / T0 2 / #### Byte 1 /
+             #,# bytes 4 / ISO 串那枚字面 T 1) 吃的正是数值兜底那条臂 —— 裸字母一视同仁就把那 15 处从「那个数」
+             改成「一个日期」 (尺 .build/k496_census.txt + k497_wqt_where.txt)。
+             ② t 只认五连 (ttttt): 现状 Format(d,「yyyy-mm-ddTHH:mm:ss」) 交 2026-01-05T14:30:45, 那枚字面 T
+             靠游程长度保住 (1..4 枚按字面量交)。③ 周数与星期序号不许再抄一遍: 定义不再 static 的
+             vb6_WeekOfYear 声明进 vb6rtl_builtin.h (第二个读者 = Format 的 ww), DatePart 的「w」臂改问早就存在的
+             vb6_Weekday (那里原先是第二份抄写); locale 短日期/长时间两问在 Format 家族里收成
+             vb6_fmtLocaleShortDate / vb6_fmtLocaleLongTime 一条出口 (六处站点: general date 两半 + short date /
+             long time 两档 + 无格式串那条兜底臂 + 新认的 ddddd / ttttt)。vb6_Format 那两条形参从 (void) 丢掉
+             变成真被读, 与 vb6_DatePart 同一位主人; 0 = vbUseSystem 由那一位归到 vbSunday + vbFirstJan1。
+   刻意不并的两格 (另立账, 读数已到手): ① vb6_DateSerial 交的是 double 不是 VT_DATE (实测 VarType = 5, 而
+             Now/Date/CDate/TimeSerial/DateAdd 全是 7), 所以 Format(DateSerial(...),「ww」) 仍落数值臂 —— 那一格
+             要动的是 DateSerial 的类型档, 不是 Format; ② 跨文件的 locale 短日期/长时间第三家在
+             vb6rtl_system.c 的 vb6_FormatDateTime, 与 §B203 那三格越界口径同批。
+   ============================================================ */

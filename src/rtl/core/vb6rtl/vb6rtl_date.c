@@ -319,6 +319,8 @@ int64_t vb6_DateDiff(BSTR interval, double date1, double date2, int32_t firstDay
 }
 
 // 账 #422 (§B196): 「这一年里第几周」这一问的主人 (原先这问在 vb6_DatePart 里就地抄了一条公式)。
+// 账 #427 (§B201) 第一百刀: 第二个读者到了 —— Format 的「ww」档也问它, 所以这一问不再住 date.c 内部
+// (定义不再 static, 声明在 vb6rtl_builtin.h)。星期序号那一问同样收成一条: DatePart 的「w」臂改走 vb6_Weekday。
 // 对齐周由 firstDayOfWeek 定死: b = 年内第一个该星期几之前已有的天数 (0..6)，也就是开头那条
 // 不满整周的长度。firstWeekOfYear 只决定「哪条周算第 1 周」和年两端那几条不满整周的归谁:
 //   1 = 开头那条不满的周就是第 1 周;
@@ -335,7 +337,7 @@ static int32_t vb6_LeadingPartialDays(int32_t year, int32_t fdow) {
     return b < 0 ? b + 7 : b;
 }
 
-static int32_t vb6_WeekOfYear(int32_t serial, int32_t fdow, int32_t fwoy) {
+int32_t vb6_WeekOfYear(int32_t serial, int32_t fdow, int32_t fwoy) {
     int32_t y, mo, dd;
     vb6_serial_to_date(serial, &y, &mo, &dd);
     if (fdow < 1 || fdow > 7) fdow = 1;   // 0 = vbGeneral 交系统 (本机实测落在周一)，跨机器不可复现 => 统一按 vbSunday
@@ -390,16 +392,10 @@ int32_t vb6_DatePart(BSTR interval, double date, int32_t firstDayOfWeek, int32_t
             vb6_serial_to_date(d, &y, &m, &dd);
             return vb6_SerialOf(y, m, dd) - vb6_SerialOf(y, 1, 1) + 1;
         }
-        case vb6_di_weekday: {
-            // Sunday=1, Monday=2, ..., Saturday=7
-            // 1899-12-30 (serial 0) was a Saturday (day 7)
-            int32_t wd = (d % 7 + 7) % 7;  // 0=Sat,1=Sun,...,6=Fri
-            int32_t weekday = wd + 1;        // Sat=1,Sun=2,...,Fri=7
-            // Remap: Sun=1,Mon=2,...,Sat=7
-            // wd: 0=Sat,1=Sun,2=Mon,3=Tue,4=Wed,5=Thu,6=Fri
-            if (wd == 0) return 7;  // Saturday
-            return wd;              // Sunday=1, Monday=2, etc.
-        }
+        case vb6_di_weekday:
+            // 账 #427 (§B201): 这一问的主人早就是 vb6_Weekday (Sunday=1..Saturday=7), 这里原先是第二份抄写。
+            // DatePart 的两条形参对「w」不参与 (与运行期同口径: 星期序号与周首无关), 所以固定问 vbSunday 那一档。
+            return vb6_Weekday((double)d, 1);
         case vb6_di_week:
             return vb6_WeekOfYear(d, firstDayOfWeek, firstWeekOfYear);
         case vb6_di_hour:
