@@ -4260,7 +4260,11 @@ if ($Category -in @("all", "run", "vbp")) {
     Test-Vbp "test_uintfields" "$Tests\test_uintfields.vbp" @("UF-u=4294967295", "UF-ui=65535",
         "UF-u3=78187493530", "UF-sb=-128", "UF-u-add=4294967296", "UF-u-idiv=2147483647",
         "UF-u3-idiv=39093746765", "UF-u-box=4294967295", "UF-u-box-tn=ULong",
-        "UF-u3-box=78187493530", "UF-ui-box=65535", "UF-DONE")
+        "UF-u3-box=78187493530", "UF-ui-box=65535",
+        # ai/032 §6.9: 后三格钉的是**类型身份**(SByte / UInteger 的 TypeName)。
+        # 改前这两档没有自己的出口, 被 _Generic 的 `char:` / `wchar_t:` 档装成 VT_I4 ⇒
+        # 值对(65535 / -128)而 TypeName 答 "Long"。补上真出口后答各自的类型名。
+        "UF-ui-box-tn=UInteger", "UF-sb-box=-128", "UF-sb-box-tn=SByte", "UF-DONE")
 
     # Cross-module overload resolution (O3): modA exports Sub/Function overload
     # groups; modB Main calls them. Deferred re-resolution must pick variants.
