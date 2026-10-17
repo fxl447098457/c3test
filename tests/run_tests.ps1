@@ -708,6 +708,13 @@ function Test-ExtenderPushPop {
     if ($LASTEXITCODE -eq 0) { $script:pass++; Write-Host "PASS" -ForegroundColor Green }
     else { $script:fail++; Write-Host "FAIL" -ForegroundColor Red; $out | Select-Object -First 6 | ForEach-Object { Write-Host "  $_" } }
 }
+function Test-ExtenderEmitChannel {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] extender_emit_channel ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root/scripts/check_extender_emit_channel.ps1" 2>&1
+    if ($LASTEXITCODE -eq 0) { $script:pass++; Write-Host "PASS" -ForegroundColor Green }
+    else { $script:fail++; Write-Host "FAIL" -ForegroundColor Red; $out | Select-Object -First 6 | ForEach-Object { Write-Host "  $_" } }
+}
 function Test-ControlDC {
     $script:total++
     Write-Host -NoNewline "  [STATIC] control_dc ... "
@@ -7528,6 +7535,7 @@ if ($Category -in @("all", "compile")) {
     Test-IntSuffixSites
     Test-ScaleModeWriters
     Test-VbpSourceExt
+    Test-ExtenderEmitChannel
     Test-ExtenderPushPop
     Test-ControlDC
     Test-SaAccess
@@ -7937,7 +7945,7 @@ if ($Category -in @("all", "syntax")) {
     # dhExp 钉"诊断清零 + 符号照旧"，dhImp 故意不写 Option Explicit 钉"不再发死局部"。
     Test-CodegenNote "dochost_ctl_no_undeclared" @("$Tests\dochost\dhExp.ctl") @(
         "vb6_UserControl_ScaleWidth", "vb6_UserControl_hWnd",
-        "vb6_Ambient_UserMode", "vb6_Extender_Tag", "vb6_UCase") @("VB3001")
+        "vb6_Ambient_UserMode", "vb6_UC_SetExtenderMember", "vb6_UCase") @("VB3001")
     Test-CodegenNote "dochost_no_phantom_locals" @("$Tests\dochost\dhImp.ctl") @(
         "vb6_UserControl_ScaleWidth", "vb6_Ambient_UserMode", "vb6_UCase") @(
         "vb6_VARIANT UserControl", "vb6_VARIANT Ambient", "vb6_VARIANT VBA")
