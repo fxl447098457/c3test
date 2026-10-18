@@ -1059,6 +1059,32 @@ bool CCodeGen::builtinNoParamTableFormalIsDate(const std::string& callee, size_t
     return false;
 }
 
+// 账 #434 §B208 (第一百零六刀): 「这一位要的是不是数值」—— 自带名单，与日期那一问**逐位互斥**。
+// 出口 `vb6_CDbl`：八格与引擎逐格相同(尺 .build/k434_oracle.vbs)——
+//   Sqr("4")=2 / Abs("-4")=4 / Int("3.7")=3 / Sqr("1,234.5")=35.135…(区域化数字**也收**) /
+//   Abs(" 42 ")=42(空白**也收**) / Sqr("abc")=err13 / Sqr("")=err13 / **Sqr("2026/1/5")=err13**。
+// 最后一格是**判别格**：日期串进数值形参要**报错**，所以这一族绝不许复用 vb6_CDate
+//   (§B207 那一族才是日期解析)。`vb6_Val` 也不行 —— 它是 Val 的宽松语义(遇非数字就停、
+//   永不报错)，引擎这一格要的是 13。
+// ⚠ 位次照发码位号，且**逐位**登记：同一枚 vb6_DateAdd 的位 1 与位 2 答案不同(见上面那一问)。
+bool CCodeGen::builtinNoParamTableFormalWantsNumericFold(const std::string& callee, size_t argc,
+                                                        size_t pos) const {
+    static const std::unordered_map<std::string, std::vector<int>> kNumericFoldPos434 = {
+        // 一元数值族：位 0。RTL 的 C 形参逐枚实读 (vb6rtl_builtin.h:332-344 之外那一批)。
+        {"vb6_Sqr",  {0}}, {"vb6_Abs",  {0}}, {"vb6_Sgn",  {0}},
+        {"vb6_Int",  {0}}, {"vb6_Fix",  {0}}, {"vb6_Round", {0}},
+        {"vb6_Sin",  {0}}, {"vb6_Cos",  {0}}, {"vb6_Tan",  {0}},
+        {"vb6_Atn",  {0}}, {"vb6_Log",  {0}}, {"vb6_Exp",  {0}},
+        // 位 1 是**个数**(引擎 DateAdd("d","3","2026/1/5") = 2026/1/8)，位 2 才走日期名单。
+        {"vb6_DateAdd", {1}},
+    };
+    auto it = kNumericFoldPos434.find(callee);
+    if (it == kNumericFoldPos434.end()) return false;
+    if (pos >= argc) return false;
+    for (int p : it->second) { if (static_cast<size_t>(p) == pos) return true; }
+    return false;
+}
+
 bool CCodeGen::builtinNoParamTableStringSlot(const std::string& callee, size_t argc, size_t pos,
                                              Vb6Type firstArgType) const {
     // 「哪一位是字符串形参」= 上面那一问在 BSTR 档上的投影 (不是第二份名单)。

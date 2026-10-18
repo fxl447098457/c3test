@@ -620,6 +620,13 @@
     //   而 `Sqr("4")` = 2、`Pow("2",3)` = 8 都是**数值折算**。同一个 `double` 形参，两种问法。
     //   所以这一问自带名单，不许拿 `rtParamType == "double"` 当答案。
     bool builtinNoParamTableFormalIsDate(const std::string& callee, size_t argc, size_t pos) const;
+    // 账 #434 §B208 (第一百零六刀): 「这一位要的是不是**数值**(文本实参按数字折算)」
+    //   —— 与上面那一问**同形而不同答**。同形: C 侧也都是 double, 同样不许照签名反推。
+    //   不同答: 判别格就是引擎读数 —— 同一枚 `DateAdd` 的两个位给出两种问法:
+    //     DateAdd("d", "3", "2026/1/5") = 2026/1/8  ⇒ 位 1(number) 走**数值**折算(3 天)
+    //     DateAdd("d", 3,   "2026/1/5")            ⇒ 位 2(date)   走**日期**解析
+    //   而 Sqr("2026/1/5") = err13 ⇒ 数值那一族**不许**复用 vb6_CDate(会把日期串折成序列号)。
+    bool builtinNoParamTableFormalWantsNumericFold(const std::string& callee, size_t argc, size_t pos) const;
     bool builtinNoParamTableStringSlot(const std::string& callee, size_t argc, size_t pos,
                                        Vb6Type firstArgType) const;
     // 账 #305 §B177 (第六十八刀): 同一张表的**第三问** —— 「这一位是不是那枚 _Generic 宏的分派位」。

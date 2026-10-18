@@ -2942,6 +2942,21 @@ if ($Category -in @("all", "run", "bas")) {
         "NEG-sqr-untouched=1", "B433-DONE")
     Add-BasTest "b433_strdatearg" "$Tests\b433_strdatearg.bas" $b433Needles
     Add-BasTest "b433_strdatearg_x86" "$Tests\b433_strdatearg.bas" $b433Needles -Arch "x86"
+
+    # 账 #434 (§B208, 第一百零六刀): 「数值形参吃 As String 实参」—— §B207 的另一半,
+    # 承面量测 = **0 处**(真语料没有把文本喂数值形参), 由 §B207 的负控顺手发现。
+    # 出口 vb6_CDbl 而不是 vb6_CDate: 判别格 `Sqr("2026/1/5")` = **err13**(日期串进数值形参
+    #   要报错, 折成序列号就答错); 也不是 vb6_Val(Val 宽松语义、永不报错, 与 13 相反)。
+    # 逐格与引擎相同 (cscript 尺 .build/k434_oracle.vbs): Sqr("4")=2 / Int("3.7")=3 /
+    #   区域化数字("1,234.5")**收** / 前后空白(" 42 ")**收** / "abc"=13 / "2026/1/5"=13。
+    # ADDnum 与 ADDdate 是**逐位登记**的证据: 同一枚 DateAdd, 位 1 走数值、位 2 走日期。
+    # FDT-ok 是**负控**: §B207 那一族仍是日期解析, 没被本刀改成数值折算。
+    $b434Needles = @(
+        "SQR=2", "ABS=4", "INT=3", "SGN=1", "SQRlit=4",
+        "SQRdate-err=13", "SQRabc-err=13", "SQRfmt-err=0", "SQRspc-err=0",
+        "ADDnum=2026/01/09", "ADDdate=2026/01/08", "FDT-ok=1", "B434-DONE")
+    Add-BasTest "b434_numfold" "$Tests\b434_numfold.bas" $b434Needles
+    Add-BasTest "b434_numfold_x86" "$Tests\b434_numfold.bas" $b434Needles -Arch "x86"
     # <vbeclipse> 账 #215: 体级声明收成「一条声明符一条 LocalDeclStmt」。改前四条体级路两种形状 ——
     # Dim 自己手写一遍展开(那份副本漏了 WithEvents 与「后缀即类型」)，Const/Static/体级 Public 把
     # MultiDecl 原样交给语义层(switch 不认) ⇒ 一枚名字都不登记、每条使用一条 VB3001(真工程一片 276 条)，

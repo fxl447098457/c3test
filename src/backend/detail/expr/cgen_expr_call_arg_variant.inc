@@ -532,6 +532,15 @@
                 // (标量→Long/Int/Double、BSTR→String, 见 vb6rtl_variant.h 那张表)。
                 // ⚠ 别直接发 `vb6_CDate(<BSTR>)`: 那是反向 C2440(BSTR→vb6_VARIANT), 本刀先踩过。
                 argVal = "vb6_CDate(vb6_VariantFromValue(" + argVal + "))";
+            } else if (builtinNoParamTableFormalWantsNumericFold(callee, node.positional.size(), i)) {
+                // 账 #434 §B208 (第一百零六刀): 同一格问句的**另一半** —— 数值形参吃文本实参
+                // (Sqr(s) / Abs(s) / Int(s) … 与 DateAdd 的位 1), 改前同样是裸 BSTR 直递 = C2440。
+                // 出口 `vb6_CDbl`(不是 vb6_CDate, 也不是 vb6_Val): 引擎判别格 `Sqr("2026/1/5")`
+                // = **err13** —— 日期串进数值形参要报错; 用 CDate 会把它折成序列号 46027 再开方。
+                // `vb6_Val` 是 Val 的宽松语义(遇非数字就停、永不报错), 与引擎那一格要的 13 相反。
+                // 八格与引擎逐格相同 (cscript 尺 .build/k434_oracle.vbs), 含区域化数字("1,234.5")
+                // 与前后空白(" 42 ")两格 —— 那两格是「引擎收」的证明, 换成手写解析就答不出。
+                argVal = "vb6_CDbl(vb6_VariantFromValue(" + argVal + "))";
             }
         }
         // Fix 113j: ByRef **Variant** 形参 + 具体类型左值实参归一.
