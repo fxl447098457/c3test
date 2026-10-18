@@ -1,4 +1,4 @@
-﻿# ============================================================
+# ============================================================
 # check_formatdatetime_args.ps1 -- 账 #305 / §B206 / 第一百零三刀 (2026-10-17)
 #
 # 「FormatDateTime(<一枚槽>, n) 那两位各要什么 C 档」这一问之前**两级答案全空** —— 没有类型化
@@ -16,7 +16,7 @@
 # 名单不许悄悄变长: 新登记一枚有参内在函数而不给它档位答案，R4 就红。
 #
 # 规则: R1 表里 vb6_FormatDateTime 那一行恰好一行、两档 = double,int32_t (三种写坏的形状各钉 0);
-#       R2 那张表本身良构 (行数 11、键唯一、键一律 vb6_ 前缀、那一行 arity 2);
+#       R2 那张表本身良构 (行数 21、键唯一、键一律 vb6_ 前缀、FormatDateTime 那一行 arity 2);
 #       R3 站点次序仍是「先问那张表、答不出才回落」，且回落只此一处;
 #       R4 census 两头各钉一份名单 (识别表里没有 callee 的 7 枚 + 两级都没答案的 34 枚);
 #       R5 判据两头都在 (b433 两片 cell、期望表 12 行、夹具 12 针、本哨兵已登记**且被调用**)。
@@ -83,7 +83,7 @@ foreach ($r in $rows) {
 }
 $dups = 0
 foreach ($kk in $keys.Keys) { if ($keys[$kk] -gt 1) { $dups++ } }
-Want 'R2 row count' $rows.Count 11 '那张表现有 11 行; 加了人就来这里把计数与台账一起改 (减人更要改)'
+Want 'R2 row count' $rows.Count 21 '那张表现有 21 行 (11 + 账 #433 §B207 补的 10 枚日期形参: Year/Month/Day/Hour/Minute/Second/Weekday/DateAdd/DateDiff/DatePart); 加了人就来这里把计数与台账一起改 (减人更要改)'
 Want 'R2 duplicate keys' $dups 0 '同一枚 callee 登记两行 = 后一行没人读，前一行骗人'
 Want 'R2 vb6_ prefix' $badPrefix 0 '键是发码里的 callee 名，裸名当键永远答不出'
 $fdtTiers = ''
