@@ -115,37 +115,65 @@ void vb6_TimeSet(BSTR timeStr) {
     SetLocalTime(&st);
 }
 
+// 账 #419 (§B193): 「这一枚 DATE 的双半边怎么切」的唯一出口。DATE 是「整天数 + 一天的分数」，
+// 而分数在二进制里落不整 (14:30 = 0.6041666666666666)，所以拆之前必须**四舍五入到整秒** ——
+// 直接截断会把这一格少掉一秒的几分之一，实测口径 (本机 VB-family 运行期，尺
+// .build/k272_timeparts.vbs + k277_round.vbs + k278_roll.vbs):
+//   Minute(CDate("2026/1/1 14:30")) = 30 (截断那一条答 29)；+0.4/+0.5 秒不进位、+0.6/+0.99 进位。
+//
+// 账 #435 §B209 (第一百零七刀) = 把「一枚序列号拆成日期 + 日内秒」这一问**收成一位主人**，
+// 两处各答一半的那笔账一次结掉:
+//   ① §B194 (#420): 一天末尾那一格只把日内秒归零、**日期那一半不进位**。运行期两半**一起**进:
+//      raw = 46023.9999988426 (= 2026/1/1 23:59:59.9) → H/M/S = 0/0/0 且 **Day = 2**
+//      (尺 .build/k420_oracle.vbs + k420b_grid.vbs)。改前答 Day = 1。
+//   ② §B195 (#421): epoch 之前的零头取法与运行期**反号**。运行期取**绝对值**, 本仓原先 `+1.0`:
+//      raw = -657433.395833333 → 运行期 9:30, 本仓 14:30 (同一瞬间的两种拆法)。
+//   两半**符号对称**: -46023.9999988426 → 运行期 1773/12/28 (日期也进了一格) ⇒ 进位不是只给正数。
+//   ⚠ 日期那一半用 **(int32_t)date 向零截断**(不是 floor), 运行期就是这一套: 负数那几格
+//     Date=2/M=1/Y=100 与本仓改前就一致 —— 反号的只有**零头**那一半, 日期那一半一直是对的。
+static void vb6_split_serial(double date, int32_t* dayOut, int32_t* sodOut) {
+    double t = date - (double)(int32_t)date;
+    if (t < 0) t = -t;                              // ② §B195: 取绝对值, 不再 +1.0
+    int32_t sod = (int32_t)(t * 86400.0 + 0.5);
+    int32_t day = (int32_t)date;
+    if (sod >= 86400) { sod = 0; day += 1; }         // ① §B194: 日期那一半跟着进
+    *dayOut = day;
+    *sodOut = sod;
+}
+
+// 账 #435 §B209: 「日期那一格」这一问的出口 —— **转问上面那一位主人**, 不自己再抄一遍那三行。
+// 改前它与 vb6_SecondsOfDay 各答一半: 时间那三枚走 `+1.0` 归一、日期那三枚走裸 `(int32_t)date`
+// ⇒ 一天末尾那一格两半**不一致**(时间已归零、日期还没进)。
+static inline int32_t vb6_serial_day_half(double date) {
+    int32_t day, sod;
+    vb6_split_serial(date, &day, &sod);
+    return day;
+}
+
 int32_t vb6_Year(double date) {
     int32_t y, m, d;
-    vb6_serial_to_date((int32_t)date, &y, &m, &d);
+    vb6_serial_to_date(vb6_serial_day_half(date), &y, &m, &d);
     return y;
 }
 
 int32_t vb6_Month(double date) {
     int32_t y, m, d;
-    vb6_serial_to_date((int32_t)date, &y, &m, &d);
+    vb6_serial_to_date(vb6_serial_day_half(date), &y, &m, &d);
     return m;
 }
 
 int32_t vb6_Day(double date) {
     int32_t y, m, d;
-    vb6_serial_to_date((int32_t)date, &y, &m, &d);
+    vb6_serial_to_date(vb6_serial_day_half(date), &y, &m, &d);
     return d;
 }
 
-// 账 #419 (§B193): 「这一枚 DATE 的双半边怎么切」的唯一出口。DATE 是「整天数 + 一天的分数」，
-// 而分数在二进制里落不整 (14:30 = 0.6041666666666666)，所以拆之前必须**四舍五入到整秒** ——
-// 直接截断会把这一格少掉一秒的几分之一，实测口径 (本机 VB-family 运行期，尺
-// .build/k272_timeparts.vbs + k277_round.vbs + k278_roll.vbs):
-//   Minute(CDate("2026/1/1 14:30")) = 30 (截断那一条答 29)；+0.4/+0.5 秒不进位、+0.6/+0.99 进位；
-//   23:59:59.9 那一格日内秒归零 (运行期连日期那一半也进了一天，日期那一半本刀不动，另记一格)。
 // 一条出口，读者 = Hour / Minute / Second 三枚 getter 与 DateAdd 分解那一站 (DatePart 的 h/n/s
 // 三档本来就转调这三枚 getter，跟着一起好)。
 static int32_t vb6_SecondsOfDay(double date) {
-    double t = date - (double)(int32_t)date;
-    if (t < 0) t += 1.0;                       // 与 DateAdd 原有的归一保持同一条口径
-    int32_t sod = (int32_t)(t * 86400.0 + 0.5);
-    if (sod >= 86400) sod -= 86400;             // 一天末尾那一格: 只归零，不动日期那一半
+    int32_t day, sod;
+    vb6_split_serial(date, &day, &sod);
+    (void)day;                                       // 日期那一半归 Year/Month/Day 那一族用
     return sod;
 }
 
