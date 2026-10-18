@@ -135,7 +135,10 @@ if ($gtm.Success -and $gtm.Groups['b'].Value -notmatch ">= L'0'\s*&&\s*p\[intLen
 # ---- R7: 断言连符号位置一起钉，且不钉货币符号字面量 ----
 # ⚠ 断言住在 run_tests.ps1 的 needle 名单里，不在 .bas 里 —— 早先在 .bas 里找
 #   `k_cur_par=(1,234.57)` 找了一整轮找不到，因为 .bas 只写 `Debug.Print "k_cur_par=" & …`。
-$harness = [IO.File]::ReadAllText((Join-Path $root 'tests\run_tests.ps1'))
+# ⚠⚠ 必须在**去掉注释行**之后的文本里找 needle。§B438 实测过同一个坑：直接读整个
+#   run_tests.ps1，上面说明文字里反引号包着的 needle 字面量**也算命中** ⇒ 真把 needle 改掉
+#   之后这道门照样绿。needle 是**断言**，散文不是。
+$harness = (@([IO.File]::ReadAllLines((Join-Path $root 'tests\run_tests.ps1')) | Where-Object { $_ -notmatch '^\s*#' }) -join "`n")
 foreach ($n in @('k_cur_par=(1,234.57)', 'k_cur_ng=(1234.57)', 'k_pct_true=(123,456.78%)', 'k_pct_ng=(123456.78%)')) {
     if ($harness -notmatch [regex]::Escape($n)) { $bad += ('R7 the harness does not pin ' + $n + ' -> the symbol/paren placement can drift again') }
 }
