@@ -401,8 +401,26 @@ static int32_t vb6_LeadingPartialDays(int32_t year, int32_t fdow) {
 int32_t vb6_WeekOfYear(int32_t serial, int32_t fdow, int32_t fwoy) {
     int32_t y, mo, dd;
     vb6_serial_to_date(serial, &y, &mo, &dd);
-    if (fdow < 1 || fdow > 7) fdow = 1;   // 0 = vbGeneral 交系统 (本机实测落在周一)，跨机器不可复现 => 统一按 vbSunday
-    if (fwoy != 2 && fwoy != 3) fwoy = 1;  // 实测 0 与 1 同档; 4 以上运行期直接报错，这里不装死
+    if (fdow < 1 || fdow > 7) fdow = 1;   // 0 = vbGeneral
+        //
+        // 账 #424 §B198 (第一百零九刀) —— 这一格的口径由**用户拍板**，不是实现默默选的：
+        //   `firstDayOfWeek = 0` (vbGeneral) 在运行期是**交系统**的（本机 = 周一），
+        //   任何「跟随系统」的发法都**跨机器不可复现**。本仓两条 DatePart/DateDiff 路
+        //   统一 clamp 到 **vbSunday(1)**，作为一条**显式的已知偏离**：与运行期在
+        //   「系统周首 ≠ 周日」的机器上不同，但换来的是读数跨机器稳定 —— 这正是本仓
+        //   整套 emit-manifest / 夹具逐字节对账赖以成立的前提。
+        //   ⚠ 本机量不出这一格的差别（尺 .build/k424_oracle.vbs：DatePart("ww") 的
+        //     f=0/1/2/7 同答 2、DateDiff("ww") 的 f=0/1/7 同答 8）⇒ 它是一处
+        //     **有意保留**的偏离，不是漏改；要跟着系统走，得先把可复现性那套一起想清楚。
+    //
+    // 同一笔账的另一半（firstWeekOfYear）：运行期对 >= 4 **直接报错**（cscript 实测 fwy=4/5
+    //   两格当场抛，尺 .build/k424_oracle.vbs）；改前这里静默按 1 档答 2。口径同样由用户拍板
+    //   = **对齐运行期报 err 5**，与 #436「越界 namedFormat 报 err 5」同一口径。
+    if (fwoy >= 4) {
+        vb6_ErrRaiseNumber(5);
+        return 0;
+    }
+    if (fwoy != 2 && fwoy != 3) fwoy = 1;  // 实测 0 与 1 同档
     int32_t doy = serial - vb6_SerialOf(y, 1, 1) + 1;
     int32_t n = vb6_SerialOf(y, 12, 31) - vb6_SerialOf(y, 1, 1) + 1;
     int32_t b = vb6_LeadingPartialDays(y, fdow);

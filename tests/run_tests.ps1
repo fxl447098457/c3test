@@ -729,6 +729,13 @@ function Test-B433DateFormalAuthority {
     if ($LASTEXITCODE -eq 0) { $script:pass++; Write-Host "PASS" -ForegroundColor Green }
     else { $script:fail++; Write-Host "FAIL" -ForegroundColor Red; $out | Select-Object -First 6 | ForEach-Object { Write-Host "  $_" } }
 }
+function Test-B424DatedPartParams {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] b424_datedpart_params ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\check_b424_datedpart_params.ps1" 2>&1
+    if ($LASTEXITCODE -eq 0) { $script:pass++; Write-Host "PASS" -ForegroundColor Green }
+    else { $script:fail++; Write-Host "FAIL" -ForegroundColor Red; $out | Select-Object -First 6 | ForEach-Object { Write-Host "  $_" } }
+}
 function Test-B436FdtBounds {
     $script:total++
     Write-Host -NoNewline "  [STATIC] b436_fdt_bounds ... "
@@ -3026,6 +3033,18 @@ if ($Category -in @("all", "run", "bas")) {
         "NC-nospace=1", "B436-DONE")
     Add-BasTest "b436_fdt_bounds" "$Tests\b436_fdt_bounds.bas" $b436Needles
     Add-BasTest "b436_fdt_bounds_x86" "$Tests\b436_fdt_bounds.bas" $b436Needles -Arch "x86"
+
+    # 账 #424 (§B198，第一百零九刀) = DatePart/DateDiff 那两条形参的两档口径。**由用户拍板**。
+    #   ① firstWeekOfYear >= 4 ⇒ **报 err 5**（对齐运行期：cscript 实测 fwy=4/5 两格当场抛，
+    #      尺 .build/k424_oracle.vbs）；改前静默按 1 档答 2。合法档 0..3 逐格不变（0 与 1 同档）。
+    #   ② firstDayOfWeek = 0 (vbGeneral) ⇒ **继续 clamp 到 vbSunday**，作为一条**显式的已知偏离**：
+    #      运行期交系统（本机=周一）⇒ 跟随系统跨机器不可复现；clamp 换来读数稳定，那是本仓
+    #      emit-manifest / 夹具逐字节对账的前提。本机量不出差别（f=0/1/2/7 同答 2）。
+    # NC-fdow 两格是**负控**：那一处偏离是**有意保留**的，哨兵盯住它别被顺手改成"跟随系统"。
+    $b424Needles = @("fwy0=2", "fwy1=2", "fwy2=1", "fwy3=1",
+        "fwy4=ERR5", "fwy5=ERR5", "fwy9=ERR5", "NC-fdow0=2", "NC-fdow7=2", "B424-DONE")
+    Add-BasTest "b424_datedpart_params" "$Tests\b424_datedpart_params.bas" $b424Needles
+    Add-BasTest "b424_datedpart_params_x86" "$Tests\b424_datedpart_params.bas" $b424Needles -Arch "x86"
     # <vbeclipse> 账 #215: 体级声明收成「一条声明符一条 LocalDeclStmt」。改前四条体级路两种形状 ——
     # Dim 自己手写一遍展开(那份副本漏了 WithEvents 与「后缀即类型」)，Const/Static/体级 Public 把
     # MultiDecl 原样交给语义层(switch 不认) ⇒ 一枚名字都不登记、每条使用一条 VB3001(真工程一片 276 条)，
@@ -7912,6 +7931,7 @@ if ($Category -in @("all", "compile")) {
     Test-B435SerialSplitAuthority
     Test-B423IntervalPerBuiltin
     Test-B436FdtBounds
+    Test-B424DatedPartParams
     Test-ControlDC
     Test-SaAccess
     Test-BitwiseAuthority
