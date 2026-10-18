@@ -454,21 +454,57 @@ BSTR vb6_MonthName(int32_t month, int32_t abbreviate) {
 // 实测 FormatPercent 把上次结果当格式反复解析 → "123456.7856.7856.78..." 无限重复。
 // 正解 = 直接用宽度精度参数 `%.*f`, 一次成型, 不再二次套用。
 //
+// 账 #428 (§B212，第一百一十二刀) = 「UseParentheses 这一位要什么」这一问，**收成一位主人**。
+// 病机制：三家（FormatNumber / FormatCurrency / FormatPercent）各自的出口第一行都写着
+//   `(void)incLeading; (void)useParens; (void)groupDigits;` —— 这一位被**明确丢掉**，
+//   于是负数永远交 `-1,234.57`，而运行期在 useParens 为真时交 `(1,234.57)`。
+//   实测（cscript 同机代理，尺 .build/kpar2.vbs）三家口径**完全一致**:
+//       省略(默认 -1) → minus=True  parens=False
+//       useParens=True → minus=False parens=True
+//       useParens=0   → minus=True  parens=False
+//       正数 + True    → minus=False parens=False   (括号只裹负数)
+// ⚠ 判据是 `!= 0`（不是 `> 0`）：发码那一侧把「**省略**」这一档填成 **0**
+//   （`kOD_FormatNum` 位 3，§B212 改的），而显式写的 True 在 VB6 里恒为 **-1** ⇒
+//   0 = 不要括号、-1/1 = 要括号，两边**分得开**。
+//   ⚠⚠ 若某一格把省略档改回 -1，这里立刻回到「省略与显式 True 同码」的老坑：要么显式 True
+//   被吃掉（实测 -1,234.57 vs 运行期 (1,234.57)），要么省略档全变括号把正常调用一起改坏。
+static BSTR vb6_fmtApplyUseParens(const wchar_t* numBuf, double value, int32_t useParens) {
+    if (useParens == 0) return vb6_BSTR_FromStr(numBuf);       // 省略档(0) 与显式 False(0) 都走负号
+    if (!(value < 0.0)) return vb6_BSTR_FromStr(numBuf);       // 括号只裹负数
+    if (numBuf[0] != L'-') return vb6_BSTR_FromStr(numBuf);
+    wchar_t out[80];
+    out[0] = L'(';
+    wcscpy(out + 1, numBuf + 1);                              // 去掉负号那一枚
+    wcscat(out, L")");
+    return vb6_BSTR_FromStr(out);
+}
+
 // 注: FormatCurrency 的 `¥`(U+00A5) 前缀**本来就没坏** —— 曾经看到的 "гд" 是终端
 // 误解码: 936 下 vb6_ConWriteHandle 正确写出 GBK 双字节 A3A4(即全角"￥"),
 // 65001 下写出 UTF-8 C2A5; 码点探针实测 BSTR 内首字符恒为 U+00A5。别当 bug 修。
 BSTR vb6_FormatCurrency(double value, int32_t numDigits, int32_t incLeading, int32_t useParens, int32_t groupDigits) {
-    (void)incLeading; (void)useParens; (void)groupDigits;
+    (void)incLeading; (void)groupDigits;
     if (numDigits < 0) numDigits = 2;
     wchar_t numBuf[64];
     swprintf(numBuf, 64, L"%.*f", (int)numDigits, value);
-    wchar_t result[80] = L"\x00a5";  /* Yen/ Yuan sign as default currency */
-    wcscat(result, numBuf);
+    // §B212: useParens 为真且值为负 ⇒ 去掉负号、裹进括号（运行期 FC_T 同格）。
+    //   这一位在改前是 `(void)useParens` 直接丢掉的 ⇒ 永远交 `-¥…`。
+    //   ⚠ 货币符号那一枚（这里写死 ¥）**跟着区域设置走**，所以判据那一族只钉「括号/负号」
+    //     的形状，不钉符号本身 —— 与 §B142「区域设置那一格照打不钉」同一条纪律。
+    BSTR shaped = vb6_fmtApplyUseParens(numBuf, value, useParens);
+    // shaped 已经带了括号或负号；把货币符号插到**最前面**（括号要包住数字，符号在括号外，
+    // 与运行期 `(¥1,234.57)` 同形）。
+    const wchar_t* body = shaped;
+    int skip = (body[0] == L'(') ? 1 : 0;
+    wchar_t result[96] = L"\x00a5";
+    if (skip) result[1] = L'(';
+    wcscat(result, body + skip);
+    vb6_BSTR_Free(shaped);
     return vb6_BSTR_FromStr(result);
 }
 
 BSTR vb6_FormatNumber(double value, int32_t numDigits, int32_t incLeading, int32_t useParens, int32_t groupDigits) {
-    (void)incLeading; (void)useParens; (void)groupDigits;
+    (void)incLeading;
     wchar_t numBuf[64];
     if (numDigits < 0) numDigits = 2;
     swprintf(numBuf, 64, L"%.*f", (int)numDigits, value);
@@ -489,18 +525,18 @@ BSTR vb6_FormatNumber(double value, int32_t numDigits, int32_t incLeading, int32
         /* Copy decimal part */
         if (dot) { wcscpy(outBuf + outIdx, dot); } else { outBuf[outIdx] = 0; }
         if (signLen) { memmove(outBuf + 1, outBuf, (wcslen(outBuf) + 1) * sizeof(wchar_t)); outBuf[0] = L'-'; }
-        return vb6_BSTR_FromStr(outBuf);
+        return vb6_fmtApplyUseParens(outBuf, value, useParens);   // §B212
     }
-    return vb6_BSTR_FromStr(numBuf);
+    return vb6_fmtApplyUseParens(numBuf, value, useParens);       // §B212
 }
 
 BSTR vb6_FormatPercent(double value, int32_t numDigits, int32_t incLeading, int32_t useParens, int32_t groupDigits) {
-    (void)incLeading; (void)useParens; (void)groupDigits;
+    (void)incLeading;
     if (numDigits < 0) numDigits = 2;
     wchar_t buf[64];
     /* 百分比: 值 ×100 再加 '%' —— 用 %.*f 直接成型, 不套用二次格式串 */
     swprintf(buf, 64, L"%.*f%%", (int)numDigits, value * 100.0);
-    return vb6_BSTR_FromStr(buf);
+    return vb6_fmtApplyUseParens(buf, value, useParens);           // §B212
 }
 
 

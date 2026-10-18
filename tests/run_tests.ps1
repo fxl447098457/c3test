@@ -736,6 +736,13 @@ function Test-NoLocaleNeedles {
     if ($LASTEXITCODE -eq 0) { $script:pass++; Write-Host "PASS" -ForegroundColor Green }
     else { $script:fail++; Write-Host "FAIL" -ForegroundColor Red; $out | Select-Object -First 6 | ForEach-Object { Write-Host "  $_" } }
 }
+function Test-B428FormatUseParens {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] b428_format_useparens ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\check_b428_format_useparens.ps1" 2>&1
+    if ($LASTEXITCODE -eq 0) { $script:pass++; Write-Host "PASS" -ForegroundColor Green }
+    else { $script:fail++; Write-Host "FAIL" -ForegroundColor Red; $out | Select-Object -First 6 | ForEach-Object { Write-Host "  $_" } }
+}
 function Test-B426DateaddInterval {
     $script:total++
     Write-Host -NoNewline "  [STATIC] b426_dateadd_interval ... "
@@ -3096,6 +3103,24 @@ if ($Category -in @("all", "run", "bas")) {
         "d_p1=2026-1-6", "m_p1=2026-2-5", "y_p1=2026-1-6", "h_p1=2026-1-6", "B426-DONE")
     Add-BasTest "b426_dateadd_interval" "$Tests\b426_dateadd_interval.bas" $b426Needles
     Add-BasTest "b426_dateadd_interval_x86" "$Tests\b426_dateadd_interval.bas" $b426Needles -Arch "x86"
+
+    # 账 #428 (§B212，第一百一十二刀) = FormatNumber / FormatCurrency / FormatPercent 三家两笔账。
+    # ① **编不过那一族**：`FormatCurrency(x)` / `FormatPercent(x)` 发 1 个实参进 5 参的 RTL 出口
+    #   = cl C2198 整份编不过。病根 = 省略实参的默认档表 `kOD_FormatNum` **只登记了 FormatNumber**，
+    #   而三家 C 签名与可选实参完全同形 ⇒ 两家补同一张表。
+    # ② **读数那一族**：三家出口都写着 `(void)incLeading; (void)useParens; (void)groupDigits;`
+    #   ⇒ UseParentheses 被丢掉，负数永远交 `-1,234.57`；运行期该为真时交 `(1,234.57)`。
+    # ⚠ 本刀真正的坑 = **省略档与显式 True 在 C 侧同码**：VB6 的 True 恒为 -1，而省略档原先也填
+    #   -1 ⇒ 「省略」与「显式 True」分不开（当默认 ⇒ 显式 True 被吃；当真 ⇒ 省略档全变括号）。
+    #   VB6 里 UseParentheses 默认是 **False**，故发码那一档改成 **0**（位 1/2/4 仍是 -1）。
+    #   `def=` 与 `false=` 两格钉住「默认形态不许变」，`true=`/`skip=` 钉住「显式 True 要括号」。
+    # 三家那一族只钉**括号形状**不钉货币符号（符号跟着区域设置走，§B142 同一条纪律）。
+    $b428Needles = @(
+        "def-1arg=1", "cur-1arg=1", "pct-1arg=1", "cur-2arg=1",
+        "def=-1,234.57", "false=-1,234.57", "true=(1,234.57)", "pos=1,234.57", "skip=(1,234.57)",
+        "cur-def-parens=False", "cur-true-parens=True", "pct-true-parens=True", "B428-DONE")
+    Add-BasTest "b428_format_useparens" "$Tests\b428_format_useparens.bas" $b428Needles
+    Add-BasTest "b428_format_useparens_x86" "$Tests\b428_format_useparens.bas" $b428Needles -Arch "x86"
     # <vbeclipse> 账 #215: 体级声明收成「一条声明符一条 LocalDeclStmt」。改前四条体级路两种形状 ——
     # Dim 自己手写一遍展开(那份副本漏了 WithEvents 与「后缀即类型」)，Const/Static/体级 Public 把
     # MultiDecl 原样交给语义层(switch 不认) ⇒ 一枚名字都不登记、每条使用一条 VB3001(真工程一片 276 条)，
@@ -7983,6 +8008,7 @@ if ($Category -in @("all", "compile")) {
     Test-B423IntervalPerBuiltin
     Test-B436FdtBounds
     Test-NoLocaleNeedles
+    Test-B428FormatUseParens
     Test-B426DateaddInterval
     Test-B425DateserialDomain
     Test-B424DatedPartParams
