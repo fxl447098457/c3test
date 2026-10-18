@@ -722,6 +722,13 @@ function Test-FormatDateArgArm {
     if ($LASTEXITCODE -eq 0) { $script:pass++; Write-Host "PASS" -ForegroundColor Green }
     else { $script:fail++; Write-Host "FAIL" -ForegroundColor Red; $out | Select-Object -First 6 | ForEach-Object { Write-Host "  $_" } }
 }
+function Test-B433DateFormalAuthority {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] b433_date_formal_authority ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\check_b433_date_formal_authority.ps1" 2>&1
+    if ($LASTEXITCODE -eq 0) { $script:pass++; Write-Host "PASS" -ForegroundColor Green }
+    else { $script:fail++; Write-Host "FAIL" -ForegroundColor Red; $out | Select-Object -First 6 | ForEach-Object { Write-Host "  $_" } }
+}
 function Test-ExtenderGlobalCensus {
     $script:total++
     Write-Host -NoNewline "  [STATIC] extender_global_census ... "
@@ -2916,6 +2923,21 @@ if ($Category -in @("all", "run", "bas")) {
         "VE-DONE")
     Add-BasTest "test_vbnet_ext" "$Tests\test_vbnet_ext.bas" $vbnetExtNeedles
     Add-BasTest "test_vbnet_ext_x86" "$Tests\test_vbnet_ext.bas" $vbnetExtNeedles -Arch "x86"
+
+    # 账 #433 (§B207, 第一百零五刀): 「日期形参吃 As String 实参」承面九格。
+    # 改前这九格全是 cl C2440(无法从 BSTR 转换为 double) —— 两臂(有/无类型化形参表)都以
+    # argIsVariant 为闸, 文本实参压根进不去, 于是 BSTR 裸递进 double date 形参。
+    # 每一格都与引擎逐格相同 (cscript 尺 .build/k207f_oracle.vbs / _g_oracle.vbs):
+    # 2026/1/5 → 2026 / 1 / 5 / 2 / 0 / +1日 / 2026 / 31 / 2026-01-05;
+    # 纯数字文本 "46027" 按**序列号**那天 (46027 = 2026-01-05) —— 出口是 vb6_CDate 而不是
+    # 账本原候选的 vb6_DateValue(后者严格, DateValue("46027") 引擎也报 13 = 会判死合法实参)。
+    # NEG 那格是**负控**: 数值形参那一族(Sqr/Abs)不在本刀名单内, 照 C 签名反推会把它误伤。
+    $b433Needles = @(
+        "Y=2026", "M=1", "D=5", "W=2", "H=0", "ADD=2026/01/06",
+        "PART=2026", "DIFF=31", "FDT=2026/1/5",
+        "YNUM=2026", "FDTNUM=2026/1/5", "NEG-sqr-untouched=1", "B433-DONE")
+    Add-BasTest "b433_strdatearg" "$Tests\b433_strdatearg.bas" $b433Needles
+    Add-BasTest "b433_strdatearg_x86" "$Tests\b433_strdatearg.bas" $b433Needles -Arch "x86"
     # <vbeclipse> 账 #215: 体级声明收成「一条声明符一条 LocalDeclStmt」。改前四条体级路两种形状 ——
     # Dim 自己手写一遍展开(那份副本漏了 WithEvents 与「后缀即类型」)，Const/Static/体级 Public 把
     # MultiDecl 原样交给语义层(switch 不认) ⇒ 一枚名字都不登记、每条使用一条 VB3001(真工程一片 276 条)，
@@ -7798,6 +7820,7 @@ if ($Category -in @("all", "compile")) {
     Test-ExtenderPushPop
     Test-ExtenderGlobalCensus
     Test-FormatDateArgArm
+    Test-B433DateFormalAuthority
     Test-ControlDC
     Test-SaAccess
     Test-BitwiseAuthority

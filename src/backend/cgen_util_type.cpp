@@ -1004,11 +1004,59 @@ std::string CCodeGen::builtinNoParamTableFormalCType(const std::string& callee, 
         // (`vb6rtl_builtin.h:72` `vb6_FormatDateTime(double dateSerial, int32_t namedFormat)`)，
         // 下游现成会发 `vb6_VariantToDouble` / `vb6_VariantToLong` —— 零新形状。
         {"vb6_FormatDateTime", {"double", "int32_t"}},
+        // 账 #433 §B207 (第一百零五刀): 承面量测发现「date 形参吃 As String 实参」这一格**不止
+        // FormatDateTime 一枚** —— 十二形探针里 Year/Month/Day/Weekday/Hour/DateAdd/DatePart/
+        // DateDiff 连同 FormatDateTime 共 9 处**全部** C2440(无法从 BSTR 转换为 double)，两台同形。
+        // 本来只有 FormatDateTime 在这张表里(§B206 补的)，所以只有它走 rtParamType 这条臂;
+        // 其余 8 枚两张表都答不出这一位要 double ⇒ rtParamType 为空 ⇒ 整条臂跳过 ⇒ BSTR 裸递。
+        // 下面的 C 档**逐枚照 RTL 的 C 形参实读** (vb6rtl_builtin.h:332-344)，不是按名字推的。
+        // ⚠ 登这张表只让 **Variant 实参**那一半走既有提取 (vb6_VariantToDouble，本来就红、
+        //   登表即修)；**文本实参**那一半由 `builtinNoParamTableFormalIsDate` + arg_variant
+        //   里新加的那条臂办 (走 vb6_CDate 按日期解析)，两件事刻意分开记。
+        {"vb6_Year",        {"double"}},
+        {"vb6_Month",       {"double"}},
+        {"vb6_Day",         {"double"}},
+        {"vb6_Hour",        {"double"}},
+        {"vb6_Minute",      {"double"}},
+        {"vb6_Second",      {"double"}},
+        {"vb6_Weekday",     {"double", "int32_t"}},
+        {"vb6_DateAdd",     {"BSTR", "double", "double"}},
+        {"vb6_DateDiff",    {"BSTR", "double", "double", "int32_t", "int32_t"}},
+        {"vb6_DatePart",    {"BSTR", "double", "int32_t", "int32_t"}},
     };
     auto it176 = kNoTableFormalKinds176.find(callee);
     if (it176 == kNoTableFormalKinds176.end()) return "";
     if (pos >= it176->second.size()) return "";
     return it176->second[pos];
+}
+
+// 账 #433 §B207 (第一百零五刀): 「这一位要的是不是日期」—— 自带名单，**不从 C 签名反推**。
+// 为什么必须自带: C 侧全叫 `double`，而引擎对文本实参的答案**按 builtin 分两种**。实测
+// (cscript 代理, 尺 `.build/k207d_fdt.vbs`): `FormatDateTime("46027", 0)` = 2026/1/5 (纯数字
+// 文本按序列号那天, err=0)、`"2026/1/5"` = 2026/1/5、`"abc"` = 空串 + err=13 —— 全都按**日期
+// 解析**；而 `Sqr("4")` = 2、`Pow("2", 3)` = 8 是**数值折算**。拿 `rtParamType == "double"`
+// 当「这是日期位」的判据会把后者一起误伤，所以名单与 C 签名各走各的。
+//
+// 名单的位次照上面 kNoTableFormalKinds176 同一口径 (**发码位号**)，且逐枚对过 RTL 的 C 形参。
+// ⚠ 名单里故意**只有日期形参**：`vb6_DateAdd` 的 `number` 位也是 double，但它是**加的个数**
+//   不是日期 —— 引擎 `DateAdd("d", "3", d)` 的 "3" 是数量(3 天)，按日期解析成 1900-01-03 再加
+//   会答出别的日子。这一位不在名单里(见 arg_variant 那条臂的判据)，文本实参仍是 C2440。
+bool CCodeGen::builtinNoParamTableFormalIsDate(const std::string& callee, size_t argc,
+                                               size_t pos) const {
+    static const std::unordered_map<std::string, std::vector<int>> kDateFormalPos433 = {
+        {"vb6_FormatDateTime", {0}},
+        {"vb6_Year",     {0}}, {"vb6_Month",    {0}}, {"vb6_Day",   {0}},
+        {"vb6_Hour",     {0}}, {"vb6_Minute",   {0}}, {"vb6_Second",{0}},
+        {"vb6_Weekday",  {0}},
+        {"vb6_DateAdd",  {2}},                       // 位 2 是 date; 位 1 的 number 是「个数」
+        {"vb6_DateDiff", {1, 2}},                    // 两个 date 位
+        {"vb6_DatePart", {1}},
+    };
+    auto it = kDateFormalPos433.find(callee);
+    if (it == kDateFormalPos433.end()) return false;
+    if (pos >= argc) return false;
+    for (int p : it->second) { if (static_cast<size_t>(p) == pos) return true; }
+    return false;
 }
 
 bool CCodeGen::builtinNoParamTableStringSlot(const std::string& callee, size_t argc, size_t pos,

@@ -614,6 +614,12 @@
     bool typeTakesImplicitCStr(Vb6Type t) const;
     std::string builtinNoParamTableFormalCType(const std::string& callee, size_t argc, size_t pos,
                                                Vb6Type firstArgType) const;
+    // 账 #433 §B207 (第一百零五刀): 「这一位要的是不是**日期**」—— 与上面那一问**刻意分开**。
+    // 为什么不能从 C 签名反推(§B174 教训① 的同一形状): C 侧全叫 `double`，可引擎对文本实参的
+    //   口径按 builtin 分两种 —— `FormatDateTime("46027",0)` = 2026/1/5(纯数字文本按序列号那天)，
+    //   而 `Sqr("4")` = 2、`Pow("2",3)` = 8 都是**数值折算**。同一个 `double` 形参，两种问法。
+    //   所以这一问自带名单，不许拿 `rtParamType == "double"` 当答案。
+    bool builtinNoParamTableFormalIsDate(const std::string& callee, size_t argc, size_t pos) const;
     bool builtinNoParamTableStringSlot(const std::string& callee, size_t argc, size_t pos,
                                        Vb6Type firstArgType) const;
     // 账 #305 §B177 (第六十八刀): 同一张表的**第三问** —— 「这一位是不是那枚 _Generic 宏的分派位」。
