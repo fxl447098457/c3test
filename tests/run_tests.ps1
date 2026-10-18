@@ -736,6 +736,13 @@ function Test-NoLocaleNeedles {
     if ($LASTEXITCODE -eq 0) { $script:pass++; Write-Host "PASS" -ForegroundColor Green }
     else { $script:fail++; Write-Host "FAIL" -ForegroundColor Red; $out | Select-Object -First 6 | ForEach-Object { Write-Host "  $_" } }
 }
+function Test-B437FormatLeadingGroup {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] b437_format_leading_group ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\check_b437_format_leading_group.ps1" 2>&1
+    if ($LASTEXITCODE -eq 0) { $script:pass++; Write-Host "PASS" -ForegroundColor Green }
+    else { $script:fail++; Write-Host "FAIL" -ForegroundColor Red; $out | Select-Object -First 6 | ForEach-Object { Write-Host "  $_" } }
+}
 function Test-B428FormatUseParens {
     $script:total++
     Write-Host -NoNewline "  [STATIC] b428_format_useparens ... "
@@ -3121,6 +3128,30 @@ if ($Category -in @("all", "run", "bas")) {
         "cur-def-parens=False", "cur-true-parens=True", "pct-true-parens=True", "B428-DONE")
     Add-BasTest "b428_format_useparens" "$Tests\b428_format_useparens.bas" $b428Needles
     Add-BasTest "b428_format_useparens_x86" "$Tests\b428_format_useparens.bas" $b428Needles -Arch "x86"
+
+    # 账 #437 (§B213，第一百一十三刀) = 5 位签名上**剩下那两枚**被 `(void)` 丢掉的位。
+    # §B212 收了 useParens，incLeading 与 groupDigits 当时一个字没动 ⇒ 接着量，全是**静默答错**。
+    #   IncludeLeadingDigits：显式 False ⇒ 整数部分**恰为 "0"** 时去掉那个 0。实测 `0.50`/`.50`/
+    #     `-.50`/`.00`，而 `FormatNumber(0,0,False)` 是**空串**、`FormatPercent(0,0,False)` 是 **`%`**。
+    #   GroupThousands：显式 False ⇒ 不插千分位。实测 `1,234.50`/`1234.50`/`1,234.50%`。
+    # ⚠ 这一族还**顺手逮到 §B212 错了一刀**：夹具当时只钉 `InStr(s,"(")>0` 的形状，于是「货币符号
+    #   该在括号里还是括号外」没人看见 —— 引擎是 `(¥1,234.57)`，我们交的是 `¥(1,234.57)`。
+    #   `k_cur_par=` / `k_cur_ng=` 两格把**位置**连同千分位一起钉；`k_pct_true=` 钉住千分位在
+    #   括号里**照插**（引擎 `(123,456.78%)`，而 §B212 记的「同读数」其实是形状同、数字不同）。
+    $b437Needles = @(
+        "inc_T=0.50", "inc_def=0.50", "inc_F=.50", "inc_F_neg=-.50", "inc_F_zero=.00",
+        "inc_F_empty=[]", "inc_F_odd=1,234.50",
+        "grp_T=1,234.50", "grp_def=1,234.50", "grp_F=1234.50", "grp_F_neg=-1234.50",
+        "grp_big=1,000,000.00",
+        "pct_inc_T=0.50%", "pct_inc_F=.50%", "pct_inc_F_pct=[%]",
+        "pct_grp_T=1,234.50%", "pct_grp_F=1234.50%", "pct_grp_def=1,234.50%",
+        "cur_inc_T=0.50", "cur_inc_F=.50", "cur_grp_T=1,234.50", "cur_grp_F=1234.50",
+        "cur_grp_neg=-1234.50",
+        "k_def=-1,234.57", "k_false=-1,234.57", "k_true=(1,234.57)", "k_skip=(1,234.57)",
+        "k_pct_def=12.34%", "k_pct_neg=-123,456.78%", "k_pct_true=(123,456.78%)",
+        "k_pct_ng=(123456.78%)", "k_cur_par=(1,234.57)", "k_cur_ng=(1234.57)", "B437-DONE")
+    Add-BasTest "b437_format_leading_group" "$Tests\b437_format_leading_group.bas" $b437Needles
+    Add-BasTest "b437_format_leading_group_x86" "$Tests\b437_format_leading_group.bas" $b437Needles -Arch "x86"
     # <vbeclipse> 账 #215: 体级声明收成「一条声明符一条 LocalDeclStmt」。改前四条体级路两种形状 ——
     # Dim 自己手写一遍展开(那份副本漏了 WithEvents 与「后缀即类型」)，Const/Static/体级 Public 把
     # MultiDecl 原样交给语义层(switch 不认) ⇒ 一枚名字都不登记、每条使用一条 VB3001(真工程一片 276 条)，
@@ -8008,6 +8039,7 @@ if ($Category -in @("all", "compile")) {
     Test-B423IntervalPerBuiltin
     Test-B436FdtBounds
     Test-NoLocaleNeedles
+    Test-B437FormatLeadingGroup
     Test-B428FormatUseParens
     Test-B426DateaddInterval
     Test-B425DateserialDomain

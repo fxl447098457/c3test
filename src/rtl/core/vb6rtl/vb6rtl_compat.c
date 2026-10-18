@@ -479,63 +479,114 @@ static BSTR vb6_fmtApplyUseParens(const wchar_t* numBuf, double value, int32_t u
     return vb6_BSTR_FromStr(out);
 }
 
+// ===== §B213: 剩下那两枚可选位的语义（IncludeLeadingDigits / GroupThousands）=====
+// 账 #437：§B212 收了 useParens，但同一条 5 位签名上还剩**两枚**被 `(void)` 丢掉的位。
+//   量出来的运行期口径（cscript 同机代理，尺 `.build/klead.vbs` / `kedge.vbs`）三家**完全一致**。
+
+// IncludeLeadingDigits：显式 False 时，整数部分**恰为 "0"** ⇒ 去掉那个 "0"，小数点/百分号留下。
+//   运行期实测：FormatNumber(0.5,2,False)=`.50` / (0,2,False)=`.00` / (-0.5,2,False)=`-.50`
+//     / (0,0,False)=**空串** / 省略 ⇒ `0.50`（默认带前导 0）/ FormatPercent(0,0,False)=**`%`**
+//   ⚠ 判据「整数部分恰好是 0」必须连**百分号**一起看：percent 的 buf 可能是 `"0%"`，下一位是
+//     `'%'` 而不是小数点或结束。漏掉这一位 ⇒ 把 `"0%"` 当成「不止一位」而保留 0，交出 `0%`
+//     而不是运行期的 `%`。同理 `(0,0,False)` 是**空串**而不是 `0` —— 去掉 0 就是去掉 0。
+static void vb6_fmtDropLeadingZero(wchar_t* buf, int32_t incLeading) {
+    if (incLeading != 0) return;                 // 省略(-1) 与显式 True(-1) 同义 ⇒ 保留前导 0
+    wchar_t* p = (buf[0] == L'-') ? buf + 1 : buf;
+    if (p[0] != L'0') return;
+    const wchar_t nxt = p[1];
+    if (nxt != 0 && nxt != L'.' && nxt != L'%') return;   // 整数部分不止一位 ⇒ 这一位无关
+    // ⚠⚠ 这里必须搬 **wcslen(p+1)+1** 个元素（**含那个 '\0'**）。只搬 wcslen(p+1) 个会**少搬
+    // 收尾那一格**，被删掉的 '0' 原地留在末尾 ⇒ `"0.50"` 变成 `".500"`、`"0.50%"` 变成
+    // `".50%%"`、`"0"` 变成 `"0"`（压根没删）。这三个错都长得像「位数不对」而不是像「多了一格」，
+    // 本机第一版就是这么写错的，四个读数同时对不上才定位到。
+    memmove(p, p + 1, (wcslen(p + 1) + 1) * sizeof(wchar_t));
+}
+
+// GroupThousands：显式 False ⇒ 不插千分位；省略/True ⇒ 每 3 位插 ','（运行期就是 ','）。
+//   ⚠ 只数**开头那段数字**：FormatPercent 的 buf 可能是 `"1234.50%"`，若把 `%` 也算成一位，
+//     整数段长度会错 1、逗号插错位置（`FormatPercent(12.345,2,True,False,True)` 应为
+//     `1,234.50%`，错算会交成 `1,23,4.50%` 之类）。所以这里按 `isdigit` 数，不按 '.' 找。
+static void vb6_fmtGroupThousands(wchar_t* buf, int32_t groupDigits) {
+    if (groupDigits == 0) return;                // 省略(-1) 与显式 True(-1) 同义 ⇒ 分组
+    wchar_t* p = (buf[0] == L'-') ? buf + 1 : buf;
+    int intLen = 0;
+    while (p[intLen] >= L'0' && p[intLen] <= L'9') intLen++;
+    if (intLen <= 3) return;
+    wchar_t out[160];                             // 96 加上最多 ~32 个逗号, 留足
+    int o = 0;
+    for (int i = 0; i < intLen; i++) {
+        if (i > 0 && (intLen - i) % 3 == 0) out[o++] = L',';
+        out[o++] = p[i];
+    }
+    wcscpy(out + o, p + intLen);                  // 小数点 + 后缀(可能是 '%') 原样接回
+    // ⚠ 负号要**接在最前面**。p 已经跳过了符号位，而 out 是从数字段重新写的 —— 不把符号补回去
+    //   就是「插完千分位负号没了」：`FormatNumber(-1234.5678,2)` 交 `1,234.57` 而不是
+    //   `-1,234.57`。运行期 `FN neg def=[-1,234.57]` / `FP neg def=[-123,456.78%]` 钉住这一格。
+    if (buf[0] == L'-') {
+        memmove(out + 1, out, (wcslen(out) + 1) * sizeof(wchar_t));
+        out[0] = L'-';
+    }
+    wcscpy(buf, out);
+}
+
 // 注: FormatCurrency 的 `¥`(U+00A5) 前缀**本来就没坏** —— 曾经看到的 "гд" 是终端
 // 误解码: 936 下 vb6_ConWriteHandle 正确写出 GBK 双字节 A3A4(即全角"￥"),
 // 65001 下写出 UTF-8 C2A5; 码点探针实测 BSTR 内首字符恒为 U+00A5。别当 bug 修。
 BSTR vb6_FormatCurrency(double value, int32_t numDigits, int32_t incLeading, int32_t useParens, int32_t groupDigits) {
-    (void)incLeading; (void)groupDigits;
     if (numDigits < 0) numDigits = 2;
-    wchar_t numBuf[64];
-    swprintf(numBuf, 64, L"%.*f", (int)numDigits, value);
+    wchar_t numBuf[96];
+    swprintf(numBuf, 96, L"%.*f", (int)numDigits, value);
+    // §B213: 这一位改前是 `(void)incLeading; (void)groupDigits` **两个一起丢掉**。
+    //   两枚都在括号/符号**之前**定形 —— 千分位必须先插好，否则 `(`/`¥` 会被当成一位数字数错。
+    vb6_fmtDropLeadingZero(numBuf, incLeading);      // §B213
+    vb6_fmtGroupThousands(numBuf, groupDigits);      // §B213
     // §B212: useParens 为真且值为负 ⇒ 去掉负号、裹进括号（运行期 FC_T 同格）。
-    //   这一位在改前是 `(void)useParens` 直接丢掉的 ⇒ 永远交 `-¥…`。
     //   ⚠ 货币符号那一枚（这里写死 ¥）**跟着区域设置走**，所以判据那一族只钉「括号/负号」
     //     的形状，不钉符号本身 —— 与 §B142「区域设置那一格照打不钉」同一条纪律。
     BSTR shaped = vb6_fmtApplyUseParens(numBuf, value, useParens);
-    // shaped 已经带了括号或负号；把货币符号插到**最前面**（括号要包住数字，符号在括号外，
-    // 与运行期 `(¥1,234.57)` 同形）。
+    // ⚠⚠ **符号在括号里面**：运行期实测是 `(¥1,234.57)`，不是 `¥(1,234.57)`（尺
+    //   `.build/kpg.vbs`：`FC parens+group=[(¥1,234.57)]`）。§B212 第一次就是写成
+    //   「符号在括号外」的，而那一刀只钉了 `InStr(s,"(")>0` 的**形状** ⇒ 两边都有括号、
+    //   形状判据照样绿，**位置错了整整一刀没人看见**。⇒ 这一族要么连符号位置一起钉，要么
+    //   就承认自己只钉了形状。§B213 起连位置一起钉。
     const wchar_t* body = shaped;
     int skip = (body[0] == L'(') ? 1 : 0;
-    wchar_t result[96] = L"\x00a5";
-    if (skip) result[1] = L'(';
-    wcscat(result, body + skip);
+    wchar_t result[128];
+    if (skip) {
+        wcscpy(result, L"(\x00a5");           // '(' + 货币符号
+        // ⚠ **不要再补一个 ')'**：body+skip 的**收尾那个 ')' 就在 body 里**（`vb6_fmtApplyUseParens`
+        //   交回来的是完整的 `(…��)`），补一个就成 `(¥1,234.57))`。符号只该挪到 '(' **之后**，
+        //   右括号原样接着。
+        wcscat(result, body + skip);
+    } else {
+        wcscpy(result, L"\x00a5");
+        wcscat(result, body);
+    }
     vb6_BSTR_Free(shaped);
     return vb6_BSTR_FromStr(result);
 }
 
 BSTR vb6_FormatNumber(double value, int32_t numDigits, int32_t incLeading, int32_t useParens, int32_t groupDigits) {
-    (void)incLeading;
-    wchar_t numBuf[64];
     if (numDigits < 0) numDigits = 2;
-    swprintf(numBuf, 64, L"%.*f", (int)numDigits, value);
-    /* Format with grouping if requested */
-    if (groupDigits) {
-        /* Simple grouping: insert commas every 3 digits */
-        /* Find decimal point */
-        wchar_t* dot = wcschr(numBuf, L'.');
-        int intLen = dot ? (int)(dot - numBuf) : (int)wcslen(numBuf);
-        /* Build with commas */
-        wchar_t outBuf[80];
-        int outIdx = 0;
-        int signLen = (numBuf[0] == L'-') ? 1 : 0;
-        for (int i = signLen; i < intLen; i++) {
-            if (i > signLen && (intLen - i) % 3 == 0) outBuf[outIdx++] = L',';
-            outBuf[outIdx++] = numBuf[i];
-        }
-        /* Copy decimal part */
-        if (dot) { wcscpy(outBuf + outIdx, dot); } else { outBuf[outIdx] = 0; }
-        if (signLen) { memmove(outBuf + 1, outBuf, (wcslen(outBuf) + 1) * sizeof(wchar_t)); outBuf[0] = L'-'; }
-        return vb6_fmtApplyUseParens(outBuf, value, useParens);   // §B212
-    }
+    wchar_t numBuf[96];
+    swprintf(numBuf, 96, L"%.*f", (int)numDigits, value);
+    // §B213: 这一位改前是 `(void)incLeading` 直接丢掉 ⇒ `FormatNumber(0.5,2,False)` 交 `0.50`，
+    //   运行期是 `.50`。千分位那一枚改前是**手写的一遍**（含负号回填那套 memmove），现在也一并
+    //   走同一位主人：负号交给 `vb6_fmtDropLeadingZero` / `vb6_fmtGroupThousands` 各自处理。
+    vb6_fmtDropLeadingZero(numBuf, incLeading);      // §B213
+    vb6_fmtGroupThousands(numBuf, groupDigits);      // §B213
     return vb6_fmtApplyUseParens(numBuf, value, useParens);       // §B212
 }
 
 BSTR vb6_FormatPercent(double value, int32_t numDigits, int32_t incLeading, int32_t useParens, int32_t groupDigits) {
-    (void)incLeading;
     if (numDigits < 0) numDigits = 2;
-    wchar_t buf[64];
+    wchar_t buf[96];
     /* 百分比: 值 ×100 再加 '%' —— 用 %.*f 直接成型, 不套用二次格式串 */
-    swprintf(buf, 64, L"%.*f%%", (int)numDigits, value * 100.0);
+    swprintf(buf, 96, L"%.*f%%", (int)numDigits, value * 100.0);
+    // §B213: 改前 `(void)incLeading` 且 groupDigits 压根没接（运行期 `1,234.50%` / `.50%` 两格
+    //   都交不出来）。⚠ buf 里带着 '%'，所以两位主人必须都按「数字跑」而不是「到 '.' 为止」来看。
+    vb6_fmtDropLeadingZero(buf, incLeading);          // §B213
+    vb6_fmtGroupThousands(buf, groupDigits);          // §B213
     return vb6_fmtApplyUseParens(buf, value, useParens);           // §B212
 }
 
