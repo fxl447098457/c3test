@@ -143,5 +143,14 @@ Sub Main()
         Debug.Print "TOF13:FAIL (Object 基类判定错)"
     End If
 
+    ' TOF14 (账 #447 / §B219): `TypeOf x IsNot T` —— ai/032 的 IsNot 接到 TypeOf 构造上,
+    '   解析期脱糖成 Not(TypeOf x Is T) (同 binary a IsNot b)。与 TOF13 互补: 活对象
+    '   IsNot Object=False, Nothing IsNot Object=True, COM 晚绑对象 IsNot Object=False。
+    If Not (TypeOf leaf IsNot Object) And (TypeOf n IsNot Object) And Not (TypeOf d IsNot Object) Then
+        Debug.Print "TOF14:OK"
+    Else
+        Debug.Print "TOF14:FAIL (TypeOf IsNot 判定错)"
+    End If
+
     Debug.Print "TOF-DONE"
 End Sub
