@@ -1,4 +1,4 @@
-﻿# c3 编译器自动化测试框架
+# c3 编译器自动化测试框架
 # 用途: .\run_tests.ps1 [-Category <all|compile|run|syntax>] [-Verbose]
 #
 # 参数说明:
@@ -733,6 +733,13 @@ function Test-NoLocaleNeedles {
     $script:total++
     Write-Host -NoNewline "  [STATIC] no_locale_needles ... "
     $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\check_no_locale_needles.ps1" 2>&1
+    if ($LASTEXITCODE -eq 0) { $script:pass++; Write-Host "PASS" -ForegroundColor Green }
+    else { $script:fail++; Write-Host "FAIL" -ForegroundColor Red; $out | Select-Object -First 6 | ForEach-Object { Write-Host "  $_" } }
+}
+function Test-B438VoidParamCensus {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] b438_void_param_census ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\check_b438_void_param_census.ps1" 2>&1
     if ($LASTEXITCODE -eq 0) { $script:pass++; Write-Host "PASS" -ForegroundColor Green }
     else { $script:fail++; Write-Host "FAIL" -ForegroundColor Red; $out | Select-Object -First 6 | ForEach-Object { Write-Host "  $_" } }
 }
@@ -3152,6 +3159,29 @@ if ($Category -in @("all", "run", "bas")) {
         "k_pct_ng=(123456.78%)", "k_cur_par=(1,234.57)", "k_cur_ng=(1234.57)", "B437-DONE")
     Add-BasTest "b437_format_leading_group" "$Tests\b437_format_leading_group.bas" $b437Needles
     Add-BasTest "b437_format_leading_group_x86" "$Tests\b437_format_leading_group.bas" $b437Needles -Arch "x86"
+
+    # 账 #438 (§B214) = 「(void) 形参」那一族的普查结论 —— **三条全是误报，逐条钉死防误修**。
+    # §B212 与 §B213 两刀都是从「某处写着 (void)x;」这句源码里读出来的；普查顺着同一句找到
+    # 121 枚 (void)，其中三枚最像「静默丢了一位」，量完之后**全是误报**：
+    #   ① `vb6_DateDiff` 的 `(void)firstWeekOfYear` = **实测惰性**，不是丢掉了一位。
+    #      尺 `.build/kfwy.vbs`：6 间隔(w/ww/y/q/m/d) x 5 组**跨年边界**，fwy=1/2/3 **全同**。
+    #      §B197 那两条公式只吃 f=firstDayOfWeek ⇒ 这里 (void) 是对的。任何普查都会重新举它一次，
+    #      然后有人去「修」，把对的实现改成错的 ⇒ `w_f1..3` / `ww_f1..3` / `wwb_*` 六格钉住「全同」。
+    #   ② `vb6_IIfLong/Double` 的 `(void)falsepart` = **多余**，下一行就用到了。而且这三个出口
+    #      发码真的走得到（`cgen_expr_call_builtin_pre.inc` 会发 vb6_IIfLong/Double/BSTR），
+    #      IIf 是 VB6 高频件而**普查前一处回归都没有** ⇒ 这里补 `iifL_*`/`iifD_*`/`iifS_*`。
+    #      `iifL_n=7` 钉的是「**非零（含负）即真**」—— 我第一版注释写成该交 8，量出来 7，
+    #      **注释错了代码是对的**；真正的风险方向是把负数当假。
+    #   ③ `vb6_IPmt` 的 `(void)nper` / `(void)fv` = 同样多余，两个都喂给了下一行的 vb6_Pmt。
+    # ⚠ 诚实性：**本机没有财务族的引擎代理** —— VBScript 压根没有财务函数（连 IIf 也没有），
+    #   所以夹具**不钉** IPmt/PPmt/Pmt 的绝对读数，只在哨兵里钉「形参仍被引用」这条静态事实。
+    $b438Needles = @(
+        "w_f1=52", "w_f2=52", "w_f3=52", "ww_f1=53", "ww_f2=53", "ww_f3=53",
+        "wwb_1=1", "wwb_2=1",
+        "iifL_t=11", "iifL_f=22", "iifD_t=1.5", "iifD_f=2.5", "iifS_t=yes", "iifS_f=no",
+        "iifL_0=8", "iifL_n=7", "B438-DONE")
+    Add-BasTest "b438_void_param_census" "$Tests\b438_void_param_census.bas" $b438Needles
+    Add-BasTest "b438_void_param_census_x86" "$Tests\b438_void_param_census.bas" $b438Needles -Arch "x86"
     # <vbeclipse> 账 #215: 体级声明收成「一条声明符一条 LocalDeclStmt」。改前四条体级路两种形状 ——
     # Dim 自己手写一遍展开(那份副本漏了 WithEvents 与「后缀即类型」)，Const/Static/体级 Public 把
     # MultiDecl 原样交给语义层(switch 不认) ⇒ 一枚名字都不登记、每条使用一条 VB3001(真工程一片 276 条)，
@@ -8039,6 +8069,7 @@ if ($Category -in @("all", "compile")) {
     Test-B423IntervalPerBuiltin
     Test-B436FdtBounds
     Test-NoLocaleNeedles
+    Test-B438VoidParamCensus
     Test-B437FormatLeadingGroup
     Test-B428FormatUseParens
     Test-B426DateaddInterval
