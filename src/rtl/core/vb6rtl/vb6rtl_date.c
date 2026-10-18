@@ -304,13 +304,46 @@ rebuild:
 }
 
 int64_t vb6_DateDiff(BSTR interval, double date1, double date2, int32_t firstDayOfWeek, int32_t firstWeekOfYear) {
-    (void)firstDayOfWeek;
-    (void)firstWeekOfYear;
-    vb6_date_interval di = vb6_parse_interval(interval);
-    
-    int32_t d1 = (int32_t)date1, d2 = (int32_t)date2;
-    
-    switch (di) {
+      (void)firstWeekOfYear;
+      vb6_date_interval di = vb6_parse_interval(interval);
+
+      // 账 #423 §B197 (第一百零八刀) = 「w / ww 这两个间隔在 **DateDiff** 里各答什么」这一问。
+      // 病根 = `vb6_parse_interval` 是 **DateAdd / DateDiff / DatePart 三家共用**的一问，而
+      // `w` 与 `ww` 的含义**按 builtin 分岔**:
+      //     DatePart("w",  …) = 星期序号(与周首无关)     DateDiff("w",  …) = **整段七天**
+      //     DatePart("ww", …) = 一年里第几周             DateDiff("ww", …) = 半开区间 (a,b] 里
+      //                                                    落在第 f 天那一格的条数(方向带符号)
+      // 共用一枚枚举 ⇒ 改 `parse_interval` 会把另外两家的正确答案一起弄坏(实测 DatePart 的
+      // w/ww 今天都是 2、都对)。所以**枚举那一问不动**，DateDiff 自己认这一格。
+      //
+      // 运行期口径 (cscript 同机代理, 尺 .build/k423_oracle.vbs, 逐格量死):
+      //   ① "ww" = floor((b-f)/7) - floor((a-f)/7)，f 参与 ⇒ 改周首**会动**这一格;
+      //      拟合面积 162400 格对这条公式零失配(账上 §B197 记的那把尺)。
+      //   ② "w"  = trunc((b-a)/7)，**与 f 无关** ⇒ 改周首**不许动**这一格 (81200 格零失配)。
+      //      ⚠ 改前本仓这一格发的是 `(d2-d1)/7`，而 d1/d2 是**截断过的整日**、且落进
+      //        `case vb6_di_weekday` 的 `d2 - d1` ⇒ 答的是**天数**(1/5→1/12 答 7、1/5→2/5 答 31)。
+      // ⚠ 这一格用 `int` 而不是 `bool`: 用户 TU 那一遍编译把 `bool` 宏成了 `int`,
+      //   `const bool` 会展开成 `const int bool` = 两个类型词 ⇒ cl C2086/C2146(本刀撞过)。
+      const int ivIsWw423 =
+          interval && vb6_BSTR_Len(interval) >= 1 && (interval[0] == L'w' || interval[0] == L'W')
+          && vb6_BSTR_Len(interval) >= 2 && (interval[1] == L'w' || interval[1] == L'W');
+      const int ivIsW423 =
+          interval && vb6_BSTR_Len(interval) >= 1 && (interval[0] == L'w' || interval[0] == L'W')
+          && !(vb6_BSTR_Len(interval) >= 2 && (interval[1] == L'w' || interval[1] == L'W'));
+
+      int32_t d1 = (int32_t)date1, d2 = (int32_t)date2;
+
+      // ② "w": 整段七天，trunc 向零，与 firstDayOfWeek **无关** —— 先答，两条形参都不看。
+      if (ivIsW423) {
+          return (int64_t)((date2 - date1) / 7.0);
+      }
+      // ① "ww": 半开区间 (a,b] 里落在第 f 天那一格的条数。f = 1 (vbSunday) 是本仓序列号口径。
+      if (ivIsWw423) {
+          const double f = (double)firstDayOfWeek;
+          return (int64_t)(floor((date2 - f) / 7.0) - floor((date1 - f) / 7.0));
+      }
+
+      switch (di) {
         case vb6_di_year: {
             int32_t y1, m1, dd1, y2, m2, dd2;
             vb6_serial_to_date(d1, &y1, &m1, &dd1);

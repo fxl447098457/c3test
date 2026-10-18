@@ -729,6 +729,13 @@ function Test-B433DateFormalAuthority {
     if ($LASTEXITCODE -eq 0) { $script:pass++; Write-Host "PASS" -ForegroundColor Green }
     else { $script:fail++; Write-Host "FAIL" -ForegroundColor Red; $out | Select-Object -First 6 | ForEach-Object { Write-Host "  $_" } }
 }
+function Test-B423IntervalPerBuiltin {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] b423_interval_per_builtin ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\check_b423_interval_per_builtin.ps1" 2>&1
+    if ($LASTEXITCODE -eq 0) { $script:pass++; Write-Host "PASS" -ForegroundColor Green }
+    else { $script:fail++; Write-Host "FAIL" -ForegroundColor Red; $out | Select-Object -First 6 | ForEach-Object { Write-Host "  $_" } }
+}
 function Test-B435SerialSplitAuthority {
     $script:total++
     Write-Host -NoNewline "  [STATIC] b435_serial_split_authority ... "
@@ -2979,6 +2986,20 @@ if ($Category -in @("all", "run", "bas")) {
         "pos-hms=14/30/45", "whole-hms=0/0/0", "frac6-hms=23/59/59", "B435-DONE")
     Add-BasTest "b435_serialsplit" "$Tests\b435_serialsplit.bas" $b435Needles
     Add-BasTest "b435_serialsplit_x86" "$Tests\b435_serialsplit.bas" $b435Needles -Arch "x86"
+
+    # 账 #423 (§B197，第一百零八刀) = DateDiff 的「ww」与「w」两条臂。
+    # 病根 = vb6_parse_interval 是 DateAdd/DateDiff/DatePart **三家共用**的一问，而 w 与 ww 的
+    #   含义**按 builtin 分岔**(DatePart w=星期序号 / DateDiff w=整段七天)。改那枚共用枚举会把
+    #   另外两家的正确答案一起弄坏 ⇒ **枚举那一问不动**，DateDiff 自己认这一格。
+    # 改前这一格落进 vb6_di_weekday 的 d2-d1 ⇒ 答**天数**(1/5→1/12 答 7、1/5→2/5 答 31);
+    #   运行期两格都答 1 / 4。「w」与周首**无关**(w-f2 与 w-f7 同答 4)、「ww」与周首**有关**。
+    # NC-ok 是**负控**: 共用解析器那一家(DatePart 的 w/ww、DateAdd 的 w)本刀一个字没动。
+    # 承面 = 0 处(真语料 76 处 DateDiff 全三实参形、区间只有 d/s/m/n/y)，纸面缺口。
+    $b423Needles = @(
+        "w-7d=1", "w-31d=4", "w-rev=-1", "w-same=0", "w-f2=4", "w-f7=4",
+        "ww-7d=1", "ww-rev=-1", "ww-31d=4", "ww-f2=4", "ww-f7=4", "NC-ok=1", "B423-DONE")
+    Add-BasTest "b423_datediff_w" "$Tests\b423_datediff_w.bas" $b423Needles
+    Add-BasTest "b423_datediff_w_x86" "$Tests\b423_datediff_w.bas" $b423Needles -Arch "x86"
     # <vbeclipse> 账 #215: 体级声明收成「一条声明符一条 LocalDeclStmt」。改前四条体级路两种形状 ——
     # Dim 自己手写一遍展开(那份副本漏了 WithEvents 与「后缀即类型」)，Const/Static/体级 Public 把
     # MultiDecl 原样交给语义层(switch 不认) ⇒ 一枚名字都不登记、每条使用一条 VB3001(真工程一片 276 条)，
@@ -7863,6 +7884,7 @@ if ($Category -in @("all", "compile")) {
     Test-FormatDateArgArm
     Test-B433DateFormalAuthority
     Test-B435SerialSplitAuthority
+    Test-B423IntervalPerBuiltin
     Test-ControlDC
     Test-SaAccess
     Test-BitwiseAuthority
