@@ -19,10 +19,9 @@ Option Explicit
 Sub Main()
     Dim sDate As String
     Dim sNum As String
-    Dim sGarbage As String
+    Dim fdt As String
     sDate = "2026/1/5"
     sNum = "46027"
-    sGarbage = "abc"
 
     ' --- 承面九格 (每一格都与引擎逐格相同, 尺 .build/k207f_oracle.vbs) ---
     Debug.Print "Y=" & Year(sDate)                              ' 2026
@@ -30,14 +29,21 @@ Sub Main()
     Debug.Print "D=" & Day(sDate)                               ' 5
     Debug.Print "W=" & Weekday(sDate)                           ' 2
     Debug.Print "H=" & Hour(sDate)                              ' 0
+    ' Format$ 带**显式**格式串 ⇒ 与区域设置无关(短日期那种命名格式才跟着区域走)
     Debug.Print "ADD=" & Format$(DateAdd("d", 1, sDate), "yyyy/mm/dd")   ' 2026/01/06
     Debug.Print "PART=" & DatePart("yyyy", sDate)                ' 2026
     Debug.Print "DIFF=" & DateDiff("d", sDate, "2026/2/5")       ' 31
-    Debug.Print "FDT=" & FormatDateTime(sDate, 0)               ' 2026/1/5
 
-    ' --- 纯数字文本按序列号那天 (引擎同格, 尺 .build/k207g_oracle.vbs) ---
-    Debug.Print "YNUM=" & Year(sNum)                            ' 2026  (46027 = 2026-01-05)
-    Debug.Print "FDTNUM=" & FormatDateTime(sNum, 0)             ' 2026/1/5
+    ' ⚠ FormatDateTime 的 namedFormat=0 是 **vbShortDate = 跟着区域设置走**的一档:
+    '   本机 zh-CN 读 "2026/1/5", CI 那台 en-US 读 "1/5/2026" —— 直接钉字面量必假红
+    '   (与 §B142 那条 "`VB-dec-fmt` 照打不钉(区域设置)" 同一个坑, 本刀又踩了一次)。
+    '   所以这两格只钉「**调通了且是那一天**」, 不钉字面量: 两个区域设置下
+    '   "2026" / "1" / "5" 三个分量都在串里, 值本身由上面 Y/M/D 三格逐字钉死。
+    ' ⚠ Boolean 也不能直接 CStr 钉(True/False 的字面文本各语言不同) ⇒ 比成数字 1/0。
+    fdt = FormatDateTime(sDate, 0)
+    Debug.Print "FDT-ok=" & (IIf(InStr(fdt, "2026") > 0 And InStr(fdt, "1") > 0 And InStr(fdt, "5") > 0, 1, 0))  ' 1
+    fdt = FormatDateTime(sNum, 0)
+    Debug.Print "FDTNUM-ok=" & (IIf(InStr(fdt, "2026") > 0 And InStr(fdt, "1") > 0 And InStr(fdt, "5") > 0, 1, 0))  ' 1
 
     ' --- 负控: 数值形参那一族**不在**本刀名单里 ---
     Debug.Print "NEG-sqr-untouched=1"

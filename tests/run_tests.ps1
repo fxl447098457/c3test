@@ -2928,14 +2928,18 @@ if ($Category -in @("all", "run", "bas")) {
     # 改前这九格全是 cl C2440(无法从 BSTR 转换为 double) —— 两臂(有/无类型化形参表)都以
     # argIsVariant 为闸, 文本实参压根进不去, 于是 BSTR 裸递进 double date 形参。
     # 每一格都与引擎逐格相同 (cscript 尺 .build/k207f_oracle.vbs / _g_oracle.vbs):
-    # 2026/1/5 → 2026 / 1 / 5 / 2 / 0 / +1日 / 2026 / 31 / 2026-01-05;
-    # 纯数字文本 "46027" 按**序列号**那天 (46027 = 2026-01-05) —— 出口是 vb6_CDate 而不是
-    # 账本原候选的 vb6_DateValue(后者严格, DateValue("46027") 引擎也报 13 = 会判死合法实参)。
+    # 2026/1/5 → 2026 / 1 / 5 / 2 / 0 / +1日 / 2026 / 31;纯数字文本 "46027" 按**序列号**那天。
+    # ⚠ FormatDateTime 那两格**只钉 1/0 不钉字面量**: namedFormat=0 是 vbShortDate =
+    #   **跟着区域设置走**的一档(本机 zh-CN 读 "2026/1/5", CI 那台 en-US 读 "1/5/2026"),
+    #   钉字面量必假红 —— 与 §B142 "`VB-dec-fmt` 照打不钉(区域设置)" 同一个坑, 本刀踩了一次。
+    #   同理 Boolean 也不钉(CStr(True) 的字面文本各语言不同), 比成数字 1/0。
+    # 出口是 vb6_CDate 而不是账本原候选的 vb6_DateValue(后者严格, DateValue("46027") 引擎
+    #   也报 13 = 会判死合法实参); 实测值由上面 Y/M/D 三格逐字钉死。
     # NEG 那格是**负控**: 数值形参那一族(Sqr/Abs)不在本刀名单内, 照 C 签名反推会把它误伤。
     $b433Needles = @(
         "Y=2026", "M=1", "D=5", "W=2", "H=0", "ADD=2026/01/06",
-        "PART=2026", "DIFF=31", "FDT=2026/1/5",
-        "YNUM=2026", "FDTNUM=2026/1/5", "NEG-sqr-untouched=1", "B433-DONE")
+        "PART=2026", "DIFF=31", "FDT-ok=1", "FDTNUM-ok=1",
+        "NEG-sqr-untouched=1", "B433-DONE")
     Add-BasTest "b433_strdatearg" "$Tests\b433_strdatearg.bas" $b433Needles
     Add-BasTest "b433_strdatearg_x86" "$Tests\b433_strdatearg.bas" $b433Needles -Arch "x86"
     # <vbeclipse> 账 #215: 体级声明收成「一条声明符一条 LocalDeclStmt」。改前四条体级路两种形状 ——
