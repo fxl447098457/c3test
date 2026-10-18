@@ -244,11 +244,33 @@ if ($ast5) {
     }
 }
 
+# ---- H7: 这套 harness 自己（与全部哨兵）必须带 UTF-8 BOM ----
+#   为什么这道门非有不可: pwsh 7 读无 BOM 的 UTF-8 也认中文 ⇒ **本机永远绿**，只有 CI 的
+#   Windows PowerShell 5.1 会按 ANSI(cp936) 读 ⇒ 中文注释被解成乱码，乱码里带出的引号/反引号
+#   把语法**炸掉**。账 #438 实测: `tests/run_tests.ps1` 的 BOM 被 `[IO.File]::WriteAllText` 顺手
+#   抹掉（那一句是为了插一个调用点），本机 `pwsh` 一路绿，CI 上
+#   `[STATIC] ps51_joinpath` + `[STATIC] test_helper_integrity` 双双红成
+#   「Unexpected token '\Include'」/「parse errors: 72」—— 而报错指的地方跟动手的地方
+#   **隔着一千多行**，因为真正炸的是**注释**。
+#   作用域只取「CI 会去 parse 的那批」= harness + scripts/check_*.ps1：仓库里另有 10 份
+#   无 BOM 的 .ps1（含 6 份带中文的构建/开发脚本），它们不由这套 harness parse，
+#   拿「全仓库都要 BOM」当判据会平白判红 6 条。
+if (-not $fails.Contains('H7x')) {
+    $needBom = @($rt) + @(Get-ChildItem (Join-Path $PSScriptRoot 'check_*.ps1') | ForEach-Object { $_.FullName })
+    foreach ($p7 in $needBom) {
+        $b7 = [System.IO.File]::ReadAllBytes($p7)
+        if ($b7.Length -lt 3 -or $b7[0] -ne 0xEF -or $b7[1] -ne 0xBB -or $b7[2] -ne 0xBF) {
+            $fails += ('H7 ' + (Split-Path -Leaf $p7) + ' 没有 UTF-8 BOM —— pwsh 7 照样绿，只有 CI 的 5.1 会按 ' +
+                       'ANSI 读，把中文注释解成乱码再炸语法；要改这个文件请用会保留 BOM 的写法')
+        }
+    }
+}
+
 if ($fails.Count -gt 0) {
     $fails | ForEach-Object { Write-Host "FAIL $_" }
     exit 1
 }
-Write-Host ('OK check_test_helper_integrity: H1..H6 (functions=' + $defs.Count +
+Write-Host ('OK check_test_helper_integrity: H1..H7 (functions=' + $defs.Count +
              ' Test-* helpers=' + @($defs.Keys | Where-Object { $_ -like 'Test-*' }).Count +
-             ' no shadowing, all reachable)')
+             ' no shadowing, all reachable, harness+sentinels all BOM-ed)')
 exit 0

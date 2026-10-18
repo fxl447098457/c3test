@@ -1,4 +1,4 @@
-# c3 编译器自动化测试框架
+﻿# c3 编译器自动化测试框架
 # 用途: .\run_tests.ps1 [-Category <all|compile|run|syntax>] [-Verbose]
 #
 # 参数说明:
