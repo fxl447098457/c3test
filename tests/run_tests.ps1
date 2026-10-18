@@ -729,6 +729,13 @@ function Test-B433DateFormalAuthority {
     if ($LASTEXITCODE -eq 0) { $script:pass++; Write-Host "PASS" -ForegroundColor Green }
     else { $script:fail++; Write-Host "FAIL" -ForegroundColor Red; $out | Select-Object -First 6 | ForEach-Object { Write-Host "  $_" } }
 }
+function Test-B426DateaddInterval {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] b426_dateadd_interval ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\check_b426_dateadd_interval.ps1" 2>&1
+    if ($LASTEXITCODE -eq 0) { $script:pass++; Write-Host "PASS" -ForegroundColor Green }
+    else { $script:fail++; Write-Host "FAIL" -ForegroundColor Red; $out | Select-Object -First 6 | ForEach-Object { Write-Host "  $_" } }
+}
 function Test-B425DateserialDomain {
     $script:total++
     Write-Host -NoNewline "  [STATIC] b425_dateserial_domain ... "
@@ -3065,6 +3072,23 @@ if ($Category -in @("all", "run", "bas")) {
         "mm15=2027-3-3", "mm25=2028-1-3", "OUT-OF-DOMAIN-is-off=1", "B425-DONE")
     Add-BasTest "b425_dateserial_domain" "$Tests\b425_dateserial_domain.bas" $b425Needles
     Add-BasTest "b425_dateserial_domain_x86" "$Tests\b425_dateserial_domain.bas" $b425Needles -Arch "x86"
+
+    # 账 #426 (§B211，第一百一十一刀) = **只钉行为、不改行为**：DateAdd 的「w / ww」那一格。
+    # #423 给 DateDiff 补了「按 builtin 分岔」之后，隔壁 DateAdd 的同款分岔看着可疑 ——
+    #   共享枚举把单枚 w 答成 vb6_di_weekday，而 DateAdd 的 weekday 臂是 `datePart += n`（加**天**），
+    #   于是「DateAdd("w",1,·) 只加一天」看着像 bug。
+    # ⚠ **量完证明它是对的**（cscript 同机代理逐格量 **12 格零失配**）：
+    #     DateAdd("w",  1, #2026/1/5#) = 2026-01-06   ← w  = 加**天**
+    #     DateAdd("ww", 1, #2026/1/5#) = 2026-01-12   ← ww = 加**周**
+    # 顺带**反证 #423 的架构是对的**：那枚共享枚举对 DateAdd 与 DatePart 两家都恰好正确，
+    #   只有 DateDiff 一家分岔 ⇒ #423「不动枚举、让 DateDiff 自己认」是唯一正解；
+    #   若当时顺手统一成 DateDiff 口径，DateAdd 与 DatePart 会**同时**被弄坏。
+    $b426Needles = @(
+        "w_p1=2026-1-6", "ww_p1=2026-1-12", "w_m1=2026-1-4", "w_p3=2026-1-8", "w_0=2026-1-5",
+        "ww_m2=2025-12-22", "w_cross=2026-12-29", "w_leap=2024-2-27",
+        "d_p1=2026-1-6", "m_p1=2026-2-5", "y_p1=2026-1-6", "h_p1=2026-1-6", "B426-DONE")
+    Add-BasTest "b426_dateadd_interval" "$Tests\b426_dateadd_interval.bas" $b426Needles
+    Add-BasTest "b426_dateadd_interval_x86" "$Tests\b426_dateadd_interval.bas" $b426Needles -Arch "x86"
     # <vbeclipse> 账 #215: 体级声明收成「一条声明符一条 LocalDeclStmt」。改前四条体级路两种形状 ——
     # Dim 自己手写一遍展开(那份副本漏了 WithEvents 与「后缀即类型」)，Const/Static/体级 Public 把
     # MultiDecl 原样交给语义层(switch 不认) ⇒ 一枚名字都不登记、每条使用一条 VB3001(真工程一片 276 条)，
@@ -7951,6 +7975,7 @@ if ($Category -in @("all", "compile")) {
     Test-B435SerialSplitAuthority
     Test-B423IntervalPerBuiltin
     Test-B436FdtBounds
+    Test-B426DateaddInterval
     Test-B425DateserialDomain
     Test-B424DatedPartParams
     Test-ControlDC
