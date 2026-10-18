@@ -757,10 +757,10 @@ function Test-B439FormatUseParens {
     if ($LASTEXITCODE -eq 0) { $script:pass++; Write-Host "PASS" -ForegroundColor Green }
     else { $script:fail++; Write-Host "FAIL" -ForegroundColor Red; $out | Select-Object -First 6 | ForEach-Object { Write-Host "  $_" } }
 }
-function Test-B426DateaddInterval {
+function Test-B442DateaddInterval {
     $script:total++
-    Write-Host -NoNewline "  [STATIC] b426_dateadd_interval ... "
-    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\check_b426_dateadd_interval.ps1" 2>&1
+    Write-Host -NoNewline "  [STATIC] b442_dateadd_interval ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\check_b442_dateadd_interval.ps1" 2>&1
     if ($LASTEXITCODE -eq 0) { $script:pass++; Write-Host "PASS" -ForegroundColor Green }
     else { $script:fail++; Write-Host "FAIL" -ForegroundColor Red; $out | Select-Object -First 6 | ForEach-Object { Write-Host "  $_" } }
 }
@@ -3101,7 +3101,7 @@ if ($Category -in @("all", "run", "bas")) {
     Add-BasTest "b425_dateserial_domain" "$Tests\b425_dateserial_domain.bas" $b425Needles
     Add-BasTest "b425_dateserial_domain_x86" "$Tests\b425_dateserial_domain.bas" $b425Needles -Arch "x86"
 
-    # 账 #426 (§B211，第一百一十一刀) = **只钉行为、不改行为**：DateAdd 的「w / ww」那一格。
+    # 账 #442 (§B211，第一百一十一刀) = **只钉行为、不改行为**：DateAdd 的「w / ww」那一格。
     # #423 给 DateDiff 补了「按 builtin 分岔」之后，隔壁 DateAdd 的同款分岔看着可疑 ——
     #   共享枚举把单枚 w 答成 vb6_di_weekday，而 DateAdd 的 weekday 臂是 `datePart += n`（加**天**），
     #   于是「DateAdd("w",1,·) 只加一天」看着像 bug。
@@ -3111,12 +3111,12 @@ if ($Category -in @("all", "run", "bas")) {
     # 顺带**反证 #423 的架构是对的**：那枚共享枚举对 DateAdd 与 DatePart 两家都恰好正确，
     #   只有 DateDiff 一家分岔 ⇒ #423「不动枚举、让 DateDiff 自己认」是唯一正解；
     #   若当时顺手统一成 DateDiff 口径，DateAdd 与 DatePart 会**同时**被弄坏。
-    $b426Needles = @(
+    $b442Needles = @(
         "w_p1=2026-1-6", "ww_p1=2026-1-12", "w_m1=2026-1-4", "w_p3=2026-1-8", "w_0=2026-1-5",
         "ww_m2=2025-12-22", "w_cross=2026-12-29", "w_leap=2024-2-27",
-        "d_p1=2026-1-6", "m_p1=2026-2-5", "y_p1=2026-1-6", "h_p1=2026-1-6", "B426-DONE")
-    Add-BasTest "b426_dateadd_interval" "$Tests\b426_dateadd_interval.bas" $b426Needles
-    Add-BasTest "b426_dateadd_interval_x86" "$Tests\b426_dateadd_interval.bas" $b426Needles -Arch "x86"
+        "d_p1=2026-1-6", "m_p1=2026-2-5", "y_p1=2026-1-6", "h_p1=2026-1-6", "B442-DONE")
+    Add-BasTest "b442_dateadd_interval" "$Tests\b442_dateadd_interval.bas" $b442Needles
+    Add-BasTest "b442_dateadd_interval_x86" "$Tests\b442_dateadd_interval.bas" $b442Needles -Arch "x86"
 
     # 账 #439 (§B212，第一百一十二刀) = FormatNumber / FormatCurrency / FormatPercent 三家两笔账。
     # ① **编不过那一族**：`FormatCurrency(x)` / `FormatPercent(x)` 发 1 个实参进 5 参的 RTL 出口
@@ -8072,7 +8072,7 @@ if ($Category -in @("all", "compile")) {
     Test-B438VoidParamCensus
     Test-B437FormatLeadingGroup
     Test-B439FormatUseParens
-    Test-B426DateaddInterval
+    Test-B442DateaddInterval
     Test-B425DateserialDomain
     Test-B424DatedPartParams
     Test-ControlDC

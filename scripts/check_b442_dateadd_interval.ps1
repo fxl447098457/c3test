@@ -1,5 +1,5 @@
-﻿# check_b426_dateadd_interval.ps1 - DateAdd 的 w / ww 那一格是**对的**，不许照着 DateDiff 去"修"
-#   (账 #426 §B211，第一百一十一刀 = 本刀只钉行为、不改行为)
+﻿# check_b442_dateadd_interval.ps1 - DateAdd 的 w / ww 那一格是**对的**，不许照着 DateDiff 去"修"
+#   (账 #442 §B211，第一百一十一刀 = 本刀只钉行为、不改行为)
 #
 # 为什么单开这一道: 账 #423 (§B197) 给 `DateDiff` 的 w / ww 两条臂各补了一次「按 builtin 分岔」的
 #   问句。那一格修完以后，隔壁 `DateAdd` 的同款分岔看起来就**可疑**了 —— 共享枚举把单枚 `w`
@@ -23,7 +23,7 @@
 #   R3  夹具必须在，且必须同时钉住 w（加天）与 ww（加周）两档 —— 只钉一档等于没钉这格分岔
 #   R4  d / m / y / h 四档不许动（它们与 w/ww 共用那张表，改 w/ww 时最容易顺手碰到它们）
 #
-# 用法:  powershell -File scripts\check_b426_dateadd_interval.ps1
+# 用法:  powershell -File scripts\check_b442_dateadd_interval.ps1
 # 退出码: 0 = 全绿; 1 = 红
 
 $ErrorActionPreference = "Stop"
@@ -78,9 +78,9 @@ if ($add -notmatch 'case\s+vb6_di_week:\s*datePart\s*\+=\s*n\s*\*\s*7\s*;') {
 }
 
 # ---- R3/R4: 夹具必须把两档一起钉住，外加四档对照 ----
-$fixture = Join-Path $root 'tests\b426_dateadd_interval.bas'
+$fixture = Join-Path $root 'tests\b442_dateadd_interval.bas'
 if (-not (Test-Path -LiteralPath $fixture)) {
-    $bad += 'R4 tests\b426_dateadd_interval.bas is missing -> nothing pins "w adds days, ww adds weeks"'
+    $bad += 'R4 tests\b442_dateadd_interval.bas is missing -> nothing pins "w adds days, ww adds weeks"'
 } else {
     $fx = [IO.File]::ReadAllText($fixture)
     foreach ($needle in @('w_p1', 'ww_p1', 'd_p1', 'm_p1', 'y_p1', 'h_p1')) {
@@ -91,7 +91,7 @@ if (-not (Test-Path -LiteralPath $fixture)) {
 }
 
 if ($bad.Count -eq 0) {
-    Write-Host 'PASS b426_dateadd_interval: shared split intact | w adds days | ww adds weeks | fixture pins both + 4 controls | violations 0' -ForegroundColor Green
+    Write-Host 'PASS b442_dateadd_interval: shared split intact | w adds days | ww adds weeks | fixture pins both + 4 controls | violations 0' -ForegroundColor Green
     exit 0
 }
 foreach ($b in $bad) { Write-Host ('FAIL ' + $b) -ForegroundColor Red }

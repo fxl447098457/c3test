@@ -1,7 +1,7 @@
-Attribute VB_Name = "ModB426"
+Attribute VB_Name = "ModB442"
 Option Explicit
 
-' 账 #426 (§B211，第一百一十一刀) = **只钉行为、不改行为**：DateAdd 的「w / ww」那一格。
+' 账 #442 (§B211，第一百一十一刀) = **只钉行为、不改行为**：DateAdd 的「w / ww」那一格。
 '
 ' 为什么开这一道: 账 #423 给 `DateDiff` 的 w / ww 补了「按 builtin 分岔」之后，隔壁 `DateAdd`
 ' 的同款分岔看起来**可疑** —— 共享枚举把单枚 `w` 答成 `vb6_di_weekday`，而 DateAdd 的 weekday
@@ -35,7 +35,7 @@ Sub Main()
     Debug.Print "y_p1=" & D("y", 1, #1/5/2026#)      ' 2026-1-6
     Debug.Print "h_p1=" & D("h", 24, #1/5/2026#)     ' 2026-1-6
 
-    Debug.Print "B426-DONE"
+    Debug.Print "B442-DONE"
 End Sub
 
 Private Function D(iv As String, n As Long, dt As Date) As String
