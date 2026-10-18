@@ -53,8 +53,17 @@ if ($drainTxt -notmatch 'vb6_VariantClear\(&"') { $bad += 'R3 drain-does-not-cle
 # recent still-open declaration of that name instead of keying by name alone.
 $c3 = Join-Path $root '.build\C3.exe'
 if (-not (Test-Path $c3)) { $c3 = Join-Path $root '.build\Release\C3.exe' }
-$emit = & $c3 $fx --emit-c 2>&1 | Out-String
-if ($LASTEXITCODE -ne 0) { $bad += "R4 emit-c rc=$LASTEXITCODE" }
+# OS-level redirection, same as check_data_recordset_shape.ps1: C3.exe puts cache maintenance
+# ("cleanupOldSessions: removing ...") on stderr whenever a stale session ages out, and with
+# ErrorActionPreference=Stop a merged stream turns that noise into a terminating error.
+$tmpOut = Join-Path $env:TEMP ('k444_emit_' + [System.Guid]::NewGuid().ToString('N') + '.c')
+$tmpErr = $tmpOut + '.err'
+$pr = Start-Process -FilePath $c3 -ArgumentList @('"' + $fx + '"', '--emit-c') `
+        -RedirectStandardOutput $tmpOut -RedirectStandardError $tmpErr -NoNewWindow -Wait -PassThru
+$emitRc = $pr.ExitCode
+$emit = [IO.File]::ReadAllText($tmpOut)
+Remove-Item $tmpOut, $tmpErr -ErrorAction SilentlyContinue
+if ($emitRc -ne 0) { $bad += "R4 emit-c rc=$emitRc" }
 $lines = $emit -split "`r?`n"
 $declCount = 0
 $clearCount = 0
