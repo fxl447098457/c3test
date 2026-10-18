@@ -344,7 +344,7 @@
     static const char* const kOD_LoadPicEx[]   = { "NULL" };
 static const char* const kOD_Rnd[]         = { "0" };        // VB6 无参 Rnd = 取下一个数
 static const char* const kOD_Randomize[]   = { "0.0" };
-// 账 #428 (§B212): 位 3 = **UseParentheses**，默认是 **False(0)**，**不是 -1**。
+// 账 #439 (§B212): 位 3 = **UseParentheses**，默认是 **False(0)**，**不是 -1**。
 //   ⚠ 这一格原先和另外两位一样填 "-1"，于是「**省略**」与「**显式写 True**」在 C 侧**同码**
 //   （VB6 的 True 恒为 -1）⇒ RTL 收到 -1 分不清是「省略、走默认」还是「要括号」。
 //     按 -1 走默认 ⇒ 显式 True 被吃掉（实测 FormatNumber(-1234.5678,2,True,True) 交 -1,234.57，
@@ -388,7 +388,7 @@ static const char* const kOD_Randomize[]   = { "0.0" };
         { "vb6_MidB",            kOD_MidB,        sizeof(kOD_MidB) / sizeof(kOD_MidB[0]),               true  },
         { "vb6_StrConv",         kOD_StrConv,     sizeof(kOD_StrConv) / sizeof(kOD_StrConv[0]),         true  },
         { "vb6_FormatNumber",    kOD_FormatNum,   sizeof(kOD_FormatNum) / sizeof(kOD_FormatNum[0]),     true  },
-    // 账 #428 (§B212): 这两家与 FormatNumber **同形**（同一条 5 位 C 签名、同样的可选实参），
+    // 账 #439 (§B212): 这两家与 FormatNumber **同形**（同一条 5 位 C 签名、同样的可选实参），
     //   改前**只有 FormatNumber 登记了**默认档 ⇒ `FormatCurrency(1234.5678)` / `FormatPercent(...)`
     //   发成 1 个实参进 5 参的 RTL 出口 = **cl C2198 实参太少**，整份文件编不过。
     //   三家共用 kOD_FormatNum（位置 0 是 value，其余 1..4 省略档 = "-1" = 各用自己的默认）。

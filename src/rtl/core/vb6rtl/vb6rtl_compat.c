@@ -454,7 +454,7 @@ BSTR vb6_MonthName(int32_t month, int32_t abbreviate) {
 // 实测 FormatPercent 把上次结果当格式反复解析 → "123456.7856.7856.78..." 无限重复。
 // 正解 = 直接用宽度精度参数 `%.*f`, 一次成型, 不再二次套用。
 //
-// 账 #428 (§B212，第一百一十二刀) = 「UseParentheses 这一位要什么」这一问，**收成一位主人**。
+// 账 #439 (§B212，第一百一十二刀) = 「UseParentheses 这一位要什么」这一问，**收成一位主人**。
 // 病机制：三家（FormatNumber / FormatCurrency / FormatPercent）各自的出口第一行都写着
 //   `(void)incLeading; (void)useParens; (void)groupDigits;` —— 这一位被**明确丢掉**，
 //   于是负数永远交 `-1,234.57`，而运行期在 useParens 为真时交 `(1,234.57)`。

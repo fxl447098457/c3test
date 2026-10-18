@@ -750,10 +750,10 @@ function Test-B437FormatLeadingGroup {
     if ($LASTEXITCODE -eq 0) { $script:pass++; Write-Host "PASS" -ForegroundColor Green }
     else { $script:fail++; Write-Host "FAIL" -ForegroundColor Red; $out | Select-Object -First 6 | ForEach-Object { Write-Host "  $_" } }
 }
-function Test-B428FormatUseParens {
+function Test-B439FormatUseParens {
     $script:total++
-    Write-Host -NoNewline "  [STATIC] b428_format_useparens ... "
-    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\check_b428_format_useparens.ps1" 2>&1
+    Write-Host -NoNewline "  [STATIC] b439_format_useparens ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\check_b439_format_useparens.ps1" 2>&1
     if ($LASTEXITCODE -eq 0) { $script:pass++; Write-Host "PASS" -ForegroundColor Green }
     else { $script:fail++; Write-Host "FAIL" -ForegroundColor Red; $out | Select-Object -First 6 | ForEach-Object { Write-Host "  $_" } }
 }
@@ -3118,7 +3118,7 @@ if ($Category -in @("all", "run", "bas")) {
     Add-BasTest "b426_dateadd_interval" "$Tests\b426_dateadd_interval.bas" $b426Needles
     Add-BasTest "b426_dateadd_interval_x86" "$Tests\b426_dateadd_interval.bas" $b426Needles -Arch "x86"
 
-    # 账 #428 (§B212，第一百一十二刀) = FormatNumber / FormatCurrency / FormatPercent 三家两笔账。
+    # 账 #439 (§B212，第一百一十二刀) = FormatNumber / FormatCurrency / FormatPercent 三家两笔账。
     # ① **编不过那一族**：`FormatCurrency(x)` / `FormatPercent(x)` 发 1 个实参进 5 参的 RTL 出口
     #   = cl C2198 整份编不过。病根 = 省略实参的默认档表 `kOD_FormatNum` **只登记了 FormatNumber**，
     #   而三家 C 签名与可选实参完全同形 ⇒ 两家补同一张表。
@@ -3129,12 +3129,12 @@ if ($Category -in @("all", "run", "bas")) {
     #   VB6 里 UseParentheses 默认是 **False**，故发码那一档改成 **0**（位 1/2/4 仍是 -1）。
     #   `def=` 与 `false=` 两格钉住「默认形态不许变」，`true=`/`skip=` 钉住「显式 True 要括号」。
     # 三家那一族只钉**括号形状**不钉货币符号（符号跟着区域设置走，§B142 同一条纪律）。
-    $b428Needles = @(
+    $b439Needles = @(
         "def-1arg=1", "cur-1arg=1", "pct-1arg=1", "cur-2arg=1",
         "def=-1,234.57", "false=-1,234.57", "true=(1,234.57)", "pos=1,234.57", "skip=(1,234.57)",
-        "cur-def-parens=False", "cur-true-parens=True", "pct-true-parens=True", "B428-DONE")
-    Add-BasTest "b428_format_useparens" "$Tests\b428_format_useparens.bas" $b428Needles
-    Add-BasTest "b428_format_useparens_x86" "$Tests\b428_format_useparens.bas" $b428Needles -Arch "x86"
+        "cur-def-parens=False", "cur-true-parens=True", "pct-true-parens=True", "B439-DONE")
+    Add-BasTest "b439_format_useparens" "$Tests\b439_format_useparens.bas" $b439Needles
+    Add-BasTest "b439_format_useparens_x86" "$Tests\b439_format_useparens.bas" $b439Needles -Arch "x86"
 
     # 账 #437 (§B213，第一百一十三刀) = 5 位签名上**剩下那两枚**被 `(void)` 丢掉的位。
     # §B212 收了 useParens，incLeading 与 groupDigits 当时一个字没动 ⇒ 接着量，全是**静默答错**。
@@ -8071,7 +8071,7 @@ if ($Category -in @("all", "compile")) {
     Test-NoLocaleNeedles
     Test-B438VoidParamCensus
     Test-B437FormatLeadingGroup
-    Test-B428FormatUseParens
+    Test-B439FormatUseParens
     Test-B426DateaddInterval
     Test-B425DateserialDomain
     Test-B424DatedPartParams

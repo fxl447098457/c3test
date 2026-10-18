@@ -1,5 +1,5 @@
-﻿# check_b428_format_useparens.ps1 - UseParentheses 这一问只有一位主人，且**省略档不许和显式 True 同码**
-#   (账 #428 §B212 / 第一百一十二刀)
+﻿# check_b439_format_useparens.ps1 - UseParentheses 这一问只有一位主人，且**省略档不许和显式 True 同码**
+#   (账 #439 §B212 / 第一百一十二刀)
 #
 # 为什么单开这一道: FormatNumber / FormatCurrency / FormatPercent 三家共用同一条 5 位 C 签名，
 #   而「UseParentheses 要什么」原先被三家各自的 `(void)useParens` **明确丢掉** —— 三份抄写、
@@ -22,7 +22,7 @@
 #   R4  `kOD_FormatNum` 必须同时登记 **三家**（只登一家 ⇒ 另两家省略实参时 C2198 整份编不过）
 #   R5  主人里的判据是 `useParens == 0` 放行负号那一支（不是 `> 0`）：默认档已改成 0
 #
-# 用法:  powershell -File scripts\check_b428_format_useparens.ps1
+# 用法:  powershell -File scripts\check_b439_format_useparens.ps1
 # 退出码: 0 = 全绿; 1 = 红
 
 $ErrorActionPreference = "Stop"
@@ -95,7 +95,7 @@ if ($compCode -notmatch 'static\s+BSTR\s+vb6_fmtApplyUseParens') {
 }
 
 if ($bad.Count -eq 0) {
-    Write-Host 'PASS b428_format_useparens: 3 functions share one owner | no (void) useParens | UseParentheses default=0 | other defaults untouched | all 3 registered | violations 0' -ForegroundColor Green
+    Write-Host 'PASS b439_format_useparens: 3 functions share one owner | no (void) useParens | UseParentheses default=0 | other defaults untouched | all 3 registered | violations 0' -ForegroundColor Green
     exit 0
 }
 foreach ($b in $bad) { Write-Host ('FAIL ' + $b) -ForegroundColor Red }

@@ -1,7 +1,7 @@
-Attribute VB_Name = "ModB428"
+Attribute VB_Name = "ModB439"
 Option Explicit
 
-' 账 #428（§B212，第一百一十二刀）= FormatNumber / FormatCurrency / FormatPercent 三家，
+' 账 #439（§B212，第一百一十二刀）= FormatNumber / FormatCurrency / FormatPercent 三家，
 '   由「新开那条普查线」的可选实参那一轨量出来的**两笔账**。
 '
 ' ① **编不过那一族**：`FormatCurrency(x)` / `FormatPercent(x)` 发成 1 个实参进 5 参的 RTL 出口
@@ -46,7 +46,7 @@ Sub Main()
     Debug.Print "cur-true-parens=" & Shape(FormatCurrency(-1234.5678, 2, True, True))  ' True
     Debug.Print "pct-true-parens=" & Shape(FormatPercent(-1234.5678, 2, True, True))   ' True
 
-    Debug.Print "B428-DONE"
+    Debug.Print "B439-DONE"
 End Sub
 
 ' 该调用必须**编得过**（①那一族的判据）；长度 > 0 即说明编过且有内容。
