@@ -7451,6 +7451,44 @@ if ($Category -in @("all", "run", "vbp")) {
                      "C3ProbeB190-DONE")
     Test-Vbp 'b190_object_formal_scope' "$Tests\b190_scope\B190.vbp" $b190Needles
     Test-Vbp 'b190_object_formal_scope_x86' "$Tests\b190_scope\B190.vbp" $b190Needles -Arch "x86"
+    # 账 #305 §B216 (第一百一十九刀): 「一枚工程类实例进后期绑定的槽」这一问今天只许有一个答案。
+    # 九形同台、两架构各钉一遍 (读数在 .build/k845_*_run.txt, BASE = C3_k117 那一台):
+    #   A1..A4 = 泛 Object 槽的四条 RHS 形 (行内 New / 局部类变量 / 模块级 As New / 返回工程类的函数),
+    #            改前改后都交 tn=B216Impl + 晚绑定 42 —— 这一族是**不许动**的证人 (第一百一十八刀
+    #            读数 X 的「通的那六形」在本夹具里就是它们, 归一不许把它们改坏)。
+    #   V1/V2  = Variant 槽那一站 (#404, 格②) 的正靶: 改前那一站连表都不问, 发的是
+    #            vb6_VariantFromValue(裸实例), _Generic 的指针臂投成 vt=9 而 pdispVal 是一枚
+    #            vb6_cls_B216Impl* ⇒ tn=Object、stderr `vb6_ComCall: method "Twice" not found` +
+    #            late 交空 (两台同形); 改后交的是包装器 ⇒ tn=B216Impl + late=42, 而 vt 照旧 9
+    #            (钉 vt 那一手是为了别把这条改道读成"档也换了")。
+    #   N1/N2  = 格① 的正靶: 同一枚**表外**类 B216Plain (与 B216Impl 只差 BEGIN/MultiUse 那一块)
+    #            的两臂。改前 N1 (行内 New) 交 Nothing 而 N2 (模块级 As New 的变量) 交裸指针 ——
+    #            一个问句两个答案; 归一之后两臂同答那枚裸实例 (tn=Object / isNothing=False,
+    #            两条读数逐字相同)。⚠ 台账 #443 当初把坏法写成"归一成交 Nothing", 开工前的本机
+    #            A/B 把它推翻了 (两处实物见 cgen_base_type.cpp 那一格的注释), 这两形钉的就是**改后**
+    #            真正落地的方向。
+    #   N3     = 表外那一档的 Variant 形, 本刀**没动** (照旧 tn=Object): 它欠的是「要不要给这类
+    #            模块 mint 一枚最小 COM 档」那句口径 = #407 同一条, 别把它读成已修。
+    $b216Needles = @("A1-inlineNew-tn=B216Impl late=42", "A2-classVar-tn=B216Impl late=42",
+                     "A3-moduleNew-tn=B216Impl late=42", "A4-fnResult-tn=B216Impl late=42",
+                     "V1-variant-inlineNew-vt=9 tn=B216Impl late=42",
+                     "V2-variant-classVar-vt=9 tn=B216Impl late=42",
+                     "N1-plain-inlineNew-tn=Object isNothing=False",
+                     "N2-plain-moduleNew-tn=Object isNothing=False",
+                     "N3-plain-variant-tn=Object", "B216-DONE")
+    Test-Vbp 'b216_slot_arm_answers' "$Tests\b216_slot\B216d.vbp" $b216Needles
+    Test-Vbp 'b216_slot_arm_answers_x86' "$Tests\b216_slot\B216d.vbp" $b216Needles -Arch "x86"
+    # 发码针 (同一问只许从唯一发码处出): 四形 + Variant 两形都问那一位主人, 而且
+    # 表外那一枚类**一口都不许问表** —— 问到了就是有人在归一之外又发了一枚空壳包器。
+    Test-EmitcShape 'b216_slot_stations_ask_one_owner' @("$Tests\b216_slot\B216d.vbp") @(
+        'vo1 = (void*)vb6_ComObject_FromInstance(vb6_FindCoClassDesc("B216Impl"), (void*)vb6_cls_B216Impl_New());',
+        'vo4 = (void*)vb6_ComObject_FromBorrowedInstance(vb6_FindCoClassDesc("B216Impl"), (void*)vb6_Main_MakeImpl());',
+        'v1 = vb6_VariantFromValue((void*)vb6_ComObject_FromInstance(vb6_FindCoClassDesc("B216Impl"), (void*)vb6_cls_B216Impl_New()));',
+        'v2 = vb6_VariantFromValue((void*)vb6_ComObject_FromBorrowedInstance(vb6_FindCoClassDesc("B216Impl"), (void*)a));')
+    Test-EmitcAbsent 'b216_slot_keeps_no_bare_box_and_no_empty_desc_ask' @("$Tests\b216_slot\B216d.vbp") @(
+        'vb6_VariantFromValue((vb6_cls_B216Impl',
+        'vb6_FindCoClassDesc("B216Plain")',
+        '((void)(a), (void*)0)')
     # 账 #305 §B188 ④ (第九十刀): 出厂那一腿的**尾巴**。`Class_Terminate` 抛错时, `_Destroy` 里体之后
     # 那三截(字段 BSTR / 数组字段 / vb6_Free(me))曾被 ComObj_Release 的帧一起 longjmp 跳掉 —— 实测每枚
     # 抛错的出厂漏一份实例资源: x64 每枚 35~37 字节、x86 每枚 17 字节, 多一枚 20 字符 String 字段就涨到

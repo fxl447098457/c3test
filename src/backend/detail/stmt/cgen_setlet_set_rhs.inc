@@ -126,6 +126,17 @@
         }
     }
 
+    // 账 #305 §B216 格② (#404): `Set <Variant 槽> = <工程内实例>` 这一站以前**连表都不问** ——
+    // 裸实例指针直接交给下面的 _Generic, 指针臂把它投成对象档。第一百一十八刀的真跑读数
+    // (E03/E11/E15, .build/k820out/): vt=9 看着像 VT_DISPATCH 而 pdispVal 是一枚裸 `vb6_cls_X*`
+    // ⇒ TypeName 答 "Object"、晚绑定 stderr `vb6_ComCall: method "Twice" not found` + 空答。
+    // 现在与泛对象槽问**同一位主人** (唯一发码处 boxIntoLateSlot): 装箱成功交回的是包装器 (void*),
+    // 下面那一站的 _Generic 正好走 vb6_VariantObject = 真 IDispatch; 交回原样的形态 (认不出工程类 /
+    // 值自己就是槽 / 宿主句柄 / 已剥壳) 一字不变。
+    if (targetIsVariant && node.value) {
+        value = boxIntoLateSlot(value, node.value.get());
+    }
+
     // Fix 051: Set 语句中 void* → vb6_VARIANT 包装
     // 当 LHS 是 Variant 变量 (如 vb6_ret_Xxx, Dim x As Variant) 而 RHS 是
     // void* (对象指针, 如 vb6_ComCallObject, 类字段访问, vb6_VariantToObjectVal 等) 时,
@@ -188,11 +199,12 @@
     // 2026-09-21 CI VBMAN cTlsSocket 实证). void* 目标的表示是 IDispatch*
     // (vb6_ComCall 解 lpVtbl / vb6_ReleaseObject Release), 不是 VARIANT*;
     // 不能用 vb6_ComPack_<X>() (返回 VARIANT*, 仅作 COM 实参).
-    // 仅 void* 目标包装; typed 目标保持裸指针; Variant 走上方 _Generic 路径.
+    // ⚠ 账 #305 §B216 格①: 这一句**发码**已经搬进唯一发码处 boxIntoLateSlot (cgen_base_type.cpp),
+    // 那一形认得 New 就交拥有型; typed 目标照旧保持裸指针, Variant 目标走上面格② 那一站。
     bool fix179bUnwrapped = false;
     {
         // 「这枚目标槽是不是后期绑定的泛对象槽 (void* 里该装 IDispatch*)」——
-        // Fix 179a 与下面的装箱腿**同一问**，所以收成一条 lambda 问一次:
+        // 唯一发码处与登记表那一问**同一问**，所以收成一条 lambda 问一次:
         //   me-> 字段 → classVoidFieldMap_ (driver 预扫描, 含 As Object / As New)
         //   其余      → knownObjectVars_   (本过程登记过的晚绑定变量/参数)
         auto lateBoundSlotTarget = [&]() -> bool {
@@ -208,34 +220,20 @@
         // 进站时的值 (下面几条臂会改写 value, 登记表那一问要吃**原样**那一枚)
         const std::string rawSrcForReg = value;
 
-        // value 形如 "(vb6_cls_<X>_New())"
-        std::string bare179;
-        if (value.size() > 16 && value.compare(0, 9, "(vb6_cls_") == 0
-            && value.compare(value.size() - 7, 7, "_New())") == 0) {
-            bare179 = value.substr(9, value.size() - 16);
-        }
-        bool wrappedBy179a = false;   // 179a: New 那一形交回**拥有型**包装器
+        bool wrappedBy179a = false;   // 行内 New 那一形交回**拥有型**包装器
         bool boxedHere = false;       // 装箱腿: 借用型包装器
-        if (!bare179.empty()
-            && bare179.find_first_not_of(
-                   "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_")
-                   == std::string::npos
-            && !targetIsVariant) {
-            if (lateBoundSlotTarget()) {
-                value = "(void*)vb6_ComObject_FromInstance(vb6_FindCoClassDesc(\""
-                      + bare179 + "\"), (void*)" + value.substr(1, value.size() - 2) + ")";
-                wrappedBy179a = true;
-            }
-        }
-        // 账 #305 §B187 第二腿 装箱腿: `Set <泛对象槽> = <工程内实例>` (不是 New 那一形)
-        // → 交**借用型**包装器。为什么这一格欠着、哪些值不许动、desc 闸门那一段全部住在唯一
-        // 发码处 boxIntoLateSlot (cgen_base_type.cpp) —— 实参那一站 (§B187 第四腿) 问的就是
-        // 同一句，两处不许各抄一份负条件。
-        if (!wrappedBy179a && !targetIsVariant && node.value && lateBoundSlotTarget()) {
+        // 账 #305 §B216 格①: 两臂归一 —— Fix 179a 原来在这一处手抄的
+        // `(vb6_cls_<X>_New())` 文本判据与那句拥有型发码一起搬进了唯一发码处 boxIntoLateSlot
+        // (它按同一形认出新实例、交拥有型, 其余交借用型), 站点这一处只剩**一问**:
+        // 这枚目标槽是不是后期绑定的泛对象槽。表外那一档 (工程类不占运行期 coclass 表那行)
+        // 两臂现在也答同一个: 交**原样** —— 台账 #443 原先写的「归一成交 Nothing」已由本机
+        // A/B 推翻, 两处实物与理由记在 cgen_base_type.cpp 那一格 (尺 .build/k842_ab.py)。
+        if (!targetIsVariant && node.value && lateBoundSlotTarget()) {
             value = boxIntoLateSlot(value, node.value.get());
-            // 下面那张登记表要问「这一站刚交的是不是包装器」: 唯一发码处交出的就是这一枚形状
+            // 下面那张登记表要问「这一站刚交的是不是包装器」: 唯一发码处交出的只有这两枚形状
             // (前缀判据用 rfind(…, 0), 不写长度字面量 —— 那一族的坑是恒假也不报错)。
             boxedHere = value.rfind("(void*)vb6_ComObject_FromBorrowedInstance(", 0) == 0;
+            wrappedBy179a = value.rfind("(void*)vb6_ComObject_FromInstance(", 0) == 0;
         }
 
         // 登记表的口径: wrappedComVars_ 记的是「这个名字**最后一次** Set 进去的是不是

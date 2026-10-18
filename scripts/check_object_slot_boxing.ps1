@@ -80,6 +80,16 @@
 #       `knownClassVars_.erase(pLower)` 恰好 6 = UDT 形参 3 + Object 形参 3 (这张表的遮蔽站点只许这两族);
 #       否决那一行必须排在 knownClassVars_.find 与 symTab_.lookup(id.name) 之前; 夹具 + 三枚发码针
 #       + 两架构真跑都在 run_tests.ps1 里。
+#
+# B12 「一枚工程类实例**进槽**该交什么」两臂归一 (§B216, 第一百一十九刀):
+#       行内 New 那一臂原来在 Set 站点里手抄文本判据 + 自己拼拥有型包器, 变量那一臂走唯一发码处 ——
+#       同一问两个答案 (表外那一枚类: 一臂交 Nothing、一臂交裸指针)。修法 = 文本判据与两句发码
+#       (拥有型/借用型) 都搬进 boxIntoLateSlot, Set 那一站改成问两次 (泛对象槽 + Variant 槽 = 格②
+#       接上同一位主人)。钉四件: 拥有型那一句 `return "(void*)vb6_ComObject_FromInstance(vb6_FindCoClassDesc(`
+#       全 src/backend 恰好 1 处且住在唯一发码处; Set 站点自己拼的那一句 = 0 处、认前缀那一句 = 1 处
+#       (登记表还要它); 站点问唯一发码处 = 2 处 (少一处就是一臂又不问主人); 夹具 tests\b216_slot
+#       三件齐 + 真跑两格 + 五枚判据名在场。⚠ 表外那一档今天交的是**原样** (裸实例), 不是 Nothing ——
+#       台账 #443 那句"归一成交 Nothing"已由开工前的本机 A/B 推翻 (两处实物记在 cgen_base_type.cpp)。
 
 # 用法:  pwsh -File scripts\check_object_slot_boxing.ps1
 # 退出码: 0 = 全绿; 1 = 红
@@ -129,7 +139,7 @@ $nBoxFn = Count-InFiles "src\backend" $srcExts "boxIntoLateSlot\s*\("
 $nSlotParam = Count-InFiles "src\backend" $srcExts "cParamLateSlotType\s*\("
 if ($nBorrow -ne 5) { $script:bad += ("B1 FromBorrowedInstance 在 src/backend 代码行 = $nBorrow (要 5: 发码处 + ByRef 桥进场 + 站点前缀判据 + getter 2)") }
 if ($nEmit -ne 1) { $script:bad += ("B1 发出包装器那一句 = $nEmit (要 1, 只许住在唯一发码处)") }
-if ($nBoxFn -ne 5) { $script:bad += ("B1 boxIntoLateSlot( = $nBoxFn (要 5: 声明 1 + 定义 1 + 站点 3)") }
+if ($nBoxFn -ne 6) { $script:bad += ("B1 boxIntoLateSlot( = $nBoxFn (要 6: 声明 1 + 定义 1 + 站点 4 = Set 目标槽 / Set Variant 槽 (§B216 格②) / 位置实参 / 命名实参)") }
 if ($nSlotParam -ne 5) { $script:bad += ("B1 cParamLateSlotType( = $nSlotParam (要 5: 声明 1 + 定义 1 + ByVal 站点 2 + ByRef 桥 1)") }
 
 # B2
@@ -374,6 +384,29 @@ foreach ($c11 in @("b190_object_formal_goes_late", "b190_object_formal_keeps_no_
     if ($k -ne 1) { $script:bad += ("B11 发码判据 " + $c11 + " = $k 处 (要 1)") }
 }
 
+# B12 - 进槽那一问两臂归一 (§B216, 第一百一十九刀): 拥有型包器只许从唯一发码处出,
+#       Set 那一站现在问两次 (泛对象槽 + Variant 槽), 而表外那一档不许再被问表。
+#       ①/② 钉的是"撤走的手抄不许回来"与"新站点不许被删一半"; ③④ 钉夹具与判据齐件。
+$ownEmit = @([regex]::Matches($boxTxt, 'return "\(void\*\)vb6_ComObject_FromInstance\(vb6_FindCoClassDesc\(')).Count
+if ($ownEmit -ne 1) { $script:bad += ("B12 发出拥有型包器那一句 = $ownEmit (要 1: 只许住在唯一发码处, 站点里那份手抄撤走之后不许回来)") }
+$stnTxt = Text-Of $stationRel
+$stnEmit = @([regex]::Matches($stnTxt, 'value = "\(void\*\)vb6_ComObject_FromInstance')).Count
+if ($stnEmit -ne 0) { $script:bad += ("B12 Set 站点自己拼拥有型包器 = $stnEmit 处 (要 0: 那一句已经搬进唯一发码处)") }
+$stnAsk = @([regex]::Matches($stnTxt, 'value\.rfind\("\(void\*\)vb6_ComObject_FromInstance')).Count
+if ($stnAsk -ne 1) { $script:bad += ("B12 Set 站点认拥有型那一枚前缀判据 = $stnAsk (要 1: 登记表那一问还要它)") }
+$stnBox = @([regex]::Matches($stnTxt, 'value = boxIntoLateSlot\(')).Count
+if ($stnBox -ne 2) { $script:bad += ("B12 Set 那一站问唯一发码处 = $stnBox (要 2: 泛对象槽 + Variant 槽 (§B216 格②), 少一处就是一臂又不问主人)") }
+foreach ($f12 in @("tests\b216_slot\B216d.vbp", "tests\b216_slot\B216Impl.cls", "tests\b216_slot\B216Plain.cls")) {
+    if (-not (Test-Path -LiteralPath (Join-Path $root $f12))) { $script:bad += ("B12 缺夹具 " + $f12) }
+}
+$nB216Cells = @([regex]::Matches($rtTxt, "b216_slot_arm_answers")).Count
+if ($nB216Cells -ne 2) { $script:bad += ("B12 b216_slot_arm_answers 真跑格 = $nB216Cells (要 2: x64 + x86)") }
+foreach ($c12 in @("b216_slot_stations_ask_one_owner", "b216_slot_keeps_no_bare_box_and_no_empty_desc_ask",
+                   "N1-plain-inlineNew", "N2-plain-moduleNew", "V1-variant-inlineNew")) {
+    $k = @([regex]::Matches($rtTxt, $c12)).Count
+    if ($k -lt 1) { $script:bad += ("B12 判据缺件 " + $c12 + " = $k 处 (要 >=1)") }
+}
+
 if ($script:bad.Count -eq 0) {
     Write-Host ("PASS boxing-emits=1 stations=3 borrowed-refs=5 coclass-predicate-sites=" + $nUse `
         + " wrapper-ask-sites=" + $nAsk + " registry-ins=" + $nIns + " erase=" + $nErase `
@@ -383,7 +416,8 @@ if ($script:bad.Count -eq 0) {
         + " arm7=" + $nArm7 + " nothing-site=" + $nNothing + "@line" + $iNil + " empty-arm=" + $nEmptyArm `
         + " gate-sites=" + $nGateBackend + "/" + $nGateOther + " gate-table=" + $nGateState + "/" + $nGateInject + "/" + $nGateScan `
         + " fold-emit=" + $nTernary + " order=" + $iGate10 + "<" + $iTern10 `
-        + " arm8=" + $nArm8 + " gate-cells=" + $nGateCells + " veto-sites=" + $nFormalIns + "/" + $nFormalClr + "/" + $nFormalAsk + "/snap=" + $nSnapWrite + "/" + $nSnapRestore + "/erase=" + $nShadowErase) -ForegroundColor Green
+        + " arm8=" + $nArm8 + " gate-cells=" + $nGateCells + " veto-sites=" + $nFormalIns + "/" + $nFormalClr + "/" + $nFormalAsk + "/snap=" + $nSnapWrite + "/" + $nSnapRestore + "/erase=" + $nShadowErase `
+        + " b12-own-emit=" + $ownEmit + "/station-copy=" + $stnEmit + "/prefix-ask=" + $stnAsk + "/slot-stations=" + $stnBox + "/cells=" + $nB216Cells) -ForegroundColor Green
     exit 0
 }
 foreach ($b in $script:bad) { Write-Host ("FAIL " + $b) -ForegroundColor Red }
