@@ -394,6 +394,13 @@
     // 每条: { 临时char*变量名, 回写目标左值表达式, 缓冲容量表达式(可空) }。
     struct AnsiOutParam { std::string tempVar; std::string targetExpr; std::string capExpr; };
     std::vector<AnsiOutParam> ansiOutParams_;
+    // 账 #305 §B217 (第一百二十一刀): 本站为 ByRef Variant 实参 mint 的那枚具名临时槽
+    // (`_vb6_vararg_<n>`) 里住着一枚**装箱自己取的引用** —— 语句末收回, 与上面
+    // `ansiOutParams_`/`ansiTempsToFree_` 同一条"编译器自己 mint 的临时量, 范围就是这条语句"
+    // 的口径。连着记下**发声明时那层的缩进**: 语句的收回行只在同层落地, 层不同就说明声明发在
+    // 一对已经合上的花括号里 (Debug.Print 那族 `{ ... }` 自带块), 那时宁可不收也不许发成
+    // 引用越界的 C。
+    std::vector<std::pair<std::string, int>> boxTempsToClear_;
     int ansiCounter_ = 0;
     int vcmpCounter_ = 0;  // P25: Variant比较临时变量计数器
 

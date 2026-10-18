@@ -1611,6 +1611,21 @@ function Test-ObjectSlotBoxing {
     }
 }
 
+# 账 #305 §B217 (第一百二十一刀): ByRef Variant 实参那枚临时槽的语句末收回只许一处登记 + 顺序必须晚于最后一次引用
+function Test-BoxTempReclaim {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] box_temp_reclaim ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\check_box_temp_reclaim.ps1" 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        $out | Select-Object -First 8 | ForEach-Object { Write-Host "  $_" }
+    }
+}
+
 # 账 #305 #416 (第九十三刀): 文本进严格转换的那一句解析只许问 oleaut32 一次 + 两位桥分开
 function Test-ConvStrictParse {
     $script:total++
@@ -7489,6 +7504,35 @@ if ($Category -in @("all", "run", "vbp")) {
         'vb6_VariantFromValue((vb6_cls_B216Impl',
         'vb6_FindCoClassDesc("B216Plain")',
         '((void)(a), (void*)0)')
+    # 账 #305 §B217 (第一百二十一刀): ByRef Variant 实参那一站每次调用取走**两枚**引用 —— 站点自己
+    # 问 `vb6_ComObject_From*Instance` 取一枚, 装箱那一臂 `vb6_VariantObject` 又 AddRef 一枚
+    # (vb6rtl_variant.h:243-248 的注释写明它为什么要 AddRef), 而站点 mint 的具名临时槽 `_vb6_vararg_N`
+    # 全仓没人收回。本刀把**装箱多取的那一枚**在语句末收回, 走 emitStmtList 里与
+    # `ansiOutParams_`/`ansiTempsToFree_` 同一条收尾道; 剩下那一枚(实例自己的)的归属 = §B187/#407
+    # 那句没拍的口径, 本格刻意不动它 —— 所以读数是"行为一字不变、记账少一枚"。
+    #   P1/P2 = 被调方**仍然看得见**那枚对象 (vt=9 / tn=类名) ⇒ 收回落在调用之后而不是之前。
+    #           P2 是这条顺序的靶: 一条语句两枚装箱实参, 若把收回挂到 emitLine 的 postLines 队列上,
+    #           第一条 clear 会被第二条声明冲出来 ⇒ 被调方读到空槽 (a-vt=0)。
+    #   P4/P5/P6 = 调用方自己的实例在 see / 被调方 `Set Item = Nothing` / 被调方 `Item = 5` 之后
+    #           都还活着、值也没被写脏 (a.n=7 twice=42, b.n=9) ⇒ 少收的那一枚确实是别人的。
+    #   P7/P8 = If 头与 Debug.Print 实参那两形: P7 今天**不收** (声明与收回不同层 ⇒ 宁可不收也不许
+    #           发成引用越界的 C), P8 收; 两形的读数都须是 9 ⇒ 这条限制没把行为改坏。
+    $b444Needles = @("P1-see vt=9 tn=B444Impl", "P2-two a-vt=9 b-vt=9",
+                    "P4-after-see n=7 twice=42", "P5-after-clear n=7 tn=B444Impl twice=42",
+                    "P6-after-write n=9 tn=B444Impl", "P7-in-condition seen=9",
+                    "P8-in-print vt=9", "P9-fresh=7", "B444-DONE")
+    Test-Vbp 'b444_vararg_reclaim_after_call' "$Tests\b444_vararg\B444.vbp" $b444Needles
+    Test-Vbp 'b444_vararg_reclaim_after_call_x86' "$Tests\b444_vararg\B444.vbp" $b444Needles -Arch "x86"
+    # 发码针: 语句末的收回行必须与站点声明成对出现 (顺序与计数由哨兵
+    # check_box_temp_reclaim.ps1 按行号钉, 这里只钉形状确实发出来了)。
+    Test-EmitcShape 'b444_vararg_stmt_temps_are_reclaimed' @("$Tests\b444_vararg\B444.vbp") @(
+        'vb6_Main_TakeTwo(&_vb6_vararg_1, &_vb6_vararg_2);',
+        'vb6_VariantClear(&_vb6_vararg_1);',
+        'vb6_VariantClear(&_vb6_vararg_2);',
+        'vb6_VariantClear(&_vb6_vararg_8);')
+    Test-EmitcAbsent 'b444_vararg_leaves_the_header_shape_uncleared' @("$Tests\b444_vararg\B444.vbp") @(
+        'vb6_VariantClear(&_vb6_vararg_6);',
+        'vb6_VariantAssign(&(_vb6_vararg_')
     # 账 #305 §B188 ④ (第九十刀): 出厂那一腿的**尾巴**。`Class_Terminate` 抛错时, `_Destroy` 里体之后
     # 那三截(字段 BSTR / 数组字段 / vb6_Free(me))曾被 ComObj_Release 的帧一起 longjmp 跳掉 —— 实测每枚
     # 抛错的出厂漏一份实例资源: x64 每枚 35~37 字节、x86 每枚 17 字节, 多一枚 20 字符 String 字段就涨到
@@ -8167,6 +8211,7 @@ if ($Category -in @("all", "compile")) {
     Test-ComServerErrorFrame
     Test-ProjClassScanBound
     Test-ObjectSlotBoxing
+    Test-BoxTempReclaim
     Test-ConvStrictParse
     Test-DateConv
     Test-IsPredText

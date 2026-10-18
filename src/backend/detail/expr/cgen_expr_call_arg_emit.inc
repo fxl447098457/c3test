@@ -1032,6 +1032,13 @@
                                     c_.emitLine("vb6_VARIANT " + tmp92y
                                         + " = vb6_VariantFromValue(" + boxed92y
                                         + ");  /* Fix <vbeclipse>: ByRef Variant 实参装箱 */");
+                                    // 账 #305 §B217 (第一百二十一刀): `vb6_VariantFromValue` 落到
+                                    // void* 那一臂 = `vb6_VariantObject`, 它**自己就 AddRef**
+                                    // (vb6rtl_variant.h:243-248), 而上面那句 `From*Instance` 已经
+                                    // 取过一枚 ⇒ 每次调用两枚。站点自己只该留下一枚(实例自己的那一枚,
+                                    // 归属由唯一发码处答), 装箱多取的这一枚登记下来, 由 emitStmt 在
+                                    // 这条语句末收回 —— 与 ansiOutParams_/ansiTempsToFree_ 同一条道。
+                                    boxTempsToClear_.push_back({tmp92y, c_.indentLevel()});
                                     argVal = "&" + tmp92y;
                                 } else {
                                     // Variant 变量 / UDT 字段: 值已是 vb6_VARIANT 且可寻址。
