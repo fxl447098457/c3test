@@ -729,6 +729,13 @@ function Test-B433DateFormalAuthority {
     if ($LASTEXITCODE -eq 0) { $script:pass++; Write-Host "PASS" -ForegroundColor Green }
     else { $script:fail++; Write-Host "FAIL" -ForegroundColor Red; $out | Select-Object -First 6 | ForEach-Object { Write-Host "  $_" } }
 }
+function Test-NoLocaleNeedles {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] no_locale_needles ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\check_no_locale_needles.ps1" 2>&1
+    if ($LASTEXITCODE -eq 0) { $script:pass++; Write-Host "PASS" -ForegroundColor Green }
+    else { $script:fail++; Write-Host "FAIL" -ForegroundColor Red; $out | Select-Object -First 6 | ForEach-Object { Write-Host "  $_" } }
+}
 function Test-B426DateaddInterval {
     $script:total++
     Write-Host -NoNewline "  [STATIC] b426_dateadd_interval ... "
@@ -7975,6 +7982,7 @@ if ($Category -in @("all", "compile")) {
     Test-B435SerialSplitAuthority
     Test-B423IntervalPerBuiltin
     Test-B436FdtBounds
+    Test-NoLocaleNeedles
     Test-B426DateaddInterval
     Test-B425DateserialDomain
     Test-B424DatedPartParams
