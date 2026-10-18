@@ -729,6 +729,13 @@ function Test-B433DateFormalAuthority {
     if ($LASTEXITCODE -eq 0) { $script:pass++; Write-Host "PASS" -ForegroundColor Green }
     else { $script:fail++; Write-Host "FAIL" -ForegroundColor Red; $out | Select-Object -First 6 | ForEach-Object { Write-Host "  $_" } }
 }
+function Test-B425DateserialDomain {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] b425_dateserial_domain ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\check_b425_dateserial_domain.ps1" 2>&1
+    if ($LASTEXITCODE -eq 0) { $script:pass++; Write-Host "PASS" -ForegroundColor Green }
+    else { $script:fail++; Write-Host "FAIL" -ForegroundColor Red; $out | Select-Object -First 6 | ForEach-Object { Write-Host "  $_" } }
+}
 function Test-B424DatedPartParams {
     $script:total++
     Write-Host -NoNewline "  [STATIC] b424_datedpart_params ... "
@@ -3045,6 +3052,19 @@ if ($Category -in @("all", "run", "bas")) {
         "fwy4=ERR5", "fwy5=ERR5", "fwy9=ERR5", "NC-fdow0=2", "NC-fdow7=2", "B424-DONE")
     Add-BasTest "b424_datedpart_params" "$Tests\b424_datedpart_params.bas" $b424Needles
     Add-BasTest "b424_datedpart_params_x86" "$Tests\b424_datedpart_params.bas" $b424Needles -Arch "x86"
+
+    # 账 #425 (§B199，第一百一十刀) = **只结账、不改行为**：「月/日超出范围」那一问，
+    #   量完的结论是「**现成的出口已经对了，别盲修**」。本夹具把两半都钉住:
+    #   域内(月份 1..14) 九格与运行期**逐格相同**；域外(月份 >= 15) 两格钉住"**仍然是偏的**"。
+    # 承面(本刀重新点过): 真语料 DateSerial **46 处**，月份 > 14 的 **0 处** ⇒ 域外不可达。
+    # ⚠ 域外偏差只有 **2 天**（`30.6001` 与 `365.25` 两项互相抵消，只剩小残差) ⇒ **看起来几乎是对的**，
+    #   编译与运行都不会响。所以必须钉住 + 由哨兵 R1 禁止"顺手补归一"——补归一恰好是**引入偏差**。
+    $b425Needles = @(
+        "mm01=2026-1-1", "mm12=2026-12-31", "mm13=2027-1-1", "mm14=2027-2-1", "leap=2024-2-29",
+        "d00=2025-12-31", "d32=2026-2-1", "d40=2026-2-9", "d400=2027-2-4",
+        "mm15=2027-3-3", "mm25=2028-1-3", "OUT-OF-DOMAIN-is-off=1", "B425-DONE")
+    Add-BasTest "b425_dateserial_domain" "$Tests\b425_dateserial_domain.bas" $b425Needles
+    Add-BasTest "b425_dateserial_domain_x86" "$Tests\b425_dateserial_domain.bas" $b425Needles -Arch "x86"
     # <vbeclipse> 账 #215: 体级声明收成「一条声明符一条 LocalDeclStmt」。改前四条体级路两种形状 ——
     # Dim 自己手写一遍展开(那份副本漏了 WithEvents 与「后缀即类型」)，Const/Static/体级 Public 把
     # MultiDecl 原样交给语义层(switch 不认) ⇒ 一枚名字都不登记、每条使用一条 VB3001(真工程一片 276 条)，
@@ -7931,6 +7951,7 @@ if ($Category -in @("all", "compile")) {
     Test-B435SerialSplitAuthority
     Test-B423IntervalPerBuiltin
     Test-B436FdtBounds
+    Test-B425DateserialDomain
     Test-B424DatedPartParams
     Test-ControlDC
     Test-SaAccess
