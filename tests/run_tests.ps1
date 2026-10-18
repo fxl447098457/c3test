@@ -729,6 +729,13 @@ function Test-B433DateFormalAuthority {
     if ($LASTEXITCODE -eq 0) { $script:pass++; Write-Host "PASS" -ForegroundColor Green }
     else { $script:fail++; Write-Host "FAIL" -ForegroundColor Red; $out | Select-Object -First 6 | ForEach-Object { Write-Host "  $_" } }
 }
+function Test-B436FdtBounds {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] b436_fdt_bounds ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\check_b436_fdt_bounds.ps1" 2>&1
+    if ($LASTEXITCODE -eq 0) { $script:pass++; Write-Host "PASS" -ForegroundColor Green }
+    else { $script:fail++; Write-Host "FAIL" -ForegroundColor Red; $out | Select-Object -First 6 | ForEach-Object { Write-Host "  $_" } }
+}
 function Test-B423IntervalPerBuiltin {
     $script:total++
     Write-Host -NoNewline "  [STATIC] b423_interval_per_builtin ... "
@@ -3000,6 +3007,25 @@ if ($Category -in @("all", "run", "bas")) {
         "ww-7d=1", "ww-rev=-1", "ww-31d=4", "ww-f2=4", "ww-f7=4", "NC-ok=1", "B423-DONE")
     Add-BasTest "b423_datediff_w" "$Tests\b423_datediff_w.bas" $b423Needles
     Add-BasTest "b423_datediff_w_x86" "$Tests\b423_datediff_w.bas" $b423Needles -Arch "x86"
+
+    # 账 #436 (§B210，第一百零九刀) = 账 #429 (§B203) 的 ②③ 两格(① 尾随空格已随上一刀转绿)。
+    # ② 越界 namedFormat(9/99/-1) ⇒ **err 5**;改前落 default 当 general date 照常交卷。
+    # ③ 不再拿「今天」兜底 —— 本刀量出账上没列、更根本的两条:
+    #   (a) **序列号 0 是合法日期(1899-12-30)、不是哨兵**(改前答今天);
+    #   (b) `VariantTimeToSystemTime` **成功 ≠ 运行期会交卷** —— 它能翻出 1601 年以前的年份,
+    #       而 GetDateFormatW 下限就是 1601 ⇒ 改前那一段交**空串 + err=0**。
+    #   窗逐格二分 = **年份 1601**(尺 .build/k429e|429f|429g|429h.vbs): -109200→1601/1/6 ok、
+    #   -109300→ERR5。窗外现在报 err 5。
+    # ⚠ 本夹具**一个字都不钉格式化字面量**(namedFormat 1/2/4 全是 locale 档, 跨机器必假红,
+    #   与 §B142 同一个坑本刀踩了两次): 值走 Year/Month/Day 数值 getter, 报错走 Err。
+    # NC-nospace 是**负控**: 零头为 0 的 general date 不许多尾随空格(① 已转绿, 盯住别退)。
+    $b436Needles = @(
+        "ok1=OK", "ok2=OK", "ok4=OK",
+        "bad9=ERR5", "bad99=ERR5", "badneg=ERR5",
+        "zero-y=1899/12/30", "out1601=ERR5", "in1601-y=1601", "neg1-y=1899/12/29",
+        "NC-nospace=1", "B436-DONE")
+    Add-BasTest "b436_fdt_bounds" "$Tests\b436_fdt_bounds.bas" $b436Needles
+    Add-BasTest "b436_fdt_bounds_x86" "$Tests\b436_fdt_bounds.bas" $b436Needles -Arch "x86"
     # <vbeclipse> 账 #215: 体级声明收成「一条声明符一条 LocalDeclStmt」。改前四条体级路两种形状 ——
     # Dim 自己手写一遍展开(那份副本漏了 WithEvents 与「后缀即类型」)，Const/Static/体级 Public 把
     # MultiDecl 原样交给语义层(switch 不认) ⇒ 一枚名字都不登记、每条使用一条 VB3001(真工程一片 276 条)，
@@ -7885,6 +7911,7 @@ if ($Category -in @("all", "compile")) {
     Test-B433DateFormalAuthority
     Test-B435SerialSplitAuthority
     Test-B423IntervalPerBuiltin
+    Test-B436FdtBounds
     Test-ControlDC
     Test-SaAccess
     Test-BitwiseAuthority
