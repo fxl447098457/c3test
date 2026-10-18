@@ -1,4 +1,4 @@
-﻿# check_b435_serial_split_authority.ps1 - 「序列号拆成日期 + 日内秒」这一问只许一位主人 (账 #435 §B209 / 第一百零七刀)
+﻿# check_b440_serial_split_authority.ps1 - 「序列号拆成日期 + 日内秒」这一问只许一位主人 (账 #440 §B209 / 第一百零七刀)
 #
 # 为什么单开这一道: 这一问原先**两处各答一半**，两半的归一还不一样：
 #   时间那三枚 (Hour/Minute/Second) 走 `vb6_SecondsOfDay` 的 `t<0 → t+=1.0`；
@@ -15,7 +15,7 @@
 #       Year/Month/Day 必须转问 vb6_serial_day_half，不得自己抄 `(int32_t)date`
 #   R5  `+0.5` 那条进位口径（§B193）不许被顺手改掉 —— 它量过：+0.4/+0.5 不进位、+0.6/+0.99 进位
 #
-# 用法:  powershell -File scripts\check_b435_serial_split_authority.ps1
+# 用法:  powershell -File scripts\check_b440_serial_split_authority.ps1
 # 退出码: 0 = 全绿; 1 = 红
 
 $ErrorActionPreference = "Stop"
@@ -87,7 +87,7 @@ if ($code -notmatch 't\s*\*\s*86400\.0\s*\+\s*0\.5') {
 }
 
 if ($bad.Count -eq 0) {
-    Write-Host 'PASS b435_serial_split_authority: owner 1 | abs-norm 1 | old-norm 0 | day-carry 1 | round-rule 1 | violations 0' -ForegroundColor Green
+    Write-Host 'PASS b440_serial_split_authority: owner 1 | abs-norm 1 | old-norm 0 | day-carry 1 | round-rule 1 | violations 0' -ForegroundColor Green
     exit 0
 }
 foreach ($b in $bad) { Write-Host ('FAIL ' + $b) -ForegroundColor Red }

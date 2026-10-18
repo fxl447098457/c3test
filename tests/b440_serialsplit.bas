@@ -1,7 +1,7 @@
-Attribute VB_Name = "ModB435"
+Attribute VB_Name = "ModB440"
 Option Explicit
 
-' 账 #435 (§B209，第一百零七刀) = 账 #420 (§B194) + 账 #421 (§B195) 一次结掉:
+' 账 #440 (§B209，第一百零七刀) = 账 #420 (§B194) + 账 #421 (§B195) 一次结掉:
 ' 「一枚序列号拆成日期 + 日内秒」这一问原本**两处各答一半**。
 '
 ' ① §B194 (#420) 一天末尾那一格只把日内秒归零、**日期那一半不进位**:
@@ -32,7 +32,7 @@ Sub Main()
     Debug.Print "whole-hms=" & Hms(-657433#)               ' 0/0/0
     Debug.Print "frac6-hms=" & Hms(0.99999305555)           ' 23/59/59 (边界另一侧)
 
-    Debug.Print "B435-DONE"
+    Debug.Print "B440-DONE"
 End Sub
 
 Private Function Hms(v As Double) As String

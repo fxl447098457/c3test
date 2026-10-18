@@ -792,10 +792,10 @@ function Test-B423IntervalPerBuiltin {
     if ($LASTEXITCODE -eq 0) { $script:pass++; Write-Host "PASS" -ForegroundColor Green }
     else { $script:fail++; Write-Host "FAIL" -ForegroundColor Red; $out | Select-Object -First 6 | ForEach-Object { Write-Host "  $_" } }
 }
-function Test-B435SerialSplitAuthority {
+function Test-B440SerialSplitAuthority {
     $script:total++
-    Write-Host -NoNewline "  [STATIC] b435_serial_split_authority ... "
-    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\check_b435_serial_split_authority.ps1" 2>&1
+    Write-Host -NoNewline "  [STATIC] b440_serial_split_authority ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\check_b440_serial_split_authority.ps1" 2>&1
     if ($LASTEXITCODE -eq 0) { $script:pass++; Write-Host "PASS" -ForegroundColor Green }
     else { $script:fail++; Write-Host "FAIL" -ForegroundColor Red; $out | Select-Object -First 6 | ForEach-Object { Write-Host "  $_" } }
 }
@@ -3028,7 +3028,7 @@ if ($Category -in @("all", "run", "bas")) {
     Add-BasTest "b434_numfold" "$Tests\b434_numfold.bas" $b434Needles
     Add-BasTest "b434_numfold_x86" "$Tests\b434_numfold.bas" $b434Needles -Arch "x86"
 
-    # 账 #435 (§B209，第一百零七刀) = #420 (§B194) + #421 (§B195) 一次结掉:
+    # 账 #440 (§B209，第一百零七刀) = #420 (§B194) + #421 (§B195) 一次结掉:
     # 「一枚序列号拆成日期 + 日内秒」原本**两处各答一半**。
     #   ① §B194: 一天末尾只归零日内秒、日期那一半**不进位** ⇒ 46023.9999988426 改前答 Day=1
     #   ② §B195: epoch 之前零头与运行期**反号**(运行期取绝对值, 本仓原 `+1.0`)
@@ -3036,12 +3036,12 @@ if ($Category -in @("all", "run", "bas")) {
     # 两半符号对称(负数那一侧日期也进位: -46023.9999988426 → 1773/12/28), 由 cscript 同机
     # 代理逐格量死 (尺 .build/k421_grid.vbs 12 格 + k420b_grid.vbs 进位边界 8 格 = 20 格零失配)。
     # pos/whole/frac6 三格是**不许动**的对照 (§B193 那条 +0.5 进位口径仍要成立)。
-    $b435Needles = @(
+    $b440Needles = @(
         "roll-hms=0/0/0", "roll-day=2", "neghi-day=28",
         "neg-hms=9/30/0", "neg-day=2/1/100", "neg4-hms=6/0/0", "neg6-hms=18/0/0",
-        "pos-hms=14/30/45", "whole-hms=0/0/0", "frac6-hms=23/59/59", "B435-DONE")
-    Add-BasTest "b435_serialsplit" "$Tests\b435_serialsplit.bas" $b435Needles
-    Add-BasTest "b435_serialsplit_x86" "$Tests\b435_serialsplit.bas" $b435Needles -Arch "x86"
+        "pos-hms=14/30/45", "whole-hms=0/0/0", "frac6-hms=23/59/59", "B440-DONE")
+    Add-BasTest "b440_serialsplit" "$Tests\b440_serialsplit.bas" $b440Needles
+    Add-BasTest "b440_serialsplit_x86" "$Tests\b440_serialsplit.bas" $b440Needles -Arch "x86"
 
     # 账 #423 (§B197，第一百零八刀) = DateDiff 的「ww」与「w」两条臂。
     # 病根 = vb6_parse_interval 是 DateAdd/DateDiff/DatePart **三家共用**的一问，而 w 与 ww 的
@@ -8065,7 +8065,7 @@ if ($Category -in @("all", "compile")) {
     Test-ExtenderGlobalCensus
     Test-FormatDateArgArm
     Test-B433DateFormalAuthority
-    Test-B435SerialSplitAuthority
+    Test-B440SerialSplitAuthority
     Test-B423IntervalPerBuiltin
     Test-B436FdtBounds
     Test-NoLocaleNeedles
