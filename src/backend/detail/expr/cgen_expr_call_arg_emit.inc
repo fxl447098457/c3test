@@ -1436,7 +1436,11 @@
         // __refcount (ComCtlsDemo ComCtlsSubclassProc 实测: av read 0xC 崩在
         // Release, StatusBar UC 创建期 100% 复现)。
         if (cTypeIvfix.rfind("vb6_ivref_", 0) == 0 && i < node.positional.size()
-            && node.positional[i]) {
+            && node.positional[i]
+            && ifaceViewOfExpr(*node.positional[i]).empty()) {
+            // 账 #305 §B221 (形③): 实参本身已经是视图 (`Take MakeDirect()`) ⇒ 值就是那枚
+            // 薄指针，再取一次 `->__iv_<I>` 是剥第二层皮 (实测 C2039 + C2198)，所以这一问
+            // 由 ifaceViewOfExpr 在闸上答一次，站点不另写判据。
             std::string argCls = inferClassTypeOfExpr(*node.positional[i]);
             if (!argCls.empty()) {
                 const IfaceView* ivFix = ivLookupIface(

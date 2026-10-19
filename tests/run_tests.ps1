@@ -1626,6 +1626,22 @@ function Test-BoxTempReclaim {
     }
 }
 
+# 账 #305 §B221/#449 (第一百二十五刀): 「这一枚表达式是视图还是实例」只许一位主人 —— vtable 发射形状
+# 恰好 1 处 · ifaceViewOfExpr 消费文件恰好 4 份 · "vb6_ivref_" 字面量文件恰好 6 份
+function Test-IfaceViewAuthority {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] iface_view_authority ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\check_iface_view_authority.ps1" 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        $out | Select-Object -First 8 | ForEach-Object { Write-Host "  $_" }
+    }
+}
+
 # 账 #305 #416 (第九十三刀): 文本进严格转换的那一句解析只许问 oleaut32 一次 + 两位桥分开
 function Test-ConvStrictParse {
     $script:total++
@@ -7533,6 +7549,24 @@ if ($Category -in @("all", "run", "vbp")) {
     Test-EmitcAbsent 'b444_vararg_leaves_the_header_shape_uncleared' @("$Tests\b444_vararg\B444.vbp") @(
         'vb6_VariantClear(&_vb6_vararg_6);',
         'vb6_VariantAssign(&(_vb6_vararg_')
+    # 账 #305 §B221/#449 (第一百二十五刀): 「视图还是实例」四站同台 —— 修复前三形全都编译不过
+    #   (cl C2039: __iv_IB448 不是 vb6_cls_IB448 的成员 / Twice 不是 vb6_ivref_IB448 的成员
+    #    + C2198 参数太少), 第四形 (被调方体内 Set <返回槽> = New <类>) 交出去的值本身就是坏的。
+    #   读数: P1/P2 = 视图进接口槽再走 vtable 各答 43; P3 = 视图当实参 (Twice(30) = 61);
+    #   P4/P5 = 具体类那条路不受影响 (11 / 一枚命中)。
+    $b448Needles = @("P1-setslot twice=43", "P2-inline twice=43", "P3-arg twice=61",
+                    "P4-plain twice=11", "P5-hits=1", "B448-DONE")
+    Test-Vbp 'b448_iface_view_not_instance' "$Tests\b448_iface_ret\B448.vbp" $b448Needles
+    Test-Vbp 'b448_iface_view_not_instance_x86' "$Tests\b448_iface_ret\B448.vbp" $b448Needles -Arch "x86"
+    # 发码针: 视图值的三个消费形状各钉一条 —— 视图进槽走 QueryInterface、成员调用走 vtable、
+    # 视图进接口形参原样传; 反面针钉「不许再 mint 一枚 vb6_cls_<接口名>」(那一枚结构体不存在)。
+    Test-EmitcShape 'b448_iface_view_consumers' @("$Tests\b448_iface_ret\B448.vbp") @(
+        'vb6_iv_iid_IB448',
+        '->vt->twice(',
+        'vb6_Main_TakeByVal(vb6_Main_MakeNew());')
+    Test-EmitcAbsent 'b448_iface_view_never_mints_a_class_struct_for_an_interface' @(
+        "$Tests\b448_iface_ret\B448.vbp") @(
+        'vb6_cls_IB448')
     # 账 #305 §B188 ④ (第九十刀): 出厂那一腿的**尾巴**。`Class_Terminate` 抛错时, `_Destroy` 里体之后
     # 那三截(字段 BSTR / 数组字段 / vb6_Free(me))曾被 ComObj_Release 的帧一起 longjmp 跳掉 —— 实测每枚
     # 抛错的出厂漏一份实例资源: x64 每枚 35~37 字节、x86 每枚 17 字节, 多一枚 20 字符 String 字段就涨到
@@ -8211,7 +8245,7 @@ if ($Category -in @("all", "compile")) {
     Test-ComServerErrorFrame
     Test-ProjClassScanBound
     Test-ObjectSlotBoxing
-    Test-BoxTempReclaim
+    Test-BoxTempReclaim    Test-IfaceViewAuthority
     Test-ConvStrictParse
     Test-DateConv
     Test-IsPredText

@@ -622,20 +622,7 @@
                         == std::string::npos;
                 const bool isIvrefVar = knownIvrefVars_.count(ivValLower) != 0;
                 if (plainIvTarget && isIvrefVar) {
-                    const std::string ivCType = "vb6_ivref_" + cIdent(v->name) + "*";
-                    const std::string ivOld = "__ivold" + std::to_string(ivrefSetSeq_);
-                    const std::string ivGot = "__ivgot" + std::to_string(ivrefSetSeq_);
-                    ivrefSetSeq_++;
-                    c_.emitLine("{  /* tB Interface B06a: Set " + target + " = QueryInterface */");
-                    c_.indent();
-                    c_.emitLine(ivCType + " " + ivOld + " = " + target + ";");
-                    c_.emitLine("void* " + ivGot + " = NULL;");
-                    c_.emitLine("if (" + value + ") " + value + "->vt->QueryInterface(" + value +
-                                ", vb6_iv_iid_" + cIdent(v->name) + ", &" + ivGot + ");");
-                    c_.emitLine(target + " = (" + ivCType + ")" + ivGot + ";");
-                    c_.emitLine("if (" + ivOld + ") " + ivOld + "->vt->Release(" + ivOld + ");");
-                    c_.dedent();
-                    c_.emitLine("}");
+                    emitIvrefQiSet(target, v->name, value);
                     return;
                 }
                 if (isClassVar || isNewExpr) {
@@ -752,6 +739,22 @@
                                 ivCls215 = projectClassNameOf(fs215->variableTypeName);
                         }
                         if (ivCls215.empty()) ivCls215 = inferClassTypeOfExpr(*node.value);
+                    }
+                    // 账 #305 §B221 (形①): RHS 的值**已经是接口视图** —— `Set <接口槽> =
+                    // MakeDirect()` 这种「返回工程内接口的调用」。上面那条类型名问句会把
+                    // 接口名当工程类名答，于是下面铸出一枚根本不存在的 `vb6_cls_<接口名>`
+                    // 再去取 `__iv_` 槽（实测两台同红 = cl C2039）。视图→视图的正答案只有
+                    // B06a 那一条，且已挪成 emitIvrefQiSet 一位主人；目标不是裸标识符
+                    // (me->字段 那一形) 时沿用上面 B04 的纯赋值口径，不另立第三条。
+                    if (node.value) {
+                        std::string ivView221 = ifaceViewOfExpr(*node.value);
+                        if (!ivView221.empty()) {
+                            if (plainIvTarget) {
+                                emitIvrefQiSet(target, v->name, value);
+                                return;
+                            }
+                            value = "(" + ivrefCType(v->name) + ")" + value;
+                        }
                     }
                     if (!ivCls215.empty()) {
                         const std::string ivCType215 = "vb6_ivref_" + cIdent(v->name) + "*";

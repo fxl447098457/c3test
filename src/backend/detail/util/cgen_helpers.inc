@@ -284,6 +284,20 @@
     void emitIvrefScopeRelease();                     // B05: 过程出口发 Release
     std::string ivrefCType(const std::string& typeName);   // 空串 = 不是新式接口
     const IfaceView* ivLookupIface(const std::string& written);
+    // 账 #305 §B221/#449 (§B222): 「这一枚表达式的值**已经是接口视图薄指针**
+    // (vb6_ivref_<I>*)了吗」 —— 这一问只许住在这里。答「是」时给接口名，答「不是」
+    // 给空串。四个消费站点 (Set 目标侧 / Set 返回槽 / 成员访问接收者 / 实参) 都只问它，
+    // 别各写一遍「名字是不是接口」，那正是 #448 数出来的多主人病灶。
+    std::string ifaceViewOfExpr(const ASTNode& expr);
+    // B04 那条 vtable 发射 (`x->vt-><slot>(x, args)`) 的唯一作者：com_bind 与
+    // 「接收者是视图值的调用」那一站都调它 (账 #305 §B221 形②)。槽名解析不出来返回空串。
+    std::string ivrefVtableCall(const std::string& ifaceName, const std::string& member,
+                                const std::string& recv,
+                                const std::vector<std::string>& args);
+    // B06a 那条视图→视图的 QueryInterface 发射 (存旧 → QI → 覆盖 → 放手旧)，
+    // 由按名那一臂与 §B221 的调用表达式那一臂共用。
+    void emitIvrefQiSet(const std::string& target, const std::string& ifaceName,
+                        const std::string& valueExpr);
     std::vector<const IfaceView*> ivImplementedIfaces(Module& module);
     Decl* ivFindImplMember(Module& module, const IfaceView& v, const IfaceSlotView& slot);
     // tB 委托式实现 (ai/022 B10): 本类把接口 v 整份转交给哪个持有字段 (无则 nullptr)

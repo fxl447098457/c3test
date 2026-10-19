@@ -692,8 +692,58 @@ void CCodeGen::trackIvrefLocalForRelease(const std::string& cName) {
     ivrefLocalsToRelease_.push_back(cName);
 }
 
-// 与 ansiTempsToFree_ 在同一位置调用（过程正常出口）。Exit Sub/Function 走裸
-// return，与 ANSI 临时变量同样漏清理——现状与本批边界一并记进总表。
+// 账 #305 §B221: `x->vt-><slot>(x, args)` 这一发射形状只许有一位作者 —— com_bind 的
+// ivref 臂与「接收者是视图值的调用」那一站 (形②) 都调它。槽解析不出来 = 这个成员不在
+// 这张面上，返回空串让调用点继续往下落 (契约检查另有诊断)。
+std::string CCodeGen::ivrefVtableCall(const std::string& ifaceName, const std::string& member,
+                                      const std::string& recv,
+                                      const std::vector<std::string>& args) {
+    const IfaceView* v = ivLookupIface(ifaceName);
+    if (!v) return std::string();
+    const std::string slot = ivSlotKeyForMember(*v, member);
+    if (slot.empty()) return std::string();
+    std::string call = recv + "->vt->" + cIdent(slot) + "(" + recv;
+    for (const std::string& a : args) call += ", " + a;
+    call += ")";
+    return call;
+}
+
+// 账 #305 §B221: B06a 那条视图→视图的 QueryInterface 发射挪成一位主人 —— 原来这段
+// 内联在 cgen_setlet_set_prop.inc 的按名臂里，而 RHS 是「返回工程内接口的调用」那一形
+// (#448 的形①) 也要同一条腿；留在站点里就会长出第二个答案。
+// 计数口径不变: QI 成功即已 AddRef (失败得 NULL = Nothing)，旧值当场 Release。
+void CCodeGen::emitIvrefQiSet(const std::string& target, const std::string& ifaceName,
+                              const std::string& valueExpr) {
+    const std::string ivCType = ivrefCType(ifaceName);
+    // valueExpr 在这个块里出现三次 (判空 / QI 的接收者 / QI 的首参)。裸标识符无所谓，
+    // 但形①交进来的是 `MakeDirect()` 那种调用 ⇒ 三次求值 = 三枚实例、三笔引用
+    // (实测)。同一 Fix 090q 那条通道：先落一枚临时量，后面三处都用它。
+    const bool plainVal = !valueExpr.empty()
+        && valueExpr.find_first_not_of(
+            "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_")
+           == std::string::npos;
+    std::string ivVal = valueExpr;
+    if (!plainVal) {
+        ivVal = "__ivrhs" + std::to_string(ivrefSetSeq_);
+        c_.addPending(ivCType + " " + ivVal + " = " + valueExpr + ";");
+    }
+    const std::string ivOld = "__ivold" + std::to_string(ivrefSetSeq_);
+    const std::string ivGot = "__ivgot" + std::to_string(ivrefSetSeq_);
+    ivrefSetSeq_++;
+    c_.emitLine("{  /* tB Interface B06a: Set " + target + " = QueryInterface */");
+    c_.indent();
+    c_.emitLine(ivCType + " " + ivOld + " = " + target + ";");
+    c_.emitLine("void* " + ivGot + " = NULL;");
+    c_.emitLine("if (" + ivVal + ") " + ivVal + "->vt->QueryInterface(" + ivVal +
+                ", vb6_iv_iid_" + cIdent(ifaceName) + ", &" + ivGot + ");");
+    c_.emitLine(target + " = (" + ivCType + ")" + ivGot + ";");
+    c_.emitLine("if (" + ivOld + ") " + ivOld + "->vt->Release(" + ivOld + ");");
+    c_.dedent();
+    c_.emitLine("}");
+}
+
+// 出口那一腿与 ansiTempsToFree_ 在同一位置调用（过程统一出口 vb6_proc_exit，
+// Exit Sub/Function 自 c97e65bd 起也走那条 goto ⇒ 这一族不漏清理）。
 void CCodeGen::emitIvrefScopeRelease() {
     for (const std::string& s : ivrefLocalsToRelease_) {
         c_.emitLine("if (" + s + ") " + s + "->vt->Release(" + s +
