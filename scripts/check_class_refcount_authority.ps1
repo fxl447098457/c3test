@@ -1,5 +1,5 @@
 ﻿# check_class_refcount_authority.ps1 - 账 #305 §B218 (甲)：工程类实例的引用计数只许有一位主人。
-# 十三条钉（每条都能单独红，红了就说明同一问长出了第二位主人）：
+# 十四条钉（每条都能单独红，红了就说明同一问长出了第二位主人）：
 #   ① 出入口那一对的 mint 各恰好 1 处，且住在 module/cgen_com.cpp（每条腿只许转调它）。
 #   ② 计数头 `int32_t __refcount;` 的 mint 恰好 1 处，且住在 cgen_iface_vtbl.cpp 的
 #      emitIfaceClassFields 里 —— 它必须紧跟 __comObj 那一句（ai/022 D19：偏移 0 恒是 __comObj）。
@@ -20,7 +20,10 @@
 #      cgen_setlet_set_rhs.inc —— 「右侧带不带对价」与 `New` 共用同一条不 claim 的臂，别处再问就分家。
 #      清表 + 主人本体），工程类那一档的注册口 trackClassSlotForRelease 恰好 2 处
 #      （Dim As <工程类> 的两条注册路：Class 符号 / projectClassNameOf 兜底）。
-# 退出码：0 = 十三条都过；1 = 任一条红；2 = 找不到 src/backend。
+#   ⑭ 移交值那一问的三形只住一个函数: 成员返回类那一问 
+#      恰好 1 处、 基名那一问  恰好 2 处 (含本刀那一臂,
+#      另一处是 myBaseClassOf)、接口视图那道排除  恰好 1 处。
+# 退出码：0 = 十四条都过；1 = 任一条红；2 = 找不到 src/backend。
 param(
     [string]$Root = ""
 )
@@ -191,10 +194,33 @@ $xferFiles = @(FilesOf 'rhsTransfersProjectRef(*node.value)')
 if ($xferFiles.Count -ne 1 -or $xferFiles[0] -ne 'cgen_setlet_set_rhs.inc') {
     $fail += ("transfer-question call file = " + ($xferFiles -join ', ') + " (want exactly cgen_setlet_set_rhs.inc)")
 }
+
+# ⑭ 移交值那一问的**三形**只许住在这一个函数里 (第一百三十二刀 = (甲) 刀4 加了两形: callee 是成员访问
+#    `hh.Make17()` 与无括号的属性读 `hh.Next18`)。三条臂各自沿用一位现成主人，一条都不新立:
+#      · 成员是不是过程、返回哪一枚工程类 —— 只问 `getClassMethodReturnType(recvCls, ma.memberName)` 这一处;
+#      · 数据字段那一档 (那一枚别人还握着, 该 claim) —— 靠 `classTypedFieldMap_` 命中排除;
+#      · `MyBase` 那一形的基名 —— 与 cgen_inherit.cpp 的 myBaseClassOf 同读链表, 全仓只许这两处。
+#    谁在别的站点再问一遍这三问，「实参 / 返回值 / 字段 / 视图」的口径就 again 分家 (本仓病灶 #167/#231/#245)。
+$xferRetQ = CountOf 'getClassMethodReturnType(recvCls, ma.memberName)'
+if ($xferRetQ -ne 1) {
+    $fail += ("transfer-question member-return ask sites = " + $xferRetQ + " (want exactly 1, inside the one question)")
+}
+$xferBaseQ = CountOf 'classViewByName(self->baseKey)'
+if ($xferBaseQ -ne 2) {
+    $fail += ("base-name question sites = " + $xferBaseQ + " (want exactly 2: myBaseClassOf + 刀4 那一臂)")
+}
+$xferBaseFiles = @(FilesOf 'classViewByName(self->baseKey)')
+if (-not ($xferBaseFiles -contains 'cgen_com.cpp')) {
+    $fail += ("base-name question missing from cgen_com.cpp (files = " + ($xferBaseFiles -join ', ') + ")")
+}
+$xferIvref = CountOf 'ivrefCType(retCls)'
+if ($xferIvref -ne 1) {
+    $fail += ("interface-view exclusion sites = " + $xferIvref + " (want exactly 1)")
+}
 if ($fail.Count -gt 0) {
     Write-Host "CLASS-REFCOUNT-AUTHORITY FAIL"
     foreach ($f in $fail) { Write-Host ("  - " + $f) }
     exit 1
 }
-Write-Host "CLASS-REFCOUNT-AUTHORITY OK (1 pair mint / 1 header / 2 leg consumers / 3+9 formals / 7 roster / 6 literal files / 0 stale / 5 registry files + 2 registrants / 1+1 out-slot / 1+1 foreign-write drop / 1 field-teardown shape + file / 5 field-type questions / 3 transfer-question sites)"
+Write-Host "CLASS-REFCOUNT-AUTHORITY OK (1 pair mint / 1 header / 2 leg consumers / 3+9 formals / 7 roster / 6 literal files / 0 stale / 5 registry files + 2 registrants / 1+1 out-slot / 1+1 foreign-write drop / 1 field-teardown shape + file / 5 field-type questions / 3 transfer-question sites / 1+2+1 transfer-arm questions)"
 exit 0

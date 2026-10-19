@@ -251,6 +251,55 @@ Sub W16PropFactory()
     Debug.Print "W16-made=" & (Made - m0) & " terms=" & (Terms - t0)
 End Sub
 
+'
+' W17 / W18 / W19 = 账 #305 §B218 (甲) 刀4 的两形 + 反面那一档:
+'       W17 = 工厂挂在**实例**上 (`hh.Make17()`) 循环 20 次现造现放手 => made=20 terms=20;
+'       W18 = 属性读**不带括号** (`hh.Next18`) 同一契约 => made=1 terms=1;
+'       W19 = 反面: `hh.mField19` 是**数据字段**, 那一枚仍由持有者握着 => 读出来必须 claim,
+'             放手只退自己那一枚, 持有者出厂时才走第二次 (alive=0 / gone=1)。
+Sub W17MemberFactoryLoop()
+    Dim hh17 As C445H
+    Dim c17 As C445
+    Dim m0 As Long
+    Dim t0 As Long
+    Dim i As Long
+    Set hh17 = New C445H
+    m0 = Made
+    t0 = Terms
+    For i = 1 To 20
+        Set c17 = hh17.Make17()
+    Next
+    Set c17 = Nothing
+    Debug.Print "W17-made=" & (Made - m0) & " terms=" & (Terms - t0)
+End Sub
+
+Sub W18PropReadNoParens()
+    Dim hh18 As C445H
+    Dim c18 As C445
+    Dim m0 As Long
+    Dim t0 As Long
+    Set hh18 = New C445H
+    m0 = Made
+    t0 = Terms
+    Set c18 = hh18.Next18
+    Set c18 = Nothing
+    Debug.Print "W18-made=" & (Made - m0) & " terms=" & (Terms - t0)
+End Sub
+
+Sub W19FieldReadKeepsClaim()
+    Dim hh19 As C445H
+    Dim f19 As C445
+    Dim t3 As Long
+    Set hh19 = New C445H
+    hh19.Hold19
+    t3 = Terms
+    Set f19 = hh19.mField19
+    Set f19 = Nothing
+    Debug.Print "W19-field-alive-terms=" & (Terms - t3) & " n=" & hh19.mField19.N
+    Set hh19 = Nothing
+    Debug.Print "W19-field-gone-terms=" & (Terms - t3)
+End Sub
+
 Sub Main()
     W1SetNothing
     W2Alias
@@ -268,5 +317,8 @@ Sub Main()
     W14FieldAliasKeepsAlive
     W15FactoryLoop
     W16PropFactory
+    W17MemberFactoryLoop
+    W18PropReadNoParens
+    W19FieldReadKeepsClaim
     Debug.Print "B445-DONE"
 End Sub

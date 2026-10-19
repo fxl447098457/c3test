@@ -43,3 +43,25 @@ Public Sub PropFactory16()
     Dim t As C445
     Set t = NewOne16()
 End Sub
+
+' 账 #305 §B218 (甲) 刀4 的两形: 工厂挂在**实例**上 (`hh.Make17()`) 与属性读**不带括号**
+' (`hh.Next18`) —— 交出来的那一枚同样自带对价, 接手这一格不许再 claim。
+Public Function Make17() As C445
+    Dim g As C445
+    Set g = New C445
+    Set Make17 = g
+End Function
+
+Public Property Get Next18() As C445
+    Dim g As C445
+    Set g = New C445
+    Set Next18 = g
+End Property
+
+' 反面那一档 (刀4 的边界): 工程类字段是**数据字段**, 那一枚仍由持有者握着 —— 读出来必须
+' claim 一枚, 否则调用方放手就把持有者手里那枚拆了。
+Public mField19 As C445
+
+Public Sub Hold19()
+    Set mField19 = New C445
+End Sub
