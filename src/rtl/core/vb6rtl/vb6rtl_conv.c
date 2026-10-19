@@ -397,6 +397,8 @@ int32_t vb6_IsNumeric(vb6_VARIANT v) {
          * 它与 Long 同族 —— 少这一行就是同一份 VB 源码在两台机器上两个答案。 */
         case VT_I8:
         /* ai/032 §6.6: 无符号两档也是数值子类型 (同一条口径: 问的是「是不是数」)。 */
+        case (vb6_vartype)VT_I1:    /* ai/032 §6.9: 小整型两档同族, 问的还是「是不是数」 */
+        case (vb6_vartype)VT_UI2:
         case (vb6_vartype)VT_UI4:
         case (vb6_vartype)VT_UI8:
         /* 账 #305 (§B141): Decimal 也是数值子类型 —— VB6 的 IsNumeric(CDec(...)) 恒真。
@@ -476,6 +478,9 @@ static const wchar_t* vb6_TypeNameScalar(int32_t vt) {
         case VT_I8:          return L"Long";      /* 账 #305: 与 vb6_IsNumeric 同一条口径 */
         /* ai/032 §6.6: 无符号两档——按 C3/twinBASIC 的类型名答, 不吞掉无符号性
          * (这两档只会由显式无符号类型的表达式装箱而来, 答 "Long" 才是误导)。 */
+        /* ai/032 §6.9: 小整型两档同理 —— 值没丢, 丢的是类型身份; 答 "Long" 才是误导。 */
+        case (vb6_vartype)VT_I1:  return L"SByte";
+        case (vb6_vartype)VT_UI2: return L"UInteger";
         case (vb6_vartype)VT_UI4: return L"ULong";
         case (vb6_vartype)VT_UI8: return L"ULongLong";
         case vb6_vtDecimal:  return L"Decimal";  /* 账 #305 §B141: 此前落 default 答 "Variant" */

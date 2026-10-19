@@ -323,6 +323,10 @@
     // 账 #305 #408: 本过程形参表里声明成 As Object 的名字 (小写)。
     // 每张过程入口清空, 只描述当前过程的作用域 —— 用来挡住上面那张表跨过程漏答案。
     std::unordered_set<std::string> procObjectFormals_;
+    // 账 #305 §B218 (甲): 本过程**工程类形参**的名字名册 (同上面那张的生命周期, 按过程重开)。
+    // 引用计数那两条腿 (覆写 claim / 置空 release) 要它落空 —— ByVal 形参槽里那一枚引用
+    // 今天没有任何一站 claim 过它 (实参那一站是腿⑤, 还没接), 让它放手就是拆调用方还在用的实例。
+    std::unordered_set<std::string> procClassFormals_;
 
     // 账 #305 #408: knownClassVars_ 里模块级那一档登记的持久快照 (模块级 Dim As 类、类字段、窗体上的
     // UserControl 子控件、跨模块实例变量)。每张过程入口恢复一份 —— 与 moduleNewVars_ / moduleFixedStringLen_
@@ -394,6 +398,13 @@
     // 每条: { 临时char*变量名, 回写目标左值表达式, 缓冲容量表达式(可空) }。
     struct AnsiOutParam { std::string tempVar; std::string targetExpr; std::string capExpr; };
     std::vector<AnsiOutParam> ansiOutParams_;
+    // 账 #305 §B217 (第一百二十一刀): 本站为 ByRef Variant 实参 mint 的那枚具名临时槽
+    // (`_vb6_vararg_<n>`) 里住着一枚**装箱自己取的引用** —— 语句末收回, 与上面
+    // `ansiOutParams_`/`ansiTempsToFree_` 同一条"编译器自己 mint 的临时量, 范围就是这条语句"
+    // 的口径。连着记下**发声明时那层的缩进**: 语句的收回行只在同层落地, 层不同就说明声明发在
+    // 一对已经合上的花括号里 (Debug.Print 那族 `{ ... }` 自带块), 那时宁可不收也不许发成
+    // 引用越界的 C。
+    std::vector<std::pair<std::string, int>> boxTempsToClear_;
     int ansiCounter_ = 0;
     int vcmpCounter_ = 0;  // P25: Variant比较临时变量计数器
 
@@ -494,7 +505,15 @@
     // 成员访问片段 -> 调用片段之间传递"这次是接口槽调用"的接口名 (B04)
     std::string ivrefIfaceName_;
     // tB Interface B05: 本过程内需要"作用域末尾 Release"的接口变量 (C 名)
-    std::vector<std::string> ivrefLocalsToRelease_;
+    // 账 #305 §B218 (甲) 腿④: 「过程出口这一格该不该放手」收成一张**带档**的表
+    // (原来只有 ivref 一档有答案, 具体类那一档压根没有登记面 = 今天每条 `Dim x As C` 漏一枚)。
+    // isView = true 走 `->vt->Release` (接口薄指针), false 走本类那对 mint 出入口 (工程类实例)。
+    struct SlotRelease {
+        std::string expr;
+        bool isView;
+        std::string clsName;   // 只有工程类那一档带类名
+    };
+    std::vector<SlotRelease> slotsToRelease_;
     // Set 语句里"旧值"临时变量的序号 (只有新语法路径消耗, 不影响其他工程)
     int ivrefSetSeq_ = 0;
 

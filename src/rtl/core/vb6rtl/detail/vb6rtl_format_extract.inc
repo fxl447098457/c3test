@@ -48,6 +48,15 @@
         case (vb6_vartype)VT_UI8:
             if (!fmt) return vb6_CStrULongLong(expr.ullVal);
             numVal = (double)expr.ullVal; isNumeric = 1; break;
+        /* ai/032 §6.9: SByte / UInteger 两档进这一族。
+         * 以前这两档被 _Generic 的 `char:` / `wchar_t:` 档装成 VT_I4, 而**这一张表**
+         * 里没有 VT_I4 之外的小整型分支 —— 落进 default ⇒ CStr 交**空串**(实测
+         * tests/tu_holder `UF-ui-box=` 变空)。与 VT_I2 同一写法即可: 8/16 位扩到
+         * double 不丢精度, 所以不必像 VT_I8/UI4/UI8 那样单开一条无格式串的快路。 */
+        case (vb6_vartype)VT_I1:
+            numVal = (double)expr.sbVal; isNumeric = 1; break;
+        case (vb6_vartype)VT_UI2:
+            numVal = (double)expr.usVal; isNumeric = 1; break;
         /* 账 #305 §B142: VT_DECIMAL 这一档以前根本不在这张表里(落 default ⇒ CStr(Decimal)
          * 交空串)。形状照上面 :40 那条 VT_I8 的先例: 无格式串走精确出口, 带格式串才
          * 转 double 进通用数值分支(用户要的就是数值语义)。两个出口都在 vb6rtl.c。 */

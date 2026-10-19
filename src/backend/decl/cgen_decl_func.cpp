@@ -38,7 +38,7 @@ void CCodeGen::visit(FunctionDecl& node) {
     clearProcArrayTracking();
     ansiTempsToFree_.clear();
     ansiOutParams_.clear();
-    ivrefLocalsToRelease_.clear();  // tB Interface B05
+    slotsToRelease_.clear();  // tB Interface B05 / 账 #305 §B218 (甲) 腿④
     ansiCounter_ = 0;
     asmMixedBlockCounter_ = 0;   // ai/vb-asm-extension-spec 项2: 混排片段序号按过程重置
     knownBstrVars_.clear();
@@ -76,6 +76,7 @@ void CCodeGen::visit(FunctionDecl& node) {
     withObjectInfoStack_.clear();
     // 账 #305 #408: 形参名册按过程重开 (上面那张表全程不清空)。
     procObjectFormals_.clear();
+    procClassFormals_.clear();  // 账 #305 §B218 (甲): 与上面那张同一条"按过程重开"
     // 账 #305 #408: 模块级那一档先恢复进来, 下面形参那一档的遮蔽才只吃本过程。
     knownClassVars_.insert(moduleClassVars_.begin(), moduleClassVars_.end());
     // Fix 010r/010r-10: 类模块中注册me到knownClassVars_ (使Me.Method()正确分发)
@@ -165,12 +166,12 @@ void CCodeGen::visit(FunctionDecl& node) {
             // 走"模块限定"路径丢实参 (C2224)。
             if (!pSym || pSym->kind != SymbolKind::Class) {
                 const std::string projClsP092r = projectClassNameOf(simpleP.name);
-                if (!projClsP092r.empty()) knownClassVars_[pLower] = projClsP092r;
+                if (!projClsP092r.empty()) registerClassFormal(pLower, projClsP092r);
             }
             if (pSym && pSym->kind == SymbolKind::UserDefinedType) {
                 knownUdtVars_[pLower] = "vb6_type_" + cIdent(simpleP.name);
             } else if (pSym && pSym->kind == SymbolKind::Class) {
-                knownClassVars_[pLower] = pSym->name;
+                registerClassFormal(pLower, pSym->name);
             } else if (pSym && (pSym->kind == SymbolKind::ComClass || pSym->kind == SymbolKind::ComInterface)) {
                 // Fix <vbeclipse>-2: 本工程有同名类模块 ⇒ 类型名指工程类, 走原生
                 // (VB6: 工程内定义优先于引用库). 类型库自动加载会把 Shell32 的
@@ -180,7 +181,7 @@ void CCodeGen::visit(FunctionDecl& node) {
                 // 0xC0000005). 判据与 mapTypeRef 同源: projectClassNameOf.
                 const std::string projCls2 = projectClassNameOf(simpleP.name);
                 if (!projCls2.empty()) {
-                    knownClassVars_[pLower] = projCls2;
+                    registerClassFormal(pLower, projCls2);
                 } else {
                     knownTypedComVars_[pLower] = pSym;
                 }
@@ -394,6 +395,18 @@ void CCodeGen::visit(FunctionDecl& node) {
     // 与变量注册 (941-946: cType=="void*" → knownObjectVars_) 对齐.
     else if (retType == "void*") {
         knownObjectVars_.insert(funcRetLower);
+    }
+    // 账 #305 §B221/#449 (§B222 那格最靠上游的一条): 返回类型是新式接口 ⇒ 返回槽本身
+    // 就是一枚视图 (`vb6_ivref_I* vb6_ret_F`)，必须进那张按名表，否则函数体内
+    // `Set <本函数名> = <实例>` 进不了 visit(SetStmt&) 的 ivref 目标臂，今天发的是
+    // 裸类指针塞进视图槽 (两台实测 C2172/C2039，交出去的值压根是坏的那一枚)。
+    // 刻意**不进** ivrefLocalsToRelease_：那一枚引用是交出去的那一枚，出口再放手 =
+    // 调用方刚接手的视图当场读已释放块 (#448 钉住的那条夹子)。
+    else if (retType.rfind("vb6_ivref_", 0) == 0) {
+        std::string ivRet221 = retType.substr(10);
+        size_t star221 = ivRet221.find('*');
+        if (star221 != std::string::npos) ivRet221 = ivRet221.substr(0, star221);
+        if (!ivRet221.empty()) knownIvrefVars_[funcRetLower] = ivRet221;
     }
     // Fix 090i: 函数返回 UDT → 注册返回值变量到 knownUdtVars_ (如 pvVfsOpen /
     // pvVfsCreate / pvArrPtr 等 As ZipVfsType 的内部函数). 此前漏注册, 函数体内

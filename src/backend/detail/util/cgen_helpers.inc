@@ -281,9 +281,39 @@
     void emitIfaceImplTables(Module& module);         // .c: 适配器 + 类侧槽表实例
     void emitIfaceNewInit(Module& module);            // .c: _New() 里回填 vt
     void trackIvrefLocalForRelease(const std::string& cName);  // B05: 登记局部接口变量
+    // 账 #305 §B218 (甲) 腿④: 工程类那一档的登记入口 + 两档共用的那条夹
+    void trackClassSlotForRelease(const std::string& cName, const std::string& clsName);
+    // 账 #305 §B218 (甲) 腿④ 第二道夹: 这一格的地址交给了外部 Declare ⇒ 出口不放手 (只撤类档)。
+    void dropClassSlotRelease(const std::string& expr);
+    void trackSlotForRelease(const std::string& expr, bool isView,
+                             const std::string& clsName);
     void emitIvrefScopeRelease();                     // B05: 过程出口发 Release
     std::string ivrefCType(const std::string& typeName);   // 空串 = 不是新式接口
     const IfaceView* ivLookupIface(const std::string& written);
+    // 账 #305 §B221/#449 (§B222): 「这一枚表达式的值**已经是接口视图薄指针**
+    // (vb6_ivref_<I>*)了吗」 —— 这一问只许住在这里。答「是」时给接口名，答「不是」
+    // 给空串。四个消费站点 (Set 目标侧 / Set 返回槽 / 成员访问接收者 / 实参) 都只问它，
+    // 别各写一遍「名字是不是接口」，那正是 #448 数出来的多主人病灶。
+    std::string ifaceViewOfExpr(const ASTNode& expr);
+    // B04 那条 vtable 发射 (`x->vt-><slot>(x, args)`) 的唯一作者：com_bind 与
+    // 「接收者是视图值的调用」那一站都调它 (账 #305 §B221 形②)。槽名解析不出来返回空串。
+    std::string ivrefVtableCall(const std::string& ifaceName, const std::string& member,
+                                const std::string& recv,
+                                const std::vector<std::string>& args);
+    // B06a 那条视图→视图的 QueryInterface 发射 (存旧 → QI → 覆盖 → 放手旧)，
+    // 由按名那一臂与 §B221 的调用表达式那一臂共用。
+    void emitIvrefQiSet(const std::string& target, const std::string& ifaceName,
+                        const std::string& valueExpr);
+    // 账 #305 §B218 (甲): 工程类形参登记的一处出口 (按名表 + 本过程形参名册)。
+    void registerClassFormal(const std::string& pLower, const std::string& clsName);
+    // 账 #305 §B218 (甲) 腿②③②': typed 工程类槽的「覆写 / 置空 / 写进出参槽」一位主人
+    // (valueExpr 传空串 = 置空; 与上面那位接口主人同形, 几条腿共用一条顺序。
+    //  outSlot = true: 目标在计数系统外 (ByRef 出参那一格) ⇒ 只补 claim, 不碰旧值)。
+    void emitClassSlotRefSet(const std::string& target, const std::string& className,
+                             const std::string& valueExpr, bool rhsTransferred, bool outSlot);
+    // 账 #305 §B218 (甲) 刀3: 「这一发右值是不是**已经带着一枚移交过来的引用**」—— 上面那位
+    // 主人手上「不 claim」那条臂的两个成因共用一条问句 (`New <类>` 与 工程内过程调用)。
+    bool rhsTransfersProjectRef(const ASTNode& expr) const;
     std::vector<const IfaceView*> ivImplementedIfaces(Module& module);
     Decl* ivFindImplMember(Module& module, const IfaceView& v, const IfaceSlotView& slot);
     // tB 委托式实现 (ai/022 B10): 本类把接口 v 整份转交给哪个持有字段 (无则 nullptr)
@@ -614,6 +644,19 @@
     bool typeTakesImplicitCStr(Vb6Type t) const;
     std::string builtinNoParamTableFormalCType(const std::string& callee, size_t argc, size_t pos,
                                                Vb6Type firstArgType) const;
+    // 账 #433 §B207 (第一百零五刀): 「这一位要的是不是**日期**」—— 与上面那一问**刻意分开**。
+    // 为什么不能从 C 签名反推(§B174 教训① 的同一形状): C 侧全叫 `double`，可引擎对文本实参的
+    //   口径按 builtin 分两种 —— `FormatDateTime("46027",0)` = 2026/1/5(纯数字文本按序列号那天)，
+    //   而 `Sqr("4")` = 2、`Pow("2",3)` = 8 都是**数值折算**。同一个 `double` 形参，两种问法。
+    //   所以这一问自带名单，不许拿 `rtParamType == "double"` 当答案。
+    bool builtinNoParamTableFormalIsDate(const std::string& callee, size_t argc, size_t pos) const;
+    // 账 #434 §B208 (第一百零六刀): 「这一位要的是不是**数值**(文本实参按数字折算)」
+    //   —— 与上面那一问**同形而不同答**。同形: C 侧也都是 double, 同样不许照签名反推。
+    //   不同答: 判别格就是引擎读数 —— 同一枚 `DateAdd` 的两个位给出两种问法:
+    //     DateAdd("d", "3", "2026/1/5") = 2026/1/8  ⇒ 位 1(number) 走**数值**折算(3 天)
+    //     DateAdd("d", 3,   "2026/1/5")            ⇒ 位 2(date)   走**日期**解析
+    //   而 Sqr("2026/1/5") = err13 ⇒ 数值那一族**不许**复用 vb6_CDate(会把日期串折成序列号)。
+    bool builtinNoParamTableFormalWantsNumericFold(const std::string& callee, size_t argc, size_t pos) const;
     bool builtinNoParamTableStringSlot(const std::string& callee, size_t argc, size_t pos,
                                        Vb6Type firstArgType) const;
     // 账 #305 §B177 (第六十八刀): 同一张表的**第三问** —— 「这一位是不是那枚 _Generic 宏的分派位」。

@@ -345,20 +345,50 @@ std::string CCodeGen::cParamLateSlotType(const ParameterInfo& p) {
     return cTypeForDeclaredTypeName(p.typeRefName) == "void*" ? "void*" : std::string();
 }
 
-// 账 #305 §B187 装箱腿的唯一发码处 —— Set 那一站 (目标槽) 与实参那一站 (形参槽) 都问这一句,
-// 两边不许各抄一份负条件。为什么这一格欠着 (第八十二刀三条实测读数, 台账 §B187):
+// 账 #305 §B216 格①: 「这一枚 RHS 文本自己就是行内 New 出来的工程类实例?」—— 类名从
+// `(vb6_cls_<X>_New())` 那一形读出, 认不出交空串。判据原来手抄在 Set 站点里 (Fix 179a),
+// 搬进这一处之后**只有一份**: 站点与装箱腿再也不会对同一形各答一次。
+static std::string inlineNewClassOf(const std::string& argVal) {
+    if (argVal.size() <= 16 || argVal.compare(0, 9, "(vb6_cls_") != 0
+        || argVal.compare(argVal.size() - 7, 7, "_New())") != 0) return std::string();
+    const std::string bare = argVal.substr(9, argVal.size() - 16);
+    for (char ch : bare) {
+        if (!std::isalnum(static_cast<unsigned char>(ch)) && ch != '_') return std::string();
+    }
+    return bare;
+}
+
+// 账 #305 §B187 装箱腿的唯一发码处 —— Set 那一站 (目标槽 / **Variant** 槽 = §B216 格②) 与实参
+// 那两站 (形参槽) 都问这一句, 四处不许各抄一份负条件。为什么这一格欠着 (第八十二刀三条实测读数, 台账 §B187):
 //   H = Type=DLL 的驱动实测 result=42000 —— 早绑定那半 42 对, 晚绑定那半 0。
 //     `Set v = o` 发成裸指针赋值 `v = o;  /* Set */` 后，槽里是一枚
 //     `vb6_cls_X*`，首字段 __comObj 被 vb6_ComIsDispatchable 当 vtable 读 → 判否
 //     → GetIDsOfNames 给 DISPID_UNKNOWN → **静默空答** (不崩, 但值永远是 0)。
 //   I = Type=Exe 那台把同一枚槽交给真外部 COM 的实参位 (Dictionary.Add) 直接
 //     0xC0000005 —— 与工程类型无关，是"裸实例指针越过 IDispatch 边界"那一族。
-// 所有权: 这里交出去的是**别人已有的实例** (类变量/字段/形参/返回槽), 销毁权还留在
-// 宿主, 所以必须用 ownsInstance=0 的借用型 (Fix 188 那一档) 而不是 179a 的
-// FromInstance —— 用后者会让客户端 Release 到 0 时把宿主还在用的实例拆掉。
-// desc 判据 (为什么先问 classHasCoClassDesc): 查不中 desc ⇒ FromBorrowedInstance
-// 交回 NULL ⇒ 槽里成了 Nothing，比今天的裸指针**更坏** (裸指针至少早绑定那半
-// 能用)。名单由 driver 与建表那侧同一条 Symbol::isCoClassTableEntry() 扫出。
+// 所有权 (§B216 之后这一问也由本函数一处答): RHS 是**行内 New** 那枚刚造出来的实例时,
+// 调用方把销毁权交出去 ⇒ 用 ownsInstance=1 的拥有型 FromInstance (Fix 179a 那一档, 原来写在
+// Set 站点里, 现在搬到这里); RHS 是**别人已有的实例** (类变量/字段/形参/返回槽) 时, 销毁权还
+// 留在宿主 ⇒ 必须用 ownsInstance=0 的借用型 —— 用前者会让客户端 Release 到 0 时把宿主还在用
+// 的实例拆掉。
+// desc 判据与表外那一档 (§B216 读数 X + 第一百一十九刀本机 A/B 定的口径): 闸门 = classHasCoClassDesc,
+// 名单由 driver 与建表那侧同一条 Symbol::isCoClassTableEntry() 扫出。第一百一十八刀量出来的是
+// **同一问两个答案**: 行内 `New` 那一臂**不问表**就把包器发出去 (运行期 vb6_FindCoClassDesc 落空
+// ⇒ vb6_ComObject_FromInstance:494 交回 NULL ⇒ 槽里是 Nothing), 而变量那一臂**先问表**、查不中
+// 就退回原样 (`Set mOA = a;` 那种裸赋值)。本函数把两臂收在一处: 在表 ⇒ 交包装器 (New 那一形交
+// 拥有型, 其余交借用型); 表外 ⇒ **两臂都交原样** (第八十三刀那句「宁可不动」照旧作数)。
+// ⚠ 台账 #443 当初把坏法归一写成「交 Nothing」(理由是运行期现成口径), 本刀开工前的本机 A/B
+// (尺 .build/k842_ab.py, BASE=.build/C3_k117.exe × 478 份清单输入) 把它**推翻**了。两处实测的是
+// **发码移动** (后果由那一行直接读出, 没跑真编):
+//   ① tests\VBFlexGridDemo\VBFlexGridDemo.vbp 的 `vb6_VTableHandle_SetVTableHandling(me, 1)` 一族
+//     8 行 —— 实参那一站交的是**表外类**的 `me`, 换成 Nothing 就是让 #176/#180 钉着的那一路
+//     从此收不到宿主 (VTable 换表整族静默不干活)；
+//   ② tests\b190_scope\B190.vbp 的 `Thing = a;` —— 目标那枚是模块级**typed** 字段 (Private Thing
+//     As B190A), 只因为另一个过程把同名形参声明成 As Object 就进了 lateBoundSlotTarget 的答案
+//     (#408 那一族按名漏答案的镜像), 交 Nothing 就是往 `vb6_cls_B190A*` 里写 NULL ⇒ P5 那一读定崩。
+// 结论: 表外那一档不归本刀定 (它欠的是「要不要给这类模块 mint 一枚最小 COM 档」那句口径 = #407
+// 同一条), 本刀只把**问句与发码**收成一处。语料承面 0 处 (真语料 1367 份 .cls 全带 MultiUse/
+// SingleUse/Instancing 那一档, 尺 .build/k827_census.py) ⇒ 归一本身不改任何已经编得过的工程。
 // 负条件 (宁可不动，也不把好产物改坏):
 //   · 值自己就是一枚装着包装器的泛对象变量 (varHoldsComWrapper) = 槽 → 槽,
 //     里面已经是 IDispatch 档, 再套一层会把包装器的 vtable 字段当 __comObj 回填
@@ -376,7 +406,11 @@ std::string CCodeGen::cParamLateSlotType(const ParameterInfo& p) {
 //     挡下它的是 desc 闸门 (.ctl 头里只有 `Begin VB.UserControl`，没有 CLASS 的
 //     MultiUse 块 ⇒ UC 不进 coclass 表)。这条不把那个巧合当依据，句柄形状显式钉死。
 std::string CCodeGen::boxIntoLateSlot(const std::string& argVal, const ASTNode* argAst) const {
-    if (argVal.empty() || !argAst) return argVal;
+    if (argVal.empty()) return argVal;
+    // 行内 `New` 那一形: 类名与所有权都从这枚**文本**里读 (RHS 是 NewExpr 时
+    // inferClassTypeOfExpr 压根不认 —— 它没有 NewExpr 那一支)。
+    const std::string newCls = inlineNewClassOf(argVal);
+    if (newCls.empty() && !argAst) return argVal;
     if (varHoldsComWrapper(argVal)) return argVal;
     const bool valueIsHostHandle =
         argVal.find("vb6_hwnd_") != std::string::npos
@@ -385,10 +419,21 @@ std::string CCodeGen::boxIntoLateSlot(const std::string& argVal, const ASTNode* 
         argVal.find("vb6_VariantToObjectVal") != std::string::npos
         || argVal.find("vb6_ComObject_GetInstance") != std::string::npos;
     if (valueIsHostHandle || valueAlreadyUnboxed || cExprIsVariant(argVal)) return argVal;
-    const std::string boxCls = inferClassTypeOfExpr(*argAst);
-    if (boxCls.empty() || !classHasCoClassDesc(boxCls)) return argVal;
-    return "(void*)vb6_ComObject_FromBorrowedInstance(vb6_FindCoClassDesc(\""
-           + boxCls + "\"), (void*)" + argVal + ")";
+    const std::string boxCls = !newCls.empty() ? newCls : inferClassTypeOfExpr(*argAst);
+    if (boxCls.empty()) return argVal;
+    // 表外那一档 (工程类不占运行期 coclass 表那行) 交**原样** —— 两臂现在连这一档也是同一个答案,
+    // 而这一档不由本刀定 (第八十三刀「宁可不动」那句还作数; 归一之前它是两臂唯一的分歧所在)。
+    if (!classHasCoClassDesc(boxCls)) return argVal;
+    // 交回包器那一句的形状与 179a 原来在站点里拼的**逐字节相同** (剥掉 New 那层外层括号) ——
+    // 语料里 33 处 `Set <泛对象槽> = New <带档工程类>` 靠这一条不许移动。
+    const std::string inst
+        = newCls.empty() ? argVal : argVal.substr(1, argVal.size() - 2);
+    if (!newCls.empty()) {
+        return "(void*)vb6_ComObject_FromInstance(vb6_FindCoClassDesc(\"" + boxCls
+             + "\"), (void*)" + inst + ")";
+    }
+    return "(void*)vb6_ComObject_FromBorrowedInstance(vb6_FindCoClassDesc(\"" + boxCls
+           + "\"), (void*)" + inst + ")";
 }
 
 // <vbeclipse> rev7: 配套 cParamClassPtrType 的**落临时**侧 —— ByRef 类形参收到

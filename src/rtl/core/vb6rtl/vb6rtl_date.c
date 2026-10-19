@@ -115,37 +115,65 @@ void vb6_TimeSet(BSTR timeStr) {
     SetLocalTime(&st);
 }
 
+// 账 #419 (§B193): 「这一枚 DATE 的双半边怎么切」的唯一出口。DATE 是「整天数 + 一天的分数」，
+// 而分数在二进制里落不整 (14:30 = 0.6041666666666666)，所以拆之前必须**四舍五入到整秒** ——
+// 直接截断会把这一格少掉一秒的几分之一，实测口径 (本机 VB-family 运行期，尺
+// .build/k272_timeparts.vbs + k277_round.vbs + k278_roll.vbs):
+//   Minute(CDate("2026/1/1 14:30")) = 30 (截断那一条答 29)；+0.4/+0.5 秒不进位、+0.6/+0.99 进位。
+//
+// 账 #440 §B209 (第一百零七刀) = 把「一枚序列号拆成日期 + 日内秒」这一问**收成一位主人**，
+// 两处各答一半的那笔账一次结掉:
+//   ① §B194 (#420): 一天末尾那一格只把日内秒归零、**日期那一半不进位**。运行期两半**一起**进:
+//      raw = 46023.9999988426 (= 2026/1/1 23:59:59.9) → H/M/S = 0/0/0 且 **Day = 2**
+//      (尺 .build/k420_oracle.vbs + k420b_grid.vbs)。改前答 Day = 1。
+//   ② §B195 (#421): epoch 之前的零头取法与运行期**反号**。运行期取**绝对值**, 本仓原先 `+1.0`:
+//      raw = -657433.395833333 → 运行期 9:30, 本仓 14:30 (同一瞬间的两种拆法)。
+//   两半**符号对称**: -46023.9999988426 → 运行期 1773/12/28 (日期也进了一格) ⇒ 进位不是只给正数。
+//   ⚠ 日期那一半用 **(int32_t)date 向零截断**(不是 floor), 运行期就是这一套: 负数那几格
+//     Date=2/M=1/Y=100 与本仓改前就一致 —— 反号的只有**零头**那一半, 日期那一半一直是对的。
+static void vb6_split_serial(double date, int32_t* dayOut, int32_t* sodOut) {
+    double t = date - (double)(int32_t)date;
+    if (t < 0) t = -t;                              // ② §B195: 取绝对值, 不再 +1.0
+    int32_t sod = (int32_t)(t * 86400.0 + 0.5);
+    int32_t day = (int32_t)date;
+    if (sod >= 86400) { sod = 0; day += 1; }         // ① §B194: 日期那一半跟着进
+    *dayOut = day;
+    *sodOut = sod;
+}
+
+// 账 #440 §B209: 「日期那一格」这一问的出口 —— **转问上面那一位主人**, 不自己再抄一遍那三行。
+// 改前它与 vb6_SecondsOfDay 各答一半: 时间那三枚走 `+1.0` 归一、日期那三枚走裸 `(int32_t)date`
+// ⇒ 一天末尾那一格两半**不一致**(时间已归零、日期还没进)。
+static inline int32_t vb6_serial_day_half(double date) {
+    int32_t day, sod;
+    vb6_split_serial(date, &day, &sod);
+    return day;
+}
+
 int32_t vb6_Year(double date) {
     int32_t y, m, d;
-    vb6_serial_to_date((int32_t)date, &y, &m, &d);
+    vb6_serial_to_date(vb6_serial_day_half(date), &y, &m, &d);
     return y;
 }
 
 int32_t vb6_Month(double date) {
     int32_t y, m, d;
-    vb6_serial_to_date((int32_t)date, &y, &m, &d);
+    vb6_serial_to_date(vb6_serial_day_half(date), &y, &m, &d);
     return m;
 }
 
 int32_t vb6_Day(double date) {
     int32_t y, m, d;
-    vb6_serial_to_date((int32_t)date, &y, &m, &d);
+    vb6_serial_to_date(vb6_serial_day_half(date), &y, &m, &d);
     return d;
 }
 
-// 账 #419 (§B193): 「这一枚 DATE 的双半边怎么切」的唯一出口。DATE 是「整天数 + 一天的分数」，
-// 而分数在二进制里落不整 (14:30 = 0.6041666666666666)，所以拆之前必须**四舍五入到整秒** ——
-// 直接截断会把这一格少掉一秒的几分之一，实测口径 (本机 VB-family 运行期，尺
-// .build/k272_timeparts.vbs + k277_round.vbs + k278_roll.vbs):
-//   Minute(CDate("2026/1/1 14:30")) = 30 (截断那一条答 29)；+0.4/+0.5 秒不进位、+0.6/+0.99 进位；
-//   23:59:59.9 那一格日内秒归零 (运行期连日期那一半也进了一天，日期那一半本刀不动，另记一格)。
 // 一条出口，读者 = Hour / Minute / Second 三枚 getter 与 DateAdd 分解那一站 (DatePart 的 h/n/s
 // 三档本来就转调这三枚 getter，跟着一起好)。
 static int32_t vb6_SecondsOfDay(double date) {
-    double t = date - (double)(int32_t)date;
-    if (t < 0) t += 1.0;                       // 与 DateAdd 原有的归一保持同一条口径
-    int32_t sod = (int32_t)(t * 86400.0 + 0.5);
-    if (sod >= 86400) sod -= 86400;             // 一天末尾那一格: 只归零，不动日期那一半
+    int32_t day, sod;
+    vb6_split_serial(date, &day, &sod);
+    (void)day;                                       // 日期那一半归 Year/Month/Day 那一族用
     return sod;
 }
 
@@ -276,13 +304,46 @@ rebuild:
 }
 
 int64_t vb6_DateDiff(BSTR interval, double date1, double date2, int32_t firstDayOfWeek, int32_t firstWeekOfYear) {
-    (void)firstDayOfWeek;
-    (void)firstWeekOfYear;
-    vb6_date_interval di = vb6_parse_interval(interval);
-    
-    int32_t d1 = (int32_t)date1, d2 = (int32_t)date2;
-    
-    switch (di) {
+      (void)firstWeekOfYear;
+      vb6_date_interval di = vb6_parse_interval(interval);
+
+      // 账 #423 §B197 (第一百零八刀) = 「w / ww 这两个间隔在 **DateDiff** 里各答什么」这一问。
+      // 病根 = `vb6_parse_interval` 是 **DateAdd / DateDiff / DatePart 三家共用**的一问，而
+      // `w` 与 `ww` 的含义**按 builtin 分岔**:
+      //     DatePart("w",  …) = 星期序号(与周首无关)     DateDiff("w",  …) = **整段七天**
+      //     DatePart("ww", …) = 一年里第几周             DateDiff("ww", …) = 半开区间 (a,b] 里
+      //                                                    落在第 f 天那一格的条数(方向带符号)
+      // 共用一枚枚举 ⇒ 改 `parse_interval` 会把另外两家的正确答案一起弄坏(实测 DatePart 的
+      // w/ww 今天都是 2、都对)。所以**枚举那一问不动**，DateDiff 自己认这一格。
+      //
+      // 运行期口径 (cscript 同机代理, 尺 .build/k423_oracle.vbs, 逐格量死):
+      //   ① "ww" = floor((b-f)/7) - floor((a-f)/7)，f 参与 ⇒ 改周首**会动**这一格;
+      //      拟合面积 162400 格对这条公式零失配(账上 §B197 记的那把尺)。
+      //   ② "w"  = trunc((b-a)/7)，**与 f 无关** ⇒ 改周首**不许动**这一格 (81200 格零失配)。
+      //      ⚠ 改前本仓这一格发的是 `(d2-d1)/7`，而 d1/d2 是**截断过的整日**、且落进
+      //        `case vb6_di_weekday` 的 `d2 - d1` ⇒ 答的是**天数**(1/5→1/12 答 7、1/5→2/5 答 31)。
+      // ⚠ 这一格用 `int` 而不是 `bool`: 用户 TU 那一遍编译把 `bool` 宏成了 `int`,
+      //   `const bool` 会展开成 `const int bool` = 两个类型词 ⇒ cl C2086/C2146(本刀撞过)。
+      const int ivIsWw423 =
+          interval && vb6_BSTR_Len(interval) >= 1 && (interval[0] == L'w' || interval[0] == L'W')
+          && vb6_BSTR_Len(interval) >= 2 && (interval[1] == L'w' || interval[1] == L'W');
+      const int ivIsW423 =
+          interval && vb6_BSTR_Len(interval) >= 1 && (interval[0] == L'w' || interval[0] == L'W')
+          && !(vb6_BSTR_Len(interval) >= 2 && (interval[1] == L'w' || interval[1] == L'W'));
+
+      int32_t d1 = (int32_t)date1, d2 = (int32_t)date2;
+
+      // ② "w": 整段七天，trunc 向零，与 firstDayOfWeek **无关** —— 先答，两条形参都不看。
+      if (ivIsW423) {
+          return (int64_t)((date2 - date1) / 7.0);
+      }
+      // ① "ww": 半开区间 (a,b] 里落在第 f 天那一格的条数。f = 1 (vbSunday) 是本仓序列号口径。
+      if (ivIsWw423) {
+          const double f = (double)firstDayOfWeek;
+          return (int64_t)(floor((date2 - f) / 7.0) - floor((date1 - f) / 7.0));
+      }
+
+      switch (di) {
         case vb6_di_year: {
             int32_t y1, m1, dd1, y2, m2, dd2;
             vb6_serial_to_date(d1, &y1, &m1, &dd1);
@@ -340,8 +401,26 @@ static int32_t vb6_LeadingPartialDays(int32_t year, int32_t fdow) {
 int32_t vb6_WeekOfYear(int32_t serial, int32_t fdow, int32_t fwoy) {
     int32_t y, mo, dd;
     vb6_serial_to_date(serial, &y, &mo, &dd);
-    if (fdow < 1 || fdow > 7) fdow = 1;   // 0 = vbGeneral 交系统 (本机实测落在周一)，跨机器不可复现 => 统一按 vbSunday
-    if (fwoy != 2 && fwoy != 3) fwoy = 1;  // 实测 0 与 1 同档; 4 以上运行期直接报错，这里不装死
+    if (fdow < 1 || fdow > 7) fdow = 1;   // 0 = vbGeneral
+        //
+        // 账 #424 §B198 (第一百零九刀) —— 这一格的口径由**用户拍板**，不是实现默默选的：
+        //   `firstDayOfWeek = 0` (vbGeneral) 在运行期是**交系统**的（本机 = 周一），
+        //   任何「跟随系统」的发法都**跨机器不可复现**。本仓两条 DatePart/DateDiff 路
+        //   统一 clamp 到 **vbSunday(1)**，作为一条**显式的已知偏离**：与运行期在
+        //   「系统周首 ≠ 周日」的机器上不同，但换来的是读数跨机器稳定 —— 这正是本仓
+        //   整套 emit-manifest / 夹具逐字节对账赖以成立的前提。
+        //   ⚠ 本机量不出这一格的差别（尺 .build/k424_oracle.vbs：DatePart("ww") 的
+        //     f=0/1/2/7 同答 2、DateDiff("ww") 的 f=0/1/7 同答 8）⇒ 它是一处
+        //     **有意保留**的偏离，不是漏改；要跟着系统走，得先把可复现性那套一起想清楚。
+    //
+    // 同一笔账的另一半（firstWeekOfYear）：运行期对 >= 4 **直接报错**（cscript 实测 fwy=4/5
+    //   两格当场抛，尺 .build/k424_oracle.vbs）；改前这里静默按 1 档答 2。口径同样由用户拍板
+    //   = **对齐运行期报 err 5**，与 #436「越界 namedFormat 报 err 5」同一口径。
+    if (fwoy >= 4) {
+        vb6_ErrRaiseNumber(5);
+        return 0;
+    }
+    if (fwoy != 2 && fwoy != 3) fwoy = 1;  // 实测 0 与 1 同档
     int32_t doy = serial - vb6_SerialOf(y, 1, 1) + 1;
     int32_t n = vb6_SerialOf(y, 12, 31) - vb6_SerialOf(y, 1, 1) + 1;
     int32_t b = vb6_LeadingPartialDays(y, fdow);

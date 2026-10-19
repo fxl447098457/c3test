@@ -49,35 +49,64 @@ BSTR vb6_FormatDateTime(double dateSerial, int32_t namedFormat) {
     // 这一家交 `2026/1/5 `(len 9 带一枚尾随空格)、Format 那一家交 `2026/1/5 0:00:00`(len 16)、
     // CStr 那一家交 `2026/1/5`(len 8) —— 三个答案**。现在四问全部改问 vb6rtl_format.c 的那几条出口，
     // 「general date 什么时候该带时间」也只住在那一条出口里 = 四入后当日时分秒全零就不给 (尺 k559 + k564)。
-    // 病机制本身: 以前 `buf[len-1] = L' '` 是**无条件**做的，而 GetDateFormatW 的返回长度**含结束符**
+// 病机制本身: 以前 `buf[len-1] = L' '` 是**无条件**做的，而 GetDateFormatW 的返回长度**含结束符**
     // ⇒ 那一句是把结束符改成了空格；只有时间那段才判 fracPart ⇒ 零头为 0 就留下一枚孤儿空格。
+    //
+    // 账 #436 §B210 (第一百零九刀) = #429 的 ②③ 两格（第 ① 格尾随空格已随上一刀转绿，见上）。
+    // 两格都**不是**「补一个 if」那么便宜，因为病根是「解析失败就换成今天」这条兜底：
+    //   ② 越界 namedFormat（9 / 99 / -1）落 `default:` 当 general date 照常交卷；
+    //      运行期直接报 **err 5**（无效的过程调用或参数），尺 .build/k429_oracle.vbs 逐格量死。
+    //   ③ 异型/越界实参静默换成**今天**：`dateSerial == 0.0` 与 `VariantTimeToSystemTime` 失败
+    //      两条都 GetLocalTime()。
+    // ⚠ ③ 里藏着一枚**更根本**的错，本刀量出来才看见（账上没列这一格）：
+    //      **序列号 0 是一个合法日期（1899-12-30），不是哨兵。** 运行期 `FormatDateTime(0,2)`
+    //      交 `1899/12/30`，而本仓那条 `== 0.0` 分支把它答成**今天**。
+    //      可用窗口极大：-1→1899/12/29、-365→1898/12/30、-60000→1735/9/21 都合法，
+    //      直到接近 -100000 才报 err 5（尺 .build/k429b.vbs / k429c.vbs）。
+    //      ⇒ 「0 ⇒ 今天」这条兜底整个删掉；序列号能不能过，只问 VariantTimeToSystemTime 一句。
     SYSTEMTIME st;
-    if (dateSerial == 0.0) {
-        GetLocalTime(&st);   // ③那一格（0 与负值该不该落本机钟）仍等口径，本刀不动
-    } else {
-        if (!VariantTimeToSystemTime(dateSerial, &st)) {
-            GetLocalTime(&st);
-        }
+    if (!VariantTimeToSystemTime(dateSerial, &st)) {
+        // 窗外的序列号：运行期报 err 5，不再静默答今天（§B210 ③）
+        vb6_ErrRaiseNumber(5);
+        return SysAllocString(L"");
+    }
+    // ⚠ 但 `VariantTimeToSystemTime` **成功不等于运行期会交卷**：它能翻出 1601 年以前的年份，
+    //   而 GetDateFormatW 的下限就是 **1601** ⇒ 那一段本仓以前交**空串 + err=0**。
+    //   运行期的窗实测（cscript 同机代理，尺 .build/k429e|429f|429g|429h.vbs，逐格二分）：
+    //     -60000→1735/9/21  -100000→1626/3/16  -109000→1601/7/25  -109200→1601/1/6
+    //     -109300→ERR5  -109400→ERR5  -110000→ERR5  -120000→ERR5
+    //   ⇒ 边界 = **年份 1601**（1601-01-01 的序列号约 -109205），与 GetDateFormatW 的文档下限同位。
+    //   这一格本刀补齐：**窗内照常交卷，窗外报 err 5**，不再交空串装没事。
+    if (st.wYear < 1601) {
+        vb6_ErrRaiseNumber(5);
+        return SysAllocString(L"");
     }
     wchar_t buf[256];
     buf[0] = 0;
     switch (namedFormat) {
-        case 1: // vbLongDate
-            vb6_fmtLocaleLongDate(&st, buf, 256);
-            break;
-        case 2: // vbShortDate
-            vb6_fmtLocaleShortDate(&st, buf, 256);
-            break;
-        case 3: // vbLongTime
-            vb6_fmtLocaleLongTime(&st, buf, 256);
-            break;
-        case 4: // vbShortTime —— locale 的短时间（TIME_NOSECONDS）；Format 那一家是另一档口径，见 §B203
-            GetTimeFormatW(LOCALE_USER_DEFAULT, TIME_NOSECONDS, &st, NULL, buf, 256);
-            break;
-        case 0: // vbGeneralDate
-        default:
-            vb6_fmtLocaleGeneralDate(&st, buf, 256);
-            break;
+    case 1: // vbLongDate
+        vb6_fmtLocaleLongDate(&st, buf, 256);
+        break;
+    case 2: // vbShortDate
+        vb6_fmtLocaleShortDate(&st, buf, 256);
+        break;
+    case 3: // vbLongTime
+        vb6_fmtLocaleLongTime(&st, buf, 256);
+        break;
+    case 4: // vbShortTime —— locale 的短时间（TIME_NOSECONDS）；Format 那一家是另一档口径，见 §B203
+        GetTimeFormatW(LOCALE_USER_DEFAULT, TIME_NOSECONDS, &st, NULL, buf, 256);
+        break;
+    case 0: // vbGeneralDate
+        vb6_fmtLocaleGeneralDate(&st, buf, 256);
+        break;
+    default:
+        // 越界档位：运行期报 err 5（§B210 ②）。这一格**不许**回落到 general date ——
+        // 语料 44 处全用 vb* 常量，所以承面 0，但「越界静默照常交卷」正是本账的病。
+        // ⚠ general date 那一档**只**住在 `case 0:` 里：早先把它放在 switch 之后按
+        //   `namedFormat == 0` 再调一次，`default:` 臂的邻域就含着那个调用 ——
+        //   读代码的人与哨兵都会以为 default 仍会交卷。放进 case 0 这一格是唯一答案。
+        vb6_ErrRaiseNumber(5);
+        return SysAllocString(L"");
     }
     return SysAllocString(buf);
 }

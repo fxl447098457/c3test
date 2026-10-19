@@ -257,6 +257,24 @@ void CCodeGen::emitClassFactory(Module& module) {
                 c_.emitLine("vb6_BSTR_Free(me->" + cIdent(var.name) + ");");
             } else if (var.isDynamicArray || !var.dimensions.empty()) {
                 c_.emitLine("if (me->" + cIdent(var.name) + ") vb6_SA_Destroy(me->" + cIdent(var.name) + ");");
+            } else if (var.asType) {
+                // 账 #305 §B218 (甲) 腿⑤: 字段那一枚引用**由字段自己握** —— 覆写(腿②)与置空(腿③)
+                // 两站从第一刀起就问同一位主人, 只有出厂这一站缺着: 持有者拆掉时字段里那枚没人退,
+                // 于是每枚被字段持有的实例永不走 Class_Terminate (漏, 不是崩)。
+                // 类名问 `mapTypeRef` = 发这枚字段那一行用的同一个答案, 不开第二问;
+                // 答出来不是 `vb6_cls_X*` 那一个形状 (As Object 是 void* / As Variant 是槽 /
+                // 外部接口是裸指针) 就维持今天的"不动"。
+                const std::string fieldCType = mapTypeRef(var.asType.get());
+                const std::string prefix = "vb6_cls_";
+                if (fieldCType.size() > prefix.size() + 1 &&
+                    fieldCType.compare(0, prefix.size(), prefix) == 0 &&
+                    fieldCType[fieldCType.size() - 1] == '*' &&
+                    fieldCType.find(' ') == std::string::npos) {
+                    const std::string fieldStruct = fieldCType.substr(0, fieldCType.size() - 1);
+                    c_.emitLine("if (me->" + cIdent(var.name) + ") " + fieldStruct +
+                                "_Release(me->" + cIdent(var.name) +
+                                ");  /* 账 #305 (甲) 腿⑤: 字段那一枚引用出厂放手 */");
+                }
             }
         }
     }
@@ -268,6 +286,34 @@ void CCodeGen::emitClassFactory(Module& module) {
         // 区别只在实例这回真被拆掉了。
         c_.emitLine("if (vb6_termErr) vb6_RaiseError(vb6_termErr, vb6_ErrDescription());  /* 账 305 B188: 号在尾巴之后交回外层帧 */");
     }
+    c_.dedent();
+    c_.emitLine("}");
+
+    // 账 #305 §B218 (甲, 第一刀) = 引用计数那一问的**唯一一位主人**: 每个类模块一对出入口,
+    // 发在本类自己的 .c 里 (结构体完整类型可见), 声明在 .h (跨模块的槽要调它)。
+    // 为什么是一对导出函数而不是每条腿各写三行: 这条判断有四个分支 (空实例 / 还有引用 /
+    // 被 __comObj 接走 / 真该拆), 五腿各 inline 一遍 = 五位主人 (#167/#231/#245/#298/#443 那一族)
+    // —— 今天那三处手抄 (接口 AddRef / Release / claim 桩) 就在这一刀改成转调它。
+    c_.emitBlank();
+    c_.emitLine("unsigned long " + clsStruct + "_AddRef(void* instance) {");
+    c_.indent();
+    c_.emitLine(clsStruct + "* me = (" + clsStruct + "*)instance;");
+    c_.emitLine("if (!me) return 0UL;");
+    c_.emitLine("me->__refcount += 1;");
+    c_.emitLine("return (unsigned long)me->__refcount;");
+    c_.dedent();
+    c_.emitLine("}");
+    c_.emitBlank();
+    c_.emitLine("unsigned long " + clsStruct + "_Release(void* instance) {");
+    c_.indent();
+    c_.emitLine(clsStruct + "* me = (" + clsStruct + "*)instance;");
+    c_.emitLine("if (!me) return 0UL;");
+    c_.emitLine("me->__refcount -= 1;");
+    c_.emitLine("if (me->__refcount > 0) return (unsigned long)me->__refcount;  /* 还有人握 */");
+    // 实例已被 COM 包装器接管时 (__comObj 非空) 销毁权在包装器 (P6/B13 统一两套计数)
+    c_.emitLine("if (me->__comObj != NULL) return 0UL;  /* wrapper owns teardown */");
+    c_.emitLine(clsStruct + "_Destroy(me);  /* 0 引用: Class_Terminate + 释放 */");
+    c_.emitLine("return 0UL;");
     c_.dedent();
     c_.emitLine("}");
 
@@ -286,6 +332,68 @@ void CCodeGen::emitClassFactory(Module& module) {
     c_.emitLine("return vb6_ComPackVB6InstanceRaw(\"" + moduleName_ + "\", instance);");
     c_.dedent();
     c_.emitLine("}");
+}
+
+// 账 #305 §B218 (甲) 腿②③: 「覆写 / 置空一枚 typed 工程类槽」收成一位主人。
+// 为什么是一条函数而不是站点各写三行: 「这一格该不该放手」的判断跟着上面那对出入口走,
+// 站点抄一遍就多一位主人 (#167/#231/#245/#298/#443 那一族)。valueExpr 传空串 = 置空。
+// 顺序 = **先 claim 新、再 release 旧** —— 接口那族 emitIvrefQiSet 撞过的同一件事:
+// 先放旧会让 `Set a = a` 在自己还没换掉之前把自己拆掉。
+// rhsTransferred = 右侧那枚引用**已经带着对价交给这一格了**: 两种成因 (`New <类>` 与工程内过程
+// 的调用, 见 rhsTransfersProjectRef) ⇒ 移交、不 claim。
+void CCodeGen::emitClassSlotRefSet(const std::string& target, const std::string& className,
+                                   const std::string& valueExpr, bool rhsTransferred, bool outSlot) {
+    const std::string clsStruct = "vb6_cls_" + cIdent(className);
+    if (outSlot) {
+        // 腿②' = 写进一枚**活在本过程之外**的槽 (ByRef 出参那座桥的写回站)。这里的判断只有一条
+        // 加法: 取走一枚引用。**不退旧值** —— 那种槽今天整个在计数系统外面, 退它 = 多退一次;
+        // 「出参写回该不该放手旧值」与下标槽是同一格, 在册等腿⑤ 一起答。
+        c_.emitLine("{  /* 账 #305 (甲) 腿②': Set 出参槽 " + target + " */");
+        c_.indent();
+        c_.emitLine(target + " = " + valueExpr + ";");
+        if (!rhsTransferred) {
+            c_.emitLine("if (" + target + ") " + clsStruct + "_AddRef(" + target + ");");
+        }
+        c_.dedent();
+        c_.emitLine("}");
+        return;
+    }
+    const std::string legTag = valueExpr.empty() ? "③" : "②";
+    const std::string oldSlot = "__clsold" + std::to_string(ivrefSetSeq_++);
+    c_.emitLine("{  /* 账 #305 (甲) 腿" + legTag + ": Set " + target + " */");
+    c_.indent();
+    c_.emitLine(clsStruct + "* " + oldSlot + " = " + target + ";");
+    if (!valueExpr.empty()) {
+        c_.emitLine(target + " = " + valueExpr + ";");
+        if (!rhsTransferred) {
+            c_.emitLine("if (" + target + ") " + clsStruct + "_AddRef(" + target + ");");
+        }
+    } else {
+        c_.emitLine(target + " = NULL;  /* Set Nothing (项目类实例) */");
+    }
+    c_.emitLine("if (" + oldSlot + ") " + clsStruct + "_Release(" + oldSlot + ");");
+    c_.dedent();
+    c_.emitLine("}");
+}
+
+// 账 #305 §B218 (甲) 刀3: 「这一发右值是不是自带一枚移交过来的引用」—— 上面那位主人「不 claim」
+// 那条臂的第二个成因, 与 `New` 同一条契约, 所以只在这一处问, 不在站点各抄一遍。
+// 契约的实物 (三台工程同形, 尺 `.build/k1081_proj_emit.c`): 被调方 `Set <返回槽> = <局部/字段>`
+// 走 腿② 取走一枚, 出口 腿④ 退的是它自己那枚**局部**, 而返回槽自带那道夹不放手 ⇒ 交出来的指针
+// 本身带一枚对价引用; 调用方再 claim 就是每调用净 +1, 那一枚永远没人退 (实测 W6 / W9 `terms=0`)。
+// 刻意只认**裸标识符 callee** 且模块符号表认到 Function / Property Get、返回类型是工程 Class:
+// 带接收者的成员调用 (`obj.Method()`) 走的是另一套契约 (COM 打包 / 视图 QI), 本刀不碰。
+bool CCodeGen::rhsTransfersProjectRef(const ASTNode& expr) const {
+    if (expr.kind != ASTNodeKind::IndexOrCallExpr) return false;
+    const auto& call = static_cast<const IndexOrCallExpr&>(expr);
+    if (!call.callee || call.callee->kind != ASTNodeKind::IdentifierExpr) return false;
+    const std::string name = static_cast<const IdentifierExpr&>(*call.callee).name;
+    const Symbol* fn = symTab_.lookupModule(name);
+    if (!fn || (fn->kind != SymbolKind::Function && fn->kind != SymbolKind::PropertyGet)
+        || fn->variableTypeName.empty()) {
+        return false;
+    }
+    return !projectClassNameOf(fn->variableTypeName).empty();
 }
 
 // P6.4+: 类模块默认实例 (VB_PredeclaredId=True) 惰性单例访问器.

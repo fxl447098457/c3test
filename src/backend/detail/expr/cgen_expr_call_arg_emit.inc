@@ -683,6 +683,10 @@
                         && !isConstMacro;
                     if (isLValue) {
                         // 左值: 变量名、数组元素、me->field、(*ptr) 解引用 — 可以取地址
+                        // 账 #305 §B218 (甲) 腿④ 第二道夹: 把一个**标识符**格子的地址交给外部
+                        // Declare ⇒ 这一格从此由外面写, 本过程没经自己的主人拿过它。若它正好在
+                        // 出口放手那张表里 (工程类那一档), 就把这一条撤掉 (只动类档, 视图档不动)。
+                        if (isSimpleIdent) dropClassSlotRelease(argValLv);
                         argVal = "(void*)&(" + argVal + ")";
                     } else if (!argUdtRetCType090q.empty()) {
                         // Fix 090q: 实参是返回 UDT 的函数调用 — VB6 把返回值拷入临时
@@ -1032,6 +1036,13 @@
                                     c_.emitLine("vb6_VARIANT " + tmp92y
                                         + " = vb6_VariantFromValue(" + boxed92y
                                         + ");  /* Fix <vbeclipse>: ByRef Variant 实参装箱 */");
+                                    // 账 #305 §B217 (第一百二十一刀): `vb6_VariantFromValue` 落到
+                                    // void* 那一臂 = `vb6_VariantObject`, 它**自己就 AddRef**
+                                    // (vb6rtl_variant.h:243-248), 而上面那句 `From*Instance` 已经
+                                    // 取过一枚 ⇒ 每次调用两枚。站点自己只该留下一枚(实例自己的那一枚,
+                                    // 归属由唯一发码处答), 装箱多取的这一枚登记下来, 由 emitStmt 在
+                                    // 这条语句末收回 —— 与 ansiOutParams_/ansiTempsToFree_ 同一条道。
+                                    boxTempsToClear_.push_back({tmp92y, c_.indentLevel()});
                                     argVal = "&" + tmp92y;
                                 } else {
                                     // Variant 变量 / UDT 字段: 值已是 vb6_VARIANT 且可寻址。
@@ -1429,7 +1440,11 @@
         // __refcount (ComCtlsDemo ComCtlsSubclassProc 实测: av read 0xC 崩在
         // Release, StatusBar UC 创建期 100% 复现)。
         if (cTypeIvfix.rfind("vb6_ivref_", 0) == 0 && i < node.positional.size()
-            && node.positional[i]) {
+            && node.positional[i]
+            && ifaceViewOfExpr(*node.positional[i]).empty()) {
+            // 账 #305 §B221 (形③): 实参本身已经是视图 (`Take MakeDirect()`) ⇒ 值就是那枚
+            // 薄指针，再取一次 `->__iv_<I>` 是剥第二层皮 (实测 C2039 + C2198)，所以这一问
+            // 由 ifaceViewOfExpr 在闸上答一次，站点不另写判据。
             std::string argCls = inferClassTypeOfExpr(*node.positional[i]);
             if (!argCls.empty()) {
                 const IfaceView* ivFix = ivLookupIface(

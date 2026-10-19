@@ -258,7 +258,8 @@
     // 「vb6_FindCoClassDesc("<类名>") 查不查得中」—— 这一问的**唯一**出口。
     // 名单由 driver 用 Symbol::isCoClassTableEntry() 扫全部模块符号表建 (与建表那侧同一
     // 判据、同一输入), 所以这里答"有"就是运行期真有。查不到的类**不许**装箱: 装箱出
-    // NULL 包装器 = 槽里一枚 Nothing, 比裸指针更坏。
+    // NULL 包装器 = 槽里一枚 Nothing, 比裸指针更坏 (§B216 第一百一十九刀量完照旧作数,
+    // 那一刀的归一把行内 New 那一臂也拉到这一问上来, 表外那一档两臂同答"原样")。
     bool classHasCoClassDesc(const std::string& className) const {
         return projCoclassNames_ && !className.empty()
             && projCoclassNames_->count(Symbol::toLower(className)) > 0;

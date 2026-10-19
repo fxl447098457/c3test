@@ -83,12 +83,17 @@ Sub Main()
     k = CDate(46027) + 0.7
     Debug.Print "B432-17=" & CStr(k = 46028) & "/" & CStr(k = CLng(CDate(46027) + 0.7))
 
-    ' The junction with knife 101, and a LABEL WITNESS for the hole that knife 102 did NOT close:
-    ' a date that first sits in a Variant slot reaches Format's no-format-string path (the
-    ' general-date outlet) and now answers like CStr - that half is BASE-red / NEW-green. But a
-    ' Dim-As-Date local handed straight to Format is still boxed by the hand-copied table in ledger
-    ' #430, so it keeps answering with the number. The second clause pins today's WRONG half on
-    ' purpose: whoever fixes #430 must come and turn it True.
+    ' The junction with knife 101, and the LABEL WITNESS that knife 102 did NOT close but
+    ' knife 104 DID. First clause: a date that first sits in a Variant slot reaches Format's
+    ' no-format-string path (the general-date outlet) and answers like CStr -- that half was
+    ' BASE-red / NEW-green at knife 102. Second clause: a Dim-As-Date local handed straight to
+    ' Format used to be boxed by the hand-copied table in ledger #430, so it kept answering
+    ' with the number -- that half was pinned WRONG on purpose ("whoever fixes #430 must turn
+    ' it True").
+    ' >>> knife 104 (#430) landed: the Format first-arg Date arm now asks the sole authority
+    '     boxToVariant (vb6_VariantDate) instead of its own copied list (vb6_VariantDouble),
+    '     so the second clause flipped to True. This cell is the witness that it really is so.
+    '     Readings: before = True/False, after = True/True (both arches, byte-identical).
     ' (measured: .build/k638_base_run.txt vs k638_new_run.txt U09; k636_charts_diff.txt)
     v = DateSerial(2026, 1, 5)
     Debug.Print "B432-18=" & CStr(Format(v) = CStr(CDate(46027))) & "/" & _

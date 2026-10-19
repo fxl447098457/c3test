@@ -502,6 +502,47 @@
                 }
             }
         }
+        // 账 #433 §B207 (第一百零五刀): 文本实参进**日期形参**这一问 —— 两条臂都答不了它, 所以
+        //   这一条**刻意落在两条臂之外**(它们各自都以 `argIsVariant` 为闸), 一处答两臂的实参。
+        //   病形 = `As String` 变量直递进 `double` date 形参 = cl C2440, 承面 9 处(逐形实测,
+        //   尺 `.build/k672_k103_readings.md` 同形; 本刀九处全部复现)。
+        //   ⚠ 为什么「是不是日期形参」不能拿 `rtParamType == "double"` / `paramBase == Double`
+        //   当判据: C 侧日期与数值都是 double, 而**引擎对文本实参的答案按 builtin 分两种** ——
+        //   `FormatDateTime("46027",0)` = 2026/1/5(日期解析)、`Sqr("4")` = 2(数值折算)
+        //   (cscript 实测, 尺 `.build/k207d_fdt.vbs`)。照 C 签名反推会把后者一起误伤
+        //   (这正是 §B174 教训① 的同一形状, 所以另立一位权威而不是复用签名)。
+        //   两个来源各有各的权威, 这里合成一处问:
+        //     ① 带类型化形参表的那族(Year/Month/Day/Weekday/DateAdd/DateDiff/DatePart) ——
+        //        权威 = 上面那条臂自己的 `calleeParams[i].type == Vb6Type::Date`(Fix 090r 那档);
+        //     ② 没有类型化形参表的那族(FormatDateTime) —— 权威 = `builtinNoParamTableFormalIsDate`
+        //        (§B206 补进 kNoTableFormalKinds176, 这一位是它答的 "double")。
+        //   出口是 `vb6_CDate` 而不是账本原候选的 `vb6_DateValue`: 引擎对这一位是**宽松**的
+        //   —— 纯数字文本按序列号("46027"→2026/1/5, 连 "-5"→1899/12/25 都收), 认不出才报 13;
+        //   `vb6_CDate` 与引擎逐格相同, 而 `vb6_DateValue`(→`vb6_DateParse`)**严格**,
+        //   `DateValue("46027")` 引擎也报 13 —— 用它会把合法实参判死(本刀开工前量完否掉的)。
+        if (!isByRef && node.positional[i]
+            && inferExprType(*node.positional[i]) == Vb6Type::String) {
+            const bool dateParamFromTable433 =
+                (i < calleeParams.size() && calleeParams[i].type == Vb6Type::Date);
+            const bool datePosFromList433 =
+                builtinNoParamTableFormalIsDate(callee, node.positional.size(), i);
+            if (dateParamFromTable433 || datePosFromList433) {
+                // `vb6_CDate` 的 C 形参是 `vb6_VARIANT`(vb6rtl_builtin.h:358), 所以文本实参
+                // 要先装箱 —— `vb6_VariantFromValue` 的 _Generic 按 BSTR 档交 vb6_VariantString
+                // (标量→Long/Int/Double、BSTR→String, 见 vb6rtl_variant.h 那张表)。
+                // ⚠ 别直接发 `vb6_CDate(<BSTR>)`: 那是反向 C2440(BSTR→vb6_VARIANT), 本刀先踩过。
+                argVal = "vb6_CDate(vb6_VariantFromValue(" + argVal + "))";
+            } else if (builtinNoParamTableFormalWantsNumericFold(callee, node.positional.size(), i)) {
+                // 账 #434 §B208 (第一百零六刀): 同一格问句的**另一半** —— 数值形参吃文本实参
+                // (Sqr(s) / Abs(s) / Int(s) … 与 DateAdd 的位 1), 改前同样是裸 BSTR 直递 = C2440。
+                // 出口 `vb6_CDbl`(不是 vb6_CDate, 也不是 vb6_Val): 引擎判别格 `Sqr("2026/1/5")`
+                // = **err13** —— 日期串进数值形参要报错; 用 CDate 会把它折成序列号 46027 再开方。
+                // `vb6_Val` 是 Val 的宽松语义(遇非数字就停、永不报错), 与引擎那一格要的 13 相反。
+                // 八格与引擎逐格相同 (cscript 尺 .build/k434_oracle.vbs), 含区域化数字("1,234.5")
+                // 与前后空白(" 42 ")两格 —— 那两格是「引擎收」的证明, 换成手写解析就答不出。
+                argVal = "vb6_CDbl(vb6_VariantFromValue(" + argVal + "))";
+            }
+        }
         // Fix 113j: ByRef **Variant** 形参 + 具体类型左值实参归一.
         // 很多 .ctl 的辅助函数写成 `text As Variant` (无 ByVal → ByRef), C 形参
         // 是 vb6_VARIANT*. 若实参是 BSTR/Long/Double 之类**具体的左值**

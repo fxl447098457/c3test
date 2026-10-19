@@ -996,11 +996,93 @@ std::string CCodeGen::builtinNoParamTableFormalCType(const std::string& callee, 
         {"vb6_SavePicture",   {"", "BSTR"}},                      // 0 = picture(void*) —— 不是串也不是数值
         {"vb6_Format",        {"", "BSTR", "int32_t", "int32_t"}}, // 0 是 VARIANT 形参, 由 conv_output
                                                                     //   的装箱那腿办, 这里刻意留空
+        // 账 #432 §B206 (第一百零三刀): 这一站之前**两级答案全空** (这张表没有它 +
+        // `getRuntimeParamCType` 也没有), 于是 `FormatDateTime(<一枚槽>, n)` 把整枚
+        // vb6_VARIANT 裸交进 `double` 形参 = cl C2440, **整份工程编不过**。真语料 44 处里
+        // 13 处吃这一格; 逐形真编译读数 = 十二形里**八形硬错误 / 四形编得过**
+        // (`.build/k672_k103_readings.md`)。两档都按 RTL 的 C 形参答
+        // (`vb6rtl_builtin.h:72` `vb6_FormatDateTime(double dateSerial, int32_t namedFormat)`)，
+        // 下游现成会发 `vb6_VariantToDouble` / `vb6_VariantToLong` —— 零新形状。
+        {"vb6_FormatDateTime", {"double", "int32_t"}},
+        // 账 #433 §B207 (第一百零五刀): 承面量测发现「date 形参吃 As String 实参」这一格**不止
+        // FormatDateTime 一枚** —— 十二形探针里 Year/Month/Day/Weekday/Hour/DateAdd/DatePart/
+        // DateDiff 连同 FormatDateTime 共 9 处**全部** C2440(无法从 BSTR 转换为 double)，两台同形。
+        // 本来只有 FormatDateTime 在这张表里(§B206 补的)，所以只有它走 rtParamType 这条臂;
+        // 其余 8 枚两张表都答不出这一位要 double ⇒ rtParamType 为空 ⇒ 整条臂跳过 ⇒ BSTR 裸递。
+        // 下面的 C 档**逐枚照 RTL 的 C 形参实读** (vb6rtl_builtin.h:332-344)，不是按名字推的。
+        // ⚠ 登这张表只让 **Variant 实参**那一半走既有提取 (vb6_VariantToDouble，本来就红、
+        //   登表即修)；**文本实参**那一半由 `builtinNoParamTableFormalIsDate` + arg_variant
+        //   里新加的那条臂办 (走 vb6_CDate 按日期解析)，两件事刻意分开记。
+        {"vb6_Year",        {"double"}},
+        {"vb6_Month",       {"double"}},
+        {"vb6_Day",         {"double"}},
+        {"vb6_Hour",        {"double"}},
+        {"vb6_Minute",      {"double"}},
+        {"vb6_Second",      {"double"}},
+        {"vb6_Weekday",     {"double", "int32_t"}},
+        {"vb6_DateAdd",     {"BSTR", "double", "double"}},
+        {"vb6_DateDiff",    {"BSTR", "double", "double", "int32_t", "int32_t"}},
+        {"vb6_DatePart",    {"BSTR", "double", "int32_t", "int32_t"}},
     };
     auto it176 = kNoTableFormalKinds176.find(callee);
     if (it176 == kNoTableFormalKinds176.end()) return "";
     if (pos >= it176->second.size()) return "";
     return it176->second[pos];
+}
+
+// 账 #433 §B207 (第一百零五刀): 「这一位要的是不是日期」—— 自带名单，**不从 C 签名反推**。
+// 为什么必须自带: C 侧全叫 `double`，而引擎对文本实参的答案**按 builtin 分两种**。实测
+// (cscript 代理, 尺 `.build/k207d_fdt.vbs`): `FormatDateTime("46027", 0)` = 2026/1/5 (纯数字
+// 文本按序列号那天, err=0)、`"2026/1/5"` = 2026/1/5、`"abc"` = 空串 + err=13 —— 全都按**日期
+// 解析**；而 `Sqr("4")` = 2、`Pow("2", 3)` = 8 是**数值折算**。拿 `rtParamType == "double"`
+// 当「这是日期位」的判据会把后者一起误伤，所以名单与 C 签名各走各的。
+//
+// 名单的位次照上面 kNoTableFormalKinds176 同一口径 (**发码位号**)，且逐枚对过 RTL 的 C 形参。
+// ⚠ 名单里故意**只有日期形参**：`vb6_DateAdd` 的 `number` 位也是 double，但它是**加的个数**
+//   不是日期 —— 引擎 `DateAdd("d", "3", d)` 的 "3" 是数量(3 天)，按日期解析成 1900-01-03 再加
+//   会答出别的日子。这一位不在名单里(见 arg_variant 那条臂的判据)，文本实参仍是 C2440。
+bool CCodeGen::builtinNoParamTableFormalIsDate(const std::string& callee, size_t argc,
+                                               size_t pos) const {
+    static const std::unordered_map<std::string, std::vector<int>> kDateFormalPos433 = {
+        {"vb6_FormatDateTime", {0}},
+        {"vb6_Year",     {0}}, {"vb6_Month",    {0}}, {"vb6_Day",   {0}},
+        {"vb6_Hour",     {0}}, {"vb6_Minute",   {0}}, {"vb6_Second",{0}},
+        {"vb6_Weekday",  {0}},
+        {"vb6_DateAdd",  {2}},                       // 位 2 是 date; 位 1 的 number 是「个数」
+        {"vb6_DateDiff", {1, 2}},                    // 两个 date 位
+        {"vb6_DatePart", {1}},
+    };
+    auto it = kDateFormalPos433.find(callee);
+    if (it == kDateFormalPos433.end()) return false;
+    if (pos >= argc) return false;
+    for (int p : it->second) { if (static_cast<size_t>(p) == pos) return true; }
+    return false;
+}
+
+// 账 #434 §B208 (第一百零六刀): 「这一位要的是不是数值」—— 自带名单，与日期那一问**逐位互斥**。
+// 出口 `vb6_CDbl`：八格与引擎逐格相同(尺 .build/k434_oracle.vbs)——
+//   Sqr("4")=2 / Abs("-4")=4 / Int("3.7")=3 / Sqr("1,234.5")=35.135…(区域化数字**也收**) /
+//   Abs(" 42 ")=42(空白**也收**) / Sqr("abc")=err13 / Sqr("")=err13 / **Sqr("2026/1/5")=err13**。
+// 最后一格是**判别格**：日期串进数值形参要**报错**，所以这一族绝不许复用 vb6_CDate
+//   (§B207 那一族才是日期解析)。`vb6_Val` 也不行 —— 它是 Val 的宽松语义(遇非数字就停、
+//   永不报错)，引擎这一格要的是 13。
+// ⚠ 位次照发码位号，且**逐位**登记：同一枚 vb6_DateAdd 的位 1 与位 2 答案不同(见上面那一问)。
+bool CCodeGen::builtinNoParamTableFormalWantsNumericFold(const std::string& callee, size_t argc,
+                                                        size_t pos) const {
+    static const std::unordered_map<std::string, std::vector<int>> kNumericFoldPos434 = {
+        // 一元数值族：位 0。RTL 的 C 形参逐枚实读 (vb6rtl_builtin.h:332-344 之外那一批)。
+        {"vb6_Sqr",  {0}}, {"vb6_Abs",  {0}}, {"vb6_Sgn",  {0}},
+        {"vb6_Int",  {0}}, {"vb6_Fix",  {0}}, {"vb6_Round", {0}},
+        {"vb6_Sin",  {0}}, {"vb6_Cos",  {0}}, {"vb6_Tan",  {0}},
+        {"vb6_Atn",  {0}}, {"vb6_Log",  {0}}, {"vb6_Exp",  {0}},
+        // 位 1 是**个数**(引擎 DateAdd("d","3","2026/1/5") = 2026/1/8)，位 2 才走日期名单。
+        {"vb6_DateAdd", {1}},
+    };
+    auto it = kNumericFoldPos434.find(callee);
+    if (it == kNumericFoldPos434.end()) return false;
+    if (pos >= argc) return false;
+    for (int p : it->second) { if (static_cast<size_t>(p) == pos) return true; }
+    return false;
 }
 
 bool CCodeGen::builtinNoParamTableStringSlot(const std::string& callee, size_t argc, size_t pos,
@@ -1121,11 +1203,21 @@ bool CCodeGen::cExprIsVariant(const std::string& cExpr) const {
         "vb6_GetAllSettings(",     // 注册表一组值 -> vb6_VARIANT (vb6rtl_registry.c:113)
         "vb6_IIfVariant(",         // IIf 的两个分支都是槽时选中的那一族
         "vb6_VariantArrayGetVal(", // 晚绑定数组元素读值 (vb6rtl_com.c:698)
-        "vb6_VariantByte(",
-        "vb6_VariantInt(",
-        "vb6_VariantSingle(",
-        "vb6_VariantDate(",
-        "vb6_VariantIdentity(",
+"vb6_VariantByte(",
+          "vb6_VariantInt(",
+          "vb6_VariantSingle(",
+          "vb6_VariantDate(",
+          "vb6_VariantIdentity(",
+          // ai/032 §6.6 / §6.9: C3 扩展的整数族装箱出口。boxToVariant 现在**点名**调它们
+          //   (SByte / UInteger / ULong / ULongLong / LongLong 五档), 所以每一枚都得登记 ——
+          //   登记的含义是「消费点按 Variant 接」, 漏一枚就是消费点按裸标量发码 (C2440/C2088)。
+          //   ⚠ 这五枚以前全靠 boxToVariant 的 default→vb6_VariantFromValue 的 _Generic 猜,
+          //   猜不中 SByte/UInteger (char:/wchar_t: 两档都装成 VT_I4), 丢的是类型身份。见 §6.9。
+          "vb6_VariantLongLong(",
+          "vb6_VariantULong(",
+          "vb6_VariantULongLong(",
+          "vb6_VariantSByte(",
+          "vb6_VariantUInteger(",
         //   ↑ 上面五枚是构造器 (vb6rtl_variant.h 的 static inline)。表里本来就有 Empty/Long/
         //     Double/String/Bool/Null/Object/Array 那一批, 缺的正是这五档 ——
         //     cgen_util_ctrl.cpp:2419 早就写着「vb6_VariantByte( 不在 cExprIsVariant 的清单里」
