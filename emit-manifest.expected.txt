@@ -654,3 +654,23 @@ sha256=4dcdf466631f809428c31ac9b073fd0c7e3e6fab11a5dc041def212f16971e45 ascii256
 #   每一行新增都能落进"计数头 / mint 出入口 / 腿块 / 块里那句赋值 / 缩进 / 接口临时量编号顺移"
 #   这几种本刀形状之一, OTHER = 0 (对照用的 BASE = 门 run 39212142582 那台 CI 编的 exe,
 #   即账 #450 收线之后的那一台)。
+#
+# 第一百二十八刀登记（账 #305 §B218 (甲) 刀1-c = 腿④ 过程出口 + 门上量出的两道夹）：
+#   门 run 39235503769（head afc486ec，attempt 1）= 12 job 里 11 绿 + 唯一红 Emit manifest。
+#   前两趟门的三条真红都收掉了：b187 两架构（腿②' claim）与 FlexGridX86（腿④ 第二道夹），
+#   b445 的十三条针（含新加的 W10 / W11）在一台 CI 编的 exe 上全绿。
+#   清单取自 CI 自己交的那份（gh run download 39235503769 -n emit-manifest）；本机 17:53 那枚
+#   C3.exe 复算的 486 行与它逐行相同（486/486，两栏哈希都核过）=> 还是那句前提：拿 CI 那台
+#   当口径之前，先证本机与它逐行相同。
+#   移动 43 行 / 新增 0 / 退场 0。逐行归因 = .build/k1039_guard2.py -> k1039_guard.json，
+#   基准两把尺：P = CI 为 head fae0f7ae 编的那台（腿②③ 之后、腿④ 之前），R2 = CI 为 head
+#   0abf328f 编的那台（带腿④ 与腿②'，只缺第二道夹）。三种具名原因，OTHER = 0：
+#     38 行 = 本刀：36 行只多出出口那一句 _Release（合计 +124 行、删 2 行），
+#            另 2 行 = b187 / B445 里出参写回那一格由裸拷贝换成 claim 块；
+#     4 行 = 别人的账 #451（PictureBox 那条 Line 的签名 7 -> 12）：Charts 2020 两行、
+#            tests/fdraw/FDemo.vbp、tests/pcline/PcDraw.vbp，改动行全是 vb6_ControlLine /
+#            vb6_Form_Line 的调用形状，与本刀无一行重叠；
+#     1 行 = 本刀夹具自己 tests/b445_refcount/Main.bas（新写 W10 / W11 两格判据），
+#            P 与 NEW 对同一份新源码的发码一字相同 => 它不是行为面。
+#   注：tests/VBFlexGridDemo 那一行这次没动 —— 腿④ 给它加的三句出口 Release 被第二道夹
+#   撤掉了，净效果与登记过的样子一字相同（尺 .build/k1034_flex.txt：那三行现在 0 处）。
