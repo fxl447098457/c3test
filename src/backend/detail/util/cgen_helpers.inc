@@ -283,6 +283,8 @@
     void trackIvrefLocalForRelease(const std::string& cName);  // B05: 登记局部接口变量
     // 账 #305 §B218 (甲) 腿④: 工程类那一档的登记入口 + 两档共用的那条夹
     void trackClassSlotForRelease(const std::string& cName, const std::string& clsName);
+    // 账 #305 §B218 (甲) 腿④ 第二道夹: 这一格的地址交给了外部 Declare ⇒ 出口不放手 (只撤类档)。
+    void dropClassSlotRelease(const std::string& expr);
     void trackSlotForRelease(const std::string& expr, bool isView,
                              const std::string& clsName);
     void emitIvrefScopeRelease();                     // B05: 过程出口发 Release

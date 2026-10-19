@@ -1,5 +1,5 @@
 ﻿# check_class_refcount_authority.ps1 - 账 #305 §B218 (甲)：工程类实例的引用计数只许有一位主人。
-# 九条钉（每条都能单独红，红了就说明同一问长出了第二位主人）：
+# 十条钉（每条都能单独红，红了就说明同一问长出了第二位主人）：
 #   ① 出入口那一对的 mint 各恰好 1 处，且住在 module/cgen_com.cpp（每条腿只许转调它）。
 #   ② 计数头 `int32_t __refcount;` 的 mint 恰好 1 处，且住在 cgen_iface_vtbl.cpp 的
 #      emitIfaceClassFields 里 —— 它必须紧跟 __comObj 那一句（ai/022 D19：偏移 0 恒是 __comObj）。
@@ -14,7 +14,7 @@
 #   ⑧ 过程出口那张带档的登记表 slotsToRelease_ 只许住在 5 份文件里（表本体 + 三个过程入口
 #      清表 + 主人本体），工程类那一档的注册口 trackClassSlotForRelease 恰好 2 处
 #      （Dim As <工程类> 的两条注册路：Class 符号 / projectClassNameOf 兜底）。
-# 退出码：0 = 九条都过；1 = 任一条红；2 = 找不到 src/backend。
+# 退出码：0 = 十条都过；1 = 任一条红；2 = 找不到 src/backend。
 param(
     [string]$Root = ""
 )
@@ -142,10 +142,25 @@ if ($primeCalls -ne 1) {
     $fail += ("out-slot claim call sites = " + $primeCalls + " (want exactly 1)")
 }
 
+# ⑩ 腿④ 的第二道夹 (地址交给外部 Declare ⇒ 那一格出口不放手): 撤登记的主人只许住在
+#    cgen_iface_vtbl.cpp 一处 (与登记那两位同文件 = 同一张表只有一位管), 站点恰好一处
+#    (`As Any` ByRef 实参那一站)。为什么单独钉: 那一格的写者在计数系统外面 (C3 的
+#    __vbaObjSetAddref 桩对工程内实例刻意不加引用), 出口再退 = 无对价的退 = 当场拆活对象。
+$dropDefs = @($backendFiles | Select-String -SimpleMatch 'void CCodeGen::dropClassSlotRelease')
+if ($dropDefs.Count -ne 1) {
+    $fail += ("dropClassSlotRelease definition sites = " + $dropDefs.Count + " (want exactly 1)")
+} elseif ($dropDefs[0].Path -notmatch 'cgen_iface_vtbl\.cpp$') {
+    $fail += ("dropClassSlotRelease moved into " + $dropDefs[0].Path)
+}
+$dropSites = CountOf 'dropClassSlotRelease(argValLv)'
+if ($dropSites -ne 1) {
+    $fail += ("dropClassSlotRelease call sites = " + $dropSites + " (want exactly 1)")
+}
+
 if ($fail.Count -gt 0) {
     Write-Host "CLASS-REFCOUNT-AUTHORITY FAIL"
     foreach ($f in $fail) { Write-Host ("  - " + $f) }
     exit 1
 }
-Write-Host "CLASS-REFCOUNT-AUTHORITY OK (1 pair mint / 1 header / 2 leg consumers / 3+9 formals / 7 roster / 6 literal files / 0 stale / 5 registry files + 2 registrants / 1+1 out-slot)"
+Write-Host "CLASS-REFCOUNT-AUTHORITY OK (1 pair mint / 1 header / 2 leg consumers / 3+9 formals / 7 roster / 6 literal files / 0 stale / 5 registry files + 2 registrants / 1+1 out-slot / 1+1 foreign-write drop)"
 exit 0

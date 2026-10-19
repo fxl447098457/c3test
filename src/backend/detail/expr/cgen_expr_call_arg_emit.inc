@@ -683,6 +683,10 @@
                         && !isConstMacro;
                     if (isLValue) {
                         // 左值: 变量名、数组元素、me->field、(*ptr) 解引用 — 可以取地址
+                        // 账 #305 §B218 (甲) 腿④ 第二道夹: 把一个**标识符**格子的地址交给外部
+                        // Declare ⇒ 这一格从此由外面写, 本过程没经自己的主人拿过它。若它正好在
+                        // 出口放手那张表里 (工程类那一档), 就把这一条撤掉 (只动类档, 视图档不动)。
+                        if (isSimpleIdent) dropClassSlotRelease(argValLv);
                         argVal = "(void*)&(" + argVal + ")";
                     } else if (!argUdtRetCType090q.empty()) {
                         // Fix 090q: 实参是返回 UDT 的函数调用 — VB6 把返回值拷入临时

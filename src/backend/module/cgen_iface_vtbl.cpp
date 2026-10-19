@@ -705,6 +705,20 @@ void CCodeGen::trackIvrefLocalForRelease(const std::string& cName) {
     trackSlotForRelease(cName, true, std::string());
 }
 
+// 账 #305 §B218 (甲) 腿④ 的第二道夹: 这一格的**地址**交出去过 —— 写它的那一站在计数系统外面
+// (一枚外部 Declare 的 `As Any` ByRef 实参, 例如 VB6 运行时的 __vbaObjSetAddref)。本过程从没
+// 经自己的主人手里拿过这一枚引用, 出口就不能放手: C3 的那枚桩对**工程内实例**刻意不 AddRef
+// (结构体首字段不是 vtable, 加了就 0xC0000005 —— Fix 164x2), 于是"出口退一枚"= 无对价的退。
+// 门 #763 实测 = FlexGridX86 起窗期: `Dim This As VBFlexGrid` + `FlexObjSetAddRef This, uId`
+// 之后那一句出口 Release 把还活着的控件当场拆掉, 主窗口压根不出来。
+// 只撤工程类那一档: 视图那一档的引用是本站 QueryInterface 出来的, 与外部写者无关。
+void CCodeGen::dropClassSlotRelease(const std::string& expr) {
+    for (auto it = slotsToRelease_.begin(); it != slotsToRelease_.end();) {
+        if (!it->isView && it->expr == expr) it = slotsToRelease_.erase(it);
+        else ++it;
+    }
+}
+
 // 账 #305 §B221: `x->vt-><slot>(x, args)` 这一发射形状只许有一位作者 —— com_bind 的
 // ivref 臂与「接收者是视图值的调用」那一站 (形②) 都调它。槽解析不出来 = 这个成员不在
 // 这张面上，返回空串让调用点继续往下落 (契约检查另有诊断)。

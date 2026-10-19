@@ -86,8 +86,8 @@ End Sub
 
 ' W7 = 形参那一档 (今天刻意留在计数系统外面): 被调方里的 Set 形参 = Nothing
 ' 不许拆掉调用方还在用的那一枚 —— 这条就是 procClassFormals_ 那面夹的行为针。
-Public Sub DropByVal(ByVal o As C445)
-    Set o = Nothing
+Public Sub DropByVal(ByVal oF As C445)
+    Set oF = Nothing
 End Sub
 
 Sub W7ParamBorrow()
@@ -140,14 +140,38 @@ Public Sub GiveFreshRef(p As Object)
 End Sub
 
 Sub W10OutSlot()
-    Dim o As C445
+    Dim held10 As C445
     Dim t0 As Long
     t0 = Terms
-    Set o = New C445
-    GiveFreshRef o
-    Debug.Print "W10-live-terms=" & (Terms - t0) & " n=" & o.N
-    Set o = Nothing
+    Set held10 = New C445
+    GiveFreshRef held10
+    Debug.Print "W10-live-terms=" & (Terms - t0) & " n=" & held10.N
+    Set held10 = Nothing
     Debug.Print "W10-gone-terms=" & (Terms - t0)
+End Sub
+
+' W11 = 腿④ 的第二道夹: 把一格工程类局部的**地址**交给外部 Declare (VB6 运行时的
+'       __vbaObjSetAddref 那一族) ⇒ 这一格由外面写。C3 的那枚桩对工程内实例刻意不 AddRef
+'       (结构体首字段不是 vtable), 所以本过程手里没有这一枚引用的对价, 出口就不许退它。
+'       门 #763 的 FlexGridX86 = 就是这个形状把还活着的控件当场拆掉。
+Public Declare PtrSafe Function SetAddRefAny Lib "msvbvm60.dll" Alias "__vbaObjSetAddref" _
+    (ByRef Destination As Any, ByVal lpObject As LongPtr) As Long
+
+Sub W11ForeignSlot()
+    Dim borrowed As C445
+    Dim own11 As C445
+    Dim t0 As Long
+    Dim n As Long
+    Dim termsMid As Long
+    Dim termsEnd As Long
+    t0 = Terms
+    Set own11 = New C445
+    SetAddRefAny borrowed, ObjPtr(own11)
+    n = borrowed.N
+    termsMid = Terms - t0
+    Set own11 = Nothing
+    termsEnd = Terms - t0
+    Debug.Print "W11-n=" & n & " terms=" & termsMid & " owner-gone=" & termsEnd
 End Sub
 
 Sub Main()
@@ -161,5 +185,6 @@ Sub Main()
     W8ScopeExit
     W9ReturnSlot
     W10OutSlot
+    W11ForeignSlot
     Debug.Print "B445-DONE"
 End Sub

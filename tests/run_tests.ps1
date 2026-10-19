@@ -7613,6 +7613,9 @@ if ($Category -in @("all", "run", "vbp")) {
     #   W10 = 腿②' 那一格: 被调方现造一枚写进调用方的出参槽, 出口之后调用方还读得到 (n=7)
     #     且这一刻一次没出厂 (terms=0), 调用方自己置空时才出厂 (gone-terms=1)。这一格是门 #763
     #     三条红 (b187 两架构 + FlexGrid x86) 的靶: 出参槽不 claim, 被调方出口就拆了它。
+    #   W11 = 腿④ 的第二道夹: 一格工程类局部的地址交给了外部 Declare (VB6 运行时
+    #     __vbaObjSetAddref 那一族, 对工程内实例刻意不 AddRef) ⇒ 本过程手里没有这一枚的对价,
+    #     出口不许退 (FlexGridX86 起窗期那一条红就是这个形状把活控件拆了)。
     #   BASE (= 账 #450 收线那台 CI 编的 exe, run 39212142582 的 c3-exe 工件) 的读数 =
     #   W1/W3/W4/W8 全 0 ⇒ 这四格出厂次数就是本刀的行为面; 其余五格两台同值 (尺:
     #   NEW .build/k1003_n64.txt + _n32.txt / BASE .build/k1003_b64.txt + _b32.txt)。
@@ -7620,6 +7623,7 @@ if ($Category -in @("all", "run", "vbp")) {
                     "W4-terms=2 null=1", "W5-made=1 sum=14", "W6-terms=0 n=7",
                     "W7-terms=0 n=7", "W8-terms=200", "W9-terms=0 n=7 twice=7",
                     "W10-live-terms=0 n=7", "W10-gone-terms=1",
+                    "W11-n=7 terms=0 owner-gone=1",
                     "B445-DONE")
     Test-Vbp 'b445_class_slot_refcount' "$Tests\b445_refcount\B445.vbp" $b445Needles
     Test-Vbp 'b445_class_slot_refcount_x86' "$Tests\b445_refcount\B445.vbp" $b445Needles -Arch "x86"
@@ -7630,13 +7634,21 @@ if ($Category -in @("all", "run", "vbp")) {
         'if (__clsold0) vb6_cls_C445_Release(__clsold0);',
         'if (!m_auto) m_auto = vb6_cls_C445_New();',
         'if (t) vb6_cls_C445_Release(t);',
-        'if ((*p)) vb6_cls_C445_AddRef((*p));')
+        'if ((*p)) vb6_cls_C445_AddRef((*p));',
+        '(void*)&(borrowed)')
+    # 反面针: borrowed 那一格的地址交给了外部 Declare (__vbaObjSetAddref) ⇒ 写它的主人在
+    #   计数系统外面, 出口不许退它 (退 = 无对价的退, 门 #763 的 FlexGridX86 就死在这一句上)。
+    Test-EmitcAbsent 'b445_foreign_written_slot_keeps_no_exit_release' @(
+        "$Tests\b445_refcount\B445.vbp") @(
+        'if (borrowed) vb6_cls_C445_Release(borrowed);')
     # 反面针: 形参那一档整个留在计数系统外面 (今天没有一站在实参处 claim, 让形参放手
-    #   就是拆调用方还在用的那枚实例)。名字 o 只出现在 DropByVal 的形参槽上。
+    #   就是拆调用方还在用的那枚实例)。形参起名 oF = 专属名: 门 #764 上这条针红过一轮, 红得
+    #   没有道理 —— 别的原因没有, 只是 W10 新加的那格局部也叫 o, 而反面针钉的是**名字**;
+    #   同名局部在出口那一行 (Release(o)) 把它满足了。反面针要钉形状或专属名, 不钉常用名。
     Test-EmitcAbsent 'b445_class_formal_stays_out_of_count' @(
         "$Tests\b445_refcount\B445.vbp") @(
-        'vb6_cls_C445_AddRef(o)',
-        'vb6_cls_C445_Release(o)',
+        'vb6_cls_C445_AddRef(oF)',
+        'vb6_cls_C445_Release(oF)',
         'vb6_cls_C445_Release(vb6_ret_MakeOne)')
     # 账 #305 §B188 ④ (第九十刀): 出厂那一腿的**尾巴**。`Class_Terminate` 抛错时, `_Destroy` 里体之后
     # 那三截(字段 BSTR / 数组字段 / vb6_Free(me))曾被 ComObj_Release 的帧一起 longjmp 跳掉 —— 实测每枚
