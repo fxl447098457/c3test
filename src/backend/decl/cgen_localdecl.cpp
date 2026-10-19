@@ -327,8 +327,14 @@ void CCodeGen::emitLocalDeclCode(LocalDeclStmt& node) {
                     if (!ivrefCType(simple.name).empty()) {
                         knownIvrefVars_[lower] = simple.name;
                         isLocalIvrefType = true;
-                        // B05: 过程级接口变量在正常出口处 Release 自己那一份引用
-                        trackIvrefLocalForRelease(cIdent(var.name));
+                        // B05: 过程级接口变量在正常出口处 Release 自己那一份引用。
+                        // 账 #305 §B218 第一百三十三刀: 这一站与上面两条工程类腿 (第 268 / 342 行) 共用
+                        // **同一道闸** —— Static / Static Sub 里那一格 C 侧发的是 static 存储, 槽跨调用还
+                        // 活着, 出口放手 = 下一次进来读已释放块 (实测: 一枚 `Static sv As IB448` 调四次,
+                        // 第三次出口就把还有人握着的实例退到 0, 第四次 0xC0000374)。
+                        if (!var.isStatic && !inStaticProc_) {
+                            trackIvrefLocalForRelease(cIdent(var.name));
+                        }
                     } else if (localIsInterface) {
                         // P6.4: 接口类 → knownIfaceVars_ (而非 knownClassVars_)
                         knownIfaceVars_[lower] = localClsName;
