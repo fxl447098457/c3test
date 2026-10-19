@@ -368,12 +368,17 @@
                 clsOfRhs = node.value ? inferClassTypeOfExpr(*node.value) : std::string();
                 outSlotClaim = !clsOfRhs.empty();
             }
-            const bool rhsIsFresh = node.value && node.value->kind == ASTNodeKind::NewExpr;
+            // 账 #305 §B218 (甲) 刀3: 「不 claim」那一臂现在有两个成因 —— `New <类>`, 以及
+            // 工程内过程交回来的那一枚 (自带对价)。问句只有一处: rhsTransfersProjectRef。
+            bool rhsTransferred = node.value && node.value->kind == ASTNodeKind::NewExpr;
+            if (!rhsTransferred && node.value) {
+                rhsTransferred = rhsTransfersProjectRef(*node.value);
+            }
             if (!clsOfSlot.empty() && target.find('(') == std::string::npos
                 && !procClassFormals_.count(targetLower)) {
-                emitClassSlotRefSet(target, clsOfSlot, value, rhsIsFresh, false);
+                emitClassSlotRefSet(target, clsOfSlot, value, rhsTransferred, false);
             } else if (outSlotClaim) {
-                emitClassSlotRefSet(target, clsOfRhs, value, rhsIsFresh, true);
+                emitClassSlotRefSet(target, clsOfRhs, value, rhsTransferred, true);
             } else {
                 c_.emitLine(target + " = " + value + ";  /* Set */");
             }

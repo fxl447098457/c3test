@@ -339,9 +339,10 @@ void CCodeGen::emitClassFactory(Module& module) {
 // 站点抄一遍就多一位主人 (#167/#231/#245/#298/#443 那一族)。valueExpr 传空串 = 置空。
 // 顺序 = **先 claim 新、再 release 旧** —— 接口那族 emitIvrefQiSet 撞过的同一件事:
 // 先放旧会让 `Set a = a` 在自己还没换掉之前把自己拆掉。
-// rhsIsFreshNew = 右侧就是 `New <类>`: 工厂交出的那一枚引用本来就是给这个槽的 ⇒ 移交、不 claim。
+// rhsTransferred = 右侧那枚引用**已经带着对价交给这一格了**: 两种成因 (`New <类>` 与工程内过程
+// 的调用, 见 rhsTransfersProjectRef) ⇒ 移交、不 claim。
 void CCodeGen::emitClassSlotRefSet(const std::string& target, const std::string& className,
-                                   const std::string& valueExpr, bool rhsIsFreshNew, bool outSlot) {
+                                   const std::string& valueExpr, bool rhsTransferred, bool outSlot) {
     const std::string clsStruct = "vb6_cls_" + cIdent(className);
     if (outSlot) {
         // 腿②' = 写进一枚**活在本过程之外**的槽 (ByRef 出参那座桥的写回站)。这里的判断只有一条
@@ -350,7 +351,7 @@ void CCodeGen::emitClassSlotRefSet(const std::string& target, const std::string&
         c_.emitLine("{  /* 账 #305 (甲) 腿②': Set 出参槽 " + target + " */");
         c_.indent();
         c_.emitLine(target + " = " + valueExpr + ";");
-        if (!rhsIsFreshNew) {
+        if (!rhsTransferred) {
             c_.emitLine("if (" + target + ") " + clsStruct + "_AddRef(" + target + ");");
         }
         c_.dedent();
@@ -364,7 +365,7 @@ void CCodeGen::emitClassSlotRefSet(const std::string& target, const std::string&
     c_.emitLine(clsStruct + "* " + oldSlot + " = " + target + ";");
     if (!valueExpr.empty()) {
         c_.emitLine(target + " = " + valueExpr + ";");
-        if (!rhsIsFreshNew) {
+        if (!rhsTransferred) {
             c_.emitLine("if (" + target + ") " + clsStruct + "_AddRef(" + target + ");");
         }
     } else {
@@ -373,6 +374,26 @@ void CCodeGen::emitClassSlotRefSet(const std::string& target, const std::string&
     c_.emitLine("if (" + oldSlot + ") " + clsStruct + "_Release(" + oldSlot + ");");
     c_.dedent();
     c_.emitLine("}");
+}
+
+// 账 #305 §B218 (甲) 刀3: 「这一发右值是不是自带一枚移交过来的引用」—— 上面那位主人「不 claim」
+// 那条臂的第二个成因, 与 `New` 同一条契约, 所以只在这一处问, 不在站点各抄一遍。
+// 契约的实物 (三台工程同形, 尺 `.build/k1081_proj_emit.c`): 被调方 `Set <返回槽> = <局部/字段>`
+// 走 腿② 取走一枚, 出口 腿④ 退的是它自己那枚**局部**, 而返回槽自带那道夹不放手 ⇒ 交出来的指针
+// 本身带一枚对价引用; 调用方再 claim 就是每调用净 +1, 那一枚永远没人退 (实测 W6 / W9 `terms=0`)。
+// 刻意只认**裸标识符 callee** 且模块符号表认到 Function / Property Get、返回类型是工程 Class:
+// 带接收者的成员调用 (`obj.Method()`) 走的是另一套契约 (COM 打包 / 视图 QI), 本刀不碰。
+bool CCodeGen::rhsTransfersProjectRef(const ASTNode& expr) const {
+    if (expr.kind != ASTNodeKind::IndexOrCallExpr) return false;
+    const auto& call = static_cast<const IndexOrCallExpr&>(expr);
+    if (!call.callee || call.callee->kind != ASTNodeKind::IdentifierExpr) return false;
+    const std::string name = static_cast<const IdentifierExpr&>(*call.callee).name;
+    const Symbol* fn = symTab_.lookupModule(name);
+    if (!fn || (fn->kind != SymbolKind::Function && fn->kind != SymbolKind::PropertyGet)
+        || fn->variableTypeName.empty()) {
+        return false;
+    }
+    return !projectClassNameOf(fn->variableTypeName).empty();
 }
 
 // P6.4+: 类模块默认实例 (VB_PredeclaredId=True) 惰性单例访问器.
