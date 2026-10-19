@@ -23,7 +23,8 @@
 #   ⑭ 移交值那一问的三形只住一个函数: 成员返回类那一问 
 #      恰好 1 处、 基名那一问  恰好 2 处 (含本刀那一臂,
 #      另一处是 myBaseClassOf)、接口视图那道排除  恰好 1 处。
-# 退出码：0 = 十四条都过；1 = 任一条红；2 = 找不到 src/backend。
+#   ⑮ Static 那道闸 `!var.isStatic && !inStaticProc_` 全仓恰好 3 处、且全住在一份文件 (cgen_localdecl.cpp)：登记「出口放手」的三条腿 (两条工程类 + 一条接口视图) 共用同一道闸 —— 第一百三十三刀补的就是视图那条腿缺的那半。视图注册口 `trackIvrefLocalForRelease(cIdent(var.name));` 恰好 1 处。
+# 退出码：0 = 十五条都过；1 = 任一条红；2 = 找不到 src/backend。
 param(
     [string]$Root = ""
 )
@@ -217,10 +218,25 @@ $xferIvref = CountOf 'ivrefCType(retCls)'
 if ($xferIvref -ne 1) {
     $fail += ("interface-view exclusion sites = " + $xferIvref + " (want exactly 1)")
 }
+
+# ⑮ 第一百三十三刀: Static 那一档「出口不许放手」这条闸, 三条腿都得有 (两条工程类腿本来就有,
+#    视图那条腿是这一刀补的)。登记站点与闸成对: 3 处登记 <=> 3 处闸, 少一半就是这道闸被拆了。
+$gateN = CountOf '!var.isStatic && !inStaticProc_'
+if ($gateN -ne 3) {
+    $fail += ("static-gate sites = " + $gateN + " (want exactly 3: two project-class legs + the interface-view leg)")
+}
+$gateFiles = @(FilesOf '!var.isStatic && !inStaticProc_')
+if ($gateFiles.Count -ne 1 -or $gateFiles[0] -ne 'cgen_localdecl.cpp') {
+    $fail += ("static-gate files = " + ($gateFiles -join ', ') + " (want exactly cgen_localdecl.cpp)")
+}
+$ivrefReg = CountOf 'trackIvrefLocalForRelease(cIdent(var.name));'
+if ($ivrefReg -ne 1) {
+    $fail += ("interface-view release-registration sites = " + $ivrefReg + " (want exactly 1)")
+}
 if ($fail.Count -gt 0) {
     Write-Host "CLASS-REFCOUNT-AUTHORITY FAIL"
     foreach ($f in $fail) { Write-Host ("  - " + $f) }
     exit 1
 }
-Write-Host "CLASS-REFCOUNT-AUTHORITY OK (1 pair mint / 1 header / 2 leg consumers / 3+9 formals / 7 roster / 6 literal files / 0 stale / 5 registry files + 2 registrants / 1+1 out-slot / 1+1 foreign-write drop / 1 field-teardown shape + file / 5 field-type questions / 3 transfer-question sites / 1+2+1 transfer-arm questions)"
+Write-Host "CLASS-REFCOUNT-AUTHORITY OK (1 pair mint / 1 header / 2 leg consumers / 3+9 formals / 7 roster / 6 literal files / 0 stale / 5 registry files + 2 registrants / 1+1 out-slot / 1+1 foreign-write drop / 1 field-teardown shape + file / 5 field-type questions / 3 transfer-question sites / 1+2+1 transfer-arm questions / 3 static-gate sites in 1 file + 1 ivref registration)"
 exit 0
