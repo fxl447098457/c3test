@@ -1628,6 +1628,19 @@ function Test-BoxTempReclaim {
 
 # 账 #305 §B221/#449 (第一百二十五刀): 「这一枚表达式是视图还是实例」只许一位主人 —— vtable 发射形状
 # 恰好 1 处 · ifaceViewOfExpr 消费文件恰好 4 份 · "vb6_ivref_" 字面量文件恰好 6 份
+function Test-ClassRefcountAuthority {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] class_refcount_authority ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\check_class_refcount_authority.ps1" 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        $out | Select-Object -First 8 | ForEach-Object { Write-Host "  $_" }
+    }
+}
 function Test-IfaceViewAuthority {
     $script:total++
     Write-Host -NoNewline "  [STATIC] iface_view_authority ... "
@@ -7583,6 +7596,32 @@ if ($Category -in @("all", "run", "vbp")) {
     Test-EmitcAbsent 'b448_iface_view_never_mints_a_class_struct_for_an_interface' @(
         "$Tests\b448_iface_ret\B448.vbp") @(
         '(vb6_cls_IB448*)')
+
+    # 账 #305 §B218 (甲) 第一百二十七刀 = 刀1-a/b: 工程类实例的引用计数头扩到每一枚工程类,
+    #   覆写 (腿②) 与置空 (腿③) 两条腿接到同一位主人 emitClassSlotRefSet。
+    #   读数 (两台一致, 尺 = .build/k982_run.txt / .build/k984_new.txt):
+    #   W1 置空 1 / W3 自赋值 1 / W4 覆写模块级槽 2 = 这一刀新出厂的次数;
+    #   W2 别名 0 (置空 a 之后 b 还读得到 7) / W5 As New 只造一枚 / W6 工厂那枚还活着 /
+    #   W7 形参里 Set = Nothing 没拆调用方那枚 = 四条反面证人, 与 BASE 逐字相同。
+    #   BASE (门 #757 那台 CI 编的 exe, .build/k983_run.txt) 的读数 = W1/W3/W4 全 0,
+    #   即这三格出厂次数就是本刀的行为面; 证人四格两边同值 ⇒ 没有提前拆、也没有拆两次。
+    $b445Needles = @("W1-terms=1 null=1", "W2-terms=0 n=7", "W3-terms=1 n=7",
+                    "W4-terms=2 null=1", "W5-made=1 sum=14", "W6-terms=0 n=7",
+                    "W7-terms=0 n=7", "B445-DONE")
+    Test-Vbp 'b445_class_slot_refcount' "$Tests\b445_refcount\B445.vbp" $b445Needles
+    Test-Vbp 'b445_class_slot_refcount_x86' "$Tests\b445_refcount\B445.vbp" $b445Needles -Arch "x86"
+    # 发码针: 出入口那一对的 mint / claim / release / 以及 R6 那条守卫仍是一枚裸赋值。
+    Test-EmitcShape 'b445_slot_leg_shapes' @("$Tests\b445_refcount\B445.vbp") @(
+        'unsigned long vb6_cls_C445_Release(void* instance) {',
+        'if (b) vb6_cls_C445_AddRef(b);',
+        'if (__clsold0) vb6_cls_C445_Release(__clsold0);',
+        'if (!m_auto) m_auto = vb6_cls_C445_New();')
+    # 反面针: 形参那一档整个留在计数系统外面 (今天没有一站在实参处 claim, 让形参放手
+    #   就是拆调用方还在用的那枚实例)。名字 o 只出现在 DropByVal 的形参槽上。
+    Test-EmitcAbsent 'b445_class_formal_stays_out_of_count' @(
+        "$Tests\b445_refcount\B445.vbp") @(
+        'vb6_cls_C445_AddRef(o)',
+        'vb6_cls_C445_Release(o)')
     # 账 #305 §B188 ④ (第九十刀): 出厂那一腿的**尾巴**。`Class_Terminate` 抛错时, `_Destroy` 里体之后
     # 那三截(字段 BSTR / 数组字段 / vb6_Free(me))曾被 ComObj_Release 的帧一起 longjmp 跳掉 —— 实测每枚
     # 抛错的出厂漏一份实例资源: x64 每枚 35~37 字节、x86 每枚 17 字节, 多一枚 20 字符 String 字段就涨到
@@ -8263,6 +8302,7 @@ if ($Category -in @("all", "compile")) {
     Test-ObjectSlotBoxing
     Test-BoxTempReclaim
     Test-IfaceViewAuthority
+    Test-ClassRefcountAuthority
     Test-ConvStrictParse
     Test-DateConv
     Test-IsPredText
