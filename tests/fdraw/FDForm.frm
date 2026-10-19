@@ -14,13 +14,13 @@ Begin VB.Form FDForm
       Top             =   1560
    End
    Begin VB.PictureBox picP
-      Height          =   3000
-      Left            =   3360
-      ScaleHeight     =   2940
-      ScaleWidth      =   2940
+      Height          =   1680
+      Left            =   3720
+      ScaleHeight     =   1680
+      ScaleWidth      =   1680
       TabIndex        =   3
-      Top             =   120
-      Width           =   3000
+      Top             =   60
+      Width           =   1680
    End
 End
 Attribute VB_Name = "FDForm"
@@ -325,30 +325,34 @@ Debug.Print "FD27-melinestart=" & TF(ok27) & " raw=" & CStr(rowY0) & "," & CStr(
     ' was. After forwarding, has1=0 => start from picP.CurrentX/CurrentY, pen lands on the endpoint.
     ' Two-sided like FD26/FD27: a colour scan that comes back empty then finds the rows, AND the pen
     ' on the endpoint. The pen half is what rejects "read the two given coordinates as the START" --
-    ' that shape leaves the pen untouched (40 != 120). picP is its own surface (its own DC) so its
-    ' colours do not crosstalk with the Form-side judges. The segment stays inside picP's client
-    ' area (3000x3000 twips ~= 200x200 px @96dpi, holding x<=120 / y<=190); see
-    ' draw-fixture-client-area-pixels.
+    ' that shape leaves the pen untouched (20 != 100).
+    ' ⚠ picP sits at the **far right** on purpose, and this is not cosmetic: a child window paints
+    ' OVER the form's DC, so the first version of this block (Left = 3360 twips ~ 280 px) covered
+    ' FD25's magenta line at x ~ 300 px and turned THAT judge red on the gate (run 39232007659:
+    ' FD28/FD29 green, FD25-bareline raw=-1,-1 where it had read row 38 two runs earlier).
+    ' Every existing judge on this form lives at x <= 306, so picP starts at 3720 twips (~310 px)
+    ' and is 1680 twips square (~112 px) -- the whole of it inside the form's 426 px client area,
+    ' with the two segments kept at x,y <= 110 (picP's own client, see draw-fixture-client-area-pixels).
     Dim dp As LongPtr
     Dim ok28 As Boolean, ok29 As Boolean
     Dim rowP0 As Long, rowP As Long
     Dim rowQ0 As Long, rowQ As Long
     picP.ScaleMode = vbPixels
     dp = GetDC(picP.hwnd)
-    picP.CurrentX = 40
-    picP.CurrentY = 30
-    rowP0 = FirstRowOfColor(dp, vbCyan, 35, 125, 25, 105)
-    picP.Line -(120, 100), vbCyan
-    rowP = FirstRowOfColor(dp, vbCyan, 35, 125, 25, 105)
-    ok28 = (rowP0 < 0) And (rowP > 0) And (picP.CurrentX = 120) And (picP.CurrentY = 100)
+    picP.CurrentX = 20
+    picP.CurrentY = 20
+    rowP0 = FirstRowOfColor(dp, vbCyan, 15, 105, 15, 65)
+    picP.Line -(100, 60), vbCyan
+    rowP = FirstRowOfColor(dp, vbCyan, 15, 105, 15, 65)
+    ok28 = (rowP0 < 0) And (rowP > 0) And (picP.CurrentX = 100) And (picP.CurrentY = 60)
     Debug.Print "FD28-piclinestart=" & TF(ok28) & " raw=" & CStr(rowP0) & "," & CStr(rowP) & _
                " pen=" & CStr(picP.CurrentX) & "," & CStr(picP.CurrentY)
-    picP.CurrentX = 40
-    picP.CurrentY = 120
-    rowQ0 = FirstRowOfColor(dp, vbYellow, 35, 125, 115, 195)
-    picP.Line -(120, 190), vbYellow
-    rowQ = FirstRowOfColor(dp, vbYellow, 35, 125, 115, 195)
-    ok29 = (rowQ0 < 0) And (rowQ > 0) And (picP.CurrentX = 120) And (picP.CurrentY = 190)
+    picP.CurrentX = 20
+    picP.CurrentY = 70
+    rowQ0 = FirstRowOfColor(dp, vbYellow, 15, 105, 65, 115)
+    picP.Line -(100, 110), vbYellow
+    rowQ = FirstRowOfColor(dp, vbYellow, 15, 105, 65, 115)
+    ok29 = (rowQ0 < 0) And (rowQ > 0) And (picP.CurrentX = 100) And (picP.CurrentY = 110)
     Debug.Print "FD29-piclinestart2=" & TF(ok29) & " raw=" & CStr(rowQ0) & "," & CStr(rowQ) & _
                " pen=" & CStr(picP.CurrentX) & "," & CStr(picP.CurrentY)
     r = ReleaseDC(picP.hwnd, dp)
