@@ -257,6 +257,24 @@ void CCodeGen::emitClassFactory(Module& module) {
                 c_.emitLine("vb6_BSTR_Free(me->" + cIdent(var.name) + ");");
             } else if (var.isDynamicArray || !var.dimensions.empty()) {
                 c_.emitLine("if (me->" + cIdent(var.name) + ") vb6_SA_Destroy(me->" + cIdent(var.name) + ");");
+            } else if (var.asType) {
+                // 账 #305 §B218 (甲) 腿⑤: 字段那一枚引用**由字段自己握** —— 覆写(腿②)与置空(腿③)
+                // 两站从第一刀起就问同一位主人, 只有出厂这一站缺着: 持有者拆掉时字段里那枚没人退,
+                // 于是每枚被字段持有的实例永不走 Class_Terminate (漏, 不是崩)。
+                // 类名问 `mapTypeRef` = 发这枚字段那一行用的同一个答案, 不开第二问;
+                // 答出来不是 `vb6_cls_X*` 那一个形状 (As Object 是 void* / As Variant 是槽 /
+                // 外部接口是裸指针) 就维持今天的"不动"。
+                const std::string fieldCType = mapTypeRef(var.asType.get());
+                const std::string prefix = "vb6_cls_";
+                if (fieldCType.size() > prefix.size() + 1 &&
+                    fieldCType.compare(0, prefix.size(), prefix) == 0 &&
+                    fieldCType[fieldCType.size() - 1] == '*' &&
+                    fieldCType.find(' ') == std::string::npos) {
+                    const std::string fieldStruct = fieldCType.substr(0, fieldCType.size() - 1);
+                    c_.emitLine("if (me->" + cIdent(var.name) + ") " + fieldStruct +
+                                "_Release(me->" + cIdent(var.name) +
+                                ");  /* 账 #305 (甲) 腿⑤: 字段那一枚引用出厂放手 */");
+                }
             }
         }
     }
