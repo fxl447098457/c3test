@@ -11,7 +11,10 @@
 #      两条腿各问一次）。
 #   ⑥ 字面量 __refcount 的主人名单 = 在册那 6 份；RTL 那一处必须是 vb6comserver_obj.c 的注释。
 #   ⑦ 陈旧注释「没有引用计数」（具体类那三处）不许活着 —— 甲落地之后这句话是错的。
-# 退出码：0 = 七条全过；1 = 任一条红；2 = 找不到 src/backend。
+#   ⑧ 过程出口那张带档的登记表 slotsToRelease_ 只许住在 5 份文件里（表本体 + 三个过程入口
+#      清表 + 主人本体），工程类那一档的注册口 trackClassSlotForRelease 恰好 2 处
+#      （Dim As <工程类> 的两条注册路：Class 符号 / projectClassNameOf 兜底）。
+# 退出码：0 = 八条都过；1 = 任一条红；2 = 找不到 src/backend。
 param(
     [string]$Root = ""
 )
@@ -115,10 +118,22 @@ if ($stale -ne 0) {
     $fail += ("stale '没有引用计数' comment lines = " + $stale + " (want 0)")
 }
 
+# ⑧ 出口那一腿的登记面
+$srFiles = FilesOf 'slotsToRelease_'
+if ($srFiles.Count -ne 5) {
+    $fail += ("slotsToRelease_ files = " + $srFiles.Count +
+              " (want exactly 5): " + ($srFiles -join ', '))
+}
+$csSites = CountOf 'trackClassSlotForRelease(cIdent(var.name)'
+if ($csSites -ne 2) {
+    $fail += ("trackClassSlotForRelease registrant sites = " + $csSites +
+              " (want exactly 2)")
+}
+
 if ($fail.Count -gt 0) {
     Write-Host "CLASS-REFCOUNT-AUTHORITY FAIL"
     foreach ($f in $fail) { Write-Host ("  - " + $f) }
     exit 1
 }
-Write-Host "CLASS-REFCOUNT-AUTHORITY OK (1 pair mint / 1 header / 2 leg consumers / 3+9 formals / 7 roster / 6 literal files / 0 stale)"
+Write-Host "CLASS-REFCOUNT-AUTHORITY OK (1 pair mint / 1 header / 2 leg consumers / 3+9 formals / 7 roster / 6 literal files / 0 stale / 5 registry files + 2 registrants)"
 exit 0

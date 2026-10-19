@@ -100,6 +100,35 @@ Sub W7ParamBorrow()
     Set a = Nothing
 End Sub
 
+' W8 = 腿④ 过程出口: 每一轮现造的那一枚在自己那一格出口放手 (改前一条都没有)。
+'      这一形就是 (甲) 的靶 = 泄漏尺 w-newonly 那一路: 循环 200 次, 出厂恰好 200 次。
+Private Sub W8One()
+    Dim a As C445
+    Set a = New C445
+End Sub
+
+Sub W8ScopeExit()
+    Dim t0 As Long
+    Dim i As Long
+    t0 = Terms
+    For i = 1 To 200
+        W8One
+    Next
+    Debug.Print "W8-terms=" & (Terms - t0)
+End Sub
+
+' W9 = 腿④ 的夹: 返回槽那一枚交出去, 出口不许放手 (放了 = 调用方刚接手就读已释放块)。
+'      调用方接手后再 claim 一枚 (P1 里"实参/落槽各 claim"那半今天还没接, 所以这里
+'      留着一枚引用没人身负 = 在册的下一格), 但**不能被拆两次**。
+Sub W9ReturnSlot()
+    Dim c As C445
+    Dim t0 As Long
+    t0 = Terms
+    Set c = MakeOne()
+    Debug.Print "W9-terms=" & (Terms - t0) & " n=" & c.N & " twice=" & c.N
+    Set c = Nothing
+End Sub
+
 Sub Main()
     W1SetNothing
     W2Alias
@@ -108,5 +137,7 @@ Sub Main()
     W5AutoNew
     W6Factory
     W7ParamBorrow
+    W8ScopeExit
+    W9ReturnSlot
     Debug.Print "B445-DONE"
 End Sub

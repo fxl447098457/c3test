@@ -7597,17 +7597,20 @@ if ($Category -in @("all", "run", "vbp")) {
         "$Tests\b448_iface_ret\B448.vbp") @(
         '(vb6_cls_IB448*)')
 
-    # 账 #305 §B218 (甲) 第一百二十七刀 = 刀1-a/b: 工程类实例的引用计数头扩到每一枚工程类,
-    #   覆写 (腿②) 与置空 (腿③) 两条腿接到同一位主人 emitClassSlotRefSet。
-    #   读数 (两台一致, 尺 = .build/k982_run.txt / .build/k984_new.txt):
+    # 账 #305 §B218 (甲) 第一百二十七刀 = 刀1-a/b/c: 工程类实例的引用计数头扩到每一枚工程类,
+    #   覆写 (腿②) / 置空 (腿③) / 过程出口 (腿④) 三条腿接到同一位主人 emitClassSlotRefSet。
+    #   读数 (两台一字相同, 尺见下面 BASE 那两行):
     #   W1 置空 1 / W3 自赋值 1 / W4 覆写模块级槽 2 = 这一刀新出厂的次数;
     #   W2 别名 0 (置空 a 之后 b 还读得到 7) / W5 As New 只造一枚 / W6 工厂那枚还活着 /
-    #   W7 形参里 Set = Nothing 没拆调用方那枚 = 四条反面证人, 与 BASE 逐字相同。
-    #   BASE (门 #757 那台 CI 编的 exe, .build/k983_run.txt) 的读数 = W1/W3/W4 全 0,
-    #   即这三格出厂次数就是本刀的行为面; 证人四格两边同值 ⇒ 没有提前拆、也没有拆两次。
+    #   W7 形参里 Set = Nothing 没拆调用方那枚 / W9 返回槽那枚交出去还活着 = 反面证人;
+    #   W8 = 腿④ 那一格: 循环 200 次现造现出, 出厂恰好 200 次 = (甲) 这一档的靶。
+    #   BASE (= 账 #450 收线那台 CI 编的 exe, run 39212142582 的 c3-exe 工件) 的读数 =
+    #   W1/W3/W4/W8 全 0 ⇒ 这四格出厂次数就是本刀的行为面; 其余五格两台同值 (尺:
+    #   NEW .build/k1003_n64.txt + _n32.txt / BASE .build/k1003_b64.txt + _b32.txt)。
     $b445Needles = @("W1-terms=1 null=1", "W2-terms=0 n=7", "W3-terms=1 n=7",
                     "W4-terms=2 null=1", "W5-made=1 sum=14", "W6-terms=0 n=7",
-                    "W7-terms=0 n=7", "B445-DONE")
+                    "W7-terms=0 n=7", "W8-terms=200", "W9-terms=0 n=7 twice=7",
+                    "B445-DONE")
     Test-Vbp 'b445_class_slot_refcount' "$Tests\b445_refcount\B445.vbp" $b445Needles
     Test-Vbp 'b445_class_slot_refcount_x86' "$Tests\b445_refcount\B445.vbp" $b445Needles -Arch "x86"
     # 发码针: 出入口那一对的 mint / claim / release / 以及 R6 那条守卫仍是一枚裸赋值。
@@ -7615,13 +7618,15 @@ if ($Category -in @("all", "run", "vbp")) {
         'unsigned long vb6_cls_C445_Release(void* instance) {',
         'if (b) vb6_cls_C445_AddRef(b);',
         'if (__clsold0) vb6_cls_C445_Release(__clsold0);',
-        'if (!m_auto) m_auto = vb6_cls_C445_New();')
+        'if (!m_auto) m_auto = vb6_cls_C445_New();',
+        'if (t) vb6_cls_C445_Release(t);')
     # 反面针: 形参那一档整个留在计数系统外面 (今天没有一站在实参处 claim, 让形参放手
     #   就是拆调用方还在用的那枚实例)。名字 o 只出现在 DropByVal 的形参槽上。
     Test-EmitcAbsent 'b445_class_formal_stays_out_of_count' @(
         "$Tests\b445_refcount\B445.vbp") @(
         'vb6_cls_C445_AddRef(o)',
-        'vb6_cls_C445_Release(o)')
+        'vb6_cls_C445_Release(o)',
+        'vb6_cls_C445_Release(vb6_ret_MakeOne)')
     # 账 #305 §B188 ④ (第九十刀): 出厂那一腿的**尾巴**。`Class_Terminate` 抛错时, `_Destroy` 里体之后
     # 那三截(字段 BSTR / 数组字段 / vb6_Free(me))曾被 ComObj_Release 的帧一起 longjmp 跳掉 —— 实测每枚
     # 抛错的出厂漏一份实例资源: x64 每枚 35~37 字节、x86 每枚 17 字节, 多一枚 20 字符 String 字段就涨到

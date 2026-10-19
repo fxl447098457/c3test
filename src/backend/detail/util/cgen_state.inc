@@ -505,7 +505,15 @@
     // 成员访问片段 -> 调用片段之间传递"这次是接口槽调用"的接口名 (B04)
     std::string ivrefIfaceName_;
     // tB Interface B05: 本过程内需要"作用域末尾 Release"的接口变量 (C 名)
-    std::vector<std::string> ivrefLocalsToRelease_;
+    // 账 #305 §B218 (甲) 腿④: 「过程出口这一格该不该放手」收成一张**带档**的表
+    // (原来只有 ivref 一档有答案, 具体类那一档压根没有登记面 = 今天每条 `Dim x As C` 漏一枚)。
+    // isView = true 走 `->vt->Release` (接口薄指针), false 走本类那对 mint 出入口 (工程类实例)。
+    struct SlotRelease {
+        std::string expr;
+        bool isView;
+        std::string clsName;   // 只有工程类那一档带类名
+    };
+    std::vector<SlotRelease> slotsToRelease_;
     // Set 语句里"旧值"临时变量的序号 (只有新语法路径消耗, 不影响其他工程)
     int ivrefSetSeq_ = 0;
 

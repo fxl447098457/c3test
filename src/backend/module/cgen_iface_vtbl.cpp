@@ -681,11 +681,28 @@ void CCodeGen::emitIfaceImplTables(Module& module) {
 // B05: 接口变量的作用域末尾释放
 // ============================================================
 
-void CCodeGen::trackIvrefLocalForRelease(const std::string& cName) {
-    for (const std::string& s : ivrefLocalsToRelease_) {
-        if (s == cName) return;
+// 账 #305 §B218 (甲) 腿④: 「这一枚过程级槽在正常出口放手」那张表的唯一登记口。
+// 夹 = 返回槽: 那一枚引用是**交出去**的那一枚, 出口再放手 = 调用方刚接手的东西当场读已释放块
+// (#445 钉住的那条夹, 原来只有接口一档写着一句注释, 现在两档共用同一句代码)。
+void CCodeGen::trackSlotForRelease(const std::string& expr, bool isView,
+                                   const std::string& clsName) {
+    if (!currentReturnVar_.empty() && expr == currentReturnVar_) return;
+    for (const SlotRelease& s : slotsToRelease_) {
+        if (s.expr == expr) return;
     }
-    ivrefLocalsToRelease_.push_back(cName);
+    SlotRelease rec;
+    rec.expr = expr;
+    rec.isView = isView;
+    rec.clsName = clsName;
+    slotsToRelease_.push_back(rec);
+}
+
+void CCodeGen::trackClassSlotForRelease(const std::string& cName, const std::string& clsName) {
+    trackSlotForRelease(cName, false, clsName);
+}
+
+void CCodeGen::trackIvrefLocalForRelease(const std::string& cName) {
+    trackSlotForRelease(cName, true, std::string());
 }
 
 // 账 #305 §B221: `x->vt-><slot>(x, args)` 这一发射形状只许有一位作者 —— com_bind 的
@@ -741,11 +758,17 @@ void CCodeGen::emitIvrefQiSet(const std::string& target, const std::string& ifac
 // 出口那一腿与 ansiTempsToFree_ 在同一位置调用（过程统一出口 vb6_proc_exit，
 // Exit Sub/Function 自 c97e65bd 起也走那条 goto ⇒ 这一族不漏清理）。
 void CCodeGen::emitIvrefScopeRelease() {
-    for (const std::string& s : ivrefLocalsToRelease_) {
-        c_.emitLine("if (" + s + ") " + s + "->vt->Release(" + s +
-                    ");  /* tB Interface B05: scope-exit release */");
+    for (const SlotRelease& s : slotsToRelease_) {
+        if (s.isView) {
+            c_.emitLine("if (" + s.expr + ") " + s.expr + "->vt->Release(" + s.expr +
+                        ");  /* tB Interface B05: scope-exit release */");
+        } else {
+            c_.emitLine("if (" + s.expr + ") vb6_cls_" + cIdent(s.clsName) +
+                        "_Release(" + s.expr +
+                        ");  /* 账 #305 (甲) 腿④: scope-exit release */");
+        }
     }
-    ivrefLocalsToRelease_.clear();
+    slotsToRelease_.clear();
 }
 
 } // namespace vb6c3

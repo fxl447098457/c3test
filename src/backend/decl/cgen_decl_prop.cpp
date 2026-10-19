@@ -45,7 +45,7 @@ void CCodeGen::visit(PropertyDecl& node) {
     clearProcArrayTracking();
     ansiTempsToFree_.clear();
     ansiOutParams_.clear();
-    ivrefLocalsToRelease_.clear();  // tB Interface B05
+    slotsToRelease_.clear();  // tB Interface B05 / 账 #305 §B218 (甲) 腿④
     ansiCounter_ = 0;
     asmMixedBlockCounter_ = 0;   // ai/vb-asm-extension-spec 项2: 混排片段序号按过程重置
     knownBstrVars_.clear();
