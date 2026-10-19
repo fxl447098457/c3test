@@ -764,6 +764,20 @@
                          + ", " + s2 + ", 1, " + x2 + ", " + y2
                          + ", " + hasColor + ", " + col + ", " + style + ")";
                 }
+            } else if (m == "scale") {
+                // VB6: `Scale (x1, y1)-(x2, y2)` = 设自定义坐标系; `Scale` (不带坐标) = 复位回默认。
+                // 出口名**只从表里来** (cvDrawFn) —— backend 任何一处再拼一次 vb6_Form_Scale
+                // 就是第二份答案 (S9.1)。
+                // 两形的区分靠**语法事实**: parser 已把 `-(x2, y2)` 收成第 2/3 格实参, 所以
+                // "带坐标" 恒是 4 格、"不带" 恒是 0 格 —— Scale 没有 Line 那种"起点省略"
+                // 会与"两格 + color + style"撞车的形状, 按格数判是稳的 (不猜)。
+                std::string hx = "0", sx1 = "0", sy1 = "0", sx2 = "0", sy2 = "0";
+                if (a.size() >= 4) {
+                    hx = "1";
+                    sx1 = a[0]; sy1 = a[1]; sx2 = a[2]; sy2 = a[3];
+                }
+                call = cvDrawFn + "((void*)" + obj + ", " + hx + ", "
+                     + sx1 + ", " + sy1 + ", " + sx2 + ", " + sy2 + ")";
             } else { // circle
                 // Circle (x,y),r [,color] [,start] [,end] [,aspect] / Circle Step(x,y),r
                 // ⚠ 下面那个 hasStart 是「起始角给没给」，与 Line 分支里的 hasStart（起点给没给）

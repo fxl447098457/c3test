@@ -339,7 +339,8 @@ $wantPairs = @(
     @('line',   'PBOX'),    @('line',   'FORM'),    @('line',   'PRINTER'),
     @('pset',   'FORM'),    @('pset',   'PRINTER'),
     @('circle', 'FORM'),    @('circle', 'PRINTER'),
-    @('point',  'FORM'),    @('point',  'PRINTER'))
+    @('point',  'FORM'),    @('point',  'PRINTER'),
+    @('scale',  'FORM'))
 if (Test-Path -LiteralPath $canvasTable) {
     $mTbl = [regex]::Match($tableText, 'kCanvasVerbRows\[\] = \{[\s\S]*?\};')
     if (-not $mTbl.Success) {
