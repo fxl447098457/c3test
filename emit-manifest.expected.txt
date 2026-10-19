@@ -103,7 +103,7 @@ sha256=3ca810b0c9eac0b02e84ce405ada0ebc041251ad687081f8c4deba96ca2c0b82 ascii256
 sha256=ca3e6494fcf3d94159a9a5f39e6d203efce0f1e71a8f0352f7d89b54bf392459 ascii256=bac20af3d4baed11734b90ccb85d74a4b8b20792f9c3a8579294df162a7f389e rc=0 bytes=280734 tests/Charts 2020/ucPieChart/Proyecto1.vbp
 sha256=fb6a3030d6a8cc46295d9916421aa4e0de42133196c2d15bacdcc150eae42366 ascii256=a11f8bcb169b38b8e2682195f70f5639654fd5c59926b9c3407f3e1dafc5b21c rc=0 bytes=344883 tests/Charts 2020/ucProgressCircular/Proyecto1.vbp
 sha256=61d9ef486d00f36c549457bb53fa6bb36a55e10640e9f36183bf94ca689f1c33 ascii256=eb899b0e908ed09707e7c769636bf025b6f2a5cc1a4210e126500c9003d68da6 rc=0 bytes=970277 tests/Charts 2020/ucTreeMaps/Proyecto1.vbp
-sha256=157aba18259e6362c9c75481d85e26b6b639e0b0fcac1439a743c4d56e04fc0f ascii256=4dbe3cf77a6b9b51af58c40116b778352f8d0e1a82a279007d924a33b7536017 rc=0 bytes=92586 tests/cls_inh/Inh.vbp
+sha256=f4683f1d5d2413b6ce8d57deee5a9859d6807c80edbd345d6e91a6cd32deb20e ascii256=043b2f5b77f59ad2e4962d8135407f50dc8002d72dad0376e814d70862123598 rc=0 bytes=92453 tests/cls_inh/Inh.vbp
 sha256=48ebc28f3b381f1b36feada918214643029f54e358de3de9fef04b4e03d193d8 ascii256=2940656b45f4b06590a3762b1b06ed684fa10f5d512d6533f8ccea967656d4a7 rc=0 bytes=32419 tests/cls_inh/InhMain.bas
 sha256=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 ascii256=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 rc=1 bytes=0 tests/cls_neg/ci_n02_not_class.bas
 sha256=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 ascii256=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 rc=1 bytes=0 tests/cls_neg/ci_n11_protected_in_interface.bas
@@ -511,8 +511,8 @@ sha256=a1518f32c684c39cf425d0e14ebf1c3f172b3b7441789f941643ffd2a775de5e ascii256
 sha256=86e7fd9fc07fdf784fee812b09240aaf8be4ddd8b0a407f52744187cb0555336 ascii256=4598009153c3f10882efcf2519794635680488fcac2ed19da0ea55f319d69281 rc=0 bytes=7728 tests/b444_vararg/Main.bas
 sha256=6d6b60d2197852deae46c7cfdac178a26d27b81638141d9cbb260a60a9ae712e ascii256=7292588f8cb1fa42a2086ec511c0cd808bc543056639038944d7719575f84f93 rc=0 bytes=17578 tests/b448_iface_ret/B448.vbp
 sha256=eac36169521603767d8d4cdc91251398c02278aeb16a6a169245c3dc7ecdbb25 ascii256=bc3cd8f0b42a16e171deea4cb106413a0b289f3480a158f43e455b6619f2af16 rc=0 bytes=3116 tests/b448_iface_ret/Main.bas
-sha256=67f609d249b153eda37ebd10171a7e16b086957a81aca58f4c6e8ff71ea29942 ascii256=708aa86eba57d08636b8c430f932a92196b18baea59341fe06a9ca8921e9ef3c rc=0 bytes=34287 tests/b445_refcount/B445.vbp
-sha256=142bb71f8f29d8667a1cdc50062c83b0eb0634730ee382501804258a061f8b17 ascii256=996040ed0a48bf0e242a2474a33d7f76b756bb8db3f633a3c930917ddbd9468e rc=0 bytes=14550 tests/b445_refcount/Main.bas
+sha256=d82a62e837cff15b77f25287a7e1cf288b8a2de7bc1c36c57cc1d059fae81335 ascii256=5c78de7473337cff4fc768dbf60fee0fdbd0d0bf05297e8ca82a8a514a9d0375 rc=0 bytes=41951 tests/b445_refcount/B445.vbp
+sha256=6ea52fbaa5ad4cb55a13a16ae13b2d61b278d9b6d476b66d4d2f470540be9399 ascii256=8ebc98340760a9ca836dca25b9b4c54e3f5e18a118510978d996a0b951095f61 rc=0 bytes=17444 tests/b445_refcount/Main.bas
 # 账 #305 §B188 (第八十刀判据): 新增 2 行 = tests/b188_term 那两枚输入, 哈希取 CI 为同一 head 33320a1d 自己交的 9c33fdca;
 #   本轮 RTL 只动 ComObj_Release 一处 ⇒ 438 枚存量行**一行没移动** (本机与 CI 两边同读数), 形状门只报「新增未登记」这一族。
 # 账 #305 §B184 (第七十五刀) 的登记来源：门 **#640**（run 38682492970、head 8000e440、attempt 1）= 12 job 里 10 绿 + 两条**预期**红（这道形状门报「存量 5 份哈希不同 + 新增 2 份没登记」、`Tests (compile)` 里同源那句 [STATIC] manifest_coverage）。新增的两行 = 本刀夹具 `tests/b184_fieldw/{B184.vbp,B184Main.bas}`；移动的两行归本刀（Charts 2020/Proyecto1.vbp 31 处、b183_intfield/B183.vbp 2 处，逐行都是 `me-><f> = (int16_t|uint8_t)value.lVal;` → `= vb6_ChkInt|ChkByte(value.lVal);`）。**另外三行移动不是本刀**（ucTreeMaps/Proyecto1.vbp、VBFlexGridDemo/Common/VisualStyles.bas、VBFlexGridDemo/VBFlexGridDemo.vbp）：用「只含本刀、不含 merge」那一对编译器（C3_k74new vs C3_k75new，md5 d74d8b3b/2a24013d）并排重发这三份，移动行数 = 0，而本刀那两份移动 31/2 行 —— 所以这三行是 `a6b05e7d` 带进来的别人那两笔欠的登记，按 CI 为同一个 head 自己交的清单（github/ci/emit-manifest 的 7dea8d25）一并落账。
@@ -725,3 +725,15 @@ sha256=142bb71f8f29d8667a1cdc50062c83b0eb0634730ee382501804258a061f8b17 ascii256
 #        VB2002 / VB2003 / VB2004，即 Step 前缀那几行压根解析不过，产物只有一行；
 #   本机合上的那台（head ae66b0a3）独立复算出的 sha256 / ascii256 / bytes 三列与 CI 那一行全等
 #   （.build/k1120_fdemo_ab.py），所以这一行按 §B225 登记，不按本刀。
+#   第一百三十二刀登记（2026-10-20，head `6cd2044f`，run 39335391924 = 门 #776 唯一一条红是形状门）：
+#   移动 3 行 = `tests/cls_inh/Inh.vbp` + `tests/b445_refcount/B445.vbp` + 夹具自己那行 `Main.bas`。
+#   逐行归因（尺 `.build/k1157_attr.py`；BASE = CI 为 head `5a627dfb` 编的那台 `.build/k1144_base`，
+#   只缺本刀）= 新增 0 行 / 删除 6 行，六行全是本刀撤掉的那六枚 claim，OTHER = 0：
+#     Inh.vbp 3 行 = `if (p) vb6_cls_InhBase_AddRef(p);`（`Set p = MyBase.Peer` 那一形）+
+#                    `if (rb) vb6_cls_InhBase_AddRef(rb);` × 2（`d.RefOf()` / `b.RefOf()`）；
+#     B445.vbp 3 行 = `if (c17) vb6_cls_C445_AddRef(c17);` × 2（`For i = 1 To 20` 发升序 / 降序
+#                     两条循环体，所以一格 VB 站点 = 两行发码）+ `if (c18) ... AddRef(c18);` × 1
+#                     （无括号的属性读 `hh18.Next18`）。
+#   `Main.bas` 那一行 BASE 与 NEW 对同一份源码的发码**一字相同**（added=0 / removed=0）⇒ 它移动
+#   只是因为夹具自己加了 W17 / W18 / W19，不是行为面。本机合上的那台全语料复算 486 行三列与 CI
+#   逐行全等（`.build/k1156_new_manifest.txt` vs `.build/k1158_ci/emit-manifest.txt`）= 登记前后对得上。
