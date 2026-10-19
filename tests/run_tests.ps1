@@ -7626,6 +7626,7 @@ if ($Category -in @("all", "run", "vbp")) {
                     "W11-n=7 terms=0 owner-gone=1",
                     "W12-inner-made=1 inner-terms=1", "W12-holder-made=1 holder-terms=1",
                     "W13-terms=2", "W14-alive-terms=0 n=7", "W14-gone-terms=1",
+                    "W15-made=50 terms=50", "W16-made=1 terms=1",
                     "B445-DONE")
     Test-Vbp 'b445_class_slot_refcount' "$Tests\b445_refcount\B445.vbp" $b445Needles
     Test-Vbp 'b445_class_slot_refcount_x86' "$Tests\b445_refcount\B445.vbp" $b445Needles -Arch "x86"
@@ -7638,7 +7639,8 @@ if ($Category -in @("all", "run", "vbp")) {
         'if (t) vb6_cls_C445_Release(t);',
         'if ((*p)) vb6_cls_C445_AddRef((*p));',
         '(void*)&(borrowed)',
-        'if (me->mInner12) vb6_cls_C445_Release(me->mInner12);')
+        'if (me->mInner12) vb6_cls_C445_Release(me->mInner12);',
+        't = vb6_C445H_prop_get_NewOne16((void*)me);')
     # 反面针 (腿⑤ 的边界): As Object 那一格是 void*, As Variant 那一格是槽 —— 两档都答不出
     #   工程类, 出厂这一站不许碰。钉形状 (mLate15 = 专属名) 而不是钉名字, 与门 #764 那条同口径。
     Test-EmitcAbsent 'b445_nonclass_object_slots_get_no_teardown_release' @(
@@ -7658,6 +7660,15 @@ if ($Category -in @("all", "run", "vbp")) {
         'vb6_cls_C445_AddRef(oF)',
         'vb6_cls_C445_Release(oF)',
         'vb6_cls_C445_Release(vb6_ret_MakeOne)')
+    # 反面针 (第一百三十一刀 = (甲) 刀3): 工程内过程交回来的那一枚**自带对价** (被调方在返回槽那一格
+    #   claim 过、出口退的是它自己那枚局部)，所以接手这一格不许再 claim —— 再 claim = 每调用净 +1,
+    #   那一枚永远没人退 (实测 BASE 的发码 = `if (c) vb6_cls_C445_AddRef(c);` 四处 + 形⑤ 的 property
+    #   一处; NEW 两形都 0 处)。上面那条正证人 (`c = vb6_Main_MakeOne();` / `t = ...NewOne16(...)`) 在
+    #   两态都存在，所以这两枚反面针不是空的。
+    Test-EmitcAbsent 'b445_transferred_call_rhs_is_adopted_not_claimed' @(
+        "$Tests\b445_refcount\B445.vbp") @(
+        'vb6_cls_C445_AddRef(c)',
+        'vb6_cls_C445_AddRef(t)')
     # 账 #305 §B188 ④ (第九十刀): 出厂那一腿的**尾巴**。`Class_Terminate` 抛错时, `_Destroy` 里体之后
     # 那三截(字段 BSTR / 数组字段 / vb6_Free(me))曾被 ComObj_Release 的帧一起 longjmp 跳掉 —— 实测每枚
     # 抛错的出厂漏一份实例资源: x64 每枚 35~37 字节、x86 每枚 17 字节, 多一枚 20 字符 String 字段就涨到

@@ -30,3 +30,16 @@ End Sub
 Public Sub AliasInto12(ByVal o As C445)
     Set mInner12 = o
 End Sub
+
+' 账 #305 §B218 (甲) 刀3 的第二形: 工程内的 Property Get 工厂 —— 返回槽那一枚同样是交给调用方的,
+' 调用方再接手时不许再 claim (与 MakeOne 那一发同一条契约, 所以要同一问句答出来)。
+Public Property Get NewOne16() As C445
+    Dim g As C445
+    Set g = New C445
+    Set NewOne16 = g
+End Property
+
+Public Sub PropFactory16()
+    Dim t As C445
+    Set t = NewOne16()
+End Sub

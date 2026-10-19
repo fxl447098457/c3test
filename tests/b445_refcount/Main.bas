@@ -70,7 +70,7 @@ Sub W5AutoNew()
     Debug.Print "W5-made=" & (Made - m0) & " sum=" & (x + y)
 End Sub
 
-' W6 = 形⑤ 工厂返回: 被调方交出的是它自己那枚引用, 调用方接手后必须还活着。
+' W6 = 形⑤ 工厂返回: 被调方交出的是自带对价的那一枚 (claim 在返回槽那一格), 调用方接手后必须还活着。
 Public Function MakeOne() As C445
     Dim t As C445
     Set t = New C445
@@ -120,8 +120,9 @@ Sub W8ScopeExit()
 End Sub
 
 ' W9 = 腿④ 的夹: 返回槽那一枚交出去, 出口不许放手 (放了 = 调用方刚接手就读已释放块)。
-'      调用方接手后再 claim 一枚 (P1 里"实参/落槽各 claim"那半今天还没接, 所以这里
-'      留着一枚引用没人身负 = 在册的下一格), 但**不能被拆两次**。
+'      第一百三十一刀之前调用方**还多 claim 一枚** (实测 BASE 发码 `if (c) ... _AddRef(c);` =
+'      每调用净 +1, 那一枚永远没人退), 现在这一格改成接手 —— 本窗口打印在放手之前, 所以两态都
+'      答 terms=0 (它钉的是「接手后还活着」); 漏与不漏的行为面在 W15 / W16 那两格上。
 Sub W9ReturnSlot()
     Dim c As C445
     Dim t0 As Long
@@ -220,6 +221,36 @@ Sub W14FieldAliasKeepsAlive()
     Debug.Print "W14-gone-terms=" & (Terms - t2)
 End Sub
 
+'
+' W15 / W16 = 账 #305 §B218 (甲) 刀3 的两形: 工厂交回来的那一枚引用**已经带对价**, 接手这一格
+'       不许再 claim (改前每调用净 +1, 那一枚永远没人退 => 下面两格 terms 恒 0)。
+'       W15 = 模块级 Function 工厂循环 50 次: 每轮接手一枚、下一轮退掉上一轮那枚, 出口退最后一枚
+'       => made=50 terms=50; W16 = 同一件事换 Property Get 那一形 (问句必须两形同答)。
+Sub W15FactoryLoop()
+    Dim c As C445
+    Dim m0 As Long
+    Dim t0 As Long
+    Dim i As Long
+    m0 = Made
+    t0 = Terms
+    For i = 1 To 50
+        Set c = MakeOne()
+    Next
+    Set c = Nothing
+    Debug.Print "W15-made=" & (Made - m0) & " terms=" & (Terms - t0)
+End Sub
+
+Sub W16PropFactory()
+    Dim hh As C445H
+    Dim m0 As Long
+    Dim t0 As Long
+    Set hh = New C445H
+    m0 = Made
+    t0 = Terms
+    hh.PropFactory16
+    Debug.Print "W16-made=" & (Made - m0) & " terms=" & (Terms - t0)
+End Sub
+
 Sub Main()
     W1SetNothing
     W2Alias
@@ -235,5 +266,7 @@ Sub Main()
     W12FieldTeardown
     W13FieldOverwriteThenTeardown
     W14FieldAliasKeepsAlive
+    W15FactoryLoop
+    W16PropFactory
     Debug.Print "B445-DONE"
 End Sub

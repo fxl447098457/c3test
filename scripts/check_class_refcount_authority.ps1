@@ -1,5 +1,5 @@
 ﻿# check_class_refcount_authority.ps1 - 账 #305 §B218 (甲)：工程类实例的引用计数只许有一位主人。
-# 十条钉（每条都能单独红，红了就说明同一问长出了第二位主人）：
+# 十三条钉（每条都能单独红，红了就说明同一问长出了第二位主人）：
 #   ① 出入口那一对的 mint 各恰好 1 处，且住在 module/cgen_com.cpp（每条腿只许转调它）。
 #   ② 计数头 `int32_t __refcount;` 的 mint 恰好 1 处，且住在 cgen_iface_vtbl.cpp 的
 #      emitIfaceClassFields 里 —— 它必须紧跟 __comObj 那一句（ai/022 D19：偏移 0 恒是 __comObj）。
@@ -12,9 +12,15 @@
 #   ⑥ 字面量 __refcount 的主人名单 = 在册那 6 份；RTL 那一处必须是 vb6comserver_obj.c 的注释。
 #   ⑦ 陈旧注释「没有引用计数」（具体类那三处）不许活着 —— 甲落地之后这句话是错的。
 #   ⑧ 过程出口那张带档的登记表 slotsToRelease_ 只许住在 5 份文件里（表本体 + 三个过程入口
+#   ⑨ 出参槽那一档 (腿②'): claim-only 的发码形状与站点各恰好一处。
+#   ⑩ 腿④ 的第二道夹: 撤登记的主人一处 + 站点一处 (槽地址交给外部 Declare 的那一格出口不放手)。
+#   ⑪ 腿⑤ 出厂那一档: `_Release(me->` 全仓恰好一处，且主人文件必须还是 cgen_com.cpp。
+#   ⑫ 字段类型那一问 `mapTypeRef(var.asType.get())` 恰好 5 处（新增一处手抄就得改数）。
+#   ⑬ 移交值那一问 `rhsTransfersProjectRef(` 恰好 3 处（声明 + 定义 + 一个调用点），调用点必须在
+#      cgen_setlet_set_rhs.inc —— 「右侧带不带对价」与 `New` 共用同一条不 claim 的臂，别处再问就分家。
 #      清表 + 主人本体），工程类那一档的注册口 trackClassSlotForRelease 恰好 2 处
 #      （Dim As <工程类> 的两条注册路：Class 符号 / projectClassNameOf 兜底）。
-# 退出码：0 = 十条都过；1 = 任一条红；2 = 找不到 src/backend。
+# 退出码：0 = 十三条都过；1 = 任一条红；2 = 找不到 src/backend。
 param(
     [string]$Root = ""
 )
@@ -173,10 +179,22 @@ if ($fieldQ -ne 5) {
     $fail += ("mapTypeRef(var.asType.get()) question sites = " + $fieldQ + " (want exactly 5)")
 }
 
+
+# ⑬ 移交值那一问的名单: 「右侧那一枚是不是已经带对价交过来了」全仓只许问一处 (声明 + 定义 + 一个调用点 = 3 处
+#    `rhsTransfersProjectRef(`)，而且调用点必须住在 Set 的 RHS 那一档 (cgen_setlet_set_rhs.inc)。为什么钉: 这一问与
+#    `New` 共用同一条「不 claim」的臂 —— 谁在别的站点再问一遍，「实参 / 返回值 / 字段」这三条边的口径就分家了。
+$xferQ = CountOf 'rhsTransfersProjectRef('
+if ($xferQ -ne 3) {
+    $fail += ("transfer-question sites = " + $xferQ + " (want exactly 3: decl + def + 1 call)")
+}
+$xferFiles = @(FilesOf 'rhsTransfersProjectRef(*node.value)')
+if ($xferFiles.Count -ne 1 -or $xferFiles[0] -ne 'cgen_setlet_set_rhs.inc') {
+    $fail += ("transfer-question call file = " + ($xferFiles -join ', ') + " (want exactly cgen_setlet_set_rhs.inc)")
+}
 if ($fail.Count -gt 0) {
     Write-Host "CLASS-REFCOUNT-AUTHORITY FAIL"
     foreach ($f in $fail) { Write-Host ("  - " + $f) }
     exit 1
 }
-Write-Host "CLASS-REFCOUNT-AUTHORITY OK (1 pair mint / 1 header / 2 leg consumers / 3+9 formals / 7 roster / 6 literal files / 0 stale / 5 registry files + 2 registrants / 1+1 out-slot / 1+1 foreign-write drop / 1 field-teardown shape + file / 5 field-type questions)"
+Write-Host "CLASS-REFCOUNT-AUTHORITY OK (1 pair mint / 1 header / 2 leg consumers / 3+9 formals / 7 roster / 6 literal files / 0 stale / 5 registry files + 2 registrants / 1+1 out-slot / 1+1 foreign-write drop / 1 field-teardown shape + file / 5 field-type questions / 3 transfer-question sites)"
 exit 0
