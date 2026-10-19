@@ -13,6 +13,15 @@ Begin VB.Form FDForm
       Left            =   120
       Top             =   1560
    End
+   Begin VB.PictureBox picP
+      Height          =   3000
+      Left            =   3360
+      ScaleHeight     =   2940
+      ScaleWidth      =   2940
+      TabIndex        =   3
+      Top             =   120
+      Width           =   3000
+   End
 End
 Attribute VB_Name = "FDForm"
 Attribute VB_GlobalNameSpace = False
@@ -310,6 +319,39 @@ Debug.Print "FD26-barelinestart=" & TF(ok26) & " raw=" & CStr(rowC0) & "," & CSt
     ok27 = (rowY0 < 0) And (rowY > 0) And (Me.CurrentX = 120) And (Me.CurrentY = 190)
 Debug.Print "FD27-melinestart=" & TF(ok27) & " raw=" & CStr(rowY0) & "," & CStr(rowY) & _
               " pen=" & CStr(Me.CurrentX) & "," & CStr(Me.CurrentY)
+    ' 232-5 = PictureBox.Line -(x,y): the same start-omitted form as FD26/FD27, on a PictureBox.
+    ' Before, vb6_ControlLine was the only sibling not forwarded to vb6_Form_Line (账 #239) -- it
+    ' kept a 7-arg body with no has bit, so Line -(x,y) drew (x,y)->(0,0) and left the pen where it
+    ' was. After forwarding, has1=0 => start from picP.CurrentX/CurrentY, pen lands on the endpoint.
+    ' Two-sided like FD26/FD27: a colour scan that comes back empty then finds the rows, AND the pen
+    ' on the endpoint. The pen half is what rejects "read the two given coordinates as the START" --
+    ' that shape leaves the pen untouched (40 != 120). picP is its own surface (its own DC) so its
+    ' colours do not crosstalk with the Form-side judges. The segment stays inside picP's client
+    ' area (3000x3000 twips ~= 200x200 px @96dpi, holding x<=120 / y<=190); see
+    ' draw-fixture-client-area-pixels.
+    Dim dp As LongPtr
+    Dim ok28 As Boolean, ok29 As Boolean
+    Dim rowP0 As Long, rowP As Long
+    Dim rowQ0 As Long, rowQ As Long
+    picP.ScaleMode = vbPixels
+    dp = GetDC(picP.hwnd)
+    picP.CurrentX = 40
+    picP.CurrentY = 30
+    rowP0 = FirstRowOfColor(dp, vbCyan, 35, 125, 25, 105)
+    picP.Line -(120, 100), vbCyan
+    rowP = FirstRowOfColor(dp, vbCyan, 35, 125, 25, 105)
+    ok28 = (rowP0 < 0) And (rowP > 0) And (picP.CurrentX = 120) And (picP.CurrentY = 100)
+    Debug.Print "FD28-piclinestart=" & TF(ok28) & " raw=" & CStr(rowP0) & "," & CStr(rowP) & _
+               " pen=" & CStr(picP.CurrentX) & "," & CStr(picP.CurrentY)
+    picP.CurrentX = 40
+    picP.CurrentY = 120
+    rowQ0 = FirstRowOfColor(dp, vbYellow, 35, 125, 115, 195)
+    picP.Line -(120, 190), vbYellow
+    rowQ = FirstRowOfColor(dp, vbYellow, 35, 125, 115, 195)
+    ok29 = (rowQ0 < 0) And (rowQ > 0) And (picP.CurrentX = 120) And (picP.CurrentY = 190)
+    Debug.Print "FD29-piclinestart2=" & TF(ok29) & " raw=" & CStr(rowQ0) & "," & CStr(rowQ) & _
+               " pen=" & CStr(picP.CurrentX) & "," & CStr(picP.CurrentY)
+    r = ReleaseDC(picP.hwnd, dp)
     Point 7, 9
     Debug.Print "FD23-userpoint=" & CStr(userPoint)
     r = ReleaseDC(Me.hwnd, d)

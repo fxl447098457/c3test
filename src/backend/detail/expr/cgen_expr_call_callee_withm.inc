@@ -575,7 +575,7 @@
             comObjExpr_.clear();
             comMemberName_.clear();
             std::vector<std::string> la;
-            for (size_t i = 0; i < node.positional.size() && i < 6; i++) {
+            for (size_t i = 0; i < node.positional.size(); i++) {
                 emitExpr(*node.positional[i]);
                 // 同 Fix 143/185: 实参自身是 COM 成员读时必须就地消费标记，否则交出去的是对象
                 // 指针，而残留标记还会被上层当独立语句再发一遍。
@@ -592,13 +592,33 @@
                     la.push_back(std::move(lastExpr_));
                 }
             }
-            while (la.size() < 4) la.push_back("0");
-            if (la.size() < 5) la.push_back("-1");
-            if (la.size() < 6) la.push_back("0");
+            // 账 #232⑤ = PictureBox.Line 起点省略: 与 Form/Printer 那条码头 (下方 block 622
+            // 的 Line 分支) 同形 —— 读 parser 记在 node.canvasStartOmitted 上的语法事实定
+            // has1, 不再按实参个数猜 (2 格坐标 + color + style = 4, 与起点终点都给撞车)。
+            // RTL 侧 vb6_ControlLine 已随账 #239 转发 vb6_Form_Line, has1=0 ⇒ 从 CurrentX/
+            // CurrentY 起笔, 画完笔位落终点。Step 关键字 parser 未吞 (开口格 ②), step1=step2=0。
+            // B/C/F 已由 parser 折成位值 (BF=5), 这里照旧不按名归一。
+            const bool hasStart = !node.canvasStartOmitted;
+            size_t nCoord = hasStart ? 4 : 2;
+            if (la.size() < nCoord) nCoord = la.size();
+            const size_t i2 = hasStart ? 2 : 0;
+            std::string x1 = hasStart && la.size() > 0 ? la[0] : "0";
+            std::string y1 = hasStart && la.size() > 1 ? la[1] : "0";
+            std::string x2 = la.size() > i2 ? la[i2] : "0";
+            std::string y2 = la.size() > i2 + 1 ? la[i2 + 1] : "0";
+            std::string hasColor = "0", col = "0", style = "0";
+            for (size_t i = nCoord; i < la.size(); i++) {
+                if (i == nCoord) { hasColor = "1"; col = la[i]; }
+                else if (i == nCoord + 1) { style = la[i]; }
+            }
+            const std::string h1 = hasStart ? "1" : "0";
             c_.emitLine(fnLine + "((void*)" + cvHwndLine + ", "
-                        + "(double)" + la[0] + ", (double)" + la[1] + ", "
-                        + "(double)" + la[2] + ", (double)" + la[3] + ", "
-                        + "(int32_t)" + la[4] + ", (int32_t)" + la[5] + ");  /* Line */");
+                        + "(int32_t)0, (int32_t)" + h1 + ", "
+                        + "(double)" + x1 + ", (double)" + y1 + ", "
+                        + "(int32_t)0, (int32_t)1, "
+                        + "(double)" + x2 + ", (double)" + y2 + ", "
+                        + "(int32_t)" + hasColor + ", (int32_t)" + col + ", "
+                        + "(int32_t)" + style + ");  /* PictureBox.Line */");
             // ⚠ 合并 rev38 时这段的收尾曾被丢掉 (与下面的 Form/Printer 段撞在同一
             // 位置, git 把它判成冲突)。两个 if 各自闭合, 别再省。
             lastExpr_ = "0";

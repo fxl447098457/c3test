@@ -6102,6 +6102,12 @@ if ($Category -in @("all", "run", "vbp")) {
         # client area, so nothing was painted -- a pixel window that is off the window
         # produces a False that reads exactly like a broken codegen.
         "FD26-barelinestart=True", "FD27-melinestart=True",
+# 232-5: PictureBox.Line -(x,y) —— 同 FD26/FD27 的起点省略形, 承载面从 Form 换到 PictureBox。
+# 改前 vb6_ControlLine 是旧族里唯一没随账 #239 转发的那枚 (7 参无 has 位), Line - 画成
+# (x,y)→(0,0) 且不挪笔; 改后转发 vb6_Form_Line, has1=0 ⇒ 从 picP.CurrentX/Y 起笔, 笔位落终点。
+# 两側色扫 + pen 落终点同 FD26/FD27; 段压在 picP 自己的客户区内 (3000×3000 缇 ≈ 200×200px, 见
+# draw-fixture-client-area-pixels)。pen 半钉的正是「把给的坐标当起点」那形 —— 那形 pen 不动 (40≠120)。
+        "FD28-piclinestart=True", "FD29-piclinestart2=True",
         "FD-DONE")
     Test-Vbp "fdrawstate" "$Tests\fdraw\FDemo.vbp" $fdrawExpected
     Test-Vbp "fdrawstate_x86" "$Tests\fdraw\FDemo.vbp" $fdrawExpected -Arch "x86"
@@ -8658,11 +8664,14 @@ if ($Category -in @("all", "syntax")) {
     # 折好之后整条调用必须由 controlCanvasMethod 那张表改成原生 vb6_ControlLine(...)。
     # 改前两格都发裸名、由 RTL 的 const int32_t B / BF 接住 (语料实测 vb6_ComPackValue(BF)),
     # 而 Line 本身没人应答: Absent 那两条钉的就是"又退回兜底 / 名字又回来"这两件。
+    # 账 #232⑤: PictureBox.Line 随 vb6_ControlLine 转发 vb6_Form_Line 改成 12 参 has 位形
+    # (step1=0, has1=1[这四条都显式起点], step2=0, has2=1, …, hasColor, col, style) —— 4 条全是
+    # 显式起点 ⇒ has1=1, 与改前 7 参形语义逐字同 (起点终点都给); 起点省略那一形由 FD28/FD29 钉。
     Test-CodegenNote "pcline_flag_folded" @("$Tests\pcline\PcForm.frm") @(
-        "vb6_ControlLine((void*)vb6_hwnd_picA, (double)10, (double)10, (double)50, (double)50, (int32_t)255, (int32_t)5)",
-        "vb6_ControlLine((void*)vb6_hwnd_picA, (double)0, (double)0, (double)20, (double)20, (int32_t)16711680, (int32_t)1)",
-        "vb6_ControlLine((void*)vb6_hwnd_picA, (double)5, (double)5, (double)15, (double)15, (int32_t)B, (int32_t)0)",
-        "vb6_ControlLine((void*)vb6_hwnd_picA, (double)6, (double)6, (double)16, (double)16, (int32_t)BF, (int32_t)0)") @(
+        "vb6_ControlLine((void*)vb6_hwnd_picA, (int32_t)0, (int32_t)1, (double)10, (double)10, (int32_t)0, (int32_t)1, (double)50, (double)50, (int32_t)1, (int32_t)255, (int32_t)5)",
+        "vb6_ControlLine((void*)vb6_hwnd_picA, (int32_t)0, (int32_t)1, (double)0, (double)0, (int32_t)0, (int32_t)1, (double)20, (double)20, (int32_t)1, (int32_t)16711680, (int32_t)1)",
+        "vb6_ControlLine((void*)vb6_hwnd_picA, (int32_t)0, (int32_t)1, (double)5, (double)5, (int32_t)0, (int32_t)1, (double)15, (double)15, (int32_t)1, (int32_t)B, (int32_t)0)",
+        "vb6_ControlLine((void*)vb6_hwnd_picA, (int32_t)0, (int32_t)1, (double)6, (double)6, (int32_t)0, (int32_t)1, (double)16, (double)16, (int32_t)1, (int32_t)BF, (int32_t)0)") @(
         "vb6_ComGetObjectProp(vb6_hwnd_picA, L" + [char]34 + "Line" + [char]34 + ")",
         "vb6_ComPackValue(BF)", "vb6_ComPackValue(B)")
     # <vbeclipse> 账 #217 第二刀: 文档隐式对象 (UserControl / PropertyPage / Extender / Ambient)
