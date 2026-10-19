@@ -6108,6 +6108,12 @@ if ($Category -in @("all", "run", "vbp")) {
 # 两側色扫 + pen 落终点同 FD26/FD27; 段压在 picP 自己的客户区内 (3000×3000 缇 ≈ 200×200px, 见
 # draw-fixture-client-area-pixels)。pen 半钉的正是「把给的坐标当起点」那形 —— 那形 pen 不动 (40≠120)。
         "FD28-piclinestart=True", "FD29-piclinestart2=True",
+        # 232-6: `Step` 前缀 (坐标相对 CurrentX/CurrentY). 改前这一族在 parser 就被拒:
+        # `Line Step ...` 报 expected 'Input' after 'Line', `Circle Step (x,y), r` 报
+        # expected ')' (got ,) —— 两个动词各自的错法. FD31 用**两个** Step 前缀 (VB6 语法里
+        # `Line [Step] (x1,y1) [Step] -(x2,y2)` 两个都可选), FD32 走 PictureBox 那一支码头,
+        # 三枚的 pen 半钉的都是「相对坐标被当绝对坐标」那一形.
+        "FD30-psetstep=True", "FD31-linestep=True", "FD32-piclinestep=True",
         "FD-DONE")
     Test-Vbp "fdrawstate" "$Tests\fdraw\FDemo.vbp" $fdrawExpected
     Test-Vbp "fdrawstate_x86" "$Tests\fdraw\FDemo.vbp" $fdrawExpected -Arch "x86"
@@ -9046,6 +9052,16 @@ if ($Category -in @("all", "syntax")) {
         "vb6_Form_Line((void*)vb6_hwnd_FDForm, 0, 0, 0, 0, 0, 1, 120, 190, 0, 0, 0); /* Form.Line */") @(
         "vb6_Form_Line((void*)vb6_hwnd_FDForm, 0, 1, 120, 100",
         "vb6_Form_Line((void*)vb6_hwnd_FDForm, 0, 1, 120, 190")
+    # 账 #232⑥: `Step` 前缀。改前这一族连解析都过不去, 所以这三条 needle 在改前那台上
+    # **压根产不出来** (exit=1)。三枚分别钉三条码头: Form.PSet / Form.Line (两个 Step 前缀
+    # 各一位) / PictureBox.Line。Absent 那两条钉死「旗标被写死成 0」—— 那一格编得过、跑得起、
+    # 画到别处去, 正是本线反复栽的那味; pen 半 (FD30/31/32) 是它的运行期证人。
+    Test-CodegenNote "form_canvas_step" @("$Tests\fdraw\FDemo.vbp") @(
+        "vb6_Form_PSet((void*)vb6_hwnd_FDForm, 1, 1, 40, 30, 0, 0); /* Form.PSet */",
+        "vb6_Form_Line((void*)vb6_hwnd_FDForm, 1, 1, 40, 0, 1, 1, 20, (-50), 0, 0, 0); /* Form.Line */",
+        "vb6_ControlLine((void*)vb6_hwnd_picP, (int32_t)1, (int32_t)1, (double)10, (double)5, (int32_t)1, (int32_t)1, (double)20, (double)0, (int32_t)0, (int32_t)0, (int32_t)0); /* PictureBox.Line */") @(
+        "vb6_Form_PSet((void*)vb6_hwnd_FDForm, 0, 1, 40, 30",
+        "vb6_Form_Line((void*)vb6_hwnd_FDForm, 0, 1, 40, 0, 1, 1, 20")
     # 账 #278 §B113: `Load/Unload <窗体名>` 的实参站在**对象位**，不许折成默认属性。
     #   夹具里那枚没人调的 UsOwnNameProbe 写 `Unload FDForm`（VB6 里与 `Unload Me` 同义）。
     #   改前那一台在这一形里交的是 `vb6_GetControlText(vb6_hwnd_FDForm)`（Caption 的 BSTR）

@@ -611,11 +611,16 @@
                 if (i == nCoord) { hasColor = "1"; col = la[i]; }
                 else if (i == nCoord + 1) { style = la[i]; }
             }
+            // 账 #232⑥: 两个 Step 前缀各一格（VB6 `Line [Step] (x1,y1) [Step] -(x2,y2)`），
+            // 由 parser 记在 AST 上。起点省略那一形（has1=0）不交 step1 —— RTL 见 step1 就把
+            // 当前笔位再加一次，等于把起点从 (cx,cy) 挪到 (2cx,2cy)。
             const std::string h1 = hasStart ? "1" : "0";
+            const std::string s1 = (node.canvasStep1 && hasStart) ? "1" : "0";
+            const std::string s2 = node.canvasStep2 ? "1" : "0";
             c_.emitLine(fnLine + "((void*)" + cvHwndLine + ", "
-                        + "(int32_t)0, (int32_t)" + h1 + ", "
+                        + "(int32_t)" + s1 + ", (int32_t)" + h1 + ", "
                         + "(double)" + x1 + ", (double)" + y1 + ", "
-                        + "(int32_t)0, (int32_t)1, "
+                        + "(int32_t)" + s2 + ", (int32_t)1, "
                         + "(double)" + x2 + ", (double)" + y2 + ", "
                         + "(int32_t)" + hasColor + ", (int32_t)" + col + ", "
                         + "(int32_t)" + style + ");  /* PictureBox.Line */");
@@ -684,24 +689,26 @@
                     a.push_back(std::move(lastExpr_));
                 }
             }
-            // 形状判定: Step 关键字只能在**语法位置**上出现, 编译期不可得
-            // (VB6 的 Step 落到 AST 上已被 parser 吞掉)。所以按"实参个数 + 首参
-            // 是不是坐标对"来分派, 这是能拿到的最强信号。
+            // 形状判定: parser 把 `Step` / 起点省略这些**语法事实**记在 node 上, 这里只读旗标,
+            // 不再按"实参个数 + 首参是不是坐标对"去猜 (那是账 #232④ 以前的办法, 猜错过一次:
+            // 起点省略 + color + style 恰好也是 4 格, 颜色与样式被读成第二点的两格)。
             //   PSet(x,y) / PSet(x,y,c) / PSet Step(x,y) / PSet(x,y),c
-            //   Line -(x1,y1)-(x2,y2) [,c] [,B] [,F]
-            //   Circle (x,y),r [,c] [,start] [,end] [,aspect]
-            //   Point(x,y)
+            //   Line (x1,y1)-(x2,y2) [,c] [,B] [,F] / Line -(x2,y2) / Line [Step]...(...)
+            //   Circle (x,y),r [,c] [,start] [,end] [,aspect] / Circle Step(x,y),r
+            //   Point(x,y)  ← 本仓 RTL 那一枚没有 step 位 (vb6_Form_Point(hwnd,x,y)),
+            //                所以 parser 不收 `Point Step`（名单问 canvas_drawing.hpp 那一处）
             std::string call;
+            const std::string st1 = node.canvasStep1 ? "1" : "0";
             if (m == "pset") {
-                // PSet(x,y) / PSet(x,y),color —— 3 参时末参是颜色。
+                // PSet(x,y) / PSet(x,y),color / PSet Step(x,y) —— 3 参时末参是颜色。
                 bool hasColor = (a.size() >= 3);
                 std::string x = a.size() > 0 ? a[0] : "0";
                 std::string y = a.size() > 1 ? a[1] : "0";
                 std::string col = hasColor ? a[a.size() - 1] : "0";
                 call = looksLikePrinter
-                    ? (cvDrawFn + "(0, 1, " + x + ", " + y + ", "
+                    ? (cvDrawFn + "(" + st1 + ", 1, " + x + ", " + y + ", "
                        + (hasColor ? "1" : "0") + ", " + col + ")")
-                    : (cvDrawFn + "((void*)" + obj + ", 0, 1, " + x + ", " + y
+                    : (cvDrawFn + "((void*)" + obj + ", " + st1 + ", 1, " + x + ", " + y
                        + ", " + (hasColor ? "1" : "0") + ", " + col + ")");
             } else if (m == "point") {
                 std::string x = a.size() > 0 ? a[0] : "0";
@@ -744,16 +751,23 @@
                 }
                 const std::string pfx = cvDrawFn;
                 const std::string h1 = hasStart ? "1" : "0";
+                // 账 #232⑥: 两个点各有一格 Step 前缀 (VB6 语法两个都可选), 由 parser 记下;
+                // 起点省略那一形不交 step1 (RTL 见 step1 会把当前笔位再加一次 = (2cx,2cy))。
+                const std::string s1 = (node.canvasStep1 && hasStart) ? "1" : "0";
+                const std::string s2 = node.canvasStep2 ? "1" : "0";
                 if (looksLikePrinter) {
-                    call = pfx + "(0, " + h1 + ", " + x1 + ", " + y1 + ", 0, 1, " + x2 + ", " + y2
+                    call = pfx + "(" + s1 + ", " + h1 + ", " + x1 + ", " + y1
+                         + ", " + s2 + ", 1, " + x2 + ", " + y2
                          + ", " + hasColor + ", " + col + ", " + style + ")";
                 } else {
-                    call = pfx + "((void*)" + obj + ", 0, " + h1 + ", " + x1 + ", " + y1
-                         + ", 0, 1, " + x2 + ", " + y2
+                    call = pfx + "((void*)" + obj + ", " + s1 + ", " + h1 + ", " + x1 + ", " + y1
+                         + ", " + s2 + ", 1, " + x2 + ", " + y2
                          + ", " + hasColor + ", " + col + ", " + style + ")";
                 }
             } else { // circle
-                // Circle (x,y),r [,color] [,start] [,end] [,aspect]
+                // Circle (x,y),r [,color] [,start] [,end] [,aspect] / Circle Step(x,y),r
+                // ⚠ 下面那个 hasStart 是「起始角给没给」，与 Line 分支里的 hasStart（起点给没给）
+                // 不是一个东西 —— 同名两义正是本仓吃过的那味，Circle 这格的名字别再复用。
                 std::string x = a.size() > 0 ? a[0] : "0";
                 std::string y = a.size() > 1 ? a[1] : "0";
                 std::string r = a.size() > 2 ? a[2] : "0";
@@ -764,11 +778,11 @@
                 if (a.size() > 5) { hasEnd = "1"; eA = a[5]; }
                 if (a.size() > 6) { hasAsp = "1"; asp = a[6]; }
                 if (looksLikePrinter) {
-                    call = cvDrawFn + "(0, 1, " + x + ", " + y + ", " + r
+                    call = cvDrawFn + "(" + st1 + ", 1, " + x + ", " + y + ", " + r
                          + ", " + hasColor + ", " + col + ", " + hasStart + ", " + sA
                          + ", " + hasEnd + ", " + eA + ", " + hasAsp + ", " + asp + ")";
                 } else {
-                    call = cvDrawFn + "((void*)" + obj + ", 0, 1, " + x + ", " + y + ", " + r
+                    call = cvDrawFn + "((void*)" + obj + ", " + st1 + ", 1, " + x + ", " + y + ", " + r
                          + ", " + hasColor + ", " + col + ", " + hasStart + ", " + sA
                          + ", " + hasEnd + ", " + eA + ", " + hasAsp + ", " + asp + ")";
                 }

@@ -129,4 +129,16 @@ inline CanvasTailKind canvasVerbTailKind(const std::string& verb) {
     return CANVAS_TAIL_NONE;
 }
 
+// parser 问的这一问（账 #232⑥）：**这一档动词的语法里有没有 `[Step]` 前缀** ——
+// VB6: `PSet [Step] (x, y)` / `Line [Step] (x1,y1) [Step] -(x2,y2)` /
+//      `Circle [Step] (x, y), radius` / `Point [Step] (x, y)`。
+// 为什么单独一问而不是「凡是画布动词都收」: `Point` 在 VB6 也有 Step，但本仓 RTL 那一枚出口
+// **没有 step 位**（`vb6_Form_Point(hwnd, x, y)` = 两个坐标），硬收 Step 等于把相对坐标当绝对
+// 坐标画/读，编得过、读数错 —— 与账 #217/#219「表里没有出口就别在调用点顺手补一个」同一味。
+// 要给 Point 补 Step = 改 `vb6_Form_Point` 的签名 + 过 `rtl_proto_arity`，单开。
+// `Line` 的两个点**各有各的** Step（VB6 语法里两个前缀都可选），所以位要分两枚记在 AST 上。
+inline bool canvasVerbHasStep(const std::string& verb) {
+    return verb == "line" || verb == "pset" || verb == "circle";
+}
+
 } // namespace vb6c3
