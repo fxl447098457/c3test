@@ -7624,6 +7624,8 @@ if ($Category -in @("all", "run", "vbp")) {
                     "W7-terms=0 n=7", "W8-terms=200", "W9-terms=0 n=7 twice=7",
                     "W10-live-terms=0 n=7", "W10-gone-terms=1",
                     "W11-n=7 terms=0 owner-gone=1",
+                    "W12-inner-made=1 inner-terms=1", "W12-holder-made=1 holder-terms=1",
+                    "W13-terms=2", "W14-alive-terms=0 n=7", "W14-gone-terms=1",
                     "B445-DONE")
     Test-Vbp 'b445_class_slot_refcount' "$Tests\b445_refcount\B445.vbp" $b445Needles
     Test-Vbp 'b445_class_slot_refcount_x86' "$Tests\b445_refcount\B445.vbp" $b445Needles -Arch "x86"
@@ -7635,7 +7637,13 @@ if ($Category -in @("all", "run", "vbp")) {
         'if (!m_auto) m_auto = vb6_cls_C445_New();',
         'if (t) vb6_cls_C445_Release(t);',
         'if ((*p)) vb6_cls_C445_AddRef((*p));',
-        '(void*)&(borrowed)')
+        '(void*)&(borrowed)',
+        'if (me->mInner12) vb6_cls_C445_Release(me->mInner12);')
+    # 反面针 (腿⑤ 的边界): As Object 那一格是 void*, As Variant 那一格是槽 —— 两档都答不出
+    #   工程类, 出厂这一站不许碰。钉形状 (mLate15 = 专属名) 而不是钉名字, 与门 #764 那条同口径。
+    Test-EmitcAbsent 'b445_nonclass_object_slots_get_no_teardown_release' @(
+        "$Tests\b445_refcount\B445.vbp") @(
+        '_Release(me->mLate15)')
     # 反面针: borrowed 那一格的地址交给了外部 Declare (__vbaObjSetAddref) ⇒ 写它的主人在
     #   计数系统外面, 出口不许退它 (退 = 无对价的退, 门 #763 的 FlexGridX86 就死在这一句上)。
     Test-EmitcAbsent 'b445_foreign_written_slot_keeps_no_exit_release' @(

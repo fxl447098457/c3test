@@ -5,6 +5,8 @@ Option Explicit
 ' C445: Class_Initialize 里 Main.Made +1, Class_Terminate 里 Main.Terms +1, N 恒 7。
 Public Made As Long
 Public Terms As Long
+Public MadeH As Long
+Public TermsH As Long
 Private m_auto As New C445
 Public m_plain As C445
 
@@ -174,6 +176,50 @@ Sub W11ForeignSlot()
     Debug.Print "W11-n=" & n & " terms=" & termsMid & " owner-gone=" & termsEnd
 End Sub
 
+' W12 = 腿⑤ 出厂那一档: 字段里那一枚随持有者一起出厂 (改前没人退 ⇒ 内层永远走不到 Terms)。
+Sub W12FieldTeardown()
+    Dim h12 As C445H
+    Dim m0 As Long
+    Dim t0 As Long
+    Dim hm0 As Long
+    Dim ht0 As Long
+    m0 = Made
+    t0 = Terms
+    hm0 = MadeH
+    ht0 = TermsH
+    Set h12 = New C445H
+    h12.Hold12
+    Set h12 = Nothing
+    Debug.Print "W12-inner-made=" & (Made - m0) & " inner-terms=" & (Terms - t0)
+    Debug.Print "W12-holder-made=" & (MadeH - hm0) & " holder-terms=" & (TermsH - ht0)
+End Sub
+
+' W13 = 覆写 + 出厂两档同台: 造两枚, 覆写退掉第一枚, 出厂再退掉第二枚 = 恰好两枚出厂。
+Sub W13FieldOverwriteThenTeardown()
+    Dim h13 As C445H
+    Dim t1 As Long
+    t1 = Terms
+    Set h13 = New C445H
+    h13.HoldTwice12
+    Set h13 = Nothing
+    Debug.Print "W13-terms=" & (Terms - t1)
+End Sub
+
+' W14 = 反面证人 (不许提前拆): 别名进字段时 claim 一枚, 持有者先出厂, 调用方那一枚还得活着。
+Sub W14FieldAliasKeepsAlive()
+    Dim o14 As C445
+    Dim h14 As C445H
+    Dim t2 As Long
+    t2 = Terms
+    Set o14 = New C445
+    Set h14 = New C445H
+    h14.AliasInto12 o14
+    Set h14 = Nothing
+    Debug.Print "W14-alive-terms=" & (Terms - t2) & " n=" & o14.N
+    Set o14 = Nothing
+    Debug.Print "W14-gone-terms=" & (Terms - t2)
+End Sub
+
 Sub Main()
     W1SetNothing
     W2Alias
@@ -186,5 +232,8 @@ Sub Main()
     W9ReturnSlot
     W10OutSlot
     W11ForeignSlot
+    W12FieldTeardown
+    W13FieldOverwriteThenTeardown
+    W14FieldAliasKeepsAlive
     Debug.Print "B445-DONE"
 End Sub

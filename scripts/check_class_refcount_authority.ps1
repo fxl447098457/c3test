@@ -157,10 +157,26 @@ if ($dropSites -ne 1) {
     $fail += ("dropClassSlotRelease call sites = " + $dropSites + " (want exactly 1)")
 }
 
+# ⑪ 腽⑤ 出厂那一档（字段那一枚引用放手）: 全仓只许有一处把 _Release 发在 me-> 那一格上，而且必须住在 cgen_com.cpp 的 `_Destroy` 尾巴里。为什么单独钉: 字段进计数系统是从第一刀起（覆写 / 置空两站都问同一位主人），只有出厂这一站缺着 —— 补的时候若再开第二位主人，「谁握字段那一枚」就又是两份答案（本仓那一族病灶: #167/#231/#245/#298/#443）。
+$teardownShapes = CountOf '_Release(me->'
+if ($teardownShapes -ne 1) {
+    $fail += ("field-teardown _Release(me-> sites = " + $teardownShapes + " (want exactly 1)")
+}
+$teardownFiles = @(FilesOf '_Release(me->')
+if ($teardownFiles.Count -ne 1 -or $teardownFiles[0] -ne 'cgen_com.cpp') {
+    $fail += ("field-teardown owner file = " + ($teardownFiles -join ', ') + " (want exactly cgen_com.cpp)")
+}
+
+# ⑫ 字段类型的问句名单: 出厂这一站的类名是问 `mapTypeRef(var.asType.get())` 要的 —— 与发这枚字段那一行同一个答案，不开第二问。这条钉的是「这一问一共有几处」，新增一处手抄就得改这里的数（有意让它响）。
+$fieldQ = CountOf 'mapTypeRef(var.asType.get())'
+if ($fieldQ -ne 5) {
+    $fail += ("mapTypeRef(var.asType.get()) question sites = " + $fieldQ + " (want exactly 5)")
+}
+
 if ($fail.Count -gt 0) {
     Write-Host "CLASS-REFCOUNT-AUTHORITY FAIL"
     foreach ($f in $fail) { Write-Host ("  - " + $f) }
     exit 1
 }
-Write-Host "CLASS-REFCOUNT-AUTHORITY OK (1 pair mint / 1 header / 2 leg consumers / 3+9 formals / 7 roster / 6 literal files / 0 stale / 5 registry files + 2 registrants / 1+1 out-slot / 1+1 foreign-write drop)"
+Write-Host "CLASS-REFCOUNT-AUTHORITY OK (1 pair mint / 1 header / 2 leg consumers / 3+9 formals / 7 roster / 6 literal files / 0 stale / 5 registry files + 2 registrants / 1+1 out-slot / 1+1 foreign-write drop / 1 field-teardown shape + file / 5 field-type questions)"
 exit 0
