@@ -355,6 +355,49 @@ Debug.Print "FD27-melinestart=" & TF(ok27) & " raw=" & CStr(rowY0) & "," & CStr(
     ok29 = (rowQ0 < 0) And (rowQ > 0) And (picP.CurrentX = 100) And (picP.CurrentY = 110)
     Debug.Print "FD29-piclinestart2=" & TF(ok29) & " raw=" & CStr(rowQ0) & "," & CStr(rowQ) & _
                " pen=" & CStr(picP.CurrentX) & "," & CStr(picP.CurrentY)
+    ' 232-6 = `Step` 前缀: 坐标相对 CurrentX/CurrentY。改前这一族在 parser 就被拒 (`Line Step ...`
+    ' 报 expected 'Input' after 'Line'; `Circle Step (x,y), r` 报 expected ')' (got ,))。
+    ' 两格画在窗体右侧那块**空带**上 (x 210..300 / y 140..205): 这块窗体上别的一切判据都在
+    ' x <= 306, 其中 FD24 的圆止于 y=125、FD22 的点止于 y=133 —— 新的线绝不压到它们
+    ' （FD18 那一课: 子窗口/新笔画到别人的扫描窗里, 只会把别人的判据弄红）。
+    ' 颜色用 RGB() 而不是又一枚 vb 常量: 这块窗体上 vb 常量已经用尽, 而 RGB(255,128,0) /
+    ' RGB(128,0,255) 在别处一个像素都没有 —— 两枚判据的扫描窗也因此互不相干。
+    ' pen 半钉的是「Step 没生效」那一形: 相对坐标被当绝对坐标时, 落点与笔位都不在源码写的地方。
+    Dim ok30 As Boolean, ok31 As Boolean
+    Dim pixA0 As Long, pixA As Long
+    Dim rowU0 As Long, rowU As Long
+    Me.ForeColor = RGB(255, 128, 0)
+    Me.DrawWidth = 1
+    Me.CurrentX = 220
+    Me.CurrentY = 150
+    pixA0 = FirstRowOfColor(d, RGB(255, 128, 0), 255, 265, 175, 185)
+    Me.PSet Step (40, 30)
+    pixA = FirstRowOfColor(d, RGB(255, 128, 0), 255, 265, 175, 185)
+    ok30 = (pixA0 < 0) And (pixA > 0) And (Me.CurrentX = 260) And (Me.CurrentY = 180)
+    Debug.Print "FD30-psetstep=" & TF(ok30) & " raw=" & CStr(pixA0) & "," & CStr(pixA) & _
+               " pen=" & CStr(Me.CurrentX) & "," & CStr(Me.CurrentY)
+    Me.ForeColor = RGB(128, 0, 255)
+    Me.CurrentX = 220
+    Me.CurrentY = 200
+    rowU0 = FirstRowOfColor(d, RGB(128, 0, 255), 235, 265, 145, 205)
+    Me.Line Step (40, 0) Step -(20, -50)
+    rowU = FirstRowOfColor(d, RGB(128, 0, 255), 235, 265, 145, 205)
+    ok31 = (rowU0 < 0) And (rowU > 0) And (Me.CurrentX = 240) And (Me.CurrentY = 150)
+    Debug.Print "FD31-linestep=" & TF(ok31) & " raw=" & CStr(rowU0) & "," & CStr(rowU) & _
+               " pen=" & CStr(Me.CurrentX) & "," & CStr(Me.CurrentY)
+    ' 同一族在 PictureBox 上再走一遍: 那一支码头（vb6_ControlLine）自己也要读 Step 旗标,
+    ' 不是借 Form 那一支。颜色第三枚, 与 FD28/FD29/FD30/FD31 都不撞。
+    Dim ok32 As Boolean
+    Dim rowT0 As Long, rowT As Long
+    picP.ForeColor = RGB(0, 128, 128)
+    picP.CurrentX = 5
+    picP.CurrentY = 100
+    rowT0 = FirstRowOfColor(dp, RGB(0, 128, 128), 10, 30, 95, 112)
+    picP.Line Step (10, 5) Step -(20, 0)
+    rowT = FirstRowOfColor(dp, RGB(0, 128, 128), 10, 30, 95, 112)
+    ok32 = (rowT0 < 0) And (rowT > 0) And (picP.CurrentX = 25) And (picP.CurrentY = 100)
+    Debug.Print "FD32-piclinestep=" & TF(ok32) & " raw=" & CStr(rowT0) & "," & CStr(rowT) & _
+               " pen=" & CStr(picP.CurrentX) & "," & CStr(picP.CurrentY)
     r = ReleaseDC(picP.hwnd, dp)
     Point 7, 9
     Debug.Print "FD23-userpoint=" & CStr(userPoint)

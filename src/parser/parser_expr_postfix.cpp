@@ -15,18 +15,24 @@ namespace vb6c3 {
 // 一问: 这个 callee 的名字该收什么形状的尾巴。**本文件问那张表的唯一一处**
 // (check_form_draw_state.ps1 的 S10 钉"恰好一次")。名单与形状都住在
 // src/common/canvas_drawing.hpp, 这里不许再抄一份动词名单。
-static CanvasTailKind canvasTailKindOfCallee(const ExprPtr& callee) {
-    std::string name;
-    if (callee) {
-        // 归一用表自己那一份 (canvasVerbLower, ASCII 小写，与 Parser::toLower 同结果)
-        // —— 动词名的"算不算这个名字"与表住在同一条线上。
-        if (callee->kind == ASTNodeKind::MemberAccessExpr) {
-            name = canvasVerbLower(static_cast<MemberAccessExpr&>(*callee).memberName);
-        } else if (callee->kind == ASTNodeKind::IdentifierExpr) {
-            name = canvasVerbLower(static_cast<IdentifierExpr&>(*callee).name);
-        }
+// 一问: 这个 callee 的名字该收什么形状的尾巴。**本文件问那张表的唯一一处**
+// (check_form_draw_state.ps1 的 S10 钉"恰好一次")。名单与形状都住在
+// src/common/canvas_drawing.hpp, 这里不许再抄一份动词名单。
+static std::string canvasVerbNameOf(const ExprPtr& callee) {
+    if (!callee) return std::string();
+    // 归一用表自己那一份 (canvasVerbLower, ASCII 小写，与 Parser::toLower 同结果)
+    // —— 动词名的"算不算这个名字"与表住在同一条线上。
+    if (callee->kind == ASTNodeKind::MemberAccessExpr) {
+        return canvasVerbLower(static_cast<MemberAccessExpr&>(*callee).memberName);
     }
-    return canvasVerbTailKind(name);
+    if (callee->kind == ASTNodeKind::IdentifierExpr) {
+        return canvasVerbLower(static_cast<IdentifierExpr&>(*callee).name);
+    }
+    return std::string();
+}
+
+static CanvasTailKind canvasTailKindOfCallee(const ExprPtr& callee) {
+    return canvasVerbTailKind(canvasVerbNameOf(callee));
 }
 
 // 二问: 这一档的尾巴是不是**两坐标**那一形 (`-(x, y)[, color][, style]`)。
@@ -37,11 +43,21 @@ static bool isTwoPointCanvasVerb(const ExprPtr& callee) {
     return canvasTailKindOfCallee(callee) == CANVAS_TAIL_TWO_POINT;
 }
 
+// 三问（账 #232⑥）: 这一档动词的语法里有没有 `[Step]` 前缀 —— **本文件问那张表的唯一一处**。
+// 名单与「哪一档的 RTL 有 step 位」都住在 canvas_drawing.hpp 那一行答案里。
+static bool canvasVerbAcceptsStep(const ExprPtr& callee) {
+    return canvasVerbHasStep(canvasVerbNameOf(callee));
+}
+
 // ============================================================
 // 后缀表达式: .member, (args), !dict
 // ============================================================
 
 ExprPtr Parser::parsePostfix(ExprPtr expr) {
+    // 账 #232⑥: 动词与它那枚 `(` 之间若隔着一个 `[Step]`，那一格先把它吃掉，再让下一轮
+    // 的左括号分支照常建调用 —— 两步共用同一枚 pendingStep，所以「相对坐标」这件事在 AST 上
+    // 只有一处可读（`IndexOrCallExpr::canvasStep1`）。
+    bool pendingStep = false;
     while (true) {
         switch (cur_.kind) {
     case TokenKind::Dot: {
@@ -195,6 +211,10 @@ ExprPtr Parser::parsePostfix(ExprPtr expr) {
                 // VB2001 expected ')' / VB2003 / VB2002，整行崩坏）。折叠动作住在语义层（在 parser 之后），
                 // 所以 parser 这里问的只能是**名字**，不能问符号表。
                 const CanvasTailKind tailKind = canvasTailKindOfCallee(call->callee);
+                // 账 #232⑥: `Step` 前缀是**语法事实**, 必须在它被消费的那一刻记到这一枚调用上 ——
+                // 下一轮循环那枚 `Step` 分支已经把它读出来了 (见下面 pendingStep)。
+                call->canvasStep1 = pendingStep;
+                pendingStep = false;
                 if (cur_.kind == TokenKind::Comma) {
                     if (tailKind == CANVAS_TAIL_COORD) {
                         // 收不动就停 (下一个 token 是语句终止符), 剩下的交给外层。
@@ -236,6 +256,34 @@ ExprPtr Parser::parsePostfix(ExprPtr expr) {
                 break;
             }
 
+            case TokenKind::Step: {
+                // 账 #232⑥: `PSet Step (x, y)` / `Circle Step (x, y), r` / `Line Step (x1,y1)-(x2,y2)`。
+                // `Step` 是软关键字（可以当普通变量名用），所以**必须**先问「左操作数是不是
+                // 吃 Step 的那一档动词」再问「下一枚是不是 `(`」—— 否则 `step (x)` 这种把
+                // Step 当变量的写法会被吃掉一半（实测那种写法今天走 parsePostfix 的 default，
+                // 一个 token 都不消费）。
+                // 名单只问表一处（canvasVerbAcceptsStep）；旗标交给下一轮建调用时记上。
+                if (!canvasVerbAcceptsStep(expr)) {
+                    // `Point Step (x,y)` 在 VB6 合法, 但本仓 vb6_Form_Point(hwnd,x,y) 没有 step 位
+                    // (名单见 canvas_drawing.hpp 的 canvasVerbHasStep)。不收的时候**要说清是哪一枚**:
+                    // 否则 `Step` 会掉进"当实参"的兜底, 报成「'Point' 需要 2-2 个参数, 实际提供 1」
+                    // —— 与真相差着一整条语义, 读的人会以为是自己少写了一个括号。
+                    // 这一段只问**出口在不在**（另一个问题），"收不收 Step" 的答案上面已经问过了。
+                    const std::string name = canvasVerbNameOf(expr);
+                    const char* drawEntry = canvasDrawEntry(name, CR_CANVAS_FORM);
+                    if (drawEntry && *drawEntry) {
+                        diag_.error(DiagnosticID::ParseExpectedToken, currentLoc(),
+                            "'" + name + "' does not take a Step prefix in this build "
+                            "(its RTL exit has no step bit - see ledger 232 grid 2)");
+                    }
+                    return expr;
+                }
+                if (next_.kind != TokenKind::LeftParen) return expr;
+                advance();  // 消费 'Step'
+                pendingStep = true;
+                break;
+            }
+
             case TokenKind::Exclamation: {
                 // 字典访问: expr!key
                 auto loc = currentLoc();
@@ -268,6 +316,12 @@ ExprPtr Parser::parsePostfix(ExprPtr expr) {
 bool Parser::absorbCanvasLineTail(const std::unique_ptr<IndexOrCallExpr>& call) {
     if (!call) return false;
     if (!isTwoPointCanvasVerb(call->callee)) return false;
+    // 账 #232⑥: VB6 的第二点**也**可以带 Step（`Line (x1,y1) Step -(x2,y2)`）—— 与第一点那一格
+    // 一样是语法事实，记在同一枚调用上（canvasStep2），与第一点各自独立。
+    if (cur_.kind == TokenKind::Step && next_.kind == TokenKind::Minus) {
+        advance();  // 消费 'Step' (第二点的前缀)
+        call->canvasStep2 = true;
+    }
     if (cur_.kind != TokenKind::Minus || next_.kind != TokenKind::LeftParen) return false;
 
     advance();  // 消费 '-'
