@@ -76,6 +76,7 @@ void CCodeGen::visit(FunctionDecl& node) {
     withObjectInfoStack_.clear();
     // 账 #305 #408: 形参名册按过程重开 (上面那张表全程不清空)。
     procObjectFormals_.clear();
+    procClassFormals_.clear();  // 账 #305 §B218 (甲): 与上面那张同一条"按过程重开"
     // 账 #305 #408: 模块级那一档先恢复进来, 下面形参那一档的遮蔽才只吃本过程。
     knownClassVars_.insert(moduleClassVars_.begin(), moduleClassVars_.end());
     // Fix 010r/010r-10: 类模块中注册me到knownClassVars_ (使Me.Method()正确分发)
@@ -165,12 +166,12 @@ void CCodeGen::visit(FunctionDecl& node) {
             // 走"模块限定"路径丢实参 (C2224)。
             if (!pSym || pSym->kind != SymbolKind::Class) {
                 const std::string projClsP092r = projectClassNameOf(simpleP.name);
-                if (!projClsP092r.empty()) knownClassVars_[pLower] = projClsP092r;
+                if (!projClsP092r.empty()) registerClassFormal(pLower, projClsP092r);
             }
             if (pSym && pSym->kind == SymbolKind::UserDefinedType) {
                 knownUdtVars_[pLower] = "vb6_type_" + cIdent(simpleP.name);
             } else if (pSym && pSym->kind == SymbolKind::Class) {
-                knownClassVars_[pLower] = pSym->name;
+                registerClassFormal(pLower, pSym->name);
             } else if (pSym && (pSym->kind == SymbolKind::ComClass || pSym->kind == SymbolKind::ComInterface)) {
                 // Fix <vbeclipse>-2: 本工程有同名类模块 ⇒ 类型名指工程类, 走原生
                 // (VB6: 工程内定义优先于引用库). 类型库自动加载会把 Shell32 的
@@ -180,7 +181,7 @@ void CCodeGen::visit(FunctionDecl& node) {
                 // 0xC0000005). 判据与 mapTypeRef 同源: projectClassNameOf.
                 const std::string projCls2 = projectClassNameOf(simpleP.name);
                 if (!projCls2.empty()) {
-                    knownClassVars_[pLower] = projCls2;
+                    registerClassFormal(pLower, projCls2);
                 } else {
                     knownTypedComVars_[pLower] = pSym;
                 }

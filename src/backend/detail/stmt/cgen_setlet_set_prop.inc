@@ -177,11 +177,24 @@
             // 会 C2106/C2440.
             std::string targetCls101 = isCallTarget ? std::string()
                                                     : inferClassTypeOfExpr(*node.target);
+            if (targetCls101.empty()) {
+                auto itCls101 = knownClassVars_.find(targetLower);
+                if (itCls101 != knownClassVars_.end()) targetCls101 = itCls101->second;
+            }
             if (!targetCls101.empty() || knownClassVars_.count(targetLower)) {
-                // 项目类实例 (Dim c As CCircle / Dim WithEvents s As EventSource) 不是 COM
-                // 对象, 没有引用计数: 调用 vb6_ReleaseObject 会对纯 C 结构体走 vtable
-                // Release → 运行期 0xC0000005. Set Nothing 只需断开引用.
-                c_.emitLine(target + " = NULL;  /* Set Nothing (项目类实例) */");
+                // 账 #305 §B218 (甲) 腿③: 置空 = 放手那一枚 + 清槽, 与覆写同一位主人
+                // (接口那一族在上面 :141-142 早就是这个形状, 具体类只是今天才补上计数头)。
+                // 为什么不退回 vb6_ReleaseObject: 那会把纯 C 结构体首字段当 vtable
+                // Release → 0xC0000005 (Fix 101 当初正是为这条判死的); 也不许留裸清槽:
+                // 裸清槽每次覆写漏一枚 (ai/033 §1.1 行 203/204 的实物)。
+                // 拿不到类名 / 目标是调用形态 (`dict(key) = Nothing`) ⇒ 维持裸清槽。
+                if (!targetCls101.empty() && !isCallTarget
+                    && target.find('(') == std::string::npos
+                    && !procClassFormals_.count(targetLower)) {
+                    emitClassSlotRefSet(target, targetCls101, std::string(), false);
+                } else {
+                    c_.emitLine(target + " = NULL;  /* Set Nothing (项目类实例) */");
+                }
             } else if (knownTypedComVars_.count(targetLower)) {
                 c_.emitLine("vb6_ComReleaseTyped((void**)" + relObjTarget + ");  /* Set Nothing (early bound) */");
             } else {

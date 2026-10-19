@@ -346,7 +346,24 @@
                         + "\", (void*)(intptr_t)" + value + ");"
                         "  /* Extender.<prop> = v (per-instance, Set stmt) */");
         } else {
-            c_.emitLine(target + " = " + value + ";  /* Set */");
+            // 账 #305 §B218 (甲) 腿②: 目标是一格 typed 工程类槽 ⇒ 走那位主人。
+            // 类名两问按 #408 定的次序排: 先问 AST (作用域感知), 落空才问按名那张表。
+            // 拿不到类名、或槽是**下标/调用形态** (`VB6_SA_*(...)` / `dict(key)`) 时维持
+            // 今天那条裸拷贝: 那种形状里 target 出现三次 = 下标算术求值三次, 而「下标里的
+            // 副作用算不算一次」这一问本刀没有答案, 不猜 (已在册, 与腿⑤ 同批开格)。
+            std::string clsOfSlot = node.target ? inferClassTypeOfExpr(*node.target)
+                                                : std::string();
+            if (clsOfSlot.empty()) {
+                auto itSlot = knownClassVars_.find(targetLower);
+                if (itSlot != knownClassVars_.end()) clsOfSlot = itSlot->second;
+            }
+            if (!clsOfSlot.empty() && target.find('(') == std::string::npos
+                && !procClassFormals_.count(targetLower)) {
+                emitClassSlotRefSet(target, clsOfSlot, value,
+                    node.value && node.value->kind == ASTNodeKind::NewExpr);
+            } else {
+                c_.emitLine(target + " = " + value + ";  /* Set */");
+            }
         }
     }
 

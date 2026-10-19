@@ -298,6 +298,12 @@
     // 由按名那一臂与 §B221 的调用表达式那一臂共用。
     void emitIvrefQiSet(const std::string& target, const std::string& ifaceName,
                         const std::string& valueExpr);
+    // 账 #305 §B218 (甲): 工程类形参登记的一处出口 (按名表 + 本过程形参名册)。
+    void registerClassFormal(const std::string& pLower, const std::string& clsName);
+    // 账 #305 §B218 (甲) 腿②③: typed 工程类槽的「覆写 / 置空」一位主人
+    // (valueExpr 传空串 = 置空; 与上面那位接口主人同形, 两条腿共用一条顺序)。
+    void emitClassSlotRefSet(const std::string& target, const std::string& className,
+                             const std::string& valueExpr, bool rhsIsFreshNew);
     std::vector<const IfaceView*> ivImplementedIfaces(Module& module);
     Decl* ivFindImplMember(Module& module, const IfaceView& v, const IfaceSlotView& slot);
     // tB 委托式实现 (ai/022 B10): 本类把接口 v 整份转交给哪个持有字段 (无则 nullptr)

@@ -323,6 +323,10 @@
     // 账 #305 #408: 本过程形参表里声明成 As Object 的名字 (小写)。
     // 每张过程入口清空, 只描述当前过程的作用域 —— 用来挡住上面那张表跨过程漏答案。
     std::unordered_set<std::string> procObjectFormals_;
+    // 账 #305 §B218 (甲): 本过程**工程类形参**的名字名册 (同上面那张的生命周期, 按过程重开)。
+    // 引用计数那两条腿 (覆写 claim / 置空 release) 要它落空 —— ByVal 形参槽里那一枚引用
+    // 今天没有任何一站 claim 过它 (实参那一站是腿⑤, 还没接), 让它放手就是拆调用方还在用的实例。
+    std::unordered_set<std::string> procClassFormals_;
 
     // 账 #305 #408: knownClassVars_ 里模块级那一档登记的持久快照 (模块级 Dim As 类、类字段、窗体上的
     // UserControl 子控件、跨模块实例变量)。每张过程入口恢复一份 —— 与 moduleNewVars_ / moduleFixedStringLen_
