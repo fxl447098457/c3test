@@ -6073,6 +6073,19 @@ if ($Category -in @("all", "run", "vbp")) {
         # very fixture). Two-sided on a colour nothing else here uses: scan empty,
         # draw, scan again and find the rows.
         "FD24-barecircle=True", "FD25-bareline=True",
+        # 232-4: `Line -(x, y)` -- the START is omitted (VB6: from CurrentX/CurrentY).
+        # Before the cut the parser rejected the form outright (VB2001 "expected 'Input'
+        # after 'Line'" plus the `-(460` read as an infix minus), so the pre-cut compiler
+        # produced NO build and NO reading for these two at all -- there is nothing to
+        # regress from, which is exactly why the compile-side is pinned separately below.
+        # Each judge is ink + pen. The ink window starts at the pen position, so a shape
+        # that drew the two given coordinates as the START would leave it empty; the pen
+        # must end on the endpoint the source named (the old codegen shape ended it on
+        # (0,0)). The pen half of both readings was measured on the cut compiler
+        # (pen=460,140 / pen=560,140); the ink half needs a painted window, which this
+        # box does not have (the six pre-existing pixel judges FD07/FD16/FD24/FD25 read
+        # False here too) -- the ink half is CI's to confirm.
+        "FD26-barelinestart=True", "FD27-melinestart=True",
         "FD-DONE")
     Test-Vbp "fdrawstate" "$Tests\fdraw\FDemo.vbp" $fdrawExpected
     Test-Vbp "fdrawstate_x86" "$Tests\fdraw\FDemo.vbp" $fdrawExpected -Arch "x86"
@@ -8935,6 +8948,22 @@ if ($Category -in @("all", "syntax")) {
         "vb6_Point((&(int32_t){7}), (&(int32_t){9}));") @(
         "vb6_VariantEmpty()",
         "Circle(240, 90")
+    # 账 #232④: `Line -(x, y)` —— **起点省略**那一形。两件事一起钉，缺一件都过不去:
+    #   (1) parser 必须把这一形收成一次调用。改前它在**语句分发层**就被拒 (parser_stmt.cpp
+    #       的 `TokenKind::Line` 只把 `=` / `(` / `.` 交回调用路，`-` 落进 `Line Input`
+    #       那一支 ⇒ VB2001)，随后 `-(460` 又被 Pratt 当中缀减法读 ⇒ 一串级联，整个工程
+    #       exit 1 —— 这枚针的两条 needle 在改前那台上压根产不出来。
+    #   (2) 第一对坐标必须带 has=0 交出去 (RTL 那一头 vb6forms_draw.c:201 见 has1==0 就取
+    #       CurrentX/CurrentY)。发码侧以前是**按实参个数猜**的 (">= 4 就当起点也给")，
+    #       而起点省略 + color + style 恰好也是 4 格 ⇒ `Line -(x, y), vbRed, BF` 的颜色与
+    #       样式直接落进第二点的两格（实测发成 (…, 340, 80, 0, 1, 255, 5, …)）。现在起点
+    #       给没给由 parser 记在 AST 上（canvasStartOmitted），发码侧读旗标不猜。
+    # Absent 那一条钉死"错位"这一族形状：把给的两格当起点 ⇒ has=1 且第一格就是那两格。
+    Test-CodegenNote "form_canvas_tail_start" @("$Tests\fdraw\FDemo.vbp") @(
+        "vb6_Form_Line((void*)vb6_hwnd_FDForm, 0, 0, 0, 0, 0, 1, 460, 140, 0, 0, 0); /* Form.Line */",
+        "vb6_Form_Line((void*)vb6_hwnd_FDForm, 0, 0, 0, 0, 0, 1, 560, 140, 0, 0, 0); /* Form.Line */") @(
+        "vb6_Form_Line((void*)vb6_hwnd_FDForm, 0, 1, 460, 140",
+        "vb6_Form_Line((void*)vb6_hwnd_FDForm, 0, 1, 560, 140")
     # 账 #278 §B113: `Load/Unload <窗体名>` 的实参站在**对象位**，不许折成默认属性。
     #   夹具里那枚没人调的 UsOwnNameProbe 写 `Unload FDForm`（VB6 里与 `Unload Me` 同义）。
     #   改前那一台在这一形里交的是 `vb6_GetControlText(vb6_hwnd_FDForm)`（Caption 的 BSTR）

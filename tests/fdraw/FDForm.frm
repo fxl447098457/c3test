@@ -270,6 +270,39 @@ Private Sub tmrF_Timer()
     rowM = FirstRowOfColor(d, vbMagenta, 294, 306, 35, 125)
     ok25 = (rowM0 < 0) And (rowM > 0)
     Debug.Print "FD25-bareline=" & TF(ok25) & " raw=" & CStr(rowM0) & "," & CStr(rowM)
+    ' 232-4 = `Line -(x, y)`: the START is omitted (VB6: from CurrentX/CurrentY). Before this
+    ' cut the form was rejected in the parser (VB2001 "expected 'Input' after 'Line'" plus the
+    ' `-(310` read as an infix minus), so there was no build to run at all. Two-sided like
+    ' FD24/FD25 on colours nothing else here uses, and each judge ALSO reads the pen: the ink
+    ' has to land on the endpoint the source named, and the pen must end there (the RTL moves
+    ' it to the endpoint when has2 -- vb6forms_draw.c:207). Pinning the pen is what keeps
+    ' "drew something somewhere" from winning.
+    ' The scan window deliberately starts at the pen position (395,35): if the compiler read
+    ' the two given coordinates as the START, the ink would run away from (400,40) and the
+    ' window below would still be empty => False.
+    Dim ok26 As Boolean, ok27 As Boolean
+    Dim rowC0 As Long, rowC As Long
+    Dim rowY0 As Long, rowY As Long
+    Me.ForeColor = vbCyan
+    Me.DrawWidth = 3
+    Me.CurrentX = 400
+    Me.CurrentY = 40
+    rowC0 = FirstRowOfColor(d, vbCyan, 395, 465, 35, 145)
+    Line -(460, 140)
+    rowC = FirstRowOfColor(d, vbCyan, 395, 465, 35, 145)
+    ok26 = (rowC0 < 0) And (rowC > 0) And (Me.CurrentX = 460) And (Me.CurrentY = 140)
+Debug.Print "FD26-barelinestart=" & TF(ok26) & " raw=" & CStr(rowC0) & "," & CStr(rowC) & _
+              " pen=" & CStr(Me.CurrentX) & "," & CStr(Me.CurrentY)
+    Me.ForeColor = vbYellow
+    Me.DrawWidth = 3
+    Me.CurrentX = 500
+    Me.CurrentY = 40
+    rowY0 = FirstRowOfColor(d, vbYellow, 495, 565, 35, 145)
+    Me.Line -(560, 140)
+    rowY = FirstRowOfColor(d, vbYellow, 495, 565, 35, 145)
+    ok27 = (rowY0 < 0) And (rowY > 0) And (Me.CurrentX = 560) And (Me.CurrentY = 140)
+Debug.Print "FD27-melinestart=" & TF(ok27) & " raw=" & CStr(rowY0) & "," & CStr(rowY) & _
+              " pen=" & CStr(Me.CurrentX) & "," & CStr(Me.CurrentY)
     Point 7, 9
     Debug.Print "FD23-userpoint=" & CStr(userPoint)
     r = ReleaseDC(Me.hwnd, d)

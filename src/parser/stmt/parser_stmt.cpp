@@ -134,9 +134,15 @@ StmtPtr Parser::parseStatement() {
             return parseCloseStmt();
         }
         case TokenKind::Line: {
+            // `-` 那一格 = 画布的两坐标形 `Line -(x, y)` (账 #232④): VB6 里 `Line` 的
+            // **语句**义只有 `Line Input` 一种 (后继是 `Input` 关键字), 所以 `Line` 后面跟
+            // `-` 只可能是绘图义 —— 不存在"`Line - 5`"那种语句写法, 这一格抢不走任何语句。
+            // 绘图义为什么以前进不来: 交回调用路以后表达式层把 `-` 读成中缀减法
+            // (parser_expr_postfix.cpp 的 `case TokenKind::Minus` 那一档)。
             if (next_.kind == TokenKind::Equals ||
                 next_.kind == TokenKind::LeftParen ||
-                next_.kind == TokenKind::Dot) {
+                next_.kind == TokenKind::Dot ||
+                next_.kind == TokenKind::Minus) {
                 return parseLabelOrAssignmentOrCall();
             }
             return parseLineInputStmt();

@@ -158,7 +158,7 @@ sha256=0cea930e01da9792e8c1f565c8ac8b6f7aa6d6ac7be304405552d81840b5e932 ascii256
 sha256=f36375752df886382ea7964486100e426231bc23c96748f1a49f1aa08267ac6e ascii256=d323dd2d50fc35242e03fb50f82e4568baba9eab0c912ba266e1559323b48c5e rc=0 bytes=7307 tests/exename/NameProbe.vbp
 sha256=6bb457e9de3e5adfc1bcb979fbd7e762640085f1869702664709ca4a3449fdcd ascii256=a281e6f262694ed3b4fb4a5c231feac506190767c3f03552bb3f0e86feeb7801 rc=0 bytes=1341 tests/ext_show_test/Module1.bas
 sha256=cf6d1778d09fea0be4596722e34f1ee8c0ae6ea525bd95ee8baa845572d1d0a8 ascii256=65d51e895ff64be617cf4c3bb31e804ab2e88f942e4ce32f55c96ba81f3f9de1 rc=0 bytes=12879 tests/ext_show_test/test_ext_show.vbp
-sha256=fd4eedcb8b8cd4e5c912b76942acdfcf0327293e360ab4ed40f2512509d92ddd ascii256=1ea3d8693cf0289193a3077fe0ccb578e18764901d54dc191ad5f87b9496abee rc=0 bytes=28085 tests/fdraw/FDemo.vbp
+sha256=58a376265740c56428703e09ca54d2320f4a5d913bbde498176d165fff994410 ascii256=e63d3a13ef48be07e7a75f5aae18caf5df04b183c10225d9e76671d146825b77 rc=0 bytes=31686 tests/fdraw/FDemo.vbp
 sha256=6670fb7a6bd0462d2ffb70a218f589baa2ba1f8b6ad9c06824fe36bbb6e73d13 ascii256=fdb37552e5246d75ac0be91705a380f7fe50ba9902235368c6137752f10bc5b2 rc=0 bytes=22779 tests/frmevents/FrmEvents.vbp
 sha256=f5a241b1377d4317c45d94de493edf3f08845f97f907432e1a194b9fb384e1a5 ascii256=13e4a6b7a35c17d26e106c0cca563e659c00d870252e1d4645974c6b8a288a8d rc=0 bytes=13535 tests/frxdata/FrxData.vbp
 sha256=c924996056456027b457d4f54bb5870dd30683e4117b7a17796b74393febd56d ascii256=0328ca02ab875be5d56030df25c66a8884fe68181852db146ec1b0e51c97e5d5 rc=0 bytes=17195 tests/gen_cls/gen_cls.vbp
@@ -640,6 +640,5 @@ sha256=eac36169521603767d8d4cdc91251398c02278aeb16a6a169245c3dc7ecdbb25 ascii256
 #   R2 不许再有 vb6_VariantDouble / R3 权威自己答 vb6_VariantDate / R4 其余五档原样还在
 #   —— 防有人把整条链塌成一句 boxToVariant，那会一次移六档 / R5 判据两头都在）。
 #   负控实测：把手抄写法塞回去 -> R1+R2 双红。
-
 # 2026-10-19 登记来源（第一百二十一刀，账 #444 / §B217）：门 #752（head=2546ebd6，12 条里 10 绿 + Emit manifest 与 Tests (compile) 两红）报「9 份移动 / 2 份新增」，按 CI 那台自己交的清单（github/ci/emit-manifest 提交 4460c087，注脚 head=2546ebd6）登记。**逐行归因用两枚 CI 读数勈成两半**：① committed -> CI@990c8ac8（只含别人那两笔 a9e23e59 + 990c8ac8，与本刀无关）移动 2 行 = tests/typeof/Tof.vbp、tests/typeof/TofMain.bas；② CI@990c8ac8 -> CI@2546ebd6（本刀叠上去）移动 7 行 = tests/b172_paramslot/B172Main.bas、tests/b173_udtarg/B173Main.bas、tests/BalloonTooltips/prjBalloonTooltips.vbp、tests/cc_act/Act.vbp、tests/cc_act/ActMain.bas、tests/VbQRCodegen-master/src/mdQRCodegen.bas、tests/ve_list/VeList.vbp，新增 2 行 = tests/b444_vararg/B444.vbp、tests/b444_vararg/Main.bas。② 这一半与本机 480 份输入逐份 --emit-c 的 A/B（BASE C3_k119 x NEW C3_k121 = changed 7 / +28 行 / -0 行）文件集合完全相同 ⇒ 本刀没碰别人那两枚产物，而别人那两行在本刀之前就已经移动了。inputs 480 -> 482。
 # 2026-10-19 登记来源（第一百二十五刀，账 #448/#449 / §B221）：门 #756（head=6516a333，12 条里 9 绿）三红——Emit manifest 与 check_manifest_coverage 同一件事：tests/b448_iface_ret 那 2 份新输入没登记哈希。登记取本机 .build/C3.exe（sha256=97dd9f8c9f28）复算：存量 482 行**逐行相同 / 哈希不同 0 / 退场 0**，只有 +2 ⇒ 本机那台与 CI 那台在存量这一等上同码，本刀没有移动任何一行发码。ci/emit-manifest 这一头取不到：远端 tip 仍停在 4460c087（注脚 head=2546ebd6），且本机 fetch 那一条分支卡在凭据提示（同一 remote 的 dev 读得到）。

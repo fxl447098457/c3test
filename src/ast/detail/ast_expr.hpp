@@ -115,6 +115,12 @@ public:
     // 重载选择结果 (O2): 语义层 resolveOverload 选定的变体键后缀
     // ("" = 裸键 head / 非重载, 零改动; 否则 "$ov$<fp>", cgen 据此定形 C 名与形参表).
     std::string calleeOvlSuffix;
+    // 账 #232④: `Line -(x, y)` —— **起点省略**那一形 (VB6: 从 CurrentX/CurrentY 起笔)。
+    // 为什么必须是语法事实而不是发码侧按实参个数猜: 起点省略 + 可选 color/style 时
+    // 实参个数与「起点终点都给」那一形撞车 (2 坐标 + color + style = 4 格 = 4 格坐标),
+    // 按个数分派必然把 color/style 读成第二点的两格。只有 parser 知道源码里那个 `-`
+    // 之后**没有** `(x1,y1)`。
+    bool canvasStartOmitted = false;
 
     IndexOrCallExpr(SourceLocation loc, ExprPtr callee)
         : Expr(ASTNodeKind::IndexOrCallExpr, loc),

@@ -432,14 +432,31 @@ foreach ($want in @('common/canvas_drawing.hpp', 'canvasVerbTailKind(', 'CANVAS_
                  " -> a canvas verb's tail is being decided by a hand-written list again")
     }
 }
-# 一问只许问一次（两处吸收共用同一个 tailKind），但两档都得真的被用到
+# 一问只许问一次（尾巴档的名字归一全在本文件这一处），而"两坐标那一档"只许**判**一次:
+# 吸收点与 `case TokenKind::Minus` 的分发点都问 isTwoPointCanvasVerb —— 两个语法位置
+# 各问一次是必然的（要不要消费 token 只能在动手之前决定），但答案只有一位主人。
+# 账 #232④ 把这两点钉死: 吸收动作一份都不许抄第二遍 (抄一遍 = 旗标折法分家),
+# "哪一档是这一形"也不许在第二处重新判。
 if ([regex]::Matches($parserCode, 'canvasVerbTailKind\s*\(').Count -ne 1) {
     $bad += "S10 the parser asks canvasVerbTailKind a number of times other than 1 (one question, both absorptions read the answer)"
 }
-if ([regex]::Matches($parserCode, 'tailKind\s*==\s*CANVAS_TAIL_').Count -ne 2) {
+$twoPointJudges = [regex]::Matches($parserCode, 'CANVAS_TAIL_TWO_POINT').Count
+if ($twoPointJudges -ne 1) {
+    $bad += ("S10 the parser judges CANVAS_TAIL_TWO_POINT " + $twoPointJudges +
+             " times, want exactly 1 (the two-point tail has one owner: isTwoPointCanvasVerb)")
+}
+$absorbSites = [regex]::Matches($parserCode, 'absorbCanvasLineTail\s*\(').Count
+if ($absorbSites -ne 3) {
+    $bad += ("S10 absorbCanvasLineTail appears " + $absorbSites +
+             " times, want exactly 3 (1 definition + the '(' branch + the '-' branch) -> " +
+             "the second-point tail got copied instead of shared")
+}
+# 坐标尾巴那一格 (Circle 的半径 / PSet 的颜色) 仍由左括号那一支自己判，位置没挪。
+if ([regex]::Matches($parserCode, 'tailKind\s*==\s*CANVAS_TAIL_').Count -ne 1) {
     $bad += ("S10 the parser gates on tailKind " +
-            [regex]::Matches($parserCode, 'tailKind\s*==\s*CANVAS_TAIL_').Count +
-            " times, want exactly 2 (coordinate tail + second point)")
+             [regex]::Matches($parserCode, 'tailKind\s*==\s*CANVAS_TAIL_').Count +
+             " times, want exactly 1 (the coordinate tail; the second-point tail moved " +
+             "into isTwoPointCanvasVerb, which is the one place that decides it)")
 }
 foreach ($lit in @('== "circle"', '== "pset"', '== "line"')) {
     if ($parserCode.IndexOf($lit) -ge 0) {

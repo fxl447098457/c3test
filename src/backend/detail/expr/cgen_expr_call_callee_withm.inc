@@ -695,14 +695,23 @@
                 // controlCanvasMethod 那两条码头，账 #232②）。Printer.Cls = 结束文档。
                 call = cvDrawFn + "()";
             } else if (m == "line") {
-                // Line 的两种形状: -(x1,y1)-(x2,y2) 4 参, 或 (x1,y1)-(x2,y2) 4 参
-                // (VB6 里 Step 由 parser 吞, 这里统一按 4 坐标 = 2 点)。
+                // Line 的两种形状 (VB6), 按 parser 记下的**语法事实**分派:
+                //   Line (x1, y1)-(x2, y2)  4 格 = 起点与终点都给
+                //   Line -(x2, y2)         2 格 = **起点省略**, 从 CurrentX/CurrentY 起笔
+                // (`Step` 那一族今天 parser 压根没吞, 到不了这里 —— 见台账 §B223 还开着的那三格)
                 // 后面的可选实参: color / box / fill, 按 VB6 文档的实参顺序。
-                size_t nCoord = (a.size() >= 4) ? 4 : 2;
-                std::string x1 = nCoord > 0 ? a[0] : "0";
-                std::string y1 = nCoord > 1 ? a[1] : "0";
-                std::string x2 = nCoord > 2 ? a[2] : "0";
-                std::string y2 = nCoord > 3 ? a[3] : "0";
+                // 账 #232④: 起点给没给由 parser 记在 canvasStartOmitted 上 (旗标, 不是猜) ——
+                // 以前按"坐标实参 >= 4 就当起点也给"分派, 于是 `Line -(340, 80), vbRed, BF`
+                // (2 格坐标 + color + style = 4 格) 被读成起点 (340,80) → 终点 (255,5),
+                // 颜色与样式直接落进坐标格。4 格坐标那一支逐字不变 (FD25 那条针是护栏)。
+                size_t nCoord = (node.canvasStartOmitted ? 2 : 4);
+                const bool hasStart = !node.canvasStartOmitted;
+                if (a.size() < nCoord) nCoord = a.size();   // 收不满就按给的那些算 (下面各有默认值)
+                const size_t i2 = hasStart ? 2 : 0;      // 第二点实参从哪一格起算
+                std::string x1 = hasStart && a.size() > 0 ? a[0] : "0";
+                std::string y1 = hasStart && a.size() > 1 ? a[1] : "0";
+                std::string x2 = a.size() > i2 ? a[i2] : "0";
+                std::string y2 = a.size() > i2 + 1 ? a[i2 + 1] : "0";
                 std::string hasColor = "0", col = "0", style = "0";
                 for (size_t i = nCoord; i < a.size(); i++) {
                     // ⚠ B / BF / F **已由 parser 折成位值** (账 #220, B=1 C=2 F=4,
@@ -714,11 +723,12 @@
                     else if (i == nCoord + 1) { style = a[i]; }
                 }
                 const std::string pfx = cvDrawFn;
+                const std::string h1 = hasStart ? "1" : "0";
                 if (looksLikePrinter) {
-                    call = pfx + "(0, 1, " + x1 + ", " + y1 + ", 0, 1, " + x2 + ", " + y2
+                    call = pfx + "(0, " + h1 + ", " + x1 + ", " + y1 + ", 0, 1, " + x2 + ", " + y2
                          + ", " + hasColor + ", " + col + ", " + style + ")";
                 } else {
-                    call = pfx + "((void*)" + obj + ", 0, 1, " + x1 + ", " + y1
+                    call = pfx + "((void*)" + obj + ", 0, " + h1 + ", " + x1 + ", " + y1
                          + ", 0, 1, " + x2 + ", " + y2
                          + ", " + hasColor + ", " + col + ", " + style + ")";
                 }
