@@ -312,8 +312,9 @@
     void emitClassSlotRefSet(const std::string& target, const std::string& className,
                              const std::string& valueExpr, bool rhsTransferred, bool outSlot);
     // 账 #305 §B218 (甲) 刀3: 「这一发右值是不是**已经带着一枚移交过来的引用**」—— 上面那位
-    // 主人手上「不 claim」那条臂的两个成因共用一条问句 (`New <类>` 与 工程内过程调用)。
-    bool rhsTransfersProjectRef(const ASTNode& expr) const;
+    // 主人手上「不 claim」那条臂的全部成因共用这一条问句（**三形**：裸名调用 / 成员调用 /
+    // 无括号的属性读；`New <类>` 那一发仍由调用点自己答）。问句只此一位，别在别处再答一遍。
+    bool rhsTransfersProjectRef(const ASTNode& expr);
     std::vector<const IfaceView*> ivImplementedIfaces(Module& module);
     Decl* ivFindImplMember(Module& module, const IfaceView& v, const IfaceSlotView& slot);
     // tB 委托式实现 (ai/022 B10): 本类把接口 v 整份转交给哪个持有字段 (无则 nullptr)

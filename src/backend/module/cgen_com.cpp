@@ -383,17 +383,71 @@ void CCodeGen::emitClassSlotRefSet(const std::string& target, const std::string&
 // 本身带一枚对价引用; 调用方再 claim 就是每调用净 +1, 那一枚永远没人退 (实测 W6 / W9 `terms=0`)。
 // 刻意只认**裸标识符 callee** 且模块符号表认到 Function / Property Get、返回类型是工程 Class:
 // 带接收者的成员调用 (`obj.Method()`) 走的是另一套契约 (COM 打包 / 视图 QI), 本刀不碰。
-bool CCodeGen::rhsTransfersProjectRef(const ASTNode& expr) const {
-    if (expr.kind != ASTNodeKind::IndexOrCallExpr) return false;
-    const auto& call = static_cast<const IndexOrCallExpr&>(expr);
-    if (!call.callee || call.callee->kind != ASTNodeKind::IdentifierExpr) return false;
-    const std::string name = static_cast<const IdentifierExpr&>(*call.callee).name;
-    const Symbol* fn = symTab_.lookupModule(name);
-    if (!fn || (fn->kind != SymbolKind::Function && fn->kind != SymbolKind::PropertyGet)
-        || fn->variableTypeName.empty()) {
-        return false;
+bool CCodeGen::rhsTransfersProjectRef(const ASTNode& expr) {
+    // 账 #305 §B218 (甲) 刀3 + 刀4: 「这一发右值自带一枚移交过来的引用」= 上面那位主人
+    // 「不 claim」那条臂的**唯一**问句, 三条臂都收在这里 (别处再答一遍 = 第二套判据):
+    //   形① `Set c = MakeOne()`               callee 是裸标识符 (刀3);
+    //   形② `Set rb = d.RefOf()`              callee 是成员访问 (刀4);
+    //   形③ `Set p = Peer` / `Set p = MyBase.Peer`  **无括号**的属性读 = 语义上就是一次调用 (刀4)。
+    // 前提在三台工程上逐行核过 (尺 `.build/k1115_membercensus.py` + cls_inh 的 `--emit-c`):
+    // 被调方在**自己的返回槽**那一格 claim 一枚, 出口 腿④ 退的是那枚局部、返回槽自带那道夹不放手,
+    // 继承那几档包装器 `return vb6_<Base>_M((vb6_cls_<Base>*)me);` 原样转交不退 ⇒ 交出来的指针
+    // 本身就带对价 ⇒ 调用方再 claim = 每调用净 +1 = 永不销毁。
+    // 反面 = 数据字段: 那一枚仍由持有者握着, 接手会少一枚, 所以字段那一档继续 claim。
+    const ASTNode* callee = nullptr;
+    if (expr.kind == ASTNodeKind::IndexOrCallExpr) {
+        callee = static_cast<const IndexOrCallExpr&>(expr).callee.get();
+    } else if (expr.kind == ASTNodeKind::MemberAccessExpr) {
+        callee = &expr;  // 形③: 整枚右值就是一次属性读
     }
-    return !projectClassNameOf(fn->variableTypeName).empty();
+    if (!callee) return false;
+
+    if (callee->kind == ASTNodeKind::IdentifierExpr) {
+        // 形① (刀3 那一臂, 一字未动)
+        const std::string name = static_cast<const IdentifierExpr&>(*callee).name;
+        const Symbol* fn = symTab_.lookupModule(name);
+        if (!fn || (fn->kind != SymbolKind::Function && fn->kind != SymbolKind::PropertyGet)
+            || fn->variableTypeName.empty()) {
+            return false;
+        }
+        return !projectClassNameOf(fn->variableTypeName).empty();
+    }
+    if (callee->kind != ASTNodeKind::MemberAccessExpr) return false;
+    const auto& ma = static_cast<const MemberAccessExpr&>(*callee);
+    if (!ma.object) return false;
+
+    // 接收者那一问只有两条答案: 普通表达式问那一位类型推断主人; `MyBase` 这一形按
+    // cgen_expr_member_precheck.inc 那条**按名接管**的事实认 (parser 不动), 基名只问链表
+    // 那一张表 (classViewByName), 不现拼第二套。
+    std::string recvCls;
+    const bool myBaseRecv =
+        ma.object->kind == ASTNodeKind::IdentifierExpr
+        && Symbol::toLower(static_cast<const IdentifierExpr&>(*ma.object).name) == "mybase";
+    if (myBaseRecv) {
+        const ClassChainView* self = classViewByName(moduleName_);
+        const ClassChainView* base =
+            (self && !self->baseKey.empty()) ? classViewByName(self->baseKey) : nullptr;
+        if (!base || !base->mod) return false;
+        recvCls = base->name;
+    } else {
+        recvCls = inferClassTypeOfExpr(*ma.object);
+    }
+    if (recvCls.empty()) return false;
+
+    // 字段那一档不是调用 (这张表就是发那行字段声明用的同一位主人; `COM:` 前缀那几档同样
+    // 算字段 —— 它们压根不是 vb6_cls_ 实例)。
+    if (classTypedFieldMap_) {
+        auto itCls = classTypedFieldMap_->find(recvCls);
+        if (itCls != classTypedFieldMap_->end()
+            && itCls->second.count(Symbol::toLower(ma.memberName)) != 0) {
+            return false;
+        }
+    }
+    // 过程返回类: 只认 Function / PropertyGet 符号, 与形① 同一位主人。返回的是工程内**接口**
+    // 那一档刻意不走这条腿 (薄指针不是实例, 它的所有权由接口那一位主人管)。
+    const std::string retCls = getClassMethodReturnType(recvCls, ma.memberName);
+    if (retCls.empty() || !ivrefCType(retCls).empty()) return false;
+    return true;
 }
 
 // P6.4+: 类模块默认实例 (VB_PredeclaredId=True) 惰性单例访问器.
