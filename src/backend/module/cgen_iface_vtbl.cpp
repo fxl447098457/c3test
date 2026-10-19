@@ -380,11 +380,11 @@ std::string CCodeGen::ivParamDeclsRef(const Decl* sig) {
 // ============================================================
 
 void CCodeGen::emitIfaceClassFields(Module& module) {
+    // 账 #305 §B218 (甲, 第一刀): 计数头不再跟着接口走 —— **每个类模块都带它**.
+    // 位置仍钉在 __comObj (第 0 字段, D19 硬约束) 之后、__iv_<I> 槽字段之前 ⇒ "谁握着这枚实例"
+    // 从此在类型里有答案; 代价 = 工程类结构体每个字段偏移都动 (两架构 padding 不同形 ⇒ x86 要真验).
+    h_.emitLine("    int32_t __refcount;  /* tB B05 / 账 #445 (甲): 1 at New, +1 per owning ref */");
     const std::vector<const IfaceView*> ifaces = ivImplementedIfaces(module);
-    if (ifaces.empty()) return;
-    // B05: 引用计数头. 只落在"实现新式接口"的类上 —— 无新语法的工程结构体逐字节不变.
-    // 位置在 __comObj (第 0 字段, D19 硬约束) 之后、__iv_<I> 槽字段之前.
-    h_.emitLine("    int32_t __refcount;  /* tB Interface B05: 1 at New, +1 per owning ref */");
     for (const IfaceView* v : ifaces) {
         const std::string id = cIdent(v->name);
         h_.emitLine("    vb6_ivref_" + id + " __iv_" + id +
@@ -394,11 +394,11 @@ void CCodeGen::emitIfaceClassFields(Module& module) {
 
 void CCodeGen::emitIfaceNewInit(Module& module) {
     const std::string clsId = cIdent(moduleName_);
+    // 账 #305 §B218 (甲): 初值 1 也无条件发 —— 语义不变 (`_New` 交出的那一次引用归"接住它的那一枚槽"),
+    // 变的是那一枚槽从此**要**在覆写/置空/过程出口上放手 (那三条腿见 emitClassRefPair 与 §B218 五腿).
+    c_.emitLine("me->__refcount = 1;  /* tB B05 / 账 #445 (甲): 交出的一枚引用归接住它的那一枚槽 */");
     const std::vector<const IfaceView*> ifaces = ivImplementedIfaces(module);
     if (ifaces.empty()) return;
-    // B05: _New 交出的那一次引用由"创建者"持有: 类变量永不 Release (现状),
-    // 而 `Set <接口变量> = New <类>` 走引用移交 (不 AddRef) → 该接口变量就是唯一主人.
-    c_.emitLine("me->__refcount = 1;  /* tB Interface B05 */");
     for (const IfaceView* v : ifaces) {
         const std::string id = cIdent(v->name);
         c_.emitLine("me->__iv_" + id + ".vt = &vb6_ivtbl_" + id + "_for_" + clsId + ";");
@@ -485,19 +485,15 @@ void CCodeGen::emitIfaceImplTables(Module& module) {
         c_.emitLine("static unsigned long __stdcall vb6_iunk_" + clsId + "_" + id + "_AddRef(void* self) {");
         c_.indent();
         c_.emitLine(walk);
-        c_.emitLine("me->__refcount += 1;");
-        c_.emitLine("return (unsigned long)me->__refcount;");
+        // 账 #305 §B218 (甲): 公式只住 emitClassRefPair 那一处, 这里转调.
+        c_.emitLine("return " + clsStruct + "_AddRef(me);");
         c_.dedent();
         c_.emitLine("}");
         c_.emitLine("static unsigned long __stdcall vb6_iunk_" + clsId + "_" + id + "_Release(void* self) {");
         c_.indent();
         c_.emitLine(walk);
-        c_.emitLine("me->__refcount -= 1;");
-        c_.emitLine("if (me->__refcount > 0) return (unsigned long)me->__refcount;");
-        // 实例已被 COM 包装器接管时 (__comObj 非空) 销毁权在包装器 (P6/B13 统一两套计数)
-        c_.emitLine("if (me->__comObj != NULL) return 0UL;  /* wrapper owns teardown */");
-        c_.emitLine(clsStruct + "_Destroy(me);  /* 0 引用: Class_Terminate + 释放 */");
-        c_.emitLine("return 0UL;");
+        // 账 #305 §B218 (甲): 退一 + 到 0 才拆 + 「被包装器接管就不拆」那一条规则只住 emitClassRefPair.
+        c_.emitLine("return " + clsStruct + "_Release(me);");
         c_.dedent();
         c_.emitLine("}");
 
@@ -674,9 +670,9 @@ void CCodeGen::emitIfaceImplTables(Module& module) {
     c_.emitLine(clsStruct + "* me = (" + clsStruct + "*)instance;");
     c_.emitLine("if (!me) return;");
     c_.emitLine("me->__comObj = NULL;  /* B16: 包装器已走, 薄引用的最后一次 Release 自己收尾 */");
-    c_.emitLine("me->__refcount -= 1;");
-    c_.emitLine("if (me->__refcount > 0) return;  /* 还有薄引用在世 */");
-    c_.emitLine(clsStruct + "_Destroy(me);");
+    // 账 #305 §B218 (甲): 退数搬到那一处出入口; 清完回指之后 __comObj 为空 ⇒ 到 0 就走"自己销毁"那一支,
+    // 与前面手抄的三行同语义 (>0 就直接回, 还有薄引用在世).
+    c_.emitLine(clsStruct + "_Release(me);");
     c_.dedent();
     c_.emitLine("}");
 }

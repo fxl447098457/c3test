@@ -271,6 +271,34 @@ void CCodeGen::emitClassFactory(Module& module) {
     c_.dedent();
     c_.emitLine("}");
 
+    // 账 #305 §B218 (甲, 第一刀) = 引用计数那一问的**唯一一位主人**: 每个类模块一对出入口,
+    // 发在本类自己的 .c 里 (结构体完整类型可见), 声明在 .h (跨模块的槽要调它)。
+    // 为什么是一对导出函数而不是每条腿各写三行: 这条判断有四个分支 (空实例 / 还有引用 /
+    // 被 __comObj 接走 / 真该拆), 五腿各 inline 一遍 = 五位主人 (#167/#231/#245/#298/#443 那一族)
+    // —— 今天那三处手抄 (接口 AddRef / Release / claim 桩) 就在这一刀改成转调它。
+    c_.emitBlank();
+    c_.emitLine("unsigned long " + clsStruct + "_AddRef(void* instance) {");
+    c_.indent();
+    c_.emitLine(clsStruct + "* me = (" + clsStruct + "*)instance;");
+    c_.emitLine("if (!me) return 0UL;");
+    c_.emitLine("me->__refcount += 1;");
+    c_.emitLine("return (unsigned long)me->__refcount;");
+    c_.dedent();
+    c_.emitLine("}");
+    c_.emitBlank();
+    c_.emitLine("unsigned long " + clsStruct + "_Release(void* instance) {");
+    c_.indent();
+    c_.emitLine(clsStruct + "* me = (" + clsStruct + "*)instance;");
+    c_.emitLine("if (!me) return 0UL;");
+    c_.emitLine("me->__refcount -= 1;");
+    c_.emitLine("if (me->__refcount > 0) return (unsigned long)me->__refcount;  /* 还有人握 */");
+    // 实例已被 COM 包装器接管时 (__comObj 非空) 销毁权在包装器 (P6/B13 统一两套计数)
+    c_.emitLine("if (me->__comObj != NULL) return 0UL;  /* wrapper owns teardown */");
+    c_.emitLine(clsStruct + "_Destroy(me);  /* 0 引用: Class_Terminate + 释放 */");
+    c_.emitLine("return 0UL;");
+    c_.dedent();
+    c_.emitLine("}");
+
     // ExeComBridge 03: COM 实参打包函数 (每个类模块一个).
     //   `New <本工程类>` 出现在 COM 调用实参位置时 (cgen_util_com.cpp comPackExpr),
     //   通用打包 vb6_ComPackValue 会把裸 vb6_cls_X* 当 VT_DISPATCH 传出去, 对端
@@ -284,6 +312,33 @@ void CCodeGen::emitClassFactory(Module& module) {
     c_.emitLine("void* vb6_ComPack_" + cIdent(moduleName_) + "(void* instance) {");
     c_.indent();
     c_.emitLine("return vb6_ComPackVB6InstanceRaw(\"" + moduleName_ + "\", instance);");
+    c_.dedent();
+    c_.emitLine("}");
+}
+
+// 账 #305 §B218 (甲) 腿②③: 「覆写 / 置空一枚 typed 工程类槽」收成一位主人。
+// 为什么是一条函数而不是站点各写三行: 「这一格该不该放手」的判断跟着上面那对出入口走,
+// 站点抄一遍就多一位主人 (#167/#231/#245/#298/#443 那一族)。valueExpr 传空串 = 置空。
+// 顺序 = **先 claim 新、再 release 旧** —— 接口那族 emitIvrefQiSet 撞过的同一件事:
+// 先放旧会让 `Set a = a` 在自己还没换掉之前把自己拆掉。
+// rhsIsFreshNew = 右侧就是 `New <类>`: 工厂交出的那一枚引用本来就是给这个槽的 ⇒ 移交、不 claim。
+void CCodeGen::emitClassSlotRefSet(const std::string& target, const std::string& className,
+                                   const std::string& valueExpr, bool rhsIsFreshNew) {
+    const std::string clsStruct = "vb6_cls_" + cIdent(className);
+    const std::string legTag = valueExpr.empty() ? "③" : "②";
+    const std::string oldSlot = "__clsold" + std::to_string(ivrefSetSeq_++);
+    c_.emitLine("{  /* 账 #305 (甲) 腿" + legTag + ": Set " + target + " */");
+    c_.indent();
+    c_.emitLine(clsStruct + "* " + oldSlot + " = " + target + ";");
+    if (!valueExpr.empty()) {
+        c_.emitLine(target + " = " + valueExpr + ";");
+        if (!rhsIsFreshNew) {
+            c_.emitLine("if (" + target + ") " + clsStruct + "_AddRef(" + target + ");");
+        }
+    } else {
+        c_.emitLine(target + " = NULL;  /* Set Nothing (项目类实例) */");
+    }
+    c_.emitLine("if (" + oldSlot + ") " + clsStruct + "_Release(" + oldSlot + ");");
     c_.dedent();
     c_.emitLine("}");
 }
