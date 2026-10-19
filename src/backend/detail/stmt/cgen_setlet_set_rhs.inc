@@ -357,10 +357,23 @@
                 auto itSlot = knownClassVars_.find(targetLower);
                 if (itSlot != knownClassVars_.end()) clsOfSlot = itSlot->second;
             }
+            // 账 #305 §B218 (甲) 腿②': 目标是**出参槽** `(*p)` (ByRef 形参那座桥的写回站)。
+            // 写进去的那一枚由本过程一位局部持有, 而腿④ 会在过程出口放手它 ⇒ 这一格不自己取走
+            // 一枚引用, 调用者还看着它时它就已经拆了 (门 #763 实测 = b187 第五臂
+            // probe exit=-1073740940, 两台同形)。类名问**右侧**: 出参槽没有类型档 (void*),
+            // 只有 RHS 答得出。旧值仍不退 = 出参写回那一格泄漏, 与下标槽同在册。
+            bool outSlotClaim = false;
+            std::string clsOfRhs;
+            if (target.rfind("(*", 0) == 0 && value.find('(') == std::string::npos) {
+                clsOfRhs = node.value ? inferClassTypeOfExpr(*node.value) : std::string();
+                outSlotClaim = !clsOfRhs.empty();
+            }
+            const bool rhsIsFresh = node.value && node.value->kind == ASTNodeKind::NewExpr;
             if (!clsOfSlot.empty() && target.find('(') == std::string::npos
                 && !procClassFormals_.count(targetLower)) {
-                emitClassSlotRefSet(target, clsOfSlot, value,
-                    node.value && node.value->kind == ASTNodeKind::NewExpr);
+                emitClassSlotRefSet(target, clsOfSlot, value, rhsIsFresh, false);
+            } else if (outSlotClaim) {
+                emitClassSlotRefSet(target, clsOfRhs, value, rhsIsFresh, true);
             } else {
                 c_.emitLine(target + " = " + value + ";  /* Set */");
             }

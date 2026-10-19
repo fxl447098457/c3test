@@ -191,7 +191,7 @@
                 if (!targetCls101.empty() && !isCallTarget
                     && target.find('(') == std::string::npos
                     && !procClassFormals_.count(targetLower)) {
-                    emitClassSlotRefSet(target, targetCls101, std::string(), false);
+                    emitClassSlotRefSet(target, targetCls101, std::string(), false, false);
                 } else {
                     c_.emitLine(target + " = NULL;  /* Set Nothing (项目类实例) */");
                 }

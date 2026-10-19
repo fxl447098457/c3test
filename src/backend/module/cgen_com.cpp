@@ -323,8 +323,22 @@ void CCodeGen::emitClassFactory(Module& module) {
 // 先放旧会让 `Set a = a` 在自己还没换掉之前把自己拆掉。
 // rhsIsFreshNew = 右侧就是 `New <类>`: 工厂交出的那一枚引用本来就是给这个槽的 ⇒ 移交、不 claim。
 void CCodeGen::emitClassSlotRefSet(const std::string& target, const std::string& className,
-                                   const std::string& valueExpr, bool rhsIsFreshNew) {
+                                   const std::string& valueExpr, bool rhsIsFreshNew, bool outSlot) {
     const std::string clsStruct = "vb6_cls_" + cIdent(className);
+    if (outSlot) {
+        // 腿②' = 写进一枚**活在本过程之外**的槽 (ByRef 出参那座桥的写回站)。这里的判断只有一条
+        // 加法: 取走一枚引用。**不退旧值** —— 那种槽今天整个在计数系统外面, 退它 = 多退一次;
+        // 「出参写回该不该放手旧值」与下标槽是同一格, 在册等腿⑤ 一起答。
+        c_.emitLine("{  /* 账 #305 (甲) 腿②': Set 出参槽 " + target + " */");
+        c_.indent();
+        c_.emitLine(target + " = " + valueExpr + ";");
+        if (!rhsIsFreshNew) {
+            c_.emitLine("if (" + target + ") " + clsStruct + "_AddRef(" + target + ");");
+        }
+        c_.dedent();
+        c_.emitLine("}");
+        return;
+    }
     const std::string legTag = valueExpr.empty() ? "③" : "②";
     const std::string oldSlot = "__clsold" + std::to_string(ivrefSetSeq_++);
     c_.emitLine("{  /* 账 #305 (甲) 腿" + legTag + ": Set " + target + " */");

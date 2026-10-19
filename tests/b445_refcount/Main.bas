@@ -129,6 +129,27 @@ Sub W9ReturnSlot()
     Set c = Nothing
 End Sub
 
+' W10 = 腿②' 出参槽 (ByRef 那座桥的写回站): 被调方现造一枚写进调用方那一格, 而自己那一格
+'       的局部会在被调方出口放手 —— 所以那一格必须自己取走一枚引用, 否则调用方还看着它时
+'       它已经拆了 (门 #763 的 b187 第五臂 0xC0000409 = 就是这个形状)。
+'       旧值那一格 (Set o = New 造的第一枚) 今天没人退 = 出参写回的泄漏, 与下标槽同在册。
+Public Sub GiveFreshRef(p As Object)
+    Dim g As C445
+    Set g = New C445
+    Set p = g
+End Sub
+
+Sub W10OutSlot()
+    Dim o As C445
+    Dim t0 As Long
+    t0 = Terms
+    Set o = New C445
+    GiveFreshRef o
+    Debug.Print "W10-live-terms=" & (Terms - t0) & " n=" & o.N
+    Set o = Nothing
+    Debug.Print "W10-gone-terms=" & (Terms - t0)
+End Sub
+
 Sub Main()
     W1SetNothing
     W2Alias
@@ -139,5 +160,6 @@ Sub Main()
     W7ParamBorrow
     W8ScopeExit
     W9ReturnSlot
+    W10OutSlot
     Debug.Print "B445-DONE"
 End Sub

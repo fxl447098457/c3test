@@ -7604,12 +7604,16 @@ if ($Category -in @("all", "run", "vbp")) {
     #   W2 别名 0 (置空 a 之后 b 还读得到 7) / W5 As New 只造一枚 / W6 工厂那枚还活着 /
     #   W7 形参里 Set = Nothing 没拆调用方那枚 / W9 返回槽那枚交出去还活着 = 反面证人;
     #   W8 = 腿④ 那一格: 循环 200 次现造现出, 出厂恰好 200 次 = (甲) 这一档的靶。
+    #   W10 = 腿②' 那一格: 被调方现造一枚写进调用方的出参槽, 出口之后调用方还读得到 (n=7)
+    #     且这一刻一次没出厂 (terms=0), 调用方自己置空时才出厂 (gone-terms=1)。这一格是门 #763
+    #     三条红 (b187 两架构 + FlexGrid x86) 的靶: 出参槽不 claim, 被调方出口就拆了它。
     #   BASE (= 账 #450 收线那台 CI 编的 exe, run 39212142582 的 c3-exe 工件) 的读数 =
     #   W1/W3/W4/W8 全 0 ⇒ 这四格出厂次数就是本刀的行为面; 其余五格两台同值 (尺:
     #   NEW .build/k1003_n64.txt + _n32.txt / BASE .build/k1003_b64.txt + _b32.txt)。
     $b445Needles = @("W1-terms=1 null=1", "W2-terms=0 n=7", "W3-terms=1 n=7",
                     "W4-terms=2 null=1", "W5-made=1 sum=14", "W6-terms=0 n=7",
                     "W7-terms=0 n=7", "W8-terms=200", "W9-terms=0 n=7 twice=7",
+                    "W10-live-terms=0 n=7", "W10-gone-terms=1",
                     "B445-DONE")
     Test-Vbp 'b445_class_slot_refcount' "$Tests\b445_refcount\B445.vbp" $b445Needles
     Test-Vbp 'b445_class_slot_refcount_x86' "$Tests\b445_refcount\B445.vbp" $b445Needles -Arch "x86"
@@ -7619,7 +7623,8 @@ if ($Category -in @("all", "run", "vbp")) {
         'if (b) vb6_cls_C445_AddRef(b);',
         'if (__clsold0) vb6_cls_C445_Release(__clsold0);',
         'if (!m_auto) m_auto = vb6_cls_C445_New();',
-        'if (t) vb6_cls_C445_Release(t);')
+        'if (t) vb6_cls_C445_Release(t);',
+        'if ((*p)) vb6_cls_C445_AddRef((*p));')
     # 反面针: 形参那一档整个留在计数系统外面 (今天没有一站在实参处 claim, 让形参放手
     #   就是拆调用方还在用的那枚实例)。名字 o 只出现在 DropByVal 的形参槽上。
     Test-EmitcAbsent 'b445_class_formal_stays_out_of_count' @(

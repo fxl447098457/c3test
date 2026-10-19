@@ -1,5 +1,5 @@
 ﻿# check_class_refcount_authority.ps1 - 账 #305 §B218 (甲)：工程类实例的引用计数只许有一位主人。
-# 七条钉（每条都能单独红，红了就说明同一问长出了第二位主人）：
+# 九条钉（每条都能单独红，红了就说明同一问长出了第二位主人）：
 #   ① 出入口那一对的 mint 各恰好 1 处，且住在 module/cgen_com.cpp（每条腿只许转调它）。
 #   ② 计数头 `int32_t __refcount;` 的 mint 恰好 1 处，且住在 cgen_iface_vtbl.cpp 的
 #      emitIfaceClassFields 里 —— 它必须紧跟 __comObj 那一句（ai/022 D19：偏移 0 恒是 __comObj）。
@@ -14,7 +14,7 @@
 #   ⑧ 过程出口那张带档的登记表 slotsToRelease_ 只许住在 5 份文件里（表本体 + 三个过程入口
 #      清表 + 主人本体），工程类那一档的注册口 trackClassSlotForRelease 恰好 2 处
 #      （Dim As <工程类> 的两条注册路：Class 符号 / projectClassNameOf 兜底）。
-# 退出码：0 = 八条都过；1 = 任一条红；2 = 找不到 src/backend。
+# 退出码：0 = 九条都过；1 = 任一条红；2 = 找不到 src/backend。
 param(
     [string]$Root = ""
 )
@@ -130,10 +130,22 @@ if ($csSites -ne 2) {
               " (want exactly 2)")
 }
 
+# ⑨ 出参槽那一档 (腿②'): claim-only 的发码形状只许住在主人本体里一处, 站点也恰好一处。
+#    为什么单独钉: 腿④ 会在过程出口放手局部, 写进出参槽的那一枚若不自己取走引用, 调用方
+#    还看着它时它就拆了 (门 #763 实测 b187 第五臂 probe exit=-1073740940)。
+$primeShapes = CountOf '(甲) 腿②'': Set 出参槽 '
+if ($primeShapes -ne 1) {
+    $fail += ("out-slot claim shape sites = " + $primeShapes + " (want exactly 1)")
+}
+$primeCalls = CountOf 'emitClassSlotRefSet(target, clsOfRhs'
+if ($primeCalls -ne 1) {
+    $fail += ("out-slot claim call sites = " + $primeCalls + " (want exactly 1)")
+}
+
 if ($fail.Count -gt 0) {
     Write-Host "CLASS-REFCOUNT-AUTHORITY FAIL"
     foreach ($f in $fail) { Write-Host ("  - " + $f) }
     exit 1
 }
-Write-Host "CLASS-REFCOUNT-AUTHORITY OK (1 pair mint / 1 header / 2 leg consumers / 3+9 formals / 7 roster / 6 literal files / 0 stale / 5 registry files + 2 registrants)"
+Write-Host "CLASS-REFCOUNT-AUTHORITY OK (1 pair mint / 1 header / 2 leg consumers / 3+9 formals / 7 roster / 6 literal files / 0 stale / 5 registry files + 2 registrants / 1+1 out-slot)"
 exit 0
