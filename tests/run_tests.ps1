@@ -7566,7 +7566,7 @@ if ($Category -in @("all", "run", "vbp")) {
         'vb6_Main_TakeByVal(vb6_Main_MakeNew());')
     Test-EmitcAbsent 'b448_iface_view_never_mints_a_class_struct_for_an_interface' @(
         "$Tests\b448_iface_ret\B448.vbp") @(
-        'vb6_cls_IB448')
+        '(vb6_cls_IB448*)')
     # 账 #305 §B188 ④ (第九十刀): 出厂那一腿的**尾巴**。`Class_Terminate` 抛错时, `_Destroy` 里体之后
     # 那三截(字段 BSTR / 数组字段 / vb6_Free(me))曾被 ComObj_Release 的帧一起 longjmp 跳掉 —— 实测每枚
     # 抛错的出厂漏一份实例资源: x64 每枚 35~37 字节、x86 每枚 17 字节, 多一枚 20 字符 String 字段就涨到
@@ -8245,7 +8245,8 @@ if ($Category -in @("all", "compile")) {
     Test-ComServerErrorFrame
     Test-ProjClassScanBound
     Test-ObjectSlotBoxing
-    Test-BoxTempReclaim    Test-IfaceViewAuthority
+    Test-BoxTempReclaim
+    Test-IfaceViewAuthority
     Test-ConvStrictParse
     Test-DateConv
     Test-IsPredText
