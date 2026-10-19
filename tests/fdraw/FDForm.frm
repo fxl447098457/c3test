@@ -275,32 +275,39 @@ Private Sub tmrF_Timer()
     ' `-(310` read as an infix minus), so there was no build to run at all. Two-sided like
     ' FD24/FD25 on colours nothing else here uses, and each judge ALSO reads the pen: the ink
     ' has to land on the endpoint the source named, and the pen must end there (the RTL moves
-    ' it to the endpoint when has2 -- vb6forms_draw.c:207). Pinning the pen is what keeps
-    ' "drew something somewhere" from winning.
-    ' The scan window deliberately starts at the pen position (395,35): if the compiler read
-    ' the two given coordinates as the START, the ink would run away from (400,40) and the
-    ' window below would still be empty => False.
+    ' it to the endpoint when has2 -- vb6forms_draw.c:207).
+    ' ⚠ The coordinates live in the LEFT band on purpose: this form is 6400x3200 twips, which
+    ' is **426x213 px at 96 dpi** (1440 twips = 1 inch), not 640x320. The first version of
+    ' these two judges used x up to 560 and CI read `raw=-1,-1 pen=560,140` on the `Me.` one:
+    ' the pen moved (the call is right) but the whole segment sat past the right edge of the
+    ' client area, so nothing was ever painted. A pixel judge whose window is off the window
+    ' is a False that reads exactly like a broken codegen -- keep the whole segment inside.
+    ' Also keep it clear of FD24's circle (205..275) and FD25's magenta line (298..302); the
+    ' scans filter by colour, but overlapping ink would still be one more thing to explain.
+    ' The pen half is what rejects "read the two given coordinates as the START": that shape
+    ' ends the pen at (0,0) (measured: `pen=0,0` on the pre-fix dock), while its ink would
+    ' still cross these windows.
     Dim ok26 As Boolean, ok27 As Boolean
     Dim rowC0 As Long, rowC As Long
     Dim rowY0 As Long, rowY As Long
     Me.ForeColor = vbCyan
     Me.DrawWidth = 3
-    Me.CurrentX = 400
-    Me.CurrentY = 40
-    rowC0 = FirstRowOfColor(d, vbCyan, 395, 465, 35, 145)
-    Line -(460, 140)
-    rowC = FirstRowOfColor(d, vbCyan, 395, 465, 35, 145)
-    ok26 = (rowC0 < 0) And (rowC > 0) And (Me.CurrentX = 460) And (Me.CurrentY = 140)
+    Me.CurrentX = 40
+    Me.CurrentY = 30
+    rowC0 = FirstRowOfColor(d, vbCyan, 35, 125, 25, 105)
+    Line -(120, 100)
+    rowC = FirstRowOfColor(d, vbCyan, 35, 125, 25, 105)
+    ok26 = (rowC0 < 0) And (rowC > 0) And (Me.CurrentX = 120) And (Me.CurrentY = 100)
 Debug.Print "FD26-barelinestart=" & TF(ok26) & " raw=" & CStr(rowC0) & "," & CStr(rowC) & _
               " pen=" & CStr(Me.CurrentX) & "," & CStr(Me.CurrentY)
     Me.ForeColor = vbYellow
     Me.DrawWidth = 3
-    Me.CurrentX = 500
-    Me.CurrentY = 40
-    rowY0 = FirstRowOfColor(d, vbYellow, 495, 565, 35, 145)
-    Me.Line -(560, 140)
-    rowY = FirstRowOfColor(d, vbYellow, 495, 565, 35, 145)
-    ok27 = (rowY0 < 0) And (rowY > 0) And (Me.CurrentX = 560) And (Me.CurrentY = 140)
+    Me.CurrentX = 40
+    Me.CurrentY = 120
+    rowY0 = FirstRowOfColor(d, vbYellow, 35, 125, 115, 195)
+    Me.Line -(120, 190)
+    rowY = FirstRowOfColor(d, vbYellow, 35, 125, 115, 195)
+    ok27 = (rowY0 < 0) And (rowY > 0) And (Me.CurrentX = 120) And (Me.CurrentY = 190)
 Debug.Print "FD27-melinestart=" & TF(ok27) & " raw=" & CStr(rowY0) & "," & CStr(rowY) & _
               " pen=" & CStr(Me.CurrentX) & "," & CStr(Me.CurrentY)
     Point 7, 9

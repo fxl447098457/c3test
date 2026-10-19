@@ -6073,18 +6073,21 @@ if ($Category -in @("all", "run", "vbp")) {
         # very fixture). Two-sided on a colour nothing else here uses: scan empty,
         # draw, scan again and find the rows.
         "FD24-barecircle=True", "FD25-bareline=True",
-        # 232-4: `Line -(x, y)` -- the START is omitted (VB6: from CurrentX/CurrentY).
+# 232-4: `Line -(x, y)` -- the START is omitted (VB6: from CurrentX/CurrentY).
         # Before the cut the parser rejected the form outright (VB2001 "expected 'Input'
         # after 'Line'" plus the `-(460` read as an infix minus), so the pre-cut compiler
         # produced NO build and NO reading for these two at all -- there is nothing to
-        # regress from, which is exactly why the compile-side is pinned separately below.
+        # regress from, which is why the compile-side is pinned separately below.
         # Each judge is ink + pen. The ink window starts at the pen position, so a shape
         # that drew the two given coordinates as the START would leave it empty; the pen
         # must end on the endpoint the source named (the old codegen shape ended it on
-        # (0,0)). The pen half of both readings was measured on the cut compiler
-        # (pen=460,140 / pen=560,140); the ink half needs a painted window, which this
-        # box does not have (the six pre-existing pixel judges FD07/FD16/FD24/FD25 read
-        # False here too) -- the ink half is CI's to confirm.
+        # (0,0) -- measured `pen=0,0` against `pen=120,100` / `pen=120,190` here).
+        # The coordinates sit in the LEFT band on purpose: this form is 6400x3200 twips =
+        # **426x213 px at 96 dpi** (1440 twips = 1 inch). Gate run 39209565086 read
+        # `raw=-1,-1 pen=560,140` on FD27 with the first version's x up to 560: the pen
+        # moved (the call is right) but the whole segment sat past the right edge of the
+        # client area, so nothing was painted -- a pixel window that is off the window
+        # produces a False that reads exactly like a broken codegen.
         "FD26-barelinestart=True", "FD27-melinestart=True",
         "FD-DONE")
     Test-Vbp "fdrawstate" "$Tests\fdraw\FDemo.vbp" $fdrawExpected
@@ -8960,10 +8963,10 @@ if ($Category -in @("all", "syntax")) {
     #       给没给由 parser 记在 AST 上（canvasStartOmitted），发码侧读旗标不猜。
     # Absent 那一条钉死"错位"这一族形状：把给的两格当起点 ⇒ has=1 且第一格就是那两格。
     Test-CodegenNote "form_canvas_tail_start" @("$Tests\fdraw\FDemo.vbp") @(
-        "vb6_Form_Line((void*)vb6_hwnd_FDForm, 0, 0, 0, 0, 0, 1, 460, 140, 0, 0, 0); /* Form.Line */",
-        "vb6_Form_Line((void*)vb6_hwnd_FDForm, 0, 0, 0, 0, 0, 1, 560, 140, 0, 0, 0); /* Form.Line */") @(
-        "vb6_Form_Line((void*)vb6_hwnd_FDForm, 0, 1, 460, 140",
-        "vb6_Form_Line((void*)vb6_hwnd_FDForm, 0, 1, 560, 140")
+        "vb6_Form_Line((void*)vb6_hwnd_FDForm, 0, 0, 0, 0, 0, 1, 120, 100, 0, 0, 0); /* Form.Line */",
+        "vb6_Form_Line((void*)vb6_hwnd_FDForm, 0, 0, 0, 0, 0, 1, 120, 190, 0, 0, 0); /* Form.Line */") @(
+        "vb6_Form_Line((void*)vb6_hwnd_FDForm, 0, 1, 120, 100",
+        "vb6_Form_Line((void*)vb6_hwnd_FDForm, 0, 1, 120, 190")
     # 账 #278 §B113: `Load/Unload <窗体名>` 的实参站在**对象位**，不许折成默认属性。
     #   夹具里那枚没人调的 UsOwnNameProbe 写 `Unload FDForm`（VB6 里与 `Unload Me` 同义）。
     #   改前那一台在这一形里交的是 `vb6_GetControlText(vb6_hwnd_FDForm)`（Caption 的 BSTR）
