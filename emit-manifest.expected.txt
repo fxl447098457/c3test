@@ -83,8 +83,8 @@ sha256=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 ascii256
 sha256=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 ascii256=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 rc=1 bytes=0 tests/cc_demo/DemoBlocksDll.bas
 sha256=0f05a2e7b6fcf4693d542e71bd8a639e50eda9bf4f9b2bf869b4c6bac39b664b ascii256=f4a893f94be67de185db86741b241eee3306342c60945592e28b453f88ac48fe rc=0 bytes=2295 tests/cc_demo/DemoClient.bas
 sha256=0f05a2e7b6fcf4693d542e71bd8a639e50eda9bf4f9b2bf869b4c6bac39b664b ascii256=f4a893f94be67de185db86741b241eee3306342c60945592e28b453f88ac48fe rc=0 bytes=2295 tests/cc_demo/DemoClient.vbp
-sha256=d95e09b14752d6e74fd2c028b8906b5f8c028385a84c1ec6a5c8dd3cf9427c8f ascii256=effbeb7ac7063d3c348abc27752ad00304cd9366520b3164343e427360056735 rc=0 bytes=41193 tests/cc_demo/DemoDll.vbp
-sha256=cc3a1783e23a03d93bdf5e5e962ebf71588d7620110fe5f84c0bc55d17685483 ascii256=1f6725932aefd316b300b9d926cd5b39bbd92f9e8539903335fe8cabb861b62c rc=0 bytes=51141 tests/cc_demo/DemoExe.vbp
+sha256=fd205e86b6aaec6ac2d425b1bd8eaec33eee66e3048a046be5b6896e81fa1db5 ascii256=effbeb7ac7063d3c348abc27752ad00304cd9366520b3164343e427360056735 rc=0 bytes=41311 tests/cc_demo/DemoDll.vbp
+sha256=66160933b8759a624a25cb676571fe7efb38a90f91d895b0e10f6a00086cde20 ascii256=1f6725932aefd316b300b9d926cd5b39bbd92f9e8539903335fe8cabb861b62c rc=0 bytes=51259 tests/cc_demo/DemoExe.vbp
 sha256=af8ebd7f810836fbb9ce1a3969157771cf013ed0859c6dd93bf1fe79944e4e2a ascii256=09c3854675adb00a27b186cd82f24620b5b856950299e00a6247f3da6bf6c52d rc=0 bytes=7799 tests/cc_demo/DemoMain.bas
 sha256=d0c320fc43bdf74227a458f37e611b26cf6fe9883008ccbb2cc37e0f51f8e9cf ascii256=65e1a63a5712559aee7afbbfdf39c44cf4226c266405e7d9995eb39b73d8a391 rc=0 bytes=2925 tests/cc_dll_client/LateClient.vbp
 sha256=d0c320fc43bdf74227a458f37e611b26cf6fe9883008ccbb2cc37e0f51f8e9cf ascii256=65e1a63a5712559aee7afbbfdf39c44cf4226c266405e7d9995eb39b73d8a391 rc=0 bytes=2925 tests/cc_dll_client/LateMain.bas
@@ -96,14 +96,14 @@ sha256=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 ascii256
 sha256=f54491a074004beb6323f8e9da91c96fd185e2c2867c03147705b00378af8e47 ascii256=00f9f2040196e901f0485f5abcc41c0858d1c3795c0a17651ecc1cd23add0ce2 rc=0 bytes=5208 tests/cc_id/IdFold.vbp
 sha256=5347c812cabfff37c6592c899919a1f7a5422934682daa250fa1e2260c2e9341 ascii256=acf9b53b1834c0153f02a7a6cbfa391ae0e4ac35b513cceb3e3c9cb611ad5811 rc=0 bytes=3681 tests/cc_id/IdIfaces.bas
 sha256=ecb2d1df992330a8b4b7c7f4cdc26c13e2af28fd166f5c99ebf9889f91dc68b5 ascii256=530a8b0161884482dfedd034a6f65d69602ca71ee69a5f0e2b75c01c1711bf3f rc=0 bytes=1382 tests/cc_id/IdMain.bas
-sha256=3bc4ce810daf66dee684e928b03b835b51949b5630e605a4a867eb282d477877 ascii256=c161ed500a626d100960520c1a1f8478eddceab9315cb59d75afad325907e494 rc=0 bytes=2117940 tests/Charts 2020/Proyecto1.vbp
+sha256=56d7ef5d3aee3f91ce83d8f8951076d29e14a78cf3baaf54ab77e748a47892ac ascii256=c161ed500a626d100960520c1a1f8478eddceab9315cb59d75afad325907e494 rc=0 bytes=2118233 tests/Charts 2020/Proyecto1.vbp
 sha256=3152f3eb570b56ce4efd8a7224c656984c1350cd45611feb20e6fd429c522daf ascii256=c3bea8e5aba629630a0656206804f14f626682888d9767cca4b651bac1f02dd8 rc=0 bytes=274058 tests/Charts 2020/ucChartArea/Proyecto1.vbp
 sha256=d5da58ff68385632f9c51175841545765b33003f3962af3e7b0525f2356779e1 ascii256=5d6e416fd97a1b1c48cc0db9789fd02cb5d9cf7e0b09148713a911910618f1ff rc=0 bytes=493132 tests/Charts 2020/ucChartBar/Proyecto1.vbp
 sha256=3ca810b0c9eac0b02e84ce405ada0ebc041251ad687081f8c4deba96ca2c0b82 ascii256=0d52a6d71b36345cc8ec50038f9e0ffe12bcbd38ef5d1a46d30c1432467703a5 rc=0 bytes=2846 tests/Charts 2020/ucPieChart/Module1.bas
 sha256=ca3e6494fcf3d94159a9a5f39e6d203efce0f1e71a8f0352f7d89b54bf392459 ascii256=bac20af3d4baed11734b90ccb85d74a4b8b20792f9c3a8579294df162a7f389e rc=0 bytes=280734 tests/Charts 2020/ucPieChart/Proyecto1.vbp
-sha256=b2dd43653776a0d0a4592bcd6affc82ca7d8bc17845ef01c625554b08d002dce ascii256=a11f8bcb169b38b8e2682195f70f5639654fd5c59926b9c3407f3e1dafc5b21c rc=0 bytes=344722 tests/Charts 2020/ucProgressCircular/Proyecto1.vbp
-sha256=eb34af3ff7acb83e5e139ec237b73b90066c05792e7faa0434dd51a69f483b42 ascii256=eb899b0e908ed09707e7c769636bf025b6f2a5cc1a4210e126500c9003d68da6 rc=0 bytes=970140 tests/Charts 2020/ucTreeMaps/Proyecto1.vbp
-sha256=1d95545b70a91aea868a7ad5bce6c2866b48885352531e6ad41108ccc555e8b8 ascii256=4dbe3cf77a6b9b51af58c40116b778352f8d0e1a82a279007d924a33b7536017 rc=0 bytes=91980 tests/cls_inh/Inh.vbp
+sha256=fb6a3030d6a8cc46295d9916421aa4e0de42133196c2d15bacdcc150eae42366 ascii256=a11f8bcb169b38b8e2682195f70f5639654fd5c59926b9c3407f3e1dafc5b21c rc=0 bytes=344883 tests/Charts 2020/ucProgressCircular/Proyecto1.vbp
+sha256=61d9ef486d00f36c549457bb53fa6bb36a55e10640e9f36183bf94ca689f1c33 ascii256=eb899b0e908ed09707e7c769636bf025b6f2a5cc1a4210e126500c9003d68da6 rc=0 bytes=970277 tests/Charts 2020/ucTreeMaps/Proyecto1.vbp
+sha256=157aba18259e6362c9c75481d85e26b6b639e0b0fcac1439a743c4d56e04fc0f ascii256=4dbe3cf77a6b9b51af58c40116b778352f8d0e1a82a279007d924a33b7536017 rc=0 bytes=92586 tests/cls_inh/Inh.vbp
 sha256=48ebc28f3b381f1b36feada918214643029f54e358de3de9fef04b4e03d193d8 ascii256=2940656b45f4b06590a3762b1b06ed684fa10f5d512d6533f8ccea967656d4a7 rc=0 bytes=32419 tests/cls_inh/InhMain.bas
 sha256=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 ascii256=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 rc=1 bytes=0 tests/cls_neg/ci_n02_not_class.bas
 sha256=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 ascii256=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 rc=1 bytes=0 tests/cls_neg/ci_n11_protected_in_interface.bas
@@ -161,7 +161,7 @@ sha256=cf6d1778d09fea0be4596722e34f1ee8c0ae6ea525bd95ee8baa845572d1d0a8 ascii256
 sha256=e20d0532d308d8f765dc5f56105d805ba3f15f0d34303f743d43e71bb3849b5a ascii256=6e880f8af4a7bba56c304881833c1ff92bf02dd460143982940024639def5789 rc=0 bytes=35931 tests/fdraw/FDemo.vbp
 sha256=6670fb7a6bd0462d2ffb70a218f589baa2ba1f8b6ad9c06824fe36bbb6e73d13 ascii256=fdb37552e5246d75ac0be91705a380f7fe50ba9902235368c6137752f10bc5b2 rc=0 bytes=22779 tests/frmevents/FrmEvents.vbp
 sha256=f5a241b1377d4317c45d94de493edf3f08845f97f907432e1a194b9fb384e1a5 ascii256=13e4a6b7a35c17d26e106c0cca563e659c00d870252e1d4645974c6b8a288a8d rc=0 bytes=13535 tests/frxdata/FrxData.vbp
-sha256=a2e9a77ea3e93b30481bb36ee33f6b5cec80e04b486eb6921f0f5afe09954cd2 ascii256=ce097fc1dcc0ddd9cf455f7317838bc5a4988398661527f67fe6b96f4c781b39 rc=0 bytes=23523 tests/gen_cls/gen_cls.vbp
+sha256=c7fe570cb697dc028f536b2e924e62abec39db02a127787c0edb087747da395c ascii256=ce097fc1dcc0ddd9cf455f7317838bc5a4988398661527f67fe6b96f4c781b39 rc=0 bytes=23777 tests/gen_cls/gen_cls.vbp
 sha256=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 ascii256=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 rc=1 bytes=0 tests/gen_cls/main.bas
 sha256=70f92c6d65e9eaf075ad9758a1dfee0dfa6ed92810b5ad9322caf352cb7a597b ascii256=9ec6f8dcec8e947a0451c1c7404ad472b6634d0ea8cb5d1c5f2b3cb0f012e6bc rc=0 bytes=6443 tests/gen_xmod/gen_xmod.vbp
 sha256=f03a1971ac6ffa98349c84bc1faa6767b155220e19e59f8eec979cca68255a35 ascii256=8a2c1a07cadeaf9cdc87da54fcab90eb90f2d2b4595b940018df5f1b9a30a0a0 rc=0 bytes=1235 tests/gen_xmod/gmod_a.bas
@@ -209,7 +209,7 @@ sha256=8b5133de505058db77ef3ba951e6f5db86804939fb5f0685909c9bb6c31c1b72 ascii256
 sha256=0615657ec1eaf22f53ff80edc8f2056c204f0166b4526dccad6d5ab024ff8b1d ascii256=d7659b4c9e2fb19e076980bffea5c1bf426ab47d60f2ed6a739aba3b7c87d65b rc=0 bytes=3249 tests/itf_pos/p05_coclass_block.bas
 sha256=8a36ca8cfa5eac2e194f016260dff6d4d7f2b509334bb475196478709dc8b7ac ascii256=a220c9b555c7f1db4d5dd0e4464ed769f6c3eaa44f3c3a8a81bd00ca641d339d rc=0 bytes=1888 tests/itf_pos/p06_coclass_soft_ident.bas
 sha256=b0e395464a98b218b93132f92972fc8e5f57abb9a9adb8ed6c9bbe458c3d4592 ascii256=fdf1aa640ab000ff985585937e4a77238cd993ae0f01f9fe17289518c4a0b04d rc=0 bytes=1528 tests/itf_pos/p10_coclass_fold_use.bas
-sha256=f0a20eb35218505dc73c01558fbcc6f2efe82f2c7f6f279adf9c16371193247c ascii256=e6ebe2dcde1157466575f6447a3689d6df32bdbe9ead4b0f9e31593fc375cbcb rc=0 bytes=62973 tests/itf_via/Via.vbp
+sha256=d9bc7c5842be3bb3e2b7886b40c4289e8263d7bce9e1501527952f2a4e9ee6ec ascii256=e6ebe2dcde1157466575f6447a3689d6df32bdbe9ead4b0f9e31593fc375cbcb rc=0 bytes=63211 tests/itf_via/Via.vbp
 sha256=156aa84f9cbe0d96a598722149d3d69d070d85acc2bc33968a9ef5ad43c7056f ascii256=81e240dcfb6e1f3c0d0010e88f63a65e2f6807d5ebf02bf90aa4a661b4bbf4a2 rc=0 bytes=8691 tests/itf_via/ViaMain.bas
 sha256=0c6dae8c3f673e394039c33ff96b608f3c3eb1879500956854696aa7f593eb7b ascii256=c25f53113dfa425b41bdce26a1437bb4afc825ca191dd2ec46e892a015b93e90 rc=0 bytes=10863 tests/itf_xmod/XMain.bas
 sha256=6ef55dd6d4f0547d56d8bff6fa430d3183adc636cb956fe79623f400e36f9479 ascii256=317c73137e1e9bd0d20023b8e5e7c4a07e07f3c67f87409fccbeae948d6d3891 rc=0 bytes=47079 tests/itf_xmod/XWriter.vbp
@@ -412,7 +412,7 @@ sha256=459ec010f1fa3cea34eb01c222ca3babbe3b9d49d8bd64b8b3111bf09e6331e0 ascii256
 sha256=dccb4e0eefb33ea5aa039969cbc2afbd9910c440ed53be1095b02c2aae27bfe4 ascii256=4e60e08bbf5ea4370142f00d5de69a2666d6a0e4f0e017131e17f25fa5c5f3df rc=0 bytes=187492 tests/VBFlexGridDemo/Common/Common.bas
 sha256=e2dad590e783b18ba71f929ae0333c8e635141af2f2e3bf9696231b6073a0d10 ascii256=cd876129e57f397197b6167aa70733fb4561904d53ef68e6b05f7ff64ddbb569 rc=0 bytes=4189 tests/VBFlexGridDemo/Common/Startup.bas
 sha256=b754061ccdc65a189a68b809a85968e579808179fa0c648b3a5dc07d2d53d9d6 ascii256=4dfc425bea7b3922e61ea7bd9211088235cc6ea04de4c9b62c0e9305899a7d4e rc=0 bytes=67832 tests/VBFlexGridDemo/Common/VisualStyles.bas
-sha256=b62ac0c9cc104930eebca2db4bc2e685b21db234ea099724c074ca8747d4394d ascii256=9727fde1e5a1222d877b799679ab67b88920b4fbb157354c3261bc495b1db1ab rc=0 bytes=5505224 tests/VBFlexGridDemo/VBFlexGridDemo.vbp
+sha256=4ec95042095511961d58c6e854fcfb0e8134e650402f88d0a896347a1e9dc086 ascii256=9727fde1e5a1222d877b799679ab67b88920b4fbb157354c3261bc495b1db1ab rc=0 bytes=5505563 tests/VBFlexGridDemo/VBFlexGridDemo.vbp
 sha256=49d51878943fce03c7516b3cf06727555d1c5b6bc1aed8db368e9fcfd1f4f690 ascii256=9d9840c51015c8a6e63aa923404f47d99cee82835b9fa92a76c73cd7317fddc8 rc=0 bytes=3245 tests/vbman_host/run_host.bas
 sha256=49d51878943fce03c7516b3cf06727555d1c5b6bc1aed8db368e9fcfd1f4f690 ascii256=9d9840c51015c8a6e63aa923404f47d99cee82835b9fa92a76c73cd7317fddc8 rc=0 bytes=3245 tests/vbman_host/vbman_host.vbp
 sha256=5f6d4159602806680561963237b24008263b38246332b50b3e814a333009d1a5 ascii256=5cd8103e73a1c07e2fece83539770603407213236bbf9822bd9b08ea74e7d778 rc=0 bytes=1763 tests/vbp_project/MainMod.bas
@@ -511,8 +511,8 @@ sha256=a1518f32c684c39cf425d0e14ebf1c3f172b3b7441789f941643ffd2a775de5e ascii256
 sha256=86e7fd9fc07fdf784fee812b09240aaf8be4ddd8b0a407f52744187cb0555336 ascii256=4598009153c3f10882efcf2519794635680488fcac2ed19da0ea55f319d69281 rc=0 bytes=7728 tests/b444_vararg/Main.bas
 sha256=6d6b60d2197852deae46c7cfdac178a26d27b81638141d9cbb260a60a9ae712e ascii256=7292588f8cb1fa42a2086ec511c0cd808bc543056639038944d7719575f84f93 rc=0 bytes=17578 tests/b448_iface_ret/B448.vbp
 sha256=eac36169521603767d8d4cdc91251398c02278aeb16a6a169245c3dc7ecdbb25 ascii256=bc3cd8f0b42a16e171deea4cb106413a0b289f3480a158f43e455b6619f2af16 rc=0 bytes=3116 tests/b448_iface_ret/Main.bas
-sha256=a8d250066eb3652594113fd7a1e2fbbf2fda76674f2b7d22c0aa6e471a2cc2f9 ascii256=5d1b5b3ddec941eb2fca790900d04efa1c365d7122e049b5f48f32afa2f61a4a rc=0 bytes=20596 tests/b445_refcount/B445.vbp
-sha256=4dcdf466631f809428c31ac9b073fd0c7e3e6fab11a5dc041def212f16971e45 ascii256=36df20300d0436a2b39de01baa791216541c8129bab9b1ada32c943399273dc1 rc=0 bytes=10198 tests/b445_refcount/Main.bas
+sha256=8bcc0c55b243d35b419b4e5e51e81b9084ffe6679ae6e17048c4dfe69be040c0 ascii256=e160a2f5a6d99a112f16c4b087c6a626c6d5e5f4d18bcfa3eccc6258cbf81e40 rc=0 bytes=30694 tests/b445_refcount/B445.vbp
+sha256=602caab1efc8d6924b8b8e4ce5df4c93fc481ef8f57a4282fe0c4abcb9887213 ascii256=6269b64c022d77bb474b09cd12de9df310f13feaf068146ecf49e220e687e833 rc=0 bytes=12945 tests/b445_refcount/Main.bas
 # 账 #305 §B188 (第八十刀判据): 新增 2 行 = tests/b188_term 那两枚输入, 哈希取 CI 为同一 head 33320a1d 自己交的 9c33fdca;
 #   本轮 RTL 只动 ComObj_Release 一处 ⇒ 438 枚存量行**一行没移动** (本机与 CI 两边同读数), 形状门只报「新增未登记」这一族。
 # 账 #305 §B184 (第七十五刀) 的登记来源：门 **#640**（run 38682492970、head 8000e440、attempt 1）= 12 job 里 10 绿 + 两条**预期**红（这道形状门报「存量 5 份哈希不同 + 新增 2 份没登记」、`Tests (compile)` 里同源那句 [STATIC] manifest_coverage）。新增的两行 = 本刀夹具 `tests/b184_fieldw/{B184.vbp,B184Main.bas}`；移动的两行归本刀（Charts 2020/Proyecto1.vbp 31 处、b183_intfield/B183.vbp 2 处，逐行都是 `me-><f> = (int16_t|uint8_t)value.lVal;` → `= vb6_ChkInt|ChkByte(value.lVal);`）。**另外三行移动不是本刀**（ucTreeMaps/Proyecto1.vbp、VBFlexGridDemo/Common/VisualStyles.bas、VBFlexGridDemo/VBFlexGridDemo.vbp）：用「只含本刀、不含 merge」那一对编译器（C3_k74new vs C3_k75new，md5 d74d8b3b/2a24013d）并排重发这三份，移动行数 = 0，而本刀那两份移动 31/2 行 —— 所以这三行是 `a6b05e7d` 带进来的别人那两笔欠的登记，按 CI 为同一个 head 自己交的清单（github/ci/emit-manifest 的 7dea8d25）一并落账。
@@ -674,3 +674,23 @@ sha256=4dcdf466631f809428c31ac9b073fd0c7e3e6fab11a5dc041def212f16971e45 ascii256
 #            P 与 NEW 对同一份新源码的发码一字相同 => 它不是行为面。
 #   注：tests/VBFlexGridDemo 那一行这次没动 —— 腿④ 给它加的三句出口 Release 被第二道夹
 #   撤掉了，净效果与登记过的样子一字相同（尺 .build/k1034_flex.txt：那三行现在 0 处）。
+# 第一百三十刀登记（账 #305 §B218 (甲) 刀2 = 腿⑤ 出厂那一档：_Destroy 退「工程类字段」那一枚引用）：
+#   门 run 39253175752（head aa33913f，attempt 1）= 12 job 里 11 绿，唯一一枚红就是形状门；x64 + x86
+#   两台真跑里 b445 新加的三格判据 W12 / W13 / W14 全绿。
+#   清单仍取 CI 自己编的那份（gh run download 39253175752 -n emit-manifest），本机再拿 head 61b14f95
+#   编的那台 C3.exe 对同一份源码复算一遍，486 行 sha256 与 ascii256 两栏逐行相同（尺
+#   .build/k1074_local.txt）=> 还是那句前提：拿 CI 那台当口径之前，先证本机与它逐行相同。
+#   移动 11 行 / 新增 0 / 退场 0，行序一字未改。发码逐行归因 = .build/k1075_guard.py ->
+#   k1075_guard.json；两头尺：BASE = CI 为 head afc486ec 编的那台（.build/k1062_base，腿①②③④ 与
+#   两道夹齐全、只缺腿⑤），NEW = 本机为 head 61b14f95 编的那台。具名原因两条，OTHER = 0：
+#     18 行 = 本刀（10 份输入各只多出若干句 if (me->X) vb6_cls_Y_Release(me->X)，删 0 行、改 0 行）：
+#            cc_demo 两片各 1、Charts 三片 2 / 1 / 1、cls_inh 5、gen_cls 2、itf_via 2、FlexGrid 2、
+#            b445 的 B445.vbp 1；
+#     1 行 = 夹具源码自己变了 tests/b445_refcount/Main.bas（新写 W12 / W13 / W14 三格判据）：BASE 与
+#            NEW 对同一份新源码的发码一字相同（added=0 removed=0）=> 它不是行为面；B445.vbp 那一行
+#            的 bytes 增量也有大半 = 工程里新挂了一整个 C445H 模块（同上，夹具侧），本刀在那一行里
+#            只多出上面那 1 句。
+#   注 1：这回 tests/VBFlexGridDemo 那一行动了（上一刀还专门写明它没动）—— 腿⑤ 给它的两枚
+#            As <工程类> 字段各补一句出厂放手，这一档第一次打到真语料上。
+#   注 2：cls_inh 那 5 句全在派生类自己的 _Destroy 里；读码尺 .build/k1059_view.txt 证过派生那台从不
+#            转调祖先的 _Destroy => 同一条继承链上同一枚字段不会被退两次。
