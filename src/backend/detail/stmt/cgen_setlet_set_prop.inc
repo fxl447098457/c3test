@@ -635,7 +635,11 @@
                         == std::string::npos;
                 const bool isIvrefVar = knownIvrefVars_.count(ivValLower) != 0;
                 if (plainIvTarget && isIvrefVar) {
-                    emitIvrefQiSet(target, v->name, value);
+                    // 账 #305 §B218 第一百三十四刀: 接管问句只有一位主人, 两站都问它 ——
+                    // 这一档的右值按上面那条判据就是一枚裸视图变量 (借来的), 问句答 false。
+                    emitIvrefQiSet(target, v->name, value,
+                                   node.value ? rhsTransfersProjectRef(*node.value, true)
+                                              : false);
                     return;
                 }
                 if (isClassVar || isNewExpr) {
@@ -763,7 +767,10 @@
                         std::string ivView221 = ifaceViewOfExpr(*node.value);
                         if (!ivView221.empty()) {
                             if (plainIvTarget) {
-                                emitIvrefQiSet(target, v->name, value);
+                                // 账 #305 §B218 第一百三十四刀: 这一档的右值是「返回工程内接口的调用」
+                                // ⇒ 交出来的那枚薄指针自带对价, 视图腿② QI 完当场交回 (问句同 刀3/刀4)。
+                                emitIvrefQiSet(target, v->name, value,
+                                               rhsTransfersProjectRef(*node.value, true));
                                 return;
                             }
                             value = "(" + ivrefCType(v->name) + ")" + value;

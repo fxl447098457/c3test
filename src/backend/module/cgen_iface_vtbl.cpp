@@ -740,7 +740,7 @@ std::string CCodeGen::ivrefVtableCall(const std::string& ifaceName, const std::s
 // (#448 的形①) 也要同一条腿；留在站点里就会长出第二个答案。
 // 计数口径不变: QI 成功即已 AddRef (失败得 NULL = Nothing)，旧值当场 Release。
 void CCodeGen::emitIvrefQiSet(const std::string& target, const std::string& ifaceName,
-                              const std::string& valueExpr) {
+                              const std::string& valueExpr, bool rhsTransferred) {
     const std::string ivCType = ivrefCType(ifaceName);
     // valueExpr 在这个块里出现三次 (判空 / QI 的接收者 / QI 的首参)。裸标识符无所谓，
     // 但形①交进来的是 `MakeDirect()` 那种调用 ⇒ 三次求值 = 三枚实例、三笔引用
@@ -765,6 +765,15 @@ void CCodeGen::emitIvrefQiSet(const std::string& target, const std::string& ifac
                 ", vb6_iv_iid_" + cIdent(ifaceName) + ", &" + ivGot + ");");
     c_.emitLine(target + " = (" + ivCType + ")" + ivGot + ";");
     c_.emitLine("if (" + ivOld + ") " + ivOld + "->vt->Release(" + ivOld + ");");
+    // 账 #305 §B218 第一百三十四刀 (甲) 腿② 视图档: 右值那枚临时量是**接管来的** (被调方 =
+    // 返回工程内接口的过程, 它自己的返回槽在 腿④ 不退 ⇒ 交出来就带一枚对价; 契约同 刀3/刀4,
+    // 问句也只那一位主人 —— rhsTransfersProjectRef)。本站 QI 出来的那一枚另算 (QI 自己 AddRef),
+    // 所以接管来的那一枚当场交回, 不退 = 每调用净 +1 = 永不销毁。
+    // 借来的那一档 (裸标识符右值 / New 那一站) 天然 rhsTransferred=false ⇒ 一发都不补。
+    if (rhsTransferred) {
+        c_.emitLine("if (" + ivVal + ") " + ivVal + "->vt->Release(" + ivVal +
+                    ");  /* 账 #305 (甲) 腿②: 交回接管来的那一枚 */");
+    }
     c_.dedent();
     c_.emitLine("}");
 }

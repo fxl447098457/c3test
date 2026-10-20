@@ -383,7 +383,7 @@ void CCodeGen::emitClassSlotRefSet(const std::string& target, const std::string&
 // 本身带一枚对价引用; 调用方再 claim 就是每调用净 +1, 那一枚永远没人退 (实测 W6 / W9 `terms=0`)。
 // 刻意只认**裸标识符 callee** 且模块符号表认到 Function / Property Get、返回类型是工程 Class:
 // 带接收者的成员调用 (`obj.Method()`) 走的是另一套契约 (COM 打包 / 视图 QI), 本刀不碰。
-bool CCodeGen::rhsTransfersProjectRef(const ASTNode& expr) {
+bool CCodeGen::rhsTransfersProjectRef(const ASTNode& expr, bool forViewSlot) {
     // 账 #305 §B218 (甲) 刀3 + 刀4: 「这一发右值自带一枚移交过来的引用」= 上面那位主人
     // 「不 claim」那条臂的**唯一**问句, 三条臂都收在这里 (别处再答一遍 = 第二套判据):
     //   形① `Set c = MakeOne()`               callee 是裸标识符 (刀3);
@@ -394,6 +394,10 @@ bool CCodeGen::rhsTransfersProjectRef(const ASTNode& expr) {
     // 继承那几档包装器 `return vb6_<Base>_M((vb6_cls_<Base>*)me);` 原样转交不退 ⇒ 交出来的指针
     // 本身就带对价 ⇒ 调用方再 claim = 每调用净 +1 = 永不销毁。
     // 反面 = 数据字段: 那一枚仍由持有者握着, 接手会少一枚, 所以字段那一档继续 claim。
+    // 第一百三十四刀: 同一位主人多答一档。forViewSlot = 本站槽装的是**接口视图** —— 交出来的
+    // 那枚薄指针带的也是对价 (`Set vb6_ret_F = New CB448` 那一档 isNewExpr **不 AddRef** = New 的
+    // 初始引用就地移交, 而返回槽在 腿④ 不退)，视图腿② 因此 QI 完必须交回它 (见 emitIvrefQiSet)；
+    // 两档互斥, 各站只认自己那一档, 工程类那一站的答案与发码一字不改。
     const ASTNode* callee = nullptr;
     if (expr.kind == ASTNodeKind::IndexOrCallExpr) {
         callee = static_cast<const IndexOrCallExpr&>(expr).callee.get();
@@ -410,6 +414,7 @@ bool CCodeGen::rhsTransfersProjectRef(const ASTNode& expr) {
             || fn->variableTypeName.empty()) {
             return false;
         }
+        if (forViewSlot) return !ivrefCType(fn->variableTypeName).empty();
         return !projectClassNameOf(fn->variableTypeName).empty();
     }
     if (callee->kind != ASTNodeKind::MemberAccessExpr) return false;
@@ -444,10 +449,12 @@ bool CCodeGen::rhsTransfersProjectRef(const ASTNode& expr) {
         }
     }
     // 过程返回类: 只认 Function / PropertyGet 符号, 与形① 同一位主人。返回的是工程内**接口**
-    // 那一档刻意不走这条腿 (薄指针不是实例, 它的所有权由接口那一位主人管)。
+    // 那一档 = ProjectView (第一百三十四刀), 工程类那一站 (forViewSlot=false) 仍照第一百三十二刀
+    // 的原话不认它 —— 薄指针不是实例, 归接口那一位主人管。
     const std::string retCls = getClassMethodReturnType(recvCls, ma.memberName);
-    if (retCls.empty() || !ivrefCType(retCls).empty()) return false;
-    return true;
+    if (retCls.empty()) return false;
+    const bool retIsView = !ivrefCType(retCls).empty();
+    return forViewSlot ? retIsView : !retIsView;
 }
 
 // P6.4+: 类模块默认实例 (VB_PredeclaredId=True) 惰性单例访问器.

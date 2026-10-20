@@ -368,11 +368,12 @@
                 clsOfRhs = node.value ? inferClassTypeOfExpr(*node.value) : std::string();
                 outSlotClaim = !clsOfRhs.empty();
             }
-            // 账 #305 §B218 (甲) 刀3: 「不 claim」那一臂现在有两个成因 —— `New <类>`, 以及
+            // 账 #305 §B218 (甲) 刀3: 「不 claim」那一臂有两个成因 —— `New <类>`, 以及
             // 工程内过程交回来的那一枚 (自带对价)。问句只有一处: rhsTransfersProjectRef。
+            // 第一百三十四刀给它补了第二档 (forViewSlot): 本站的槽装实例 ⇒ 报 false。
             bool rhsTransferred = node.value && node.value->kind == ASTNodeKind::NewExpr;
             if (!rhsTransferred && node.value) {
-                rhsTransferred = rhsTransfersProjectRef(*node.value);
+                rhsTransferred = rhsTransfersProjectRef(*node.value, false);
             }
             if (!clsOfSlot.empty() && target.find('(') == std::string::npos
                 && !procClassFormals_.count(targetLower)) {

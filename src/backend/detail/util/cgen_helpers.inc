@@ -302,8 +302,10 @@
                                 const std::vector<std::string>& args);
     // B06a 那条视图→视图的 QueryInterface 发射 (存旧 → QI → 覆盖 → 放手旧)，
     // 由按名那一臂与 §B221 的调用表达式那一臂共用。
+    // 账 #305 §B218 第一百三十四刀: 多收一个 rhsTransferred = 「右值那枚临时量自带对价」，
+    // 真就当场把接管来的那一枚交回 (只在这一位主人里交, 站点不许自己补一行)。
     void emitIvrefQiSet(const std::string& target, const std::string& ifaceName,
-                        const std::string& valueExpr);
+                        const std::string& valueExpr, bool rhsTransferred);
     // 账 #305 §B218 (甲): 工程类形参登记的一处出口 (按名表 + 本过程形参名册)。
     void registerClassFormal(const std::string& pLower, const std::string& clsName);
     // 账 #305 §B218 (甲) 腿②③②': typed 工程类槽的「覆写 / 置空 / 写进出参槽」一位主人
@@ -314,7 +316,9 @@
     // 账 #305 §B218 (甲) 刀3: 「这一发右值是不是**已经带着一枚移交过来的引用**」—— 上面那位
     // 主人手上「不 claim」那条臂的全部成因共用这一条问句（**三形**：裸名调用 / 成员调用 /
     // 无括号的属性读；`New <类>` 那一发仍由调用点自己答）。问句只此一位，别在别处再答一遍。
-    bool rhsTransfersProjectRef(const ASTNode& expr);
+    // 账 #305 §B218 第一百三十四刀: 多收一个 forViewSlot = 「本站的槽装的是接口视图还是工程类」——
+    // 同一条契约问句, 两站各自报自己要的那一档返回类型 (视图那一站 = 视图腿② 交回接管值)。
+    bool rhsTransfersProjectRef(const ASTNode& expr, bool forViewSlot);
     std::vector<const IfaceView*> ivImplementedIfaces(Module& module);
     Decl* ivFindImplMember(Module& module, const IfaceView& v, const IfaceSlotView& slot);
     // tB 委托式实现 (ai/022 B10): 本类把接口 v 整份转交给哪个持有字段 (无则 nullptr)
