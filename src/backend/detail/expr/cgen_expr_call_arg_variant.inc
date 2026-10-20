@@ -276,11 +276,21 @@
         bool rtParamTypeUsable = (i >= calleeParams.size())
             || calleeParams[i].type == Vb6Type::Variant
             || calleeParams[i].type == Vb6Type::Empty;
-        // 账 #454 §B164 形①②③⑤ (第一百三十四刀): 把上面那一段算出来的「这一位要什么 C 档」
-        // 带出块外 —— 下面 594 行上面的提名站要用同一个答案, 而那张 C 签名表
-        // (getRuntimeParamCType) 只许**一处问**(第 76 道哨兵 implicit_cstr_station 的 R8 钉的
-        // 就是这件事: 那张表不许再答位号, 多问一次就等于让两处各答一遍)。
-        std::string rtParamType454;
+        // 账 #454 §B164 形①②③⑤ (第一百三十四刀): 「这一位要什么 C 档」这一问**只算一次**,
+        // 两处消费 —— 上面那个块 (按档包装实参) 与下面 594 行上面的提名站。
+        // 为什么必须提到块外: 那张按 callee 名登的 C 签名表 (getRuntimeParamCType) 只许
+        // **一处问** (第 76 道哨兵 implicit_cstr_station 的 R8; 本刀第一版在块外又问了一次,
+        // 当场红)。而提名站**必须**拿到答案 —— `Len`/`LenB` 的符号档是 Unknown (不是
+        // Variant/Empty), 那个块根本不会进, 可它们收的正是 BSTR, 只有签名表知道。
+        // 次序照 §B176: 先问 `builtinNoParamTableFormalCType` (按写出来的 arity 答档),
+        // 它答不出才回落到签名表。
+        const Vb6Type first454 = node.positional.empty()
+            ? Vb6Type::Empty
+            : (node.positional[0] ? inferExprType(*node.positional[0]) : Vb6Type::Empty);
+        const std::string kind176_454 =
+            builtinNoParamTableFormalCType(callee, node.positional.size(), i, first454);
+        std::string rtParamType454 =
+            kind176_454.empty() ? getRuntimeParamCType(callee, i) : kind176_454;
         if (!isByRef && rtParamTypeUsable) {
             // 账 #305 §B176 (第六十七刀): 「这一位要什么 C 档」先问**那一位权威** ——
             // 没有类型化形参表的那族内在函数由 `builtinNoParamTableFormalCType` 按**写出来的**
@@ -297,8 +307,11 @@
                 const Vb6Type first176 = node.positional.empty()
                     ? Vb6Type::Empty
                     : (node.positional[0] ? inferExprType(*node.positional[0]) : Vb6Type::Empty);
-                std::string kind176 = builtinNoParamTableFormalCType(
-                    callee, node.positional.size(), i, first176);
+                // 账 #454: 这一问**块外已经算过一次**(kind176_454, 同一个 callee / 同一个位号 /
+                // 同一个首参档), 这里直接复用 —— 第 76 道哨兵 implicit_cstr_station 的 R8
+                // 把 `builtinNoParamTableFormalCType` 的读者钉在 2 处 (投影 + 本站), 再问一次
+                // 就是第三位主人。
+                std::string kind176 = kind176_454;
                 // 账 #305 §B177 (第六十八刀): 宏的分派位(= InStr 的 needle) 上 **Variant 裸交**。
                 // `vb6_InStr` / `vb6_InStrC` 是按 needle 分派的 _Generic 宏, needle 是
                 // vb6_VARIANT 时选 `vb6_InStrVar` / `vb6_InStrVarC` —— 那里自己
@@ -316,7 +329,7 @@
                            callee, node.positional.size(), i, first176)) {
                     kind176 = "vb6_VARIANT";
                 }
-                rtParamType = kind176.empty() ? getRuntimeParamCType(callee, i) : kind176;
+                rtParamType = kind176.empty() ? rtParamType454 : kind176;
                 // 账 #305 §B180 (第六十九刀): 这一位要不要**收整枚槽**（= 不解包），一处问句
                 // 两站同归 —— 这里撤回解包，`builtin_fixup` 那一站照着同一问句把 callee 换成
                 // 收槽的出口 `vb6_StrPtrVar`。撤掉的病形是 `vb6_StrPtr(vb6_VariantToString(v))`：
@@ -506,9 +519,6 @@
                     }
                 }
             }
-            // 账 #454: 把这一位的答案带出块 (含 §B177/§B180 那两条把档改成 "vb6_VARIANT"
-            // 的覆盖 —— 那两条答的是「这一位保留整枚槽」, 提名站据此**不提名**(0), 语义一致)。
-            rtParamType454 = rtParamType;
         }
         // 账 #433 §B207 (第一百零五刀): 文本实参进**日期形参**这一问 —— 两条臂都答不了它, 所以
         //   这一条**刻意落在两条臂之外**(它们各自都以 `argIsVariant` 为闸), 一处答两臂的实参。

@@ -2666,13 +2666,12 @@ int CCodeGen::exprOwnedTempKind(ASTNode* e, const std::string& rawC,
     if (isSlot454) {
         return variantRhsOwnsValue(ex, rawC) ? kOwnedTempVariant : 0;
     }
-    // 形参档答不出 BSTR 的两种情形, 仍然可能是"这一段文本就是一枚现造的 BSTR":
-    //   `void*` / 空 —— 那一位的形参档不可信 (`Len`/`LenB` 在符号表里是 Unknown, mapType
-    //   折出来就是 void*; 而它们收的正是 BSTR)。这两形再走下面同一套闸, 只多一条源档否决。
-    const bool declSaysBstr454 = (declCType == "BSTR");
-    const bool declBlind454 = declCType.empty() || declCType == "void*" || declCType == "vb6_VARIANT";
-    if (!declSaysBstr454 && !declBlind454) return 0;
-    // 走到这里 = 形参档说 BSTR, 或形参档答不出。剩下三道闸都是为了**不惜**:
+    // 形参档**必须**答 BSTR, 不许「答不出就猜」: 本刀第二版给「形参档是 void*/空」开了一条
+    // 宽容路 (再加源档否决), 结果三处 C2440 —— `vb6_ScaleUnitX(vb6_GetCurrentX(…), …, 3)`
+    // 那种**带尾注的 With 读数**压根问不出档, double 就被当成 BSTR (Charts 2020 PropPagFMR)。
+    // 现在 `Len`/`LenB` 已经能从签名表拿到 "BSTR" (见 arg_variant 那处「只算一次」), 不需要宽容路。
+    if (declCType != "BSTR") return 0;
+    // 走到这里 = 形参要 BSTR、文本又不是一只槽。剩下三道闸都是为了**不惜**:
     //
     // ① 顶层必须是调用。裸标识符 (`s` / `v`) 与裸字面量 (`L"ab"`) 到此都还没变成 BSTR ——
     //    按 BSTR 声明一枚具名临时量会分别发成 `BSTR t = v;`(C2440) 与 `BSTR t = L"ab";`
@@ -2717,13 +2716,6 @@ int CCodeGen::exprOwnedTempKind(ASTNode* e, const std::string& rawC,
     // 现造的串提名 (Charts 2020 ucChartBar 六处 C2440)。这是硬约定 b 那一条的又一例。
     if (callee454 != "vb6_VariantToString" && callee454.rfind("vb6_VariantTo", 0) == 0) {
         return 0;
-    }
-    if (!declSaysBstr454) {
-        // 形参档答不出时, 再用**源档**否决一类: 数值 / 对象 / UDT 的现造值不是我们管的那一形。
-        const Vb6Type t454 = inferExprType(*ex);
-        const bool stringish454 = (t454 == Vb6Type::String || t454 == Vb6Type::Variant
-                                   || t454 == Vb6Type::Empty || t454 == Vb6Type::Unknown);
-        if (!stringish454) return 0;
     }
     return exprBorrowsBstrStorage(ex, rawC) ? 0 : kOwnedTempBstr;
 }
