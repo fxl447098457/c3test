@@ -434,6 +434,17 @@ $escapeRoster = CountOf 'escapedLocalArrays_'
 if ($escapeRoster -ne 5) {
     $fail += ("escape roster sites = " + $escapeRoster + " (want exactly 5: 字段 + 注释 + clear + count + insert)")
 }
+#    · topLevelLocalArrays_ = 出口那一发的第二道闸 (声明那条 Dim 必须是过程体的**直接子句**, 否则那枚
+#      C 变量在出口不在作用域内 = 门 #821 的 FlexGridX86 十二发 C2065) ⇒ 字段 + clear + insert + count
+#      = 4 处 / 2 份文件。少了这一道闸 = 嵌套块里的 Dim 又被出口放手。
+$scopeRoster = CountOf 'topLevelLocalArrays_'
+if ($scopeRoster -ne 4) {
+    $fail += ("declaration-scope roster sites = " + $scopeRoster + " (want exactly 4: 字段 + clear + insert + count)")
+}
+$scopeRosterFiles = @(FilesOf 'topLevelLocalArrays_')
+if ($scopeRosterFiles.Count -ne 2) {
+    $fail += ("declaration-scope roster files = " + ($scopeRosterFiles -join ', ') + " (want exactly 2 files)")
+}
 # ㉔ 第一百五十二刀: 那张带档的表 (+第三档) 的形状 —— isCarrier 只许住在表与出口那一趟 (2 份文件 / 4 处)。
 $carrierFlag = CountOf 'isCarrier'
 if ($carrierFlag -ne 4) {
@@ -459,5 +470,5 @@ if ($fail.Count -gt 0) {
     foreach ($f in $fail) { Write-Host ("  - " + $f) }
     exit 1
 }
-Write-Host "CLASS-REFCOUNT-AUTHORITY OK (1 pair mint / 1 header / 2 leg consumers / 3+9 formals / 10 roster files / 6 literal files / 0 stale / 5 registry files + 2 registrants / 1+1 out-slot / 1+1 foreign-write drop / 1 field-teardown shape + file / 6 field-type questions (标量 + 数组两档) / 6 transfer-question sites in 2 files / 1 view-leg hand-back + 2 QiSet calls / 1+2+1 transfer-arm questions / 3 static-gate sites in 1 file + 1 ivref registration / 1 arg-station hand-back + 4+4 helper sites in 4 files / 4+4 index-slot + project-class questions / 1 address-temp mint / 3 element-teardown sites + 4+4 carrier-destroy questions + 4 preserve-with-release sites in 4 files / 4+4 形A questions (out-slot class + owner pass) + 5 copy-in claim sites in 4 files / 3+4 carrier-destroy sites in 3 files / 8 hand-back stations (5 in cgen_redim.cpp + 过程出口) + 4 shape questions + 3 multidim export sites + 4+2 carrier-scope registrar + flag sites / 7+3 carrier-free flag + 5+5 escape pre-pass + 5 roster sites / 5 static gates / 4+3 ND Preserve-with-release export sites)"
+Write-Host "CLASS-REFCOUNT-AUTHORITY OK (1 pair mint / 1 header / 2 leg consumers / 3+9 formals / 10 roster files / 6 literal files / 0 stale / 5 registry files + 2 registrants / 1+1 out-slot / 1+1 foreign-write drop / 1 field-teardown shape + file / 6 field-type questions (标量 + 数组两档) / 6 transfer-question sites in 2 files / 1 view-leg hand-back + 2 QiSet calls / 1+2+1 transfer-arm questions / 3 static-gate sites in 1 file + 1 ivref registration / 1 arg-station hand-back + 4+4 helper sites in 4 files / 4+4 index-slot + project-class questions / 1 address-temp mint / 3 element-teardown sites + 4+4 carrier-destroy questions + 4 preserve-with-release sites in 4 files / 4+4 形A questions (out-slot class + owner pass) + 5 copy-in claim sites in 4 files / 3+4 carrier-destroy sites in 3 files / 8 hand-back stations (5 in cgen_redim.cpp + 过程出口) + 4 shape questions + 3 multidim export sites + 4+2 carrier-scope registrar + flag sites / 7+3 carrier-free flag + 5+5 escape pre-pass + 5 roster sites + 4+2 declaration-scope roster / 5 static gates / 4+3 ND Preserve-with-release export sites)"
 exit 0

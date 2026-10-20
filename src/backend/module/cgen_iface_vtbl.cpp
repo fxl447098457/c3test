@@ -718,6 +718,9 @@ void CCodeGen::trackArrayCarrierForRelease(const std::string& cName,
     if (cName.empty() || arrayName.empty()) return;
     std::string lower = arrayName;
     for (char& ch : lower) ch = (char)tolower((unsigned char)ch);
+    // 闸① (第一百五十六刀补): 只有过程体**顶层**那条 Dim 的 C 变量在出口还看得见。
+    if (topLevelLocalArrays_.count(lower) == 0) return;
+    // 闸②: 预扫说这枚载体在本过程里被整体用掉过 ⇒ 不销毁。
     trackSlotForRelease(cName, false, std::string(), arrayName,
                         escapedLocalArrays_.count(lower) == 0);
 }
@@ -725,12 +728,14 @@ void CCodeGen::trackArrayCarrierForRelease(const std::string& cName,
 // 「这枚局部数组有没有被整体用掉」那一问的唯一答案。判据按**节点地址**认, 不按文本:
 // traverseExpr 先 visit 父节点再下钻 ⇒ 在父节点里把「这一格不算逃逸」的子节点指针记下,
 // 到 IdentifierExpr 那一访按指针放行。认不出的形状默认算逃逸 (fail-safe: 少发一发销毁)。
-// 不算逃逸的只有两形: ① 带实参的元素访问 `a(i)` / `a(i)=v` 里那个被调者 ② 整数组赋值的左值
-// `a = ...` (换载体 = 老载体已由 ReDim/赋值那一站收尾, 出口只管新的那一块)。
+// 放行的只有那一形: 带实参的元素访问 `a(i)` / `a(i)=v` 里那个被调者 —— 它只碰一格, 载体没交出去。
 // 算逃逸的 = 其余每一次裸出现: 右值 (`v = a` / `pv = a`)、实参 (`P(a)` / `UBound(a)`)、
 // 零实参的整枚数组那一形 (`v = a()`, 载体当场交给调用方)、`For Each x In a` 的集合、
-// 成员链的宿主 (`a.Field`) —— 后两形今天在 VB6 里其实是**借用**不逃逸, 这里刻意从严:
-// 载体级销毁是全元素档一起动, 换悬空读的代价不值这 3% 的覆盖率。
+// 成员链的宿主 (`a.Field`)、以及**整数组赋值的左值** `a = ...`。
+// 左值那一格刻意不放行 (实测发码 = `d = b;` 一发裸指针赋值, 两边共用同一枚载体):
+// 那一格之后槽里握的是**别人**的载体, 出口按自己的名义去销毁 = 把别人还活着的东西拆了
+// (最坏那形 = `loc = mg` 左值接的是模块级数组的载体 ⇒ 出口一发把整个模块的数组销毁)。
+// 代价 = `loc = <新造的那枚>` 这一子集接着漏, 与漏判同方向; 换悬空读的代价不值这一格。
 namespace {
 struct EscapeScan : public ASTVisitor {
     std::set<const ASTNode*> exempt;
@@ -753,17 +758,39 @@ struct EscapeScan : public ASTVisitor {
             exempt.insert(node.callee.get());
         }
     }
-    void visit(AssignmentStmt& node) override {
-        if (node.target) exempt.insert(node.target.get());  // `a = ...` 的左值 = 换载体, 不逃逸
-    }
-    void visit(LetStmt& node) override {
-        if (node.target) exempt.insert(node.target.get());
-    }
 };
+
+// 「这条声明是不是过程体的直接子句」—— 只收数组那一档的名字 (逗号声明要展开成子声明逐条看)。
+// 嵌在 If / For / With 块里的 `Dim q(5)` 发在**那个块的括号内**, 出口那一发在它的括号外 ⇒ 拿一个
+// 当时并不存在的名字去销毁 = cl C2065 (门 #821 的 FlexGridX86 十二发全在这个形状上)。
+void collectTopLevelArrayNames(const Decl* d, std::set<std::string>& out) {
+    if (!d) return;
+    if (d->kind == ASTNodeKind::MultiDecl) {
+        for (const DeclPtr& child : static_cast<const MultiDecl&>(*d).declarations) {
+            collectTopLevelArrayNames(child.get(), out);
+        }
+        return;
+    }
+    if (d->kind != ASTNodeKind::VariableDecl) return;
+    const VariableDecl& var = static_cast<const VariableDecl&>(*d);
+    // 「这条声明是不是数组」问的正是发码那两条臂各自的条件 (定长/多维看 dimensions,
+    // 动态看 isDynamicArray —— `Dim d()` 的 dimensions 是空的), 少一条就把动态那一档漏回今天的漏。
+    if (var.dimensions.empty() && !var.isDynamicArray) return;
+    std::string lower = var.name;
+    for (char& ch : lower) ch = (char)tolower((unsigned char)ch);
+    out.insert(lower);
+}
 } // namespace
 
 void CCodeGen::scanLocalArrayEscapes(const StmtList& body) {
     escapedLocalArrays_.clear();
+    topLevelLocalArrays_.clear();
+    for (const StmtPtr& st : body) {
+        if (st && st->kind == ASTNodeKind::LocalDeclStmt) {
+            collectTopLevelArrayNames(static_cast<const LocalDeclStmt&>(*st).decl.get(),
+                                      topLevelLocalArrays_);
+        }
+    }
     EscapeScan scan;
     for (const auto& st : body) {
         if (st) traverseStmt(*st, scan);

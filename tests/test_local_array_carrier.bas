@@ -10,15 +10,19 @@ Option Explicit
 '   fix / dyn / nd  = the three shapes the exit now reclaims. Band = 4 B/call: the pre-fix reading
 '                    is ~80x over it, so the flag has real red power, while a few pages of noise
 '                    cannot make it flap.
-'   alias / bound / give = the three shapes the escape rule deliberately refuses to free, because
+'   alias / bound / give / take = the four shapes the escape rule refuses to free, because
 '                    the carrier left the procedure and a second owner still reads it
 '                    (into a module Variant / only borrowed through UBound / handed to the CALLER
-'                    through VB6's zero-arg whole-array form `w()`). These must KEEP leaking -
-'                    that flag is what goes red if the escape rule is ever loosened. Measured:
-'                    with free-forced-on for every shape, all three read 0 (red) while the element
-'                    values STILL printed 123456 / 246810, because a freed-but-not-yet-reused block
-'                    keeps its bytes in a Release build. So the read below is a same-direction
-'                    witness, not the guard - do not trust it alone.
+'                    through VB6's zero-arg whole-array form `w()` / the LOCAL slot receiving the
+'                    MODULE array's carrier through `l = mg`, which emits a bare pointer copy).
+'                    These must KEEP leaking - that flag is what goes red if the escape rule is
+'                    ever loosened. Measured: with free-forced-on for every shape, all three
+'                    read 0 (red) while the element values STILL printed 123456 / 246810, because
+'                    a freed-but-not-yet-reused block keeps its bytes in a Release build. So the
+'                    read below is a same-direction witness, not the guard - do not trust it alone.
+'                    take (B225) mints nothing, so its leak flag reads 0 in both builds; the guard
+'                    for that shape is the Absent emit needle (no Destroy1D(l) with the exit
+'                    comment), which the pre-fix build did emit.
 '   Rule-mutation controls (this machine, x64): free-always=false -> fix/dyn/nd all N; true ->
 '   alias/bound/give all 0. Both ends of the band can go red. Pre-fix readings of the six windows
 '   are archived at .build/k1927_*.txt + k1931_destroys.txt.
@@ -43,6 +47,7 @@ Private Const N As Long = 20000
 Private gmv As Variant
 Private ggive As Variant
 Private gborrow As Long
+Private mg() As Long
 
 Function PF() As Long
     Dim pmc As PMC
@@ -112,6 +117,16 @@ Function GiveDyn() As Variant
     GiveDyn = w()
 End Function
 
+' escapes (the left-hand side!): `l = mg` emits a bare pointer copy, so after that line the LOCAL
+' slot holds the MODULE array's carrier. Freeing it here would tear down the module's array -
+' the worst shape this knife can reach, and it has 74 real-world occurrences (dyn<-unknown in the
+' 9400-file corpus scan). The exit must keep its hands off, and mg(3) must still read 123456.
+Sub TakeModuleArray()
+    Dim l() As Long
+    l = mg
+    l(1) = 7
+End Sub
+
 Function FixBytes() As Long
     Dim p0 As Long, p1 As Long, i As Long
     p0 = PF()
@@ -172,6 +187,16 @@ Function GiveBytes() As Long
     GiveBytes = p1 - p0
 End Function
 
+Function TakeBytes() As Long
+    Dim p0 As Long, p1 As Long, i As Long
+    p0 = PF()
+    For i = 1 To N
+        TakeModuleArray
+    Next i
+    p1 = PF()
+    TakeBytes = p1 - p0
+End Function
+
 Public Sub Main()
     Dim r As Long
     r = FixBytes()
@@ -200,5 +225,13 @@ Public Sub Main()
     ggive = GiveDyn()
     rg = CLng(ggive(3))
     Debug.Print "B223-give-leak="; LeakFlag(r); " read="; rg
+
+    ReDim mg(0 To 8)
+    mg(3) = 123456
+    r = TakeBytes()
+    Dim rm As Long
+    rm = 0
+    rm = CLng(mg(3))
+    Debug.Print "B225-take-leak="; LeakFlag(r); " module-read="; rm
     Debug.Print "B224-DONE"
 End Sub

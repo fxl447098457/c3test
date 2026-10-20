@@ -524,6 +524,9 @@
     // 由过程入口那一趟预扫 (scanLocalArrayEscapes) 一次性回答, 存小写裸名。登记口只在这张名单
     // 不含它时才允许出口销毁载体 —— 认不出的形状一律算逃逸 (漏判的方向是继续漏, 不是悬空读)。
     std::set<std::string> escapedLocalArrays_;
+    // 第一百五十六刀的第二道闸: 过程体**直接子句**里那几条数组 Dim 的小写名。出口那一发拿的是
+    // C 变量名, 而嵌在 If / For / With 括号里的 Dim 只在那对括号内存在 ⇒ 不在名单里就不登记。
+    std::set<std::string> topLevelLocalArrays_;
     // Set 语句里"旧值"临时变量的序号 (只有新语法路径消耗, 不影响其他工程)
     int ivrefSetSeq_ = 0;
 

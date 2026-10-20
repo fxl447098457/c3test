@@ -7891,7 +7891,8 @@ if ($Category -in @("all", "run", "vbp")) {
     #   (Release 版里刚 free 还没被复用的块保留原字节)，所以读数是同向证人、不是判据。
     $b156Needles = @("B218-fix-ok=Y", "B219-dyn-ok=Y", "B220-nd-ok=Y",
                      "B221-alias-leak=1 read=123456", "B222-bound-leak=1 ubound=63",
-                     "B223-give-leak=1 read=246810", "B224-DONE")
+                     "B223-give-leak=1 read=246810", "B225-take-leak=0 module-read=123456",
+                     "B224-DONE")
     Add-BasTest "test_local_array_carrier" "$Tests\test_local_array_carrier.bas" $b156Needles
     Add-BasTest "test_local_array_carrier_x86" "$Tests\test_local_array_carrier.bas" $b156Needles -Arch "x86"
     # 发码两面: 该销毁的三形各发一条 (1D 两形 + ND 那一形带兄弟出口与转型)，
@@ -7906,7 +7907,8 @@ if ($Category -in @("all", "run", "vbp")) {
         "$Tests\test_local_array_carrier.bas") @(
         'vb6_SafeArrayDestroy1D(a);  /* 账 #305 (甲) 腿⑤: 作用域出口销毁载体',
         'vb6_SafeArrayDestroy1D(u);  /* 账 #305 (甲) 腿⑤: 作用域出口销毁载体',
-        'vb6_SafeArrayDestroy1D(w);  /* 账 #305 (甲) 腿⑤: 作用域出口销毁载体')
+        'vb6_SafeArrayDestroy1D(w);  /* 账 #305 (甲) 腿⑤: 作用域出口销毁载体',
+        'vb6_SafeArrayDestroy1D(l);  /* 账 #305 (甲) 腿⑤: 作用域出口销毁载体')
     # 账 #305 §B188 ④ (第九十刀): 出厂那一腿的**尾巴**。`Class_Terminate` 抛错时, `_Destroy` 里体之后
     # 那三截(字段 BSTR / 数组字段 / vb6_Free(me))曾被 ComObj_Release 的帧一起 longjmp 跳掉 —— 实测每枚
     # 抛错的出厂漏一份实例资源: x64 每枚 35~37 字节、x86 每枚 17 字节, 多一枚 20 字符 String 字段就涨到
