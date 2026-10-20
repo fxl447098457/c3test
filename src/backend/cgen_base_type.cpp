@@ -259,6 +259,38 @@ bool CCodeGen::clsPtrIsViewSlot(const std::string& clsPtr) {
     return clsPtr.compare(0, 10, "vb6_ivref_") == 0;  // vb6_ivref_ = 10 个字符
 }
 
+// 账 #305 §B218 第一百四十刀: 「这枚目标表达式是不是一个**可寻址的数组元素槽**」—— 唯一出口。
+// VB6_SA_AT(<元素档>, <数组>, <下标>) 是 RTL 里唯一产出左值的函数式宏 (Fix 113f 定的口径,
+// ByRef 实参那一族早就按它取址)，所以「带括号 = 函数调用 = 非左值」那条老判据对它不成立。
+// 交回的是宏的第一个实参 (= 元素 C 档，类数组是 void*)，发码那一处靠它落地址临时量；
+// 认不出来一律交空串 = 维持今天那条裸拷贝。前缀知识同 `clsPtrIsViewSlot` 一样留在这份文件。
+std::string CCodeGen::classArraySlotElemType(const std::string& target) {
+    static const std::string pre = "VB6_SA_AT(";
+    if (target.compare(0, pre.size(), pre) != 0) return std::string();
+    const size_t comma = target.find(',');
+    if (comma == std::string::npos || comma < pre.size()) return std::string();
+    std::string ty = target.substr(pre.size(), comma - pre.size());
+    const size_t b = ty.find_first_not_of(" \t");
+    const size_t e = ty.find_last_not_of(" \t");
+    if (b == std::string::npos) return std::string();
+    ty = ty.substr(b, e - b + 1);
+    // 视图那一档的元素槽走的是接口主人 (emitIvrefQiSet)，不归本问句管。
+    if (clsPtrIsViewSlot(ty)) return std::string();
+    return ty;
+}
+
+// 账 #305 §B218 (甲) 腿⑤ 第一百四十刀: 「mapTypeRef 交回来的这一档是不是**本工程类的指针**」——
+// 出厂那一站的两档 (标量字段 / 数组元素) 共用这一问，别各抄一遍形状。答案要长成
+// `vb6_cls_<类>*` (单个 *、中间无空格)：`As Object` 是 void*、`As Variant` 是整枚槽、
+// 外部接口是 vb6_ComIface_* ⇒ 一律交空串 = 维持今天的"不动"。
+std::string CCodeGen::projectClsStructOfCType(const std::string& cType) {
+    static const std::string prefix = "vb6_cls_";
+    if (cType.size() <= prefix.size() + 1) return std::string();
+    if (cType.compare(0, prefix.size(), prefix) != 0) return std::string();
+    if (cType[cType.size() - 1] != '*' || cType.find(' ') != std::string::npos) return std::string();
+    return cType.substr(0, cType.size() - 1);
+}
+
 // <vbeclipse>: 这个名字是不是**本工程的一个类/窗体模块** —— 它的 prop_let_/prop_set_/
 // 成员函数真的会被发出来。判法 = 名字命中"本模块 ∪ 驱动下发的其它模块", 且
 // mapTypeRef 把它映射成 vb6_cls_* (与 cParamClassPtrType 同一口径)。

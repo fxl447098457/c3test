@@ -149,6 +149,11 @@ vb6_SafeArray1D* vb6_SafeArrayReDimPreserve1D_Udt(int32_t elemSize,
 
 // 销毁数组 (释放内存)
 void vb6_SafeArrayDestroy1D(vb6_SafeArray1D* arr);
+// 账 #305 §B218 (甲) 腿⑤ 数组档 (第一百四十刀): 元素是**工程类实例指针** (vb6_sa_ptr) 时,
+// 逐元素把引用交回给持有它的那位主人 —— 谁的 Release 只有调用方知道 (每类一对出口),
+// 所以这里收函数指针。elemType 不是 vb6_sa_ptr 或 release 为空 ⇒ 一个字都不做 (=旧行为)。
+// 必须在销毁载体**之前**调用: 载体一没, 元素地址就没了。
+void vb6_SA_ReleaseElements(void* arr, unsigned long (*release)(void*));
 // Fix <vbeclipse> 2026-10-06: Erase 语句的数组变量出口 (VB6 文档口径):
 // 动态数组 → 释放存储并置 NULL; 固定数组 → 保留存储, 元素重置
 // (数值/UDT 置零, BSTR 置零长串, Variant 置 Empty)。

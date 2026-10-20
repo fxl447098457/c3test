@@ -256,6 +256,18 @@ void CCodeGen::emitClassFactory(Module& module) {
             if (varType == Vb6Type::String) {
                 c_.emitLine("vb6_BSTR_Free(me->" + cIdent(var.name) + ");");
             } else if (var.isDynamicArray || !var.dimensions.empty()) {
+                // 账 #305 §B218 (甲) 腿⑤ 数组档 (第一百四十刀): 元素那一枚引用由**那一格元素**握,
+                // 而载体销毁那一发认不出工程类裸结构体 (`vb6_ReleaseObject` 的 Fix 191 判据) ⇒
+                // 每枚被数组字段持有的实例永不走 Class_Terminate (漏, 不是崩)。逐元素放手交回
+                // RTL 那一趟 (release 是函数指针: 谁的出口只有调用方知道), 且必须排在销毁载体之前。
+                // 元素档 = 与下面标量那一支同一个问句; 多维载体不是 vb6_SafeArray1D ⇒ 维持"不动"
+                // (真语料里工程类数组字段全是 1 维, 尺 .build/k1477_decl140.py)。
+                const std::string elemStruct = var.asType
+                    ? projectClsStructOfCType(mapTypeRef(var.asType.get())) : std::string();
+                if (!elemStruct.empty() && var.dimensions.size() <= 1) {
+                    c_.emitLine("vb6_SA_ReleaseElements(me->" + cIdent(var.name) + ", " + elemStruct +
+                                "_Release);  /* 账 #305 (甲) 腿⑤ 数组档: 元素出厂逐枚交回 */");
+                }
                 c_.emitLine("if (me->" + cIdent(var.name) + ") vb6_SA_Destroy(me->" + cIdent(var.name) + ");");
             } else if (var.asType) {
                 // 账 #305 §B218 (甲) 腿⑤: 字段那一枚引用**由字段自己握** —— 覆写(腿②)与置空(腿③)
@@ -264,13 +276,9 @@ void CCodeGen::emitClassFactory(Module& module) {
                 // 类名问 `mapTypeRef` = 发这枚字段那一行用的同一个答案, 不开第二问;
                 // 答出来不是 `vb6_cls_X*` 那一个形状 (As Object 是 void* / As Variant 是槽 /
                 // 外部接口是裸指针) 就维持今天的"不动"。
-                const std::string fieldCType = mapTypeRef(var.asType.get());
-                const std::string prefix = "vb6_cls_";
-                if (fieldCType.size() > prefix.size() + 1 &&
-                    fieldCType.compare(0, prefix.size(), prefix) == 0 &&
-                    fieldCType[fieldCType.size() - 1] == '*' &&
-                    fieldCType.find(' ') == std::string::npos) {
-                    const std::string fieldStruct = fieldCType.substr(0, fieldCType.size() - 1);
+                const std::string fieldStruct =
+                    projectClsStructOfCType(mapTypeRef(var.asType.get()));
+                if (!fieldStruct.empty()) {
                     c_.emitLine("if (me->" + cIdent(var.name) + ") " + fieldStruct +
                                 "_Release(me->" + cIdent(var.name) +
                                 ");  /* 账 #305 (甲) 腿⑤: 字段那一枚引用出厂放手 */");
@@ -342,7 +350,8 @@ void CCodeGen::emitClassFactory(Module& module) {
 // rhsTransferred = 右侧那枚引用**已经带着对价交给这一格了**: 两种成因 (`New <类>` 与工程内过程
 // 的调用, 见 rhsTransfersProjectRef) ⇒ 移交、不 claim。
 void CCodeGen::emitClassSlotRefSet(const std::string& target, const std::string& className,
-                                   const std::string& valueExpr, bool rhsTransferred, bool outSlot) {
+                                   const std::string& valueExpr, bool rhsTransferred, bool outSlot,
+                                   const std::string& slotElemType) {
     const std::string clsStruct = "vb6_cls_" + cIdent(className);
     if (outSlot) {
         // 腿②' = 写进一枚**活在本过程之外**的槽 (ByRef 出参那座桥的写回站)。这里的判断只有一条
@@ -360,6 +369,31 @@ void CCodeGen::emitClassSlotRefSet(const std::string& target, const std::string&
     }
     const std::string legTag = valueExpr.empty() ? "③" : "②";
     const std::string oldSlot = "__clsold" + std::to_string(ivrefSetSeq_++);
+    if (!slotElemType.empty()) {
+        // 第一百三十九刀量完的形状: 目标是一枚**数组元素** (类数组的元素档是 void*) ⇒ 先把
+        // 地址落一枚临时量，之后读、写、claim、退旧全部走这一枚 —— 「下标算术算几次」这一问
+        // 于是只有一个答案 (一次)。抄 target 三遍那一形 (下面那条直写臂) 用在这里就是把 1 次
+        // 悄悄改成 3 次：本机 VB-family 运行期对 `a(Bump())` 与 `a(Bump()+k-1)` 两形都答 1。
+        const std::string addrSlot = "__clsaddr" + std::to_string(ivrefSetSeq_++);
+        const std::string deref = "(*" + addrSlot + ")";
+        c_.emitLine("{  /* 账 #305 (甲) 腿" + legTag + ": Set 数组元素 " + target
+                    + " (地址落一次, 下标算术只算一次) */");
+        c_.indent();
+        c_.emitLine(slotElemType + "* " + addrSlot + " = &(" + target + ");");
+        c_.emitLine(slotElemType + " " + oldSlot + " = " + deref + ";");
+        if (!valueExpr.empty()) {
+            c_.emitLine(deref + " = " + valueExpr + ";");
+            if (!rhsTransferred) {
+                c_.emitLine("if (" + deref + ") " + clsStruct + "_AddRef(" + deref + ");");
+            }
+        } else {
+            c_.emitLine(deref + " = NULL;  /* Set Nothing (项目类实例) */");
+        }
+        c_.emitLine("if (" + oldSlot + ") " + clsStruct + "_Release(" + oldSlot + ");");
+        c_.dedent();
+        c_.emitLine("}");
+        return;
+    }
     c_.emitLine("{  /* 账 #305 (甲) 腿" + legTag + ": Set " + target + " */");
     c_.indent();
     c_.emitLine(clsStruct + "* " + oldSlot + " = " + target + ";");

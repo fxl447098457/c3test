@@ -348,9 +348,10 @@
         } else {
             // 账 #305 §B218 (甲) 腿②: 目标是一格 typed 工程类槽 ⇒ 走那位主人。
             // 类名两问按 #408 定的次序排: 先问 AST (作用域感知), 落空才问按名那张表。
-            // 拿不到类名、或槽是**下标/调用形态** (`VB6_SA_*(...)` / `dict(key)`) 时维持
-            // 今天那条裸拷贝: 那种形状里 target 出现三次 = 下标算术求值三次, 而「下标里的
-            // 副作用算不算一次」这一问本刀没有答案, 不猜 (已在册, 与腿⑤ 同批开格)。
+            // 拿不到类名时维持今天那条裸拷贝。**下标形态从第一百四十刀起也进主人** (走地址
+            // 那一臂, 见下面 elemTy140)，仍留在外面的只有**真调用形态** (`dict(key)`)：那种
+            // target 不是左值，取不了址，而「下标算术里的副作用算几次」已由第一百三十九刀
+            // 量成一句有答案的口径 (两栏都答一次) ⇒ 地址临时量那一臂就是它的答案。
             std::string clsOfSlot = node.target ? inferClassTypeOfExpr(*node.target)
                                                 : std::string();
             if (clsOfSlot.empty()) {
@@ -375,9 +376,14 @@
             if (!rhsTransferred && node.value) {
                 rhsTransferred = rhsTransfersProjectRef(*node.value, false);
             }
-            if (!clsOfSlot.empty() && target.find('(') == std::string::npos
-                && !procClassFormals_.count(targetLower)) {
-                emitClassSlotRefSet(target, clsOfSlot, value, rhsTransferred, false);
+            // 账 #305 §B218 第一百四十刀: 「带括号就不进主人」那条老闸对**数组元素**不成立 ——
+            // VB6_SA_AT(…) 是产出左值的函数式宏 (Fix 113f)，第一百三十九刀量到它今天裸写
+            // ⇒ 覆写不退旧值。改走主人的地址那一臂：元素档非空 = 这一形有可寻址的地址临时量，
+            // 下标算术仍只算一次；真调用形态 (`dict(key)`) 元素档为空串 ⇒ 维持裸拷贝。
+            const std::string elemTy140 = classArraySlotElemType(target);
+            if (!clsOfSlot.empty() && !procClassFormals_.count(targetLower)
+                && (target.find('(') == std::string::npos || !elemTy140.empty())) {
+                emitClassSlotRefSet(target, clsOfSlot, value, rhsTransferred, false, elemTy140);
             } else if (outSlotClaim) {
                 emitClassSlotRefSet(target, clsOfRhs, value, rhsTransferred, true);
             } else {

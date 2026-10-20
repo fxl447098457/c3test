@@ -287,6 +287,22 @@ void vb6_SafeArrayDestroy1D(vb6_SafeArray1D* arr) {
     free(arr);
 }
 
+// 账 #305 §B218 (甲) 腿⑤ 数组档 (第一百四十刀): 见 vb6rtl_array.h 的注释。
+// 逐元素放手时先把槽清空: 被放手那枚的 Class_Terminate 若回头写这一格
+// (`Set holder.mKids(i) = Nothing`), 清过的槽不会被退第二遍。
+void vb6_SA_ReleaseElements(void* arrV, unsigned long (*release)(void*)) {
+    vb6_SafeArray1D* arr = (vb6_SafeArray1D*)arrV;
+    if (!arr || !release || arr->elemType != vb6_sa_ptr || !arr->data) return;
+    for (int32_t i = 0; i < arr->count; i++) {
+        void** slot = (void**)((char*)arr->data + i * arr->elemSize);
+        if (*slot) {
+            void* elem = *slot;
+            *slot = NULL;
+            release(elem);
+        }
+    }
+}
+
 // Fix <vbeclipse> 2026-10-06: Erase 语句的数组变量出口 (VB6 文档口径):
 //   · 动态数组 → 释放存储, 变量置 NULL (须 ReDim 才能用);
 //   · 固定数组 → **保留存储**, 元素重置: 数值/UDT 置零, BSTR 逐个置零长串,

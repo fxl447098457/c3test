@@ -174,9 +174,12 @@
             // COM 类型化类 (SymbolKind::ComClass) 一律返回空串, 不误伤本应走
             // vb6_ComReleaseTyped / vb6_ReleaseObject 的目标.
             // 函数调用形态 (isCallTarget) 排除: 其求值非左值, 生成 "<call> = NULL"
-            // 会 C2106/C2440.
-            std::string targetCls101 = isCallTarget ? std::string()
-                                                    : inferClassTypeOfExpr(*node.target);
+            // 会 C2106/C2440.  ⚠ 但 **VB6_SA_AT(…) 那一形不是调用** —— 它是 RTL 里产出左值
+            // 的函数式宏 (Fix 113f 定的口径), 第一百四十刀起它归主人管 (见下面 elemTyP140)。
+            const std::string elemTyP140 = classArraySlotElemType(target);
+            std::string targetCls101 = (isCallTarget && elemTyP140.empty())
+                                        ? std::string()
+                                        : inferClassTypeOfExpr(*node.target);
             if (targetCls101.empty()) {
                 auto itCls101 = knownClassVars_.find(targetLower);
                 if (itCls101 != knownClassVars_.end()) targetCls101 = itCls101->second;
@@ -187,11 +190,16 @@
                 // 为什么不退回 vb6_ReleaseObject: 那会把纯 C 结构体首字段当 vtable
                 // Release → 0xC0000005 (Fix 101 当初正是为这条判死的); 也不许留裸清槽:
                 // 裸清槽每次覆写漏一枚 (ai/033 §1.1 行 203/204 的实物)。
-                // 拿不到类名 / 目标是调用形态 (`dict(key) = Nothing`) ⇒ 维持裸清槽。
-                if (!targetCls101.empty() && !isCallTarget
-                    && target.find('(') == std::string::npos
+                // 拿不到类名 / 目标是**真调用**形态 (`dict(key) = Nothing`) ⇒ 维持裸清槽。
+                // 数组元素 (`VB6_SA_AT(void*, arr, i) = Nothing`) 从第一百四十刀起进主人：
+                // 第一百三十九刀量到它今天发的是 `vb6_ReleaseObject((void**)(&(void*){…}))`，
+                // 而那枚 `&(void*){…}` 是复合字面量临时量、ReleaseObject 对裸结构体只清
+                // `*objPtr` ⇒ 数组元素既不放手也不清空 = 整条语句 no-op (两台实测 S3b-term=0)。
+                if (!targetCls101.empty()
+                    && (target.find('(') == std::string::npos || !elemTyP140.empty())
                     && !procClassFormals_.count(targetLower)) {
-                    emitClassSlotRefSet(target, targetCls101, std::string(), false, false);
+                    emitClassSlotRefSet(target, targetCls101, std::string(), false, false,
+                                        elemTyP140);
                 } else {
                     c_.emitLine(target + " = NULL;  /* Set Nothing (项目类实例) */");
                 }

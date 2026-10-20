@@ -311,8 +311,12 @@
     // 账 #305 §B218 (甲) 腿②③②': typed 工程类槽的「覆写 / 置空 / 写进出参槽」一位主人
     // (valueExpr 传空串 = 置空; 与上面那位接口主人同形, 几条腿共用一条顺序。
     //  outSlot = true: 目标在计数系统外 (ByRef 出参那一格) ⇒ 只补 claim, 不碰旧值)。
+    // 账 #305 §B218 第一百四十刀: slotElemType 非空 = 「目标是一枚**可寻址的数组元素**，
+    // 其元素档是这个 C 类型 (类数组 = void*)」⇒ 先把地址落一枚临时量，**下标算术只算一次**
+    // (第一百三十九刀两栏读数：今天算一次、本机 VB-family 运行期也答一次)；留空 = 今天那一直写形状。
     void emitClassSlotRefSet(const std::string& target, const std::string& className,
-                             const std::string& valueExpr, bool rhsTransferred, bool outSlot);
+                             const std::string& valueExpr, bool rhsTransferred, bool outSlot,
+                             const std::string& slotElemType = std::string());
     // 账 #305 §B218 (甲) 刀3: 「这一发右值是不是**已经带着一枚移交过来的引用**」—— 上面那位
     // 主人手上「不 claim」那条臂的全部成因共用这一条问句（**三形**：裸名调用 / 成员调用 /
     // 无括号的属性读；`New <类>` 那一发仍由调用点自己答）。问句只此一位，别在别处再答一遍。
@@ -752,6 +756,12 @@
     // 装的是**视图薄指针**还是工程类实例 —— 前缀名单只住在上面那位主人出生的那份文件里,
     // 站点与所有权主人都不许再抄一遍视图那一档的前缀 (check_iface_view_authority ③ 钉的就是这张名单)。
     bool clsPtrIsViewSlot(const std::string& clsPtr);
+    // 账 #305 §B218 第一百四十刀: 「这枚目标表达式是不是可寻址的数组元素槽」= VB6_SA_AT 那一形，
+    // 交回元素 C 档 (认不出 = 空串)。与上面那位前缀主人同住 cgen_base_type.cpp。
+    std::string classArraySlotElemType(const std::string& target);
+    // 账 #305 §B218 (甲) 腿⑤ 第一百四十刀: 「mapTypeRef 这一档是不是本工程类的指针」= 出厂那一站
+    // 两档 (标量字段 / 数组元素) 共用的那一问；交回 `vb6_cls_<类>` (认不出 = 空串)。
+    std::string projectClsStructOfCType(const std::string& cType);
 
     // <vbeclipse>: 该名字是否为本工程的某个类/窗体模块 (它的 prop_let_/成员函数真会被发出)。
     // 与 cParamClassPtrType 同一口径, 见 cgen_base_type.cpp 定义处注释。凡是要"按类实例
