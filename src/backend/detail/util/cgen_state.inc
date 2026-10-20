@@ -405,6 +405,25 @@
     // 一对已经合上的花括号里 (Debug.Print 那族 `{ ... }` 自带块), 那时宁可不收也不许发成
     // 引用越界的 C。
     std::vector<std::pair<std::string, int>> boxTempsToClear_;
+    // 账 #454 §B164 形①②③⑤ (第一百三十四刀): 语句级**带权**临时量名单 —— 与上面三条
+    // 同一条道 (编译器自己 mint、范围就是这条语句), 但这一份**带档**: 五形实测里
+    // ①②⑤ 交的是 BSTR (拼接/换算现造的串 ⇒ `vb6_BSTR_Free`), ③ 交的是 vb6_VARIANT
+    // 槽 (Collection 取回的带权副本 ⇒ `vb6_VariantClear`)。只发一种 free 就会在另一档上
+    // 漏 (或把 VARIANT 当 BSTR 解 ⇒ 读越界), 所以档跟着值走, 与 §B142/§B144 那条
+    // "所有权要跟值类型走" 是同一条纪律。
+    // 名单元素 = { 具名临时量, 声明时层号, 档(kOwnedTempBstr / kOwnedTempVariant) }。
+    struct OwnedTemp {
+        std::string name;
+        int level;
+        int kind;
+    };
+    // ⚠ 编号**从 1 起**: 0 = 「不是现造的带权值」, 与 VB6_ScaleMode 那颗雷同一味 ——
+    // 档号若也用 0, 「现造的 BSTR」与「不用管」就不可分辨 (本刀第一跑正是这么撞的:
+    // 拼接那一形档号 0 ⇒ 被当"不用管" ⇒ 一枚都没回收)。
+    static const int kOwnedTempBstr = 1;
+    static const int kOwnedTempVariant = 2;
+    std::vector<OwnedTemp> ownedTempsToFree_;
+    int ownedTempCounter_ = 0;
     int ansiCounter_ = 0;
     int vcmpCounter_ = 0;  // P25: Variant比较临时变量计数器
 

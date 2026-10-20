@@ -98,6 +98,23 @@
     // 上面那一问的第二形, 单独露出来是给哨兵与后来的站点(§B164 形⑥ 那一站)当口径用的。
     bool exprBorrowsBstrStorage(Expr* rhs, const std::string& rawC) const;
 
+    // 账 #454 §B164 形①②③⑤ (第一百三十四刀): 「这段发码文本是不是**这一句刚 mint 的带权值**,
+    // 是的话它是 BSTR 还是 vb6_VARIANT」—— 唯一答案只住在这里, 站点不许按文本各自猜。
+    // 返回 kOwnedTempBstr(1) / kOwnedTempVariant(2) / 0(不是现造的带权值 —— 借用、标量、
+    // 或已被别人接手)。
+    // **档由 declCType 定, 不由源表达式的 VB 档定**: `n = Len(v)` (v 是 Variant) 发码交的是
+    // `vb6_VariantToString(v)` = **BSTR**, 而源档是 Variant —— 照源档声明临时量就成了
+    // `vb6_VARIANT t = <BSTR>` ⇒ cl C2440。所以站点必须把它**要交给形参的那个 C 类型**说出来。
+    // 「现造还是借用」则分档问: VARIANT 档问 variantRhsOwnsValue (它连"右值本身是一枚活着的槽"
+    // 一起答 —— For Each 的 `e` 就是这一形, 误收会把循环槽里那只 BSTR 提前 Clear),
+    // BSTR 档问 exprBorrowsBstrStorage (串数组元素那一路是借来的存储)。
+    int exprOwnedTempKind(ASTNode* e, const std::string& rawC,
+                          const std::string& declCType) const;
+    // 上面那一问的落地: 命中就提一枚具名临时量、登记名单、返回变量名; 不命中原样返回。
+    // 站点不许自己拼这一对声明行 —— 与 emitVariantSlotStore 同一条纪律。
+    std::string hoistOwnedTemp(ASTNode* e, const std::string& rawC,
+                               const std::string& declCType);
+
     // Fix 198: 装箱点上的布尔口径修正. `As Boolean` 在 C 层就是 int16_t (与 Integer
     // 同型), 布尔字面量又是裸 (-1) (int) → 交给 _Generic vb6_VariantFromValue 会分别
     // 选到 short:/int: 分支, 装箱成 VT_I2 / VT_I4: 实测 VarType(b)=2、
