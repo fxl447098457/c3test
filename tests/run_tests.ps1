@@ -7830,11 +7830,13 @@ if ($Category -in @("all", "run", "vbp")) {
         'vb6_SA_ReleaseElements(mObjArr445',
         'vb6_SA_ReleaseElements(mLngArr445',
         'vb6_SA_ReleaseElements(mND445')   # ND 载体不许吃 1D 那一发 (步长错位) —— 多维那一档另有正面针
-    # 账 #305 §B218 (甲) 第一百五十刀 = 多维那一档补上之后的发码正面: ND 载体销毁前那一发走**兄弟出口**
-    #   vb6_SA_ReleaseElementsND((vb6_SafeArrayND*)<载体>, <类>_Release)。站点仍只调同一位主人，
-    #   由主人自己问「这枚载体几维」挑出口 (carrierIsMultidim) ⇒ 上面那条反面针与这条正面针两头钉住形状那一问。
+    # 账 #305 §B218 (甲) 第一百五十刀 = 多维那一档补上之后的发码正面: 站点仍只调同一位主人，由主人自己
+    #   问「这枚载体几维」挑出口 (carrierIsMultidim) ⇒ 两发各钉一条，谁被改成另一种答案当场红：
+    #   ① 多维 ReDim 之前那一发问的是**旧载体**那一档 (`Private mND445() As C445` = 一维 / 还没建 = 1D 那一支)，
+    #   ② `Erase` 之前那一发才吃兄弟出口 `vb6_SA_ReleaseElementsND` (界表按代码顺序已登记成 2 维)。
     Test-EmitcShape 'b445_nd_carrier_destroy_handback_shape' @(
         "$Tests\b445_refcount\B445.vbp") @(
+        'vb6_SA_ReleaseElements((vb6_SafeArrayND*)mND445, vb6_cls_C445_Release);',
         'vb6_SA_ReleaseElementsND((vb6_SafeArrayND*)mND445, vb6_cls_C445_Release);')
     # 账 #305 §B218 (甲) 第一百四十八刀 = Preserve 收缩丢尾那一格的发码两面:
     #   正 = 类数组的 Preserve 从此发那位**带回调的兄弟出口** (`...1D_Tr(vb6_sa_ptr, 载体, 下界, 上界,
