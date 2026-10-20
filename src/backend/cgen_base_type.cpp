@@ -291,6 +291,53 @@ std::string CCodeGen::projectClsStructOfCType(const std::string& cType) {
     return cType.substr(0, cType.size() - 1);
 }
 
+// 账 #305 §B218 (甲) 形A (第一百四十四刀): 被调方那一格发成 `(*<名>)` 时, **这一格是谁的**。
+// 名册 procClassFormals_ 只登记形参名, 而 ByRef 工程类形参在 C 侧是 `vb6_cls_X** 名`、
+// 站点拿到的 target 文本是 `(*名)` —— 按名查表那两问 (inferClassTypeOfExpr / knownClassVars_)
+// 都答不出这一格 ⇒ 出参槽的覆写与置空三形落到主人外面裸写 (第一百三十九刀量到的那一格)。
+// 这一问就是补那一个缺口: 命中的那一格**由调用方持有那一枚引用** (桥的另一头), 所以
+// 覆写要退旧、置空要退旧且清槽 —— 与第一百三十九刀⑤栏那句代理读数「落回调用者并当场退旧」同一条口径。
+std::string CCodeGen::classOfProjectRefOutSlot(const std::string& target) {
+    if (target.size() < 4) return std::string();
+    if (target.compare(0, 2, "(*") != 0 || target[target.size() - 1] != ')') return std::string();
+    const std::string inner = target.substr(2, target.size() - 3);
+    if (inner.empty() || inner.find(' ') != std::string::npos
+        || inner.find('(') != std::string::npos) {
+        return std::string();
+    }
+    const std::string lower = Symbol::toLower(inner);
+    if (!procClassFormals_.count(lower)) return std::string();
+    auto it = knownClassVars_.find(lower);
+    return it == knownClassVars_.end() ? std::string() : it->second;
+}
+
+// 账 #305 §B218 (甲) 形A (第一百四十四刀): 「这一枚实参**持有**它交出去的那一枚引用吗」——
+// 答真是「把它的地址直接交给被调方」的唯一前提：被调方那一发写回会**退掉这一格原来的那一枚**，
+// 所以这一格必须先握着它 (P1 口径: 谁写谁付、谁握谁退)。
+//   成立 = 本过程局部 / 模块级 / 类字段 —— 三档都由 腿②/腿③ 各持一枚 (第一百三十、一百四十刀定的账)；
+//   不成立 = **ByVal 工程类形参**：procClassFormals_ 的名册理由写死了「没人 claim 过它」
+//            (`cgen_state.inc` 那句注释)，退旧 = 拆调用方还在用的实例 = 过退 ⇒ 继续走临时量，
+//            写回丢掉是**有意的**，不是漏；
+//   不成立 = `me` 与默认实例类名 —— 都不是可以被被调方写回的变量 (VB6 里 `Foo Me` 那一形
+//            被调方 `Set p = …` 不落回调用者)；
+//   不成立 = 交付要被 deliverToClassSlot 改写的那两形 (Variant / 包装器槽) —— 站点另问，
+//            那一族的口径归 §B187 待拍，本刀不吃。
+bool CCodeGen::argHoldsProjectRefInOwnSlot(const std::string& ident, const std::string& clsPtr) {
+    if (ident.empty() || clsPtr.empty()) return false;
+    if (clsPtrIsViewSlot(clsPtr)) return false;
+    if (ident.find('(') != std::string::npos || ident.find(' ') != std::string::npos
+        || ident.find('.') != std::string::npos) {
+        return false;   // 只认**裸标识符**：带括号的那一形是调用 / 宏展开出来的地址，不是槽
+    }
+    const std::string lower = Symbol::toLower(ident);
+    if (lower == "me") return false;
+    if (procClassFormals_.count(lower)) return false;
+    if (!defaultInstanceClassName(ident).empty()) return false;
+    auto it = knownClassVars_.find(lower);
+    if (it == knownClassVars_.end()) return false;
+    return cTypeForDeclaredTypeName(it->second) == clsPtr;
+}
+
 // <vbeclipse>: 这个名字是不是**本工程的一个类/窗体模块** —— 它的 prop_let_/prop_set_/
 // 成员函数真的会被发出来。判法 = 名字命中"本模块 ∪ 驱动下发的其它模块", 且
 // mapTypeRef 把它映射成 vb6_cls_* (与 cParamClassPtrType 同一口径)。

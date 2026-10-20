@@ -369,6 +369,14 @@
                 clsOfRhs = node.value ? inferClassTypeOfExpr(*node.value) : std::string();
                 outSlotClaim = !clsOfRhs.empty();
             }
+            // 账 #305 §B218 (甲) 形A (第一百四十四刀): 出参槽那一格**由调用方持有**那一枚引用
+            // (调用侧现在是把持有者自己的地址交出来的)，所以覆写 = 取走新的 + **当场退旧**，
+            // 与第一百三十九刀⑤栏那句代理读数「落回调用者并当场退旧」同一条口径。
+            // 类名问**形参声明档** (classOfProjectRefOutSlot)，不再问右侧那枚文本的形状 ——
+            // 下面那条 outSlotClaim 是按「RHS 发码文本有没有括号」分臂的旧判据，同一条语句
+            // 换种写法就换一套答案 (New / Nothing / (*q) 三形落裸写、只有裸标识符落腿②′)，
+            // 它现在只剩 §B187 那一档 (出参槽是泛对象 / Variant) 还会走到，一字未动。
+            const std::string outCls144 = classOfProjectRefOutSlot(target);
             // 账 #305 §B218 (甲) 刀3: 「不 claim」那一臂有两个成因 —— `New <类>`, 以及
             // 工程内过程交回来的那一枚 (自带对价)。问句只有一处: rhsTransfersProjectRef。
             // 第一百三十四刀给它补了第二档 (forViewSlot): 本站的槽装实例 ⇒ 报 false。
@@ -384,6 +392,8 @@
             if (!clsOfSlot.empty() && !procClassFormals_.count(targetLower)
                 && (target.find('(') == std::string::npos || !elemTy140.empty())) {
                 emitClassSlotRefSet(target, clsOfSlot, value, rhsTransferred, false, elemTy140);
+            } else if (!outCls144.empty()) {
+                emitClassSlotRefSet(target, outCls144, value, rhsTransferred, false);
             } else if (outSlotClaim) {
                 emitClassSlotRefSet(target, clsOfRhs, value, rhsTransferred, true);
             } else {

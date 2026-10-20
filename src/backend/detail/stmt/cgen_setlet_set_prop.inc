@@ -184,7 +184,11 @@
                 auto itCls101 = knownClassVars_.find(targetLower);
                 if (itCls101 != knownClassVars_.end()) targetCls101 = itCls101->second;
             }
-            if (!targetCls101.empty() || knownClassVars_.count(targetLower)) {
+            // 账 #305 §B218 (甲) 形A (第一百四十四刀): 出参槽 `(*名)` 的置空 —— 那一格由调用方
+            // 持有，所以「置空」= 放手调用方那一枚 + 清槽 (与覆写同一位主人、同一个声明档类名)。
+            // 判据住在 classOfProjectRefOutSlot 一处，与覆写那一站同问。
+            const std::string outClsP144 = classOfProjectRefOutSlot(target);
+            if (!targetCls101.empty() || !outClsP144.empty() || knownClassVars_.count(targetLower)) {
                 // 账 #305 §B218 (甲) 腿③: 置空 = 放手那一枚 + 清槽, 与覆写同一位主人
                 // (接口那一族在上面 :141-142 早就是这个形状, 具体类只是今天才补上计数头)。
                 // 为什么不退回 vb6_ReleaseObject: 那会把纯 C 结构体首字段当 vtable
@@ -195,7 +199,9 @@
                 // 第一百三十九刀量到它今天发的是 `vb6_ReleaseObject((void**)(&(void*){…}))`，
                 // 而那枚 `&(void*){…}` 是复合字面量临时量、ReleaseObject 对裸结构体只清
                 // `*objPtr` ⇒ 数组元素既不放手也不清空 = 整条语句 no-op (两台实测 S3b-term=0)。
-                if (!targetCls101.empty()
+                if (!outClsP144.empty()) {
+                    emitClassSlotRefSet(target, outClsP144, std::string(), false, false);
+                } else if (!targetCls101.empty()
                     && (target.find('(') == std::string::npos || !elemTyP140.empty())
                     && !procClassFormals_.count(targetLower)) {
                     emitClassSlotRefSet(target, targetCls101, std::string(), false, false,

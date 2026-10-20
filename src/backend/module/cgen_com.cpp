@@ -520,6 +520,23 @@ void CCodeGen::registerClassArgRefHandback(const std::string& clsPtr, const std:
                    + ";  /* 账 #305 (甲) 腿⑤: 实参那一站交回 */");
 }
 
+// 账 #305 §B218 (甲) 形A (第一百四十四刀): 上面那条交回的另一半 —— **借来的实参先付钱**。
+// 出参槽那一格从本刀起按 腿② 的形状写 (claim 新 + **当场退旧**)，所以落进那枚临时量的初值
+// 必须是**这一格自己的**一枚引用；实参读来的那一枚 (ByVal 形参 / 泛对象槽 / 数组元素 / 属性读)
+// 是借的 ⇒ 在这里补一枚 AddRef, 被调方退的就是我们这一枚, 调用者那一格一个字节都不动。
+// 为什么还要问一句「槽里是不是包装器」(运行期 vb6_ComObject_IsBoxed, 与 §B187 第五腿那座桥同一把尺):
+// 泛对象槽里躺着的是 `vb6_ComObject` 包装器, 对它跑 `vb6_cls_X_AddRef` = 把包装器当实例拆 = 堆损坏
+// (实测 x64 停在 PassLate 之后)。剥回实例再 claim ⇒ 临时量握的是实例, 调用者槽里那枚包装器原样留着。
+// 视图那一档 (薄指针) 不吃这一形: 它的借/移交仍由第一百三十四刀那条问句一处答。
+void CCodeGen::registerClassArgRefCopyIn(const std::string& clsPtr, const std::string& tmp) {
+    if (clsPtrIsViewSlot(clsPtr) || clsPtr.empty()) return;
+    const size_t star = clsPtr.find('*');
+    const std::string base = (star != std::string::npos) ? clsPtr.substr(0, star) : clsPtr;
+    c_.addPending("{ void* __bx = (void*)" + tmp + "; if (__bx) { if (vb6_ComObject_IsBoxed(__bx))"
+        + " { void* __bi = vb6_ComObject_GetInstance(__bx); if (__bi) " + tmp + " = (" + clsPtr
+        + ")__bi; } " + base + "_AddRef(" + tmp + "); } }  /* 账 #305 (甲) 腿⑤: 借来的实参在这一格先落一枚自有引用 */");
+}
+
 // P6.4+: 类模块默认实例 (VB_PredeclaredId=True) 惰性单例访问器.
 // VB6 为 PredeclaredId 类生成隐藏的全局默认实例, frm 里裸类名成员访问经过
 // knownClassVars_ 解析, 对象表达式生成 vb6_cls_X_Default() 调用. 这里生成:

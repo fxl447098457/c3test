@@ -328,6 +328,9 @@
     // 发码只在这一位主人里登记交回, 站点不许自己补一行。
     bool argHandsOverProjectRef(const ASTNode& expr, const std::string& clsPtr);
     void registerClassArgRefHandback(const std::string& clsPtr, const std::string& tmp);
+    // 账 #305 §B218 (甲) 形A (第一百四十四刀): 交回的另一半 —— 实参读来的是**借的**时,
+    // 临时量先落一枚自有引用 (并按运行期问一句是不是包装器)，与上面那条交回配对使用。
+    void registerClassArgRefCopyIn(const std::string& clsPtr, const std::string& tmp);
     std::vector<const IfaceView*> ivImplementedIfaces(Module& module);
     Decl* ivFindImplMember(Module& module, const IfaceView& v, const IfaceSlotView& slot);
     // tB 委托式实现 (ai/022 B10): 本类把接口 v 整份转交给哪个持有字段 (无则 nullptr)
@@ -762,6 +765,11 @@
     // 账 #305 §B218 (甲) 腿⑤ 第一百四十刀: 「mapTypeRef 这一档是不是本工程类的指针」= 出厂那一站
     // 两档 (标量字段 / 数组元素) 共用的那一问；交回 `vb6_cls_<类>` (认不出 = 空串)。
     std::string projectClsStructOfCType(const std::string& cType);
+    // 账 #305 §B218 (甲) 形A (第一百四十四刀): 出参槽那一格的两问 —— 「`(*名)` 里的名是不是本过程
+    // 声明过的工程类形参 (交回类名)」与「这一枚实参**持有**它交出去的那一枚引用吗 (才许直传地址)」。
+    // 两位主人同住 cgen_base_type.cpp；两站 (覆写 / 置空) 与调用侧都只问这两句，不许各抄一遍。
+    std::string classOfProjectRefOutSlot(const std::string& target);
+    bool argHoldsProjectRefInOwnSlot(const std::string& ident, const std::string& clsPtr);
 
     // <vbeclipse>: 该名字是否为本工程的某个类/窗体模块 (它的 prop_let_/成员函数真会被发出)。
     // 与 cParamClassPtrType 同一口径, 见 cgen_base_type.cpp 定义处注释。凡是要"按类实例
