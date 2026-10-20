@@ -1,5 +1,5 @@
 ﻿# check_class_refcount_authority.ps1 - 账 #305 §B218 (甲)：工程类实例的引用计数只许有一位主人。
-# 二十一条钉（每条都能单独红，红了就说明同一问长出了第二位主人）：
+# 二十二条钉（每条都能单独红，红了就说明同一问长出了第二位主人）：
 #   ① 出入口那一对的 mint 各恰好 1 处，且住在 module/cgen_com.cpp（每条腿只许转调它）。
 #   ② 计数头 `int32_t __refcount;` 的 mint 恰好 1 处，且住在 cgen_iface_vtbl.cpp 的
 #      emitIfaceClassFields 里 —— 它必须紧跟 __comObj 那一句（ai/022 D19：偏移 0 恒是 __comObj）。
@@ -286,7 +286,7 @@ if ($argAsk -ne 4) {
 #      (再多一处 = 有站点绕过问句自己认 VB6_SA_AT)。
 #    · projectClsStructOfCType = 「这一档是不是本工程类的指针」: 声明 + 定义 + 出厂两档 = 4 处，两份站点必须在同一份 cgen_com.cpp。
 #    · 地址临时量 __clsaddr 的 mint 全仓恰好 1 处 (只有 emitClassSlotRefSet 铸它) ⇒「下标算术算几次」只有一个答案。
-#    · 元素出厂那一发 vb6_SA_ReleaseElements = RTL 声明 + 定义 + 后端一处发射 = 3 处；后端多一处 = 第二位主人。
+#    · 元素出厂那一发 vb6_SA_ReleaseElements = RTL 声明 + 定义 + 字段出厂那一站 = 3 处；数组那一支发的是 fn 变量挑出来的两档之一，所以它不再以 `...Elements(` 的形状出现在后端。
 $askElem = CountOf 'classArraySlotElemType('
 if ($askElem -ne 4) {
     $fail += ("index-slot question sites = " + $askElem + " (want exactly 4: declaration + definition + 2 legs)")
@@ -308,8 +308,8 @@ if ($addrMint -ne 1) {
     $fail += ("address-temp mint sites = " + $addrMint + " (want exactly 1, inside emitClassSlotRefSet)")
 }
 $elemOut = CountOf 'vb6_SA_ReleaseElements('
-if ($elemOut -ne 4) {
-    $fail += ("element-teardown export sites = " + $elemOut + " (want exactly 4: RTL declaration + definition + 2 emit stations, 都不许绕过主人自己拼)")
+if ($elemOut -ne 3) {
+    $fail += ("element-teardown export sites = " + $elemOut + " (want exactly 3: RTL declaration + definition + 字段出厂那一站 —— 数组那一支由主人用 fn 变量挑两档出口，自己拼那发释放的站点多一处就是第二位主人)")
 }
 $elemOutFiles = @(FilesOf 'vb6_SA_ReleaseElements')
 if (-not ($elemOutFiles -contains 'cgen_com.cpp')) {
@@ -355,9 +355,9 @@ if ($trExportFiles.Count -ne 4) {
     $fail += ("preserve-with-release export files = " + ($trExportFiles -join ', ') + " (want exactly 4 files: 名单那一格不许漏)")
 }
 # ⑳ 第一百四十六刀: 载体销毁那一族 (Erase / ReDim 不带 Preserve) 的两问只许一位主人。
-#    · classOfArrayCarrier = 「这枚数组变量握着的元素是不是工程类」: 声明 + 定义 + 发码主人里问一次 = 3 处 / 3 份文件
+#    · classOfArrayCarrier = 「这枚数组变量握着的元素是不是工程类」: 声明 + 定义 + 两位读者 (销毁主人 + Preserve 站) = 4 处 / 4 份文件
 #      (再多一处 = 某个站点绕过问句自己查 arrayClassElemTypes_ 那张表)。
-#    · emitClassArrayElemHandback = 销毁载体前那一发的唯一发码处: 声明 + 定义 + Erase站 + ReDim站 = 4 处 / 3 份文件,
+#    · emitClassArrayElemHandback = 销毁载体前那一发的唯一发码处: 声明 + 定义 + 五个站点 (1D Erase / 1D ReDim / ND ReDim 两支 / ND Erase) = 7 处 / 3 份文件，站点必须全住在 cgen_redim.cpp。
 #      两位站点必须全住在 cgen_redim.cpp。只要有站自己拼那发释放，“谁握元素那一枚”就又分家。
 $askCarrier = CountOf 'classOfArrayCarrier('
 if ($askCarrier -ne 4) {
@@ -368,17 +368,39 @@ if ($askCarrierFiles.Count -ne 4) {
     $fail += ("array-carrier question files = " + ($askCarrierFiles -join ', ') + " (want exactly 4 files)")
 }
 $carrierHelp = CountOf 'emitClassArrayElemHandback('
-if ($carrierHelp -ne 4) {
-    $fail += ("carrier-destroy hand-back sites = " + $carrierHelp + " (want exactly 4: declaration + definition + Erase station + ReDim station)")
+if ($carrierHelp -ne 7) {
+    $fail += ("carrier-destroy hand-back sites = " + $carrierHelp + " (want exactly 7: declaration + definition + 5 stations = 1D Erase + 1D ReDim + ND ReDim 两支 + ND Erase)")
 }
 $carrierHelpFiles = @(FilesOf 'emitClassArrayElemHandback(')
 if (-not ($carrierHelpFiles -contains 'cgen_redim.cpp')) {
     $fail += ("carrier-destroy stations missing from cgen_redim.cpp (files = " + ($carrierHelpFiles -join ', ') + ")")
 }
+# ㉒ 第一百五十刀: 多维载体那一档接进同一位主人之后, 这一问与这枚出口各只许有一位主人。
+#    · carrierIsMultidim = 「这枚载体是几维」: 声明 + 定义 + 主人内部那一问 = 3 处 / 3 份文件。
+#      站点若自己按 arrayDimCounts_ 判维度 = 同一问长出第二位主人, 1D 读法套 ND 载体就是步长错位。
+#    · vb6_SA_ReleaseElementsND = 多维那一发的出口: RTL 声明 + 定义 + 主人里那枚字符串 = 3 处 / 3 份文件。
+#      后端多一处 = 有站点绕过主人自己拼那发释放。
+$askDims = CountOf 'carrierIsMultidim('
+if ($askDims -ne 3) {
+    $fail += ("carrier-shape question sites = " + $askDims + " (want exactly 3: declaration + definition + 1 owner)")
+}
+$askDimsFiles = @(FilesOf 'carrierIsMultidim(')
+if ($askDimsFiles.Count -ne 3) {
+    $fail += ("carrier-shape question files = " + ($askDimsFiles -join ', ') + " (want exactly 3 files)")
+}
+$ndExport = CountOf 'vb6_SA_ReleaseElementsND'
+if ($ndExport -ne 3) {
+    $fail += ("multidim hand-back export sites = " + $ndExport + " (want exactly 3: RTL decl + definition + 主人里那枚字符串)")
+}
+$ndExportFiles = @(FilesOf 'vb6_SA_ReleaseElementsND')
+if ($ndExportFiles.Count -ne 3) {
+    $fail += ("multidim hand-back export files = " + ($ndExportFiles -join ', ') + " (want exactly 3 files)")
+}
+
 if ($fail.Count -gt 0) {
     Write-Host "CLASS-REFCOUNT-AUTHORITY FAIL"
     foreach ($f in $fail) { Write-Host ("  - " + $f) }
     exit 1
 }
-Write-Host "CLASS-REFCOUNT-AUTHORITY OK (1 pair mint / 1 header / 2 leg consumers / 3+9 formals / 10 roster files / 6 literal files / 0 stale / 5 registry files + 2 registrants / 1+1 out-slot / 1+1 foreign-write drop / 1 field-teardown shape + file / 6 field-type questions (标量 + 数组两档) / 6 transfer-question sites in 2 files / 1 view-leg hand-back + 2 QiSet calls / 1+2+1 transfer-arm questions / 3 static-gate sites in 1 file + 1 ivref registration / 1 arg-station hand-back + 4+4 helper sites in 4 files / 4+4 index-slot + project-class questions / 1 address-temp mint / 4 element-teardown sites + 4+4 carrier-destroy questions + 4 preserve-with-release sites in 4 files / 4+4 形A questions (out-slot class + owner pass) + 5 copy-in claim sites in 4 files / 3+4 carrier-destroy sites in 3 files)"
+Write-Host "CLASS-REFCOUNT-AUTHORITY OK (1 pair mint / 1 header / 2 leg consumers / 3+9 formals / 10 roster files / 6 literal files / 0 stale / 5 registry files + 2 registrants / 1+1 out-slot / 1+1 foreign-write drop / 1 field-teardown shape + file / 6 field-type questions (标量 + 数组两档) / 6 transfer-question sites in 2 files / 1 view-leg hand-back + 2 QiSet calls / 1+2+1 transfer-arm questions / 3 static-gate sites in 1 file + 1 ivref registration / 1 arg-station hand-back + 4+4 helper sites in 4 files / 4+4 index-slot + project-class questions / 1 address-temp mint / 3 element-teardown sites + 4+4 carrier-destroy questions + 4 preserve-with-release sites in 4 files / 4+4 形A questions (out-slot class + owner pass) + 5 copy-in claim sites in 4 files / 3+4 carrier-destroy sites in 3 files / 7 hand-back stations in cgen_redim.cpp + 3 shape questions + 3 multidim export sites)"
 exit 0

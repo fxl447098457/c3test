@@ -443,8 +443,8 @@ Sub W35PreserveShrink()
     Set mDyn445(1) = Nothing
 End Sub
 
-' W34 = ND 载体那一档本刀刻意不吃 (没有 vb6_SA_ReleaseElementsND，硬塞 cast = 拆错布局)：
-'   两枚照常漏 ⇒ 同样钉成证词。ND 那一枚兄弟出口出来时要把它翻成正面针。
+' W34 = 多维载体那一档 (第一百四十九刀量、第一百五十刀补): 销毁 ND 载体之前，两格元素各交回一枚 ⇒ 2。
+'   发码走的是 vb6_SA_ReleaseElementsND 那枚兄弟出口，形状那一问由主人自己问 (站点不判维度)。
 Sub W34NdCarrierUntouched()
     Dim t0 As Long
     t0 = Terms

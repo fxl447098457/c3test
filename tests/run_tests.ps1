@@ -7718,9 +7718,9 @@ if ($Category -in @("all", "run", "vbp")) {
                     #   W32 = 反面证人 Preserve 那一支: 元素是被搬走的 ⇒ 一格都不许多退, 且搬完还能用。
                     "W29-terms=2 cleared=True", "W30-terms=2", "W31-terms=2",
                     "W32-terms=0 kept=True",
-                    #   W33/W34 = 两枚**反面证人**: 元素不是工程类 (泛对象包装器 / 裸值) 与多维载体,
-                    #   本刀刻意不碰 ⇒ 一枚不退 (在册)。钉成证词, 那一档补上时这两条要一起翻。
-                    "W33-terms=0", "W34-terms=0",
+                    #   W33 = 反面证人 (元素不是工程类: 泛对象包装器 / 裸值) ⇒ 一枚不退, 在册; W34 = 多维载体那一档, 第一百四十九刀量完、第一百五十刀补上 ⇒ 从反面证人翻成本体。
+                    #   运行时读数: W34 修前 0 枚, 修后 2 枚 (2x2 载体里两格各握着 New 出来的一枚引用)。
+                    "W33-terms=0", "W34-terms=2",
                     # 第一百四十八刀 (Preserve 收缩丢尾): W35 = 3 缩到 1 ⇒ 尾两枚当场出厂 (修前 = 0 枚),
                     #   保留那一枚照常可用; W32 (同尺寸 Preserve) 必须继续 = 0 = 搬走的不许多退。
                     "W35-terms=2 kept=True",
@@ -7819,17 +7819,23 @@ if ($Category -in @("all", "run", "vbp")) {
     #   正 = 销毁载体那一发**之前**逐枚交回同一位主人 (固定数组走 vb6_EraseArrayVar 的 memset 支路、
     #     动态走 vb6_SafeArrayDestroy1D；两条都是裸销毁 ⇒ 元素那一枚引用没人放手)。
     #   反 = 三道闸拦下的那三档，从此一发都不许出现: `As Object` (槽里是包装器, 按实例拆 = 堆损坏)、
-    #     `As Long` (裸值不是指针)、多维载体 (不是 vb6_SafeArray1D, RTL 还没有 ND 版出口)。
+    #   反 = 两道闸拦下的那两档，从此一发都不许出现: `As Object` (槽里是包装器, 按实例拆 = 堆损坏)、`As Long` (裸值不是指针)。
     #     Preserve 那一支不吃 (元素被搬走不是被丢)，判据收在上面那条 W32-terms=0 的运行时证词里。
     Test-EmitcShape 'b445_carrier_destroy_handback_shapes' @(
         "$Tests\b445_refcount\B445.vbp") @(
         'vb6_SA_ReleaseElements(mArr445, vb6_cls_C445_Release);  /* 账 #305 (甲) 腿⑤ 数组档: 载体销毁前逐枚交回 */',
         'vb6_SA_ReleaseElements(mDyn445, vb6_cls_C445_Release);')
-    Test-EmitcAbsent 'b445_carrier_destroy_skips_nonclass_and_nd' @(
+    Test-EmitcAbsent 'b445_carrier_destroy_skips_nonclass_carriers' @(
         "$Tests\b445_refcount\B445.vbp") @(
         'vb6_SA_ReleaseElements(mObjArr445',
         'vb6_SA_ReleaseElements(mLngArr445',
-        'vb6_SA_ReleaseElements(mND445')
+        'vb6_SA_ReleaseElements(mND445')   # ND 载体不许吃 1D 那一发 (步长错位) —— 多维那一档另有正面针
+    # 账 #305 §B218 (甲) 第一百五十刀 = 多维那一档补上之后的发码正面: ND 载体销毁前那一发走**兄弟出口**
+    #   vb6_SA_ReleaseElementsND((vb6_SafeArrayND*)<载体>, <类>_Release)。站点仍只调同一位主人，
+    #   由主人自己问「这枚载体几维」挑出口 (carrierIsMultidim) ⇒ 上面那条反面针与这条正面针两头钉住形状那一问。
+    Test-EmitcShape 'b445_nd_carrier_destroy_handback_shape' @(
+        "$Tests\b445_refcount\B445.vbp") @(
+        'vb6_SA_ReleaseElementsND((vb6_SafeArrayND*)mND445, vb6_cls_C445_Release);')
     # 账 #305 §B218 (甲) 第一百四十八刀 = Preserve 收缩丢尾那一格的发码两面:
     #   正 = 类数组的 Preserve 从此发那位**带回调的兄弟出口** (`...1D_Tr(vb6_sa_ptr, 载体, 下界, 上界,
     #     vb6_cls_X_Release)`) —— 界只算一次 (同一对文本进一发调用)，出厂在 RTL，搬移本身转调 _T；
@@ -7842,8 +7848,7 @@ if ($Category -in @("all", "run", "vbp")) {
     Test-EmitcAbsent 'b445_preserve_nonclass_carrier_keeps_the_plain_export' @(
         "$Tests\b445_refcount\B445.vbp") @(
         'vb6_SafeArrayReDimPreserve1D_Tr(vb6_sa_long',
-        'vb6_SafeArrayReDimPreserve1D_Tr(vb6_sa_variant',
-        'ReleaseElementsND')
+        'vb6_SafeArrayReDimPreserve1D_Tr(vb6_sa_variant')
     # 账 #305 §B188 ④ (第九十刀): 出厂那一腿的**尾巴**。`Class_Terminate` 抛错时, `_Destroy` 里体之后
     # 那三截(字段 BSTR / 数组字段 / vb6_Free(me))曾被 ComObj_Release 的帧一起 longjmp 跳掉 —— 实测每枚
     # 抛错的出厂漏一份实例资源: x64 每枚 35~37 字节、x86 每枚 17 字节, 多一枚 20 字符 String 字段就涨到
