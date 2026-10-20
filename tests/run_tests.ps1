@@ -1451,6 +1451,22 @@ function Test-VariantSlotStore {
     }
 }
 
+function Test-OwnedTempReclaim {
+    # 账 #454 §B164 形①②③⑤ (第一百三十四刀): 「一条语句里现造的带权临时量」只许住
+    # 一枚权威 / 一份带档名单 / 一处回收。八条规则见那道哨兵的文件头。
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] owned_temp_reclaim ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\check_owned_temp_reclaim.ps1" 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        $out | Select-Object -First 6 | ForEach-Object { Write-Host "  $_" }
+    }
+}
+
 function Test-ImplicitCstrStation {
     # 账 #305 §B174 (第六十五刀): 「数值实参交进 VB 的字符串形参 ⇒ 隐式 CStr」这条规则的
     # 站点/位号/档位/形状四问各只许有一位主人 (站点=arg_emit 的 Fix 175)。
@@ -8392,6 +8408,7 @@ if ($Category -in @("all", "compile")) {
     Test-RunBudget
     Test-VariantI8Coverage
     Test-VariantSlotStore
+    Test-OwnedTempReclaim
     Test-ImplicitCstrStation
     Test-ParamArrayReclaim
     Test-BstrBorrowSlot
