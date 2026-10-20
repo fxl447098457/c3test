@@ -1,5 +1,5 @@
 ﻿# check_class_refcount_authority.ps1 - 账 #305 §B218 (甲)：工程类实例的引用计数只许有一位主人。
-# 十四条钉（每条都能单独红，红了就说明同一问长出了第二位主人）：
+# 十六条钉（每条都能单独红，红了就说明同一问长出了第二位主人）：
 #   ① 出入口那一对的 mint 各恰好 1 处，且住在 module/cgen_com.cpp（每条腿只许转调它）。
 #   ② 计数头 `int32_t __refcount;` 的 mint 恰好 1 处，且住在 cgen_iface_vtbl.cpp 的
 #      emitIfaceClassFields 里 —— 它必须紧跟 __comObj 那一句（ai/022 D19：偏移 0 恒是 __comObj）。
@@ -24,6 +24,7 @@
 #      恰好 1 处、 基名那一问  恰好 2 处 (含本刀那一臂,
 #      另一处是 myBaseClassOf)、接口视图那道排除  恰好 1 处。
 #   ⑮ Static 那道闸 `!var.isStatic && !inStaticProc_` 全仓恰好 3 处、且全住在一份文件 (cgen_localdecl.cpp)：登记「出口放手」的三条腿 (两条工程类 + 一条接口视图) 共用同一道闸 —— 第一百三十三刀补的就是视图那条腿缺的那半。视图注册口 `trackIvrefLocalForRelease(cIdent(var.name));` 恰好 1 处。
+#   ⑯ 第一百三十四刀: 视图腿② 的「交回接管来的那一枚」只许住在 emitIvrefQiSet 里 (全仓 1 处、文件 = cgen_iface_vtbl.cpp)，而它两位调用点都住在 cgen_setlet_set_prop.inc —— 移交那一问 (⑬/⑭) 现在是两站三处：工程类站 1 处 (forViewSlot=false) + 视图站 2 处 (true)；再冒出一处自己补 Release 的站点就是第二套判据。
 # 退出码：0 = 十五条都过；1 = 任一条红；2 = 找不到 src/backend。
 param(
     [string]$Root = ""
@@ -188,12 +189,16 @@ if ($fieldQ -ne 5) {
 #    `rhsTransfersProjectRef(`)，而且调用点必须住在 Set 的 RHS 那一档 (cgen_setlet_set_rhs.inc)。为什么钉: 这一问与
 #    `New` 共用同一条「不 claim」的臂 —— 谁在别的站点再问一遍，「实参 / 返回值 / 字段」这三条边的口径就分家了。
 $xferQ = CountOf 'rhsTransfersProjectRef('
-if ($xferQ -ne 3) {
-    $fail += ("transfer-question sites = " + $xferQ + " (want exactly 3: decl + def + 1 call)")
+if ($xferQ -ne 5) {
+    $fail += ("transfer-question sites = " + $xferQ + " (want exactly 5: decl + def + 3 call sites)")
 }
-$xferFiles = @(FilesOf 'rhsTransfersProjectRef(*node.value)')
-if ($xferFiles.Count -ne 1 -or $xferFiles[0] -ne 'cgen_setlet_set_rhs.inc') {
-    $fail += ("transfer-question call file = " + ($xferFiles -join ', ') + " (want exactly cgen_setlet_set_rhs.inc)")
+$xferFiles = @(FilesOf 'rhsTransfersProjectRef(*node.value')
+if ($xferFiles.Count -ne 2 -or -not ($xferFiles -contains 'cgen_setlet_set_rhs.inc') -or -not ($xferFiles -contains 'cgen_setlet_set_prop.inc')) {
+    $fail += ("transfer-question call files = " + ($xferFiles -join ', ') + " (want exactly cgen_setlet_set_rhs.inc + cgen_setlet_set_prop.inc)")
+}
+$xferAsk = CountOf 'rhsTransfersProjectRef(*node.value'
+if ($xferAsk -ne 3) {
+    $fail += ("transfer-question call sites = " + $xferAsk + " (want exactly 3: 工程类站 1 + 视图站 2)")
 }
 
 # ⑭ 移交值那一问的**三形**只许住在这一个函数里 (第一百三十二刀 = (甲) 刀4 加了两形: callee 是成员访问
@@ -233,10 +238,29 @@ $ivrefReg = CountOf 'trackIvrefLocalForRelease(cIdent(var.name));'
 if ($ivrefReg -ne 1) {
     $fail += ("interface-view release-registration sites = " + $ivrefReg + " (want exactly 1)")
 }
+
+# ⑯ 第一百三十四刀: 视图腿② QI 完把接管来的那一枚交回 —— 这一发只许住在 emitIvrefQiSet 里
+#    (与 ⑬/⑭ 那条问句同一条契约: 工程类那一站「不 claim」、视图这一站「当场交回」, 两处都问同一位主人)。
+$handN = CountOf '腿②: 交回接管来的那一枚'
+if ($handN -ne 1) {
+    $fail += ("view-leg hand-back emit sites = " + $handN + " (want exactly 1, inside emitIvrefQiSet)")
+}
+$handFiles = @(FilesOf '腿②: 交回接管来的那一枚')
+if ($handFiles.Count -ne 1 -or $handFiles[0] -ne 'cgen_iface_vtbl.cpp') {
+    $fail += ("view-leg hand-back files = " + ($handFiles -join ', ') + " (want exactly cgen_iface_vtbl.cpp)")
+}
+$qiCalls = CountOf 'emitIvrefQiSet(target, v->name, value'
+if ($qiCalls -ne 2) {
+    $fail += ("view-leg QiSet call sites = " + $qiCalls + " (want exactly 2: 借用那一档 + 形① 那一档)")
+}
+$qiFiles = @(FilesOf 'emitIvrefQiSet(target, v->name, value')
+if ($qiFiles.Count -ne 1 -or $qiFiles[0] -ne 'cgen_setlet_set_prop.inc') {
+    $fail += ("view-leg QiSet call files = " + ($qiFiles -join ', ') + " (want exactly cgen_setlet_set_prop.inc)")
+}
 if ($fail.Count -gt 0) {
     Write-Host "CLASS-REFCOUNT-AUTHORITY FAIL"
     foreach ($f in $fail) { Write-Host ("  - " + $f) }
     exit 1
 }
-Write-Host "CLASS-REFCOUNT-AUTHORITY OK (1 pair mint / 1 header / 2 leg consumers / 3+9 formals / 7 roster / 6 literal files / 0 stale / 5 registry files + 2 registrants / 1+1 out-slot / 1+1 foreign-write drop / 1 field-teardown shape + file / 5 field-type questions / 3 transfer-question sites / 1+2+1 transfer-arm questions / 3 static-gate sites in 1 file + 1 ivref registration)"
+Write-Host "CLASS-REFCOUNT-AUTHORITY OK (1 pair mint / 1 header / 2 leg consumers / 3+9 formals / 7 roster / 6 literal files / 0 stale / 5 registry files + 2 registrants / 1+1 out-slot / 1+1 foreign-write drop / 1 field-teardown shape + file / 5 field-type questions / 5 transfer-question sites in 2 files / 1 view-leg hand-back + 2 QiSet calls / 1+2+1 transfer-arm questions / 3 static-gate sites in 1 file + 1 ivref registration)"
 exit 0

@@ -34,6 +34,27 @@ Sub W20StaticView()
     Debug.Print "W20 twice=" & sv20.Twice(2) & " hits=" & (gHits48 - gMark48) & " term=" & gTerm48
 End Sub
 
+' 账 #305 §B218 第一百三十四刀: 视图腿② (`Set <工程接口槽> = <返回该接口的工程内过程>`) 那一站
+' 铸的临时量 __ivrhsN 自带被调方移交来的那一枚引用 (它的返回槽在 腿④ 不退), 而本站 QI 完只退旧槽值、
+' 从不交回它 ⇒ 每调用净 +1。W21 = 一枚普通 Dim 视图槽被同一枚工厂喂 5 次: 每次覆写退掉槽里那一枚,
+' 修前那枚接管值留下 ⇒ 五枚实例一枚都不销毁; 修后当场交回 ⇒ 五枚都销毁。
+' W22 = 借来的那一档 (`Set dst = src`, 右值是裸视图变量): 不许交回 —— 交回就是多退一枚。
+Sub W21ViewLeak()
+    Dim v21 As IB448
+    Dim k21 As Long
+    For k21 = 1 To 5
+        Set v21 = MakeNew()
+    Next
+End Sub
+
+Sub W22ViewBorrow()
+    Dim src22 As IB448
+    Dim dst22 As IB448
+    Set src22 = MakeNew()
+    Set dst22 = src22
+    Debug.Print "W22 twice=" & dst22.Twice(7) & " src=" & src22.Twice(1)
+End Sub
+
 Sub Main()
     Dim s As IB448
     Set s = MakeNew()
@@ -51,5 +72,10 @@ Sub Main()
     W20StaticView
     W20StaticView
     Debug.Print "W20-end term=" & gTerm48
+    gTerm48 = 0
+    W21ViewLeak
+    Debug.Print "W21-end term=" & gTerm48
+    W22ViewBorrow
+    Debug.Print "W22-end term=" & gTerm48
     Debug.Print "B448-DONE"
 End Sub

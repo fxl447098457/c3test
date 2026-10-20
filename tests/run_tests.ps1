@@ -7599,10 +7599,15 @@ if ($Category -in @("all", "run", "vbp")) {
     #   缺了工程类那两腿都有的 `!var.isStatic && !inStaticProc_`, 槽跨调用还活着而出口照退:
     #   改前两台都在第三行就读到 term=1 (第二次的出口把还有人握着的实例退到 0), 第四调 0xC0000374;
     #   改后三行全 term=0、hits 连着涨 = 同一枚活实例一直服务。gMark48 只算这一格的命中 (P1..P5 也吃 Twice)。
+    # 账 #305 §B218 第一百三十四刀 (W21 / W22): 视图腿② 交回接管来的那一枚 —— `Set <接口槽> = <返回该接口的
+    #   工程内过程调用>` 那一站铸的 __ivrhsN 自带被调方移交的对价, QI 完不退 = 每调用净 +1 (W21 五枚全不销毁);
+    #   退掉之后 W21 五枚当场销毁 (term=5), W22 = 借来的那一档 (`Set dst22 = src22`) 一字未动 (twice/src 两台同值),
+    #   而 W22 那枚实例随两条腿各退一次后出厂 ⇒ W22-end 6 = 5 + 1。两台 (x64 / x86) 读数一字相同。
     $b448Needles = @("P1-setslot twice=43", "P2-inline twice=43", "P3-arg twice=61",
                     "P4-plain twice=11", "P5-hits=1", "B448-DONE",
                     "W20 twice=5 hits=0 term=0", "W20 twice=5 hits=1 term=0",
-                    "W20 twice=5 hits=2 term=0", "W20-end term=0")
+                    "W20 twice=5 hits=2 term=0", "W20-end term=0",
+                    "W21-end term=5", "W22 twice=15 src=3", "W22-end term=6")
     Test-Vbp 'b448_iface_view_not_instance' "$Tests\b448_iface_ret\B448.vbp" $b448Needles
     Test-Vbp 'b448_iface_view_not_instance_x86' "$Tests\b448_iface_ret\B448.vbp" $b448Needles -Arch "x86"
     # 发码针: 视图值的三个消费形状各钉一条 —— 视图进槽走 QueryInterface、成员调用走 vtable、
@@ -7621,6 +7626,16 @@ if ($Category -in @("all", "run", "vbp")) {
     Test-EmitcAbsent 'b448_static_view_keeps_no_exit_release' @(
         "$Tests\b448_iface_ret\B448.vbp") @(
         'if (sv20) sv20->vt->Release(sv20);')
+    # 第一百三十四刀两面: 正面 = 视图腿② 那一格 QI 完必须交回接管来的临时量 (钉两处站点: W20 的
+    #   __ivrhs3 与 Sub Main 的 __ivrhs8); 反面 = 借来的那一档 (`Set dst22 = src22`) 不许交回 ——
+    #   交回就是多退一枚, 现场会把还有人握着的实例拆掉。
+    Test-EmitcShape 'b448_view_leg_returns_taken_ref' @("$Tests\b448_iface_ret\B448.vbp") @(
+        'if (__ivrhs3) __ivrhs3->vt->Release(__ivrhs3);  /* 账 #305 (甲) 腿②: 交回接管来的那一枚 */',
+        'if (__ivrhs8) __ivrhs8->vt->Release(__ivrhs8);  /* 账 #305 (甲) 腿②: 交回接管来的那一枚 */')
+    Test-EmitcAbsent 'b448_view_leg_never_gives_back_a_borrowed_view' @(
+        "$Tests\b448_iface_ret\B448.vbp") @(
+        'if (src22) src22->vt->Release(src22);  /* 账 #305 (甲) 腿②',
+        'if (dst22) dst22->vt->Release(dst22);  /* 账 #305 (甲) 腿②')
 
     # 账 #305 §B218 (甲) 第一百二十七刀 = 刀1-a/b/c: 工程类实例的引用计数头扩到每一枚工程类,
     #   覆写 (腿②) / 置空 (腿③) / 过程出口 (腿④) 三条腿接到同一位主人 emitClassSlotRefSet。
