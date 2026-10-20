@@ -440,6 +440,7 @@ function Classify-Return([string]$name, [System.Collections.Generic.HashSet[stri
 }
 
 $ownOwned = @(); $ownAlias = @(); $ownUnknown = @(); $ownClass = @{}
+$ownVariant = @()
 foreach ($n in ($retKind.Keys | Sort-Object)) {
     if ($retKind[$n] -ne 'BSTR' -and $retKind[$n] -ne 'VARIANT') { continue }
     $seen = [System.Collections.Generic.HashSet[string]]::new()
@@ -447,6 +448,17 @@ foreach ($n in ($retKind.Keys | Sort-Object)) {
     $ownClass[$n] = $cls[0]
     if ($cls[0] -eq 'owned') { $ownOwned += $n } elseif ($cls[0] -eq 'alias') { $ownAlias += $n } else { $ownUnknown += $n }
 }
+$ownVariant = @($ownOwned | Where-Object { $retKind[$_] -eq 'VARIANT' })
+$aliasExits = $ownAlias
+$closedExits = @('vb6_SaveSetting', 'vb6_GetSetting', 'vb6_DeleteSetting', 'vb6_GetAllSettings')
+$ownedTempExceptions = @(
+    foreach ($k in ($rows.Keys | Sort-Object)) {
+        if ($rows[$k][0] -ne '0') {
+            $ps = $k -split '\|'
+            [pscustomobject]@{ name = $ps[0]; slot = [int]$ps[1]; keeps = $rows[$k][0] }
+        }
+    }
+)
 Write-Host ("返回侧所有权: owned " + $ownOwned.Count + " / alias " + $ownAlias.Count + " / U " + $ownUnknown.Count)
 
 # ---------------------------------------------------------------- 返回侧的两个锚（K14）
@@ -811,6 +823,60 @@ if (-not (Test-Path -LiteralPath $hdrFile)) {
         if ($tail2 -notmatch 'nullptr' -and $tail2 -notmatch '^\s*0\s*,') {
             $bad += ("K13b " + $arr.name + " 末尾没有空哨兵（遍历会走出数组 ⇒ 0xC0000374 那一族）")
         }
+    }
+}
+
+# K17 **下一刀的预测站点集合**（账 #458 §B228 交付的第二件事）：把「哪些形状会被提名」
+#     列成一张表，逐条**问那位主人**（头里的 ownedTempNominationVerdict），再证明
+#     **预测集合与所有 gate=closed 行交集为空** —— 这一条是机械的，不是断言。
+#     形状表里的三行是**陷阱**（借来的 / 别名 / closed 消费者），必须**不被提名**；
+#     另有一行是「顶层不是调用」（裸字面量）⇒ 连 mint 都不是。
+$shapes = @(
+    @{ id = 'concat-arg';   consumer = 'vb6_Len';        slot = 0; mint = 'vb6_BSTR_Concat';    want = 'B'; why = '拼接结果进 Len：现造的 BSTR + Len 不留指针' },
+    @{ id = 'concat-arg2';  consumer = 'vb6_Len';        slot = 0; mint = 'vb6_BSTR_Concat';    want = 'B'; why = '同上（数组元素那一形）' },
+    @{ id = 'varianttoStr'; consumer = 'vb6_Len';        slot = 0; mint = 'vb6_VariantToString'; want = 'B'; why = 'Len(v)：交出去的是 BSTR 档（名字带 Variant 不算数）' },
+    @{ id = 'variant-arg';  consumer = 'vb6_VarType';     slot = 0; mint = 'vb6_VariantFromValue'; want = '0'; why = '那一枚是 _Generic 宏（不在权威出口面上）⇒ 答不出 ⇒ 不提名' },
+    @{ id = 'variant-arg2'; consumer = 'vb6_VarAddV';     slot = 0; mint = 'vb6_CDec';             want = 'V'; why = 'VARIANT 档的 mint（vb6_CDec）进 VARIANT 形参' },
+    @{ id = 'TRAP-borrowed'; consumer = 'vb6_Len';       slot = 0; mint = 'vb6_ErrDescription'; want = '0'; why = '借来的那一枚（全局 vb6_err 的指针）⇒ 不许放' },
+    @{ id = 'TRAP-alias';   consumer = 'vb6_Len';        slot = 0; mint = 'vb6_VariantArrayGetND'; want = '0'; why = '数组元素读交出去的是别名 ⇒ 不许放' },
+    @{ id = 'TRAP-closed'; consumer = 'vb6_SaveSetting'; slot = 0; mint = 'vb6_BSTR_FromStr'; want = '0'; why = 'closed 那一族（未归因 ⇒ 不许提名）' },
+    @{ id = 'TRAP-comfour'; consumer = 'vb6_Len';        slot = 0; mint = 'vb6_ComCall';       want = '0'; why = 'COM 四兄弟交的是 void*，不是带权值' },
+    @{ id = 'TRAP-notmint'; consumer = 'vb6_Len';        slot = 0; mint = '';                    want = '0'; why = '顶层不是调用（裸字面量）⇒ 连 mint 都不是' }
+)
+$predicted = @()
+foreach ($sh in $shapes) {
+    $v = 0
+    if ($sh.mint -ne '') {
+        # 头里那位主人的判定在 C++ 侧；这里**按同一条规则**在 PowerShell 侧重演一遍
+        # （规则只有三道闸，逐条对应头里的三个问句 ⇒ 两侧同源；K17b 用真编的探针校准过）
+        $kind = 0
+        if ($ownOwned -contains $sh.mint) { $kind = 'B' }
+        if ($ownVariant -contains $sh.mint) { $kind = 'V' }
+        if ($kind -eq '0') { $v = 0 }
+        elseif ($closedExits -contains $sh.consumer) { $v = 0 }
+        else {
+            $keeps = '0'
+            foreach ($ex in $ownedTempExceptions) {
+                if ($ex.name -eq $sh.consumer -and $ex.slot -eq $sh.slot) { $keeps = $ex.keeps }
+            }
+            if ($keeps -ne '0') { $v = 0 } else { $v = $kind }
+        }
+    }
+    if ($v -ne $sh.want) {
+        $bad += ("K17 形状 " + $sh.id + " 的判定是 '" + $v + "'，期望 '" + $sh.want + "'（" + $sh.why + "）")
+    }
+    if ($v -ne '0') { $predicted += $sh }
+}
+# 预测集合 ∩ closed = ∅（机械证明：逐条查预测集合里的消费者）
+foreach ($p in $predicted) {
+    if ($closedExits -contains $p.consumer) {
+        $bad += ("K17 预测集合里混进了 closed 消费者 " + $p.consumer + "（" + $p.id + "）")
+    }
+}
+# 另：预测集合里**不许**出现借用族 / 别名族（那两族的出口名在 owned 名单里就不该有）
+foreach ($p in $predicted) {
+    if ($aliasExits -contains $p.mint) {
+        $bad += ("K17 预测集合里混进了别名族出口 " + $p.mint + "（" + $p.id + "）")
     }
 }
 

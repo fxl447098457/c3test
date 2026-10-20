@@ -310,4 +310,25 @@ inline char ownedTempMintKind(const char* exitName) {
     }
     return 0;
 }
+
+// **提名这一枚实参吗？** —— 回收点只许问这一位主人，不再自己判。
+//   返回 'B' / 'V' = 可提名（档号）  0 = 不许提名
+// 三道闸，各答各的（账 #458 §B228 把它们收成一位主人）：
+//   ① 档号：这一枚是不是**现造**的（出口交出来的是不是新造且归我们所有）—— 答不出 ⇒ 不提名
+//      （这挡掉「借来的那一枚」：Err.Description / 数组元素读 / 任何别名）
+//   ② 消费者：消费者**那一格**会不会把指针带出调用 —— '1' 或 'U' ⇒ 不提名
+//   ③ 那一族：closed（注册表那一族，运行期破坏未归因）⇒ 不提名 ⇒ **预测集合与 closed 必不相交**
+// 另有一条由 §B227 的归因加进来的硬规则，落在**站点**那一侧：
+//   **放掉一次的责任只许一处** —— 拼接站（`vb6_BSTR_ConcatFree` 放掉右操作数）与语句末的按档回收
+//   **不许对同一枚临时量各放一次**（撤回那一版就是这么双放的 ⇒ 堆损坏 ⇒ 注册表那一族的红是它的下游受害者）。
+//   ⇒ 实参站提名的那一枚，**只许**由语句末回收；拼接站自己放掉的那一枚，**不进**名单。
+inline char ownedTempNominationVerdict(const char* consumer, int slot, const char* mintCall) {
+    if (!consumer || !mintCall) return 0;
+    const char kind = ownedTempMintKind(mintCall);
+    if (!kind) return 0;                                  // ① 不是现造的（含借来的/别名）⇒ 不许放
+    const char keeps = ownedTempKeepsPointerKind(consumer, slot);
+    if (keeps != '0') return 0;                           // ② 消费者留不留 ⇒ '1'/'U' 不许放
+    if (ownedTempConsumerClosed(consumer)) return 0;       // ③ closed ⇒ 不许提名
+    return kind;                                          // ⇒ 可提名（档号由出口的返回档定）
+}
 }  // namespace vb6c3
