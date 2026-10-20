@@ -111,6 +111,11 @@ void CCodeGen::emitLocalDeclCode(LocalDeclStmt& node) {
                 {
                     std::string cls = resolveArrayClassElemType(var.asType.get());
                     if (!cls.empty()) arrayClassElemTypes_[lower] = cls;
+                    // 账 #305 §B218 (甲) 第一百五十二刀: 同一位登记口、同一道闸
+                    // (Static 那一格跨调用活着, 出口不许放手)。
+                    if (!cls.empty() && !var.isStatic && !inStaticProc_) {
+                        trackClassArrayCarrierForRelease(cIdent(var.name), var.name);
+                    }
                 }
                 knownLocalVars_.insert(lower);
                 break;
@@ -149,6 +154,11 @@ void CCodeGen::emitLocalDeclCode(LocalDeclStmt& node) {
                 {
                     std::string cls = resolveArrayClassElemType(var.asType.get());
                     if (!cls.empty()) arrayClassElemTypes_[lower] = cls;
+                    // 账 #305 §B218 (甲) 第一百五十二刀: 同一位登记口、同一道闸
+                    // (Static 那一格跨调用活着, 出口不许放手)。
+                    if (!cls.empty() && !var.isStatic && !inStaticProc_) {
+                        trackClassArrayCarrierForRelease(cIdent(var.name), var.name);
+                    }
                 }
                 knownLocalVars_.insert(lower);
                 break;

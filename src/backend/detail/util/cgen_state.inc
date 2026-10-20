@@ -508,10 +508,15 @@
     // 账 #305 §B218 (甲) 腿④: 「过程出口这一格该不该放手」收成一张**带档**的表
     // (原来只有 ivref 一档有答案, 具体类那一档压根没有登记面 = 今天每条 `Dim x As C` 漏一枚)。
     // isView = true 走 `->vt->Release` (接口薄指针), false 走本类那对 mint 出入口 (工程类实例)。
+    // isCarrier = true = 第三档「数组载体」(第一百五十二刀): 这一格躺的不是引用而是一枚载体,
+    // 出口发的不是 `_Release` 而是那位数组主人 (出厂逐枚)。arrayName = 登记那一刻的**数组名**,
+    // 出口照它问「哪一类的元素 / 几维」—— 两问与语句站点共用同一位主人, 不另开第二问。
     struct SlotRelease {
         std::string expr;
         bool isView;
         std::string clsName;   // 只有工程类那一档带类名
+        bool isCarrier = false;
+        std::string arrayName; // 只有载体档带带数组名
     };
     std::vector<SlotRelease> slotsToRelease_;
     // Set 语句里"旧值"临时变量的序号 (只有新语法路径消耗, 不影响其他工程)

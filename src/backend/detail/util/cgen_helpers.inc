@@ -285,8 +285,14 @@
     void trackClassSlotForRelease(const std::string& cName, const std::string& clsName);
     // 账 #305 §B218 (甲) 腿④ 第二道夹: 这一格的地址交给了外部 Declare ⇒ 出口不放手 (只撤类档)。
     void dropClassSlotRelease(const std::string& expr);
+    // 第一百五十二刀: arrayName 非空 = 第三档「数组载体」(clsName 那一格空着不用)。
     void trackSlotForRelease(const std::string& expr, bool isView,
-                             const std::string& clsName);
+                             const std::string& clsName,
+                             const std::string& arrayName = std::string());
+    // 账 #305 §B218 (甲) 腿④: 局部类数组出作用域那一格的唯一登记口 ——
+    // 认不出元素类的数组压根不登记 (三道闸住在那位主人 classOfArrayCarrier 里)。
+    void trackClassArrayCarrierForRelease(const std::string& cName,
+                                          const std::string& arrayName);
     void emitIvrefScopeRelease();                     // B05: 过程出口发 Release
     std::string ivrefCType(const std::string& typeName);   // 空串 = 不是新式接口
     const IfaceView* ivLookupIface(const std::string& written);
@@ -333,7 +339,9 @@
     void registerClassArgRefCopyIn(const std::string& clsPtr, const std::string& tmp);
     // 账 #305 §B218 (甲) 腿⑤ 第三格 (第一百四十六刀): 载体销毁那一族 (`Erase` / `ReDim` 不带
     // Preserve) 的发码主人 —— 只调这一枚，站点不许自己拼 `vb6_SA_ReleaseElements`; 认不出就一声不出。
-    void emitClassArrayElemHandback(const std::string& carrierExpr, const std::string& arrayName);
+    // note = 只改注释那一截 (语句站点 / 过程出口两读法共用同一位主人, 臂与问句只有一份)。
+    void emitClassArrayElemHandback(const std::string& carrierExpr, const std::string& arrayName,
+                                    const std::string& note = "载体销毁前逐枚交回");
     std::vector<const IfaceView*> ivImplementedIfaces(Module& module);
     Decl* ivFindImplMember(Module& module, const IfaceView& v, const IfaceSlotView& slot);
     // tB 委托式实现 (ai/022 B10): 本类把接口 v 整份转交给哪个持有字段 (无则 nullptr)

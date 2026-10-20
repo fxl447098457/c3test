@@ -685,7 +685,8 @@ void CCodeGen::emitIfaceImplTables(Module& module) {
 // 夹 = 返回槽: 那一枚引用是**交出去**的那一枚, 出口再放手 = 调用方刚接手的东西当场读已释放块
 // (#445 钉住的那条夹, 原来只有接口一档写着一句注释, 现在两档共用同一句代码)。
 void CCodeGen::trackSlotForRelease(const std::string& expr, bool isView,
-                                   const std::string& clsName) {
+                                   const std::string& clsName,
+                                   const std::string& arrayName) {
     if (!currentReturnVar_.empty() && expr == currentReturnVar_) return;
     for (const SlotRelease& s : slotsToRelease_) {
         if (s.expr == expr) return;
@@ -694,7 +695,22 @@ void CCodeGen::trackSlotForRelease(const std::string& expr, bool isView,
     rec.expr = expr;
     rec.isView = isView;
     rec.clsName = clsName;
+    rec.arrayName = arrayName;
+    rec.isCarrier = !arrayName.empty();
     slotsToRelease_.push_back(rec);
+}
+
+// 账 #305 §B218 (甲) 第一百五十二刀: 「这一枚过程级**数组载体**在正常出口要把元素交回」那张表的
+// 唯一登记口。闸一条不加、一条不少:
+//  - 认不出元素类 (`classOfArrayCarrier` 空串 = `As Object` 包装器 / `As Long` 裸值 / 外部类 / 点链成员数组)
+//    压根不登记 = 维持今天的裸着出作用域;
+//  - Static 那一档 (`Static a() As C`, 或整个 `Static Sub`) 由调用方 (cgen_localdecl.cpp 那两条臂)
+//    拦在门外 —— 那一格跨调用活着, 出口放手 = 下次进来读已释放块 (与类槽那一档同一句理由)。
+void CCodeGen::trackClassArrayCarrierForRelease(const std::string& cName,
+                                              const std::string& arrayName) {
+    if (cName.empty() || arrayName.empty()) return;
+    if (classOfArrayCarrier(arrayName).empty()) return;
+    trackSlotForRelease(cName, false, std::string(), arrayName);
 }
 
 void CCodeGen::trackClassSlotForRelease(const std::string& cName, const std::string& clsName) {
@@ -782,6 +798,15 @@ void CCodeGen::emitIvrefQiSet(const std::string& target, const std::string& ifac
 // Exit Sub/Function 自 c97e65bd 起也走那条 goto ⇒ 这一族不漏清理）。
 void CCodeGen::emitIvrefScopeRelease() {
     for (const SlotRelease& s : slotsToRelease_) {
+        // 第三档 (第一百五十二刀): 数组载体 —— 交给那位数组主人, 出口自己不问臂
+        // (`classOfArrayCarrier` + `carrierIsMultidim` 两问都住在主人里)。
+        // 刻意**只出厂、不销毁载体**: 载体的形状在出口这一发只有「按代码顺序」那一个答案,
+        // 出厂那一支答错的下限是静默不漏 (第一百五十刀那条 elemType 闸), 而 free 那一支答错
+        // 就是拿错步长解引用再 free —— 载体级的销毁 (= 内存那半, 全元素档一起) 是另一格机制。
+        if (s.isCarrier) {
+            emitClassArrayElemHandback(s.expr, s.arrayName, "作用域出口逐枚交回 (载体不销毁)");
+            continue;
+        }
         if (s.isView) {
             c_.emitLine("if (" + s.expr + ") " + s.expr + "->vt->Release(" + s.expr +
                         ");  /* tB Interface B05: scope-exit release */");

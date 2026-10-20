@@ -546,7 +546,10 @@ void CCodeGen::registerClassArgRefCopyIn(const std::string& clsPtr, const std::s
 // RTL 那一头先清槽再放手 ⇒ 被放手那枚的 Class_Terminate 若回头写这一格，不会退第二遍 (同一枚
 // 载体的字段出厂那一档也是这个口径，见 cgen_com.cpp 的 `_Destroy`); 固定数组那一支随后 memset
 // 已清空的槽 = 无害。多维 (ND) 载体不是 `vb6_SafeArray1D` ⇒ 本刀不硬塞 cast，等 ND 那一枚兄弟出口。
-void CCodeGen::emitClassArrayElemHandback(const std::string& carrierExpr, const std::string& arrayName) {
+// note 只改**注释**那一截 (第一百五十二刀): 语句站点那一发后面紧跟销毁, 过程出口那一发刻意不销毁
+// (载体级的 free 是另一格机制) —— 两发的读者不一样, 注释各说各那句, 臂与问句仍只有一位主人。
+void CCodeGen::emitClassArrayElemHandback(const std::string& carrierExpr, const std::string& arrayName,
+                                     const std::string& note) {
     const std::string cls = classOfArrayCarrier(arrayName);
     if (cls.empty() || carrierExpr.empty()) return;
     // 载体形状只在这一处问 (第一百四十九刀): 多维那一档换 ND 兄弟出口 ——
@@ -554,7 +557,7 @@ void CCodeGen::emitClassArrayElemHandback(const std::string& carrierExpr, const 
     const std::string fn = carrierIsMultidim(arrayName) ? "vb6_SA_ReleaseElementsND"
                                                         : "vb6_SA_ReleaseElements";
     c_.emitLine(fn + "(" + carrierExpr + ", " + cls
-        + "_Release);  /* 账 #305 (甲) 腿⑤ 数组档: 载体销毁前逐枚交回 */");
+        + "_Release);  /* 账 #305 (甲) 腿⑤ 数组档: " + note + " */");
 }
 
 // P6.4+: 类模块默认实例 (VB_PredeclaredId=True) 惰性单例访问器.
