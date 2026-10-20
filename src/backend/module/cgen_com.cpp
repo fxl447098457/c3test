@@ -463,7 +463,7 @@ bool CCodeGen::rhsTransfersProjectRef(const ASTNode& expr, bool forViewSlot) {
 // 发出来的是包出来的薄指针 `&(<实例>->__iv_<I>)` (见 cgen_expr_call_arg_emit.inc 那条 2026-10-12
 // 的 ivfix), 那一枚对价归 §B187 待拍的那一句管 ⇒ 这一形刻意答 false: 交回错对象比漏一枚更坏。
 bool CCodeGen::argHandsOverProjectRef(const ASTNode& expr, const std::string& clsPtr) {
-    const bool forView = clsPtr.compare(0, 10, "vb6_ivref_") == 0;  // vb6_ivref_ = 10 个字符
+    const bool forView = clsPtrIsViewSlot(clsPtr);
     if (expr.kind == ASTNodeKind::NewExpr) return !forView;
     return rhsTransfersProjectRef(expr, forView);
 }
@@ -474,7 +474,7 @@ bool CCodeGen::argHandsOverProjectRef(const ASTNode& expr, const std::string& cl
 // (与第一百三十四刀 emitIvrefQiSet 末尾那一发同一形状)。
 void CCodeGen::registerClassArgRefHandback(const std::string& clsPtr, const std::string& tmp) {
     std::string releaseCall;
-    if (clsPtr.compare(0, 10, "vb6_ivref_") == 0) {
+    if (clsPtrIsViewSlot(clsPtr)) {
         releaseCall = tmp + "->vt->Release(" + tmp + ")";
     } else {
         const size_t star = clsPtr.find('*');

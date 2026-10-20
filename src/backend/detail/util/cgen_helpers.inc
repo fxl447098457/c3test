@@ -748,6 +748,10 @@
     // 只认 vb6_cls_ / vb6_ivref_ 两档：legacy 接口的 vb6_iface_<I>（非指针）和 COM 的
     // vb6_ComIface_X* 一律返回空串 = 维持本改动之前的行为，不在这里顺手扩大。
     std::string cParamClassPtrType(const ParameterInfo& p);
+    // 账 #305 §B218 (甲) 腿⑤ 第二格 (第一百三十七刀): cParamClassPtrType 交回来的那个 C 类型名
+    // 装的是**视图薄指针**还是工程类实例 —— 前缀名单只住在上面那位主人出生的那份文件里,
+    // 站点与所有权主人都不许再抄一遍视图那一档的前缀 (check_iface_view_authority ③ 钉的就是这张名单)。
+    bool clsPtrIsViewSlot(const std::string& clsPtr);
 
     // <vbeclipse>: 该名字是否为本工程的某个类/窗体模块 (它的 prop_let_/成员函数真会被发出)。
     // 与 cParamClassPtrType 同一口径, 见 cgen_base_type.cpp 定义处注释。凡是要"按类实例

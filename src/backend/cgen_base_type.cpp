@@ -252,6 +252,13 @@ std::string CCodeGen::cParamClassPtrType(const ParameterInfo& p) {
     return {};
 }
 
+// 账 #305 §B218 (甲) 腿⑤ 第二格 (第一百三十七刀): 「这一档槽装的是视图薄指针吗」—— 上面那位主人
+// 的两档里读视图那一档的唯一出口。前缀知识刻意留在这份文件 (= cParamClassPtrType 的出生地),
+// 别处再抄一次字面量就是把「谁认得 vb6_ivref_」这张名单扩大。
+bool CCodeGen::clsPtrIsViewSlot(const std::string& clsPtr) {
+    return clsPtr.compare(0, 10, "vb6_ivref_") == 0;  // vb6_ivref_ = 10 个字符
+}
+
 // <vbeclipse>: 这个名字是不是**本工程的一个类/窗体模块** —— 它的 prop_let_/prop_set_/
 // 成员函数真的会被发出来。判法 = 名字命中"本模块 ∪ 驱动下发的其它模块", 且
 // mapTypeRef 把它映射成 vb6_cls_* (与 cParamClassPtrType 同一口径)。
