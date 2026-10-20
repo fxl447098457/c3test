@@ -473,6 +473,22 @@ foreach ($a in $ownAnchors) {
         $bad += ("K14 返回侧锚点 " + $a.name + " 判成 " + $ownClass[$a.name] + "，期望 " + $a.want + "（" + $a.why + "）")
     }
 }
+# K14b **档号**：mint 交出来的是 BSTR 还是 VARIANT —— 只由出口的返回档定
+#     （源表达式的 VB 档不作数：`Len(v)` 的源档是 Variant、交出去的是 BSTR ⇒ 照源档声明就 C2440）。
+foreach ($mk in @(@{ name = 'vb6_BSTR_FromStr';    want = 'B'; why = 'BSTR 档的 mint' },
+                   @{ name = 'vb6_VariantToString'; want = 'B'; why = '名字带 Variant、交出的却是 BSTR' },
+                   @{ name = 'vb6_VariantLong';     want = 'V'; why = 'VARIANT 档的 mint' },
+                   @{ name = 'vb6_CDec';            want = 'V'; why = 'VARIANT 档的 mint' })) {
+    $k = $retKind[$mk.name]
+    if (-not $k) {
+        $bad += ("K14b 档号锚点缺失（表里没有这一枚）: " + $mk.name)
+        continue
+    }
+    $want = if ($k -eq 'BSTR') { 'B' } else { 'V' }
+    if ($want -ne $mk.want) {
+        $bad += ("K14b 档号锚点 " + $mk.name + " 的返回档是 " + $k + "，期望 " + $mk.want + "（" + $mk.why + "）")
+    }
+}
 # K15 两条轴**不许互相顶替**：借用族三枚必须是 alias（不是 owned）——
 #     「这一枚交出去的是借来的」与「这一枚交出去的是新造的」是同一件事的两面，
 #     两面判成一样 ⇒ 有一面判错了（撤回那一版就是只判了 mint 那一面）。
@@ -631,9 +647,9 @@ if ($Bless) {
     $out += '# --- 借用轴（返回侧）：这一枚出口交出去的指针是借来的，不归调用方所有 ⇒ 不许放它 ---'
     foreach ($b in ($borrowedExports | Sort-Object)) { $out += ('[borrow] ' + $b) }
     $out += '# --- 返回侧所有权：owned = 这一枚交出去的是**新造且归调用方所有**（调用方可以放它）---'
-    foreach ($o in ($ownOwned | Sort-Object)) { $out += ('[own] ' + $o) }
+    foreach ($o in ($ownOwned | Sort-Object)) { $out += ('[own] ' + $o + ' ' + $retKind[$o]) }
     $out += '# --- 返回侧所有权：alias = 交出去的是**别名**（指着调用方的内存或一个全局）⇒ 不许放它 ---'
-    foreach ($a in ($ownAlias | Sort-Object)) { $out += ('[alias] ' + $a) }
+    foreach ($a in ($ownAlias | Sort-Object)) { $out += ('[alias] ' + $a + ' ' + $retKind[$a]) }
     [System.IO.File]::WriteAllLines($TableFile, $out, (New-Object System.Text.UTF8Encoding($false)))
     # ⚠ **只登记这张表**（推导出来的**证据**）；发码侧那份（src/common/owned_temp_keeps.hpp）
     #   是**手写**的出口，由哨兵 **K13** 双向对账 —— 与仓里 `kBorrowedBstrExports167`（手写）
@@ -759,13 +775,32 @@ if (-not (Test-Path -LiteralPath $hdrFile)) {
                      (($d2 | Select-Object -First 5) -join ', '))
         }
     }
+    # K13c **owned 名单里那些 VARIANT 档**（其余 owned 交出 BSTR）—— 档号**只由出口的返回档定**
+    #     （源表达式的 VB 档不作数：`Len(v)` 的源档是 Variant、交出去的是 BSTR）。这张名单是
+    #     owned 那张的**子集** ⇒ 少一枚/多一枚/不是子集，三样都红。
+    $ownVariant = @($ownOwned | Where-Object { $retKind[$_] -eq 'VARIANT' })
+    $vm = [regex]::Match($hdrTxt, 'kOwnedVariant\[\]\s*=\s*\{([\s\S]*?)\n    \};')
+    if (-not $vm.Success) {
+        $bad += 'K13c owned_temp_keeps.hpp 里的 kOwnedVariant 读不出来'
+    } else {
+        $hdrVar = @([regex]::Matches($vm.Groups[1].Value, '"(vb6_[A-Za-z0-9_]+)"') | ForEach-Object { $_.Groups[1].Value } | Sort-Object -Unique)
+        $d1 = @($ownVariant | Where-Object { $hdrVar -notcontains $_ })
+        $d2 = @($hdrVar | Where-Object { $ownVariant -notcontains $_ })
+        if ($d1.Count -gt 0) {
+            $bad += ("K13c VARIANT 档的 owned " + $d1.Count + " 枚发码侧那份里没有: " + (($d1 | Select-Object -First 5) -join ', '))
+        }
+        if ($d2.Count -gt 0) {
+            $bad += ("K13c 发码侧那份的 VARIANT 档 owned 多出 " + $d2.Count + " 枚（推导里不是 VARIANT 档）: " + (($d2 | Select-Object -First 5) -join ', '))
+        }
+    }
     # K13b 每张表末尾必须有**空哨兵**（遍历写法是 `for (...; r->exitName; ++r)`）——
     #     少了它就**走出数组**（本刀实测：编得过、跑起来 0xC0000374 堆损坏 ⇒ 正是这一类）。
     #     这条是**文本**判据，但它挡的正是「表编得过、跑起来炸」那一族。
     foreach ($arr in @(@{ name = 'kRows';      pat = 'static const OwnedTempException kRows\[\] = \{' },
                        @{ name = 'kClosed';   pat = 'static const char\* const kClosed\[\] = \{' },
                        @{ name = 'kBorrowed'; pat = 'static const char\* const kBorrowed\[\] = \{' },
-                       @{ name = 'kOwned';    pat = 'static const char\* const kOwned\[\] = \{' })) {
+                       @{ name = 'kOwned';    pat = 'static const char\* const kOwned\[\] = \{' },
+                       @{ name = 'kOwnedVariant'; pat = 'static const char\* const kOwnedVariant\[\] = \{' })) {
         $am2 = [regex]::Match($hdrTxt, '(?s)' + $arr.pat + '(.*?)\n    \};')
         if (-not $am2.Success) {
             $bad += ("K13b " + $arr.name + " 读不出来（头被改坏了？）")
@@ -830,7 +865,7 @@ if ($bad.Count -eq 0) {
                 " / surface " + $surface.Count + " / rows " + $rows.Count +
                 " | keeps_pointer 0 " + $k0 + " 1 " + $k1 + " U " + $ku +
                 " | closed " + $closedRows.Count + " | nomination " + $nomRows.Count +
-                " | unclassified 0 | 10 anchors OK | gray rules 2 | witnesses 3")
+                " | unclassified 0 | 15 anchors OK (K14 + K14b) | K13/K13b/K13c two-way | gray rules 2 | witnesses 3")
     exit 0
 }
 foreach ($b in $bad) { Write-Host ("FAIL " + $b) -ForegroundColor Red }

@@ -262,4 +262,52 @@ inline bool ownedTempReturnIsOwned(const char* exitName) {
     }
     return false;
 }
+
+// **owned 名单里那些交出 VARIANT 的一档**（其余 owned 交出 BSTR）。
+// 档号**只由出口的返回档定** —— 源表达式的 VB 档不作数：`Len(v)` 的源档是 Variant，
+// 交出去的却是 BSTR；照源档声明就是 `vb6_VARIANT t = <BSTR>` ⇒ cl C2440（账 #454 的教训）。
+// 这张名单是 owned 那张的**子集**（哨兵 K13 双向对账 ⇒ 漂不了）。
+inline const char* const* ownedTempOwnedVariantExits() {
+    static const char* const kOwnedVariant[] = {
+        "vb6_CallByName",
+        "vb6_CDec",
+        "vb6_CVErr",
+        "vb6_IIfVariant",
+        "vb6_LoadResString",
+        "vb6_VarAddV",
+        "vb6_VarDivV",
+        "vb6_VarMulV",
+        "vb6_VarSubV",
+        "vb6_VariantBool",
+        "vb6_VariantByte",
+        "vb6_VariantDate",
+        "vb6_VariantDouble",
+        "vb6_VariantEmpty",
+        "vb6_VariantFromComResult",
+        "vb6_VariantIdentity",
+        "vb6_VariantInt",
+        "vb6_VariantLong",
+        "vb6_VariantLongLong",
+        "vb6_VariantNull",
+        "vb6_VariantSByte",
+        "vb6_VariantSingle",
+        "vb6_VariantUInteger",
+        "vb6_VariantULong",
+        "vb6_VariantULongLong",
+        0,                                // 空哨兵（遍历靠它收尾；0 = 空指针常量）
+    };
+    return kOwnedVariant;
+}
+
+// 这一枚 mint 交出来的是哪一档？'B' = BSTR / 'V' = VARIANT / 0 = 不是新造的（不许回收）。
+inline char ownedTempMintKind(const char* exitName) {
+    if (!exitName) return 0;
+    for (const char* const* p = ownedTempOwnedVariantExits(); *p; ++p) {
+        if (std::strcmp(*p, exitName) == 0) return 'V';
+    }
+    for (const char* const* p = ownedTempOwnedReturnExits(); *p; ++p) {
+        if (std::strcmp(*p, exitName) == 0) return 'B';
+    }
+    return 0;
+}
 }  // namespace vb6c3

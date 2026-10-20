@@ -228,127 +228,127 @@ vb6_Write|1	0	handoff-reads:vb6_BSTR_Len	0	open	BSTR
 [borrow] vb6_ErrSource
 [borrow] vb6_ho_variantToBstr
 # --- 返回侧所有权：owned = 这一枚交出去的是**新造且归调用方所有**（调用方可以放它）---
-[own] vb6_App_EXEName
-[own] vb6_App_HelpFile
-[own] vb6_App_Path
-[own] vb6_BSTR_Concat
-[own] vb6_BSTR_ConcatFree
-[own] vb6_BSTR_Empty
-[own] vb6_BSTR_FixedSTR
-[own] vb6_BSTR_FromANSIBuf
-[own] vb6_BSTR_FromBSTR
-[own] vb6_BSTR_FromStr
-[own] vb6_BSTR_FromStrN
-[own] vb6_ByteArrayToString
-[own] vb6_CallByName
-[own] vb6_CDec
-[own] vb6_Chr
-[own] vb6_ChrB
-[own] vb6_ChrW
-[own] vb6_Clipboard_GetText
-[own] vb6_Command
-[own] vb6_ConReadKey
-[own] vb6_ConReadLine
-[own] vb6_Console_ReadKey
-[own] vb6_Console_ReadLine
-[own] vb6_CStr
-[own] vb6_CStrBool
-[own] vb6_CStrByte
-[own] vb6_CStrDate
-[own] vb6_CStrDateFromBSTR
-[own] vb6_CStrDbl
-[own] vb6_CStrDblFromBSTR
-[own] vb6_CStrDblFromVariant
-[own] vb6_CStrLong
-[own] vb6_CStrLongFromVariant
-[own] vb6_CStrLongLong
-[own] vb6_CStrSingle
-[own] vb6_CStrULong
-[own] vb6_CStrULongFromVariant
-[own] vb6_CStrULongLong
-[own] vb6_CStrULongLongFromVariant
-[own] vb6_CurDir
-[own] vb6_CVErr
-[own] vb6_DecimalToBSTR
-[own] vb6_Dir
-[own] vb6_Environ
-[own] vb6_FormatCurrency
-[own] vb6_FormatDateTime
-[own] vb6_FormatNumber
-[own] vb6_FormatPercent
-[own] vb6_GetSetting
-[own] vb6_Hex
-[own] vb6_IIfBSTR
-[own] vb6_IIfVariant
-[own] vb6_InputB
-[own] vb6_InputBox
-[own] vb6_InputString
-[own] vb6_Join
-[own] vb6_LCase
-[own] vb6_LCase_str
-[own] vb6_Left
-[own] vb6_LeftB
-[own] vb6_LineInput
-[own] vb6_LoadResString
-[own] vb6_LSet
-[own] vb6_LSetFree
-[own] vb6_LTrim
-[own] vb6_LTrimVar
-[own] vb6_Mid
-[own] vb6_MidB
-[own] vb6_MonthName
-[own] vb6_NumToBSTRDefault
-[own] vb6_Oct
-[own] vb6_PA_GetBSTR
-[own] vb6_Partition
-[own] vb6_Replace
-[own] vb6_Right
-[own] vb6_RightB
-[own] vb6_RSet
-[own] vb6_RTrim
-[own] vb6_Space
-[own] vb6_Spc
-[own] vb6_Str
-[own] vb6_StrConv
-[own] vb6_StrConvFromByteArray
-[own] vb6_String
-[own] vb6_StrReverse
-[own] vb6_Tab
-[own] vb6_Trim
-[own] vb6_TypeName
-[own] vb6_UCase
-[own] vb6_UCase_str
-[own] vb6_VarAddV
-[own] vb6_VarDivV
-[own] vb6_VariantBool
-[own] vb6_VariantByte
-[own] vb6_VariantDate
-[own] vb6_VariantDouble
-[own] vb6_VariantEmpty
-[own] vb6_VariantFromComResult
-[own] vb6_VariantIdentity
-[own] vb6_VariantInt
-[own] vb6_VariantLong
-[own] vb6_VariantLongLong
-[own] vb6_VariantNull
-[own] vb6_VariantSByte
-[own] vb6_VariantSingle
-[own] vb6_VariantToString
-[own] vb6_VariantUInteger
-[own] vb6_VariantULong
-[own] vb6_VariantULongLong
-[own] vb6_VarMulV
-[own] vb6_VarSubV
-[own] vb6_WeekdayName
+[own] vb6_App_EXEName BSTR
+[own] vb6_App_HelpFile BSTR
+[own] vb6_App_Path BSTR
+[own] vb6_BSTR_Concat BSTR
+[own] vb6_BSTR_ConcatFree BSTR
+[own] vb6_BSTR_Empty BSTR
+[own] vb6_BSTR_FixedSTR BSTR
+[own] vb6_BSTR_FromANSIBuf BSTR
+[own] vb6_BSTR_FromBSTR BSTR
+[own] vb6_BSTR_FromStr BSTR
+[own] vb6_BSTR_FromStrN BSTR
+[own] vb6_ByteArrayToString BSTR
+[own] vb6_CallByName VARIANT
+[own] vb6_CDec VARIANT
+[own] vb6_Chr BSTR
+[own] vb6_ChrB BSTR
+[own] vb6_ChrW BSTR
+[own] vb6_Clipboard_GetText BSTR
+[own] vb6_Command BSTR
+[own] vb6_ConReadKey BSTR
+[own] vb6_ConReadLine BSTR
+[own] vb6_Console_ReadKey BSTR
+[own] vb6_Console_ReadLine BSTR
+[own] vb6_CStr BSTR
+[own] vb6_CStrBool BSTR
+[own] vb6_CStrByte BSTR
+[own] vb6_CStrDate BSTR
+[own] vb6_CStrDateFromBSTR BSTR
+[own] vb6_CStrDbl BSTR
+[own] vb6_CStrDblFromBSTR BSTR
+[own] vb6_CStrDblFromVariant BSTR
+[own] vb6_CStrLong BSTR
+[own] vb6_CStrLongFromVariant BSTR
+[own] vb6_CStrLongLong BSTR
+[own] vb6_CStrSingle BSTR
+[own] vb6_CStrULong BSTR
+[own] vb6_CStrULongFromVariant BSTR
+[own] vb6_CStrULongLong BSTR
+[own] vb6_CStrULongLongFromVariant BSTR
+[own] vb6_CurDir BSTR
+[own] vb6_CVErr VARIANT
+[own] vb6_DecimalToBSTR BSTR
+[own] vb6_Dir BSTR
+[own] vb6_Environ BSTR
+[own] vb6_FormatCurrency BSTR
+[own] vb6_FormatDateTime BSTR
+[own] vb6_FormatNumber BSTR
+[own] vb6_FormatPercent BSTR
+[own] vb6_GetSetting BSTR
+[own] vb6_Hex BSTR
+[own] vb6_IIfBSTR BSTR
+[own] vb6_IIfVariant VARIANT
+[own] vb6_InputB BSTR
+[own] vb6_InputBox BSTR
+[own] vb6_InputString BSTR
+[own] vb6_Join BSTR
+[own] vb6_LCase BSTR
+[own] vb6_LCase_str BSTR
+[own] vb6_Left BSTR
+[own] vb6_LeftB BSTR
+[own] vb6_LineInput BSTR
+[own] vb6_LoadResString VARIANT
+[own] vb6_LSet BSTR
+[own] vb6_LSetFree BSTR
+[own] vb6_LTrim BSTR
+[own] vb6_LTrimVar BSTR
+[own] vb6_Mid BSTR
+[own] vb6_MidB BSTR
+[own] vb6_MonthName BSTR
+[own] vb6_NumToBSTRDefault BSTR
+[own] vb6_Oct BSTR
+[own] vb6_PA_GetBSTR BSTR
+[own] vb6_Partition BSTR
+[own] vb6_Replace BSTR
+[own] vb6_Right BSTR
+[own] vb6_RightB BSTR
+[own] vb6_RSet BSTR
+[own] vb6_RTrim BSTR
+[own] vb6_Space BSTR
+[own] vb6_Spc BSTR
+[own] vb6_Str BSTR
+[own] vb6_StrConv BSTR
+[own] vb6_StrConvFromByteArray BSTR
+[own] vb6_String BSTR
+[own] vb6_StrReverse BSTR
+[own] vb6_Tab BSTR
+[own] vb6_Trim BSTR
+[own] vb6_TypeName BSTR
+[own] vb6_UCase BSTR
+[own] vb6_UCase_str BSTR
+[own] vb6_VarAddV VARIANT
+[own] vb6_VarDivV VARIANT
+[own] vb6_VariantBool VARIANT
+[own] vb6_VariantByte VARIANT
+[own] vb6_VariantDate VARIANT
+[own] vb6_VariantDouble VARIANT
+[own] vb6_VariantEmpty VARIANT
+[own] vb6_VariantFromComResult VARIANT
+[own] vb6_VariantIdentity VARIANT
+[own] vb6_VariantInt VARIANT
+[own] vb6_VariantLong VARIANT
+[own] vb6_VariantLongLong VARIANT
+[own] vb6_VariantNull VARIANT
+[own] vb6_VariantSByte VARIANT
+[own] vb6_VariantSingle VARIANT
+[own] vb6_VariantToString BSTR
+[own] vb6_VariantUInteger VARIANT
+[own] vb6_VariantULong VARIANT
+[own] vb6_VariantULongLong VARIANT
+[own] vb6_VarMulV VARIANT
+[own] vb6_VarSubV VARIANT
+[own] vb6_WeekdayName BSTR
 # --- 返回侧所有权：alias = 交出去的是**别名**（指着调用方的内存或一个全局）⇒ 不许放它 ---
-[alias] vb6_ErrDescription
-[alias] vb6_ErrSource
-[alias] vb6_LoadResData
-[alias] vb6_LoadResPicture
-[alias] vb6_VariantArray
-[alias] vb6_VariantArrayGet
-[alias] vb6_VariantArrayGetND
-[alias] vb6_VariantArrayGetVal
-[alias] vb6_VariantFromStackVARIANT
-[alias] vb6_VariantObject
-[alias] vb6_VariantString
+[alias] vb6_ErrDescription BSTR
+[alias] vb6_ErrSource BSTR
+[alias] vb6_LoadResData VARIANT
+[alias] vb6_LoadResPicture VARIANT
+[alias] vb6_VariantArray VARIANT
+[alias] vb6_VariantArrayGet VARIANT
+[alias] vb6_VariantArrayGetND VARIANT
+[alias] vb6_VariantArrayGetVal VARIANT
+[alias] vb6_VariantFromStackVARIANT VARIANT
+[alias] vb6_VariantObject VARIANT
+[alias] vb6_VariantString VARIANT
