@@ -529,6 +529,74 @@ if ($borrowedExports.Count -gt 0) {
 #     「那一枚归调用方所有」时才成立），由回收刀自己的哨兵钉；本表只把借用名单钉住（K11①）
 #     与不相交性（K11②）。
 
+# K12 **发码侧那份**（src/common/owned_temp_keeps.hpp）与本表**双向对齐**：
+#     例外行（KEEPS=1 / U）、closed 那一族、借用族，三样都要**逐行相同** ——
+#     表是**推导**出来的（从 RTL 的权威头），头是**给发码侧问的那一份**；
+#     少一行（表里有、头里没有 ⇒ 发码侧会提名一枚不许提名的）都红。
+$hdrFile = Join-Path $Root 'src\common\owned_temp_keeps.hpp'
+if (-not (Test-Path -LiteralPath $hdrFile)) {
+    $bad += 'K12 src/common/owned_temp_keeps.hpp 不在 —— 发码侧那份权威没了 ⇒ 停机'
+} else {
+    $hdrTxt = [System.IO.File]::ReadAllText($hdrFile)
+    # 头里的例外行
+    $hdrRows = @{}
+    $em = [regex]::Match($hdrTxt, 'kRows\[\]\s*=\s*\{([\s\S]*?)\n    \};')
+    if (-not $em.Success) {
+        $bad += 'K12 owned_temp_keeps.hpp 里的 kRows 读不出来'
+    } else {
+        foreach ($rm in [regex]::Matches($em.Groups[1].Value, '\{\s*"(vb6_[A-Za-z0-9_]+)"\s*,\s*(\d+)\s*,\s*''(.)''\s*,\s*"([^"]*)"\s*\}')) {
+            $hdrRows[$rm.Groups[1].Value + '|' + $rm.Groups[2].Value] = @($rm.Groups[3].Value, $rm.Groups[4].Value)
+        }
+        # 表里的例外行（KEEPS=1 / U）
+        $tblRows = @{}
+        foreach ($k in $rows.Keys) {
+            if ($rows[$k][0] -ne '0') { $tblRows[$k] = @($rows[$k][0], $rows[$k][1]) }
+        }
+        $missH = @($tblRows.Keys | Where-Object { -not $hdrRows.ContainsKey($_) })
+        $missT = @($hdrRows.Keys | Where-Object { -not $tblRows.ContainsKey($_) })
+        if ($missH.Count -gt 0) {
+            $bad += ("K12 表里的例外行 " + $missH.Count + " 枚在发码侧那份里没有（发码侧会提名一枚不许提名的）: " +
+                     (($missH | Select-Object -First 5) -join ', '))
+        }
+        if ($missT.Count -gt 0) {
+            $bad += ("K12 发码侧那份里多出 " + $missT.Count + " 枚例外行（表里没有 ⇒ 那是发码侧自己加的）: " +
+                     (($missT | Select-Object -First 5) -join ', '))
+        }
+        foreach ($k in $tblRows.Keys) {
+            if ($hdrRows.ContainsKey($k)) {
+                if ($hdrRows[$k][0] -ne $tblRows[$k][0]) {
+                    $bad += ("K12 " + $k + " 的分类在两处不同：表 " + $tblRows[$k][0] + " / 头 " + $hdrRows[$k][0])
+                } elseif ($hdrRows[$k][1] -ne $tblRows[$k][1]) {
+                    $bad += ("K12 " + $k + " 的逃逸通道在两处不同：表 " + $tblRows[$k][1] + " / 头 " + $hdrRows[$k][1])
+                }
+            }
+        }
+    }
+    # closed 那一族
+    $cm = [regex]::Match($hdrTxt, 'kClosed\[\]\s*=\s*\{([\s\S]*?)\n    \};')
+    if (-not $cm.Success) {
+        $bad += 'K12 owned_temp_keeps.hpp 里的 kClosed 读不出来'
+    } else {
+        $hdrClosed = @([regex]::Matches($cm.Groups[1].Value, '"(vb6_[A-Za-z0-9_]+)"') | ForEach-Object { $_.Groups[1].Value })
+        $tblClosed = @($closedRows | ForEach-Object { ($_ -split '\|')[0] } | Sort-Object -Unique)
+        $d1 = @($tblClosed | Where-Object { $hdrClosed -notcontains $_ })
+        $d2 = @($hdrClosed | Where-Object { $tblClosed -notcontains $_ })
+        if ($d1.Count -gt 0) { $bad += ("K12 closed 那一族：表里有 " + ($d1 -join ', ') + "，发码侧那份里没有") }
+        if ($d2.Count -gt 0) { $bad += ("K12 closed 那一族：发码侧那份里多了 " + ($d2 -join ', ') + "，表里没有") }
+    }
+    # 借用族：发码侧那份 ≡ 编译器侧 kBorrowedBstrExports167 ≡ 本表的 [borrow] 节
+    $bm = [regex]::Match($hdrTxt, 'kBorrowed\[\]\s*=\s*\{([\s\S]*?)\n    \};')
+    if (-not $bm.Success) {
+        $bad += 'K12 owned_temp_keeps.hpp 里的 kBorrowed 读不出来'
+    } else {
+        $hdrBorrow = @([regex]::Matches($bm.Groups[1].Value, '"(vb6_[A-Za-z0-9_]+)"') | ForEach-Object { $_.Groups[1].Value })
+        $d1 = @($borrowedExports | Where-Object { $hdrBorrow -notcontains $_ })
+        $d2 = @($hdrBorrow | Where-Object { $borrowedExports -notcontains $_ })
+        if ($d1.Count -gt 0) { $bad += ("K12 借用族：编译器侧名单里有 " + ($d1 -join ', ') + "，发码侧那份里没有") }
+        if ($d2.Count -gt 0) { $bad += ("K12 借用族：发码侧那份里多了 " + ($d2 -join ', ') + "，编译器侧名单里没有") }
+    }
+}
+
 # K2: unclassified == 0 —— 出口面里每一枚按值带权形参位都必须有行
 $missing = @($surface.Keys | Where-Object { -not $rows.ContainsKey($_) })
 if ($missing.Count -gt 0) {
