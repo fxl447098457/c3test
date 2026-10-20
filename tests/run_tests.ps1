@@ -7646,11 +7646,12 @@ if ($Category -in @("all", "run", "vbp")) {
         "$Tests\b448_iface_ret\B448.vbp") @(
         'if (sv20) sv20->vt->Release(sv20);')
     # 第一百三十四刀两面: 正面 = 视图腿② 那一格 QI 完必须交回接管来的临时量 (钉两处站点: W20 的
-    #   __ivrhs3 与 Sub Main 的 __ivrhs8); 反面 = 借来的那一档 (`Set dst22 = src22`) 不许交回 ——
+    #   __ivrhs6 与 Sub Main 的 __ivrhs11 —— 编号从 3/8 移到 6/11 是因为第一百三十七刀让实参那一站
+    #   也吃同一枚 tempCounter_, 站点顺序没变; 反面 = 借来的那一档 (`Set dst22 = src22`) 不许交回 ——
     #   交回就是多退一枚, 现场会把还有人握着的实例拆掉。
     Test-EmitcShape 'b448_view_leg_returns_taken_ref' @("$Tests\b448_iface_ret\B448.vbp") @(
-        'if (__ivrhs3) __ivrhs3->vt->Release(__ivrhs3);  /* 账 #305 (甲) 腿②: 交回接管来的那一枚 */',
-        'if (__ivrhs8) __ivrhs8->vt->Release(__ivrhs8);  /* 账 #305 (甲) 腿②: 交回接管来的那一枚 */')
+        'if (__ivrhs6) __ivrhs6->vt->Release(__ivrhs6);  /* 账 #305 (甲) 腿②: 交回接管来的那一枚 */',
+        'if (__ivrhs11) __ivrhs11->vt->Release(__ivrhs11);  /* 账 #305 (甲) 腿②: 交回接管来的那一枚 */')
     Test-EmitcAbsent 'b448_view_leg_never_gives_back_a_borrowed_view' @(
         "$Tests\b448_iface_ret\B448.vbp") @(
         'if (src22) src22->vt->Release(src22);  /* 账 #305 (甲) 腿②',
