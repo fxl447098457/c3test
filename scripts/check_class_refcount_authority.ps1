@@ -355,17 +355,18 @@ if ($trExportFiles.Count -ne 4) {
     $fail += ("preserve-with-release export files = " + ($trExportFiles -join ', ') + " (want exactly 4 files: 名单那一格不许漏)")
 }
 # ⑳ 第一百四十六刀: 载体销毁那一族 (Erase / ReDim 不带 Preserve) 的两问只许一位主人。
-#    · classOfArrayCarrier = 「这枚数组变量握着的元素是不是工程类」: 声明 + 定义 + 两位读者 (销毁主人 + Preserve 站) = 4 处 / 4 份文件
-#      (再多一处 = 某个站点绕过问句自己查 arrayClassElemTypes_ 那张表)。
+#    · classOfArrayCarrier = 「这枚数组变量握着的元素是不是工程类」: 声明 + 定义 + 三位读者 (销毁主人
+#      + Preserve 两站) = 5 处 / 4 份文件 (第一百五十六刀起登记口不再问这一句 —— 放宽到每一档局部数组,
+#      认不出元素类只是不交回元素, 载体那一发照旧要收尾; 那位主人剩下的读者全是元素出厂那两腿)。
 #    · emitClassArrayElemHandback = 销毁载体前那一发的唯一发码处: 声明 + 定义 + 五个站点 (1D Erase / 1D ReDim / ND ReDim 两支 / ND Erase) = 7 处 / 3 份文件，站点必须全住在 cgen_redim.cpp。
 #      两位站点必须全住在 cgen_redim.cpp。只要有站自己拼那发释放，“谁握元素那一枚”就又分家。
 $askCarrier = CountOf 'classOfArrayCarrier('
-if ($askCarrier -ne 6) {
-    $fail += ("array-carrier question sites = " + $askCarrier + " (want exactly 5: declaration + definition + 4 readers = 销毁主人 + Preserve 站 + 载体档登记口)")
+if ($askCarrier -ne 5) {
+    $fail += ("array-carrier question sites = " + $askCarrier + " (want exactly 5: declaration + definition + 3 readers = 销毁主人 + Preserve 两站)")
 }
 $askCarrierFiles = @(FilesOf 'classOfArrayCarrier(')
-if ($askCarrierFiles.Count -ne 5) {
-    $fail += ("array-carrier question files = " + ($askCarrierFiles -join ', ') + " (want exactly 5 files)")
+if ($askCarrierFiles.Count -ne 4) {
+    $fail += ("array-carrier question files = " + ($askCarrierFiles -join ', ') + " (want exactly 4 files)")
 }
 $carrierHelp = CountOf 'emitClassArrayElemHandback('
 if ($carrierHelp -ne 8) {
@@ -376,17 +377,18 @@ if (-not ($carrierHelpFiles -contains 'cgen_redim.cpp')) {
     $fail += ("carrier-destroy stations missing from cgen_redim.cpp (files = " + ($carrierHelpFiles -join ', ') + ")")
 }
 # ㉒ 第一百五十刀: 多维载体那一档接进同一位主人之后, 这一问与这枚出口各只许有一位主人。
-#    · carrierIsMultidim = 「这枚载体是几维」: 声明 + 定义 + 主人内部那一问 = 3 处 / 3 份文件。
+#    · carrierIsMultidim = 「这枚载体是几维」: 声明 + 定义 + 主人内部那一问 + 第一百五十六刀出口那一问
+#      (从 1D / ND 两种销毁出口里挑一种 = 同一问的第二次调用, 不是第二位主人) = 4 处 / 4 份文件。
 #      站点若自己按 arrayDimCounts_ 判维度 = 同一问长出第二位主人, 1D 读法套 ND 载体就是步长错位。
 #    · vb6_SA_ReleaseElementsND = 多维那一发的出口: RTL 声明 + 定义 + 主人里那枚字符串 = 3 处 / 3 份文件。
 #      后端多一处 = 有站点绕过主人自己拼那发释放。
 $askDims = CountOf 'carrierIsMultidim('
-if ($askDims -ne 3) {
-    $fail += ("carrier-shape question sites = " + $askDims + " (want exactly 3: declaration + definition + 1 owner)")
+if ($askDims -ne 4) {
+    $fail += ("carrier-shape question sites = " + $askDims + " (want exactly 4: declaration + definition + 销毁主人 + 出口挑销毁那一问)")
 }
 $askDimsFiles = @(FilesOf 'carrierIsMultidim(')
-if ($askDimsFiles.Count -ne 3) {
-    $fail += ("carrier-shape question files = " + ($askDimsFiles -join ', ') + " (want exactly 3 files)")
+if ($askDimsFiles.Count -ne 4) {
+    $fail += ("carrier-shape question files = " + ($askDimsFiles -join ', ') + " (want exactly 4 files)")
 }
 $ndExport = CountOf 'vb6_SA_ReleaseElementsND'
 if ($ndExport -ne 3) {
@@ -397,15 +399,40 @@ if ($ndExportFiles.Count -ne 3) {
     $fail += ("multidim hand-back export files = " + ($ndExportFiles -join ', ') + " (want exactly 3 files)")
 }
 
-# ㉓ 第一百五十二刀: 「过程级数组载体出口要出厂」这一档的登记口只许有一位, 且只有声明那两条臂能调它。
-#    · trackClassArrayCarrierForRelease = 声明 + 定义 + 两条臂 (固定 / 动态) = 4 处 / 3 份文件。
-$trackCarrier = CountOf 'trackClassArrayCarrierForRelease('
+# ㉓ 第一百五十二刀立、第一百五十六刀放宽: 「过程级数组载体出口收尾」这一档的登记口只许有一位,
+#    且只有声明那两条臂能调它。名字从 trackClass... 改成 trackArray... 是因为它不再只认工程类元素。
+#    · trackArrayCarrierForRelease = 声明 + 定义 + 两条臂 (固定 / 动态) = 4 处 / 3 份文件。
+$trackCarrier = CountOf 'trackArrayCarrierForRelease('
 if ($trackCarrier -ne 4) {
     $fail += ("carrier-scope-exit registrar sites = " + $trackCarrier + " (want exactly 4: declaration + definition + 2 声明臂)")
 }
-$trackCarrierFiles = @(FilesOf 'trackClassArrayCarrierForRelease(')
+$trackCarrierFiles = @(FilesOf 'trackArrayCarrierForRelease(')
 if ($trackCarrierFiles.Count -ne 3) {
     $fail += ("carrier-scope-exit registrar files = " + ($trackCarrierFiles -join ', ') + " (want exactly 3 files)")
+}
+# ㉖ 第一百五十六刀: 「出口这一发销毁到底发不发」只有那一枚新字段能答, 且答案只在过程入口算一次。
+#    · freeCarrier = 表字段 + 声明默认值 + 定义形参 + 赋值 + 出口两读 + 那条注释 = 7 处 / 3 份文件;
+#    · scanLocalArrayEscapes( = 声明 + 定义 + 三条过程入口 (Func / Proc / Prop) = 5 处 / 5 份文件
+#      ⇒ 少一条入口 = 那一族的预扫没跑, 登记表会拿上一过程的名单决定这一发的销毁 = 悬空读。
+$carrierFree = CountOf 'freeCarrier'
+if ($carrierFree -ne 7) {
+    $fail += ("carrier-free flag sites = " + $carrierFree + " (want exactly 7: 表字段 + 声明默认 + 定义形参 + 赋值 + 出口两读 + 注释)")
+}
+$carrierFreeFiles = @(FilesOf 'freeCarrier')
+if ($carrierFreeFiles.Count -ne 3) {
+    $fail += ("carrier-free flag files = " + ($carrierFreeFiles -join ', ') + " (want exactly 3 files)")
+}
+$escapeScan = CountOf 'scanLocalArrayEscapes('
+if ($escapeScan -ne 5) {
+    $fail += ("escape pre-pass sites = " + $escapeScan + " (want exactly 5: declaration + definition + 3 proc entries)")
+}
+$escapeScanFiles = @(FilesOf 'scanLocalArrayEscapes(')
+if ($escapeScanFiles.Count -ne 5) {
+    $fail += ("escape pre-pass files = " + ($escapeScanFiles -join ', ') + " (want exactly 5 files)")
+}
+$escapeRoster = CountOf 'escapedLocalArrays_'
+if ($escapeRoster -ne 5) {
+    $fail += ("escape roster sites = " + $escapeRoster + " (want exactly 5: 字段 + 注释 + clear + count + insert)")
 }
 # ㉔ 第一百五十二刀: 那张带档的表 (+第三档) 的形状 —— isCarrier 只许住在表与出口那一趟 (2 份文件 / 4 处)。
 $carrierFlag = CountOf 'isCarrier'
@@ -432,5 +459,5 @@ if ($fail.Count -gt 0) {
     foreach ($f in $fail) { Write-Host ("  - " + $f) }
     exit 1
 }
-Write-Host "CLASS-REFCOUNT-AUTHORITY OK (1 pair mint / 1 header / 2 leg consumers / 3+9 formals / 10 roster files / 6 literal files / 0 stale / 5 registry files + 2 registrants / 1+1 out-slot / 1+1 foreign-write drop / 1 field-teardown shape + file / 6 field-type questions (标量 + 数组两档) / 6 transfer-question sites in 2 files / 1 view-leg hand-back + 2 QiSet calls / 1+2+1 transfer-arm questions / 3 static-gate sites in 1 file + 1 ivref registration / 1 arg-station hand-back + 4+4 helper sites in 4 files / 4+4 index-slot + project-class questions / 1 address-temp mint / 3 element-teardown sites + 4+4 carrier-destroy questions + 4 preserve-with-release sites in 4 files / 4+4 形A questions (out-slot class + owner pass) + 5 copy-in claim sites in 4 files / 3+4 carrier-destroy sites in 3 files / 8 hand-back stations (5 in cgen_redim.cpp + 过程出口) + 3 shape questions + 3 multidim export sites + 4+2 carrier-scope registrar + flag sites / 5 static gates / 4+3 ND Preserve-with-release export sites)"
+Write-Host "CLASS-REFCOUNT-AUTHORITY OK (1 pair mint / 1 header / 2 leg consumers / 3+9 formals / 10 roster files / 6 literal files / 0 stale / 5 registry files + 2 registrants / 1+1 out-slot / 1+1 foreign-write drop / 1 field-teardown shape + file / 6 field-type questions (标量 + 数组两档) / 6 transfer-question sites in 2 files / 1 view-leg hand-back + 2 QiSet calls / 1+2+1 transfer-arm questions / 3 static-gate sites in 1 file + 1 ivref registration / 1 arg-station hand-back + 4+4 helper sites in 4 files / 4+4 index-slot + project-class questions / 1 address-temp mint / 3 element-teardown sites + 4+4 carrier-destroy questions + 4 preserve-with-release sites in 4 files / 4+4 形A questions (out-slot class + owner pass) + 5 copy-in claim sites in 4 files / 3+4 carrier-destroy sites in 3 files / 8 hand-back stations (5 in cgen_redim.cpp + 过程出口) + 4 shape questions + 3 multidim export sites + 4+2 carrier-scope registrar + flag sites / 7+3 carrier-free flag + 5+5 escape pre-pass + 5 roster sites / 5 static gates / 4+3 ND Preserve-with-release export sites)"
 exit 0

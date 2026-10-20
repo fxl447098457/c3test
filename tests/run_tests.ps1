@@ -7840,12 +7840,18 @@ if ($Category -in @("all", "run", "vbp")) {
     #   ① 多维 ReDim 之前那一发问的是**旧载体**那一档 (`Private mND445() As C445` = 一维 / 还没建 = 1D 那一支)，
     #   ② `Erase` 之前那一发才吃兄弟出口 `vb6_SA_ReleaseElementsND` (界表按代码顺序已登记成 2 维)。
     # 账 #305 §B218 (甲) 第一百五十二刀 = 过程级类数组出作用域: 那一发走的是同一位主人的**第三档**
-    #   (登记口 = trackClassArrayCarrierForRelease, 发码口 = emitClassArrayElemHandback 的 "作用域出口" 那一读法)。
-    #   动态 (`loc`) 与固定 (`lf`) 两形同一条臂 (都由主人问维度); 非类那一形 (`lg`) 压根不登记 ⇒ 反面针。
+    #   (登记口 = trackArrayCarrierForRelease, 发码口 = emitClassArrayElemHandback 的 "作用域出口" 那一读法)。
+    #   动态 (`loc`) 与固定 (`lf`) 两形同一条臂 (都由主人问维度); 非类那一形 (`lg`) 交不回元素 ⇒ 元素那头仍是反面针。
+    # 第一百五十六刀把这一档补完: 登记口放宽到**每一档**局部数组，出口除逐枚交回之外再销毁载体本身，
+    #   闸 = 过程入口那一趟预扫说「本过程从没整体用掉它」。`loc`/`lf`/`lg` 三格都不逃逸 ⇒ 三发销毁都在，
+    #   而 `lg` (As Long) 只多那一发销毁、一枚元素不退 = 两问各钉一头。
     Test-EmitcShape 'b445_local_array_scope_exit_handback' @(
         "$Tests\b445_refcount\B445.vbp") @(
-        'vb6_SA_ReleaseElements(loc, vb6_cls_C445_Release);  /* 账 #305 (甲) 腿⑤ 数组档: 作用域出口逐枚交回 (载体不销毁) */',
-        'vb6_SA_ReleaseElements(lf, vb6_cls_C445_Release);  /* 账 #305 (甲) 腿⑤ 数组档: 作用域出口逐枚交回 (载体不销毁) */')
+        'vb6_SA_ReleaseElements(loc, vb6_cls_C445_Release);  /* 账 #305 (甲) 腿⑤ 数组档: 作用域出口逐枚交回 (载体随后销毁) */',
+        'vb6_SA_ReleaseElements(lf, vb6_cls_C445_Release);  /* 账 #305 (甲) 腿⑤ 数组档: 作用域出口逐枚交回 (载体随后销毁) */',
+        'vb6_SafeArrayDestroy1D(loc);  /* 账 #305 (甲) 腿⑤: 作用域出口销毁载体 (本过程内它从没整体用掉) */',
+        'vb6_SafeArrayDestroy1D(lf);  /* 账 #305 (甲) 腿⑤: 作用域出口销毁载体 (本过程内它从没整体用掉) */',
+        'vb6_SafeArrayDestroy1D(lg);  /* 账 #305 (甲) 腿⑤: 作用域出口销毁载体 (本过程内它从没整体用掉) */')
     Test-EmitcAbsent 'b445_local_array_scope_exit_skips_nonclass' @(
         "$Tests\b445_refcount\B445.vbp") @(
         'vb6_SA_ReleaseElements(lg')
@@ -7876,6 +7882,31 @@ if ($Category -in @("all", "run", "vbp")) {
         "$Tests\b445_refcount\B445.vbp") @(
         'vb6_SafeArrayReDimPreserve1D_Tr(vb6_sa_long',
         'vb6_SafeArrayReDimPreserve1D_Tr(vb6_sa_variant')
+    # 账 #305 §B218 (甲) 第一百五十六刀 = 局部数组**载体本身**在过程出口销毁 (腿⑤ 补完)。
+    #   尺 = tests/test_local_array_carrier.bas: 三档该收的 (定长 / 动态 / 多维) 每次调用净 0，
+    #   三档不该收的 (整枚进模块 Variant / 只被 UBound 借过 / `w()` 交给调用方) 必须继续漏 ——
+    #   判的都是每次调用的增量带宽 (页粒度会抖，口径同第五十六刀那把尺)。两台各钉一头。
+    #   改法一验就红的两头 (本机 x64，改回常量的那发): free 恒 false ⇒ fix/dyn/nd 三针全 N;
+    #   free 恒 true ⇒ alias/bound/give 三针全 0。注意恒 true 那一发下元素值照旧读对
+    #   (Release 版里刚 free 还没被复用的块保留原字节)，所以读数是同向证人、不是判据。
+    $b156Needles = @("B218-fix-ok=Y", "B219-dyn-ok=Y", "B220-nd-ok=Y",
+                     "B221-alias-leak=1 read=123456", "B222-bound-leak=1 ubound=63",
+                     "B223-give-leak=1 read=246810", "B224-DONE")
+    Add-BasTest "test_local_array_carrier" "$Tests\test_local_array_carrier.bas" $b156Needles
+    Add-BasTest "test_local_array_carrier_x86" "$Tests\test_local_array_carrier.bas" $b156Needles -Arch "x86"
+    # 发码两面: 该销毁的三形各发一条 (1D 两形 + ND 那一形带兄弟出口与转型)，
+    #   逃逸的三形一条都不许有 —— 反面针钉的是「带注释那一发」的形状, 因为 ReDim 换载体那一发
+    #   长得一模一样、只是没有注释 (少了这个限定, 反面针在修前就红了)。
+    Test-EmitcShape 'b156_local_carrier_destroy_shapes' @(
+        "$Tests\test_local_array_carrier.bas") @(
+        'vb6_SafeArrayDestroy1D(f);  /* 账 #305 (甲) 腿⑤: 作用域出口销毁载体 (本过程内它从没整体用掉) */',
+        'vb6_SafeArrayDestroy1D(d);  /* 账 #305 (甲) 腿⑤: 作用域出口销毁载体 (本过程内它从没整体用掉) */',
+        'vb6_SafeArrayDestroyND((vb6_SafeArrayND*)m);  /* 账 #305 (甲) 腿⑤: 作用域出口销毁载体 (本过程内它从没整体用掉) */')
+    Test-EmitcAbsent 'b156_escaped_carriers_never_destroyed_at_exit' @(
+        "$Tests\test_local_array_carrier.bas") @(
+        'vb6_SafeArrayDestroy1D(a);  /* 账 #305 (甲) 腿⑤: 作用域出口销毁载体',
+        'vb6_SafeArrayDestroy1D(u);  /* 账 #305 (甲) 腿⑤: 作用域出口销毁载体',
+        'vb6_SafeArrayDestroy1D(w);  /* 账 #305 (甲) 腿⑤: 作用域出口销毁载体')
     # 账 #305 §B188 ④ (第九十刀): 出厂那一腿的**尾巴**。`Class_Terminate` 抛错时, `_Destroy` 里体之后
     # 那三截(字段 BSTR / 数组字段 / vb6_Free(me))曾被 ComObj_Release 的帧一起 longjmp 跳掉 —— 实测每枚
     # 抛错的出厂漏一份实例资源: x64 每枚 35~37 字节、x86 每枚 17 字节, 多一枚 20 字符 String 字段就涨到
