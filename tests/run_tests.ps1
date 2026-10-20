@@ -1655,6 +1655,24 @@ function Test-IfaceViewAuthority {
     }
 }
 
+# 账 #454 §B164 形① (第一百三十五刀): 「谁存住了传进去的带权值」那张 KEEPS 表 ——
+# 出口面出自 RTL 的 24 个权威头（不是 grep 名单）· 三分类 0/1/U · unclassified == 0
+# · 三锚（正控 = 存进全局那一枚 / 负控 = 只读那一枚 / 灰控 = 用户过程 + 晚绑定 COM 归 U）
+# 这道门**钉的是新表**，不钉旧机制（旧的 ownedTempsToFree_ 已随撤回那一版删掉）。
+function Test-OwnedTempKeeps {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] owned_temp_keeps ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\check_owned_temp_keeps.ps1" 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        $out | Select-Object -First 8 | ForEach-Object { Write-Host "  $_" }
+    }
+}
+
 # 账 #305 #416 (第九十三刀): 文本进严格转换的那一句解析只许问 oleaut32 一次 + 两位桥分开
 function Test-ConvStrictParse {
     $script:total++
@@ -8394,6 +8412,7 @@ if ($Category -in @("all", "compile")) {
     Test-ObjectSlotBoxing
     Test-BoxTempReclaim
     Test-IfaceViewAuthority
+    Test-OwnedTempKeeps
     Test-ClassRefcountAuthority
     Test-ConvStrictParse
     Test-DateConv
