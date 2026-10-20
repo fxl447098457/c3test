@@ -276,21 +276,6 @@
         bool rtParamTypeUsable = (i >= calleeParams.size())
             || calleeParams[i].type == Vb6Type::Variant
             || calleeParams[i].type == Vb6Type::Empty;
-        // 账 #454 §B164 形①②③⑤ (第一百三十四刀): 「这一位要什么 C 档」这一问**只算一次**,
-        // 两处消费 —— 上面那个块 (按档包装实参) 与下面 594 行上面的提名站。
-        // 为什么必须提到块外: 那张按 callee 名登的 C 签名表 (getRuntimeParamCType) 只许
-        // **一处问** (第 76 道哨兵 implicit_cstr_station 的 R8; 本刀第一版在块外又问了一次,
-        // 当场红)。而提名站**必须**拿到答案 —— `Len`/`LenB` 的符号档是 Unknown (不是
-        // Variant/Empty), 那个块根本不会进, 可它们收的正是 BSTR, 只有签名表知道。
-        // 次序照 §B176: 先问 `builtinNoParamTableFormalCType` (按写出来的 arity 答档),
-        // 它答不出才回落到签名表。
-        const Vb6Type first454 = node.positional.empty()
-            ? Vb6Type::Empty
-            : (node.positional[0] ? inferExprType(*node.positional[0]) : Vb6Type::Empty);
-        const std::string kind176_454 =
-            builtinNoParamTableFormalCType(callee, node.positional.size(), i, first454);
-        std::string rtParamType454 =
-            kind176_454.empty() ? getRuntimeParamCType(callee, i) : kind176_454;
         if (!isByRef && rtParamTypeUsable) {
             // 账 #305 §B176 (第六十七刀): 「这一位要什么 C 档」先问**那一位权威** ——
             // 没有类型化形参表的那族内在函数由 `builtinNoParamTableFormalCType` 按**写出来的**
@@ -307,11 +292,8 @@
                 const Vb6Type first176 = node.positional.empty()
                     ? Vb6Type::Empty
                     : (node.positional[0] ? inferExprType(*node.positional[0]) : Vb6Type::Empty);
-                // 账 #454: 这一问**块外已经算过一次**(kind176_454, 同一个 callee / 同一个位号 /
-                // 同一个首参档), 这里直接复用 —— 第 76 道哨兵 implicit_cstr_station 的 R8
-                // 把 `builtinNoParamTableFormalCType` 的读者钉在 2 处 (投影 + 本站), 再问一次
-                // 就是第三位主人。
-                std::string kind176 = kind176_454;
+                std::string kind176 = builtinNoParamTableFormalCType(
+                    callee, node.positional.size(), i, first176);
                 // 账 #305 §B177 (第六十八刀): 宏的分派位(= InStr 的 needle) 上 **Variant 裸交**。
                 // `vb6_InStr` / `vb6_InStrC` 是按 needle 分派的 _Generic 宏, needle 是
                 // vb6_VARIANT 时选 `vb6_InStrVar` / `vb6_InStrVarC` —— 那里自己
@@ -329,7 +311,7 @@
                            callee, node.positional.size(), i, first176)) {
                     kind176 = "vb6_VARIANT";
                 }
-                rtParamType = kind176.empty() ? rtParamType454 : kind176;
+                rtParamType = kind176.empty() ? getRuntimeParamCType(callee, i) : kind176;
                 // 账 #305 §B180 (第六十九刀): 这一位要不要**收整枚槽**（= 不解包），一处问句
                 // 两站同归 —— 这里撤回解包，`builtin_fixup` 那一站照着同一问句把 callee 换成
                 // 收槽的出口 `vb6_StrPtrVar`。撤掉的病形是 `vb6_StrPtr(vb6_VariantToString(v))`：
@@ -608,35 +590,6 @@
                     argVal = "(" + ifaceCT + ")" + argVal;
                 }
             }
-        }
-        // 账 #454 §B164 形①③⑤: 一枚**现造的带权值**内联喂进 callee、而 callee 只读它
-        // (五形实测: `n = Len(vb6_VariantToString(v))` 24.8 B/次、`n = VarType(gColl(2))`
-        // 25.6 B/次、`n = Len(<拼接>)` 75 B/次 —— 三形的结果都没落到任何变量上, 于是从
-        // 来没人 free)。口径 = **语句级带档名单**(先例 M22 `ansiTempsToFree_`): 提成具名
-        // 临时量, 由 emitStmt 在这条语句末按档收回 —— 与 VB6「临时量的寿命就是这一条语句」
-        // 同档, 所以不会重演 §B165 那次「改问借用权威反而悬空」。
-        // 不在此收的两形, 各自有理由:
-        //   ① **ByRef 形参** —— 传进去的是这枚临时量的**地址**, 被调方一旦把它存下来或
-        //      回写, 语句末 free 就成悬空 ⇒ 宁可漏这一形也不许发成引用越界的 C。
-        //   ② 右值被**赋值/进槽**接手的那些形不经过本站(它们在赋值站与 §B164 形④ 那枚
-        //      出口里), 本站只管"没人接手"的那一半。
-        // 档 = **形参要的那个 C 类型** (与上方 ivref 那一支同一句: cType 出了作用域就按
-        // 形参重算)。只有 BSTR / vb6_VARIANT 两档谈得上"现造的带权值", 其余档(数值标量、
-        // 指针、UDT)今天没有现造即漏的那一形 ⇒ 一律不介入, 不许顺手扩大面。
-        if (!isByRef && node.positional[i]) {
-            std::string declCT454;
-            if (!rtParamType454.empty()) {
-                // 上方那段已经按权威答过这一位 (顺序: builtinNoParamTableFormalCType →
-                // getRuntimeParamCType)。**复用**它的答案, 不在这里再问一次那张 C 签名表 ——
-                // 第 76 道哨兵 implicit_cstr_station 的 R8 钉的就是「那张表只许一处问」。
-                // `Len`/`LenB` 正是靠这条路拿到 "BSTR": 符号档把它们登记成 Variant/Empty,
-                // 按形参表折出来是 `void*`, 只有签名表知道 vbb6_Len 收的是 BSTR。
-                declCT454 = rtParamType454;
-            } else if (i < calleeParams.size()) {
-                declCT454 = cTypeForDeclaredTypeName(calleeParams[i].typeRefName);
-                if (declCT454.empty()) declCT454 = mapType(calleeParams[i].type);
-            }
-            argVal = hoistOwnedTemp(node.positional[i].get(), argVal, declCT454);
         }
         args.push_back(std::move(argVal));
     }

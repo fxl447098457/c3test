@@ -1451,22 +1451,6 @@ function Test-VariantSlotStore {
     }
 }
 
-function Test-OwnedTempReclaim {
-    # 账 #454 §B164 形①②③⑤ (第一百三十四刀): 「一条语句里现造的带权临时量」只许住
-    # 一枚权威 / 一份带档名单 / 一处回收。八条规则见那道哨兵的文件头。
-    $script:total++
-    Write-Host -NoNewline "  [STATIC] owned_temp_reclaim ... "
-    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\check_owned_temp_reclaim.ps1" 2>&1
-    if ($LASTEXITCODE -eq 0) {
-        $script:pass++
-        Write-Host "PASS" -ForegroundColor Green
-    } else {
-        $script:fail++
-        Write-Host "FAIL" -ForegroundColor Red
-        $out | Select-Object -First 6 | ForEach-Object { Write-Host "  $_" }
-    }
-}
-
 function Test-ImplicitCstrStation {
     # 账 #305 §B174 (第六十五刀): 「数值实参交进 VB 的字符串形参 ⇒ 隐式 CStr」这条规则的
     # 站点/位号/档位/形状四问各只许有一位主人 (站点=arg_emit 的 Fix 175)。
@@ -3434,34 +3418,6 @@ if ($Category -in @("all", "run", "bas")) {
         'e = vb6_VariantFromStackVARIANT(&_fe_var_0);',
         'vb6_VariantAssign(&e, vb6_VariantFromValue(VB6_SA_AT(BSTR, gArr, _fe_i5)));',
         'vb6_VariantAssign(&keep, vb6_VariantFromValue(e));'
-    )
-    # 账 #454 §B164 形①②③⑤ (第一百三十四刀): 一条语句里**现造**的带权临时量从来没进过回收名单 ——
-    # 它没落到任何变量上, 所以从来没被 free。BASE 实测(x86 / x64, 每次的增量):
-    #   ① n = Len("ab" & "cd")        75.2 / 121.3 字节  (拼接结果 + 两枚字面量, 三枚全漏)
-    #   ② n = Len(gArr(1) & "!")      49.9 /  68.3      (同一形, 换一条读数来源)
-    #   ③ n = VarType(gColl(2))       25.0 /  35.0      (Collection 交回那枚带权副本)
-    #   ⑤ n = Len(v) (v 是数值)       24.9 /  51.5      (换算出口现造的临时串)
-    #   ④ For Each 循环变量 = 0  ← 第五十五刀已出, 本夹具把它当**证人**钉住, 不许改坏
-    # 口径 = 语句级**带档**名单(先例 M22 的 ansiTempsToFree_): 提成具名临时量, 由 emitStmt 在
-    # 这条语句末按档收回 —— BSTR 交 vb6_BSTR_Free、vb6_VARIANT 交 vb6_VariantClear。只发一种
-    # 就会在另一档上继续漏, 或把 VARIANT 当 BSTR 解。临时量的寿命 = 一条语句, 正是 VB6 自己的
-    # 规矩 ⇒ 不会重演 §B165 那次「改问借用权威反而悬空」。
-    # 判据问**每次的增量上限**(< 8 字节/次), 不用绝对值; BASE 比它高一个数量级。
-    # api=1/1 是「两次读数都真取到」的正控 —— 缺它, delta 可能是"自己减自己"的假零。
-    # slot / plain 两针是「别把已经对的那两条路改坏」的证人(BASE 上也是 0), len/arrlen/vlen/
-    # chain/stored 五针钉的是「收回临时量不许动到值本身」。
-    $b164tNeedles = @("B164T-api=1/1", "B164T-concat=Y", "B164T-arrcat=Y", "B164T-coll=Y",
-        "B164T-conv=Y", "B164T-foreach=Y", "B164T-slot=Y", "B164T-plain=Y",
-        "B164T-len=4", "B164T-arrlen=4", "B164T-vlen=5",
-        "B164T-chain=ABC/ABC!ABC", "B164T-stored=keepmealive/keepmealive3", "B164T-DONE")
-    Add-BasTest "test_b164_owned_temp" "$Tests\test_b164_owned_temp.bas" $b164tNeedles
-    Add-BasTest "test_b164_owned_temp_x86" "$Tests\test_b164_owned_temp.bas" $b164tNeedles -Arch "x86"
-    # 发码形状针: 两档各自的「声明 + 收回」都得在产物里 —— 缺任一行 = 有人把档又合成一种 free 了。
-    Test-EmitcShape "b164_owned_temp_shape" @("$Tests\test_b164_owned_temp.bas") @(
-        'BSTR _own_',
-        'vb6_BSTR_Free(_own_',
-        'vb6_VARIANT _own_',
-        'vb6_VariantClear(&_own_'
     )
     # 账 #305 §B166 (第五十六刀): 一枚 ParamArray 往返的两半回收各接上一枚出口 —— 调用点现造的
     # 数组归**被调方统一出口**销毁(此前 vb6_PA_Destroy 全仓 0 调用者), For Each 的中间槽 _pa_vN
@@ -8408,7 +8364,6 @@ if ($Category -in @("all", "compile")) {
     Test-RunBudget
     Test-VariantI8Coverage
     Test-VariantSlotStore
-    Test-OwnedTempReclaim
     Test-ImplicitCstrStation
     Test-ParamArrayReclaim
     Test-BstrBorrowSlot

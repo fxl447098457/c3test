@@ -110,19 +110,8 @@ void CCodeGen::visit(BinaryExpr& node) {
     if (node.op == BinaryOp::Concat) {
         left = wrapToBSTR(left, *node.left);
         right = wrapToBSTR(right, *node.right);
-        // 账 #454 §B164 形①②: 拼接两侧若有一侧是这一句现造的串, 那一枚从来没人收
-        // (实测 `n = Len("ab" & "cd")` 每次漏三枚 ≈ 75 B, x86)。
-        //   左操作数 —— 复用既有的 vb6_BSTR_ConcatFree (它本来就把左操作数 SysFreeString
-        //     掉), 只把触发条件从「文本里出现 vb6_BSTR_Concat 子串」换成「权威答出现造」:
-        //     旧判据是**子串**搜索, 左操作数是 `vb6_Len(vb6_BSTR_Concat(...))` 这种**顶层不是
-        //     BSTR**的形状时也会命中 ⇒ 把一枚 Long 当 BSTR 放掉; 换权威后这一形归 Concat。
-        //   右操作数 —— 没有既有的"免费放右操作数"出口, 所以提成具名临时量交语句末收回
-        //     (比给它新造一枚 RTL 出口便宜, 也只在这一形上多两行 C)。
-        // 两侧经 wrapToBSTR 之后**必是 BSTR**, 所以档直接说 "BSTR" (不猜源档)。
-        const bool leftOwned454 =
-            (exprOwnedTempKind(node.left.get(), left, "BSTR") == kOwnedTempBstr);
-        right = hoistOwnedTemp(node.right.get(), right, "BSTR");
-        if (leftOwned454) {
+        bool leftIsConcat = (left.find("vb6_BSTR_Concat") != std::string::npos);
+        if (leftIsConcat) {
             lastExpr_ = "vb6_BSTR_ConcatFree(" + left + ", " + right + ")";
         } else {
             lastExpr_ = "vb6_BSTR_Concat(" + left + ", " + right + ")";
@@ -203,12 +192,8 @@ void CCodeGen::visit(BinaryExpr& node) {
     if (node.op == BinaryOp::Add && addIsConcat092i) {
         left = wrapToBSTR(left, *node.left);
         right = wrapToBSTR(right, *node.right);
-        // 账 #454 §B164 形①②: 与上面 Concat 那一支同一条规则 (VB6 的 `+` 在两端是串时
-        // 等同于 `&`)。两处必须同口径 —— 只改一处等于把同一问的答案写成两份。
-        const bool leftOwned454b =
-            (exprOwnedTempKind(node.left.get(), left, "BSTR") == kOwnedTempBstr);
-        right = hoistOwnedTemp(node.right.get(), right, "BSTR");
-        if (leftOwned454b) {
+        bool leftIsConcat = (left.find("vb6_BSTR_Concat") != std::string::npos);
+        if (leftIsConcat) {
             lastExpr_ = "vb6_BSTR_ConcatFree(" + left + ", " + right + ")";
         } else {
             lastExpr_ = "vb6_BSTR_Concat(" + left + ", " + right + ")";
