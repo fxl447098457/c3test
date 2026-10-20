@@ -549,6 +549,42 @@ Sub W28HandedOverArg()
     Debug.Print "W28-made=" & (Made - m0) & " end-terms=" & (Terms - t0)
 End Sub
 
+' ==== 账 #305 §B218 (甲) 第一百五十二刀 = 腿④ 与腿⑤ 合体那一格: 过程级**类数组**出作用域 ====
+' 修前: 载体与元素两样都没人放 (本机探针 A6 局部动态 / A7 局部固定 各退 0 枚, `.build/k1650_p64.txt`);
+' 修后: 出口那一发把里面每一枚交回同一位主人 (臂仍由主人自己问维度)。非类那一档是**反面证人** = 一枚不退。
+' 刻意不在这一刀吃「销毁载体」: 出口那一发的形状只有「按代码顺序」那一个答案, 出厂答错的下限是静默不漏,
+' 而 free 答错就是拿错步长解引用 ⇒ 载体级的销毁 (= 内存那半, 全元素档一起) 是另一格机制, 在册。
+Private Sub W36OneDyn()
+    Dim loc() As C445
+    ReDim loc(1 To 2)
+    Set loc(1) = New C445
+    Set loc(2) = New C445
+End Sub
+
+Private Sub W36OneFix()
+    Dim lf(1 To 2) As C445
+    Set lf(1) = New C445
+    Set lf(2) = New C445
+End Sub
+
+Private Sub W36OneNotClass()
+    Dim lg() As Long
+    ReDim lg(1 To 2)
+    lg(1) = 7
+End Sub
+
+Sub W36LocalArrayScope()
+    Dim t0 As Long
+    Dim i As Long
+    t0 = Terms
+    For i = 1 To 3
+        W36OneDyn
+        W36OneFix
+        W36OneNotClass
+    Next
+    Debug.Print "W36-terms=" & (Terms - t0)
+End Sub
+
 Sub Main()
     W1SetNothing
     W2Alias
@@ -585,5 +621,6 @@ Sub Main()
     W33NonClassCarriers
     W34NdCarrierUntouched
     W35PreserveShrink
+    W36LocalArrayScope
     Debug.Print "B445-DONE"
 End Sub

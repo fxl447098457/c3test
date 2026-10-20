@@ -7721,9 +7721,13 @@ if ($Category -in @("all", "run", "vbp")) {
                     #   W33 = 反面证人 (元素不是工程类: 泛对象包装器 / 裸值) ⇒ 一枚不退, 在册; W34 = 多维载体那一档, 第一百四十九刀量完、第一百五十刀补上 ⇒ 从反面证人翻成本体。
                     #   运行时读数: W34 修前 0 枚, 修后 2 枚 (2x2 载体里两格各握着 New 出来的一枚引用)。
                     "W33-terms=0", "W34-terms=2",
+                    # 第一百五十二刀 (腿④ 与腿⑤ 合体 = 过程级类数组出作用域): W36 三轮 × (动态 2 + 固定 2 + 非类 0) = 12 枚。
+#   修前 = 0 枚 (本机探针 A6 局部动态 / A7 局部固定 各退 0 枚, .build/k1650_p64.txt) ⇒ 这一格是那条漏在门禁里的第一枚证人;
+#   非类那一档 (`Dim lg() As Long`) 是反面证人 = 一枚都不许多退。载体本身那一格 (内存) 刻意不吃 = 见发码注那句「载体不销毁」。
                     # 第一百四十八刀 (Preserve 收缩丢尾): W35 = 3 缩到 1 ⇒ 尾两枚当场出厂 (修前 = 0 枚),
                     #   保留那一枚照常可用; W32 (同尺寸 Preserve) 必须继续 = 0 = 搬走的不许多退。
                     "W35-terms=2 kept=True",
+                    "W36-terms=12",
                     "B445-DONE")
     Test-Vbp 'b445_class_slot_refcount' "$Tests\b445_refcount\B445.vbp" $b445Needles
     Test-Vbp 'b445_class_slot_refcount_x86' "$Tests\b445_refcount\B445.vbp" $b445Needles -Arch "x86"
@@ -7834,6 +7838,16 @@ if ($Category -in @("all", "run", "vbp")) {
     #   问「这枚载体几维」挑出口 (carrierIsMultidim) ⇒ 两发各钉一条，谁被改成另一种答案当场红：
     #   ① 多维 ReDim 之前那一发问的是**旧载体**那一档 (`Private mND445() As C445` = 一维 / 还没建 = 1D 那一支)，
     #   ② `Erase` 之前那一发才吃兄弟出口 `vb6_SA_ReleaseElementsND` (界表按代码顺序已登记成 2 维)。
+    # 账 #305 §B218 (甲) 第一百五十二刀 = 过程级类数组出作用域: 那一发走的是同一位主人的**第三档**
+    #   (登记口 = trackClassArrayCarrierForRelease, 发码口 = emitClassArrayElemHandback 的 "作用域出口" 那一读法)。
+    #   动态 (`loc`) 与固定 (`lf`) 两形同一条臂 (都由主人问维度); 非类那一形 (`lg`) 压根不登记 ⇒ 反面针。
+    Test-EmitcShape 'b445_local_array_scope_exit_handback' @(
+        "$Tests\b445_refcount\B445.vbp") @(
+        'vb6_SA_ReleaseElements(loc, vb6_cls_C445_Release);  /* 账 #305 (甲) 腿⑤ 数组档: 作用域出口逐枚交回 (载体不销毁) */',
+        'vb6_SA_ReleaseElements(lf, vb6_cls_C445_Release);  /* 账 #305 (甲) 腿⑤ 数组档: 作用域出口逐枚交回 (载体不销毁) */')
+    Test-EmitcAbsent 'b445_local_array_scope_exit_skips_nonclass' @(
+        "$Tests\b445_refcount\B445.vbp") @(
+        'vb6_SA_ReleaseElements(lg')
     Test-EmitcShape 'b445_nd_carrier_destroy_handback_shape' @(
         "$Tests\b445_refcount\B445.vbp") @(
         'vb6_SA_ReleaseElements((vb6_SafeArrayND*)mND445, vb6_cls_C445_Release);',
