@@ -9,19 +9,33 @@
 # 命题换错 ⇒ 门把 5 份既有夹具的运行期读数改了（注册表那一族整条断掉等）⇒ 那一版已撤回。
 # 教训：**先证明「知道谁不能回收」，再谈「能回收」**。
 #
-# 三分类（这一版的口径）：
-#   KEEPS=0  确定只在调用内读，不把指针存出去 —— 允许回收（**但是**回收那一刀还没开）
-#   KEEPS=1  确定会把指针存到结构体/堆/全局，或原样返回出去，或经由它写出去 —— 禁止回收
-#   U       静态分析或权威签名表答不出它到底存不存
-# 逃逸通道三条（KEEPS=1 的「为什么」那一栏，缺一条就漏一族）：
+# 三分类（这一版的口径，**只看得指针轴**）：
+#   keeps_pointer = 0  确定只在调用内读，指针/槽位/引用**没有**带出调用 ⇒ 允许回收
+#   keeps_pointer = 1  确定把指针/槽位/引用**保留到调用外**（存进结构体·堆·全局、
+#                      原样返回出去，或经由它写出去）⇒ 禁止回收
+#   keeps_pointer = U  证不出（静态分析或权威签名表答不出来）
+# 逃逸通道三条（keeps_pointer=1 的「为什么」那一栏，缺一条就漏一族）：
 #   store   存进结构体/堆/全局（指针活着越过调用）
-#   ret     原样返回（借出去 ⇒ 调用方拿到的是同一枚指针，不是副本）
+#   ret     原样返回（借出去 ⇒ 调用方拿到的是同一枚指针）
 #   write   经由它写出去（形参是 BSTR* / VARIANT* 那种可写槽）
+#
+# **第二条轴：persists_data**（数据持久化）—— 与指针轴**分开**，**不参与回收**。
+# 「这条形参带进去的**数据**有没有被落到一个比调用活得久的地方」（注册表 / 文件 / 剪贴板）。
+# 注册表那一族在**这条轴上是 1**（值真的落进了注册表），在**指针轴上是 0**（RegSetValueExW
+# 与 vb6_RegBuildKey 都复制 ⇒ 指针不留存）—— 两轴各答各的，回收只看指针轴。
+#
+# 第三列 gate = open / closed：closed 的行**不进提名面**。
+# 注册表那一族挂 closed 的理由**不是**它不安全（它指针轴上是 0），而是
+# **它那一族的运行期破坏至今未归因**（CI 上 R2-vt=1 而不是 8204，连注册表键都没建起来）
+# ⇒ 未归因 ⇒ 不许提名（纪律：未登记差异 ⇒ 停机）。
 #
 # 出口面（**不许用 grep 名单当权威**）：权威 = RTL 的那 18 个头
 # （src/rtl/core/vb6rtl/*.h + src/rtl/core/vb6forms/*.h，也就是生成代码 include 的
 # 那两张伞头 vb6rtl.h / vb6forms.h 拉进来的全部子头）。表里每一行都必须能从那 18 个头
 # 推出来；推不出来 = unclassified ≠ 0 ⇒ 停机。
+#
+# **提名面**（下一刀回收时要用的那一块）：keeps_pointer = 0 ∧ gate = open。
+# 硬形状（那一刀自己的判据）不在本表里；本表只答「谁安全、谁不安全、谁不许动」。
 #
 # 分类的**可证性**（这一版最要紧的一条）：只**证得出**的才给 0/1，证不出的给 U。
 #   证得出 KEEPS=1：形参被**整枚**赋给一个结构体成员/文件级全局，或被**原样**返回，
@@ -190,6 +204,10 @@ function Get-LocalNames([string]$body) {
     return $names
 }
 
+# 数据持久化的**落点**（第二条轴的 sink）：这些 API 一调，数据就落到一个比调用活得久的地方。
+# 注册表写 / 文件写 / 剪贴板。**这一轴不参与回收**（指针轴才是回收看的那一轴）。
+$script:sinkRx = '(RegSetValueExW|RegCreateKeyExW|RegSetKeyValueW|WriteFile|WriteConsoleW|fwrite|fputs|fputws|SetClipboardData)'
+
 function Classify([string]$name, [int]$idx) {
     $key = "$name|$idx"
     if ($script:clsMemo.ContainsKey($key)) {
@@ -312,22 +330,69 @@ $rows = @{}
 # （踩过一次： hashtable 的 Keys 顺序变一次，快照就漂 396 行 ⇒ 表变成不可登记的）。
 foreach ($key in ($surface.Keys | Sort-Object)) {
     $parts = $key -split '\|'
-    Classify $parts[0] ([int]$parts[1])
-    $rows[$key] = @($script:clsClass, $script:clsEscape, $surface[$key])
+    $nm = $parts[0]
+    $idx = [int]$parts[1]
+    Classify $nm $idx
+    $kp = $script:clsClass
+    $esc = $script:clsEscape
+    # ---- 第二条轴：persists_data（数据持久化，**不参与回收**）----
+    # 这枚形参带进去的**数据**有没有落到一个比调用活得久的地方。判据 = 它的数据有没有
+    # 流进一枚 sink（注册表写 / 文件写 / 剪贴板）。证不出就 U（这一轴不卡任何东西）。
+    $persists = '0'
+    if ($bodyOf.ContainsKey($nm) -and $protos.ContainsKey($nm) -and $idx -lt $protos[$nm].Count) {
+        $arg = [regex]::Match($protos[$nm][$idx], '([A-Za-z_][A-Za-z0-9_]*)\s*$').Groups[1].Value
+        $body = $bodyOf[$nm]
+        $hasSink = [regex]::IsMatch($body, $script:sinkRx)
+        $argInSink = $false
+        if ($hasSink) {
+            # ⚠ 落点的**实参表**要取到「那一整条语句」为止：非贪婪的 `[^;]*?\)` 会在
+            # `(const BYTE*)setting` 的那个 ')' 处停下 ⇒ 形参名压根不在捕获里（实测
+            # SaveSetting 的四格因此全落成 U）。改成「从 sink 那一枚起，往后看同一条语句」。
+            foreach ($sm in [regex]::Matches($body, $script:sinkRx)) {
+                $tail = $body.Substring($sm.Index, [Math]::Min(400, $body.Length - $sm.Index))
+                $stop = $tail.IndexOf(';')
+                if ($stop -ge 0) { $tail = $tail.Substring(0, $stop) }
+                if ([regex]::IsMatch($tail, '\b' + [regex]::Escape($arg) + '\b')) { $argInSink = $true; break }
+            }
+        }
+        if ($argInSink) { $persists = '1' } elseif ($hasSink) { $persists = 'U' }
+    }
+    # ---- 第三列 gate：closed 的行**不进提名面** ----
+    # 注册表那一族挂 closed 的理由是**它那一族的运行期破坏未归因**（CI 上 R2-vt=1 而不是
+    # 8204，连注册表键都没建起来）⇒ 未归因 ⇒ 不许提名。**不是**因为它指针轴上不安全
+    # （它在指针轴上是 0：RegSetValueExW 与 vb6_RegBuildKey 都复制）。
+    $gate = 'open'
+    if ($nm -in @('vb6_SaveSetting', 'vb6_GetSetting', 'vb6_DeleteSetting', 'vb6_GetAllSettings')) {
+        $gate = 'closed'
+    }
+    $rows[$key] = @($kp, $esc, $persists, $gate, $surface[$key])
 }
 $k0 = @($rows.Values | Where-Object { $_[0] -eq '0' }).Count
 $k1 = @($rows.Values | Where-Object { $_[0] -eq '1' }).Count
 $ku = @($rows.Values | Where-Object { $_[0] -eq 'U' }).Count
-Write-Host ("KEEPS 表: KEEPS=0 $k0 / KEEPS=1 $k1 / U $ku （共 " + $rows.Count + " 行）")
+# 提名面 = keeps_pointer 0 ∧ gate open（**不看 persists_data**：数据持久化那条轴不参与回收）
+$nomRows = @($rows.Keys | Where-Object { $rows[$_][0] -eq '0' -and $rows[$_][3] -eq 'open' })
+$closedRows = @($rows.Keys | Where-Object { $rows[$_][3] -eq 'closed' })
+Write-Host ("KEEPS 表（指针轴）: keeps_pointer=0 $k0 / =1 $k1 / U $ku （共 " + $rows.Count + " 行）")
+Write-Host ("提名面（keeps_pointer=0 ∧ gate=open）: " + $nomRows.Count + " 行 ; closed " + $closedRows.Count + " 行")
 
-# ---------------------------------------------------------------- 三锚
-# 正控 = 存进全局那一枚（vb6_ErrRaise 把 source/description 存进 vb6_err）⇒ KEEPS=1
-# 负控 = 只读那一枚（vb6_Len 只读）⇒ KEEPS=0
-# 灰控 = 用户过程 / 晚绑定 COM ⇒ U（不是表里的行，是**规则**上的那一类）
+# ---------------------------------------------------------------- 三锚（按裁决）
+# 正控 = **指针轴**上真存指针的四族（用户裁决）：vb6_ErrRaise / vb6_RaiseError（存进全局
+#   vb6_err）、vb6_ho_setVariantBstr（存进 VARIANT 槽）、vb6_BSTR_AssignMove（经解引用写出去）、
+#   vb6_ArraySetVariant / vb6_LoadResData / vb6_IIfVariant（经可写槽接手）⇒ keeps_pointer = 1
+# 负控 = 只读那一枚（vb6_Len）⇒ keeps_pointer = 0
+# 灰控 = 证不出那一枚（vb6_DecSetTag 第 0 格）⇒ keeps_pointer = U（**必须保持 U**）
 $anchors = @(
-    @{ key = 'vb6_ErrRaise|1'; want = '1'; why = 'store: 存进全局 vb6_err' },
-    @{ key = 'vb6_ErrRaise|2'; want = '1'; why = 'store: 存进全局 vb6_err' },
-    @{ key = 'vb6_Len|0';      want = '0'; why = 'read-only: 只在调用内读' }
+    @{ key = 'vb6_ErrRaise|1';         want = '1'; why = 'store: 存进全局 vb6_err' },
+    @{ key = 'vb6_ErrRaise|2';         want = '1'; why = 'store: 存进全局 vb6_err' },
+    @{ key = 'vb6_RaiseError|1';       want = '1'; why = 'store: 存进全局 vb6_err' },
+    @{ key = 'vb6_ho_setVariantBstr|1'; want = '1'; why = 'store: 存进 VARIANT 槽' },
+    @{ key = 'vb6_BSTR_AssignMove|1';  want = '1'; why = 'write: 经解引用写出去' },
+    @{ key = 'vb6_ArraySetVariant|2';  want = '1'; why = 'write: 经可写槽接手' },
+    @{ key = 'vb6_LoadResData|0';      want = '1'; why = 'write: 经可写槽接手' },
+    @{ key = 'vb6_IIfVariant|1';        want = '1'; why = 'ret+write' },
+    @{ key = 'vb6_Len|0';              want = '0'; why = 'read-only: 只在调用内读' },
+    @{ key = 'vb6_DecSetTag|0';        want = 'U'; why = '证不出: 转手进 vb6_DEC_VT' }
 )
 foreach ($a in $anchors) {
     if (-not $rows.ContainsKey($a.key)) {
@@ -335,9 +400,37 @@ foreach ($a in $anchors) {
         continue
     }
     if ($rows[$a.key][0] -ne $a.want) {
-        $bad += ("K1 锚点 " + $a.key + " 分类 = " + $rows[$a.key][0] + "，期望 " + $a.want +
+        $bad += ("K1 锚点 " + $a.key + " keeps_pointer = " + $rows[$a.key][0] + "，期望 " + $a.want +
                  "（" + $a.why + "；实测逃逸通道 = " + $rows[$a.key][1] + "）")
     }
+}
+# K8 注册表族：指针轴上是 0（复制证据完整）＋ **gate=closed**（CI 红未归因 ⇒ 不进提名面）
+$regRows = @($rows.Keys | Where-Object { ($_ -split '\|')[0] -in @('vb6_SaveSetting', 'vb6_GetSetting', 'vb6_DeleteSetting', 'vb6_GetAllSettings') })
+if ($regRows.Count -eq 0) {
+    $bad += 'K8 表里没有注册表那一族 —— 那一族必须显式在册（哪怕是 closed）'
+} else {
+    foreach ($r in $regRows) {
+        if ($rows[$r][0] -ne '0') {
+            $bad += ("K8 注册表族 " + $r + " 的 keeps_pointer = " + $rows[$r][0] +
+                     "，期望 0（RegSetValueExW 与 vb6_RegBuildKey 都复制 ⇒ 指针不留存）")
+        }
+        if ($rows[$r][3] -ne 'closed') {
+            $bad += ("K8 注册表族 " + $r + " 的 gate = " + $rows[$r][3] +
+                     "，期望 closed（CI 红未归因 ⇒ 那一族不进提名面）")
+        }
+    }
+}
+# K9 提名面：closed 的行**一律不许**出现在里面（这条是「停机」纪律的机械形式）
+$leak = @($closedRows | Where-Object { $rows[$_][0] -eq '0' -and $nomRows -contains $_ })
+if ($leak.Count -gt 0) {
+    $bad += ("K9 提名面里混进了 closed 的行 " + $leak.Count + " 处: " + (($leak | Select-Object -First 4) -join ', '))
+}
+# K10 提名面**只看指针轴**：一条 persists_data=1 而 keeps_pointer=0 的行，必须是 closed
+#     （数据持久化那条轴不参与回收 ⇒ 落在 open 集合里就是「按数据轴禁回收」= 走错轴）
+$misaxis = @($rows.Keys | Where-Object { $rows[$_][2] -eq '1' -and $rows[$_][0] -eq '0' -and $rows[$_][3] -ne 'closed' })
+if ($misaxis.Count -gt 0) {
+    $bad += ("K10 " + $misaxis.Count + " 行 persists_data=1 却落在 open 集合里（数据轴不参与回收 ⇒ " +
+             "按数据轴禁回收就是走错轴）: " + (($misaxis | Select-Object -First 4) -join ', '))
 }
 $grayRules = @('user-proc', 'late-bound-com')
 
@@ -349,20 +442,22 @@ if (Test-Path -LiteralPath $TableFile) {
         # ⚠ 字段分隔**不许用 '|'**：键自己带一个 '|'（出口名|形参序号），用 '|' 分隔
         # 就把键切成两半 ⇒ 快照对账全表漂（踩过一次：漂 396 行，名单每跑一次还不一样）。
         # 用 TAB：键与逃逸通道里都不可能出现 TAB。
-        $p = $ln -split "`t", 4
-        if ($p.Count -lt 4) { continue }
-        $snap[$p[0]] = @($p[1], $p[2], $p[3])
+        $p = $ln -split "`t", 6
+        if ($p.Count -lt 6) { continue }
+        $snap[$p[0]] = @($p[1], $p[2], $p[3], $p[4], $p[5])
     }
 }
 if ($Bless) {
     $out = @()
     $out += '# owned_temp_keeps_164.txt —— 账 #454 §B164 形① 的 KEEPS 表（出口面出自 RTL 的权威头）'
-    $out += '# 格式: 出口名|形参序号 <TAB> 分类(0/1/U) <TAB> 逃逸通道 <TAB> 形参档'
-    $out += '# 分类口径: 0 = 只在调用内读 / 1 = 存|原样返回|经它写出去 / U = 证不出'
+    $out += '# 字段（TAB 分隔）: 出口名|形参序号 <TAB> keeps_pointer(0/1/U) <TAB> 逃逸通道 <TAB> persists_data(1/0/U) <TAB> gate(open/closed) <TAB> 形参档'
+    $out += '# keeps_pointer = 指针/槽位/引用有没有带出调用（**回收只看这一轴**）'
+    $out += '# persists_data = 这条形参的数据有没有落到比调用活得久的地方（**不参与回收**）'
+    $out += '# gate=closed = **不进提名面**（注册表那一族：CI 红未归因 ⇒ 停机）'
     $out += '# 用户过程与晚绑定 COM 不在表里（不是具名出口）⇒ 按规则归 U，见 check_owned_temp_keeps.ps1'
     foreach ($k in ($rows.Keys | Sort-Object)) {
         $v = $rows[$k]
-        $out += ($k + "`t" + $v[0] + "`t" + $v[1] + "`t" + $v[2])
+        $out += ($k + "`t" + $v[0] + "`t" + $v[1] + "`t" + $v[2] + "`t" + $v[3] + "`t" + $v[4])
     }
     [System.IO.File]::WriteAllLines($TableFile, $out, (New-Object System.Text.UTF8Encoding($false)))
     Write-Host ("已登记快照: " + $TableFile + " （" + $rows.Count + " 行）")
@@ -418,8 +513,9 @@ if ($missingW.Count -gt 0) {
 if ($bad.Count -eq 0) {
     Write-Host ("PASS owned temp keeps: authority headers " + $authorityHeaders.Count +
                 " / surface " + $surface.Count + " / rows " + $rows.Count +
-                " | KEEPS=0 " + $k0 + " KEEPS=1 " + $k1 + " U " + $ku +
-                " | unclassified 0 | 3 anchors OK | snapshot OK | gray rules 2 | witnesses 3")
+                " | keeps_pointer 0 " + $k0 + " 1 " + $k1 + " U " + $ku +
+                " | closed " + $closedRows.Count + " | nomination " + $nomRows.Count +
+                " | unclassified 0 | 10 anchors OK | gray rules 2 | witnesses 3")
     exit 0
 }
 foreach ($b in $bad) { Write-Host ("FAIL " + $b) -ForegroundColor Red }
