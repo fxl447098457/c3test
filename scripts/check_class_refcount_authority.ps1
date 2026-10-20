@@ -24,6 +24,7 @@
 #      恰好 1 处、 基名那一问  恰好 2 处 (含本刀那一臂,
 #      另一处是 myBaseClassOf)、接口视图那道排除  恰好 1 处。
 #   ⑮ Static 那道闸 `!var.isStatic && !inStaticProc_` 全仓恰好 3 处、且全住在一份文件 (cgen_localdecl.cpp)：登记「出口放手」的三条腿 (两条工程类 + 一条接口视图) 共用同一道闸 —— 第一百三十三刀补的就是视图那条腿缺的那半。视图注册口 `trackIvrefLocalForRelease(cIdent(var.name));` 恰好 1 处。
+#   ⑰ 第一百三十七刀: 实参那一站「交回进站那一枚」只许住在 registerClassArgRefHandback 里 (注释串全仓 1 处、文件 = cgen_com.cpp)，两位站点 (ByVal 那一档 + ByRef 092r 那一档) 都只调它，谁也不许自己补一行 Release。问句 `argHandsOverProjectRef` = 契约问句 + New 那一形的合起来答一次: 声明 + 定义 + 两处调用 = 4 处 / 4 份文件。
 #   ⑯ 第一百三十四刀: 视图腿② 的「交回接管来的那一枚」只许住在 emitIvrefQiSet 里 (全仓 1 处、文件 = cgen_iface_vtbl.cpp)，而它两位调用点都住在 cgen_setlet_set_prop.inc —— 移交那一问 (⑬/⑭) 现在是两站三处：工程类站 1 处 (forViewSlot=false) + 视图站 2 处 (true)；再冒出一处自己补 Release 的站点就是第二套判据。
 # 退出码：0 = 十五条都过；1 = 任一条红；2 = 找不到 src/backend。
 param(
@@ -188,9 +189,11 @@ if ($fieldQ -ne 5) {
 # ⑬ 移交值那一问的名单: 「右侧那一枚是不是已经带对价交过来了」全仓只许问一处 (声明 + 定义 + 一个调用点 = 3 处
 #    `rhsTransfersProjectRef(`)，而且调用点必须住在 Set 的 RHS 那一档 (cgen_setlet_set_rhs.inc)。为什么钉: 这一问与
 #    `New` 共用同一条「不 claim」的臂 —— 谁在别的站点再问一遍，「实参 / 返回值 / 字段」这三条边的口径就分家了。
+#    第一百三十七刀: 实参那一站 (⑰) 也从这里问, 但不**直接**吃 `*node.value` —— 它套在
+#    argHandsOverProjectRef 那一层里, 所以下面 `$xferAsk` (只数站点直接问句) 仍是 3, 本条才 6。
 $xferQ = CountOf 'rhsTransfersProjectRef('
-if ($xferQ -ne 5) {
-    $fail += ("transfer-question sites = " + $xferQ + " (want exactly 5: decl + def + 3 call sites)")
+if ($xferQ -ne 6) {
+    $fail += ("transfer-question sites = " + $xferQ + " (want exactly 6: decl + def + 3 station calls + 1 ask behind the argument-station wrapper)")
 }
 $xferFiles = @(FilesOf 'rhsTransfersProjectRef(*node.value')
 if ($xferFiles.Count -ne 2 -or -not ($xferFiles -contains 'cgen_setlet_set_rhs.inc') -or -not ($xferFiles -contains 'cgen_setlet_set_prop.inc')) {
@@ -257,10 +260,28 @@ $qiFiles = @(FilesOf 'emitIvrefQiSet(target, v->name, value')
 if ($qiFiles.Count -ne 1 -or $qiFiles[0] -ne 'cgen_setlet_set_prop.inc') {
     $fail += ("view-leg QiSet call files = " + ($qiFiles -join ', ') + " (want exactly cgen_setlet_set_prop.inc)")
 }
+# ⑰ 第一百三十七刀: 实参那一站 (形参是工程类 / 视图) 交完就忘的那一枚, 从此由一位主人登记交回。
+#    站点两处 (ByVal 档 / ByRef 092r 档) 都只调这一枚; 注释串全仓 1 处 = 「没有第二站自己补 Release」。
+$argTag = CountOf '腿⑤: 实参那一站交回'
+if ($argTag -ne 1) {
+    $fail += ("argument-station hand-back emit sites = " + $argTag + " (want exactly 1, inside registerClassArgRefHandback)")
+}
+$argFiles = @(FilesOf '腿⑤: 实参那一站交回')
+if ($argFiles.Count -ne 1 -or $argFiles[0] -ne 'cgen_com.cpp') {
+    $fail += ("argument-station hand-back files = " + ($argFiles -join ', ') + " (want exactly cgen_com.cpp)")
+}
+$argHelp = CountOf 'registerClassArgRefHandback('
+if ($argHelp -ne 4) {
+    $fail += ("argument-station helper sites = " + $argHelp + " (want exactly 4: declaration + definition + 2 call stations)")
+}
+$argAsk = CountOf 'argHandsOverProjectRef('
+if ($argAsk -ne 4) {
+    $fail += ("argument-station question sites = " + $argAsk + " (want exactly 4: declaration + definition + 2 call stations)")
+}
 if ($fail.Count -gt 0) {
     Write-Host "CLASS-REFCOUNT-AUTHORITY FAIL"
     foreach ($f in $fail) { Write-Host ("  - " + $f) }
     exit 1
 }
-Write-Host "CLASS-REFCOUNT-AUTHORITY OK (1 pair mint / 1 header / 2 leg consumers / 3+9 formals / 7 roster / 6 literal files / 0 stale / 5 registry files + 2 registrants / 1+1 out-slot / 1+1 foreign-write drop / 1 field-teardown shape + file / 5 field-type questions / 5 transfer-question sites in 2 files / 1 view-leg hand-back + 2 QiSet calls / 1+2+1 transfer-arm questions / 3 static-gate sites in 1 file + 1 ivref registration)"
+Write-Host "CLASS-REFCOUNT-AUTHORITY OK (1 pair mint / 1 header / 2 leg consumers / 3+9 formals / 7 roster / 6 literal files / 0 stale / 5 registry files + 2 registrants / 1+1 out-slot / 1+1 foreign-write drop / 1 field-teardown shape + file / 5 field-type questions / 6 transfer-question sites in 2 files / 1 view-leg hand-back + 2 QiSet calls / 1+2+1 transfer-arm questions / 3 static-gate sites in 1 file + 1 ivref registration / 1 arg-station hand-back + 4+4 helper sites in 4 files)"
 exit 0

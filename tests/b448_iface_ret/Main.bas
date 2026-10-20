@@ -17,6 +17,48 @@ End Function
 Public Sub TakeByVal(ByVal o As IB448)
     Debug.Print "P3-arg twice=" & o.Twice(30)
 End Sub
+' 账 #305 §B218 第一百三十七刀: 形参是工程类 / 视图的**实参那一站**。移交值 (`New <类>` 与被调方
+' 返回槽交回来的那一枚) 自带一枚对价, 而修前没有任何一站退它 => 每调用净漏一枚, 那一枚永不销毁。
+' W23 = 五枚 `New` 现造现交; W24 = 同一枚借来的实例分别当 ByVal 与 ByRef 实参 (反面证人:
+' 两头都不许多退, 只有过程自己那枚局部在出口退); W25 = 视图那一档的移交值 (与 P3 同形, 循环四次)。
+Public Function MakeCls48() As CB448
+    Set MakeCls48 = New CB448
+End Function
+
+Public Sub TakeCls48(ByVal c As CB448)
+    c.Twice 1
+End Sub
+
+Public Sub TakeCls48Ref(c As CB448)
+    c.Twice 2
+End Sub
+
+Public Sub TakeView48(ByVal v As IB448)
+    v.Twice 3
+End Sub
+
+Sub W23ArgHandOver()
+    Dim k23 As Long
+    For k23 = 1 To 5
+        TakeCls48 New CB448
+    Next
+End Sub
+
+Sub W24ArgBorrow()
+    Dim c24 As CB448
+    Set c24 = New CB448
+    TakeCls48 c24
+    TakeCls48Ref c24
+    Debug.Print "W24 hits=" & c24.Hits()
+End Sub
+
+Sub W25ArgViewHandOver()
+    Dim k25 As Long
+    For k25 = 1 To 4
+        TakeView48 MakeNew()
+    Next
+End Sub
+
 
 ' 账 #305 §B218 第一百三十三刀: `Static` 那一档的工程接口视图。视图腿登记「出口放手」时缺了
 ' 工程类那两腿都有的 `!var.isStatic && !inStaticProc_` 那道闸 ⇒ 槽 (C 侧 static 存储) 跨调用还
@@ -77,5 +119,14 @@ Sub Main()
     Debug.Print "W21-end term=" & gTerm48
     W22ViewBorrow
     Debug.Print "W22-end term=" & gTerm48
+    gTerm48 = 0
+    W23ArgHandOver
+    Debug.Print "W23-end term=" & gTerm48
+    gTerm48 = 0
+    W24ArgBorrow
+    Debug.Print "W24-end term=" & gTerm48
+    gTerm48 = 0
+    W25ArgViewHandOver
+    Debug.Print "W25-end term=" & gTerm48
     Debug.Print "B448-DONE"
 End Sub

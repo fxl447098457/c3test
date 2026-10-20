@@ -7625,17 +7625,18 @@ if ($Category -in @("all", "run", "vbp")) {
                     "P4-plain twice=11", "P5-hits=1", "B448-DONE",
                     "W20 twice=5 hits=0 term=0", "W20 twice=5 hits=1 term=0",
                     "W20 twice=5 hits=2 term=0", "W20-end term=0",
-                    "W21-end term=5", "W22 twice=15 src=3", "W22-end term=6")
+                    "W21-end term=5", "W22 twice=15 src=3", "W22-end term=6",
+                    "W23-end term=5", "W24 hits=2", "W24-end term=1", "W25-end term=4")
     Test-Vbp 'b448_iface_view_not_instance' "$Tests\b448_iface_ret\B448.vbp" $b448Needles
     Test-Vbp 'b448_iface_view_not_instance_x86' "$Tests\b448_iface_ret\B448.vbp" $b448Needles -Arch "x86"
     # 发码针: 视图值的三个消费形状各钉一条 —— 视图进槽走 QueryInterface、成员调用走 vtable、
-    # 视图进接口形参原样传; 反面针钉「不许再 mint 一枚 vb6_cls_<接口名>」(那一枚结构体不存在)。
+    # 视图进接口形参: 第一百三十七刀起先落本站临时量、调用行之后当场交回 (P3 的读数一字未动);
     # 第一百三十三刀再加两条正证人: static 那一格发的是 static 存储 (所以出口那枚不能退),
     # 而普通 Dim 那一格 (Sub Main 的 s) 出口照退 —— 反面针只撤 static 那一格。
     Test-EmitcShape 'b448_iface_view_consumers' @("$Tests\b448_iface_ret\B448.vbp") @(
         'vb6_iv_iid_IB448',
         '->vt->twice(',
-        'vb6_Main_TakeByVal(vb6_Main_MakeNew());',
+        'vb6_Main_TakeByVal(vb6_argtmp_vb6_ivref_IB448_5);',
         'static vb6_ivref_IB448* sv20 = NULL;',
         'if (s) s->vt->Release(s);  /* tB Interface B05: scope-exit release */')
     Test-EmitcAbsent 'b448_iface_view_never_mints_a_class_struct_for_an_interface' @(
@@ -7654,6 +7655,18 @@ if ($Category -in @("all", "run", "vbp")) {
         "$Tests\b448_iface_ret\B448.vbp") @(
         'if (src22) src22->vt->Release(src22);  /* 账 #305 (甲) 腿②',
         'if (dst22) dst22->vt->Release(dst22);  /* 账 #305 (甲) 腿②')
+    # 账 #305 §B218 第一百三十七刀 (W23 / W24 / W25): 形参是工程类 / 视图的**实参那一站**。
+    #   移交值 (`New <类>` 与被调方返回槽交回来的那一枚) 自带一枚对价, 而修前这一站一个字都不做 ——
+    #   五枚 `New` 当实参一台都不销毁 (W23 两台 term=0), 改后当场销毁 (term=5)。
+    #   W24 = 同一枚借来的实例分别走 ByVal 与 ByRef: hits=2 / term=1 两台修前后一字相同 = 反面证人;
+    #   W25 = 视图那一档 (与 P3 同形) 四枚移交视图 term=0 → 4。两台 (x64 / x86) 读数一字相同。
+    Test-EmitcShape 'b448_arg_station_returns_transferred_ref' @("$Tests\b448_iface_ret\B448.vbp") @(
+        'if (vb6_argtmp_vb6_cls_CB448_0) vb6_cls_CB448_Release(vb6_argtmp_vb6_cls_CB448_0);  /* 账 #305 (甲) 腿⑤: 实参那一站交回 */',
+        'if (vb6_argtmp_vb6_ivref_IB448_5) vb6_argtmp_vb6_ivref_IB448_5->vt->Release(vb6_argtmp_vb6_ivref_IB448_5);  /* 账 #305 (甲) 腿⑤: 实参那一站交回 */')
+    Test-EmitcAbsent 'b448_arg_station_never_returns_a_borrowed_instance' @(
+        "$Tests\b448_iface_ret\B448.vbp") @(
+        'if (c24) vb6_cls_CB448_Release(c24);  /* 账 #305 (甲) 腿⑤',
+        'if (vb6_argtmp_vb6_cls_CB448_2) vb6_cls_CB448_Release(vb6_argtmp_vb6_cls_CB448_2);  /* 账 #305 (甲) 腿⑤')
 
     # 账 #305 §B218 (甲) 第一百二十七刀 = 刀1-a/b/c: 工程类实例的引用计数头扩到每一枚工程类,
     #   覆写 (腿②) / 置空 (腿③) / 过程出口 (腿④) 三条腿接到同一位主人 emitClassSlotRefSet。
