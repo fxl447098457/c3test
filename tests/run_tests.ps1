@@ -7721,6 +7721,9 @@ if ($Category -in @("all", "run", "vbp")) {
                     #   W33/W34 = 两枚**反面证人**: 元素不是工程类 (泛对象包装器 / 裸值) 与多维载体,
                     #   本刀刻意不碰 ⇒ 一枚不退 (在册)。钉成证词, 那一档补上时这两条要一起翻。
                     "W33-terms=0", "W34-terms=0",
+                    # 第一百四十八刀 (Preserve 收缩丢尾): W35 = 3 缩到 1 ⇒ 尾两枚当场出厂 (修前 = 0 枚),
+                    #   保留那一枚照常可用; W32 (同尺寸 Preserve) 必须继续 = 0 = 搬走的不许多退。
+                    "W35-terms=2 kept=True",
                     "B445-DONE")
     Test-Vbp 'b445_class_slot_refcount' "$Tests\b445_refcount\B445.vbp" $b445Needles
     Test-Vbp 'b445_class_slot_refcount_x86' "$Tests\b445_refcount\B445.vbp" $b445Needles -Arch "x86"
@@ -7827,6 +7830,20 @@ if ($Category -in @("all", "run", "vbp")) {
         'vb6_SA_ReleaseElements(mObjArr445',
         'vb6_SA_ReleaseElements(mLngArr445',
         'vb6_SA_ReleaseElements(mND445')
+    # 账 #305 §B218 (甲) 第一百四十八刀 = Preserve 收缩丢尾那一格的发码两面:
+    #   正 = 类数组的 Preserve 从此发那位**带回调的兄弟出口** (`...1D_Tr(vb6_sa_ptr, 载体, 下界, 上界,
+    #     vb6_cls_X_Release)`) —— 界只算一次 (同一对文本进一发调用)，出厂在 RTL，搬移本身转调 _T；
+    #   反 = 认不出的载体 (这里钉 `As Long` 那一档) 继续发今天那一发 `_T(...)`，一字不动 ⇒
+    #     全语料的 Preserve 形状只有类数组那几格会动，别的一律不变 (形状门会证实这一点)。
+    Test-EmitcShape 'b445_preserve_tail_release_shape' @(
+        "$Tests\b445_refcount\B445.vbp") @(
+        'mDyn445 = vb6_SafeArrayReDimPreserve1D_Tr(vb6_sa_ptr, mDyn445, 1, 1, vb6_cls_C445_Release);',
+        'mDyn445 = vb6_SafeArrayReDimPreserve1D_Tr(vb6_sa_ptr, mDyn445, 1, 6, vb6_cls_C445_Release);')
+    Test-EmitcAbsent 'b445_preserve_nonclass_carrier_keeps_the_plain_export' @(
+        "$Tests\b445_refcount\B445.vbp") @(
+        'vb6_SafeArrayReDimPreserve1D_Tr(vb6_sa_long',
+        'vb6_SafeArrayReDimPreserve1D_Tr(vb6_sa_variant',
+        'ReleaseElementsND')
     # 账 #305 §B188 ④ (第九十刀): 出厂那一腿的**尾巴**。`Class_Terminate` 抛错时, `_Destroy` 里体之后
     # 那三截(字段 BSTR / 数组字段 / vb6_Free(me))曾被 ComObj_Release 的帧一起 longjmp 跳掉 —— 实测每枚
     # 抛错的出厂漏一份实例资源: x64 每枚 35~37 字节、x86 每枚 17 字节, 多一枚 20 字符 String 字段就涨到

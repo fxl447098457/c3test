@@ -1,5 +1,5 @@
 ﻿# check_class_refcount_authority.ps1 - 账 #305 §B218 (甲)：工程类实例的引用计数只许有一位主人。
-# 二十条钉（每条都能单独红，红了就说明同一问长出了第二位主人）：
+# 二十一条钉（每条都能单独红，红了就说明同一问长出了第二位主人）：
 #   ① 出入口那一对的 mint 各恰好 1 处，且住在 module/cgen_com.cpp（每条腿只许转调它）。
 #   ② 计数头 `int32_t __refcount;` 的 mint 恰好 1 处，且住在 cgen_iface_vtbl.cpp 的
 #      emitIfaceClassFields 里 —— 它必须紧跟 __comObj 那一句（ai/022 D19：偏移 0 恒是 __comObj）。
@@ -342,18 +342,30 @@ $askCopyInFiles = @(FilesOf 'registerClassArgRefCopyIn(')
 if ($askCopyInFiles.Count -ne 4) {
     $fail += ("copy-in claim files = " + ($askCopyInFiles -join ', ') + " (want exactly 4 files)")
 }
+# ⒉ 第一百四十八刀: Preserve 丢尾那一格换的是一枚**带回调的兄弟出口** vb6_SafeArrayReDimPreserve1D_Tr。
+#    它全仓恰好 4 处 / 4 份文件: RTL 声明 + 定义 + 发码站 (cgen_redim.cpp) + **载体前缀名单** (cgen_util_type.cpp)。
+#    为什么要把名单那一格一起钉: 「这枚表达式**已经是载体**」答错 = 再包一层 = 双重解引用，
+#    而它与出口本体住在两份文件里，只改一处就会静默错。新增一枚这样的出口时两格必须一起动。
+$trExport = CountOf 'vb6_SafeArrayReDimPreserve1D_Tr('
+if ($trExport -ne 4) {
+    $fail += ("preserve-with-release export sites = " + $trExport + " (want exactly 4: RTL decl + definition + emit station + carrier-prefix list)")
+}
+$trExportFiles = @(FilesOf 'vb6_SafeArrayReDimPreserve1D_Tr(')
+if ($trExportFiles.Count -ne 4) {
+    $fail += ("preserve-with-release export files = " + ($trExportFiles -join ', ') + " (want exactly 4 files: 名单那一格不许漏)")
+}
 # ⑳ 第一百四十六刀: 载体销毁那一族 (Erase / ReDim 不带 Preserve) 的两问只许一位主人。
 #    · classOfArrayCarrier = 「这枚数组变量握着的元素是不是工程类」: 声明 + 定义 + 发码主人里问一次 = 3 处 / 3 份文件
 #      (再多一处 = 某个站点绕过问句自己查 arrayClassElemTypes_ 那张表)。
 #    · emitClassArrayElemHandback = 销毁载体前那一发的唯一发码处: 声明 + 定义 + Erase站 + ReDim站 = 4 处 / 3 份文件,
 #      两位站点必须全住在 cgen_redim.cpp。只要有站自己拼那发释放，“谁握元素那一枚”就又分家。
 $askCarrier = CountOf 'classOfArrayCarrier('
-if ($askCarrier -ne 3) {
-    $fail += ("array-carrier question sites = " + $askCarrier + " (want exactly 3: declaration + definition + 1 emit owner)")
+if ($askCarrier -ne 4) {
+    $fail += ("array-carrier question sites = " + $askCarrier + " (want exactly 4: declaration + definition + 2 owners = 销毁站 + Preserve 站)")
 }
 $askCarrierFiles = @(FilesOf 'classOfArrayCarrier(')
-if ($askCarrierFiles.Count -ne 3) {
-    $fail += ("array-carrier question files = " + ($askCarrierFiles -join ', ') + " (want exactly 3 files)")
+if ($askCarrierFiles.Count -ne 4) {
+    $fail += ("array-carrier question files = " + ($askCarrierFiles -join ', ') + " (want exactly 4 files)")
 }
 $carrierHelp = CountOf 'emitClassArrayElemHandback('
 if ($carrierHelp -ne 4) {
@@ -368,5 +380,5 @@ if ($fail.Count -gt 0) {
     foreach ($f in $fail) { Write-Host ("  - " + $f) }
     exit 1
 }
-Write-Host "CLASS-REFCOUNT-AUTHORITY OK (1 pair mint / 1 header / 2 leg consumers / 3+9 formals / 10 roster files / 6 literal files / 0 stale / 5 registry files + 2 registrants / 1+1 out-slot / 1+1 foreign-write drop / 1 field-teardown shape + file / 6 field-type questions (标量 + 数组两档) / 6 transfer-question sites in 2 files / 1 view-leg hand-back + 2 QiSet calls / 1+2+1 transfer-arm questions / 3 static-gate sites in 1 file + 1 ivref registration / 1 arg-station hand-back + 4+4 helper sites in 4 files / 4+4 index-slot + project-class questions / 1 address-temp mint / 4 element-teardown sites + 3+4 carrier-destroy questions / 4+4 形A questions (out-slot class + owner pass) + 5 copy-in claim sites in 4 files / 3+4 carrier-destroy sites in 3 files)"
+Write-Host "CLASS-REFCOUNT-AUTHORITY OK (1 pair mint / 1 header / 2 leg consumers / 3+9 formals / 10 roster files / 6 literal files / 0 stale / 5 registry files + 2 registrants / 1+1 out-slot / 1+1 foreign-write drop / 1 field-teardown shape + file / 6 field-type questions (标量 + 数组两档) / 6 transfer-question sites in 2 files / 1 view-leg hand-back + 2 QiSet calls / 1+2+1 transfer-arm questions / 3 static-gate sites in 1 file + 1 ivref registration / 1 arg-station hand-back + 4+4 helper sites in 4 files / 4+4 index-slot + project-class questions / 1 address-temp mint / 4 element-teardown sites + 4+4 carrier-destroy questions + 4 preserve-with-release sites in 4 files / 4+4 形A questions (out-slot class + owner pass) + 5 copy-in claim sites in 4 files / 3+4 carrier-destroy sites in 3 files)"
 exit 0

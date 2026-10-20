@@ -423,9 +423,24 @@ Sub W33NonClassCarriers()
     Set mObjArr445(1) = New C445
     ReDim mLngArr445(1 To 2)
     mLngArr445(1) = 7
+    ReDim Preserve mLngArr445(1 To 3)
     Erase mObjArr445
     Erase mLngArr445
     Debug.Print "W33-terms=" & (Terms - t0)
+End Sub
+
+' W35 = Preserve **收缩**那一格 (第一百四十八刀): VB6 把尾那两枚当场放手 (尺寸变小 = 截断,
+'   被截掉的元素移除), 修前 = 整批裸丢一枚不退。保留那一枚必须照常能用 = 同一条语句的另一半。
+Sub W35PreserveShrink()
+    Dim t0 As Long
+    t0 = Terms
+    ReDim mDyn445(1 To 3)
+    Set mDyn445(1) = New C445
+    Set mDyn445(2) = New C445
+    Set mDyn445(3) = New C445
+    ReDim Preserve mDyn445(1 To 1)
+    Debug.Print "W35-terms=" & (Terms - t0) & " kept=" & (Not (mDyn445(1) Is Nothing))
+    Set mDyn445(1) = Nothing
 End Sub
 
 ' W34 = ND 载体那一档本刀刻意不吃 (没有 vb6_SA_ReleaseElementsND，硬塞 cast = 拆错布局)：
@@ -569,5 +584,6 @@ Sub Main()
     W32PreserveKeepsElems
     W33NonClassCarriers
     W34NdCarrierUntouched
+    W35PreserveShrink
     Debug.Print "B445-DONE"
 End Sub
