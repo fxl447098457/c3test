@@ -273,6 +273,9 @@ void CCodeGen::visit(ReDimStmt& node) {
             c_.emitLine(cName + " = " + (wrapBack.empty() ? "(vb6_SafeArray1D*)" : "") + res + ";");
         } else {
             std::string destroyArg = redimArg;
+            // 账 #305 §B218 (甲) 腿⑤ 第五格 (第一百四十九刀): 多维载体的元素出厂走同一位主人，
+            // 由它自己问「这枚载体是几维」挑 1D / ND 那一发 —— 排在销毁之前同样是硬约束。
+            emitClassArrayElemHandback("(vb6_SafeArrayND*)" + destroyArg, node.varName);
             c_.emitLine("vb6_SafeArrayDestroyND((vb6_SafeArrayND*)" + destroyArg + ");");
             std::string newVal;
             if (isUdtArray) {
@@ -426,6 +429,9 @@ void CCodeGen::emitReDimComplexTarget(ReDimStmt& node) {
         }
         c_.dedent();
         c_.emitLine("};");
+        // 账 #305 §B218 (甲) 腿⑤ 第五格 (第一百四十九刀): 这一支的目标是复杂左值 (成员链 / 下标)，
+        // 问句只认裸名 ⇒ 认不出就一声不出；认得出时仍由主人自己判维度挑出口，站点不代替它判。
+        emitClassArrayElemHandback("(vb6_SafeArrayND*)" + cName, node.varName);
         c_.emitLine("vb6_SafeArrayDestroyND((vb6_SafeArrayND*)" + cName + ");");
         std::string newVal = isUdtArray
             ? ("vb6_SafeArrayReDimND_Udt((int32_t)sizeof(" + udtCType + "), "
@@ -477,6 +483,8 @@ void CCodeGen::visit(EraseStmt& node) {
         std::transform(lowerName.begin(), lowerName.end(), lowerName.begin(), ::tolower);
         auto it = arrayDimCounts_.find(lowerName);
         if (it != arrayDimCounts_.end() && it->second > 1) {
+            // 账 #305 §B218 (甲) 腿⑤ 第五格 (第一百四十九刀): 多维载体的 Erase 也走同一位主人。
+            emitClassArrayElemHandback("(vb6_SafeArrayND*)" + cName, name);
             c_.emitLine("vb6_SafeArrayDestroyND((vb6_SafeArrayND*)" + cName + "); " + cName + " = NULL;");
         } else {
             // Fix <vbeclipse> 2026-10-06: 1D 数组统一走 vb6_EraseArrayVar —

@@ -778,6 +778,9 @@
     // (认不出 = 空串 = 维持今天的裸销毁)。三道闸 (只认裸名 / 得是本工程类 / 形状) 一道不能少，
     // 与上面几位主人同住 cgen_base_type.cpp；站点只调 emitClassArrayElemHandback，不许自己查表。
     std::string classOfArrayCarrier(const std::string& name);
+    // 账 #305 §B218 (甲) 腿⑤ 第五格 (第一百四十九刀): 「这一枚载体是多维的吗」= 销毁那一族挑
+    // 一维/多维出口用的唯一一问，只许 emitClassArrayElemHandback 那一处主人问，站点不许自己判。
+    bool carrierIsMultidim(const std::string& name);
 
     // <vbeclipse>: 该名字是否为本工程的某个类/窗体模块 (它的 prop_let_/成员函数真会被发出)。
     // 与 cParamClassPtrType 同一口径, 见 cgen_base_type.cpp 定义处注释。凡是要"按类实例

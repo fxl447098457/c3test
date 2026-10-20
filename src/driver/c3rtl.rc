@@ -885,3 +885,12 @@
  *   判据读数: 探针 k1591_probe 的 A8 一格 (3 缩到 1) 修前 after-shrink term 不动、修后 +2,
  *   K145-END 12 -> 14; 夹具 b445 的 W32 (同尺寸 Preserve) 必须继续 = 0 = 反面证人。
  *   touch 本文件 = 让 RCDATA 重包一次 (§B99②)。 */
+/* 账 #305 §B218 (甲) 腿⑤ 第五格 = 第一百五十刀 (2026-10-20 深夜): 多维类数组的载体销毁没人逐枚交回。
+ *   新增一枚 RTL 出口 vb6_SA_ReleaseElementsND(void* 载体, unsigned long (*release)(void*)) —— 1D 那位
+ *   vb6_SA_ReleaseElements 的多维兄弟: 按 i * elemSize 线性走 totalElements 格 (与 vb6_SafeArrayDestroyND
+ *   里 bstr / variant 那两档同一进口径), 先清槽再放手; 谁的 Release 只有 cgen 知道 (裸结构体没有 vtable)。
+ *   挑哪一档出口由发码主人自己问 (carrierIsMultidim 读 arrayDimCounts_), 站点只调 emitClassArrayElemHandback
+ *   ⇒ 多维那一档补上时不必改任何站点的判断, 「1D 读法套 ND 载体」那处交错型也没长出新主人。
+ *   判据读数: 探针 k1591_probe 的 A9 一格 (Erase 一个 2x2 类数组) 修前 term 不动、修后 +2, K145-END 14 -> 16;
+ *   夹具 b445 的 W34 从反面证人翻成本体 (0 -> 2)，W32/W33/W35 与其余针一字未动。
+ *   touch 本文件 = 让 RCDATA 重包一次 (§B99②)。 */

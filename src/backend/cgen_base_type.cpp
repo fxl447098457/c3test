@@ -357,6 +357,16 @@ std::string CCodeGen::classOfArrayCarrier(const std::string& name) {
     return projectClsStructOfCType(cTypeForDeclaredTypeName(it->second));
 }
 
+// 账 #305 §B218 (甲) 腿⑤ 第五格 (第一百四十九刀): 「这一枚载体是**多维**的吗」—— 销毁那一族的
+// 发码主人挑出口用的唯一一问。表按代码顺序更新 (`cgen_redim.cpp` 每走过一发 ReDim 就写一次),
+// 查不到 = 当一维 (= 今天的形状)。这一问只许住在主人那一侧: 站点若自己判维度,
+// 「1D 读法套 ND 载体」那处交错型就又长出一位主人 (步长错位 = 拆错布局)。
+bool CCodeGen::carrierIsMultidim(const std::string& name) {
+    if (name.empty()) return false;
+    auto it = arrayDimCounts_.find(Symbol::toLower(name));
+    return it != arrayDimCounts_.end() && it->second > 1;
+}
+
 // <vbeclipse>: 这个名字是不是**本工程的一个类/窗体模块** —— 它的 prop_let_/prop_set_/
 // 成员函数真的会被发出来。判法 = 名字命中"本模块 ∪ 驱动下发的其它模块", 且
 // mapTypeRef 把它映射成 vb6_cls_* (与 cParamClassPtrType 同一口径)。

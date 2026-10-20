@@ -244,6 +244,12 @@ typedef struct vb6_SafeArrayND {
 vb6_SafeArrayND* vb6_SafeArrayCreateND(vb6_safearray_elemtype elemType,
     int32_t dimCount, vb6_SafeArrayBound bounds[]);
 void vb6_SafeArrayDestroyND(vb6_SafeArrayND* arr);
+// 账 #305 §B218 (甲) 腿⑤ 第五格 (第一百四十九刀): 上面 1D 那位 vb6_SA_ReleaseElements 的**多维兄弟** ——
+// 元素是本工程类裸实例 (vb6_sa_ptr) 的 ND 载体在销毁前逐枚交回。步进口径与 vb6_SafeArrayDestroyND 里
+// bstr / variant 那两档一字相同 (按 i * elemSize 线性走 totalElements 格), 区别只在「这一格是裸实例指针」
+// ⇒ 该调谁的 Release 仍只有调用方知道。release 为空 / elemType 不是 vb6_sa_ptr / 载体还没建 ⇒ 一个字不做。
+// 同样必须在销毁载体**之前**调用。
+void vb6_SA_ReleaseElementsND(void* arr, unsigned long (*release)(void*));
 vb6_SafeArrayND* vb6_SafeArrayReDimND(vb6_safearray_elemtype elemType,
     int32_t dimCount, vb6_SafeArrayBound bounds[]);
 vb6_SafeArrayND* vb6_SafeArrayReDimND_Udt(int32_t elemSize,

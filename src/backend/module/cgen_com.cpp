@@ -549,7 +549,11 @@ void CCodeGen::registerClassArgRefCopyIn(const std::string& clsPtr, const std::s
 void CCodeGen::emitClassArrayElemHandback(const std::string& carrierExpr, const std::string& arrayName) {
     const std::string cls = classOfArrayCarrier(arrayName);
     if (cls.empty() || carrierExpr.empty()) return;
-    c_.emitLine("vb6_SA_ReleaseElements(" + carrierExpr + ", " + cls
+    // 载体形状只在这一处问 (第一百四十九刀): 多维那一档换 ND 兄弟出口 ——
+    // 1D 那枚读的是 count/lBound 那一套头部字段, 递给 ND 载体就是步长错位。
+    const std::string fn = carrierIsMultidim(arrayName) ? "vb6_SA_ReleaseElementsND"
+                                                        : "vb6_SA_ReleaseElements";
+    c_.emitLine(fn + "(" + carrierExpr + ", " + cls
         + "_Release);  /* 账 #305 (甲) 腿⑤ 数组档: 载体销毁前逐枚交回 */");
 }
 

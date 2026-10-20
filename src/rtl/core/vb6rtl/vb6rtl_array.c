@@ -326,6 +326,24 @@ void vb6_SA_ReleaseElements(void* arrV, unsigned long (*release)(void*)) {
     }
 }
 
+// 账 #305 §B218 (甲) 腿⑤ 第五格 (第一百四十九刀): 上面那位主人的**多维兄弟**。
+// 步进口径与 vb6_SafeArrayDestroyND 里 bstr / variant 那两档一字相同 (按 i * elemSize 线性走
+// totalElements 格) —— 多维载体的元素在 data 里本就是这个线性布局, 维度只影响下标算术。
+// 该调谁的 Release 仍只有调用方知道 (每类一对出口, 裸结构体没有 vtable)。
+// 先清槽再放手: 被放手那枚的 Class_Terminate 若回头写这一格, 不会被退第二遍。
+void vb6_SA_ReleaseElementsND(void* arrV, unsigned long (*release)(void*)) {
+    vb6_SafeArrayND* arr = (vb6_SafeArrayND*)arrV;
+    if (!arr || !release || arr->elemType != vb6_sa_ptr || !arr->data) return;
+    for (int32_t i = 0; i < arr->totalElements; i++) {
+        void** slot = (void**)((char*)arr->data + i * arr->elemSize);
+        if (*slot) {
+            void* elem = *slot;
+            *slot = NULL;
+            release(elem);
+        }
+    }
+}
+
 // Fix <vbeclipse> 2026-10-06: Erase 语句的数组变量出口 (VB6 文档口径):
 //   · 动态数组 → 释放存储, 变量置 NULL (须 ReDim 才能用);
 //   · 固定数组 → **保留存储**, 元素重置: 数值/UDT 置零, BSTR 逐个置零长串,
