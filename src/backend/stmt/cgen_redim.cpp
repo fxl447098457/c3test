@@ -262,7 +262,14 @@ void CCodeGen::visit(ReDimStmt& node) {
                 // 不带 Preserve 的那一支 (:244) 一直递 saElemType, Preserve 这一支却递了
                 // 空手, 于是「首次分配就走 Preserve」的形状在 RTL 里回落 vb6_sa_empty
                 // (4 字节一步) 而访问按声明档走 —— 同一件事两处写法不同形, 第三例。
-                res = "vb6_SafeArrayReDimPreserveND(" + saElemType + ", (vb6_SafeArrayND*)" + redimArg + ", " + std::to_string(dimCount) + ", " + boundsVar + ")";
+                // 账 #305 §B218 (甲) 腿⑤ 第六格 (第一百五十四刀): 元素是本工程类时换那位带回调的兄弟出口 ——
+                // 收缩丢尾的那几格在旧块被 free 之前逐枚交回同一位主人。哪些格出局、每格多宽都由载体自己在
+                // 运行期答, 所以这一站不吃 arrayDimCounts_ 那张按代码顺序的表; 认不出 (As Object 包装器 /
+                // As Long 裸值 / 外部类 / 点链成员数组) 继续发今天那一发, 产物逐字节留着。
+                const std::string clsNDPreserve = classOfArrayCarrier(node.varName);
+                res = clsNDPreserve.empty()
+                    ? ("vb6_SafeArrayReDimPreserveND(" + saElemType + ", (vb6_SafeArrayND*)" + redimArg + ", " + std::to_string(dimCount) + ", " + boundsVar + ")")
+                    : ("vb6_SafeArrayReDimPreserveND_Tr(" + saElemType + ", (vb6_SafeArrayND*)" + redimArg + ", " + std::to_string(dimCount) + ", " + boundsVar + ", " + clsNDPreserve + "_Release)");
             }
             if (!wrapBack.empty()) res = wrapBack + res + ")";
             // 账 #305 §B154 第二格: 那枚 (vb6_SafeArray1D*) 强转**只在该槽是数组指针时**才成立。

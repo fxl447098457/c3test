@@ -263,6 +263,12 @@ vb6_SafeArrayND* vb6_SafeArrayReDimND_Udt(int32_t elemSize,
    UDT 不在这一枚 (它走下面的 _Udt, 元素尺寸由调用方的 sizeof 给)。 */
 vb6_SafeArrayND* vb6_SafeArrayReDimPreserveND(vb6_safearray_elemtype elemType,
     vb6_SafeArrayND* arr, int32_t dimCount, vb6_SafeArrayBound newBounds[]);
+/* 账 #305 §B218 (甲) 腿⑤ 第六格 (第一百五十四刀): 本体多收一枚元素交回回调, 上面那枚是它的转调。
+   与一维那位兄弟 vb6_SafeArrayReDimPreserve1D_Tr 同一个理由 —— 收缩丢尾那几格躺的是本工程
+   哪一类的实例, 只有 cgen 知道该递哪一枚 <Cls>_Release。release 为空 = 今天那一发留着。 */
+vb6_SafeArrayND* vb6_SafeArrayReDimPreserveND_Tr(vb6_safearray_elemtype elemType,
+    vb6_SafeArrayND* arr, int32_t dimCount, vb6_SafeArrayBound newBounds[],
+    unsigned long (*release)(void*));
 
 // UDT版ReDim Preserve(多维): elemSize由调用方提供
 vb6_SafeArrayND* vb6_SafeArrayReDimPreserveND_Udt(int32_t elemSize,

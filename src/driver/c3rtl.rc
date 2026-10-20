@@ -894,3 +894,11 @@
  *   判据读数: 探针 k1591_probe 的 A9 一格 (Erase 一个 2x2 类数组) 修前 term 不动、修后 +2, K145-END 14 -> 16;
  *   夹具 b445 的 W34 从反面证人翻成本体 (0 -> 2)，W32/W33/W35 与其余针一字未动。
  *   touch 本文件 = 让 RCDATA 重包一次 (§B99②)。 */
+/* 账 #305 §B218 (甲) 腿⑤ 第六格 = 第一百五十四刀 (2026-10-21): 多维 ReDim Preserve 收缩丢尾没人交回。
+ *   vb6_SafeArrayReDimPreserveND 的丢尾那一段原来只认 vb6_sa_bstr / vb6_sa_variant 两档, vb6_sa_ptr
+ *   整段跳过 ⇒ 丢掉那几格的引用连旧块一起被 free。做法 = 本体改名 ..._Tr 多收一枚 release, 同一段循环
+ *   里补一条指针档 (先清槽再放手), 老名字改成传 NULL 的转调 ⇒ 格位算术只有一份 (§B158 立的口径), 而
+ *   认不出元素类的那些工程产物逐字节不动 (门内 tests/test_redim_elem.bas 那 7 发多维 Preserve 全非类档)。
+ *   判据读数: 探针 k1591_probe 的 A10 一格 (2x3 缩到 2x1) 修前 after-shrink term 不动、修后 +2,
+ *   K145-END made=24 term=22 -> 24; 夹具 b445 新增 W37 (ND Preserve 收缩), W33/W35 继续 = 反面证人。
+ *   touch 本文件 = 让 RCDATA 重包一次 (§B99②)。 */

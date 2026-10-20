@@ -748,8 +748,14 @@ static int32_t vb6_SaNdSlot(const vb6_SafeArrayBound* bounds, int32_t rank,
     return off;
 }
 
-vb6_SafeArrayND* vb6_SafeArrayReDimPreserveND(vb6_safearray_elemtype elemType,
-    vb6_SafeArrayND* arr, int32_t dimCount, vb6_SafeArrayBound newBounds[]) {
+// 账 #305 §B218 (甲) 腿⑤ 第六格 (第一百五十四刀): 多维那一发的**收缩丢尾**也吃同一位主人。
+// 为什么这一枚必须是本体、老名字 vb6_SafeArrayReDimPreserveND 只是它的转调:
+//   丢的是哪些格、每格多宽, 全由载体自己身上的 bounds / elemSize 在这一发里答 —— 那套格位
+//   算术只许有一份 (§B158 那一刀立的口径), 分两枚函数各写一遍就是它的复发。
+// release 为空 / 元素档不是 vb6_sa_ptr / 载体还没建 ⇒ 一个字不做 = 老行为逐字节留着。
+vb6_SafeArrayND* vb6_SafeArrayReDimPreserveND_Tr(vb6_safearray_elemtype elemType,
+    vb6_SafeArrayND* arr, int32_t dimCount, vb6_SafeArrayBound newBounds[],
+    unsigned long (*release)(void*)) {
     if (elemType == vb6_sa_udt) elemType = vb6_sa_variant;
     if (!arr) return vb6_SafeArrayReDimND(elemType, dimCount, newBounds);
     if (arr->elemType != vb6_sa_udt && arr->elemType != elemType) {
@@ -816,7 +822,10 @@ vb6_SafeArrayND* vb6_SafeArrayReDimPreserveND(vb6_safearray_elemtype elemType,
     }
 
     // P1-12修复: BSTR/VARIANT - 旧区域中被丢弃的元素需要释放
-    if (arr->data && (arr->elemType == vb6_sa_bstr || arr->elemType == vb6_sa_variant)) {
+    // 账 #305 §B218 (甲) 腿⑤ 第六格: 同一趟循环再认指针档 —— 工程类实例是裸结构体指针,
+    // RTL 认不出该调谁的 Release, 所以那一枚 _Release 由发码方递进来 (与一维那位兄弟同口径)。
+    if (arr->data && (arr->elemType == vb6_sa_bstr || arr->elemType == vb6_sa_variant
+                      || (arr->elemType == vb6_sa_ptr && release))) {
         for (int32_t linear = 0; linear < arr->totalElements; linear++) {
             int32_t tmp = linear;
             int32_t indices[16];
@@ -837,6 +846,13 @@ vb6_SafeArrayND* vb6_SafeArrayReDimPreserveND(vb6_safearray_elemtype elemType,
                 } else if (arr->elemType == vb6_sa_variant) {
                     vb6_VARIANT* slot = (vb6_VARIANT*)((char*)arr->data + linear * arr->elemSize);
                     vb6_VariantClear(slot);
+                } else if (arr->elemType == vb6_sa_ptr && release) {
+                    void** slot = (void**)((char*)arr->data + linear * arr->elemSize);
+                    if (*slot) {
+                        void* elem = *slot;
+                        *slot = NULL;   // 先清槽再放手: 那一枚的 Class_Terminate 回头写这格也不退第二遍
+                        release(elem);
+                    }
                 }
             }
         }
@@ -854,6 +870,12 @@ vb6_SafeArrayND* vb6_SafeArrayReDimPreserveND(vb6_safearray_elemtype elemType,
     }
 
     return arr;
+}
+
+// 不带回调的那一枚 = 上面本体的转调 (认不出元素类的多维数组继续吃这一发, 产物逐字节不变)。
+vb6_SafeArrayND* vb6_SafeArrayReDimPreserveND(vb6_safearray_elemtype elemType,
+    vb6_SafeArrayND* arr, int32_t dimCount, vb6_SafeArrayBound newBounds[]) {
+    return vb6_SafeArrayReDimPreserveND_Tr(elemType, arr, dimCount, newBounds, NULL);
 }
 
 // UDT版ReDim Preserve(多维): 元素尺寸由调用方提供 (sizeof(UDT))。
