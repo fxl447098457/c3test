@@ -21,6 +21,8 @@ Private mDyn445() As C445
 Private mObjArr445() As Object
 Private mLngArr445() As Long
 Private mND445() As C445
+' 第一百五十四刀的反面证人: 同样是多维 Preserve, 但元素是裸值 (As Long) ⇒ 那一发必须仍走不带回调的转调
+Private mNDLng445() As Long
 Public Side445 As Long
 
 Public Function Pick445() As Long
@@ -585,6 +587,26 @@ Sub W36LocalArrayScope()
     Debug.Print "W36-terms=" & (Terms - t0)
 End Sub
 
+' ==== 账 #305 §B218 (甲) 第一百五十四刀 = 多维 Preserve **收缩**那一格: 掉出界的那几格也逐枚交回 ====
+' 修前: 丢尾那几格的引用连旧块一起被 free (探针 A10 = 2x3 缩到 2x1 退 0 枚, .build/k1846_a10_p64.txt);
+' 修后: 同一趟丢尾循环认指针档 ⇒ 2 枚 (那两枚留下来的不在这一发里退, 由紧随的 Erase 交回)。
+' 同格里再走一发 As Long 的多维 Preserve = 反面证人: 那一发继续走转调, 产物一字不动。
+Sub W37NDPreserveShrink()
+    Dim t0 As Long
+    t0 = Terms
+    ReDim mND445(1 To 2, 1 To 3)
+    Set mND445(1, 1) = New C445
+    Set mND445(1, 2) = New C445
+    Set mND445(2, 1) = New C445
+    Set mND445(2, 3) = New C445
+    ReDim Preserve mND445(1 To 2, 1 To 1)
+    Debug.Print "W37-terms=" & (Terms - t0) & " kept=" & (Not (mND445(1, 1) Is Nothing))
+    Erase mND445
+    ReDim mNDLng445(1 To 2, 1 To 3)
+    ReDim Preserve mNDLng445(1 To 2, 1 To 1)
+    Erase mNDLng445
+End Sub
+
 Sub Main()
     W1SetNothing
     W2Alias
@@ -622,5 +644,6 @@ Sub Main()
     W34NdCarrierUntouched
     W35PreserveShrink
     W36LocalArrayScope
+    W37NDPreserveShrink
     Debug.Print "B445-DONE"
 End Sub

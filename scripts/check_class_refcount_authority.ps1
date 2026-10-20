@@ -360,8 +360,8 @@ if ($trExportFiles.Count -ne 4) {
 #    · emitClassArrayElemHandback = 销毁载体前那一发的唯一发码处: 声明 + 定义 + 五个站点 (1D Erase / 1D ReDim / ND ReDim 两支 / ND Erase) = 7 处 / 3 份文件，站点必须全住在 cgen_redim.cpp。
 #      两位站点必须全住在 cgen_redim.cpp。只要有站自己拼那发释放，“谁握元素那一枚”就又分家。
 $askCarrier = CountOf 'classOfArrayCarrier('
-if ($askCarrier -ne 5) {
-    $fail += ("array-carrier question sites = " + $askCarrier + " (want exactly 5: declaration + definition + 3 readers = 销毁主人 + Preserve 站 + 载体档登记口)")
+if ($askCarrier -ne 6) {
+    $fail += ("array-carrier question sites = " + $askCarrier + " (want exactly 5: declaration + definition + 4 readers = 销毁主人 + Preserve 站 + 载体档登记口)")
 }
 $askCarrierFiles = @(FilesOf 'classOfArrayCarrier(')
 if ($askCarrierFiles.Count -ne 5) {
@@ -417,10 +417,20 @@ if ($carrierFlagFiles.Count -ne 2) {
     $fail += ("carrier-slot flag files = " + ($carrierFlagFiles -join ', ') + " (want exactly 2 files: cgen_state.inc + cgen_iface_vtbl.cpp)")
 }
 
+# 25 第一百五十四刀: 多维 Preserve 收缩丢尾那位带回调的本体 —— 老名字只剩一句转调,
+#    两个名字都要数得着: 本体的声明 + 定义 + 转调里那一发 + 后端发码那一行。
+$ndTrExport = CountOf 'vb6_SafeArrayReDimPreserveND_Tr('
+if ($ndTrExport -ne 4) {
+    $fail += ("ND Preserve-with-release export sites = " + $ndTrExport + " (want exactly 4: RTL decl + def + forwarder call + backend emit)")
+}
+$ndTrFiles = @(FilesOf 'vb6_SafeArrayReDimPreserveND_Tr(')
+if ($ndTrFiles.Count -ne 3) {
+    $fail += ("ND Preserve-with-release export files = " + ($ndTrFiles -join ", ") + " (want exactly 3 files: .h + .c + cgen_redim.cpp)")
+}
 if ($fail.Count -gt 0) {
     Write-Host "CLASS-REFCOUNT-AUTHORITY FAIL"
     foreach ($f in $fail) { Write-Host ("  - " + $f) }
     exit 1
 }
-Write-Host "CLASS-REFCOUNT-AUTHORITY OK (1 pair mint / 1 header / 2 leg consumers / 3+9 formals / 10 roster files / 6 literal files / 0 stale / 5 registry files + 2 registrants / 1+1 out-slot / 1+1 foreign-write drop / 1 field-teardown shape + file / 6 field-type questions (标量 + 数组两档) / 6 transfer-question sites in 2 files / 1 view-leg hand-back + 2 QiSet calls / 1+2+1 transfer-arm questions / 3 static-gate sites in 1 file + 1 ivref registration / 1 arg-station hand-back + 4+4 helper sites in 4 files / 4+4 index-slot + project-class questions / 1 address-temp mint / 3 element-teardown sites + 4+4 carrier-destroy questions + 4 preserve-with-release sites in 4 files / 4+4 形A questions (out-slot class + owner pass) + 5 copy-in claim sites in 4 files / 3+4 carrier-destroy sites in 3 files / 8 hand-back stations (5 in cgen_redim.cpp + 过程出口) + 3 shape questions + 3 multidim export sites + 4+2 carrier-scope registrar + flag sites / 5 static gates)"
+Write-Host "CLASS-REFCOUNT-AUTHORITY OK (1 pair mint / 1 header / 2 leg consumers / 3+9 formals / 10 roster files / 6 literal files / 0 stale / 5 registry files + 2 registrants / 1+1 out-slot / 1+1 foreign-write drop / 1 field-teardown shape + file / 6 field-type questions (标量 + 数组两档) / 6 transfer-question sites in 2 files / 1 view-leg hand-back + 2 QiSet calls / 1+2+1 transfer-arm questions / 3 static-gate sites in 1 file + 1 ivref registration / 1 arg-station hand-back + 4+4 helper sites in 4 files / 4+4 index-slot + project-class questions / 1 address-temp mint / 3 element-teardown sites + 4+4 carrier-destroy questions + 4 preserve-with-release sites in 4 files / 4+4 形A questions (out-slot class + owner pass) + 5 copy-in claim sites in 4 files / 3+4 carrier-destroy sites in 3 files / 8 hand-back stations (5 in cgen_redim.cpp + 过程出口) + 3 shape questions + 3 multidim export sites + 4+2 carrier-scope registrar + flag sites / 5 static gates / 4+3 ND Preserve-with-release export sites)"
 exit 0

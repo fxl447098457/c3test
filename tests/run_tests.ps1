@@ -7728,6 +7728,7 @@ if ($Category -in @("all", "run", "vbp")) {
                     #   保留那一枚照常可用; W32 (同尺寸 Preserve) 必须继续 = 0 = 搬走的不许多退。
                     "W35-terms=2 kept=True",
                     "W36-terms=12",
+                    "W37-terms=2 kept=True",
                     "B445-DONE")
     Test-Vbp 'b445_class_slot_refcount' "$Tests\b445_refcount\B445.vbp" $b445Needles
     Test-Vbp 'b445_class_slot_refcount_x86' "$Tests\b445_refcount\B445.vbp" $b445Needles -Arch "x86"
@@ -7848,6 +7849,16 @@ if ($Category -in @("all", "run", "vbp")) {
     Test-EmitcAbsent 'b445_local_array_scope_exit_skips_nonclass' @(
         "$Tests\b445_refcount\B445.vbp") @(
         'vb6_SA_ReleaseElements(lg')
+    # 账 #305 §B218 (甲) 第一百五十四刀 = 腿⑤ 第六格: 多维 Preserve **收缩**那一发认指针档 ⇒ 换带回调的本体
+    # _Tr; 同格里的 As Long 那一发必须继续走不带回调的转调 = 反面证人。针只钉到界临时量的名字前面 —— 末尾
+    # 那个序号随语句顺序漂 (§B156), 把它写进针里就是一枚会假红的钉。递不递 _Release 由臂本身保证:
+    # 少一形参在 cl 上是 C2197, 这一档编不过比针先响。
+    Test-EmitcShape 'b445_nd_preserve_shrink_handback' @(
+        "$Tests\b445_refcount\B445.vbp") @(
+        'vb6_SafeArrayReDimPreserveND_Tr(vb6_sa_ptr, (vb6_SafeArrayND*)mND445, 2, _redim_bounds_mND445')
+    Test-EmitcAbsent 'b445_nd_preserve_keeps_plain_export_for_nonclass' @(
+        "$Tests\b445_refcount\B445.vbp") @(
+        'vb6_SafeArrayReDimPreserveND_Tr(vb6_sa_long')
     Test-EmitcShape 'b445_nd_carrier_destroy_handback_shape' @(
         "$Tests\b445_refcount\B445.vbp") @(
         'vb6_SA_ReleaseElements((vb6_SafeArrayND*)mND445, vb6_cls_C445_Release);',
