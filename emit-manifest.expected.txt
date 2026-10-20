@@ -509,8 +509,8 @@ sha256=39a9930fd668cbc50eae8264e259de6a79745c9c38fdc6a1bd3ce71fb7e446df ascii256
 sha256=c0244be05cc0a51db87fe0d0acbd182e9d8c078cc849e3f725c423721848c651 ascii256=dc42a9a061da3b4e7cd4f12d7c26d091a0d8b50eeb85280c6705bd68875ee860 rc=0 bytes=3462 tests/b440_serialsplit.bas
 sha256=a1518f32c684c39cf425d0e14ebf1c3f172b3b7441789f941643ffd2a775de5e ascii256=1f01f259a38082f75ebfef9168b7ee1d5bc5751eb9e314dd00f1e2ff39f87244 rc=0 bytes=13275 tests/b444_vararg/B444.vbp
 sha256=86e7fd9fc07fdf784fee812b09240aaf8be4ddd8b0a407f52744187cb0555336 ascii256=4598009153c3f10882efcf2519794635680488fcac2ed19da0ea55f319d69281 rc=0 bytes=7728 tests/b444_vararg/Main.bas
-sha256=6d6b60d2197852deae46c7cfdac178a26d27b81638141d9cbb260a60a9ae712e ascii256=7292588f8cb1fa42a2086ec511c0cd808bc543056639038944d7719575f84f93 rc=0 bytes=17578 tests/b448_iface_ret/B448.vbp
-sha256=eac36169521603767d8d4cdc91251398c02278aeb16a6a169245c3dc7ecdbb25 ascii256=bc3cd8f0b42a16e171deea4cb106413a0b289f3480a158f43e455b6619f2af16 rc=0 bytes=3116 tests/b448_iface_ret/Main.bas
+sha256=7717ab0c974f850547e0c463fddc347e065f6a438240273fc4c233440afabd7a ascii256=a8a3b9a72f1d2e44c4a040e64b7a4eecf228daba65d758d3c140bacf6721be82 rc=0 bytes=19528 tests/b448_iface_ret/B448.vbp
+sha256=fefe555470d4a0c26ca58df59ff355f2ac1a2b62f1cbc0dc8e383b515d0d0c9f ascii256=c70a2d8b7f5f15b732e5f4f4e800a146480dcfc92c1c2d8a54e693b751422e83 rc=0 bytes=4127 tests/b448_iface_ret/Main.bas
 sha256=d82a62e837cff15b77f25287a7e1cf288b8a2de7bc1c36c57cc1d059fae81335 ascii256=5c78de7473337cff4fc768dbf60fee0fdbd0d0bf05297e8ca82a8a514a9d0375 rc=0 bytes=41951 tests/b445_refcount/B445.vbp
 sha256=6ea52fbaa5ad4cb55a13a16ae13b2d61b278d9b6d476b66d4d2f470540be9399 ascii256=8ebc98340760a9ca836dca25b9b4c54e3f5e18a118510978d996a0b951095f61 rc=0 bytes=17444 tests/b445_refcount/Main.bas
 # 账 #305 §B188 (第八十刀判据): 新增 2 行 = tests/b188_term 那两枚输入, 哈希取 CI 为同一 head 33320a1d 自己交的 9c33fdca;
@@ -737,3 +737,15 @@ sha256=6ea52fbaa5ad4cb55a13a16ae13b2d61b278d9b6d476b66d4d2f470540be9399 ascii256
 #   `Main.bas` 那一行 BASE 与 NEW 对同一份源码的发码**一字相同**（added=0 / removed=0）⇒ 它移动
 #   只是因为夹具自己加了 W17 / W18 / W19，不是行为面。本机合上的那台全语料复算 486 行三列与 CI
 #   逐行全等（`.build/k1156_new_manifest.txt` vs `.build/k1158_ci/emit-manifest.txt`）= 登记前后对得上。
+#   第一百三十三刀登记（2026-10-20，head `a5f0aac1`，run 39343960421 = 门 #780 唯一一条红是形状门）：
+#   移动 2 行 = `tests/b448_iface_ret/B448.vbp` + 夹具自己那行 `Main.bas`，新增 0 / 退场 0。
+#   逐行归因（尺 `.build/k1220_attr.py`：**同一份夹具交给两台编译器**，BASE = CI 为 head `5a627dfb`
+#   编的那台 `.build/k1144_base`，只缺本刀）= 新增 0 行 / 删除 **1 行**，删掉的那一行正是
+#   `if (sv20) sv20->vt->Release(sv20);  /* tB Interface B05: scope-exit release */` —— 一枚
+#   `Static` 视图槽的出口放手（`src/backend/decl/cgen_localdecl.cpp:335` 那道闸补上之后不再发）。
+#   夹具自己的新行（W20 那一格 + 两枚模块级计数器 + `Class_Terminate`）两台一字相同 ⇒ 不进差异；
+#   这两行之所以还移动，一半是本刀撤掉那一枚、一半是夹具自己变长。
+#   两头独立核对（尺 `.build/k1217_verify.py`）：① 本机全语料复算 vs CI 本头那份工件 = 486 行
+#   四列全等（只在 local = 0 / 只在 ci = 0 / 三列不同 = 0）；② CI 本头 vs CI 上一头（head `f9d79d1b`，
+#   run 39341501644 = 门 #779 十二格全绿）= 移动 2 / 新增 0 / 退场 0 ⇒ 「语料里
+#   `Static … As <工程接口>` 暴露面 0 处」这条主张由 CI 自己的数背书：另外 484 行一个字没动。
