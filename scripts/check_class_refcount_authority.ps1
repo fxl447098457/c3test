@@ -1,5 +1,5 @@
 ﻿# check_class_refcount_authority.ps1 - 账 #305 §B218 (甲)：工程类实例的引用计数只许有一位主人。
-# 十九条钉（每条都能单独红，红了就说明同一问长出了第二位主人）：
+# 二十条钉（每条都能单独红，红了就说明同一问长出了第二位主人）：
 #   ① 出入口那一对的 mint 各恰好 1 处，且住在 module/cgen_com.cpp（每条腿只许转调它）。
 #   ② 计数头 `int32_t __refcount;` 的 mint 恰好 1 处，且住在 cgen_iface_vtbl.cpp 的
 #      emitIfaceClassFields 里 —— 它必须紧跟 __comObj 那一句（ai/022 D19：偏移 0 恒是 __comObj）。
@@ -296,8 +296,8 @@ if ($askElemFiles.Count -ne 4) {
     $fail += ("index-slot question files = " + ($askElemFiles -join ', ') + " (want exactly 4 files)")
 }
 $askStruct = CountOf 'projectClsStructOfCType('
-if ($askStruct -ne 4) {
-    $fail += ("project-class-pointer question sites = " + $askStruct + " (want exactly 4: declaration + definition + 2 teardown legs)")
+if ($askStruct -ne 5) {
+    $fail += ("project-class-pointer question sites = " + $askStruct + " (want exactly 5: declaration + definition + 2 teardown legs + 载体销毁那一问)")
 }
 $askStructFiles = @(FilesOf 'projectClsStructOfCType(')
 if (-not ($askStructFiles -contains 'cgen_com.cpp')) {
@@ -307,9 +307,9 @@ $addrMint = CountOf '"__clsaddr" + std::to_string'
 if ($addrMint -ne 1) {
     $fail += ("address-temp mint sites = " + $addrMint + " (want exactly 1, inside emitClassSlotRefSet)")
 }
-$elemOut = CountOf 'vb6_SA_ReleaseElements'
-if ($elemOut -ne 3) {
-    $fail += ("element-teardown export sites = " + $elemOut + " (want exactly 3: RTL declaration + definition + 1 emit station)")
+$elemOut = CountOf 'vb6_SA_ReleaseElements('
+if ($elemOut -ne 4) {
+    $fail += ("element-teardown export sites = " + $elemOut + " (want exactly 4: RTL declaration + definition + 2 emit stations, 都不许绕过主人自己拼)")
 }
 $elemOutFiles = @(FilesOf 'vb6_SA_ReleaseElements')
 if (-not ($elemOutFiles -contains 'cgen_com.cpp')) {
@@ -342,10 +342,31 @@ $askCopyInFiles = @(FilesOf 'registerClassArgRefCopyIn(')
 if ($askCopyInFiles.Count -ne 4) {
     $fail += ("copy-in claim files = " + ($askCopyInFiles -join ', ') + " (want exactly 4 files)")
 }
+# ⑳ 第一百四十六刀: 载体销毁那一族 (Erase / ReDim 不带 Preserve) 的两问只许一位主人。
+#    · classOfArrayCarrier = 「这枚数组变量握着的元素是不是工程类」: 声明 + 定义 + 发码主人里问一次 = 3 处 / 3 份文件
+#      (再多一处 = 某个站点绕过问句自己查 arrayClassElemTypes_ 那张表)。
+#    · emitClassArrayElemHandback = 销毁载体前那一发的唯一发码处: 声明 + 定义 + Erase站 + ReDim站 = 4 处 / 3 份文件,
+#      两位站点必须全住在 cgen_redim.cpp。只要有站自己拼那发释放，“谁握元素那一枚”就又分家。
+$askCarrier = CountOf 'classOfArrayCarrier('
+if ($askCarrier -ne 3) {
+    $fail += ("array-carrier question sites = " + $askCarrier + " (want exactly 3: declaration + definition + 1 emit owner)")
+}
+$askCarrierFiles = @(FilesOf 'classOfArrayCarrier(')
+if ($askCarrierFiles.Count -ne 3) {
+    $fail += ("array-carrier question files = " + ($askCarrierFiles -join ', ') + " (want exactly 3 files)")
+}
+$carrierHelp = CountOf 'emitClassArrayElemHandback('
+if ($carrierHelp -ne 4) {
+    $fail += ("carrier-destroy hand-back sites = " + $carrierHelp + " (want exactly 4: declaration + definition + Erase station + ReDim station)")
+}
+$carrierHelpFiles = @(FilesOf 'emitClassArrayElemHandback(')
+if (-not ($carrierHelpFiles -contains 'cgen_redim.cpp')) {
+    $fail += ("carrier-destroy stations missing from cgen_redim.cpp (files = " + ($carrierHelpFiles -join ', ') + ")")
+}
 if ($fail.Count -gt 0) {
     Write-Host "CLASS-REFCOUNT-AUTHORITY FAIL"
     foreach ($f in $fail) { Write-Host ("  - " + $f) }
     exit 1
 }
-Write-Host "CLASS-REFCOUNT-AUTHORITY OK (1 pair mint / 1 header / 2 leg consumers / 3+9 formals / 10 roster files / 6 literal files / 0 stale / 5 registry files + 2 registrants / 1+1 out-slot / 1+1 foreign-write drop / 1 field-teardown shape + file / 6 field-type questions (标量 + 数组两档) / 6 transfer-question sites in 2 files / 1 view-leg hand-back + 2 QiSet calls / 1+2+1 transfer-arm questions / 3 static-gate sites in 1 file + 1 ivref registration / 1 arg-station hand-back + 4+4 helper sites in 4 files / 4+4 index-slot + project-class questions / 1 address-temp mint / 3 element-teardown sites / 4+4 形A questions (out-slot class + owner pass) + 5 copy-in claim sites in 4 files)"
+Write-Host "CLASS-REFCOUNT-AUTHORITY OK (1 pair mint / 1 header / 2 leg consumers / 3+9 formals / 10 roster files / 6 literal files / 0 stale / 5 registry files + 2 registrants / 1+1 out-slot / 1+1 foreign-write drop / 1 field-teardown shape + file / 6 field-type questions (标量 + 数组两档) / 6 transfer-question sites in 2 files / 1 view-leg hand-back + 2 QiSet calls / 1+2+1 transfer-arm questions / 3 static-gate sites in 1 file + 1 ivref registration / 1 arg-station hand-back + 4+4 helper sites in 4 files / 4+4 index-slot + project-class questions / 1 address-temp mint / 4 element-teardown sites + 3+4 carrier-destroy questions / 4+4 形A questions (out-slot class + owner pass) + 5 copy-in claim sites in 4 files / 3+4 carrier-destroy sites in 3 files)"
 exit 0

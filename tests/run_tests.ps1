@@ -7713,6 +7713,14 @@ if ($Category -in @("all", "run", "vbp")) {
                     "W26-null=True terms=1",
                     "W27-same=True mid-terms=1", "W27-made=1 end-terms=2",
                     "W28-mid-terms=2", "W28-made=2 end-terms=2",
+                    # 第一百四十六刀 (载体销毁那一族): W29 固定数组的 Erase / W30 动态数组的 Erase /
+                    #   W31 ReDim 不带 Preserve 换载体 = 旧元素当场出厂 (修前三发全 0 枚);
+                    #   W32 = 反面证人 Preserve 那一支: 元素是被搬走的 ⇒ 一格都不许多退, 且搬完还能用。
+                    "W29-terms=2 cleared=True", "W30-terms=2", "W31-terms=2",
+                    "W32-terms=0 kept=True",
+                    #   W33/W34 = 两枚**反面证人**: 元素不是工程类 (泛对象包装器 / 裸值) 与多维载体,
+                    #   本刀刻意不碰 ⇒ 一枚不退 (在册)。钉成证词, 那一档补上时这两条要一起翻。
+                    "W33-terms=0", "W34-terms=0",
                     "B445-DONE")
     Test-Vbp 'b445_class_slot_refcount' "$Tests\b445_refcount\B445.vbp" $b445Needles
     Test-Vbp 'b445_class_slot_refcount_x86' "$Tests\b445_refcount\B445.vbp" $b445Needles -Arch "x86"
@@ -7804,6 +7812,21 @@ if ($Category -in @("all", "run", "vbp")) {
         'VB6_SA_AT(void*, mArr445, 1) = (vb6_cls_C445_New());  /* Set */',
         'VB6_SA_AT(void*, me->mKids23, 1) = (vb6_cls_C445_New());  /* Set */',
         'vb6_ReleaseObject((void**)(&(void*){VB6_SA_AT')
+    # 账 #305 §B218 (甲) 第一百四十六刀 = 载体销毁那一族 (Erase / ReDim 不带 Preserve) 的发码两面:
+    #   正 = 销毁载体那一发**之前**逐枚交回同一位主人 (固定数组走 vb6_EraseArrayVar 的 memset 支路、
+    #     动态走 vb6_SafeArrayDestroy1D；两条都是裸销毁 ⇒ 元素那一枚引用没人放手)。
+    #   反 = 三道闸拦下的那三档，从此一发都不许出现: `As Object` (槽里是包装器, 按实例拆 = 堆损坏)、
+    #     `As Long` (裸值不是指针)、多维载体 (不是 vb6_SafeArray1D, RTL 还没有 ND 版出口)。
+    #     Preserve 那一支不吃 (元素被搬走不是被丢)，判据收在上面那条 W32-terms=0 的运行时证词里。
+    Test-EmitcShape 'b445_carrier_destroy_handback_shapes' @(
+        "$Tests\b445_refcount\B445.vbp") @(
+        'vb6_SA_ReleaseElements(mArr445, vb6_cls_C445_Release);  /* 账 #305 (甲) 腿⑤ 数组档: 载体销毁前逐枚交回 */',
+        'vb6_SA_ReleaseElements(mDyn445, vb6_cls_C445_Release);')
+    Test-EmitcAbsent 'b445_carrier_destroy_skips_nonclass_and_nd' @(
+        "$Tests\b445_refcount\B445.vbp") @(
+        'vb6_SA_ReleaseElements(mObjArr445',
+        'vb6_SA_ReleaseElements(mLngArr445',
+        'vb6_SA_ReleaseElements(mND445')
     # 账 #305 §B188 ④ (第九十刀): 出厂那一腿的**尾巴**。`Class_Terminate` 抛错时, `_Destroy` 里体之后
     # 那三截(字段 BSTR / 数组字段 / vb6_Free(me))曾被 ComObj_Release 的帧一起 longjmp 跳掉 —— 实测每枚
     # 抛错的出厂漏一份实例资源: x64 每枚 35~37 字节、x86 每枚 17 字节, 多一枚 20 字符 String 字段就涨到

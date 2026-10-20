@@ -13,6 +13,14 @@ Public m_plain As C445
 ' 账 #305 §B218 (甲) 第一百四十刀 = 下标槽那一档: 目标是 VB6_SA_AT(...) 那一形 —— 带括号**但是左值**,
 '   所以「带括号就当函数调用」那条老判据对它不成立。三站各一枚靶 (W20/W21/W22)。
 Private mArr445(1 To 3) As C445
+' 账 #305 §B218 (甲) 第一百四十六刀 = 载体销毁那一族: Erase / ReDim 不带 Preserve 换掉整块载体时,
+'   元素那一枚引用由这一格握着 (腿②③ 已认同一位主人)，销毁前必须逐枚交回。靶两枚: 固定 + 动态。
+Private mDyn445() As C445
+' 第一百四十六刀的两枚反面证人: W33 = 载体里的元素**不是**工程类 (泛对象包装器 / 裸值)，
+' W34 = 多维载体那一档本刀刻意没接 (RTL 还没有 ND 版出口)。
+Private mObjArr445() As Object
+Private mLngArr445() As Long
+Private mND445() As C445
 Public Side445 As Long
 
 Public Function Pick445() As Long
@@ -356,6 +364,82 @@ Sub W23ArrFieldTeardown()
     Debug.Print "W23-out-made=" & (Made - m0) & " terms=" & (Terms - t0)
 End Sub
 
+' ==== 账 #305 §B218 (甲) 第一百四十六刀 = 载体销毁那一族 (Erase / ReDim 不带 Preserve) ====
+' 修前: 这两发都是裸销毁 —— 动态那一支 `vb6_SafeArrayDestroy1D` 对 vb6_sa_ptr 元素压根没有那一支,
+'       固定那一支逐元素走 `vb6_ReleaseObject`, 而它的 Fix 191 判据认不出工程类裸结构体 ⇒ 一枚不退。
+' 修后: 销毁载体之前先问一处「这一枚数组握着的元素是不是工程类」，是 ⇒ 逐枚交回 (RTL 那头先清槽
+'       再放手 ⇒ Terminate 回头写这一格不会退第二遍)。
+
+' W29 = 固定类数组的 Erase: 两枚当场出厂 + 槽真清 (修前 = terms 0、槽却被 memset 清成 Nothing)。
+Sub W29EraseFixedArr()
+    Dim t0 As Long
+    t0 = Terms
+    Set mArr445(1) = New C445
+    Set mArr445(2) = New C445
+    Erase mArr445
+    Debug.Print "W29-terms=" & (Terms - t0) & " cleared=" & (mArr445(1) Is Nothing)
+End Sub
+
+' W30 = 动态类数组的 Erase (同一枚 RTL 出口的 isDynamic 那一支): 两枚当场出厂。
+Sub W30EraseDynArr()
+    Dim t0 As Long
+    t0 = Terms
+    ReDim mDyn445(1 To 2)
+    Set mDyn445(1) = New C445
+    Set mDyn445(2) = New C445
+    Erase mDyn445
+    Debug.Print "W30-terms=" & (Terms - t0)
+End Sub
+
+' W31 = ReDim 不带 Preserve 换掉旧载体: 旧的两枚当场出厂 (修前 = 0 枚)。
+Sub W31RedimNoPreserve()
+    Dim t0 As Long
+    t0 = Terms
+    ReDim mDyn445(1 To 2)
+    Set mDyn445(1) = New C445
+    Set mDyn445(2) = New C445
+    ReDim mDyn445(1 To 5)
+    Debug.Print "W31-terms=" & (Terms - t0)
+End Sub
+
+' W32 = 反面证人: Preserve 那一支元素是**被搬走**的, 一格都不许多退 (留下那两枚还得照样能用)。
+Sub W32PreserveKeepsElems()
+    Dim t0 As Long
+    t0 = Terms
+    ReDim Preserve mDyn445(1 To 6)
+    Set mDyn445(1) = New C445
+    Set mDyn445(2) = New C445
+    ReDim Preserve mDyn445(1 To 6)
+    Debug.Print "W32-terms=" & (Terms - t0) & " kept=" & (Not (mDyn445(1) Is Nothing))
+    Erase mDyn445
+End Sub
+
+' W33 = 反面证人: 载体里躺的**不是**工程类实例 (As Object = 包装器 / As Long = 裸值) ⇒ 三道闸拦下，
+'   这一站一声不出。今天这两发照样一枚不退 = 泛对象档那一格还欠口径 (在册)，钉成证词不是愿望。
+Sub W33NonClassCarriers()
+    Dim t0 As Long
+    t0 = Terms
+    ReDim mObjArr445(1 To 2)
+    Set mObjArr445(1) = New C445
+    ReDim mLngArr445(1 To 2)
+    mLngArr445(1) = 7
+    Erase mObjArr445
+    Erase mLngArr445
+    Debug.Print "W33-terms=" & (Terms - t0)
+End Sub
+
+' W34 = ND 载体那一档本刀刻意不吃 (没有 vb6_SA_ReleaseElementsND，硬塞 cast = 拆错布局)：
+'   两枚照常漏 ⇒ 同样钉成证词。ND 那一枚兄弟出口出来时要把它翻成正面针。
+Sub W34NdCarrierUntouched()
+    Dim t0 As Long
+    t0 = Terms
+    ReDim mND445(1 To 2, 1 To 2)
+    Set mND445(1, 1) = New C445
+    Set mND445(2, 2) = New C445
+    Erase mND445
+    Debug.Print "W34-terms=" & (Terms - t0)
+End Sub
+
 ' ==== 账 #305 §B218 (甲) 第一百四十四刀 = 形A 那座桥 (ByRef 工程类形参的写回站) ====
 ' 修前: 调用侧交出去的是一枚**副本** (vb6_argtmp_*)，调用行之后没人写回 ⇒ 被调方那一发 `Set <形参> = ...`
 '       整条丢掉，而且那一枚 New 从此没人退；链形 (实参本身是 ByRef 工程类形参) 更糟 —— 交出去的是一枚
@@ -479,5 +563,11 @@ Sub Main()
     W26OutParamNil
     W27ByValDoesNotLand
     W28HandedOverArg
+    W29EraseFixedArr
+    W30EraseDynArr
+    W31RedimNoPreserve
+    W32PreserveKeepsElems
+    W33NonClassCarriers
+    W34NdCarrierUntouched
     Debug.Print "B445-DONE"
 End Sub
