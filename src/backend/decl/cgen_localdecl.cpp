@@ -111,10 +111,11 @@ void CCodeGen::emitLocalDeclCode(LocalDeclStmt& node) {
                 {
                     std::string cls = resolveArrayClassElemType(var.asType.get());
                     if (!cls.empty()) arrayClassElemTypes_[lower] = cls;
-                    // 账 #305 §B218 (甲) 第一百五十二刀: 同一位登记口、同一道闸
-                    // (Static 那一格跨调用活着, 出口不许放手)。
-                    if (!cls.empty() && !var.isStatic && !inStaticProc_) {
-                        trackClassArrayCarrierForRelease(cIdent(var.name), var.name);
+                    // 账 #305 §B218 (甲) 第一百五十二刀立的那位登记口; 第一百五十六刀放宽到
+                    // **每一档**局部数组 (认不出元素类的也登记, 只是不交回元素), 闸一条不少:
+                    // Static 那一格跨调用活着, 出口放手 = 下次进来读已释放块。
+                    if (!var.isStatic && !inStaticProc_) {
+                        trackArrayCarrierForRelease(cIdent(var.name), var.name);
                     }
                 }
                 knownLocalVars_.insert(lower);
@@ -154,10 +155,11 @@ void CCodeGen::emitLocalDeclCode(LocalDeclStmt& node) {
                 {
                     std::string cls = resolveArrayClassElemType(var.asType.get());
                     if (!cls.empty()) arrayClassElemTypes_[lower] = cls;
-                    // 账 #305 §B218 (甲) 第一百五十二刀: 同一位登记口、同一道闸
-                    // (Static 那一格跨调用活着, 出口不许放手)。
-                    if (!cls.empty() && !var.isStatic && !inStaticProc_) {
-                        trackClassArrayCarrierForRelease(cIdent(var.name), var.name);
+                    // 账 #305 §B218 (甲) 第一百五十二刀立的那位登记口; 第一百五十六刀放宽到
+                    // **每一档**局部数组 (认不出元素类的也登记, 只是不交回元素), 闸一条不少:
+                    // Static 那一格跨调用活着, 出口放手 = 下次进来读已释放块。
+                    if (!var.isStatic && !inStaticProc_) {
+                        trackArrayCarrierForRelease(cIdent(var.name), var.name);
                     }
                 }
                 knownLocalVars_.insert(lower);

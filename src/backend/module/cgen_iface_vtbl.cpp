@@ -35,6 +35,8 @@
 #include <algorithm>
 #include <cctype>
 #include <cstdint>
+#include <map>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -686,7 +688,7 @@ void CCodeGen::emitIfaceImplTables(Module& module) {
 // (#445 钉住的那条夹, 原来只有接口一档写着一句注释, 现在两档共用同一句代码)。
 void CCodeGen::trackSlotForRelease(const std::string& expr, bool isView,
                                    const std::string& clsName,
-                                   const std::string& arrayName) {
+                                   const std::string& arrayName, bool freeCarrier) {
     if (!currentReturnVar_.empty() && expr == currentReturnVar_) return;
     for (const SlotRelease& s : slotsToRelease_) {
         if (s.expr == expr) return;
@@ -697,6 +699,7 @@ void CCodeGen::trackSlotForRelease(const std::string& expr, bool isView,
     rec.clsName = clsName;
     rec.arrayName = arrayName;
     rec.isCarrier = !arrayName.empty();
+    rec.freeCarrier = freeCarrier;
     slotsToRelease_.push_back(rec);
 }
 
@@ -706,11 +709,68 @@ void CCodeGen::trackSlotForRelease(const std::string& expr, bool isView,
 //    压根不登记 = 维持今天的裸着出作用域;
 //  - Static 那一档 (`Static a() As C`, 或整个 `Static Sub`) 由调用方 (cgen_localdecl.cpp 那两条臂)
 //    拦在门外 —— 那一格跨调用活着, 出口放手 = 下次进来读已释放块 (与类槽那一档同一句理由)。
-void CCodeGen::trackClassArrayCarrierForRelease(const std::string& cName,
-                                              const std::string& arrayName) {
+// 账 #305 §B218 (甲) 第一百五十六刀: 这一口从「只认工程类元素的载体」放宽到**每一档局部数组**——
+// 元素认不出就一声不交回, 但载体那一块该销毁还是要销毁 (Destroy1D 自己会按 elemType 收尾
+// bstr / variant 元素)。多出来的那一档只有一条闸: 预扫说这枚载体在本过程里被整体用掉过
+// (`Dim v: v = a` / `P(a)` / `For Each x In a` / `UBound(a)` 一律算) ⇒ 不登记 = 维持今天的漏。
+void CCodeGen::trackArrayCarrierForRelease(const std::string& cName,
+                                           const std::string& arrayName) {
     if (cName.empty() || arrayName.empty()) return;
-    if (classOfArrayCarrier(arrayName).empty()) return;
-    trackSlotForRelease(cName, false, std::string(), arrayName);
+    std::string lower = arrayName;
+    for (char& ch : lower) ch = (char)tolower((unsigned char)ch);
+    trackSlotForRelease(cName, false, std::string(), arrayName,
+                        escapedLocalArrays_.count(lower) == 0);
+}
+
+// 「这枚局部数组有没有被整体用掉」那一问的唯一答案。判据按**节点地址**认, 不按文本:
+// traverseExpr 先 visit 父节点再下钻 ⇒ 在父节点里把「这一格不算逃逸」的子节点指针记下,
+// 到 IdentifierExpr 那一访按指针放行。认不出的形状默认算逃逸 (fail-safe: 少发一发销毁)。
+// 不算逃逸的只有两形: ① 带实参的元素访问 `a(i)` / `a(i)=v` 里那个被调者 ② 整数组赋值的左值
+// `a = ...` (换载体 = 老载体已由 ReDim/赋值那一站收尾, 出口只管新的那一块)。
+// 算逃逸的 = 其余每一次裸出现: 右值 (`v = a` / `pv = a`)、实参 (`P(a)` / `UBound(a)`)、
+// 零实参的整枚数组那一形 (`v = a()`, 载体当场交给调用方)、`For Each x In a` 的集合、
+// 成员链的宿主 (`a.Field`) —— 后两形今天在 VB6 里其实是**借用**不逃逸, 这里刻意从严:
+// 载体级销毁是全元素档一起动, 换悬空读的代价不值这 3% 的覆盖率。
+namespace {
+struct EscapeScan : public ASTVisitor {
+    std::set<const ASTNode*> exempt;
+    std::map<std::string, int> bare;
+    static std::string low(const std::string& s) {
+        std::string r = s;
+        for (char& ch : r) ch = (char)tolower((unsigned char)ch);
+        return r;
+    }
+    void visit(IdentifierExpr& node) override {
+        if (exempt.count(&node)) return;
+        bare[low(node.name)]++;
+    }
+    void visit(IndexOrCallExpr& node) override {
+        // `a(i)` 那一形: 被调者就是数组本身, 只碰一格, 载体不交出去 ⇒ 放行。
+        // `a()` (零实参) 在 VB6 里是**整枚数组**那一形 —— 函数返回数组、整数组赋值的右边都写它,
+        // 载体当场交给了调用方, 和 `P(a)` 同一族 ⇒ 这一格不放行, 按裸出现算逃逸。
+        if (node.callee &&
+            (!node.positional.empty() || !node.named.empty())) {
+            exempt.insert(node.callee.get());
+        }
+    }
+    void visit(AssignmentStmt& node) override {
+        if (node.target) exempt.insert(node.target.get());  // `a = ...` 的左值 = 换载体, 不逃逸
+    }
+    void visit(LetStmt& node) override {
+        if (node.target) exempt.insert(node.target.get());
+    }
+};
+} // namespace
+
+void CCodeGen::scanLocalArrayEscapes(const StmtList& body) {
+    escapedLocalArrays_.clear();
+    EscapeScan scan;
+    for (const auto& st : body) {
+        if (st) traverseStmt(*st, scan);
+    }
+    for (const auto& kv : scan.bare) {
+        escapedLocalArrays_.insert(kv.first);
+    }
 }
 
 void CCodeGen::trackClassSlotForRelease(const std::string& cName, const std::string& clsName) {
@@ -804,7 +864,21 @@ void CCodeGen::emitIvrefScopeRelease() {
         // 出厂那一支答错的下限是静默不漏 (第一百五十刀那条 elemType 闸), 而 free 那一支答错
         // 就是拿错步长解引用再 free —— 载体级的销毁 (= 内存那半, 全元素档一起) 是另一格机制。
         if (s.isCarrier) {
-            emitClassArrayElemHandback(s.expr, s.arrayName, "作用域出口逐枚交回 (载体不销毁)");
+            const bool nd = carrierIsMultidim(s.arrayName);
+            emitClassArrayElemHandback(s.expr, s.arrayName,
+                                       s.freeCarrier ? "作用域出口逐枚交回 (载体随后销毁)"
+                                                     : "作用域出口逐枚交回 (载体不销毁)");
+            // 第一百五十二刀刻意留在册的那一半 (第一百五十五刀量完 = 每次调用实测漏 316/334 字节):
+            // 出口销毁载体。臂由同一位主人挑 (`carrierIsMultidim` 读的是当前载体那一档, 与 152 那条
+            // 「表在出口这一刻反映的就是当前载体」的实测同前提); 双 free 那两条封死 —— Erase 四支都
+            // 要么置 NULL 要么保留载体, 而非 Preserve 的 ReDim 先销毁旧载体再赋新 (读数在台账)。
+            if (s.freeCarrier) {
+                const std::string kill = nd
+                    ? ("vb6_SafeArrayDestroyND((vb6_SafeArrayND*)" + s.expr + ");")
+                    : ("vb6_SafeArrayDestroy1D(" + s.expr + ");");
+                c_.emitLine(kill +
+                            "  /* 账 #305 (甲) 腿⑤: 作用域出口销毁载体 (本过程内它从没整体用掉) */");
+            }
             continue;
         }
         if (s.isView) {

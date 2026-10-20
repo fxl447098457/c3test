@@ -288,11 +288,16 @@
     // 第一百五十二刀: arrayName 非空 = 第三档「数组载体」(clsName 那一格空着不用)。
     void trackSlotForRelease(const std::string& expr, bool isView,
                              const std::string& clsName,
-                             const std::string& arrayName = std::string());
-    // 账 #305 §B218 (甲) 腿④: 局部类数组出作用域那一格的唯一登记口 ——
-    // 认不出元素类的数组压根不登记 (三道闸住在那位主人 classOfArrayCarrier 里)。
-    void trackClassArrayCarrierForRelease(const std::string& cName,
-                                          const std::string& arrayName);
+                             const std::string& arrayName = std::string(),
+                             bool freeCarrier = false);
+    // 账 #305 §B218 (甲) 腿④: 局部数组出作用域那一格的唯一登记口 (第一百五十二刀立,
+    // 第一百五十六刀放宽) —— 每一档局部数组都登记; 元素认不出类就不交回元素, 载体照样收尾,
+    // 收尾那一发只在过程入口预扫说「这枚载体在本过程里没被整体用掉」时才发。
+    void trackArrayCarrierForRelease(const std::string& cName,
+                                     const std::string& arrayName);
+    // 账 #305 §B218 (甲) 第一百五十六刀: 过程入口跑一趟, 把「载体被整体用掉」的数组名收进
+    // escapedLocalArrays_ (与 clear 那张表同一位置调用)。
+    void scanLocalArrayEscapes(const StmtList& body);
     void emitIvrefScopeRelease();                     // B05: 过程出口发 Release
     std::string ivrefCType(const std::string& typeName);   // 空串 = 不是新式接口
     const IfaceView* ivLookupIface(const std::string& written);

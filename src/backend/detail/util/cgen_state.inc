@@ -516,9 +516,14 @@
         bool isView;
         std::string clsName;   // 只有工程类那一档带类名
         bool isCarrier = false;
+        bool freeCarrier = false;  // 只有载体档用: 出口除逐枚交回之外还销毁载体
         std::string arrayName; // 只有载体档带带数组名
     };
     std::vector<SlotRelease> slotsToRelease_;
+    // 账 #305 §B218 (甲) 第一百五十六刀: 「这一档局部数组的载体有没有在本过程里被整体用掉」
+    // 由过程入口那一趟预扫 (scanLocalArrayEscapes) 一次性回答, 存小写裸名。登记口只在这张名单
+    // 不含它时才允许出口销毁载体 —— 认不出的形状一律算逃逸 (漏判的方向是继续漏, 不是悬空读)。
+    std::set<std::string> escapedLocalArrays_;
     // Set 语句里"旧值"临时变量的序号 (只有新语法路径消耗, 不影响其他工程)
     int ivrefSetSeq_ = 0;
 
