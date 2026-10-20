@@ -38,7 +38,7 @@ sha256=990a641c51a2ec09d2f8718b481f1a6f7ce3cf09e71cb54257e1b56e236dfefa ascii256
 sha256=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 ascii256=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 rc=1 bytes=0 tests/acc/acc_prot_neg.vbp
 sha256=4b91d9d931f761daab8a042a43580e8185eccb72aca804f01fad2e2d99643f0e ascii256=c35c140bb2bcadf39f3fe5b7537de295714c710386caf289be01d98b7d608f45 rc=0 bytes=10395 tests/acc/acc_prot_ok.vbp
 sha256=00f09540b14b64ee8cb03ddb7b3b232b6fc7fb2686fa06bffcc702151aac2b35 ascii256=2b8de0296eed09c56a9a2c9636da585e961de7c41ee32b245fc592760985b55a rc=0 bytes=8476 tests/appqquit/QApp.vbp
-sha256=c2c9b6f4fec13cfb19acc08580e04d0597f258cca925a956a147e7055509bf1e ascii256=a02ddcef5c3991c6fcd541a471020de4788ab05aab355020fef55927355d7fa3 rc=0 bytes=12852 tests/arr_cls/ArrCls.vbp
+sha256=0b70894b9b1d8dc9bfac06d41b96732ffe00fee0750ae814a7852a646f0e781c ascii256=5372e0be9a509841a4568beecd91dfd15bedfd795e89f0a2c391521420e1a093 rc=0 bytes=12882 tests/arr_cls/ArrCls.vbp
 sha256=45992c93df6c51c815459a1b451398ed04c738679982b7f348de44c2843940f6 ascii256=1b3c42b5cf240cdc21c980d07653a0fe4c172e0dc6dc6188ef604165250d29dc rc=0 bytes=9042 tests/arr_cls/ArrClsMain.bas
 sha256=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 ascii256=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 rc=1 bytes=0 tests/arr_neg/n01_ubound_vbnull.bas
 sha256=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 ascii256=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 rc=1 bytes=0 tests/arr_neg/n02_join_vbnull.bas
@@ -511,8 +511,8 @@ sha256=a1518f32c684c39cf425d0e14ebf1c3f172b3b7441789f941643ffd2a775de5e ascii256
 sha256=86e7fd9fc07fdf784fee812b09240aaf8be4ddd8b0a407f52744187cb0555336 ascii256=4598009153c3f10882efcf2519794635680488fcac2ed19da0ea55f319d69281 rc=0 bytes=7728 tests/b444_vararg/Main.bas
 sha256=e53761a9c1112f9885b0268fca183424bc243691f7f2245584471b5d0a302fe2 ascii256=095782ff0074cabfbf6fe809c5ce180f134898da2a5332d19c2896aaa8d32c46 rc=0 bytes=27875 tests/b448_iface_ret/B448.vbp
 sha256=13d894f2ae0360dc552cd71b68a96fb462997f6ec4c559cfd02e92496b6d6a6c ascii256=ffa4517d5ef45dc2cc5537547fecbee622218487217955b6378549299dda5d2c rc=0 bytes=8770 tests/b448_iface_ret/Main.bas
-sha256=874680392701b7ad02ee991d980628e55d8a6b7d938a6e2fb1a06fc3b8c6b65b ascii256=8a92316ab0af86b69e94b5147dc12259bf303391779b361a1e64bf9df00fe2ee rc=0 bytes=64661 tests/b445_refcount/B445.vbp
-sha256=bec9bc8666bcf3431c803f00c891710d4f4bf6428827effe9ee68a62e4237934 ascii256=f492df37f9825970cde53ed6659db87ca9406e9b91fdda97c25edc9b955a5df1 rc=0 bytes=31207 tests/b445_refcount/Main.bas
+sha256=ea566381922368665ef9a246068f9eead604288cf6d0fa85f292e479f34405b3 ascii256=192b5ac499e9d8357883b43baf1204ea775758664fca9d23c4ea90f58991d7f0 rc=0 bytes=67016 tests/b445_refcount/B445.vbp
+sha256=09a0f58a54d9d5f4798e18fcffb7a66b1900f4edb2407c86a13ab97dd2876a30 ascii256=ec747df365e269f86890fc7850aa88e06b879acbed7624b9bef8dda3ee1c4392 rc=0 bytes=32409 tests/b445_refcount/Main.bas
 # 账 #305 §B188 (第八十刀判据): 新增 2 行 = tests/b188_term 那两枚输入, 哈希取 CI 为同一 head 33320a1d 自己交的 9c33fdca;
 #   本轮 RTL 只动 ComObj_Release 一处 ⇒ 438 枚存量行**一行没移动** (本机与 CI 两边同读数), 形状门只报「新增未登记」这一族。
 # 账 #305 §B184 (第七十五刀) 的登记来源：门 **#640**（run 38682492970、head 8000e440、attempt 1）= 12 job 里 10 绿 + 两条**预期**红（这道形状门报「存量 5 份哈希不同 + 新增 2 份没登记」、`Tests (compile)` 里同源那句 [STATIC] manifest_coverage）。新增的两行 = 本刀夹具 `tests/b184_fieldw/{B184.vbp,B184Main.bas}`；移动的两行归本刀（Charts 2020/Proyecto1.vbp 31 处、b183_intfield/B183.vbp 2 处，逐行都是 `me-><f> = (int16_t|uint8_t)value.lVal;` → `= vb6_ChkInt|ChkByte(value.lVal);`）。**另外三行移动不是本刀**（ucTreeMaps/Proyecto1.vbp、VBFlexGridDemo/Common/VisualStyles.bas、VBFlexGridDemo/VBFlexGridDemo.vbp）：用「只含本刀、不含 merge」那一对编译器（C3_k74new vs C3_k75new，md5 d74d8b3b/2a24013d）并排重发这三份，移动行数 = 0，而本刀那两份移动 31/2 行 —— 所以这三行是 `a6b05e7d` 带进来的别人那两笔欠的登记，按 CI 为同一个 head 自己交的清单（github/ci/emit-manifest 的 7dea8d25）一并落账。
