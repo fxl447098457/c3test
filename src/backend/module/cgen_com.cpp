@@ -457,6 +457,35 @@ bool CCodeGen::rhsTransfersProjectRef(const ASTNode& expr, bool forViewSlot) {
     return forViewSlot ? retIsView : !retIsView;
 }
 
+// 账 #305 §B218 (甲) 腿⑤ 第二格 (第一百三十七刀): 「实参这一站交出去之后欠不欠一次交回」。
+// 问句不新立, 只把上面那条契约问句与 `New` 那一形成因合起来答一次; forViewSlot 取的是**形参槽
+// 自己**那一档 (各站只认自己那一档 = §B221 那条纪律)。`New <类>` 交的是**实例**, 而视图槽收到它时
+// 发出来的是包出来的薄指针 `&(<实例>->__iv_<I>)` (见 cgen_expr_call_arg_emit.inc 那条 2026-10-12
+// 的 ivfix), 那一枚对价归 §B187 待拍的那一句管 ⇒ 这一形刻意答 false: 交回错对象比漏一枚更坏。
+bool CCodeGen::argHandsOverProjectRef(const ASTNode& expr, const std::string& clsPtr) {
+    const bool forView = clsPtr.compare(0, 10, "vb6_ivref_") == 0;  // vb6_ivref_ = 10 个字符
+    if (expr.kind == ASTNodeKind::NewExpr) return !forView;
+    return rhsTransfersProjectRef(expr, forView);
+}
+
+// 同一站的**唯一**发码出口: 站点把实参落进一枚只活到这条语句结束的临时量, 这里登记
+// 「调用行之后把那一枚交回」。两档形状各一条 —— 实例档问每类一对的 `vb6_cls_X_Release`
+// (与 emitClassSlotRefSet 退旧值那一发同一位主人), 视图档走薄指针自己的 vtable
+// (与第一百三十四刀 emitIvrefQiSet 末尾那一发同一形状)。
+void CCodeGen::registerClassArgRefHandback(const std::string& clsPtr, const std::string& tmp) {
+    std::string releaseCall;
+    if (clsPtr.compare(0, 10, "vb6_ivref_") == 0) {
+        releaseCall = tmp + "->vt->Release(" + tmp + ")";
+    } else {
+        const size_t star = clsPtr.find('*');
+        const std::string rel
+            = (star != std::string::npos) ? clsPtr.substr(0, star) : clsPtr;
+        releaseCall = rel + "_Release(" + tmp + ")";
+    }
+    c_.addPostLine("if (" + tmp + ") " + releaseCall
+                   + ";  /* 账 #305 (甲) 腿⑤: 实参那一站交回 */");
+}
+
 // P6.4+: 类模块默认实例 (VB_PredeclaredId=True) 惰性单例访问器.
 // VB6 为 PredeclaredId 类生成隐藏的全局默认实例, frm 里裸类名成员访问经过
 // knownClassVars_ 解析, 对象表达式生成 vb6_cls_X_Default() 调用. 这里生成:

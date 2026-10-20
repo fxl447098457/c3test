@@ -319,6 +319,11 @@
     // 账 #305 §B218 第一百三十四刀: 多收一个 forViewSlot = 「本站的槽装的是接口视图还是工程类」——
     // 同一条契约问句, 两站各自报自己要的那一档返回类型 (视图那一站 = 视图腿② 交回接管值)。
     bool rhsTransfersProjectRef(const ASTNode& expr, bool forViewSlot);
+    // 账 #305 §B218 (甲) 腿⑤ 第二格 (第一百三十七刀): 实参那一站的两枚出口 —— 问句把上面那条
+    // 契约问句与 `New` 那一形成因合起来只答一次 (forViewSlot 取**形参槽自己**那一档),
+    // 发码只在这一位主人里登记交回, 站点不许自己补一行。
+    bool argHandsOverProjectRef(const ASTNode& expr, const std::string& clsPtr);
+    void registerClassArgRefHandback(const std::string& clsPtr, const std::string& tmp);
     std::vector<const IfaceView*> ivImplementedIfaces(Module& module);
     Decl* ivFindImplMember(Module& module, const IfaceView& v, const IfaceSlotView& slot);
     // tB 委托式实现 (ai/022 B10): 本类把接口 v 整份转交给哪个持有字段 (无则 nullptr)

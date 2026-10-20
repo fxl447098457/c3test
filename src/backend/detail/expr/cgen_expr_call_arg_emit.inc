@@ -1285,6 +1285,14 @@
                             // cType 都不重合, 所以只能显式短路)。
                             isClassSlot092r = true;
                             cType = clsSlotP092r;   // 供下方 090d 的 void* 判定等留个一致的读数
+                            // 账 #305 §B218 (甲) 腿⑤ 第二格 (第一百三十七刀): 本站已经落好一枚只活到
+                            // 这条语句的临时量 —— 实参自带移交的对价时就在那枚临时量上登记交回
+                            // (借来的实参问句答 false ⇒ 一个字节都不发)。裸标识符那一支 (上面 092r)
+                            // 按契约问句自己的规则压根答不出移交 (既不是 New 也不是调用), 不补。
+                            if (i < node.positional.size() && node.positional[i]
+                                && argHandsOverProjectRef(*node.positional[i], clsSlotP092r)) {
+                                registerClassArgRefHandback(clsSlotP092r, tmpCls092r);
+                            }
                         }
                     }
                     // Fix 120: ByRef 具体数值形参 ← 裸 COM 结果 (void* 承载 COM VARIANT*)
