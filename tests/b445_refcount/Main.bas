@@ -10,6 +10,16 @@ Public TermsH As Long
 Private m_auto As New C445
 Public m_plain As C445
 
+' 账 #305 §B218 (甲) 第一百四十刀 = 下标槽那一档: 目标是 VB6_SA_AT(...) 那一形 —— 带括号**但是左值**,
+'   所以「带括号就当函数调用」那条老判据对它不成立。三站各一枚靶 (W20/W21/W22)。
+Private mArr445(1 To 3) As C445
+Public Side445 As Long
+
+Public Function Pick445() As Long
+    Side445 = Side445 + 1
+    Pick445 = 3
+End Function
+
 ' W1 = 腿③ 置空: 局部那一枚交出去之前自己先放手。
 Sub W1SetNothing()
     Dim a As C445
@@ -300,6 +310,52 @@ Sub W19FieldReadKeepsClaim()
     Debug.Print "W19-field-gone-terms=" & (Terms - t3)
 End Sub
 
+' W20 = 覆写那一格: 连设两次 ⇒ 前一枚当场出厂 (修前 = 裸赋值, 旧值没人退 ⇒ 0)。
+Sub W20ArrElemOverwrite()
+    Dim t0 As Long
+    t0 = Terms
+    Set mArr445(1) = New C445
+    Set mArr445(1) = New C445
+    Debug.Print "W20-over-terms=" & (Terms - t0)
+    Set mArr445(1) = Nothing
+End Sub
+
+' W21 = 置空那一格: 放手 + 真清槽 (修前 = 把复合字面量 & 的槽交给 vb6_ReleaseObject, 而它认不出
+'   工程类裸结构体 ⇒ 既不放手也不清槽, 整条语句是 no-op)。
+Sub W21ArrElemNothing()
+    Dim t0 As Long
+    t0 = Terms
+    Set mArr445(2) = New C445
+    Set mArr445(2) = Nothing
+    Debug.Print "W21-terms=" & (Terms - t0) & " cleared=" & (mArr445(2) Is Nothing)
+End Sub
+
+' W22 = 「下标算术算几次」: 每条语句的复合下标只许算一次 (两发 = 2)，同时那一格照样退旧。
+Sub W22IndexSideEffectOnce()
+    Dim t0 As Long
+    Side445 = 0
+    t0 = Terms
+    Set mArr445(Pick445()) = New C445
+    Set mArr445(Pick445()) = New C445
+    Debug.Print "W22-side=" & Side445 & " terms=" & (Terms - t0)
+    Set mArr445(3) = Nothing
+End Sub
+
+' W23 = 数组字段那一档的出厂 (腿⑤ 数组形) + 字段里的覆写: 改前两处都 0 枚 ⇒ 内层永不走 Class_Terminate。
+Sub W23ArrFieldTeardown()
+    Dim hh As C445H
+    Dim t0 As Long
+    Dim m0 As Long
+    t0 = Terms
+    m0 = Made
+    Set hh = New C445H
+    hh.FillKids23
+    hh.FillKids23
+    Debug.Print "W23-over-terms=" & (Terms - t0)
+    Set hh = Nothing
+    Debug.Print "W23-out-made=" & (Made - m0) & " terms=" & (Terms - t0)
+End Sub
+
 Sub Main()
     W1SetNothing
     W2Alias
@@ -320,5 +376,9 @@ Sub Main()
     W17MemberFactoryLoop
     W18PropReadNoParens
     W19FieldReadKeepsClaim
+    W20ArrElemOverwrite
+    W21ArrElemNothing
+    W22IndexSideEffectOnce
+    W23ArrFieldTeardown
     Debug.Print "B445-DONE"
 End Sub

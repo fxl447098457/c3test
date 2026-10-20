@@ -7695,6 +7695,9 @@ if ($Category -in @("all", "run", "vbp")) {
                     "W15-made=50 terms=50", "W16-made=1 terms=1",
                     "W17-made=20 terms=20", "W18-made=1 terms=1",
                     "W19-field-alive-terms=0 n=7", "W19-field-gone-terms=1",
+                    "W20-over-terms=1", "W21-terms=1 cleared=True",
+                    "W22-side=2 terms=1",
+                    "W23-over-terms=2", "W23-out-made=4 terms=4",
                     "B445-DONE")
     Test-Vbp 'b445_class_slot_refcount' "$Tests\b445_refcount\B445.vbp" $b445Needles
     Test-Vbp 'b445_class_slot_refcount_x86' "$Tests\b445_refcount\B445.vbp" $b445Needles -Arch "x86"
@@ -7746,6 +7749,26 @@ if ($Category -in @("all", "run", "vbp")) {
         'vb6_cls_C445_AddRef(t)',
         'vb6_cls_C445_AddRef(c17)',
         'vb6_cls_C445_AddRef(c18)')
+
+    # 账 #305 §B218 (甲) 第一百四十刀 = 下标槽那一档的三站 (腿②覆写 / 腿③置空 / 腿⑤ 数组档出厂)。
+    #   形状 = 先把**元素地址**落一枚临时量 (void** __clsaddrN = &(VB6_SA_AT(...)))，读旧、写新、claim、退旧
+    #   全走这一枚 ⇒「下标算术算几次」只剩一个答案 (W22-side=2 = 每发一次，修前修后一字相同)。
+    #   反面针钉的是修前那份产物的**逐字形状** (BASE 上分别 2 / 3 / 1 处，NEW 全 0 ⇒ 两头发码针都真能红)：
+    #   ① 裸赋值把旧值整格盖掉 (每覆写一枚净漏一枚)；② 置空那一发拿复合字面量 & 的地址交给
+    #   vb6_ReleaseObject，而它认不出工程类裸结构体 (Fix 191) ⇒ 既不放手也不清槽 = 整条语句 no-op。
+    #   W23 = 数组字段的出厂 (修前 made=4 / terms=0 = 四枚内层一枚没走 Class_Terminate)。
+    Test-EmitcShape 'b445_index_slot_three_stations' @("$Tests\b445_refcount\B445.vbp") @(
+        'void** __clsaddr49 = &(VB6_SA_AT(void*, mArr445, 1));',
+        'void* __clsold48 = (*__clsaddr49);',
+        'if (__clsold48) vb6_cls_C445_Release(__clsold48);',
+        '(*__clsaddr53) = NULL;  /* Set Nothing (项目类实例) */',
+        'void** __clsaddr59 = &(VB6_SA_AT(void*, mArr445, vb6_Main_Pick445()));',
+        'vb6_SA_ReleaseElements(me->mKids23, vb6_cls_C445_Release);  /* 账 #305 (甲) 腿⑤ 数组档: 元素出厂逐枚交回 */')
+    Test-EmitcAbsent 'b445_index_slot_never_bare_writes_or_fakes_a_release' @(
+        "$Tests\b445_refcount\B445.vbp") @(
+        'VB6_SA_AT(void*, mArr445, 1) = (vb6_cls_C445_New());  /* Set */',
+        'VB6_SA_AT(void*, me->mKids23, 1) = (vb6_cls_C445_New());  /* Set */',
+        'vb6_ReleaseObject((void**)(&(void*){VB6_SA_AT')
     # 账 #305 §B188 ④ (第九十刀): 出厂那一腿的**尾巴**。`Class_Terminate` 抛错时, `_Destroy` 里体之后
     # 那三截(字段 BSTR / 数组字段 / vb6_Free(me))曾被 ComObj_Release 的帧一起 longjmp 跳掉 —— 实测每枚
     # 抛错的出厂漏一份实例资源: x64 每枚 35~37 字节、x86 每枚 17 字节, 多一枚 20 字符 String 字段就涨到

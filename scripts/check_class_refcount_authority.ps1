@@ -1,5 +1,5 @@
 ﻿# check_class_refcount_authority.ps1 - 账 #305 §B218 (甲)：工程类实例的引用计数只许有一位主人。
-# 十六条钉（每条都能单独红，红了就说明同一问长出了第二位主人）：
+# 十八条钉（每条都能单独红，红了就说明同一问长出了第二位主人）：
 #   ① 出入口那一对的 mint 各恰好 1 处，且住在 module/cgen_com.cpp（每条腿只许转调它）。
 #   ② 计数头 `int32_t __refcount;` 的 mint 恰好 1 处，且住在 cgen_iface_vtbl.cpp 的
 #      emitIfaceClassFields 里 —— 它必须紧跟 __comObj 那一句（ai/022 D19：偏移 0 恒是 __comObj）。
@@ -15,7 +15,8 @@
 #   ⑨ 出参槽那一档 (腿②'): claim-only 的发码形状与站点各恰好一处。
 #   ⑩ 腿④ 的第二道夹: 撤登记的主人一处 + 站点一处 (槽地址交给外部 Declare 的那一格出口不放手)。
 #   ⑪ 腿⑤ 出厂那一档: `_Release(me->` 全仓恰好一处，且主人文件必须还是 cgen_com.cpp。
-#   ⑫ 字段类型那一问 `mapTypeRef(var.asType.get())` 恰好 5 处（新增一处手抄就得改数）。
+#   ⑫ 字段类型那一问 `mapTypeRef(var.asType.get())` 恰好 6 处（第一百四十刀给出厂加了数组那一档；
+#      新增一处手抄就得改数）。
 #   ⑬ 移交值那一问 `rhsTransfersProjectRef(` 恰好 3 处（声明 + 定义 + 一个调用点），调用点必须在
 #      cgen_setlet_set_rhs.inc —— 「右侧带不带对价」与 `New` 共用同一条不 claim 的臂，别处再问就分家。
 #      清表 + 主人本体），工程类那一档的注册口 trackClassSlotForRelease 恰好 2 处
@@ -181,8 +182,8 @@ if ($teardownFiles.Count -ne 1 -or $teardownFiles[0] -ne 'cgen_com.cpp') {
 
 # ⑫ 字段类型的问句名单: 出厂这一站的类名是问 `mapTypeRef(var.asType.get())` 要的 —— 与发这枚字段那一行同一个答案，不开第二问。这条钉的是「这一问一共有几处」，新增一处手抄就得改这里的数（有意让它响）。
 $fieldQ = CountOf 'mapTypeRef(var.asType.get())'
-if ($fieldQ -ne 5) {
-    $fail += ("mapTypeRef(var.asType.get()) question sites = " + $fieldQ + " (want exactly 5)")
+if ($fieldQ -ne 6) {
+    $fail += ("mapTypeRef(var.asType.get()) question sites = " + $fieldQ + " (want exactly 6)")
 }
 
 
@@ -278,10 +279,44 @@ $argAsk = CountOf 'argHandsOverProjectRef('
 if ($argAsk -ne 4) {
     $fail += ("argument-station question sites = " + $argAsk + " (want exactly 4: declaration + definition + 2 call stations)")
 }
+# ⑱ 第一百四十刀: 下标槽那一档 (数组元素) 的三站只许问一位主人。
+#    · classArraySlotElemType = 「这枚目标是不是可寻址的元素槽」: 声明 + 定义 + 两条腿各问一次 = 4 处 / 4 份文件
+#      (再多一处 = 有站点绕过问句自己认 VB6_SA_AT)。
+#    · projectClsStructOfCType = 「这一档是不是本工程类的指针」: 声明 + 定义 + 出厂两档 = 4 处，两份站点必须在同一份 cgen_com.cpp。
+#    · 地址临时量 __clsaddr 的 mint 全仓恰好 1 处 (只有 emitClassSlotRefSet 铸它) ⇒「下标算术算几次」只有一个答案。
+#    · 元素出厂那一发 vb6_SA_ReleaseElements = RTL 声明 + 定义 + 后端一处发射 = 3 处；后端多一处 = 第二位主人。
+$askElem = CountOf 'classArraySlotElemType('
+if ($askElem -ne 4) {
+    $fail += ("index-slot question sites = " + $askElem + " (want exactly 4: declaration + definition + 2 legs)")
+}
+$askElemFiles = @(FilesOf 'classArraySlotElemType(')
+if ($askElemFiles.Count -ne 4) {
+    $fail += ("index-slot question files = " + ($askElemFiles -join ', ') + " (want exactly 4 files)")
+}
+$askStruct = CountOf 'projectClsStructOfCType('
+if ($askStruct -ne 4) {
+    $fail += ("project-class-pointer question sites = " + $askStruct + " (want exactly 4: declaration + definition + 2 teardown legs)")
+}
+$askStructFiles = @(FilesOf 'projectClsStructOfCType(')
+if (-not ($askStructFiles -contains 'cgen_com.cpp')) {
+    $fail += ("project-class-pointer question missing from cgen_com.cpp (files = " + ($askStructFiles -join ', ') + ")")
+}
+$addrMint = CountOf '"__clsaddr" + std::to_string'
+if ($addrMint -ne 1) {
+    $fail += ("address-temp mint sites = " + $addrMint + " (want exactly 1, inside emitClassSlotRefSet)")
+}
+$elemOut = CountOf 'vb6_SA_ReleaseElements'
+if ($elemOut -ne 3) {
+    $fail += ("element-teardown export sites = " + $elemOut + " (want exactly 3: RTL declaration + definition + 1 emit station)")
+}
+$elemOutFiles = @(FilesOf 'vb6_SA_ReleaseElements')
+if (-not ($elemOutFiles -contains 'cgen_com.cpp')) {
+    $fail += ("element-teardown emit station missing from cgen_com.cpp (files = " + ($elemOutFiles -join ', ') + ")")
+}
 if ($fail.Count -gt 0) {
     Write-Host "CLASS-REFCOUNT-AUTHORITY FAIL"
     foreach ($f in $fail) { Write-Host ("  - " + $f) }
     exit 1
 }
-Write-Host "CLASS-REFCOUNT-AUTHORITY OK (1 pair mint / 1 header / 2 leg consumers / 3+9 formals / 7 roster / 6 literal files / 0 stale / 5 registry files + 2 registrants / 1+1 out-slot / 1+1 foreign-write drop / 1 field-teardown shape + file / 5 field-type questions / 6 transfer-question sites in 2 files / 1 view-leg hand-back + 2 QiSet calls / 1+2+1 transfer-arm questions / 3 static-gate sites in 1 file + 1 ivref registration / 1 arg-station hand-back + 4+4 helper sites in 4 files)"
+Write-Host "CLASS-REFCOUNT-AUTHORITY OK (1 pair mint / 1 header / 2 leg consumers / 3+9 formals / 7 roster / 6 literal files / 0 stale / 5 registry files + 2 registrants / 1+1 out-slot / 1+1 foreign-write drop / 1 field-teardown shape + file / 6 field-type questions (标量 + 数组两档) / 6 transfer-question sites in 2 files / 1 view-leg hand-back + 2 QiSet calls / 1+2+1 transfer-arm questions / 3 static-gate sites in 1 file + 1 ivref registration / 1 arg-station hand-back + 4+4 helper sites in 4 files / 4+4 index-slot + project-class questions / 1 address-temp mint / 3 element-teardown sites)"
 exit 0
