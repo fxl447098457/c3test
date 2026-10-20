@@ -71,6 +71,7 @@ inline const OwnedTempException* ownedTempExceptions() {
         { "vb6_VariantToBool",    0, '1', "store" },
         { "vb6_VariantToLong",    0, '1', "store" },
         { "vb6_VariantToLongPtr", 0, '1', "write" },
+        { nullptr, 0, '0', nullptr },   // 空哨兵：遍历靠它收尾
     };
     return kRows;
 }
@@ -80,6 +81,7 @@ inline const OwnedTempException* ownedTempExceptions() {
 inline const char* const* ownedTempClosedExits() {
     static const char* const kClosed[] = {
         "vb6_SaveSetting", "vb6_GetSetting", "vb6_DeleteSetting", "vb6_GetAllSettings",
+        0,                                // 空哨兵（遍历靠它收尾；0 = 空指针常量）
     };
     return kClosed;
 }
@@ -90,6 +92,7 @@ inline const char* const* ownedTempClosedExits() {
 inline const char* const* ownedTempBorrowedExits() {
     static const char* const kBorrowed[] = {
         "vb6_ErrDescription", "vb6_ErrSource", "vb6_ho_variantToBstr",
+        0,                                // 空哨兵（遍历靠它收尾；0 = 空指针常量）
     };
     return kBorrowed;
 }
@@ -122,4 +125,141 @@ inline bool ownedTempExitIsBorrowed(const char* exitName) {
     return false;
 }
 
+// **返回侧的所有权**（账 #456 §B227 第五格）：这一枚出口交出去的是不是**新造且归调用方所有**？
+//   owned = 新造（调用方**可以**放它）· alias = 别名（指着调用方的内存或一个全局 ⇒ 不许放）
+//            U = 答不出（安全默认：当作不是新造的 ⇒ 不许回收）
+// 回收刀的白名单就是这一份 owned 名单：只有**从这些出口出来的**值才谈得上「现造」，
+// 其余一律不许碰 —— 撤回那一版把「顶层是个调用」当成「现造」⇒ 放掉了借来的那一枚 ⇒ 堆损坏。
+// 这份名单由 `scripts/check_owned_temp_keeps.ps1` 从 RTL **推导**（mint ⇒ owned；返回参数/全局
+// 的成员 ⇒ alias；答不出 ⇒ U），推导结果落在 scripts/owned_temp_keeps_164.txt 的 [own] 节，
+// 哨兵 **K13** 与本名单**双向**对账 ⇒ 漂不了。名单是**数据**不是逻辑：加一档 = 加一行。
+inline const char* const* ownedTempOwnedReturnExits() {
+    static const char* const kOwned[] = {
+        // >>> GENERATED-OWNED-EXITS <<<（推导结果见 scripts/owned_temp_keeps_164.txt 的 [own] 节；哨兵 K13 双向对账）
+        "vb6_App_EXEName",
+        "vb6_App_HelpFile",
+        "vb6_App_Path",
+        "vb6_BSTR_Concat",
+        "vb6_BSTR_ConcatFree",
+        "vb6_BSTR_Empty",
+        "vb6_BSTR_FixedSTR",
+        "vb6_BSTR_FromANSIBuf",
+        "vb6_BSTR_FromBSTR",
+        "vb6_BSTR_FromStr",
+        "vb6_BSTR_FromStrN",
+        "vb6_ByteArrayToString",
+        "vb6_CallByName",
+        "vb6_CDec",
+        "vb6_Chr",
+        "vb6_ChrB",
+        "vb6_ChrW",
+        "vb6_Clipboard_GetText",
+        "vb6_Command",
+        "vb6_ConReadKey",
+        "vb6_ConReadLine",
+        "vb6_Console_ReadKey",
+        "vb6_Console_ReadLine",
+        "vb6_CStr",
+        "vb6_CStrBool",
+        "vb6_CStrByte",
+        "vb6_CStrDate",
+        "vb6_CStrDateFromBSTR",
+        "vb6_CStrDbl",
+        "vb6_CStrDblFromBSTR",
+        "vb6_CStrDblFromVariant",
+        "vb6_CStrLong",
+        "vb6_CStrLongFromVariant",
+        "vb6_CStrLongLong",
+        "vb6_CStrSingle",
+        "vb6_CStrULong",
+        "vb6_CStrULongFromVariant",
+        "vb6_CStrULongLong",
+        "vb6_CStrULongLongFromVariant",
+        "vb6_CurDir",
+        "vb6_CVErr",
+        "vb6_DecimalToBSTR",
+        "vb6_Dir",
+        "vb6_Environ",
+        "vb6_FormatCurrency",
+        "vb6_FormatDateTime",
+        "vb6_FormatNumber",
+        "vb6_FormatPercent",
+        "vb6_GetSetting",
+        "vb6_Hex",
+        "vb6_IIfBSTR",
+        "vb6_IIfVariant",
+        "vb6_InputB",
+        "vb6_InputBox",
+        "vb6_InputString",
+        "vb6_Join",
+        "vb6_LCase",
+        "vb6_LCase_str",
+        "vb6_Left",
+        "vb6_LeftB",
+        "vb6_LineInput",
+        "vb6_LoadResString",
+        "vb6_LSet",
+        "vb6_LSetFree",
+        "vb6_LTrim",
+        "vb6_LTrimVar",
+        "vb6_Mid",
+        "vb6_MidB",
+        "vb6_MonthName",
+        "vb6_NumToBSTRDefault",
+        "vb6_Oct",
+        "vb6_PA_GetBSTR",
+        "vb6_Partition",
+        "vb6_Replace",
+        "vb6_Right",
+        "vb6_RightB",
+        "vb6_RSet",
+        "vb6_RTrim",
+        "vb6_Space",
+        "vb6_Spc",
+        "vb6_Str",
+        "vb6_StrConv",
+        "vb6_StrConvFromByteArray",
+        "vb6_String",
+        "vb6_StrReverse",
+        "vb6_Tab",
+        "vb6_Trim",
+        "vb6_TypeName",
+        "vb6_UCase",
+        "vb6_UCase_str",
+        "vb6_VarAddV",
+        "vb6_VarDivV",
+        "vb6_VariantBool",
+        "vb6_VariantByte",
+        "vb6_VariantDate",
+        "vb6_VariantDouble",
+        "vb6_VariantEmpty",
+        "vb6_VariantFromComResult",
+        "vb6_VariantIdentity",
+        "vb6_VariantInt",
+        "vb6_VariantLong",
+        "vb6_VariantLongLong",
+        "vb6_VariantNull",
+        "vb6_VariantSByte",
+        "vb6_VariantSingle",
+        "vb6_VariantToString",
+        "vb6_VariantUInteger",
+        "vb6_VariantULong",
+        "vb6_VariantULongLong",
+        "vb6_VarMulV",
+        "vb6_VarSubV",
+        "vb6_WeekdayName",
+        // >>> END-GENERATED-OWNED-EXITS <<<
+        0,                                // 空哨兵（遍历靠它收尾；0 = 空指针常量）
+    };
+    return kOwned;
+}
+
+// 这一枚出口交出去的是**新造且归调用方所有**吗？不在 owned 名单里（答不出 / 是别名）⇒ 不许回收。
+inline bool ownedTempReturnIsOwned(const char* exitName) {
+    if (!exitName) return false;
+    for (const char* const* p = ownedTempOwnedReturnExits(); *p; ++p) {
+        if (std::strcmp(*p, exitName) == 0) return true;
+    }
+    return false;
+}
 }  // namespace vb6c3

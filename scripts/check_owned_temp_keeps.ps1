@@ -123,6 +123,7 @@ function Formal-Kind([string]$T) {
 }
 
 $protos = @{}          # 出口名 -> 形参类型数组
+$retKind = @{}         # 出口名 -> 返回档（'BSTR' / 'VARIANT' / ''）
 $surface = @{}         # "出口名|形参序号" -> 记号
 foreach ($f in $hdrFiles) {
     $lines = [System.IO.File]::ReadAllLines($f.FullName)
@@ -145,9 +146,17 @@ foreach ($f in $hdrFiles) {
         $name = $m.Groups[1].Value
         if ($name -notlike 'vb6_*') { $i = $k + 1; continue }
         $params = Split-Params $buf.Substring($open + 1, $close - $open - 1)
-        if ($params.Count -eq 0) { $i = $k + 1; continue }
+        if ($params.Count -eq 0 -and $head -notmatch '\bBSTR\b' -and $head -notmatch '\bvb6_VARIANT\b') {
+            $i = $k + 1; continue
+        }
         if (-not $protos.ContainsKey($name)) {
             $protos[$name] = $params
+            # 返回档 = 头里那枚类型（BSTR / vb6_VARIANT）—— 「返回侧所有权」那一轴靠它取面
+            $h2 = ($head -replace '\b(static|inline|__inline|extern)\b', '').Trim()
+            $h2 = ($h2 -replace '\b[A-Za-z_][A-Za-z0-9_]*\s*$', '').Trim()
+            if ($h2 -match '\bBSTR\s*$') { $retKind[$name] = 'BSTR' }
+            elseif ($h2 -match '\bvb6_VARIANT\s*$') { $retKind[$name] = 'VARIANT' }
+            else { $retKind[$name] = '' }
             for ($pi = 0; $pi -lt $params.Count; $pi++) {
                 $kind = Formal-Kind $params[$pi]
                 if ($kind -eq 'BSTR' -or $kind -eq 'VARIANT') { $surface["$name|$pi"] = $kind }
@@ -352,6 +361,134 @@ if ($borrowedExports.Count -eq 0) {
     $bad += 'K11 编译器侧的借用名单 kBorrowedBstrExports167 读不出来 —— 借用族答不了 ⇒ 停机'
 }
 
+# ---------------------------------------------------------------- 返回侧的所有权（账 #456 §B227 第五格）
+# 「这一枚出口交出去的是不是**新造且归调用方所有**」——
+#   owned = 出口自己新造的（调用方可以放它）   —— 返回表达式一路落到一枚 **mint**
+#   alias = 交出去的是**别名**（指着调用方的内存或一个全局）—— 调用方**不许**放它
+#   U      = 答不出（安全默认：当作不是新造的 ⇒ 不许回收）
+# 为什么必须**逐枚**答：编译器侧那三枚借用名单（kBorrowedBstrExports167）**只覆盖 BSTR 返回**，
+# 盖不到数组元素读那一族（`vb6_VariantArrayGet`/`GetND`/`GetVal` 交出去的是变体里那格
+# **指着数组里那一枚**的 BSTR）⇒ 拿「三枚名单」当全部，就是撤回那一版的病根。
+$script:mintRx = '(SysAllocString|SysAllocStringLen|vb6_BSTR_FromStr|vb6_BSTR_Concat|vb6_BSTR_ConcatFree|vb6_BSTR_FromBSTR|vb6_BSTR_Empty|vb6_VariantCopy|vb6_VariantFromValue|vb6_VariantEmpty|vb6_Format)'
+$script:aliasRx = '([A-Za-z_][A-Za-z0-9_]*)\s*(->|\.)\s*[A-Za-z0-9_]+'
+
+function Get-ReturnExpr([string]$name) {
+    if (-not $bodyOf.ContainsKey($name)) { return '' }
+    $body = $bodyOf[$name]
+    $ms = [regex]::Matches($body, '(?m)return\s+([^;]+);')
+    if ($ms.Count -eq 0) { return '' }
+    return $ms[$ms.Count - 1].Groups[1].Value.Trim()
+}
+
+# 逐枚分类（带传递闭包：返回的是另一枚出口 ⇒ 继承那枚的分类；成环 ⇒ U）
+$script:ownMemo = @{}
+function Classify-Return([string]$name, [System.Collections.Generic.HashSet[string]]$seen) {
+    if ($script:ownMemo.ContainsKey($name)) {
+        $m = $script:ownMemo[$name]
+        return @($m[0], $m[1])
+    }
+    if ($seen.Contains($name)) { return @('U', 'cycle') }          # 成环 ⇒ 答不出
+    $seen.Add($name) | Out-Null
+    $kind = 'U'
+    $why = 'unknown'
+    $expr = Get-ReturnExpr $name
+    if ($expr -eq '') {
+        $kind = 'U'; $why = 'no-return'
+    } elseif ($expr -match ('^' + $script:mintRx + '\s*\(')) {
+        $kind = 'owned'; $why = 'mint'
+    } elseif ($expr -match ('\b' + $script:mintRx + '\s*\(')) {
+        $kind = 'U'; $why = 'mixed'          # 返回表达式里混着 mint 与别的东西 ⇒ 答不出
+    } elseif ($expr -match $script:aliasRx) {
+        $kind = 'alias'; $why = 'alias'
+    } elseif ($expr -match '^\s*([A-Za-z_][A-Za-z0-9_]*)\s*$' -and $bodyOf.ContainsKey($name)) {
+        # 返回的是**本地结构体** ⇒ 逐格看它的字段：指针那一格是从 mint 来的（新造，归我们所有），
+        # 还是从**形参**读来的（别名！）—— 数组元素读那一族就在这里：
+        #   result.bstrVal = ((BSTR*)data)[off];   ← 不复制，指着数组里那一枚 ⇒ alias
+        #   result = ((vb6_VARIANT*)data)[off];     ← 浅拷，BSTR 那格仍共享 ⇒ alias
+        $local = $Matches[1]
+        $pnames = @()
+        foreach ($pp in $protos[$name]) {
+            $mm2 = [regex]::Match($pp, '([A-Za-z_][A-Za-z0-9_]*)\s*$')
+            if ($mm2.Success) { $pnames += $mm2.Groups[1].Value }
+        }
+        $aliasHit = $false; $unknownHit = $false
+        foreach ($am in [regex]::Matches($bodyOf[$name], '(?m)\b' + [regex]::Escape($local) + '\s*\.\s*([A-Za-z0-9_]+)\s*=\s*([^;]+);')) {
+            $field = $am.Groups[1].Value
+            $rhs = $am.Groups[2].Value
+            if ($field -notmatch 'bstrVal|parray|pvarVal|pdispVal|piface|punkVal|pszVal|psafeArray|pgv') { continue }
+            if ($rhs -match ('\b' + $script:mintRx + '\s*\(')) { continue }
+            $hit = $false
+            foreach ($pn in $pnames) {
+                if ($rhs -match ('\b' + [regex]::Escape($pn) + '\b')) { $hit = $true; break }
+            }
+            if ($hit) { $aliasHit = $true } else { $unknownHit = $true }
+        }
+        if ($aliasHit) { $kind = 'alias'; $why = 'field-of-param' }
+        elseif ($unknownHit) { $kind = 'U'; $why = 'field-unknown' }
+        else { $kind = 'owned'; $why = 'struct-mint' }
+    } else {
+        $cm = [regex]::Match($expr, '^\s*(vb6_[A-Za-z0-9_]+)\s*\(')
+        if ($cm.Success -and $bodyOf.ContainsKey($cm.Groups[1].Value)) {
+            $sub = Classify-Return $cm.Groups[1].Value $seen
+            $kind = $sub[0]; $why = "via:" + $cm.Groups[1].Value
+        } else {
+            $kind = 'U'; $why = 'unknown'
+        }
+    }
+    $script:ownMemo[$name] = @($kind, $why)
+    return @($kind, $why)
+}
+
+$ownOwned = @(); $ownAlias = @(); $ownUnknown = @(); $ownClass = @{}
+foreach ($n in ($retKind.Keys | Sort-Object)) {
+    if ($retKind[$n] -ne 'BSTR' -and $retKind[$n] -ne 'VARIANT') { continue }
+    $seen = [System.Collections.Generic.HashSet[string]]::new()
+    $cls = Classify-Return $n $seen
+    $ownClass[$n] = $cls[0]
+    if ($cls[0] -eq 'owned') { $ownOwned += $n } elseif ($cls[0] -eq 'alias') { $ownAlias += $n } else { $ownUnknown += $n }
+}
+Write-Host ("返回侧所有权: owned " + $ownOwned.Count + " / alias " + $ownAlias.Count + " / U " + $ownUnknown.Count)
+
+# ---------------------------------------------------------------- 返回侧的两个锚（K14）
+# 正控 = **新造**那一族（调用方可以放它）· 负控 = **别名**那一族（调用方不许放它）
+$ownAnchors = @(
+    @{ name = 'vb6_BSTR_FromStr';      want = 'owned'; why = 'mint: SysAllocString' },
+    @{ name = 'vb6_BSTR_Concat';       want = 'owned'; why = 'mint: 新造串' },
+    @{ name = 'vb6_CStr';              want = 'owned'; why = 'mint: 新造串' },
+    @{ name = 'vb6_CStrLong';          want = 'owned'; why = 'mint: 新造串' },
+    @{ name = 'vb6_VariantToString';   want = 'owned'; why = 'mint: 新造串' },
+    @{ name = 'vb6_ErrDescription';    want = 'alias'; why = '全局 vb6_err 的指针' },
+    @{ name = 'vb6_ErrSource';         want = 'alias'; why = '全局 vb6_err 的指针' },
+    @{ name = 'vb6_VariantString';     want = 'alias'; why = '变体那格 BSTR 就是形参本身' },
+    @{ name = 'vb6_VariantArrayGet';   want = 'alias'; why = 'bstrVal 指着数组里那一枚' },
+    @{ name = 'vb6_VariantArrayGetND'; want = 'alias'; why = 'bstrVal 指着数组里那一枚' },
+    @{ name = 'vb6_VariantArrayGetVal';want = 'alias'; why = 'bstrVal 指着数组里那一枚' }
+)
+foreach ($a in $ownAnchors) {
+    if (-not $ownClass.ContainsKey($a.name)) {
+        $bad += ("K14 返回侧锚点缺失（表里没有这一枚）: " + $a.name + " —— " + $a.why)
+        continue
+    }
+    if ($ownClass[$a.name] -ne $a.want) {
+        $bad += ("K14 返回侧锚点 " + $a.name + " 判成 " + $ownClass[$a.name] + "，期望 " + $a.want + "（" + $a.why + "）")
+    }
+}
+# K15 两条轴**不许互相顶替**：借用族三枚必须是 alias（不是 owned）——
+#     「这一枚交出去的是借来的」与「这一枚交出去的是新造的」是同一件事的两面，
+#     两面判成一样 ⇒ 有一面判错了（撤回那一版就是只判了 mint 那一面）。
+foreach ($b in $borrowedExports) {
+    if ($ownClass.ContainsKey($b) -and $ownClass[$b] -eq 'owned') {
+        $bad += ("K15 借用族 " + $b + " 在返回侧被判成 owned（交出去的是借来的指针，不许当新造）")
+    }
+}
+# K16 两条轴**不许互相顶替**：alias 那一族与 owned 那一族必须**不相交**
+#     （同一枚出口不能既是「新造」又是「别名」—— 判成一样就说明有一面判错了）
+$overlapOwn = @($ownOwned | Where-Object { $ownAlias -contains $_ })
+if ($overlapOwn.Count -gt 0) {
+    $bad += ("K16 " + $overlapOwn.Count + " 枚出口同时被判成 owned 与 alias（两轴判成一样 = 有一面判错了）: " +
+             (($overlapOwn | Select-Object -First 5) -join ', '))
+}
+
 $rows = @{}
 # ⚠ 遍历顺序必须**定死**（排序）：分类里有成环判定，顺序不同会得出不同的表
 # （踩过一次： hashtable 的 Keys 顺序变一次，快照就漂 396 行 ⇒ 表变成不可登记的）。
@@ -493,8 +630,17 @@ if ($Bless) {
     }
     $out += '# --- 借用轴（返回侧）：这一枚出口交出去的指针是借来的，不归调用方所有 ⇒ 不许放它 ---'
     foreach ($b in ($borrowedExports | Sort-Object)) { $out += ('[borrow] ' + $b) }
+    $out += '# --- 返回侧所有权：owned = 这一枚交出去的是**新造且归调用方所有**（调用方可以放它）---'
+    foreach ($o in ($ownOwned | Sort-Object)) { $out += ('[own] ' + $o) }
+    $out += '# --- 返回侧所有权：alias = 交出去的是**别名**（指着调用方的内存或一个全局）⇒ 不许放它 ---'
+    foreach ($a in ($ownAlias | Sort-Object)) { $out += ('[alias] ' + $a) }
     [System.IO.File]::WriteAllLines($TableFile, $out, (New-Object System.Text.UTF8Encoding($false)))
-    Write-Host ("已登记快照: " + $TableFile + " （" + $rows.Count + " 行 + 借用 " + $borrowedExports.Count + " 枚）")
+    # ⚠ **只登记这张表**（推导出来的**证据**）；发码侧那份（src/common/owned_temp_keeps.hpp）
+    #   是**手写**的出口，由哨兵 **K13** 双向对账 —— 与仓里 `kBorrowedBstrExports167`（手写）
+    #   + `check_bstr_borrow_slot` Q6（推导后对账）同一形状。**不由本脚本改写那份**：
+    #   两边都由本脚本生成的话，对账就成了自己跟自己比，K13 会永远绿。
+    Write-Host ("已登记快照: " + $TableFile + " （" + $rows.Count + " 行 + 借用 " + $borrowedExports.Count +
+                " 枚 + owned " + $ownOwned.Count + " 枚 + alias " + $ownAlias.Count + " 枚）")
     exit 0
 }
 
@@ -594,6 +740,42 @@ if (-not (Test-Path -LiteralPath $hdrFile)) {
         $d2 = @($hdrBorrow | Where-Object { $borrowedExports -notcontains $_ })
         if ($d1.Count -gt 0) { $bad += ("K12 借用族：编译器侧名单里有 " + ($d1 -join ', ') + "，发码侧那份里没有") }
         if ($d2.Count -gt 0) { $bad += ("K12 借用族：发码侧那份里多了 " + ($d2 -join ', ') + "，编译器侧名单里没有") }
+    }
+    # K13 **返回侧所有权**：发码侧那份的 owned 名单必须与本表推导出来的 owned 名单**逐行相同**（双向）
+    #     —— 少一行 = 发码侧会放掉一枚它证明是借来的/答不出的值；多一行 = 那是发码侧自己加的。
+    $om = [regex]::Match($hdrTxt, '(?s)GENERATED-OWNED-EXITS <<<(.*?)// >>> END-GENERATED-OWNED-EXITS')
+    if (-not $om.Success) {
+        $bad += 'K13 owned_temp_keeps.hpp 里的 owned 名单读不出来（标记不在？）'
+    } else {
+        $hdrOwned = @([regex]::Matches($om.Groups[1].Value, '"(vb6_[A-Za-z0-9_]+)"') | ForEach-Object { $_.Groups[1].Value } | Sort-Object -Unique)
+        $d1 = @($ownOwned | Where-Object { $hdrOwned -notcontains $_ })
+        $d2 = @($hdrOwned | Where-Object { $ownOwned -notcontains $_ })
+        if ($d1.Count -gt 0) {
+            $bad += ("K13 推导出来的 owned " + $d1.Count + " 枚发码侧那份里没有（发码侧会放掉一枚它证明不是新造的值）: " +
+                     (($d1 | Select-Object -First 5) -join ', '))
+        }
+        if ($d2.Count -gt 0) {
+            $bad += ("K13 发码侧那份 owned 多出 " + $d2.Count + " 枚（推导里没有 ⇒ 那是发码侧自己加的）: " +
+                     (($d2 | Select-Object -First 5) -join ', '))
+        }
+    }
+    # K13b 每张表末尾必须有**空哨兵**（遍历写法是 `for (...; r->exitName; ++r)`）——
+    #     少了它就**走出数组**（本刀实测：编得过、跑起来 0xC0000374 堆损坏 ⇒ 正是这一类）。
+    #     这条是**文本**判据，但它挡的正是「表编得过、跑起来炸」那一族。
+    foreach ($arr in @(@{ name = 'kRows';      pat = 'static const OwnedTempException kRows\[\] = \{' },
+                       @{ name = 'kClosed';   pat = 'static const char\* const kClosed\[\] = \{' },
+                       @{ name = 'kBorrowed'; pat = 'static const char\* const kBorrowed\[\] = \{' },
+                       @{ name = 'kOwned';    pat = 'static const char\* const kOwned\[\] = \{' })) {
+        $am2 = [regex]::Match($hdrTxt, '(?s)' + $arr.pat + '(.*?)\n    \};')
+        if (-not $am2.Success) {
+            $bad += ("K13b " + $arr.name + " 读不出来（头被改坏了？）")
+            continue
+        }
+        $body2 = $am2.Groups[1].Value
+        $tail2 = (($body2 -split "`r?`n") | Where-Object { $_.Trim() -ne '' } | Select-Object -Last 1)
+        if ($tail2 -notmatch 'nullptr' -and $tail2 -notmatch '^\s*0\s*,') {
+            $bad += ("K13b " + $arr.name + " 末尾没有空哨兵（遍历会走出数组 ⇒ 0xC0000374 那一族）")
+        }
     }
 }
 
