@@ -356,6 +356,100 @@ Sub W23ArrFieldTeardown()
     Debug.Print "W23-out-made=" & (Made - m0) & " terms=" & (Terms - t0)
 End Sub
 
+' ==== 账 #305 §B218 (甲) 第一百四十四刀 = 形A 那座桥 (ByRef 工程类形参的写回站) ====
+' 修前: 调用侧交出去的是一枚**副本** (vb6_argtmp_*)，调用行之后没人写回 ⇒ 被调方那一发 `Set <形参> = ...`
+'       整条丢掉，而且那一枚 New 从此没人退；链形 (实参本身是 ByRef 工程类形参) 更糟 —— 交出去的是一枚
+'       vb6_VARIANT*，里面还替调用者那枚实例多握了一个没人放手的包装器。
+' 修后: 持有者那一格把**自己的地址**交出去 ⇒ 写回当场落地 + 当场退旧；不持有那一格 (ByVal / 移交值)
+'       仍走副本，但副本先付一枚 (copy-in)、调用行之后交回 ⇒ 计数守恒，调用者那一格一个字节不动。
+Public Sub OutOver24(p As C445)
+    Set p = New C445
+End Sub
+
+' W24 = 持有者直传: 写回落地 (same 翻false) + 旧值当场出厂 (mid-terms=1) + 两台计数守恒。
+Sub W24OutParamWriteBack()
+    Dim a As C445
+    Dim d As C445
+    Dim t0 As Long
+    Dim m0 As Long
+    Set d = New C445
+    Set a = d
+    t0 = Terms
+    m0 = Made
+    OutOver24 a
+    Debug.Print "W24-same=" & (a Is d) & " mid-terms=" & (Terms - t0)
+    Set a = Nothing
+    Set d = Nothing
+    Debug.Print "W24-made=" & (Made - m0) & " end-terms=" & (Terms - t0)
+End Sub
+
+' W25 = 链形 (实参是本过程的 ByRef 工程类形参): 同一格一路传到底 ⇒ 写回照样落地，
+'       而且不再替调用者多铸一枚包装器 (修前 = 调用者那一枚再也拆不掉, end-terms=0)。
+Public Sub ChainOut25(q As C445)
+    OutOver24 q
+End Sub
+
+Sub W25ChainCarriesBack()
+    Dim b As C445
+    Dim e As C445
+    Dim t0 As Long
+    Set e = New C445
+    Set b = e
+    t0 = Terms
+    ChainOut25 b
+    Debug.Print "W25-same=" & (b Is e) & " mid-terms=" & (Terms - t0)
+    Set b = Nothing
+    Set e = Nothing
+    Debug.Print "W25-end-terms=" & (Terms - t0)
+End Sub
+
+' W26 = 出参那一格置空: 落地 + 退旧 (修前 = 裸写一枚 NULL 进副本, 调用者手里一切如旧)。
+Public Sub OutNil26(p As C445)
+    Set p = Nothing
+End Sub
+
+Sub W26OutParamNil()
+    Dim c As C445
+    Dim t0 As Long
+    Set c = New C445
+    t0 = Terms
+    OutNil26 c
+    Debug.Print "W26-null=" & (c Is Nothing) & " terms=" & (Terms - t0)
+    Set c = Nothing
+End Sub
+
+' W27 = 反面证人: **ByVal** 那一格不持有它交出去的那一枚 ⇒ 刻意不落地，但副本先付一枚、调用行之后交回。
+Public Sub ByValProbe27(ByVal x As C445)
+    OutOver24 x
+End Sub
+
+Sub W27ByValDoesNotLand()
+    Dim f As C445
+    Dim g As C445
+    Dim t0 As Long
+    Dim m0 As Long
+    Set g = New C445
+    Set f = g
+    t0 = Terms
+    m0 = Made
+    ByValProbe27 f
+    Debug.Print "W27-same=" & (f Is g) & " mid-terms=" & (Terms - t0)
+    Set f = Nothing
+    Set g = Nothing
+    Debug.Print "W27-made=" & (Made - m0) & " end-terms=" & (Terms - t0)
+End Sub
+
+' W28 = 移交值当实参 (MakeOne() 那一枚自带对价): 不补 copy-in，只交回；被调方退旧退的正是移交来的那一枚。
+Sub W28HandedOverArg()
+    Dim t0 As Long
+    Dim m0 As Long
+    t0 = Terms
+    m0 = Made
+    OutOver24 MakeOne()
+    Debug.Print "W28-mid-terms=" & (Terms - t0)
+    Debug.Print "W28-made=" & (Made - m0) & " end-terms=" & (Terms - t0)
+End Sub
+
 Sub Main()
     W1SetNothing
     W2Alias
@@ -380,5 +474,10 @@ Sub Main()
     W21ArrElemNothing
     W22IndexSideEffectOnce
     W23ArrFieldTeardown
+    W24OutParamWriteBack
+    W25ChainCarriesBack
+    W26OutParamNil
+    W27ByValDoesNotLand
+    W28HandedOverArg
     Debug.Print "B445-DONE"
 End Sub

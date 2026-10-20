@@ -7636,7 +7636,11 @@ if ($Category -in @("all", "run", "vbp")) {
     Test-EmitcShape 'b448_iface_view_consumers' @("$Tests\b448_iface_ret\B448.vbp") @(
         'vb6_iv_iid_IB448',
         '->vt->twice(',
-        'vb6_Main_TakeByVal(vb6_argtmp_vb6_ivref_IB448_5);',
+        'vb6_Main_TakeByVal(vb6_argtmp_vb6_ivref_IB448_4);',
+        # 账 #305 §B218 (甲) 第一百四十四刀 (形A): W24 那一格的实参 c24 是本过程的局部工程类变量 =
+        #   **持有自己那一枚引用**的槽 ⇒ 地址原样交出，被调方那发 Set 当场落回调用者这一格并退旧。
+        #   编号从 5 移到 4 = 这一站从此不铸临时量 (tempCounter_ 少切一刀)，站点顺序一字未动。
+        'vb6_Main_TakeCls48Ref(&c24);',
         'static vb6_ivref_IB448* sv20 = NULL;',
         'if (s) s->vt->Release(s);  /* tB Interface B05: scope-exit release */')
     Test-EmitcAbsent 'b448_iface_view_never_mints_a_class_struct_for_an_interface' @(
@@ -7663,11 +7667,12 @@ if ($Category -in @("all", "run", "vbp")) {
     #   W25 = 视图那一档 (与 P3 同形) 四枚移交视图 term=0 → 4。两台 (x64 / x86) 读数一字相同。
     Test-EmitcShape 'b448_arg_station_returns_transferred_ref' @("$Tests\b448_iface_ret\B448.vbp") @(
         'if (vb6_argtmp_vb6_cls_CB448_0) vb6_cls_CB448_Release(vb6_argtmp_vb6_cls_CB448_0);  /* 账 #305 (甲) 腿⑤: 实参那一站交回 */',
-        'if (vb6_argtmp_vb6_ivref_IB448_5) vb6_argtmp_vb6_ivref_IB448_5->vt->Release(vb6_argtmp_vb6_ivref_IB448_5);  /* 账 #305 (甲) 腿⑤: 实参那一站交回 */')
+        'if (vb6_argtmp_vb6_ivref_IB448_4) vb6_argtmp_vb6_ivref_IB448_4->vt->Release(vb6_argtmp_vb6_ivref_IB448_4);  /* 账 #305 (甲) 腿⑤: 实参那一站交回 */')
     Test-EmitcAbsent 'b448_arg_station_never_returns_a_borrowed_instance' @(
         "$Tests\b448_iface_ret\B448.vbp") @(
         'if (c24) vb6_cls_CB448_Release(c24);  /* 账 #305 (甲) 腿⑤',
-        'if (vb6_argtmp_vb6_cls_CB448_2) vb6_cls_CB448_Release(vb6_argtmp_vb6_cls_CB448_2);  /* 账 #305 (甲) 腿⑤')
+        # 第一百四十四刀: 持有者那一格从此直传地址 —— 铸临时量那一形 (以及为它登记的交回) 在这站上消失。
+        'vb6_Main_TakeCls48Ref(&vb6_argtmp')
 
     # 账 #305 §B218 (甲) 第一百二十七刀 = 刀1-a/b/c: 工程类实例的引用计数头扩到每一枚工程类,
     #   覆写 (腿②) / 置空 (腿③) / 过程出口 (腿④) 三条腿接到同一位主人 emitClassSlotRefSet。
@@ -7698,6 +7703,16 @@ if ($Category -in @("all", "run", "vbp")) {
                     "W20-over-terms=1", "W21-terms=1 cleared=True",
                     "W22-side=2 terms=1",
                     "W23-over-terms=2", "W23-out-made=4 terms=4",
+                    # 第一百四十四刀 (形A 那座桥): W24 局部实参 / W25 链形 / W26 置空 三格 = 写回落地 + 当场退旧;
+                    #   W27 = **ByVal 那一格刻意不落地** (反面证人) 但副本先付一枚、调用行之后交回 ⇒ 计数守恒;
+                    #   W28 = 移交值当实参: 被调方退的正是移交来的那一枚, 交回收的是留下的那一枚。
+                    #   BASE (= 第一百三十七刀那台) 同五格 = W24 same=True/end=1, W25 same=True/end=0
+                    #   (链形之后调用者那枚**再也拆不掉**), W26 False/0, W27 mid=0/end=1, W28 mid=0/end=0。
+                    "W24-same=False mid-terms=0", "W24-made=1 end-terms=2",
+                    "W25-same=False mid-terms=0", "W25-end-terms=2",
+                    "W26-null=True terms=1",
+                    "W27-same=True mid-terms=1", "W27-made=1 end-terms=2",
+                    "W28-mid-terms=2", "W28-made=2 end-terms=2",
                     "B445-DONE")
     Test-Vbp 'b445_class_slot_refcount' "$Tests\b445_refcount\B445.vbp" $b445Needles
     Test-Vbp 'b445_class_slot_refcount_x86' "$Tests\b445_refcount\B445.vbp" $b445Needles -Arch "x86"
@@ -7722,6 +7737,26 @@ if ($Category -in @("all", "run", "vbp")) {
     Test-EmitcAbsent 'b445_nonclass_object_slots_get_no_teardown_release' @(
         "$Tests\b445_refcount\B445.vbp") @(
         '_Release(me->mLate15)')
+    # 账 #305 §B218 (甲) 第一百四十四刀 = 形A 那座桥的发码两面:
+    #   正 = 持有者那一格 (局部 a / 链 q / 模块级 b / 置空 c) 一律发**地址**，出参槽那两站并入
+    #     emitClassSlotRefSet 的普通那一臂 (腿② / 腿③ 的 target 打成 (*p) ⇒ 当场退旧)，
+    #     借来的那一档 (ByVal 形参 x) 落临时量 + 先付一枚 + 调用行之后交回;
+    #   反 = 第一百三十九刀量到的那两种裸写与那一枚交错型的打包，从此一发都不许再出现
+    #     (`(&vb6_VARIANT)` = 链形把 vb6_VARIANT* 喂进 vb6_cls_C445** 的那一形)。
+    Test-EmitcShape 'b445_out_param_bridge_shapes' @(
+        "$Tests\b445_refcount\B445.vbp") @(
+        'vb6_Main_OutOver24(&a);',
+        'vb6_Main_ChainOut25(&b);',
+        'vb6_Main_OutOver24(q);',
+        'vb6_Main_OutNil26(&c);',
+        '/* 账 #305 (甲) 腿②: Set (*p) */',
+        '/* 账 #305 (甲) 腿③: Set (*p) */',
+        '/* 账 #305 (甲) 腿⑤: 借来的实参在这一格先落一枚自有引用 */')
+    Test-EmitcAbsent 'b445_out_param_never_bare_writes_or_boxes_a_variant' @(
+        "$Tests\b445_refcount\B445.vbp") @(
+        '(*p) = (vb6_cls_C445_New());  /* Set */',
+        'vb6_Main_OutOver24((&(vb6_VARIANT){.vt=VT_DISPATCH',
+        '(*p) = (*q);  /* Set */')
     # 反面针: borrowed 那一格的地址交给了外部 Declare (__vbaObjSetAddref) ⇒ 写它的主人在
     #   计数系统外面, 出口不许退它 (退 = 无对价的退, 门 #763 的 FlexGridX86 就死在这一句上)。
     Test-EmitcAbsent 'b445_foreign_written_slot_keeps_no_exit_release' @(

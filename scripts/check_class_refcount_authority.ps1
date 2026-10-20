@@ -1,5 +1,5 @@
 ﻿# check_class_refcount_authority.ps1 - 账 #305 §B218 (甲)：工程类实例的引用计数只许有一位主人。
-# 十八条钉（每条都能单独红，红了就说明同一问长出了第二位主人）：
+# 十九条钉（每条都能单独红，红了就说明同一问长出了第二位主人）：
 #   ① 出入口那一对的 mint 各恰好 1 处，且住在 module/cgen_com.cpp（每条腿只许转调它）。
 #   ② 计数头 `int32_t __refcount;` 的 mint 恰好 1 处，且住在 cgen_iface_vtbl.cpp 的
 #      emitIfaceClassFields 里 —— 它必须紧跟 __comObj 那一句（ai/022 D19：偏移 0 恒是 __comObj）。
@@ -7,8 +7,8 @@
 #      第 3 份只能由腿④/腿⑤ 那两刀带进来，届时这里跟着改数。
 #   ④ 工程类形参登记收成一处出口 registerClassFormal：消费文件恰好 3 份（Sub / Function /
 #      Property 三个入口），调用点恰好 9 处（每份三条：跨模块兜底 / Class 符号 / ComClass 同名）。
-#   ⑤ procClassFormals_ 那张名册只许住在 7 份文件里（表本体 + 三个入口清表 + 出口本体 +
-#      两条腿各问一次）。
+#   ⑤ procClassFormals_ 那张名册只许住在 10 份文件里（表本体 + 三个入口清表 + 出口本体 +
+#      两条腿各问一次 + 第一百四十四刀形A 的三问：出参槽类名 / 直传所有权 / 链形那道闸）。
 #   ⑥ 字面量 __refcount 的主人名单 = 在册那 6 份；RTL 那一处必须是 vb6comserver_obj.c 的注释。
 #   ⑦ 陈旧注释「没有引用计数」（具体类那三处）不许活着 —— 甲落地之后这句话是错的。
 #   ⑧ 过程出口那张带档的登记表 slotsToRelease_ 只许住在 5 份文件里（表本体 + 三个过程入口
@@ -102,9 +102,9 @@ if ($regSites -ne 9) {
 
 # ⑤ procClassFormals_ 的名册面
 $cfFiles = FilesOf 'procClassFormals_'
-if ($cfFiles.Count -ne 7) {
+if ($cfFiles.Count -ne 10) {
     $fail += ("procClassFormals_ files = " + $cfFiles.Count +
-              " (want exactly 7): " + ($cfFiles -join ', '))
+              " (want exactly 10): " + ($cfFiles -join ', '))
 }
 
 # ⑥ __refcount 字面量的主人名单
@@ -272,8 +272,10 @@ if ($argFiles.Count -ne 1 -or $argFiles[0] -ne 'cgen_com.cpp') {
     $fail += ("argument-station hand-back files = " + ($argFiles -join ', ') + " (want exactly cgen_com.cpp)")
 }
 $argHelp = CountOf 'registerClassArgRefHandback('
-if ($argHelp -ne 4) {
-    $fail += ("argument-station helper sites = " + $argHelp + " (want exactly 4: declaration + definition + 2 call stations)")
+# 第一百四十四刀: 站点从两处增到四处 (ByVal 档 + ByRef 裸标识符临时量档 + ByRef 复合字面量档 + 命名实参档)
+# —— 形A 之后**每一条副本交付都得有人把被调方留在临时量里的那一枚收回来**，漏一站就是一枚永久泄漏。
+if ($argHelp -ne 6) {
+    $fail += ("argument-station helper sites = " + $argHelp + " (want exactly 6: declaration + definition + 4 call stations)")
 }
 $argAsk = CountOf 'argHandsOverProjectRef('
 if ($argAsk -ne 4) {
@@ -313,10 +315,37 @@ $elemOutFiles = @(FilesOf 'vb6_SA_ReleaseElements')
 if (-not ($elemOutFiles -contains 'cgen_com.cpp')) {
     $fail += ("element-teardown emit station missing from cgen_com.cpp (files = " + ($elemOutFiles -join ', ') + ")")
 }
+# ⑲ 第一百四十四刀: 形A 那座桥的三处问句各只许一位主人。
+#    · classOfProjectRefOutSlot = 「(*名) 里的名是不是本过程的工程类形参 (交回类名)」:
+#      声明 + 定义 + 覆写/置空两站 = 4 处 / 4 份文件 (再多一处 = 有站点自己拆括号按名查表)。
+#    · argHoldsProjectRefInOwnSlot = 「这一枚实参持有它交出去的那一枚引用吗 (才许直传地址)」:
+#      声明 + 定义 + 位置实参臂 + 命名实参臂 = 4 处 / 4 份文件。
+#    · registerClassArgRefCopyIn = 借来的实参在临时量上先付一枚 (copy-in) 的唯一发码处:
+#      声明 + 定义 + 位置实参两臂 (裸标识符 / 复合字面量) + 命名实参臂 = 5 处 / 4 份文件。
+$askOutSlot = CountOf 'classOfProjectRefOutSlot('
+if ($askOutSlot -ne 4) {
+    $fail += ("out-slot class question sites = " + $askOutSlot + " (want exactly 4: declaration + definition + 2 stations)")
+}
+$askOutSlotFiles = @(FilesOf 'classOfProjectRefOutSlot(')
+if ($askOutSlotFiles.Count -ne 4) {
+    $fail += ("out-slot class question files = " + ($askOutSlotFiles -join ', ') + " (want exactly 4 files)")
+}
+$askOwnSlot = CountOf 'argHoldsProjectRefInOwnSlot('
+if ($askOwnSlot -ne 4) {
+    $fail += ("owner-direct-pass question sites = " + $askOwnSlot + " (want exactly 4: declaration + definition + 2 arg arms)")
+}
+$askCopyIn = CountOf 'registerClassArgRefCopyIn('
+if ($askCopyIn -ne 5) {
+    $fail += ("copy-in claim sites = " + $askCopyIn + " (want exactly 5: declaration + definition + 3 temp stations)")
+}
+$askCopyInFiles = @(FilesOf 'registerClassArgRefCopyIn(')
+if ($askCopyInFiles.Count -ne 4) {
+    $fail += ("copy-in claim files = " + ($askCopyInFiles -join ', ') + " (want exactly 4 files)")
+}
 if ($fail.Count -gt 0) {
     Write-Host "CLASS-REFCOUNT-AUTHORITY FAIL"
     foreach ($f in $fail) { Write-Host ("  - " + $f) }
     exit 1
 }
-Write-Host "CLASS-REFCOUNT-AUTHORITY OK (1 pair mint / 1 header / 2 leg consumers / 3+9 formals / 7 roster / 6 literal files / 0 stale / 5 registry files + 2 registrants / 1+1 out-slot / 1+1 foreign-write drop / 1 field-teardown shape + file / 6 field-type questions (标量 + 数组两档) / 6 transfer-question sites in 2 files / 1 view-leg hand-back + 2 QiSet calls / 1+2+1 transfer-arm questions / 3 static-gate sites in 1 file + 1 ivref registration / 1 arg-station hand-back + 4+4 helper sites in 4 files / 4+4 index-slot + project-class questions / 1 address-temp mint / 3 element-teardown sites)"
+Write-Host "CLASS-REFCOUNT-AUTHORITY OK (1 pair mint / 1 header / 2 leg consumers / 3+9 formals / 10 roster files / 6 literal files / 0 stale / 5 registry files + 2 registrants / 1+1 out-slot / 1+1 foreign-write drop / 1 field-teardown shape + file / 6 field-type questions (标量 + 数组两档) / 6 transfer-question sites in 2 files / 1 view-leg hand-back + 2 QiSet calls / 1+2+1 transfer-arm questions / 3 static-gate sites in 1 file + 1 ivref registration / 1 arg-station hand-back + 4+4 helper sites in 4 files / 4+4 index-slot + project-class questions / 1 address-temp mint / 3 element-teardown sites / 4+4 形A questions (out-slot class + owner pass) + 5 copy-in claim sites in 4 files)"
 exit 0
