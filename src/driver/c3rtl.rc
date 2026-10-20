@@ -876,3 +876,12 @@
  *   调用方指定的那位主人; 谁的 Release 只有 cgen 知道 (每类一对出口), RTL 侧只认 elemType==vb6_sa_ptr。
  *   判据读数: 探针 k1438_probe 的 S8b/S8c 两栏 (覆写退旧 / 元素出厂) 修前 0/1、修后 1/4, 两台一字相同。
  *   touch 本文件 = 让 RCDATA 重包一次 (§B99②)。 */
+/* 账 #305 §B218 (甲) 腿⑤ 第四格 = 第一百四十八刀 (2026-10-20): ReDim Preserve 收缩丢尾那几格没人退。
+ *   新增一枚 RTL 出口 vb6_SafeArrayReDimPreserve1D_Tr(elemType, arr, newLBound, newUBound,
+ *       unsigned long (*release)(void*)) —— 上面那位 _T 主人的带回调兄弟: 先把落在新范围之外
+ *   的旧槽逐枚交回 (与 vb6_SA_ReleaseElements 同一口径: 裸结构体没有 vtable, 该调谁的 Release
+ *   只有 cgen 知道), 再原样转调 _T ⇒ 搬移/重建规则只有一份, 这里不重复实现。
+ *   只有元素是本工程类的载体才走这一形 (认不出仍发 _T, 全语料形状一字不动)。
+ *   判据读数: 探针 k1591_probe 的 A8 一格 (3 缩到 1) 修前 after-shrink term 不动、修后 +2,
+ *   K145-END 12 -> 14; 夹具 b445 的 W32 (同尺寸 Preserve) 必须继续 = 0 = 反面证人。
+ *   touch 本文件 = 让 RCDATA 重包一次 (§B99②)。 */

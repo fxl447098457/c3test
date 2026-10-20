@@ -216,6 +216,29 @@ vb6_SafeArray1D* vb6_SafeArrayReDimPreserve1D_T(vb6_safearray_elemtype elemType,
     return arr;
 }
 
+// 账 #305 §B218 (甲) 腿⑤ 第四格 (第一百四十八刀): Preserve 那一发**收缩丢尾**的元素出厂。
+// 为什么必须多收一枚回调: 工程类实例是**裸结构体指针** (没有 vtable, 类与类不同名),
+// RTL 自己认不出该调谁的 Release ⇒ 「谁的 Release 只有调用方知道」这一条与 vb6_SA_ReleaseElements
+// 同一口径。丢的是哪些格子也照抄上面 BSTR 那一支的算法 (绝对下标落在新范围之外 = 丢), 两档同源。
+// 先清槽再放手 ⇒ 被放手那枚的 Class_Terminate 若回头写这一格, 不会被退第二遍。
+// release 为空 / 元素档不是 vb6_sa_ptr / 载体还没建 (首次 ReDim Preserve) ⇒ 一个字都不做 = 旧行为。
+vb6_SafeArray1D* vb6_SafeArrayReDimPreserve1D_Tr(vb6_safearray_elemtype elemType,
+    vb6_SafeArray1D* arr, int32_t newLBound, int32_t newUBound,
+    unsigned long (*release)(void*)) {
+    if (arr && release && arr->elemType == vb6_sa_ptr && arr->data) {
+        for (int32_t i = arr->lBound; i <= arr->uBound; i++) {
+            if (i >= newLBound && i <= newUBound) continue;   // 落在新范围里 = 被搬走的那一枚, 不许退
+            void** slot = &VB6_SA_AT(void*, arr, i);
+            if (*slot) {
+                void* elem = *slot;
+                *slot = NULL;
+                release(elem);
+            }
+        }
+    }
+    return vb6_SafeArrayReDimPreserve1D_T(elemType, arr, newLBound, newUBound);
+}
+
 // 兼容入口: 元素类型未知 (无 elemType 形参的老调用点)。按 variant 兜底 ——
 // 元素尺寸取最大, 只可能多分配不少分配。**新代码别用这个**。
 vb6_SafeArray1D* vb6_SafeArrayReDimPreserve1D(vb6_SafeArray1D* arr,

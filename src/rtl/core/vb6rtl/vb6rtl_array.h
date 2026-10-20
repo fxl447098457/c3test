@@ -142,6 +142,14 @@ vb6_SafeArray1D* vb6_SafeArrayReDimPreserve1D_T(vb6_safearray_elemtype elemType,
     vb6_SafeArray1D* arr, int32_t newLBound, int32_t newUBound);
 vb6_SafeArray1D* vb6_SafeArrayReDimPreserve1D(vb6_SafeArray1D* arr,
     int32_t newLBound, int32_t newUBound);
+// 账 #305 §B218 (甲) 腿⑤ 第四格 (第一百四十八刀): 上面那位主人的**带回调兄弟** —— 元素是工程类
+// 裸实例 (vb6_sa_ptr) 时, 收缩丢尾的那几格要在搬移之前把引用交回。为什么多收一枚函数指针:
+// 裸结构体没有 vtable、每类的 Release 是各自一对出口 ⇒ RTL 自己认不出该调谁 (与
+// vb6_SA_ReleaseElements 同一口径)。搬移本身**不重复实现**: 这枚只做完出厂就转调 _T,
+// 所以两条路的保留/重建规则永远一字相同。非类元素请继续直接用 _T (发码形状逐字节不变)。
+vb6_SafeArray1D* vb6_SafeArrayReDimPreserve1D_Tr(vb6_safearray_elemtype elemType,
+    vb6_SafeArray1D* arr, int32_t newLBound, int32_t newUBound,
+    unsigned long (*release)(void*));
 
 // UDT版ReDim Preserve: elemSize由调用方提供 (用于UDT动态数组)
 vb6_SafeArray1D* vb6_SafeArrayReDimPreserve1D_Udt(int32_t elemSize,

@@ -184,7 +184,15 @@ void CCodeGen::visit(ReDimStmt& node) {
                 // 销毁时再被当 bstrVal 二次 free (实测 play78.exe 的 List.Contains)。
                 // saElemType 来自 mapSaElemType(elemType), 与非 preserve 分支
                 // (下方 vb6_SafeArrayReDim1D(saElemType, …)) 同一口径。
-                assignVal = "vb6_SafeArrayReDimPreserve1D_T(" + saElemType + ", " + callArg + ", " + lBound + ", " + uBound + ")";
+                // 账 #305 §B218 (甲) 腿⑤ 第四格 (第一百四十八刀): 元素是**本工程类实例**时换那位
+                // 带回调的兄弟出口 —— 收缩丢尾的那几格在搬移之前逐枚交回同一位主人。界仍只算一次:
+                // lBound/uBound 是同一对文本, 出厂逻辑在 RTL 那一处, 搬移本身直接转调 _T。
+                // 认不出 (As Object = 包装器 / As Variant = 槽 / 外部类 / 点链成员数组) ⇒ 今天那一发
+                // 逐字节留着 ⇒ 全语料的 Preserve 形状只有类数组那几格会动。
+                const std::string clsPreserve = classOfArrayCarrier(node.varName);
+                assignVal = clsPreserve.empty()
+                    ? ("vb6_SafeArrayReDimPreserve1D_T(" + saElemType + ", " + callArg + ", " + lBound + ", " + uBound + ")")
+                    : ("vb6_SafeArrayReDimPreserve1D_Tr(" + saElemType + ", " + callArg + ", " + lBound + ", " + uBound + ", " + clsPreserve + "_Release)");
             }
             c_.emitLine(cName + " = " + assignVal + ";");
         } else {
