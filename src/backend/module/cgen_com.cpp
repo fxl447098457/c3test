@@ -537,6 +537,22 @@ void CCodeGen::registerClassArgRefCopyIn(const std::string& clsPtr, const std::s
         + ")__bi; } " + base + "_AddRef(" + tmp + "); } }  /* 账 #305 (甲) 腿⑤: 借来的实参在这一格先落一枚自有引用 */");
 }
 
+// 账 #305 §B218 (甲) 腿⑤ 第三格 (第一百四十六刀): **销毁载体之前**把元素逐枚交回 —— 与上面那条
+// copy-in、与第一百四十刀 `_Destroy` 里那一发「元素出厂」同属腿⑤，只是这一站的形状是「载体整块没了」。
+// 问句只许问一处 (`classOfArrayCarrier` = 登记表 + 工程类那一闸 + 形状问句)，站点不许各抄一份名单；
+// 认不出 (点链成员数组 / `As Object` / `As Variant` / 外部类) 就一声不出 = 维持今天的裸销毁。
+// 出口排在销毁**之前**是硬约束: `vb6_SA_ReleaseElements` 要按载体的元素档步进读槽，而
+// `vb6_SafeArrayDestroy1D` / `vb6_EraseArrayVar` 一进去就把 data 与载体 free 了。
+// RTL 那一头先清槽再放手 ⇒ 被放手那枚的 Class_Terminate 若回头写这一格，不会退第二遍 (同一枚
+// 载体的字段出厂那一档也是这个口径，见 cgen_com.cpp 的 `_Destroy`); 固定数组那一支随后 memset
+// 已清空的槽 = 无害。多维 (ND) 载体不是 `vb6_SafeArray1D` ⇒ 本刀不硬塞 cast，等 ND 那一枚兄弟出口。
+void CCodeGen::emitClassArrayElemHandback(const std::string& carrierExpr, const std::string& arrayName) {
+    const std::string cls = classOfArrayCarrier(arrayName);
+    if (cls.empty() || carrierExpr.empty()) return;
+    c_.emitLine("vb6_SA_ReleaseElements(" + carrierExpr + ", " + cls
+        + "_Release);  /* 账 #305 (甲) 腿⑤ 数组档: 载体销毁前逐枚交回 */");
+}
+
 // P6.4+: 类模块默认实例 (VB_PredeclaredId=True) 惰性单例访问器.
 // VB6 为 PredeclaredId 类生成隐藏的全局默认实例, frm 里裸类名成员访问经过
 // knownClassVars_ 解析, 对象表达式生成 vb6_cls_X_Default() 调用. 这里生成:

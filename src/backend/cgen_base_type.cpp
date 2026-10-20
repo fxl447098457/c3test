@@ -338,6 +338,25 @@ bool CCodeGen::argHoldsProjectRefInOwnSlot(const std::string& ident, const std::
     return cTypeForDeclaredTypeName(it->second) == clsPtr;
 }
 
+// 账 #305 §B218 (甲) 腿⑤ 第三格 (第一百四十六刀): 「这一枚**数组变量**握着的元素是不是工程类实例」——
+// 载体销毁那一族 (`Erase` / `ReDim` 不带 Preserve) 唯一的那一问。交回 `vb6_cls_<类>` (单个 * 已被
+// 剥掉)，认不出交空串 = 维持今天的"不动"。三道闸一道都不能少：
+//   1) 只认**裸名** —— `arrayClassElemTypes_` 这张表就是按裸名登记的 (Fix 192 的口径: 点链成员链的
+//      键与访问侧对不上，猜错比不猜更坏)，`obj.Field` / `VB6_SA_AT(...)` 那一形今天答不出来；
+//   2) 表里那个类名必须真是**本工程的类模块** (`isProjectClassName`) —— RTL/typelib 里
+//      `typedef vb6_ComIface_Font vb6_cls_StdFont;` 那一族也有 `vb6_cls_` 的痕迹，但没有类模块去
+//      发 `vb6_cls_StdFont_Release`，按它发码就是调一个不存在的出口；
+//   3) 形状问句 `projectClsStructOfCType` —— `As Object` 是 void*、`As Variant` 是整枚槽、
+//      外部接口是 vb6_ComIface_* ⇒ 一律空串。
+std::string CCodeGen::classOfArrayCarrier(const std::string& name) {
+    if (name.empty()) return std::string();
+    if (name.find_first_of(".() ,") != std::string::npos) return std::string();
+    auto it = arrayClassElemTypes_.find(Symbol::toLower(name));
+    if (it == arrayClassElemTypes_.end()) return std::string();
+    if (!isProjectClassName(it->second)) return std::string();
+    return projectClsStructOfCType(cTypeForDeclaredTypeName(it->second));
+}
+
 // <vbeclipse>: 这个名字是不是**本工程的一个类/窗体模块** —— 它的 prop_let_/prop_set_/
 // 成员函数真的会被发出来。判法 = 名字命中"本模块 ∪ 驱动下发的其它模块", 且
 // mapTypeRef 把它映射成 vb6_cls_* (与 cParamClassPtrType 同一口径)。

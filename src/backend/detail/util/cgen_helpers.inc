@@ -331,6 +331,9 @@
     // 账 #305 §B218 (甲) 形A (第一百四十四刀): 交回的另一半 —— 实参读来的是**借的**时,
     // 临时量先落一枚自有引用 (并按运行期问一句是不是包装器)，与上面那条交回配对使用。
     void registerClassArgRefCopyIn(const std::string& clsPtr, const std::string& tmp);
+    // 账 #305 §B218 (甲) 腿⑤ 第三格 (第一百四十六刀): 载体销毁那一族 (`Erase` / `ReDim` 不带
+    // Preserve) 的发码主人 —— 只调这一枚，站点不许自己拼 `vb6_SA_ReleaseElements`; 认不出就一声不出。
+    void emitClassArrayElemHandback(const std::string& carrierExpr, const std::string& arrayName);
     std::vector<const IfaceView*> ivImplementedIfaces(Module& module);
     Decl* ivFindImplMember(Module& module, const IfaceView& v, const IfaceSlotView& slot);
     // tB 委托式实现 (ai/022 B10): 本类把接口 v 整份转交给哪个持有字段 (无则 nullptr)
@@ -770,6 +773,11 @@
     // 两位主人同住 cgen_base_type.cpp；两站 (覆写 / 置空) 与调用侧都只问这两句，不许各抄一遍。
     std::string classOfProjectRefOutSlot(const std::string& target);
     bool argHoldsProjectRefInOwnSlot(const std::string& ident, const std::string& clsPtr);
+    // 账 #305 §B218 (甲) 腿⑤ 第三格 (第一百四十六刀): 「这一枚**数组变量**握着的元素是不是工程类
+    // 实例」= 载体销毁那一族 (`Erase` / `ReDim` 不带 Preserve) 唯一的那一问，交回 `vb6_cls_<类>`
+    // (认不出 = 空串 = 维持今天的裸销毁)。三道闸 (只认裸名 / 得是本工程类 / 形状) 一道不能少，
+    // 与上面几位主人同住 cgen_base_type.cpp；站点只调 emitClassArrayElemHandback，不许自己查表。
+    std::string classOfArrayCarrier(const std::string& name);
 
     // <vbeclipse>: 该名字是否为本工程的某个类/窗体模块 (它的 prop_let_/成员函数真会被发出)。
     // 与 cParamClassPtrType 同一口径, 见 cgen_base_type.cpp 定义处注释。凡是要"按类实例

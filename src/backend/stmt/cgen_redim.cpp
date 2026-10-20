@@ -191,6 +191,10 @@ void CCodeGen::visit(ReDimStmt& node) {
             // Fix 084a: Variant 数组非 preserve ReDim — 先销毁提取出的 SafeArray, 再包装新数组回 Variant
             std::string destroyArg = cName;
             if (isVariantArrayVar(cName)) destroyArg = "vb6_VariantToSafeArray1D(" + cName + ")";
+            // 账 #305 §B218 (甲) 腿⑤ 第三格 (第一百四十六刀): 不带 Preserve 的那一发把旧载体整块
+            // 换掉 ⇒ 旧元素那一枚引用没人放手 = 漏。销毁之前问一处 (认不出 = 一声不出)。
+            // Preserve 那一支**不吃**: 元素是被搬走的, 不是被丢的 (丢尾那一档随 RTL 出口另议)。
+            emitClassArrayElemHandback(cName, node.varName);
             c_.emitLine("vb6_SafeArrayDestroy1D(" + destroyArg + ");");
             std::string newVal;
             if (isUdtArray) {
@@ -471,6 +475,11 @@ void CCodeGen::visit(EraseStmt& node) {
             // 动态数组释放存储置 NULL, **固定数组保留存储**只把元素重置
             // (数值/BSTR/Variant 按 VB6 文档口径; 此前固定数组也被整块释放,
             //  Erase VarArray 后再访问 UBound/元素直接错误 9, t3.bas 实测)。
+            // 账 #305 §B218 (甲) 腿⑤ 第三格 (第一百四十六刀): 类数组的元素由**这一格**握着 ⇒
+            // 销毁载体之前逐枚交回同一位主人 (问句与出口只住在 emitClassArrayElemHandback 那一处,
+            // 认不出就一声不出 = 维持今天的裸销毁)。固定数组那一支同样吃这一发: RTL 里的
+            // vb6_ReleaseObject 认不出工程类裸结构体 (Fix 191), 过去只把槽清成 NULL 而不放手。
+            emitClassArrayElemHandback(cName, name);
             c_.emitLine("vb6_EraseArrayVar(&" + cName + ");");
         }
     }
