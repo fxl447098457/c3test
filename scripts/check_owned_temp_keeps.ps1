@@ -325,6 +325,33 @@ function Classify([string]$name, [int]$idx) {
     $script:clsStack.Remove($key)
 }
 
+# ---------------------------------------------------------------- 借用轴（返回侧）
+# 这一枚出口**交出去的指针是借来的**（不归调用方所有 ⇒ 调用方不许放它）。它不是形参位的性质，
+# 而是**出口**的性质 ⇒ 单独一节，不塞进上面那张按形参位排的表。
+# 权威 = 编译器侧那枚借用名单 `kBorrowedBstrExports167`（src/backend/cgen_util_ctrl.cpp），
+# 那份名单本身由 `check_bstr_borrow_slot.ps1` 的 Q6 从 RTL **双向推导**钉住（导出面全、无遗漏）。
+# 为什么这一节必须在：撤回那一版（9546dbfe / 6bf5989 / be5d6abf）**只问了 mint 那一侧**
+# （「这一格是不是现造的」），没问 borrow 那一侧（「这一格是借来的吗」）⇒ 它把
+# `vb6_BSTR_Concat` 换成 `vb6_BSTR_ConcatFree`，于是**放掉了借来的 `vb6_ErrDescription()`**
+# （RTL 全局 vb6_err 的指针）⇒ 全局悬空 ⇒ 读数变堆垃圾；又对**借来的变体**
+# （`vb6_VariantArrayGetND` 的元素，指向数组里那块）发 `vb6_VariantClear` ⇒ 数组被清坏。
+# 本机实测：那一版在 `test_bstr_borrow_slot` 上 W8b/W9a/W9b 读出堆垃圾，在
+# `test_host_decimal`(x86) 上直接 0xC0000374（堆损坏）⇒ **借用族一律不许进提名面**。
+$borrowAuthority = Join-Path $Root 'src\backend\cgen_util_ctrl.cpp'
+$borrowedExports = @()
+if (Test-Path -LiteralPath $borrowAuthority) {
+    $authTxt = [System.IO.File]::ReadAllText($borrowAuthority)
+    $am = [regex]::Match($authTxt, 'kBorrowedBstrExports167\[\]\s*=\s*\{([\s\S]*?)\}')
+    if ($am.Success) {
+        foreach ($nm in [regex]::Matches($am.Groups[1].Value, '"(vb6_[A-Za-z0-9_]+)"')) {
+            $borrowedExports += $nm.Groups[1].Value
+        }
+    }
+}
+if ($borrowedExports.Count -eq 0) {
+    $bad += 'K11 编译器侧的借用名单 kBorrowedBstrExports167 读不出来 —— 借用族答不了 ⇒ 停机'
+}
+
 $rows = @{}
 # ⚠ 遍历顺序必须**定死**（排序）：分类里有成环判定，顺序不同会得出不同的表
 # （踩过一次： hashtable 的 Keys 顺序变一次，快照就漂 396 行 ⇒ 表变成不可登记的）。
@@ -436,9 +463,14 @@ $grayRules = @('user-proc', 'late-bound-com')
 
 # ---------------------------------------------------------------- 快照对账
 $snap = @{}
+$snapBorrow = @()
 if (Test-Path -LiteralPath $TableFile) {
     foreach ($ln in [System.IO.File]::ReadAllLines($TableFile)) {
         if ($ln -eq '' -or $ln.StartsWith('#')) { continue }
+        if ($ln.StartsWith('[borrow]')) {
+            $snapBorrow += $ln.Substring(8).Trim()
+            continue
+        }
         # ⚠ 字段分隔**不许用 '|'**：键自己带一个 '|'（出口名|形参序号），用 '|' 分隔
         # 就把键切成两半 ⇒ 快照对账全表漂（踩过一次：漂 396 行，名单每跑一次还不一样）。
         # 用 TAB：键与逃逸通道里都不可能出现 TAB。
@@ -459,10 +491,43 @@ if ($Bless) {
         $v = $rows[$k]
         $out += ($k + "`t" + $v[0] + "`t" + $v[1] + "`t" + $v[2] + "`t" + $v[3] + "`t" + $v[4])
     }
+    $out += '# --- 借用轴（返回侧）：这一枚出口交出去的指针是借来的，不归调用方所有 ⇒ 不许放它 ---'
+    foreach ($b in ($borrowedExports | Sort-Object)) { $out += ('[borrow] ' + $b) }
     [System.IO.File]::WriteAllLines($TableFile, $out, (New-Object System.Text.UTF8Encoding($false)))
-    Write-Host ("已登记快照: " + $TableFile + " （" + $rows.Count + " 行）")
+    Write-Host ("已登记快照: " + $TableFile + " （" + $rows.Count + " 行 + 借用 " + $borrowedExports.Count + " 枚）")
     exit 0
 }
+
+# K11 借用轴：① 表里那一节必须与**编译器侧权威名单**逐字相同（双向）；
+#      ② 借用族与按形参位排的这张表**不相交** —— 借来的那一枚是**出口**（交出去的东西不归
+#      调用方所有），它**不可能**同时是「按值带权形参位」的接收者；两处若重了，说明有人把一枚
+#      借来的出口当成了现造的临时量来回收（撤回那一版的病根）。
+#      ③ **回收点那一侧必须再问一次借用权威**：`ConcatFree` 放掉左操作数、`VariantClear` 清一枚
+#      变体，都只在「那一枚归调用方所有」时才成立 —— 这是回收刀那一侧的判据，本表只把名单钉住。
+#      ⚠ 这里**故意没有**「借用族不许进提名面」那一格：借用族是**出口**（它们没有按值的带权形参位）
+#      ⇒ 那一格在今天这张表上**恒为空**，写进去就是一条**永远不会红的判据**（负控一跑就露馅：
+#      把借用族的 gate 打开，那一格照样绿）。它属于**回收点**那一侧，由回收刀自己的哨兵钉。
+if ($borrowedExports.Count -gt 0) {
+    $missingB = @($borrowedExports | Where-Object { $snapBorrow -notcontains $_ })
+    $extraB = @($snapBorrow | Where-Object { $borrowedExports -notcontains $_ })
+    if ($missingB.Count -gt 0) {
+        $bad += ("K11 表的借用轴少了 " + $missingB.Count + " 枚（权威名单里有，表里没有）: " + ($missingB -join ', '))
+    }
+    if ($extraB.Count -gt 0) {
+        $bad += ("K11 表的借用轴多了 " + $extraB.Count + " 枚（表里有，权威名单里没有）: " + ($extraB -join ', '))
+    }
+    # ② 不相交：借用族是**出口**，不该同时出现在「按值带权形参位」这张表里
+    $overlap = @($rows.Keys | Where-Object { ($_ -split '\|')[0] -in $borrowedExports })
+    if ($overlap.Count -gt 0) {
+        $bad += ("K11 借用族 " + $overlap.Count + " 枚同时出现在按值带权形参位表里（借来的出口不是接收者）: " +
+                 (($overlap | Select-Object -First 4) -join ', '))
+    }
+}
+# ⚠ 「借用族不许进提名面」那一格**故意不写在这里**：借用族是**出口**，今天这张表里根本没有它们的行
+#     ⇒ 那一格恒为空 = 一条**永远不会红的判据**（负控一跑就露馅：把借用族的 gate 打开，照样绿）。
+#     它属于**回收点**那一侧（`ConcatFree` 放掉左操作数 / `VariantClear` 清一枚变体 ⇒ 只在
+#     「那一枚归调用方所有」时才成立），由回收刀自己的哨兵钉；本表只把借用名单钉住（K11①）
+#     与不相交性（K11②）。
 
 # K2: unclassified == 0 —— 出口面里每一枚按值带权形参位都必须有行
 $missing = @($surface.Keys | Where-Object { -not $rows.ContainsKey($_) })

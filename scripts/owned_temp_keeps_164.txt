@@ -223,3 +223,7 @@ vb6_VarSubV|0	0	handoff-reads:vb6_VarArith	0	open	VARIANT
 vb6_VarSubV|1	0	handoff-reads:vb6_VarArith	0	open	VARIANT
 vb6_VarType|0	0		0	open	VARIANT
 vb6_Write|1	0	handoff-reads:vb6_BSTR_Len	0	open	BSTR
+# --- 借用轴（返回侧）：这一枚出口交出去的指针是借来的，不归调用方所有 ⇒ 不许放它 ---
+[borrow] vb6_ErrDescription
+[borrow] vb6_ErrSource
+[borrow] vb6_ho_variantToBstr
