@@ -506,6 +506,20 @@ $carrierShapeFiles = @(FilesOf 'emitArrayCarrierDecl')
 if ($carrierShapeFiles.Count -ne 2) {
     $fail += ("array-carrier decl shape files = " + ($carrierShapeFiles -join ', ') + " (want exactly 2 files)")
 }
+# ㉘ 第一百六十五刀: 「这一格槽装的是不是 legacy 那一档接口视图」那一问收成一处 = slotIsLegacyIfaceView。
+#    病灶形状 = 腿②/腿③ 那两站先问类名 (inferClassTypeOfExpr 把接口名也答出来)，于是铸出一枚声明侧从没造过的
+#    `vb6_cls_<接口名>*` = cl C2440 (#407 那十二形全撞在这一发上，且门内没有一份输入走到这一形)。
+#    只许一份声明 + 一份定义 + 两处调用 (= 4 处 / 4 份文件)：多一处 = 又有站点自己拼名单，少一处 = 有一站还没问它。
+#    ⚠ 这一问不许被并进 ifaceViewOfExpr: 那一问问的是**新式薄指针** (vb6_ivref_<I>*)，两档的主人与形状都不同，
+#    合一起会让 b448 / iface_wrap 那两片真跑夹具当场换形状。
+$viewSlotAsk = CountOf 'slotIsLegacyIfaceView'
+if ($viewSlotAsk -ne 4) {
+    $fail += ("iface-view-slot question sites = " + $viewSlotAsk + " (want exactly 4: 声明 + 定义 + 腿② 那一站 + 腿③ 那一站)")
+}
+$viewSlotAskFiles = @(FilesOf 'slotIsLegacyIfaceView')
+if ($viewSlotAskFiles.Count -ne 4) {
+    $fail += ("iface-view-slot question files = " + ($viewSlotAskFiles -join ', ') + " (want exactly 4 files)")
+}
 # ㉗ 第一百六十四刀: 「嵌在块里的定长/多维数组载体 —— 声明提到过程序言」这一族五问各只许一位主人:
 #    · hoistingLocalDeclsEnabled = 「提升开着没有」(早退那一发与闸① 同一位主人; C3_NO_HOIST 关掉时闸①
 #      必须跟着答否, 否则门 #821 那一形立刻回来) = 声明 + 定义 + 两处调用 = 4 处 / 3 份文件。

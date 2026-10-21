@@ -8098,6 +8098,34 @@ if ($Category -in @("all", "run", "vbp")) {
         'if (t == NULL) {',
         'vb6_SafeArrayDestroy1D(e2);',
         'vb6_SafeArray1D* q = vb6_SafeArrayCreate1D')
+    # 账 #305 §B218 (甲) 第一百六十五刀: 「这一格槽装的是不是 legacy 那一档接口视图」收成一处
+    # slotIsLegacyIfaceView。腿②/腿③ 那两站从前先问类名 (inferClassTypeOfExpr 把接口名也答出来)，
+    # 于是铸出一枚声明侧从没造过的 `vb6_cls_K165Iface*` = cl C2440 (两台同形，基线 = 门 #831 那台
+    # CI 二进制编同一份夹具: 九发错，其中 C2440 四发 / C2172 两发 / C2083 两发 / void*→struct 一发)。
+    # 视图那一档的正答案 = 覆写走 wrap、置空走 vb6_ReleaseObject —— 与**局部**声明那一路今天发的一字
+    # 相同 (P14/P15 实测)；`mi` 那两枚针钉的是**具体类槽照旧归工程类那位主人**，本刀一条没松。
+    $b165Expected = @("K165-new=9", "K165-over=12", "K165-local=18", "K165-afternothing=21",
+                     "K165-mi=16", "K165-DONE=1")
+    Test-Vbp 'b165_iface_view_slot' "$Tests\k165_iface_slot\K165Slot.vbp" $b165Expected
+    Test-Vbp 'b165_iface_view_slot_x86' "$Tests\k165_iface_slot\K165Slot.vbp" $b165Expected -Arch "x86"
+    $b165Shapes = @(
+        'mv = vb6_iface_K165Iface_wrap((vb6_cls_K165Impl_New()));  /* Set */',
+        'mv = vb6_iface_K165Iface_wrap(mi);  /* Set */',
+        'lv = vb6_iface_K165Iface_wrap((vb6_cls_K165Impl_New()));  /* Set */',
+        'vb6_ReleaseObject((void**)&mv);  /* Set Nothing */',
+        'mv.vtbl->Bar(mv.obj, 3)',
+        'vb6_cls_K165Impl* __clsold',
+        'mi = (vb6_cls_K165Impl_New());',
+        'vb6_cls_K165Impl_Release(__clsold')
+    Test-EmitcShape 'b165_view_slot_set_and_clear_take_the_view_shapes' @(
+        "$Tests\k165_iface_slot\K165Slot.vbp") $b165Shapes
+    $b165Absent = @(
+        'vb6_cls_K165Iface* __clsold',
+        'vb6_cls_K165Iface_AddRef(mv)',
+        'vb6_cls_K165Iface_Release(__clsold',
+        'mv = NULL;')
+    Test-EmitcAbsent 'b165_no_phantom_class_holder_for_a_view_slot' @(
+        "$Tests\k165_iface_slot\K165Slot.vbp") $b165Absent
     # 账 #305 §B188 ④ (第九十刀): 出厂那一腿的**尾巴**。`Class_Terminate` 抛错时, `_Destroy` 里体之后
     # 那三截(字段 BSTR / 数组字段 / vb6_Free(me))曾被 ComObj_Release 的帧一起 longjmp 跳掉 —— 实测每枚
     # 抛错的出厂漏一份实例资源: x64 每枚 35~37 字节、x86 每枚 17 字节, 多一枚 20 字符 String 字段就涨到
