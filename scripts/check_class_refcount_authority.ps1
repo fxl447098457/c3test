@@ -486,6 +486,25 @@ $scopeRosterFiles = @(FilesOf 'topLevelLocalArrays_')
 if ($scopeRosterFiles.Count -ne 3) {
     $fail += ("declaration-scope roster files = " + ($scopeRosterFiles -join ', ') + " (want exactly 3 files: cgen_state.inc + cgen_iface_vtbl.cpp + cgen_util_type.cpp)")
 }
+# ㉕ 第一百六十刀: 「这枚局部声明要不要 C 的 static 存储」收成一处 = wantsStaticLocalStorage，
+#    数组载体声明那一发的形状收成一处 = emitArrayCarrierDecl。多一处 = 第二位作者又自己拼了一遍
+#    (数组那三支从前就是这么掉掉这一档：只有标量那一路问判据，于是 Static 数组每调用换一块)。
+$staticAsk = CountOf 'wantsStaticLocalStorage'
+if ($staticAsk -ne 7) {
+    $fail += ("static-storage question sites = " + $staticAsk + " (want exactly 7: 定义 + 声明 + 数组三支的调用 + 标量那一路的调用 + 那条注释)")
+}
+$staticAskFiles = @(FilesOf 'wantsStaticLocalStorage')
+if ($staticAskFiles.Count -ne 2) {
+    $fail += ("static-storage question files = " + ($staticAskFiles -join ', ') + " (want exactly 2 files: cgen_localdecl.cpp + cgen_helpers.inc)")
+}
+$carrierShape = CountOf 'emitArrayCarrierDecl'
+if ($carrierShape -ne 5) {
+    $fail += ("array-carrier decl shape sites = " + $carrierShape + " (want exactly 5: 定义 + 声明 + 三支站点)")
+}
+$carrierShapeFiles = @(FilesOf 'emitArrayCarrierDecl')
+if ($carrierShapeFiles.Count -ne 2) {
+    $fail += ("array-carrier decl shape files = " + ($carrierShapeFiles -join ', ') + " (want exactly 2 files)")
+}
 # ㉔ 第一百五十二刀: 那张带档的表 (+第三档) 的形状 —— isCarrier 只许住在表与出口那一趟 (2 份文件 / 4 处)。
 $carrierFlag = CountOf 'isCarrier'
 if ($carrierFlag -ne 4) {

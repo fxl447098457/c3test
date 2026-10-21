@@ -7961,6 +7961,39 @@ if ($Category -in @("all", "run", "vbp")) {
         'p = b;',
         'mFix = vb6_ChkLong(b);',
         'loc = src;')
+
+    # 账 #305 §B218 (甲) 第一百六十刀 = `Static` 局部数组那一档从来没吃到 C 的 static 存储：只有标量那一路
+    #   问 `var.isStatic || inStaticProc_`，数组那三支各发各的自动存储 ⇒ 每次进来换一块。尺 =
+    #   tests/test_static_array.bas 五格，每格「第一次调用写、第二次调用读」，两台各钉一头：
+    #     fix / dyn / nd / copy / ptr = 静态那一格必须跨调用活着 (VB6 口径)；ptr 那一格钉的是同一枚缓冲的地址
+    #     (门禁输入 VBFlexGridDemo UserEditingForm.frm:412 就是把 VarPtr(CustomColors(0)) 交给 OS 的 CHOOSECOLOR，
+    #     地址每次换 = 用户的自定义色板静默清空)；fresh / freshnd = 同一过程里用普通 Dim 声明的兄弟，必须照旧
+    #     每调用归零 —— 那道闸没被放红的反面证人。erase 那一钉的是「静态定长档被 Erase 之后载体还在」
+    #     (RTL 对定长保留存储、不把指针置 NULL ⇒ 元素归零而 UBound 照旧答，不交错误 9)。修法的形状：动态那一支
+    #     初值本来就是常量 NULL ⇒ 只加 static 前缀、不发守卫；定长 1D / 多维那两支的初值是运行时调用 ⇒
+    #     `static T* x = NULL;` + 一发拿指针本身当首轮守卫 (C 不许静态局部用非常量初始化器，Fix 084aa 那条老规矩)。
+    #     inStaticProc_ 那一档今天判不了：parser 从不给过程头传 isStatic (parser_decl.cpp:35/40/95/100 全传 false)，
+    #     实测 `Static Sub Foo()` 交 VB2001 ⇒ 另开一条账，本刀的针只覆盖显式 Static 那一形。
+    $b160Needles = @("K160-fix=42 fresh=0", "K160-dyn=7 ub=2 nd=9 freshnd=0",
+                     "K160-copy=123456", "K160-erase=0 ub=3", "K160-ptr=Y", "K160-DONE=1")
+    Add-BasTest "test_static_array" "$Tests	est_static_array.bas" $b160Needles
+    Add-BasTest "test_static_array_x86" "$Tests	est_static_array.bas" $b160Needles -Arch "x86"
+    # 发码两面：静态那六形各发一条 static 声明；同一过程里普通 Dim 那三形一条都不许带上前缀，
+    #   而动态那一支 (初值本来就是 NULL) 不许多发一发守卫 —— 发了就挡住用户 ReDim 那一发的退旧。
+    Test-EmitcShape 'b160_static_array_decls_get_static_storage' @(
+        "$Tests	est_static_array.bas") @(
+        'static vb6_SafeArray1D* sf = NULL;',
+        'static vb6_SafeArray1D* cs = NULL;',
+        'static vb6_SafeArray1D* es = NULL;',
+        'static vb6_SafeArray1D* pc = NULL;',
+        'static vb6_SafeArrayND* sn = NULL;',
+        'static vb6_SafeArray1D* d = NULL;')
+    Test-EmitcAbsent 'b160_plain_dim_arrays_stay_automatic' @(
+        "$Tests	est_static_array.bas") @(
+        'static vb6_SafeArray1D* f = NULL;',
+        'static vb6_SafeArrayND* nd = NULL;',
+        'static vb6_SafeArray1D* src = NULL;',
+        'if (d == NULL) {')
     # 账 #305 §B188 ④ (第九十刀): 出厂那一腿的**尾巴**。`Class_Terminate` 抛错时, `_Destroy` 里体之后
     # 那三截(字段 BSTR / 数组字段 / vb6_Free(me))曾被 ComObj_Release 的帧一起 longjmp 跳掉 —— 实测每枚
     # 抛错的出厂漏一份实例资源: x64 每枚 35~37 字节、x86 每枚 17 字节, 多一枚 20 字符 String 字段就涨到
