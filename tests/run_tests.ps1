@@ -1025,6 +1025,24 @@ function Test-Ps51JoinPath {
         $out | Select-Object -First 10 | ForEach-Object { Write-Host "  $_" }
     }
 }
+# 第一百六十刀「判据」的实物（2026-10-21，门 #829 三条红的真因）：给本文件打补丁的 Python 脚本把双引号串里的
+#   反斜杠+t 写成了一枚真制表符，四条夹具路径静默坏成「反斜杠被制表符顶掉 + est_static_array.bas」—— 后果分两种，两种都坏：
+#   运行期那两例（Add-BasTest）连名字都没出现在 CI 日志里 ⇒ 用例凭空消失，判据看着绿其实一条没跑；
+#   发码那两例（Test-EmitcShape / Test-EmitcAbsent）报红却说「missing 全部针」与「还在场:（空）」⇒ 看着像发码回归，
+#   实际是命令行里那个源文件压根没打开。全仓 .ps1 今天 0 个裸制表符，判据不设豁免名单；细则与改法见那份哨兵。
+function Test-NoRawTab {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] no_raw_tab ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\check_no_raw_tab_in_ps1.ps1" 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        $out | Select-Object -First 10 | ForEach-Object { Write-Host "  $_" }
+    }
+}
 function Test-UcArrayEventSites {
     $script:total++
     Write-Host -NoNewline "  [STATIC] uc_array_event_sites ... "
@@ -7976,12 +7994,12 @@ if ($Category -in @("all", "run", "vbp")) {
     #     实测 `Static Sub Foo()` 交 VB2001 ⇒ 另开一条账，本刀的针只覆盖显式 Static 那一形。
     $b160Needles = @("K160-fix=42 fresh=0", "K160-dyn=7 ub=2 nd=9 freshnd=0",
                      "K160-copy=123456", "K160-erase=0 ub=3", "K160-ptr=Y", "K160-DONE=1")
-    Add-BasTest "test_static_array" "$Tests	est_static_array.bas" $b160Needles
-    Add-BasTest "test_static_array_x86" "$Tests	est_static_array.bas" $b160Needles -Arch "x86"
+    Add-BasTest "test_static_array" "$Tests\test_static_array.bas" $b160Needles
+    Add-BasTest "test_static_array_x86" "$Tests\test_static_array.bas" $b160Needles -Arch "x86"
     # 发码两面：静态那六形各发一条 static 声明；同一过程里普通 Dim 那三形一条都不许带上前缀，
     #   而动态那一支 (初值本来就是 NULL) 不许多发一发守卫 —— 发了就挡住用户 ReDim 那一发的退旧。
     Test-EmitcShape 'b160_static_array_decls_get_static_storage' @(
-        "$Tests	est_static_array.bas") @(
+        "$Tests\test_static_array.bas") @(
         'static vb6_SafeArray1D* sf = NULL;',
         'static vb6_SafeArray1D* cs = NULL;',
         'static vb6_SafeArray1D* es = NULL;',
@@ -7989,7 +8007,7 @@ if ($Category -in @("all", "run", "vbp")) {
         'static vb6_SafeArrayND* sn = NULL;',
         'static vb6_SafeArray1D* d = NULL;')
     Test-EmitcAbsent 'b160_plain_dim_arrays_stay_automatic' @(
-        "$Tests	est_static_array.bas") @(
+        "$Tests\test_static_array.bas") @(
         'static vb6_SafeArray1D* f = NULL;',
         'static vb6_SafeArrayND* nd = NULL;',
         'static vb6_SafeArray1D* src = NULL;',
@@ -8632,6 +8650,7 @@ if ($Category -in @("all", "compile")) {
     Test-RsRecordsetShape
     Test-SbPanelHm
     Test-Ps51JoinPath
+    Test-NoRawTab
     Test-UcArrayEventSites
     Test-SubclassSlotSites
     Test-CtrlArrayMemberSites
