@@ -340,6 +340,17 @@ std::string CCodeGen::ifaceViewOfExpr(const ASTNode& expr) {
     return ivrefCType(n).empty() ? std::string() : n;
 }
 
+// 账 #305 §B218 第一百六十五刀: 「这一格槽装的是不是 legacy 那一档接口视图」的唯一问句
+// (名册 = knownIfaceVars_，由 cgen_decl_var.cpp / cgen_localdecl.cpp / 三处形参登记共同写入)。
+// 为什么需要单独一问: 视图那一档的 C 值是**一枚值结构体** vb6_iface_<I> { vtbl, obj }，
+// 而工程类那一位主人只会写 `vb6_cls_<类名>* 旧 = 目标;` —— 它拿到的是左值的**声明类型名**，
+// 接口名也照样答得出，于是铸出一枚声明侧从没造过的 `vb6_cls_<接口名>` (实测 = cl C2440，
+// #407 那十二形全撞在这一发上)。视图那一档的覆写/置空本就有自己的形状 (wrap / ReleaseObject)，
+// 站点问这一句落空才归工程类那位主人管，别再长第三种答案。
+bool CCodeGen::slotIsLegacyIfaceView(const std::string& nameLower) const {
+    return knownIfaceVars_.count(nameLower) > 0;
+}
+
 
 // Fix 219: Variant 载体判定 —— 见 cgen_helpers.inc 的声明注释。
 bool CCodeGen::isVariantCarrierExpr(const std::string& cExpr) const {

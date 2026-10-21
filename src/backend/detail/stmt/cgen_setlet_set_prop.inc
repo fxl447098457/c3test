@@ -184,6 +184,10 @@
                 auto itCls101 = knownClassVars_.find(targetLower);
                 if (itCls101 != knownClassVars_.end()) targetCls101 = itCls101->second;
             }
+            // 账 #305 §B218 第一百六十五刀: 与覆写那一站同一条问句 —— 槽装的是 legacy 接口视图时
+            // 本主人不接手 (置空那一发它会写 `vb6_cls_<接口名>* 旧 = 目标` = cl C2440)。
+            // 落空之后走下面那条 vb6_ReleaseObject，与**局部**视图置空今天发的一字相同 (实测)。
+            if (!targetCls101.empty() && slotIsLegacyIfaceView(targetLower)) targetCls101.clear();
             // 账 #305 §B218 (甲) 形A (第一百四十四刀): 出参槽 `(*名)` 的置空 —— 那一格由调用方
             // 持有，所以「置空」= 放手调用方那一枚 + 清槽 (与覆写同一位主人、同一个声明档类名)。
             // 判据住在 classOfProjectRefOutSlot 一处，与覆写那一站同问。

@@ -358,6 +358,10 @@
                 auto itSlot = knownClassVars_.find(targetLower);
                 if (itSlot != knownClassVars_.end()) clsOfSlot = itSlot->second;
             }
+            // 账 #305 §B218 第一百六十五刀: 槽装的是 legacy 接口视图 ⇒ 本主人不接手
+            // (它只会写 `vb6_cls_<名>* 旧 = 目标`，而那一型从没为接口造过 = cl C2440)。
+            // 视图那一档今天落回下面那条裸拷贝 —— 与**局部**声明那一路发的一字相同 (实测)。
+            if (!clsOfSlot.empty() && slotIsLegacyIfaceView(targetLower)) clsOfSlot.clear();
             // 账 #305 §B218 (甲) 腿②': 目标是**出参槽** `(*p)` (ByRef 形参那座桥的写回站)。
             // 写进去的那一枚由本过程一位局部持有, 而腿④ 会在过程出口放手它 ⇒ 这一格不自己取走
             // 一枚引用, 调用者还看着它时它就已经拆了 (门 #763 实测 = b187 第五臂

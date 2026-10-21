@@ -330,6 +330,11 @@
     // 给空串。四个消费站点 (Set 目标侧 / Set 返回槽 / 成员访问接收者 / 实参) 都只问它，
     // 别各写一遍「名字是不是接口」，那正是 #448 数出来的多主人病灶。
     std::string ifaceViewOfExpr(const ASTNode& expr);
+    // 账 #305 §B218 第一百六十五刀: 「这一格**槽**装的是不是 legacy 那一档接口视图」——
+    // knownIfaceVars_ 那张名册的唯一问句。与上面那一问的分工 = 上面问**新式薄指针**
+    // (vb6_ivref_<I>*) 与「返回接口的调用」，本问只认名册里那一档值结构体 (vb6_iface_<I>)。
+    // 工程类那一位主人 (emitClassSlotRefSet) 接手它就铸一枚从没造过的 `vb6_cls_<接口名>`。
+    bool slotIsLegacyIfaceView(const std::string& nameLower) const;
     // B04 那条 vtable 发射 (`x->vt-><slot>(x, args)`) 的唯一作者：com_bind 与
     // 「接收者是视图值的调用」那一站都调它 (账 #305 §B221 形②)。槽名解析不出来返回空串。
     std::string ivrefVtableCall(const std::string& ifaceName, const std::string& member,
