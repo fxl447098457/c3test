@@ -276,6 +276,11 @@
         bool rtParamTypeUsable = (i >= calleeParams.size())
             || calleeParams[i].type == Vb6Type::Variant
             || calleeParams[i].type == Vb6Type::Empty;
+        // 账 #454 §B164 形①②③⑤ (第一百三十四刀): 把上面那一段算出来的「这一位要什么 C 档」
+        // 带出块外 —— 下面 594 行上面的提名站要用同一个答案, 而那张 C 签名表
+        // (getRuntimeParamCType) 只许**一处问**(第 76 道哨兵 implicit_cstr_station 的 R8 钉的
+        // 就是这件事: 那张表不许再答位号, 多问一次就等于让两处各答一遍)。
+        std::string rtParamType454;
         if (!isByRef && rtParamTypeUsable) {
             // 账 #305 §B176 (第六十七刀): 「这一位要什么 C 档」先问**那一位权威** ——
             // 没有类型化形参表的那族内在函数由 `builtinNoParamTableFormalCType` 按**写出来的**
@@ -501,6 +506,9 @@
                     }
                 }
             }
+            // 账 #454: 把这一位的答案带出块 (含 §B177/§B180 那两条把档改成 "vb6_VARIANT"
+            // 的覆盖 —— 那两条答的是「这一位保留整枚槽」, 提名站据此**不提名**(0), 语义一致)。
+            rtParamType454 = rtParamType;
         }
         // 账 #433 §B207 (第一百零五刀): 文本实参进**日期形参**这一问 —— 两条臂都答不了它, 所以
         //   这一条**刻意落在两条臂之外**(它们各自都以 `argIsVariant` 为闸), 一处答两臂的实参。
@@ -591,6 +599,7 @@
                 }
             }
         }
+
         // 账 #305 §B218 (甲) 腿⑤ 第二格 (第一百三十七刀): 形参槽收工程类实例指针、实参自带一枚
         // 移交来的对价 (`New <类>` / 被调方返回槽交回来的那一枚) ⇒ 这一站先落一枚自己的临时量,
         // 调用行之后当场交回 —— 修前这一枚没有任何一站退 (实测 Q1-term=0, VB6 答 3)。
@@ -606,6 +615,36 @@
                 registerClassArgRefHandback(clsArg136, tmpArg136);
                 argVal = tmpArg136;
             }
+
+        }
+        // 账 #454 §B164 形①③⑤: 一枚**现造的带权值**内联喂进 callee、而 callee 只读它
+        // (五形实测: `n = Len(vb6_VariantToString(v))` 24.8 B/次、`n = VarType(gColl(2))`
+        // 25.6 B/次、`n = Len(<拼接>)` 75 B/次 —— 三形的结果都没落到任何变量上, 于是从
+        // 来没人 free)。口径 = **语句级带档名单**(先例 M22 `ansiTempsToFree_`): 提成具名
+        // 临时量, 由 emitStmt 在这条语句末按档收回 —— 与 VB6「临时量的寿命就是这一条语句」
+        // 同档, 所以不会重演 §B165 那次「改问借用权威反而悬空」。
+        // 不在此收的两形, 各自有理由:
+        //   ① **ByRef 形参** —— 传进去的是这枚临时量的**地址**, 被调方一旦把它存下来或
+        //      回写, 语句末 free 就成悬空 ⇒ 宁可漏这一形也不许发成引用越界的 C。
+        //   ② 右值被**赋值/进槽**接手的那些形不经过本站(它们在赋值站与 §B164 形④ 那枚
+        //      出口里), 本站只管"没人接手"的那一半。
+        // 档 = **形参要的那个 C 类型** (与上方 ivref 那一支同一句: cType 出了作用域就按
+        // 形参重算)。只有 BSTR / vb6_VARIANT 两档谈得上"现造的带权值", 其余档(数值标量、
+        // 指针、UDT)今天没有现造即漏的那一形 ⇒ 一律不介入, 不许顺手扩大面。
+        if (!isByRef && node.positional[i]) {
+            std::string declCT454;
+            if (!rtParamType454.empty()) {
+                // 上方那段已经按权威答过这一位 (顺序: builtinNoParamTableFormalCType →
+                // getRuntimeParamCType)。**复用**它的答案, 不在这里再问一次那张 C 签名表 ——
+                // 第 76 道哨兵 implicit_cstr_station 的 R8 钉的就是「那张表只许一处问」。
+                // `Len`/`LenB` 正是靠这条路拿到 "BSTR": 符号档把它们登记成 Variant/Empty,
+                // 按形参表折出来是 `void*`, 只有签名表知道 vbb6_Len 收的是 BSTR。
+                declCT454 = rtParamType454;
+            } else if (i < calleeParams.size()) {
+                declCT454 = cTypeForDeclaredTypeName(calleeParams[i].typeRefName);
+                if (declCT454.empty()) declCT454 = mapType(calleeParams[i].type);
+            }
+            argVal = hoistOwnedTemp(node.positional[i].get(), argVal, declCT454);
         }
         args.push_back(std::move(argVal));
     }
