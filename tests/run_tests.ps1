@@ -1691,6 +1691,25 @@ function Test-OwnedTempKeeps {
     }
 }
 
+# 账 #463 §B164 (第一百六十三刀): VB 那一面的**参考实现**（VBScript）——
+# 「语句里现造的带权临时量」在 VB 家族那一面是**值**还是**别名**、是什么**档**、
+# 赋值是不是**拷贝** —— 这三问由参考件回答，不由编译器自己的推理想当然。
+# ⚠ 这一道**只答 VB 那一面**；「谁负责放掉」（C 层的 free/clear）由
+# check_owned_temp_keeps.ps1 从 RTL 实读回答（[consumes] 节）。两面分开记。
+function Test-OwnedTempSemantics {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] owned_temp_semantics ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\check_owned_temp_semantics.ps1" 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        $out | Select-Object -First 8 | ForEach-Object { Write-Host "  $_" }
+    }
+}
+
 # 账 #305 #416 (第九十三刀): 文本进严格转换的那一句解析只许问 oleaut32 一次 + 两位桥分开
 function Test-ConvStrictParse {
     $script:total++
@@ -8722,6 +8741,7 @@ if ($Category -in @("all", "compile")) {
     Test-BoxTempReclaim
     Test-IfaceViewAuthority
     Test-OwnedTempKeeps
+    Test-OwnedTempSemantics
     Test-ClassRefcountAuthority
     Test-ConvStrictParse
     Test-DateConv

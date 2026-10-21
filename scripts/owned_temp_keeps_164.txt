@@ -241,7 +241,6 @@ vb6_Write|1	0	handoff-reads:vb6_BSTR_Len	0	open	BSTR
 [own] vb6_BSTR_FromStrN BSTR
 [own] vb6_ByteArrayToString BSTR
 [own] vb6_CallByName VARIANT
-[own] vb6_CDec VARIANT
 [own] vb6_Chr BSTR
 [own] vb6_ChrB BSTR
 [own] vb6_ChrW BSTR
@@ -278,8 +277,6 @@ vb6_Write|1	0	handoff-reads:vb6_BSTR_Len	0	open	BSTR
 [own] vb6_FormatPercent BSTR
 [own] vb6_GetSetting BSTR
 [own] vb6_Hex BSTR
-[own] vb6_IIfBSTR BSTR
-[own] vb6_IIfVariant VARIANT
 [own] vb6_InputB BSTR
 [own] vb6_InputBox BSTR
 [own] vb6_InputString BSTR
@@ -326,7 +323,6 @@ vb6_Write|1	0	handoff-reads:vb6_BSTR_Len	0	open	BSTR
 [own] vb6_VariantDouble VARIANT
 [own] vb6_VariantEmpty VARIANT
 [own] vb6_VariantFromComResult VARIANT
-[own] vb6_VariantIdentity VARIANT
 [own] vb6_VariantInt VARIANT
 [own] vb6_VariantLong VARIANT
 [own] vb6_VariantLongLong VARIANT
@@ -341,8 +337,11 @@ vb6_Write|1	0	handoff-reads:vb6_BSTR_Len	0	open	BSTR
 [own] vb6_VarSubV VARIANT
 [own] vb6_WeekdayName BSTR
 # --- 返回侧所有权：alias = 交出去的是**别名**（指着调用方的内存或一个全局）⇒ 不许放它 ---
+[alias] vb6_CDec VARIANT
 [alias] vb6_ErrDescription BSTR
 [alias] vb6_ErrSource BSTR
+[alias] vb6_IIfBSTR BSTR
+[alias] vb6_IIfVariant VARIANT
 [alias] vb6_LoadResData VARIANT
 [alias] vb6_LoadResPicture VARIANT
 [alias] vb6_VariantArray VARIANT
@@ -350,5 +349,17 @@ vb6_Write|1	0	handoff-reads:vb6_BSTR_Len	0	open	BSTR
 [alias] vb6_VariantArrayGetND VARIANT
 [alias] vb6_VariantArrayGetVal VARIANT
 [alias] vb6_VariantFromStackVARIANT VARIANT
+[alias] vb6_VariantIdentity VARIANT
 [alias] vb6_VariantObject VARIANT
 [alias] vb6_VariantString VARIANT
+# --- 消费轴（账 #463 §B164 研究新增）：消费者**自己放掉**自己的形参的那几格 ---
+# 字段: 出口名|形参序号 <TAB> 条件性(0/1) <TAB> 放掉它的调用 <TAB> 形参名
+# 条件性=1 ⇒ 放不放**看运行期分支**（IIf 那一族）⇒ 调用方无从知道 ⇒ 不许提名
+vb6_BSTR_ConcatFree|0	0	vb6_BSTR_Free	a
+vb6_BSTR_Free|0	0	SysFreeString	bstr
+vb6_IIfBSTR|1	1	vb6_BSTR_Free	truepart
+vb6_IIfBSTR|2	1	vb6_BSTR_Free	falsepart
+vb6_IIfVariant|1	1	vb6_VariantClear	truepart
+vb6_IIfVariant|2	1	vb6_VariantClear	falsepart
+vb6_LSetFree|0	0	vb6_BSTR_Free	str
+vb6_VariantAssign|0	0	vb6_VariantClear	dst

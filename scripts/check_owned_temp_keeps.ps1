@@ -411,6 +411,47 @@ function Classify-Return([string]$name, [System.Collections.Generic.HashSet[stri
             $mm2 = [regex]::Match($pp, '([A-Za-z_][A-Za-z0-9_]*)\s*$')
             if ($mm2.Success) { $pnames += $mm2.Groups[1].Value }
         }
+        # 账 #463 §B164 研究（台账 #462/#463 两行）：这一支原来只有「逐格看字段」一问，**漏了三形** ——
+        #   ① 返回的就是**形参本身**（vb6_VariantIdentity: `return v;`）⇒ 别名
+        #   ② 返回的局部量被**整份**赋成形参（vb6_CDec 的 DECIMAL 那一支: `result = v;`）⇒ 别名
+        #      （那一支交出去的 DECIMAL 指着**形参**那一份 ⇒ 放掉它 = 放掉别人手里的东西）
+        #   ③ 返回的局部量是**在形参之间挑一个**（vb6_IIfBSTR: `result = cond ? truepart : falsepart;`）⇒ 别名
+        # 这三形以前一律落到 'struct-mint' ⇒ 判成 owned ⇒ [own] 表里多了四枚别名
+        #   （vb6_IIfBSTR / vb6_IIfVariant / vb6_CDec / vb6_VariantIdentity）
+        # ⇒ 回收刀会把「别人手里的那一枚」当现造的放掉 ⇒ 悬空 / 双放。判据见台账 #463。
+        $aliasKind = ''
+        if ($pnames -contains $local) {
+            $aliasKind = 'return-param'
+        } else {
+            $wholeHit = $false
+            foreach ($pn in $pnames) {
+                if ([regex]::IsMatch($bodyOf[$name],
+                        ('(?m)\b' + [regex]::Escape($local) + '\s*=\s*&?\s*' + [regex]::Escape($pn) + '\s*;'))) {
+                    $wholeHit = $true; break
+                }
+            }
+            if ($wholeHit) {
+                $aliasKind = 'assigned-from-param'
+            } else {
+                # ③ 在形参之间挑一个：右值提到形参、**没有调用**、且去掉形参与运算符后**不剩东西**
+                foreach ($am in [regex]::Matches($bodyOf[$name],
+                            '(?m)\b' + [regex]::Escape($local) + '\s*=\s*([^;]+);')) {
+                    $rhs = $am.Groups[1].Value
+                    if ($rhs -match '\(') { continue }
+                    $mentions = $false
+                    $rest = $rhs
+                    foreach ($pn in $pnames) {
+                        if ($rhs -match ('\b' + [regex]::Escape($pn) + '\b')) { $mentions = $true }
+                        $rest = [regex]::Replace($rest, '\b' + [regex]::Escape($pn) + '\b', '')
+                    }
+                    if (-not $mentions) { continue }
+                    if ((($rest -replace '[\s?:&|!,]', '')) -eq '') { $aliasKind = 'selected-from-param'; break }
+                }
+            }
+        }
+        if ($aliasKind -ne '') {
+            $kind = 'alias'; $why = $aliasKind
+        } else {
         $aliasHit = $false; $unknownHit = $false
         foreach ($am in [regex]::Matches($bodyOf[$name], '(?m)\b' + [regex]::Escape($local) + '\s*\.\s*([A-Za-z0-9_]+)\s*=\s*([^;]+);')) {
             $field = $am.Groups[1].Value
@@ -426,6 +467,7 @@ function Classify-Return([string]$name, [System.Collections.Generic.HashSet[stri
         if ($aliasHit) { $kind = 'alias'; $why = 'field-of-param' }
         elseif ($unknownHit) { $kind = 'U'; $why = 'field-unknown' }
         else { $kind = 'owned'; $why = 'struct-mint' }
+        }
     } else {
         $cm = [regex]::Match($expr, '^\s*(vb6_[A-Za-z0-9_]+)\s*\(')
         if ($cm.Success -and $bodyOf.ContainsKey($cm.Groups[1].Value)) {
@@ -451,6 +493,50 @@ foreach ($n in ($retKind.Keys | Sort-Object)) {
 $ownVariant = @($ownOwned | Where-Object { $retKind[$_] -eq 'VARIANT' })
 $aliasExits = $ownAlias
 $closedExits = @('vb6_SaveSetting', 'vb6_GetSetting', 'vb6_DeleteSetting', 'vb6_GetAllSettings')
+
+# ---------------------------------------------------------------- 消费轴（账 #463 §B164 研究新增）
+# 「消费者会不会**自己放掉**自己的形参」—— 与 keeps_pointer（指针有没有**带出**调用）是**另一轴**：
+#     keeps_pointer = '1' ⇒ 消费者把指针留在外面 ⇒ 调用方不能放（否则双放/悬空）
+#     consumes      = 1   ⇒ 消费者自己放掉这一格 ⇒ 调用方**也不能**再放（否则**双放** ⇒ 堆损坏）
+# 判据 = 函数体里对自己的形参调 vb6_BSTR_Free / SysFreeString / vb6_VariantClear。
+# 「条件性」= 那一放**看运行期分支**（if/else 的条件不是那个形参本身）⇒ 调用方**无从知道**
+#     ⇒ 那一格**不许**提名（IIf 那一族：没选中的那一支被放掉，而调用方不知道会放哪一支）。
+$consumesRows = @{}
+foreach ($nm in $bodyOf.Keys) {
+    $plist = @()
+    if ($protos.ContainsKey($nm)) { $plist = $protos[$nm] }
+    $pnames = @()
+    foreach ($pp in $plist) {
+        $mm2 = [regex]::Match($pp, '([A-Za-z_][A-Za-z0-9_]*)\s*$')
+        if ($mm2.Success) { $pnames += $mm2.Groups[1].Value }
+    }
+    if ($pnames.Count -eq 0) { continue }
+    $body = $bodyOf[$nm]
+    for ($pi = 0; $pi -lt $pnames.Count; $pi++) {
+        $pn = $pnames[$pi]
+        $rx = '(vb6_BSTR_Free|SysFreeString|vb6_VariantClear)\s*\(\s*&?\s*' + [regex]::Escape($pn) + '\s*\)'
+        foreach ($fm in [regex]::Matches($body, $rx)) {
+            $lineStart = $body.LastIndexOf("`n", [Math]::Max(0, $fm.Index - 1))
+            $line = $body.Substring($lineStart + 1, $fm.Index - $lineStart)
+            $cond = '0'
+            $im = [regex]::Match($line, '\b(?:if|else)\b')
+            if ($im.Success) {
+                $cm2 = [regex]::Match($line, '\bif\s*\(([^)]*)\)')
+                if ($cm2.Success) {
+                    # 条件**就是**那个形参（空指针检查）⇒ 与分支无关 ⇒ 不算条件性
+                    if ($cm2.Groups[1].Value.Trim() -ne $pn) { $cond = '1' }
+                } else {
+                    $cond = '1'      # else 分支 ⇒ 条件性
+                }
+            }
+            $key = $nm + '|' + $pi
+            if (-not $consumesRows.ContainsKey($key)) {
+                $consumesRows[$key] = @($cond, $fm.Groups[1].Value, $pn)
+            }
+        }
+    }
+}
+Write-Host ("消费轴（消费者自己放掉形参的那几格）: " + $consumesRows.Count + " 格")
 $ownedTempExceptions = @(
     foreach ($k in ($rows.Keys | Sort-Object)) {
         if ($rows[$k][0] -ne '0') {
@@ -662,6 +748,13 @@ if ($Bless) {
     foreach ($o in ($ownOwned | Sort-Object)) { $out += ('[own] ' + $o + ' ' + $retKind[$o]) }
     $out += '# --- 返回侧所有权：alias = 交出去的是**别名**（指着调用方的内存或一个全局）⇒ 不许放它 ---'
     foreach ($a in ($ownAlias | Sort-Object)) { $out += ('[alias] ' + $a + ' ' + $retKind[$a]) }
+    $out += '# --- 消费轴（账 #463 §B164 研究新增）：消费者**自己放掉**自己的形参的那几格 ---'
+    $out += '# 字段: 出口名|形参序号 <TAB> 条件性(0/1) <TAB> 放掉它的调用 <TAB> 形参名'
+    $out += '# 条件性=1 ⇒ 放不放**看运行期分支**（IIf 那一族）⇒ 调用方无从知道 ⇒ 不许提名'
+    foreach ($k in ($consumesRows.Keys | Sort-Object)) {
+        $v = $consumesRows[$k]
+        $out += ($k + "`t" + $v[0] + "`t" + $v[1] + "`t" + $v[2])
+    }
     [System.IO.File]::WriteAllLines($TableFile, $out, (New-Object System.Text.UTF8Encoding($false)))
     # ⚠ **只登记这张表**（推导出来的**证据**）；发码侧那份（src/common/owned_temp_keeps.hpp）
     #   是**手写**的出口，由哨兵 **K13** 双向对账 —— 与仓里 `kBorrowedBstrExports167`（手写）
@@ -805,6 +898,32 @@ if (-not (Test-Path -LiteralPath $hdrFile)) {
             $bad += ("K13c 发码侧那份的 VARIANT 档 owned 多出 " + $d2.Count + " 枚（推导里不是 VARIANT 档）: " + (($d2 | Select-Object -First 5) -join ', '))
         }
     }
+    # K13d **消费轴**（账 #463 §B164 研究新增）：发码侧那份的 consumes 名单必须与本表推导出来的
+    #     **逐格相同**（双向）—— 少一格 = 发码侧会把「消费者自己放掉」的那一枚**再放一次**（双放）。
+    $cm2 = [regex]::Match($hdrTxt, 'kConsumes\[\]\s*=\s*\{([\s\S]*?)\n    \};')
+    if (-not $cm2.Success) {
+        $bad += 'K13d owned_temp_keeps.hpp 里的 kConsumes 读不出来'
+    } else {
+        $hdrConsumes = @{}
+        foreach ($xm in [regex]::Matches($cm2.Groups[1].Value, '\{\s*"(vb6_[A-Za-z0-9_]+)"\s*,\s*(\d+)\s*,\s*''(.)''\s*\}')) {
+            $hdrConsumes[$xm.Groups[1].Value + '|' + $xm.Groups[2].Value] = $xm.Groups[3].Value
+        }
+        $d1 = @($consumesRows.Keys | Where-Object { -not $hdrConsumes.ContainsKey($_) })
+        $d2 = @($hdrConsumes.Keys | Where-Object { -not $consumesRows.ContainsKey($_) })
+        if ($d1.Count -gt 0) {
+            $bad += ("K13d 推导出来的消费格 " + $d1.Count + " 格发码侧那份里没有（发码侧会双放）: " +
+                     (($d1 | Select-Object -First 6) -join ', '))
+        }
+        if ($d2.Count -gt 0) {
+            $bad += ("K13d 发码侧那份的消费格多出 " + $d2.Count + " 格（推导里没有）: " +
+                     (($d2 | Select-Object -First 6) -join ', '))
+        }
+        foreach ($k in $consumesRows.Keys) {
+            if ($hdrConsumes.ContainsKey($k) -and $hdrConsumes[$k] -ne $consumesRows[$k][0]) {
+                $bad += ("K13d " + $k + " 的条件性在两处不同：表 " + $consumesRows[$k][0] + " / 头 " + $hdrConsumes[$k])
+            }
+        }
+    }
     # K13b 每张表末尾必须有**空哨兵**（遍历写法是 `for (...; r->exitName; ++r)`）——
     #     少了它就**走出数组**（本刀实测：编得过、跑起来 0xC0000374 堆损坏 ⇒ 正是这一类）。
     #     这条是**文本**判据，但它挡的正是「表编得过、跑起来炸」那一族。
@@ -812,7 +931,8 @@ if (-not (Test-Path -LiteralPath $hdrFile)) {
                        @{ name = 'kClosed';   pat = 'static const char\* const kClosed\[\] = \{' },
                        @{ name = 'kBorrowed'; pat = 'static const char\* const kBorrowed\[\] = \{' },
                        @{ name = 'kOwned';    pat = 'static const char\* const kOwned\[\] = \{' },
-                       @{ name = 'kOwnedVariant'; pat = 'static const char\* const kOwnedVariant\[\] = \{' })) {
+                       @{ name = 'kOwnedVariant'; pat = 'static const char\* const kOwnedVariant\[\] = \{' },
+                       @{ name = 'kConsumes'; pat = 'static const OwnedTempConsumes kConsumes\[\] = \{' })) {
         $am2 = [regex]::Match($hdrTxt, '(?s)' + $arr.pat + '(.*?)\n    \};')
         if (-not $am2.Success) {
             $bad += ("K13b " + $arr.name + " 读不出来（头被改坏了？）")
@@ -836,7 +956,9 @@ $shapes = @(
     @{ id = 'concat-arg2';  consumer = 'vb6_Len';        slot = 0; mint = 'vb6_BSTR_Concat';    want = 'B'; why = '同上（数组元素那一形）' },
     @{ id = 'varianttoStr'; consumer = 'vb6_Len';        slot = 0; mint = 'vb6_VariantToString'; want = 'B'; why = 'Len(v)：交出去的是 BSTR 档（名字带 Variant 不算数）' },
     @{ id = 'variant-arg';  consumer = 'vb6_VarType';     slot = 0; mint = 'vb6_VariantFromValue'; want = '0'; why = '那一枚是 _Generic 宏（不在权威出口面上）⇒ 答不出 ⇒ 不提名' },
-    @{ id = 'variant-arg2'; consumer = 'vb6_VarAddV';     slot = 0; mint = 'vb6_CDec';             want = 'V'; why = 'VARIANT 档的 mint（vb6_CDec）进 VARIANT 形参' },
+    @{ id = 'TRAP-cdec';    consumer = 'vb6_VarAddV';     slot = 0; mint = 'vb6_CDec';             want = '0'; why = 'CDec 的 DECIMAL 那一支交回**形参本身** ⇒ 别名（账 #463 补上的那一形）⇒ 不许放' },
+    @{ id = 'TRAP-iifbstr'; consumer = 'vb6_IIfBSTR';     slot = 1; mint = 'vb6_BSTR_FromStr';     want = '0'; why = 'IIf 那一族**条件性**地放掉没选中的那一支 ⇒ 调用方无从知道 ⇒ 不许提名' },
+    @{ id = 'TRAP-consumes'; consumer = 'vb6_BSTR_ConcatFree'; slot = 0; mint = 'vb6_BSTR_FromStr'; want = '0'; why = 'ConcatFree 放掉**左**形参 ⇒ 调用方再放就是双放 ⇒ 不许提名' },
     @{ id = 'TRAP-borrowed'; consumer = 'vb6_Len';       slot = 0; mint = 'vb6_ErrDescription'; want = '0'; why = '借来的那一枚（全局 vb6_err 的指针）⇒ 不许放' },
     @{ id = 'TRAP-alias';   consumer = 'vb6_Len';        slot = 0; mint = 'vb6_VariantArrayGetND'; want = '0'; why = '数组元素读交出去的是别名 ⇒ 不许放' },
     @{ id = 'TRAP-closed'; consumer = 'vb6_SaveSetting'; slot = 0; mint = 'vb6_BSTR_FromStr'; want = '0'; why = 'closed 那一族（未归因 ⇒ 不许提名）' },
@@ -859,7 +981,9 @@ foreach ($sh in $shapes) {
             foreach ($ex in $ownedTempExceptions) {
                 if ($ex.name -eq $sh.consumer -and $ex.slot -eq $sh.slot) { $keeps = $ex.keeps }
             }
-            if ($keeps -ne '0') { $v = 0 } else { $v = $kind }
+            # ④ 消费轴（账 #463）：消费者自己放掉这一格 ⇒ 不许再放（双放）
+            $consumes = $consumesRows.ContainsKey($sh.consumer + '|' + $sh.slot)
+            if ($keeps -ne '0' -or $consumes) { $v = 0 } else { $v = $kind }
         }
     }
     if ($v -ne $sh.want) {

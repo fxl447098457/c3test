@@ -97,6 +97,50 @@ inline const char* const* ownedTempBorrowedExits() {
     return kBorrowed;
 }
 
+// ---------------------------------------------------------------------------
+// **消费轴**（账 #463 §B164 研究新增）：消费者**自己放掉**自己的形参的那几格。
+//
+// 为什么要有这一轴：keeps_pointer 答的是「指针有没有**带出**调用」（留下那一面），
+// 它**没有**答「消费者会不会**自己放掉**这一格」。那两件事不同：
+//     keeps_pointer = '1' ⇒ 消费者把指针留在外面 ⇒ 调用方不能放（否则双放/悬空）
+//     consumes      = 1   ⇒ 消费者自己放掉这一格 ⇒ 调用方**也不能**再放（否则**双放** ⇒ 堆损坏）
+// 例：vb6_BSTR_ConcatFree 放掉它的**左**形参（vb6rtl_string.c:51 `vb6_BSTR_Free(a)`）——
+//     照旧表（那一格 keeps=0）提名，就是「ConcatFree 放一次 + 语句末再放一次」⇒ 双放。
+// 名单由 scripts/check_owned_temp_keeps.ps1 从 RTL **实读**（函数体里对自己的形参调
+// vb6_BSTR_Free / SysFreeString / vb6_VariantClear）⇒ 与 scripts/owned_temp_keeps_164.txt
+// 的 [consumes] 节**双向对账** ⇒ 漂不了。名单是**数据**不是逻辑：加一格 = 加一行。
+//
+// 一格 = (出口名, 形参序号)；「条件性」那一列只作记录：条件性的那几格（IIf 那一族）
+//     放不放**看运行期分支** ⇒ 调用方无从知道 ⇒ 两格都**不许**提名。
+struct OwnedTempConsumes {
+    const char* exitName;   // 出口名（vb6_*）
+    int         slot;       // 形参序号（0 起）
+    char        conditional; // '0' = 无条件放掉；'1' = 看运行期分支（调用方无从知道）
+};
+inline const OwnedTempConsumes* ownedTempConsumes() {
+    static const OwnedTempConsumes kConsumes[] = {
+        { "vb6_BSTR_ConcatFree", 0, '0' },
+        { "vb6_BSTR_Free",       0, '0' },
+        { "vb6_IIfBSTR",         1, '1' },
+        { "vb6_IIfBSTR",         2, '1' },
+        { "vb6_IIfVariant",      1, '1' },
+        { "vb6_IIfVariant",      2, '1' },
+        { "vb6_LSetFree",        0, '0' },
+        { "vb6_VariantAssign",   0, '0' },
+        { nullptr, 0, '0' },    // 空哨兵：遍历靠它收尾
+    };
+    return kConsumes;
+}
+
+// 这一格会不会被**消费者自己放掉**？会 ⇒ 调用方不许再放（否则双放 ⇒ 堆损坏）。
+inline bool ownedTempConsumerConsumes(const char* exitName, int slot) {
+    if (!exitName) return true;
+    for (const OwnedTempConsumes* c = ownedTempConsumes(); c->exitName; ++c) {
+        if (c->slot == slot && std::strcmp(c->exitName, exitName) == 0) return true;
+    }
+    return false;
+}
+
 // 消费者那一侧的答案：这一枚出口的**这一格**会不会把指针带出调用？
 //   '0' = 不会（可提名）  '1' = 会（禁止提名）  'U' = 证不出（禁止提名）
 inline char ownedTempKeepsPointerKind(const char* exitName, int slot) {
@@ -149,7 +193,6 @@ inline const char* const* ownedTempOwnedReturnExits() {
         "vb6_BSTR_FromStrN",
         "vb6_ByteArrayToString",
         "vb6_CallByName",
-        "vb6_CDec",
         "vb6_Chr",
         "vb6_ChrB",
         "vb6_ChrW",
@@ -186,8 +229,6 @@ inline const char* const* ownedTempOwnedReturnExits() {
         "vb6_FormatPercent",
         "vb6_GetSetting",
         "vb6_Hex",
-        "vb6_IIfBSTR",
-        "vb6_IIfVariant",
         "vb6_InputB",
         "vb6_InputBox",
         "vb6_InputString",
@@ -234,7 +275,6 @@ inline const char* const* ownedTempOwnedReturnExits() {
         "vb6_VariantDouble",
         "vb6_VariantEmpty",
         "vb6_VariantFromComResult",
-        "vb6_VariantIdentity",
         "vb6_VariantInt",
         "vb6_VariantLong",
         "vb6_VariantLongLong",
@@ -270,9 +310,7 @@ inline bool ownedTempReturnIsOwned(const char* exitName) {
 inline const char* const* ownedTempOwnedVariantExits() {
     static const char* const kOwnedVariant[] = {
         "vb6_CallByName",
-        "vb6_CDec",
         "vb6_CVErr",
-        "vb6_IIfVariant",
         "vb6_LoadResString",
         "vb6_VarAddV",
         "vb6_VarDivV",
@@ -284,7 +322,6 @@ inline const char* const* ownedTempOwnedVariantExits() {
         "vb6_VariantDouble",
         "vb6_VariantEmpty",
         "vb6_VariantFromComResult",
-        "vb6_VariantIdentity",
         "vb6_VariantInt",
         "vb6_VariantLong",
         "vb6_VariantLongLong",
@@ -313,11 +350,16 @@ inline char ownedTempMintKind(const char* exitName) {
 
 // **提名这一枚实参吗？** —— 回收点只许问这一位主人，不再自己判。
 //   返回 'B' / 'V' = 可提名（档号）  0 = 不许提名
-// 三道闸，各答各的（账 #458 §B228 把它们收成一位主人）：
+// 四道闸，各答各的（账 #458 §B228 把前三道收成一位主人；账 #463 §B164 研究补上第四道）：
 //   ① 档号：这一枚是不是**现造**的（出口交出来的是不是新造且归我们所有）—— 答不出 ⇒ 不提名
-//      （这挡掉「借来的那一枚」：Err.Description / 数组元素读 / 任何别名）
+//      （这挡掉「借来的那一枚」：Err.Description / 数组元素读 / 任何别名；
+//        账 #463 补上「返回值是形参本身」那几形：vb6_IIfBSTR / vb6_IIfVariant /
+//        vb6_CDec / vb6_VariantIdentity —— 它们交回的是**别人手里**的那一枚）
 //   ② 消费者：消费者**那一格**会不会把指针带出调用 —— '1' 或 'U' ⇒ 不提名
 //   ③ 那一族：closed（注册表那一族，运行期破坏未归因）⇒ 不提名 ⇒ **预测集合与 closed 必不相交**
+//   ④ **消费轴**（账 #463 新增）：消费者会不会**自己放掉**这一格 —— 会 ⇒ 不提名
+//      （ConcatFree 放掉左操作数 / LSetFree 放掉被对齐的那一枚 / IIf 那一族**条件性**地
+//        放掉没选中的那一支 ⇒ 调用方无从知道是哪一支 ⇒ 两格都不许提名）
 // 另有一条由 §B227 的归因加进来的硬规则，落在**站点**那一侧：
 //   **放掉一次的责任只许一处** —— 拼接站（`vb6_BSTR_ConcatFree` 放掉右操作数）与语句末的按档回收
 //   **不许对同一枚临时量各放一次**（撤回那一版就是这么双放的 ⇒ 堆损坏 ⇒ 注册表那一族的红是它的下游受害者）。
@@ -329,6 +371,7 @@ inline char ownedTempNominationVerdict(const char* consumer, int slot, const cha
     const char keeps = ownedTempKeepsPointerKind(consumer, slot);
     if (keeps != '0') return 0;                           // ② 消费者留不留 ⇒ '1'/'U' 不许放
     if (ownedTempConsumerClosed(consumer)) return 0;       // ③ closed ⇒ 不许提名
+    if (ownedTempConsumerConsumes(consumer, slot)) return 0; // ④ 消费者自己放掉 ⇒ 不许再放（双放）
     return kind;                                          // ⇒ 可提名（档号由出口的返回档定）
 }
 }  // namespace vb6c3
