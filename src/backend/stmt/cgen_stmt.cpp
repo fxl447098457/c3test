@@ -141,23 +141,6 @@ c_.emitLine("switch(vb6_gosub_stack[--vb6_gosub_sp]) {");
             }
         }
         boxTempsToClear_.clear();
-
-        // 账 #454 §B164 形①②③⑤ (第一百三十四刀): 这条语句里现造的**带权**临时量在这里按档收回。
-        // 带档 = 名单元素自带 kind: BSTR 交 vb6_BSTR_Free、vb6_VARIANT 交 vb6_VariantClear ——
-        // 只发一种就会在另一档上继续漏(或把 VARIANT 当 BSTR 解 ⇒ 读越界)。
-        // 层号守卫与上面 boxTempsToClear_ 同一条: 声明若发在一对已经合上的花括号里
-        // (Debug.Print 那族 `{ ... }` 自带块), 这里宁可不收也不许发成引用越界的 C。
-        for (const auto& ot : ownedTempsToFree_) {
-            if (ot.level != c_.indentLevel()) continue;
-            if (ot.kind == kOwnedTempVariant) {
-                c_.emitLine("vb6_VariantClear(&" + ot.name
-                            + ");  /* 账 #454 §B164: 语句末收回现造的 Variant 临时槽 */");
-            } else {
-                c_.emitLine("vb6_BSTR_Free(" + ot.name
-                            + ");  /* 账 #454 §B164: 语句末收回现造的临时串 */");
-            }
-        }
-        ownedTempsToFree_.clear();
     }
 }
 

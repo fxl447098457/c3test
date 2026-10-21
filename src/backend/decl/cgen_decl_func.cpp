@@ -37,7 +37,6 @@ void CCodeGen::visit(FunctionDecl& node) {
     // Fix 056b: 清理局部数组注册 (模块级/类成员数组跨过程保留)
     clearProcArrayTracking();
     ansiTempsToFree_.clear();
-    ownedTempsToFree_.clear();  /* 账 #454 §B164: 带权临时量名单随过程复位 */
     ansiOutParams_.clear();
     slotsToRelease_.clear();  // tB Interface B05 / 账 #305 §B218 (甲) 腿④
     // 账 #305 §B218 (甲) 第一百五十六刀: 「这档局部数组的载体能不能在出口销毁」在过程入口
@@ -514,7 +513,6 @@ void CCodeGen::visit(FunctionDecl& node) {
         c_.emitLine("vb6_FreeANSI(" + ansiVar + ");");
     }
     ansiTempsToFree_.clear();
-    ownedTempsToFree_.clear();  /* 账 #454 §B164: 带权临时量名单随过程复位 */
     ansiOutParams_.clear();
 
     // 账 #305 §B166 (第五十六刀): 本次调用现造的 ParamArray 数组在统一出口销毁(口径见那枚出口)。
