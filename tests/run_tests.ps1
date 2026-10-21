@@ -7883,8 +7883,9 @@ if ($Category -in @("all", "run", "vbp")) {
         'vb6_SafeArrayReDimPreserve1D_Tr(vb6_sa_long',
         'vb6_SafeArrayReDimPreserve1D_Tr(vb6_sa_variant')
     # 账 #305 §B218 (甲) 第一百五十六刀 = 局部数组**载体本身**在过程出口销毁 (腿⑤ 补完)。
-    #   尺 = tests/test_local_array_carrier.bas: 三档该收的 (定长 / 动态 / 多维) 每次调用净 0，
-    #   三档不该收的 (整枚进模块 Variant / 只被 UBound 借过 / `w()` 交给调用方) 必须继续漏 ——
+    #   尺 = tests/test_local_array_carrier.bas: 该收的四档 (定长 / 动态 / 多维 / 第一百五十八刀起
+    #   加上整数组赋值的左值 —— `l = mg` 那一发现走复制, 槽里握的是自己新克隆的那一枚) 每次调用净 0，
+    #   不该收的三档 (整枚进模块 Variant / 只被 UBound 借过 / `w()` 交给调用方) 必须继续漏 ——
     #   判的都是每次调用的增量带宽 (页粒度会抖，口径同第五十六刀那把尺)。两台各钉一头。
     #   改法一验就红的两头 (本机 x64，改回常量的那发): free 恒 false ⇒ fix/dyn/nd 三针全 N;
     #   free 恒 true ⇒ alias/bound/give 三针全 0。注意恒 true 那一发下元素值照旧读对
@@ -7902,13 +7903,39 @@ if ($Category -in @("all", "run", "vbp")) {
         "$Tests\test_local_array_carrier.bas") @(
         'vb6_SafeArrayDestroy1D(f);  /* 账 #305 (甲) 腿⑤: 作用域出口销毁载体 (本过程内它从没整体用掉) */',
         'vb6_SafeArrayDestroy1D(d);  /* 账 #305 (甲) 腿⑤: 作用域出口销毁载体 (本过程内它从没整体用掉) */',
-        'vb6_SafeArrayDestroyND((vb6_SafeArrayND*)m);  /* 账 #305 (甲) 腿⑤: 作用域出口销毁载体 (本过程内它从没整体用掉) */')
+        'vb6_SafeArrayDestroyND((vb6_SafeArrayND*)m);  /* 账 #305 (甲) 腿⑤: 作用域出口销毁载体 (本过程内它从没整体用掉) */',
+        'vb6_SafeArrayDestroy1D(l);  /* 账 #305 (甲) 腿⑤: 作用域出口销毁载体 (本过程内它从没整体用掉) */')
     Test-EmitcAbsent 'b156_escaped_carriers_never_destroyed_at_exit' @(
         "$Tests\test_local_array_carrier.bas") @(
         'vb6_SafeArrayDestroy1D(a);  /* 账 #305 (甲) 腿⑤: 作用域出口销毁载体',
         'vb6_SafeArrayDestroy1D(u);  /* 账 #305 (甲) 腿⑤: 作用域出口销毁载体',
-        'vb6_SafeArrayDestroy1D(w);  /* 账 #305 (甲) 腿⑤: 作用域出口销毁载体',
-        'vb6_SafeArrayDestroy1D(l);  /* 账 #305 (甲) 腿⑤: 作用域出口销毁载体')
+        'vb6_SafeArrayDestroy1D(w);  /* 账 #305 (甲) 腿⑤: 作用域出口销毁载体')
+    # 账 #460 (第一百五十八刀) = VB6 的**整体数组赋值**是复制, 而裸名那一形 (`d = b`, 不带括号) 今天
+    #   发的是载体移交: `d = b;` (两名一载体 = 别名) 与 `pv = vb6_ChkLong(b)` (指针走 int32 =
+    #   x64 当场 AV、x86 静默别名)。真语料 125 处 (定长←任何 0 / 动态←动态 51 / 动态←未定 74)。
+    #   尺 = tests/test_whole_array_copy.bas 六格: 复制不退成别名 (B259/B261)、定长那一形不再截指针
+    #   (B260, 修前 x64 交 error 6 后中止)、从 Variant 取回也复制 (B262)、而**装箱借走载体那一枚**必须照旧读对
+    #   (B263)。裸名那一形的 dst 恒传 NULL = 只克隆不放旧 (模块级 / 定长那两档放手是跨过程悬空读,
+    #   一句口径还没交); 新克隆那一枚改由过程出口收尾 = 逃逸预扫里「整数组赋值的左值」那一格从本刀起
+    #   豁免。两台各钉一头, 期望串一字相同。
+    $b158Needles = @("B259-copy=123456 ubound=5 src=999", "B260-fix=234567 ubound=6",
+                     "B261-locfix=345678", "B262-var=22 copy=44",
+                     "B263-hold=5 own=6", "B264-DONE=1")
+    Add-BasTest "test_whole_array_copy" "$Tests\test_whole_array_copy.bas" $b158Needles
+    Add-BasTest "test_whole_array_copy_x86" "$Tests\test_whole_array_copy.bas" $b158Needles -Arch "x86"
+    Test-EmitcShape 'b158_whole_array_assign_goes_through_the_copy' @(
+        "$Tests\test_whole_array_copy.bas") @(
+        'd = vb6_ArrayAssign1D(NULL, b);',
+        'mFix = vb6_ArrayAssign1D(NULL, b);',
+        'p = vb6_ArrayAssign1D(NULL, b);',
+        'e = vb6_ArrayAssign1D(NULL, vb6_VariantToSafeArray1D(v));',
+        'loc = vb6_ArrayAssign1D(NULL, src);')
+    Test-EmitcAbsent 'b158_no_bare_carrier_handover_left' @(
+        "$Tests\test_whole_array_copy.bas") @(
+        'd = b;',
+        'p = b;',
+        'mFix = vb6_ChkLong(b);',
+        'loc = src;')
     # 账 #305 §B188 ④ (第九十刀): 出厂那一腿的**尾巴**。`Class_Terminate` 抛错时, `_Destroy` 里体之后
     # 那三截(字段 BSTR / 数组字段 / vb6_Free(me))曾被 ComObj_Release 的帧一起 longjmp 跳掉 —— 实测每枚
     # 抛错的出厂漏一份实例资源: x64 每枚 35~37 字节、x86 每枚 17 字节, 多一枚 20 字符 String 字段就涨到
