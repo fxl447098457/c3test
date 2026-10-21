@@ -6934,6 +6934,37 @@ if ($Category -in @("all", "run", "vbp")) {
     $ifaceWrapExpected = @("IFACE-CALL-OK", "IFACE-DONE")
     Test-Vbp "iface_wrap" "$Tests\iface_wrap\IfaceWrap.vbp" $ifaceWrapExpected
     Test-Vbp "iface_wrap_x86" "$Tests\iface_wrap\IfaceWrap.vbp" $ifaceWrapExpected -Arch "x86"
+    # <vbeclipse> 回归夹子 (iface_multi) = 新账 #464 / 第一百六十六刀: 一枚 legacy 接口被**两枚**类
+    # Implements。宿主 IMul 显式 `Attribute VB_Creatable = True` ⇒ 进不了 tB 登记表, 走 legacy 那条
+    # 发码路。从前 `emitInterfaceVtable` 在**每枚实现类里**按「自家成员声明顺序 + 自家 `me` 类型」各发
+    # 一份同名 `vb6_vtbl_IMul` / `vb6_iface_IMul` / `vb6_iface_IMul_wrap` —— 改前编译器 (C3_base_k137)
+    # 跑这片实测 **8 发 cl C2011 + 3 发 C2039** ("Three" 不是那份表的成员: 谁先定义谁赢, 另一枚类的
+    # 槽直接没了)。真语料同族是 `图像/光线跟踪/Ray.vbp`: 54 发 C2011、四份表里槽序两套。
+    # 改后表由接口自己发一份 (`#ifndef VB6_IFACE_IMUL_TBL` + 槽的 `me` 一律 `void*`), 实现类只发
+    # 自家实例与 `_wrap_<实现类名>`。Alpha 刻意把成员声明序倒过来 (钉「槽序归接口」), Beta 刻意少写
+    # `Three` (那一席发 438 桩 —— 表是工程级一份, 槽必须在; 留空 = 一枚静默 NULL 槽, 一跑就是原生 AV)。
+    $ifaceMultiExpected = @("A-ONE=11", "A-TWO=12", "A-THREE=13", "B-ONE=21", "B-TWO=22",
+                            "B-THREE-ERR=438", "MULTI-DONE")
+    Test-Vbp "iface_multi" "$Tests\iface_multi\IfaceMulti.vbp" $ifaceMultiExpected
+    Test-Vbp "iface_multi_x86" "$Tests\iface_multi\IfaceMulti.vbp" $ifaceMultiExpected -Arch "x86"
+    Test-EmitcShape "k166_emitc_shape" @("$Tests\iface_multi\IfaceMulti.vbp") @(
+        "#ifndef VB6_IFACE_IMUL_TBL",
+        "    int32_t (*One)(void* me);",
+        "    int32_t (*Three)(void* me);",
+        "static vb6_vtbl_IMul vb6_vtbl_IMul_for_Alpha = {",
+        "    .One = (int32_t (*)(void*))vb6_Alpha_IMul_One,",
+        "static vb6_vtbl_IMul vb6_vtbl_IMul_for_Beta = {",
+        "static int32_t vb6_iface_IMul_unimpl_Three_Beta(void* me) {",
+        "    vb6_RaiseError(438, NULL);",
+        "    .Three = (int32_t (*)(void*))vb6_iface_IMul_unimpl_Three_Beta",
+        "vb6_iface_IMul vb6_iface_IMul_wrap_Alpha(vb6_cls_Alpha* obj);",
+        "vb6_iface_IMul vb6_iface_IMul_wrap_Beta(vb6_cls_Beta* obj);")
+    # 反面针: 旧形状三发都必须绝迹 —— 表类型不再由实现类发 (那句注释 / 带类名的 me 槽)、
+    # wrap 不再发无实现者后缀的那一份。
+    Test-EmitcAbsent "k166_emitc_absent_old_shape" @("$Tests\iface_multi\IfaceMulti.vbp") @(
+        "// Interface vtable: IMul",
+        "(*Three)(vb6_cls_",
+        "vb6_iface_IMul_wrap(")
 
     # <vbeclipse> 回归夹子 (ve_units): 控件**自己的坐标系**读数。两枚 UC 同尺寸、同字体,
     # 只差 .ctl 声明的 ScaleMode (1=缇 / 3=像素)。判据写成「缇型 = 像素型 x TwipsPerPixelX」
@@ -8104,14 +8135,16 @@ if ($Category -in @("all", "run", "vbp")) {
     # CI 二进制编同一份夹具: 九发错，其中 C2440 四发 / C2172 两发 / C2083 两发 / void*→struct 一发)。
     # 视图那一档的正答案 = 覆写走 wrap、置空走 vb6_ReleaseObject —— 与**局部**声明那一路今天发的一字
     # 相同 (P14/P15 实测)；`mi` 那两枚针钉的是**具体类槽照旧归工程类那位主人**，本刀一条没松。
+    # 第一百六十六刀 (新账 #464) 之后这三枚 wrap 针都带上了实现者名 (`_wrap_K165Impl`) ——
+    # 一枚接口的表是工程级一份, 而包装必须一枚实现类一份, 名字不带实现者就会撞成 N 份同名函数。
     $b165Expected = @("K165-new=9", "K165-over=12", "K165-local=18", "K165-afternothing=21",
                      "K165-mi=16", "K165-DONE=1")
     Test-Vbp 'b165_iface_view_slot' "$Tests\k165_iface_slot\K165Slot.vbp" $b165Expected
     Test-Vbp 'b165_iface_view_slot_x86' "$Tests\k165_iface_slot\K165Slot.vbp" $b165Expected -Arch "x86"
     $b165Shapes = @(
-        'mv = vb6_iface_K165Iface_wrap((vb6_cls_K165Impl_New()));  /* Set */',
-        'mv = vb6_iface_K165Iface_wrap(mi);  /* Set */',
-        'lv = vb6_iface_K165Iface_wrap((vb6_cls_K165Impl_New()));  /* Set */',
+        'mv = vb6_iface_K165Iface_wrap_K165Impl((vb6_cls_K165Impl_New()));  /* Set */',
+        'mv = vb6_iface_K165Iface_wrap_K165Impl(mi);  /* Set */',
+        'lv = vb6_iface_K165Iface_wrap_K165Impl((vb6_cls_K165Impl_New()));  /* Set */',
         'vb6_ReleaseObject((void**)&mv);  /* Set Nothing */',
         'mv.vtbl->Bar(mv.obj, 3)',
         'vb6_cls_K165Impl* __clsold',

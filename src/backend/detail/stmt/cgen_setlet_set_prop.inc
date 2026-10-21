@@ -852,27 +852,41 @@
         }
     }
 
-    // P6.4: 接口引用赋值: Set ifaceRef = obj → ifaceRef = vb6_iface_IFoo_wrap(obj)
+    // P6.4: 接口引用赋值: Set ifaceRef = obj → ifaceRef = vb6_iface_IFoo_wrap_<Impl>(obj)
+    // 账 #305 新账 #464: wrap 名带上实现类 —— 一枚 legacy 接口的**表**是工程级一份, 而**包装**
+    // 必须一枚实现类一份 (它填的是 `vb6_vtbl_<I>_for_<Impl>`)。名字不带实现者时, N 枚类就发
+    // N 份同名函数 (C2084), 与从前那 N 份同名 typedef (C2011) 是同一处漏的两半。
     {
         std::string targetLower = target;
         std::transform(targetLower.begin(), targetLower.end(), targetLower.begin(), ::tolower);
         auto itIface = knownIfaceVars_.find(targetLower);
         if (itIface != knownIfaceVars_.end()) {
             std::string ifaceName = itIface->second;
-            std::string ifaceType = "vb6_iface_" + cIdent(ifaceName);
+            // `_New()` 那个形: 类名已经烘在 C 表达式里 (`vb6_cls_<Impl>_New()`), 摘出来就是实现者
+            auto classOfNewExpr = [](const std::string& e) -> std::string {
+                const std::string head = "vb6_cls_";
+                size_t p = e.find(head);
+                if (p == std::string::npos) return std::string();
+                size_t s = p + head.size();
+                size_t q = e.find("_New()", s);
+                if (q == std::string::npos) return std::string();
+                return e.substr(s, q - s);
+            };
             // 如果右侧值包含_New()或是指向类实例的变量, 包装为接口引用
-            if (value.find("_New()") != std::string::npos) {
-                value = ifaceType + "_wrap(" + value + ")";
+            std::string implCls = classOfNewExpr(value);
+            if (!implCls.empty()) {
+                value = legacyIfaceWrapFn(ifaceName, implCls) + "(" + value + ")";
             } else {
                 // 简单变量引用: value可能是类实例指针变量名
                 std::string valLower = value;
                 std::transform(valLower.begin(), valLower.end(), valLower.begin(), ::tolower);
-                if (knownClassVars_.find(valLower) != knownClassVars_.end()) {
-                    value = ifaceType + "_wrap(" + value + ")";
+                auto itCls = knownClassVars_.find(valLower);
+                if (itCls != knownClassVars_.end()) {
+                    value = legacyIfaceWrapFn(ifaceName, itCls->second) + "(" + value + ")";
                 } else {
                     // P6.4+: RHS 是 Variant (ByRef 参数/表达式), 只含对象引用.
                     // 需唯一实现类才能安全 cast:
-                    //   vb6_iface_IFoo_wrap((vb6_cls_Impl*)vb6_VariantToObjectVal(<var>))
+                    //   vb6_iface_IFoo_wrap_<Impl>((vb6_cls_Impl*)vb6_VariantToObjectVal(<var>))
                     // 生成的串已含 "vb6_VariantToObjectVal", Fix 038b-6 下方守卫会跳过,
                     // 不会二次转换. 无唯一实现类时无法推断 → 报编译错误 (绝不静默误编).
                     bool rhsIsVariant = cExprIsVariant(value);
@@ -893,7 +907,8 @@
                                 "' 在全项目有唯一实现类, 当前无法推断转换类型; "
                                 "可将 RHS 改为 objptr/类型化对象变量后重试");
                         } else {
-                            value = ifaceType + "_wrap((vb6_cls_" + cIdent(impl) +
+                            value = legacyIfaceWrapFn(ifaceName, impl) +
+                                    "((vb6_cls_" + cIdent(impl) +
                                     "*)vb6_VariantToObjectVal(" + value + "))";
                         }
                     }

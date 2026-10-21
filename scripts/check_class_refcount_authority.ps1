@@ -506,6 +506,54 @@ $carrierShapeFiles = @(FilesOf 'emitArrayCarrierDecl')
 if ($carrierShapeFiles.Count -ne 2) {
     $fail += ("array-carrier decl shape files = " + ($carrierShapeFiles -join ', ') + " (want exactly 2 files)")
 }
+# ㉙ 第一百六十六刀 / 新账 #464: legacy VB6 接口 (.cls 宿主、没进 tB 登记表) 那张**槽表的形状**收成一处。
+#    病灶形状 = `emitInterfaceVtable` 过去在**每枚实现类里**按自家成员声明顺序 + 自家 `classMeParam()`
+#    现铸一份同名 `vb6_vtbl_<I>` / `vb6_iface_<I>` / `vb6_iface_<I>_wrap` —— 一枚接口被 N 枚类 Implements
+#    就发 N 份 (真语料 Ray.vbp 实测 54 发 cl C2011、四份表里槽序两套; 新夹具 tests/iface_multi 在改前的
+#    编译器上是 8 发 C2011 + 3 发 C2039 "Three 不是 vb6_vtbl_IMul 的成员")。现在四位主人各只许一站:
+#    · emitLegacyIfaceContractTypedefs = 表类型的唯一发射口 (声明 + 定义 + 头文件开段那一发调用
+#      + cgen_com.cpp 里那句指向主人的注释) = 4 处 / 4 份文件。
+#    · legacyIfaceSlots = 槽名单的唯一读法 (声明 + 定义 + 表发射与实例发射各问一次) = 4 处 / 3 份文件。
+#    · legacyIfaceWrapFn = wrap 名的唯一出口 (声明 + 定义 + Set 那三臂各一问 + 注释) = 6 处 / 4 份文件。
+#    · setLegacyIfaceShapes = 形状表唯一的注入口 (cgen 侧 setter + driver 模块环那一发) = 2 处 / 2 份文件。
+#    再加一条反面的: cgen_com.cpp 里**不许**再拼 typedef struct " + vtblName —— 那一发就是病灶本体,
+#    谁把它写回去, 多实现类立刻回到 N 份同名表。
+$legacyTblEmit = CountOf 'emitLegacyIfaceContractTypedefs'
+if ($legacyTblEmit -ne 4) {
+    $fail += ("legacy iface table emit sites = " + $legacyTblEmit + " (want exactly 4: 声明 + 定义 + 头文件调用 + 注释)")
+}
+$legacyTblEmitFiles = @(FilesOf 'emitLegacyIfaceContractTypedefs')
+if ($legacyTblEmitFiles.Count -ne 4) {
+    $fail += ("legacy iface table emit files = " + ($legacyTblEmitFiles -join ', ') + " (want exactly 4 files)")
+}
+$legacySlotRead = CountOf 'legacyIfaceSlots'
+if ($legacySlotRead -ne 4) {
+    $fail += ("legacy iface slot question sites = " + $legacySlotRead + " (want exactly 4: 声明 + 定义 + 两处消费)")
+}
+$legacySlotReadFiles = @(FilesOf 'legacyIfaceSlots')
+if ($legacySlotReadFiles.Count -ne 3) {
+    $fail += ("legacy iface slot question files = " + ($legacySlotReadFiles -join ', ') + " (want exactly 3 files)")
+}
+$legacyWrapMint = CountOf 'legacyIfaceWrapFn'
+if ($legacyWrapMint -ne 6) {
+    $fail += ("legacy iface wrap-name sites = " + $legacyWrapMint + " (want exactly 6: 声明 + 定义 + Set 三臂 + 注释)")
+}
+$legacyWrapFiles = @(FilesOf 'legacyIfaceWrapFn')
+if ($legacyWrapFiles.Count -ne 4) {
+    $fail += ("legacy iface wrap-name files = " + ($legacyWrapFiles -join ', ') + " (want exactly 4 files)")
+}
+$legacyShapeInject = CountOf 'setLegacyIfaceShapes'
+if ($legacyShapeInject -ne 2) {
+    $fail += ("legacy iface shape injection sites = " + $legacyShapeInject + " (want exactly 2: setter + driver 注入)")
+}
+$legacyShapeInjectFiles = @(FilesOf 'setLegacyIfaceShapes')
+if ($legacyShapeInjectFiles.Count -ne 2) {
+    $fail += ("legacy iface shape injection files = " + ($legacyShapeInjectFiles -join ', ') + " (want exactly 2 files)")
+}
+$cgenComText = [IO.File]::ReadAllText((Join-Path $Root "src\backend\module\cgen_com.cpp"))
+if ($cgenComText.Contains('typedef struct " + vtblName')) {
+    $fail += "cgen_com.cpp 又自己铸 vb6_vtbl_ 表类型 (新账 #464 的病灶形状) - 表类型只许 emitLegacyIfaceContractTypedefs 一处发"
+}
 # ㉘ 第一百六十五刀: 「这一格槽装的是不是 legacy 那一档接口视图」那一问收成一处 = slotIsLegacyIfaceView。
 #    病灶形状 = 腿②/腿③ 那两站先问类名 (inferClassTypeOfExpr 把接口名也答出来)，于是铸出一枚声明侧从没造过的
 #    `vb6_cls_<接口名>*` = cl C2440 (#407 那十二形全撞在这一发上，且门内没有一份输入走到这一形)。

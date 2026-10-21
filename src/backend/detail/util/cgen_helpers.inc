@@ -277,6 +277,20 @@
     void emitClassInitChain(Module& module);  // .c: 派生类 _New() 里根→叶跑祖先初始化
 
     void emitIfaceContractTypedefs();                 // .h: 工程级 vb6_ivtbl_/vb6_ivref_ 类型
+    // ---- legacy VB6 接口 (.cls 宿主、没进 tB 登记表) 的槽表 (账 #305 新账 #464) ----
+    // 形状读 driver 预扫描那张只读表, 发码层只渲染不采集 ⇒「一枚接口一份表」是结构上的
+    // 保证, 不是发射顺序上的运气。表类型住接口自己那一趟 (每份模块头 + #ifndef 守卫),
+    // 实现类只发**自己的实例**与**带自己名字的 wrap**。
+    struct LegacyIfaceSlot {
+        std::string field;     // 结构体字段名 = cIdent(裸成员名), 唯一的读者按接收者写的名字取它
+        std::string slotKey;   // 裸成员名小写: 实现类拿 `<接口名>_成员` 认领这一席时用
+        std::string retType;   // C 返回类型; "void" = Sub 或 Property Let/Set
+        std::string params;    // 不含 me 的形参声明, 带前置 ", "; 无参 = 空串
+    };
+    std::vector<LegacyIfaceSlot> legacyIfaceSlots(const std::string& ifaceName);
+    void emitLegacyIfaceContractTypedefs();           // .h: 每枚 legacy 接口一份 vb6_vtbl_/vb6_iface_
+    std::string legacyIfaceWrapFn(const std::string& ifaceName,
+                                  const std::string& implName) const;  // wrap 名唯一出口
     void emitIfaceClassFields(Module& module);        // .h: 类结构体里的 __iv_<I> 字段
     void emitIfaceImplTables(Module& module);         // .c: 适配器 + 类侧槽表实例
     void emitIfaceNewInit(Module& module);            // .c: _New() 里回填 vt

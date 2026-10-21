@@ -378,6 +378,102 @@ std::string CCodeGen::ivParamDeclsRef(const Decl* sig) {
 }
 
 // ============================================================
+// 账 #305 新账 #464: legacy VB6 接口 (`.cls` 宿主、没进 tB 登记表) 的槽表
+// ============================================================
+//
+// 从前这一发住在 `emitInterfaceVtable` 里, 由**每枚实现类**按自家成员声明顺序 + 自家
+// `classMeParam()` 现 harvest ⇒ 一枚接口被 N 枚类实现就发 N 份同名 `vb6_vtbl_<I>`
+// (真语料 Ray.vbp 实测 54 发 C2011, 四份表里槽序有两套)。现在形状读 driver 预扫描的
+// 那张只读表, 表类型只由接口自己这一趟发一份, `me` 一律 `void*` —— 派发点
+// (`<view>.vtbl-><成员>(<view>.obj, …)`) 交的本来就是 `void*`, 与实现类是谁无关。
+//
+// 与 `emitIfaceContractTypedefs` 那套薄面对 (`vb6_ivref_<I>` / `vb6_ivtbl_<I>`) 刻意并存、
+// 不合并: 两套类型名、两套所有权, 合并会把已经进登记表的接口重新拖回胖值结构的口径。
+
+std::vector<CCodeGen::LegacyIfaceSlot> CCodeGen::legacyIfaceSlots(const std::string& ifaceName) {
+    std::vector<LegacyIfaceSlot> out;
+    if (!legacyIfaceShapes_) return out;
+    const std::string key = ifaceLower(ifaceName);
+    auto it = legacyIfaceShapes_->find(key);
+    if (it == legacyIfaceShapes_->end()) return out;
+    const std::string prefix = key + "_";
+    for (const Decl* sig : it->second.slots) {
+        if (!sig) continue;
+        Decl& d = *const_cast<Decl*>(sig);
+        std::string written;
+        if (d.kind == ASTNodeKind::SubDecl) {
+            written = static_cast<SubDecl&>(d).name;
+        } else if (d.kind == ASTNodeKind::FunctionDecl) {
+            written = static_cast<FunctionDecl&>(d).name;
+        } else if (d.kind == ASTNodeKind::PropertyDecl) {
+            written = static_cast<PropertyDecl&>(d).name;
+        } else {
+            continue;
+        }
+        // 宿主在工程外时形状是按实现类那批 `<接口名>_成员` 建的, 摘掉前缀才是成员名
+        const std::string lower = ifaceLower(written);
+        LegacyIfaceSlot s;
+        if (lower.size() > prefix.size() && lower.compare(0, prefix.size(), prefix) == 0) {
+            written = written.substr(prefix.size());
+        }
+        s.slotKey = ifaceLower(written);
+        s.field = cIdent(written);
+        s.retType = ivSlotRetType(&d);
+        s.params = ivParamDecls(d);   // 带前置 ", "; 无参 = 空串
+        out.push_back(std::move(s));
+    }
+    return out;
+}
+
+void CCodeGen::emitLegacyIfaceContractTypedefs() {
+    // 无 legacy 接口的工程: 零输出 (护栏)。std::map 按键有序 ⇒ 发射顺序与模块顺序、
+    // 与编译器二进制都无关 (同 §B97 那条「定序不许交给 unordered」的口径)。
+    if (!legacyIfaceShapes_ || legacyIfaceShapes_->empty()) return;
+
+    bool headerDone = false;
+    for (const auto& kv : *legacyIfaceShapes_) {
+        const std::string& writtenName = kv.second.writtenName;
+        const std::vector<LegacyIfaceSlot> slots = legacyIfaceSlots(writtenName);
+        if (slots.empty()) continue;
+        if (!headerDone) {
+            h_.emitLine("// === legacy VB6 interface slot tables (账 #305 新账 #464: 形状归接口自己定) ===");
+            headerDone = true;
+        }
+        const std::string id = cIdent(writtenName);
+        const std::string vtblName = "vb6_vtbl_" + id;
+        const std::string ifaceType = "vb6_iface_" + id;
+        std::string guard = "VB6_IFACE_" + id + "_TBL";
+        for (char& ch : guard) {
+            if (ch >= 'a' && ch <= 'z') ch = static_cast<char>(ch - 'a' + 'A');
+        }
+        h_.emitLine("#ifndef " + guard);
+        h_.emitLine("#define " + guard);
+        h_.emitLine("typedef struct " + vtblName + " {");
+        h_.indent();
+        for (const LegacyIfaceSlot& s : slots) {
+            h_.emitLine(s.retType + " (*" + s.field + ")(void* me" + s.params + ");");
+        }
+        h_.dedent();
+        h_.emitLine("} " + vtblName + ";");
+        h_.emitLine("typedef struct " + ifaceType + " {");
+        h_.indent();
+        h_.emitLine(vtblName + "* vtbl;");
+        h_.emitLine("void* obj;");
+        h_.dedent();
+        h_.emitLine("} " + ifaceType + ";");
+        h_.emitLine("#endif");
+        h_.emitBlank();
+    }
+}
+
+// wrap 名的唯一出口: 一枚接口的表是工程级一份, 而 `_wrap` 绑的是**实现类** ——
+// 名字不带实现者, 多实现类就会发 N 份同名函数 (C2084)。
+std::string CCodeGen::legacyIfaceWrapFn(const std::string& ifaceName,
+                                        const std::string& implName) const {
+    return "vb6_iface_" + cIdent(ifaceName) + "_wrap_" + cIdent(implName);
+}
+
+// ============================================================
 // 类结构体字段 + _New 初始化
 // ============================================================
 

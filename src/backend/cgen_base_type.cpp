@@ -630,7 +630,7 @@ std::string CCodeGen::mapTypeRef(ASTNode* typeRef) {
             // (driver 阶段 3.6 对 Implements 宿主逐模块打标) 的名字也一并劫走, 发成裸类指针。
             // 实测 BalloonTooltips: `Dim Subclass As ISubclass` (ISubclass 是 VB_Creatable=True
             // 的接口宿主, 进不了 ivref 表) 被劫成 `vb6_cls_ISubclass*`, 而 Set 侧仍发
-            // `vb6_iface_ISubclass_wrap(...)` ⇒ C2440, 整个工程编不过 (GA vbp#2)。
+            // `vb6_iface_ISubclass_wrap_<Impl>(...)` ⇒ C2440, 整个工程编不过 (GA vbp#2)。
             // 现在的次序: ivrefCType(tB 接口) → Class 符号分支(按 isInterface 真值分流:
             // 宿主发 vb6_iface_<Name> 包装 / 普通类发 vb6_cls_<Name>*) → 本兜底(只救
             // "符号真查不到"的名字, 免得掉 void*) → ComClass 分支。rev17 之后工程类符号

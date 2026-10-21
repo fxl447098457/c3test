@@ -768,6 +768,14 @@ void CCodeGen::emitClassFieldAccessors(Module& module) {
 
 // ============================================================
 // P6.4: 接口 vtable + 包装类型生成 (Implements 代码生成)
+//
+// 账 #305 新账 #464: 表**类型** (`vb6_vtbl_<I>` / `vb6_iface_<I>`) 不再在这里发 —— 它由
+// 接口自己那一趟 `emitLegacyIfaceContractTypedefs` 每份模块头一发 + `#ifndef` 守卫,
+// 形状读 driver 预扫描的 `legacyIfaceShapes_`。从前这里是「每枚实现类按自家成员声明顺序 +
+// 自家 `classMeParam()` harvest 一份同名 typedef」, 一枚接口被 N 枚类实现就发 N 份:
+// 真语料 Ray.vbp 实测 54 发 C2011, 且四份表里槽序有两套 —— 「留第一份丢其余」会把三通槽
+// 按两套含义发出去, 那不是修法。这里从此只发两样: **本类那一份实例** (按字段名填, 没实现的
+// 槽发 438 桩) 与 **带本类名字的 wrap** (`_wrap` 不带实现者名时会撞成 N 份同名函数 C2084)。
 // ============================================================
 
 void CCodeGen::emitInterfaceVtable(Module& module) {
@@ -777,111 +785,92 @@ void CCodeGen::emitInterfaceVtable(Module& module) {
         const std::string& ifaceName = impl->interfaceName;
         // 登记在册的接口 (tB `Interface` 块, 或 Pass A2 认进来的 VB6 .cls 宿主) 由
         // `emitIfaceImplTables` 那条 canonical 路径发: 槽序由接口自己定, `me` 是统一的
-        // `vb6_ivref_I*`, 表结构带 guard 只发一份。这里按实现类 harvest 再发一遍就是同名
-        // 结构 C2011 撞车 (实测 290 次), 所以只发登记表里查不到的接口。
+        // `vb6_ivref_I*`, 表结构带 guard 只发一份。这里只管登记表查不到的 legacy 接口。
         if (ivLookupIface(ifaceName)) continue;
-        std::string ifaceId = cIdent(ifaceName);
 
-        // 收集接口方法信息: 从实现类中查找 IFoo_MethodName 方法
-        struct IfaceMethodInfo {
-            std::string methodName;   // 原始方法名 (如 "Bar")
-            std::string implFuncName; // 实现函数C名 (如 "vb6_Class1_IFoo_Bar")
-            std::string retType;      // 返回C类型
-            std::string params;       // 参数列表 (不含me, 如 "int32_t x")
-            bool isSub;               // Sub vs Function
+        // 形状来自那张工程级表; 表里没有 = 本接口没有任何可实现成员 (过去也是 `methods.empty()` 跳过)
+        const std::vector<LegacyIfaceSlot> slots = legacyIfaceSlots(ifaceName);
+        if (slots.empty()) continue;
+
+        const std::string ifaceId = cIdent(ifaceName);
+        const std::string vtblName = "vb6_vtbl_" + ifaceId;
+        const std::string ifaceTypeName = "vb6_iface_" + ifaceId;
+        const std::string vtblInstance = vtblName + "_for_" + cIdent(moduleName_);  // Fix 013: VB_Name
+        const std::string wrapFn = legacyIfaceWrapFn(ifaceName, moduleName_);
+
+        // --- 本类认领: 实现成员按 `<接口名>_成员` 命名, 摘掉前缀就是槽键 ---
+        // 同一槽有两把钥匙 (如属性 Get 与 Let 同名) 时取声明序第一把, 与表那边去重同口径。
+        std::map<std::string, std::string> implOfSlot;
+        const std::string ifacePrefix = Symbol::toLower(ifaceName) + "_";
+        auto harvest = [&](const std::string& written, const std::string& fnName) {
+            std::string lower = Symbol::toLower(written);
+            if (lower.size() <= ifacePrefix.size() ||
+                lower.compare(0, ifacePrefix.size(), ifacePrefix) != 0) {
+                return;  // 不是本接口那一份成员
+            }
+            implOfSlot.emplace(lower.substr(ifacePrefix.size()), fnName);
         };
-        std::vector<IfaceMethodInfo> methods;
-
         for (auto& decl : module.declarations) {
             if (decl->kind == ASTNodeKind::SubDecl) {
                 auto& sub = static_cast<SubDecl&>(*decl);
-                // 检查是否为 Implements 实现方法 (IFoo_MethodName 格式)
-                if (sub.name.size() > ifaceName.size() + 1 &&
-                    Symbol::toLower(sub.name.substr(0, ifaceName.size() + 1)) ==
-                    Symbol::toLower(ifaceName + "_")) {
-                    std::string methodName = sub.name.substr(ifaceName.size() + 1);
-                    std::string params = makeParamList(sub.params);
-                    methods.push_back({methodName, cProcName(sub.name, sub.access, isClassModule_ ? moduleName_ : ""),
-                                       "void", params, true});
-                }
+                harvest(sub.name, cProcName(sub.name, sub.access, isClassModule_ ? moduleName_ : ""));
             } else if (decl->kind == ASTNodeKind::FunctionDecl) {
                 auto& func = static_cast<FunctionDecl&>(*decl);
-                if (func.name.size() > ifaceName.size() + 1 &&
-                    Symbol::toLower(func.name.substr(0, ifaceName.size() + 1)) ==
-                    Symbol::toLower(ifaceName + "_")) {
-                    std::string methodName = func.name.substr(ifaceName.size() + 1);
-                    std::string params = makeParamList(func.params);
-                    std::string retType = mapTypeRef(func.returnType.get());
-                    methods.push_back({methodName, cProcName(func.name, func.access, isClassModule_ ? moduleName_ : ""),
-                                       retType, params, false});
-                }
+                harvest(func.name, cProcName(func.name, func.access, isClassModule_ ? moduleName_ : ""));
             } else if (decl->kind == ASTNodeKind::PropertyDecl) {
                 auto& prop = static_cast<PropertyDecl&>(*decl);
-                if (prop.name.size() > ifaceName.size() + 1 &&
-                    Symbol::toLower(prop.name.substr(0, ifaceName.size() + 1)) ==
-                    Symbol::toLower(ifaceName + "_")) {
-                    std::string methodName = prop.name.substr(ifaceName.size() + 1);
-                    std::string params = makeParamList(prop.params);
-                    // Property Get → Function, Property Let/Set → Sub
-                    // 使用prop_get_/prop_let_/prop_set_前缀
-                    std::string propPrefix;
-                    if (prop.propKind == ProcKind::PropertyGet) {
-                        propPrefix = "prop_get_";
-                        std::string retType = mapTypeRef(prop.returnType.get());
-                        methods.push_back({methodName, cProcName(propPrefix + prop.name, prop.access, isClassModule_ ? moduleName_ : ""),
-                                           retType, params, false});
-                    } else {
-                        propPrefix = (prop.propKind == ProcKind::PropertySet) ? "prop_set_" : "prop_let_";
-                        methods.push_back({methodName, cProcName(propPrefix + prop.name, prop.access, isClassModule_ ? moduleName_ : ""),
-                                           "void", params, true});
-                    }
-                }
+                std::string prefix = "prop_let_";
+                if (prop.propKind == ProcKind::PropertyGet) prefix = "prop_get_";
+                else if (prop.propKind == ProcKind::PropertySet) prefix = "prop_set_";
+                harvest(prop.name, cProcName(prefix + prop.name, prop.access,
+                                             isClassModule_ ? moduleName_ : ""));
             }
         }
 
-        if (methods.empty()) continue;
-
-        // 1. 生成 vtable 结构体 (函数指针表)
-        std::string vtblName = "vb6_vtbl_" + ifaceId;
-        h_.emitLine("// Interface vtable: " + ifaceName);
-        h_.emitLine("typedef struct " + vtblName + " {");
-        for (auto& m : methods) {
-            std::string paramList = classMeParam();
-            if (m.params != "void") {
-                paramList += ", " + m.params;
-            }
-            h_.emitLine("    " + m.retType + " (*" + cIdent(m.methodName) + ")(" + paramList + ");");
-        }
-        h_.emitLine("} " + vtblName + ";");
-        h_.emitBlank();
-
-        // 2. 生成接口引用包装类型 (vtable指针 + 对象指针)
-        std::string ifaceTypeName = "vb6_iface_" + ifaceId;
-        h_.emitLine("typedef struct " + ifaceTypeName + " {");
-        h_.emitLine("    " + vtblName + "* vtbl;");
-        h_.emitLine("    void* obj;");
-        h_.emitLine("} " + ifaceTypeName + ";");
-        h_.emitBlank();
-
-        // 3. 生成全局 vtable 实例 (指向实现类的接口方法)
-        std::string vtblInstance = vtblName + "_for_" + cIdent(moduleName_);  // Fix 013: VB_Name
+        // --- 1. 本类那一份表实例 (按字段名填; 没实现的一席发 438 桩) ---
+        // 为什么必须发桩而不是留着不填: 表类型现在是工程级一份, 字段必须在; 少填一个
+        // 不是错 (C 会把它零初始化) 而是**静默的 NULL 槽** —— 调用点一跑就是原生 AV,
+        // 而 VB6 里「这个类没实现这一席」本来就是运行时 438。
         c_.emitBlank();
         c_.emitLine("// Interface vtable instance: " + ifaceName + " for " + module.moduleName);
+        std::vector<std::string> entries;
+        for (const LegacyIfaceSlot& s : slots) {
+            auto it = implOfSlot.find(s.slotKey);
+            std::string target;
+            if (it != implOfSlot.end()) {
+                target = it->second;
+            } else {
+                target = "vb6_iface_" + ifaceId + "_unimpl_" + s.field + "_" + cIdent(moduleName_);
+                c_.emitBlank();
+                c_.emitLine("static " + s.retType + " " + target + "(void* me" + s.params + ") {");
+                c_.indent();
+                if (s.retType != "void") {
+                    c_.emitLine(s.retType + " __unimpl = {0};");
+                }
+                c_.emitLine("vb6_RaiseError(438, NULL);  /* 账 #305 #464: '" + ifaceName + "." +
+                            s.field + "' 没由 '" + module.moduleName + "' 实现 */");
+                if (s.retType != "void") c_.emitLine("return __unimpl;");
+                c_.dedent();
+                c_.emitLine("}");
+            }
+            // me 从 `vb6_cls_<本类>*` 换成 `void*` (表归接口), 填进去要按表那一档 cast。
+            entries.push_back("." + s.field + " = (" + s.retType + " (*)(void*" + s.params + "))" +
+                              target);
+        }
+        c_.emitBlank();
         c_.emitLine("static " + vtblName + " " + vtblInstance + " = {");
         c_.indent();
-        for (size_t i = 0; i < methods.size(); i++) {
-            std::string entry = "." + cIdent(methods[i].methodName) + " = " + methods[i].implFuncName;
-            if (i < methods.size() - 1) entry += ",";
-            c_.emitLine(entry);
+        for (size_t i = 0; i < entries.size(); i++) {
+            c_.emitLine(entries[i] + (i + 1 < entries.size() ? "," : ""));
         }
         c_.dedent();
         c_.emitLine("};");
 
-        // 4. 生成包装函数: vb6_iface_IFoo_wrap(obj) → 创建接口引用
-        h_.emitLine(ifaceTypeName + " " + ifaceTypeName + "_wrap(" + clsStruct + "* obj);");
+        // --- 2. 包装函数: vb6_iface_IFoo_wrap_<Impl>(obj) → 创建接口引用 ---
         h_.emitBlank();
+        h_.emitLine(ifaceTypeName + " " + wrapFn + "(" + clsStruct + "* obj);");
         c_.emitBlank();
-        c_.emitLine(ifaceTypeName + " " + ifaceTypeName + "_wrap(" + clsStruct + "* obj) {");
+        c_.emitLine(ifaceTypeName + " " + wrapFn + "(" + clsStruct + "* obj) {");
         c_.indent();
         c_.emitLine(ifaceTypeName + " iface;");
         c_.emitLine("iface.vtbl = &" + vtblInstance + ";");

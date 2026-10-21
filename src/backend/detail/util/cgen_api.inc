@@ -359,6 +359,11 @@
     void setInterfaceAllImplementers(const std::map<std::string, std::vector<std::string>>* m) {
         interfaceAllImplementers_ = m;
     }
+    // 账 #305 新账 #464: 注入 driver 预扫描建好的 legacy 接口形状表
+    // (小写接口名 → 接口模块自己的成员声明, 按声明顺序)。只读。
+    void setLegacyIfaceShapes(const LegacyIfaceShapeMap* m) {
+        legacyIfaceShapes_ = m;
+    }
     // 查询接口的全部实现类 (保持 driver 预扫描的首见序)。空 vector = 无实现类
     // 或表未注入 => 接口桩退回零值。
     //

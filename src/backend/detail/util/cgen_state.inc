@@ -1043,6 +1043,10 @@
     // (interfaceImplementers_) 在多实现接口上是空的, 不能用于分派。
     const std::map<std::string, std::vector<std::string>>* interfaceAllImplementers_ = nullptr;
 
+    // 账 #305 新账 #464: legacy 接口（没进 tB `IfaceRegistry` 的那批 .cls 宿主）的**形状表**，
+    // driver 预扫描建、发码期只读。键 = 小写接口名；值 = 规范拼写 + 按序的可实现成员声明。
+    const LegacyIfaceShapeMap* legacyIfaceShapes_ = nullptr;
+
     // Interface 契约 (tB, ai/022 B04): stage 2.7 建好的工程级只读登记表 (driver 注入).
     // 槽表/适配器/薄指针类型都由它驱动, 与 legacy 的 implementsNames 口径互不影响.
     const IfaceRegistry* ivreg_ = nullptr;
