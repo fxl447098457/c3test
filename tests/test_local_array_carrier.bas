@@ -7,14 +7,17 @@ Option Explicit
 ' array, fixed or dynamic. This fixture asks the INCREMENT per call over N iterations and reports a
 ' band flag, never an absolute number (page commits are quantised; knife 56 set that precedent).
 '
-'   fix / dyn / nd  = the three shapes the exit now reclaims. Band = 4 B/call: the pre-fix reading
-'                    is ~80x over it, so the flag has real red power, while a few pages of noise
-'                    cannot make it flap.
-'   alias / bound / give = the three shapes the escape rule refuses to free, because
+'   fix / dyn / nd / take / dst-reclaim / src-copy = the six shapes the exit now reclaims (the last
+'                    two joined in knife 159: the destination's OLD carrier is freed by the assignment
+'                    itself, and the SOURCE of a whole-array copy no longer counts as an escape).
+'                    Band = 4 B/call: the pre-fix reading is ~80x over it, so the flag has real red
+'                    power, while a few pages of noise cannot make it flap.
+'   alias / bound / give / dst-borrowed = the four shapes the escape rule refuses to free, because
 '                    the carrier left the procedure and a second owner still reads it
 '                    (into a module Variant / only borrowed through UBound / handed to the CALLER
-'                    through VB6's zero-arg whole-array form `w()` / the LOCAL slot receiving the
-'                    MODULE array) - knife 158 turned that last one into a copy; see the take arm.
+'                    through VB6's zero-arg whole-array form `w()` / the local carrier that a Variant
+'                    borrowed BEFORE the reassignment - knife 159's DstBorrowed window, the one the dst
+'                    gate must keep refusing) - knife 158 turned the module-array take into a copy.
 '                    These must KEEP leaking - that flag is what goes red if the escape rule is
 '                    ever loosened. Measured: with free-forced-on for every shape, all three
 '                    read 0 (red) while the element values STILL printed 123456 / 246810, because
@@ -28,6 +31,11 @@ Option Explicit
 '   Rule-mutation controls (this machine, x64): free-always=false -> fix/dyn/nd all N; true ->
 '   alias/bound/give all 0. Both ends of the band can go red. Pre-fix readings of the six windows
 '   are archived at .build/k1927_*.txt + k1931_destroys.txt.
+'   Knife-159 controls (this machine, BOTH arches, pre-knife binary = the knife-158 compiler building
+'   the SAME fixture): B226 and B227 both read leak=1 (346/323 and 102/88 bytes per call, x64/x86)
+'   while the other eight lines stay byte-identical; post-knife both read 0 and B228 keeps leak=1
+'   with read=123456. The standalone dst ruler is .build/k2086_dst.bas (readings k2086_x64.txt /
+'   k2086_x86.txt): the leak that B228 refuses to close is the very block the Variant still reads.
 
 Private Type PMC
     cb As Long
@@ -130,6 +138,41 @@ Sub TakeModuleArray()
     l(1) = 7
 End Sub
 
+ ' knife 159: the destination's OLD carrier now goes back at the assignment itself (dst is no
+ ' longer NULL) for the one档 where this procedure is that carrier's only owner. ReDim first so
+ ' there IS an old carrier: without the reclaim this window reads leak=1 (346 B/call x64, 323 x86,
+ ' archived at .build/k2086_x64.txt / k2086_x86.txt); with it, 0.
+Sub DstReclaim()
+    Dim q() As Long
+    ReDim q(0 To 63)
+    q(0) = 7
+    q = mg
+End Sub
+
+ ' knife 159 second格: the SOURCE of a whole-array copy. The copy mints its own carrier
+ ' (vb6_ArrayAssign1D_Cb calloc + per-slot copies), so nothing leaves this procedure holding s -
+ ' which is exactly why s may now be reclaimed at the exit. Before the exemption this window
+ ' read leak=1 (the ReDim'd carrier outlived the procedure by mistake).
+Sub SrcCopyOnly()
+    Dim s() As Long
+    ReDim s(0 To 63)
+    s(0) = 7
+    Dim q2() As Long
+    q2 = s
+End Sub
+
+ ' and the shape the gate must STILL refuse: the carrier was boxed into a Variant before the
+ ' reassignment, so that Variant is a live reader of the OLD carrier. This one has to keep
+ ' leaking AND keep reading 123456 - it is the red-power witness for the dst gate: force the
+ ' free there and this read becomes a dangling one.
+Sub DstBorrowed()
+    Dim t() As Long
+    ReDim t(0 To 8)
+    t(3) = 123456
+    gmv = t
+    t = mg
+End Sub
+
 Function FixBytes() As Long
     Dim p0 As Long, p1 As Long, i As Long
     p0 = PF()
@@ -200,6 +243,36 @@ Function TakeBytes() As Long
     TakeBytes = p1 - p0
 End Function
 
+Function DstReclaimBytes() As Long
+    Dim p0 As Long, p1 As Long, i As Long
+    p0 = PF()
+    For i = 1 To N
+        DstReclaim
+    Next i
+    p1 = PF()
+    DstReclaimBytes = p1 - p0
+End Function
+
+Function SrcCopyBytes() As Long
+    Dim p0 As Long, p1 As Long, i As Long
+    p0 = PF()
+    For i = 1 To N
+        SrcCopyOnly
+    Next i
+    p1 = PF()
+    SrcCopyBytes = p1 - p0
+End Function
+
+Function DstBorrowedBytes() As Long
+    Dim p0 As Long, p1 As Long, i As Long
+    p0 = PF()
+    For i = 1 To N
+        DstBorrowed
+    Next i
+    p1 = PF()
+    DstBorrowedBytes = p1 - p0
+End Function
+
 Public Sub Main()
     Dim r As Long
     r = FixBytes()
@@ -236,5 +309,18 @@ Public Sub Main()
     rm = 0
     rm = CLng(mg(3))
     Debug.Print "B225-take-leak="; LeakFlag(r); " module-read="; rm
+    r = DstReclaimBytes()
+    Debug.Print "B226-dst-reclaim-leak="; LeakFlag(r)
+    r = SrcCopyBytes()
+    Debug.Print "B227-src-copy-leak="; LeakFlag(r)
+    Dim mv1 As Variant
+    mv1 = Empty
+    gmv = mv1
+    r = DstBorrowedBytes()
+    Dim rb As Long
+    rb = 0
+    On Error Resume Next
+    rb = CLng(gmv(3))
+    Debug.Print "B228-dst-borrowed-leak="; LeakFlag(r); " read="; rb
     Debug.Print "B224-DONE"
 End Sub

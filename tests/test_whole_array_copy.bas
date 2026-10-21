@@ -14,9 +14,10 @@ Option Explicit
 '   B261 local fixed array <- dynamic              -> same shape, local storage
 '   B262 dynamic <- Variant that holds an array    -> the third arm (VariantToSafeArray1D)
 '   B263 a Variant that BORROWED the carrier, then the array is reassigned
-'        -> VB6 leaves the Variant holding its own copy, so B263 must keep reading 5. The bare form
-'           passes NULL as the destination (clone, never free the old carrier), so this arm cannot go
-'           red by construction today - it is here as the witness for the day the reclaim lands.
+'        -> VB6 leaves the Variant holding its own copy, so B263 must keep reading 5. Knife 159 let
+'           the bare form hand the REAL destination to the copy (so the old carrier is freed) only
+'           where the escape roster says this procedure owns it; here `mv2 = loc` boxed that carrier,
+'           so dst stays NULL - this arm is the witness that the gate refuses the borrowed one.
 '   B264 DONE
 '
 ' The other half of this knife is in the escape roster (cgen_iface_vtbl.cpp EscapeScan): the LHS of a

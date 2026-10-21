@@ -433,14 +433,15 @@ if ($escapeScanFiles.Count -ne 5) {
 #    · escapedLocalArrays_ = 「这枚载体在本过程里被整体用掉过没有」那张名单。
 #      第一百五十八刀改的是它的含义 (整数组赋值的左值那一格从此豁免 —— 那一发现走复制)，
 #      读它的人仍然只有一位 (出口那一发的 freeCarrier) ⇒ 字段 + 注释 + clear + count + insert
-#      = 5 处 / 3 份文件；再冒出一处 count = 同一问被重述。
+#      = 6 处 / 4 份文件；再冒出一处 count = 同一问被重述 (第一百五十九刀多出来的那一处 count
+#      就是 dst 那一问的读者 —— 它问的必须是同一张名单, 不能另起一张)。
 $escapeRoster = CountOf 'escapedLocalArrays_'
-if ($escapeRoster -ne 5) {
-    $fail += ("escape roster sites = " + $escapeRoster + " (want exactly 5: 字段 + 注释 + clear + count + insert)")
+if ($escapeRoster -ne 6) {
+    $fail += ("escape roster sites = " + $escapeRoster + " (want exactly 6: 字段 + 注释 + clear + 出口那一发的 count + 第一百五十九刀 dst 那一问的 count + insert)")
 }
 $escapeRosterFiles = @(FilesOf 'escapedLocalArrays_')
-if ($escapeRosterFiles.Count -ne 3) {
-    $fail += ("escape roster files = " + ($escapeRosterFiles -join ', ') + " (want exactly 3 files)")
+if ($escapeRosterFiles.Count -ne 4) {
+    $fail += ("escape roster files = " + ($escapeRosterFiles -join ', ') + " (want exactly 4 files: cgen_state.inc + cgen_helpers.inc + cgen_iface_vtbl.cpp + cgen_util_type.cpp)")
 }
 #    · 第一百五十八刀: 整数组赋值左值那一格的豁免只许有一位作者，且必须住在 EscapeScan 里。
 #      撤掉它 = 每一发整数组赋值净漏一枚载体 (实测把第一百五十六刀那把尺的 B225-take 从 0 抬到 1)；
@@ -453,16 +454,37 @@ $lhsExemptFiles = @(FilesOf 'exempt.insert(node.target.get());')
 if ($lhsExemptFiles.Count -ne 1 -or $lhsExemptFiles[0] -ne 'cgen_iface_vtbl.cpp') {
     $fail += ("whole-array-assign LHS exemption file = " + ($lhsExemptFiles -join ', ') + " (want exactly cgen_iface_vtbl.cpp)")
 }
+#    · 第一百五十九刀: 同一格的第二半 —— 整数组赋值的**右值**也放行 (复制不吃源的载体)。
+#      撤掉它 = 「ReDim 一枚局部数组、只把它复制给另一枚」那一格净漏一枚 (第一百五十六刀那把尺
+#      的新针 B227, 拿第一百五十八刀的二进制编同一份夹具就读到 1)；多一处 = 口径被重述。
+$rhsExempt = CountOf 'exempt.insert(node.value.get());'
+if ($rhsExempt -ne 1) {
+    $fail += ("whole-array-assign RHS exemption sites = " + $rhsExempt + " (want exactly 1, inside EscapeScan)")
+}
+$rhsExemptFiles = @(FilesOf 'exempt.insert(node.value.get());')
+if ($rhsExemptFiles.Count -ne 1 -or $rhsExemptFiles[0] -ne 'cgen_iface_vtbl.cpp') {
+    $fail += ("whole-array-assign RHS exemption file = " + ($rhsExemptFiles -join ', ') + " (want exactly cgen_iface_vtbl.cpp)")
+}
+#    · 第一百五十九刀: dst 那一问也只许有一位作者，且必须问的是**那两道现成的闸** (出口收尾同一对)。
+#      另起一处 = 「谁持有旧载体」这条口径被重述; 撤掉 = 每一发整数组赋值把旧载体丢在原槽外面。
+$dstAsk = CountOf 'topLevelLocalArrays_.count(lower) && escapedLocalArrays_.count(lower) == 0'
+if ($dstAsk -ne 1) {
+    $fail += ("whole-array-assign dst gate sites = " + $dstAsk + " (want exactly 1, in wrapWholeArrayAssign)")
+}
+$dstAskFiles = @(FilesOf 'topLevelLocalArrays_.count(lower) && escapedLocalArrays_.count(lower) == 0')
+if ($dstAskFiles.Count -ne 1 -or $dstAskFiles[0] -ne 'cgen_util_type.cpp') {
+    $fail += ("whole-array-assign dst gate file = " + ($dstAskFiles -join ', ') + " (want exactly cgen_util_type.cpp)")
+}
 #    · topLevelLocalArrays_ = 出口那一发的第二道闸 (声明那条 Dim 必须是过程体的**直接子句**, 否则那枚
 #      C 变量在出口不在作用域内 = 门 #821 的 FlexGridX86 十二发 C2065) ⇒ 字段 + clear + insert + count
 #      = 4 处 / 2 份文件。少了这一道闸 = 嵌套块里的 Dim 又被出口放手。
 $scopeRoster = CountOf 'topLevelLocalArrays_'
-if ($scopeRoster -ne 4) {
-    $fail += ("declaration-scope roster sites = " + $scopeRoster + " (want exactly 4: 字段 + clear + insert + count)")
+if ($scopeRoster -ne 7) {
+    $fail += ("declaration-scope roster sites = " + $scopeRoster + " (want exactly 7: 字段 + clear + insert + 出口那道 count + 第一百五十九刀 dst 那一问的 count + 递给 EscapeScan 的那一枚指针 + 注释)")
 }
 $scopeRosterFiles = @(FilesOf 'topLevelLocalArrays_')
-if ($scopeRosterFiles.Count -ne 2) {
-    $fail += ("declaration-scope roster files = " + ($scopeRosterFiles -join ', ') + " (want exactly 2 files)")
+if ($scopeRosterFiles.Count -ne 3) {
+    $fail += ("declaration-scope roster files = " + ($scopeRosterFiles -join ', ') + " (want exactly 3 files: cgen_state.inc + cgen_iface_vtbl.cpp + cgen_util_type.cpp)")
 }
 # ㉔ 第一百五十二刀: 那张带档的表 (+第三档) 的形状 —— isCarrier 只许住在表与出口那一趟 (2 份文件 / 4 处)。
 $carrierFlag = CountOf 'isCarrier'
@@ -489,5 +511,5 @@ if ($fail.Count -gt 0) {
     foreach ($f in $fail) { Write-Host ("  - " + $f) }
     exit 1
 }
-Write-Host "CLASS-REFCOUNT-AUTHORITY OK (1 pair mint / 1 header / 2 leg consumers / 3+9 formals / 10 roster files / 6 literal files / 0 stale / 5 registry files + 2 registrants / 1+1 out-slot / 1+1 foreign-write drop / 1 field-teardown shape + file / 6 field-type questions (标量 + 数组两档) / 6 transfer-question sites in 2 files / 1 view-leg hand-back + 2 QiSet calls / 1+2+1 transfer-arm questions / 3 static-gate sites in 1 file + 1 ivref registration / 1 arg-station hand-back + 4+4 helper sites in 4 files / 4+4 index-slot + project-class questions / 1 address-temp mint / 3 element-teardown sites + 4+4 carrier-destroy questions + 4 preserve-with-release sites in 4 files / 4+4 形A questions (out-slot class + owner pass) + 5 copy-in claim sites in 4 files / 3+4 carrier-destroy sites in 3 files / 8 hand-back stations (5 in cgen_redim.cpp + 过程出口) + 4 shape questions + 3 multidim export sites + 4+2 carrier-scope registrar + flag sites / 7+3 carrier-free flag + 5+5 escape pre-pass + 5 roster sites in 3 files + 1 LHS exemption + 4+2 declaration-scope roster / 5 static gates / 4+3 ND Preserve-with-release export sites)"
+Write-Host "CLASS-REFCOUNT-AUTHORITY OK (1 pair mint / 1 header / 2 leg consumers / 3+9 formals / 10 roster files / 6 literal files / 0 stale / 5 registry files + 2 registrants / 1+1 out-slot / 1+1 foreign-write drop / 1 field-teardown shape + file / 6 field-type questions (标量 + 数组两档) / 6 transfer-question sites in 2 files / 1 view-leg hand-back + 2 QiSet calls / 1+2+1 transfer-arm questions / 3 static-gate sites in 1 file + 1 ivref registration / 1 arg-station hand-back + 4+4 helper sites in 4 files / 4+4 index-slot + project-class questions / 1 address-temp mint / 3 element-teardown sites + 4+4 carrier-destroy questions + 4 preserve-with-release sites in 4 files / 4+4 形A questions (out-slot class + owner pass) + 5 copy-in claim sites in 4 files / 3+4 carrier-destroy sites in 3 files / 8 hand-back stations (5 in cgen_redim.cpp + 过程出口) + 4 shape questions + 3 multidim export sites + 4+2 carrier-scope registrar + flag sites / 7+3 carrier-free flag + 5+5 escape pre-pass + 6 roster sites in 4 files + 1 LHS + 1 RHS exemption + 1 dst gate + 7+3 declaration-scope roster / 5 static gates / 4+3 ND Preserve-with-release export sites)"
 exit 0
