@@ -1640,7 +1640,8 @@ std::string CCodeGen::wrapWholeArrayAssign(const std::string& target,
     }
     // 第一百五十八刀 (新账 #460): 裸名那一形 (`d = b`) 从前 dst 恒传 NULL = 只克隆新载体、
     // 不碰旧的那一枚。第一百五十九刀把**甲档**接上退旧, 门就用第一百五十六刀出口那两道闸:
-    //   甲 本过程顶层那条 `Dim` 的局部数组 (动态 / 定长两档, 两档的描述符都是堆上的 —— 定长那档
+    //   甲 声明在出口那一刻还在场的那一档局部数组 (第一百六十四刀: 从前只有体顶层那条 Dim,
+    //      现在嵌在块里那几档的声明住在序言, 也算在场。动态 / 定长两档, 两档的描述符都是堆上的 —— 定长那档
     //      发 `vb6_SafeArrayCreate1D`) 且预扫说它没被整体用掉 ⇒ 这一格的旧载体唯一主人就是本站
     //      ⇒ dst 交实参, RTL 里那句 `if (dst && !sameCarrier) vb6_SafeArrayDestroy1D(dst)` 才真活着。
     //      不放行的实测代价 (页尺 .build/k2086_dst.bas, 两台): 「先 ReDim 再整体赋值」每调用净漏
@@ -1660,7 +1661,7 @@ std::string CCodeGen::wrapWholeArrayAssign(const std::string& target,
     if (targetNode && targetNode->kind == ASTNodeKind::IdentifierExpr) {
         auto& tgt = static_cast<const IdentifierExpr&>(*targetNode);
         std::string lower = Symbol::toLower(tgt.name);
-        dstArg = (topLevelLocalArrays_.count(lower) && escapedLocalArrays_.count(lower) == 0)
+        dstArg = (exitVisibleArrayCarriers_.count(lower) && escapedLocalArrays_.count(lower) == 0)
                      ? target : "NULL";
     }
     if (!elemUdt.empty() && elemUdt.compare(0, 9, "vb6_type_") == 0

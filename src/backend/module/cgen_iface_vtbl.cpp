@@ -718,8 +718,10 @@ void CCodeGen::trackArrayCarrierForRelease(const std::string& cName,
     if (cName.empty() || arrayName.empty()) return;
     std::string lower = arrayName;
     for (char& ch : lower) ch = (char)tolower((unsigned char)ch);
-    // 闸① (第一百五十六刀补): 只有过程体**顶层**那条 Dim 的 C 变量在出口还看得见。
-    if (topLevelLocalArrays_.count(lower) == 0) return;
+    // 闸① (第一百五十六刀立, 第一百六十四刀改口径): 出口那一发拿的是 C 变量名, 只有声明在那一刻
+    // 还在场的才算 —— 名单由 scanLocalArrayEscapes 照提升那一条规则填 (嵌在块里那几档的声明现在
+    // 住在序言), 关掉提升就缩回「只有过程体直接子句」那一个答案 (门 #821 那十二发 C2065 归它挡)。
+    if (exitVisibleArrayCarriers_.count(lower) == 0) return;
     // 闸②: 预扫说这枚载体在本过程里被整体用掉过 ⇒ 不销毁。
     trackSlotForRelease(cName, false, std::string(), arrayName,
                         escapedLocalArrays_.count(lower) == 0);
@@ -739,7 +741,7 @@ void CCodeGen::trackArrayCarrierForRelease(const std::string& cName,
 //   ③ 第一百五十九刀: **整数组赋值的右值** —— 复制不吃源的载体 (`vb6_ArrayAssign1D_Cb` calloc 新描述符,
 //      元素按档各建副本), 源那枚仍是这一站自己的东西 ⇒ 出口该收尾; 不放行的实测代价 = 同一把页尺的
 //      「ReDim 一枚局部数组、只把它复制给另一枚局部数组」那一格 leak=1。放行条件问的是**左值**在
-//      topLevelLocalArrays_ 里 —— 左值是 Variant 槽那一发是装箱 (②③都不免), 左值是形参 / 模块级数组
+//      exitVisibleArrayCarriers_ 里 —— 左值是 Variant 槽那一发是装箱 (②③都不免), 左值是形参 / 模块级数组
 //      那两档压根没有出口收尾, 免不免都不发东西。
 // 三格只免**那一格**: 同一个名字在别处任何裸出现照旧算, 所以 `v = a` 之后再 `a = b` 仍然不放手
 // (夹具 B263 那一档钉的就是它)。
@@ -749,7 +751,7 @@ struct EscapeScan : public ASTVisitor {
     std::map<std::string, int> bare;
     // 第一百五十九刀: 右值那一格要不要放行, 问的是「左值是不是本过程的局部数组」——
     // 这张名单由 scanLocalArrayEscapes 先填好, 指针递进来, 不再另起一趟扫描。
-    const std::set<std::string>* topLevelLocalArrays = nullptr;
+    const std::set<std::string>* exitVisibleArrayCarriers = nullptr;
     static std::string low(const std::string& s) {
         std::string r = s;
         for (char& ch : r) ch = (char)tolower((unsigned char)ch);
@@ -777,10 +779,10 @@ struct EscapeScan : public ASTVisitor {
             // 那一格 leak=1 = 每调用净漏一枚 (与 W2/W3 那两格同源)。
             // 只在**左值也是本过程的局部数组**时放行: 左值是 Variant 槽 (`mv = a`) 那一发是装箱,
             // 装的正是这枚载体 ⇒ 照旧算逃逸 (夹具 B263 钉的那一发); 左值是标量同理不走复制。
-            if (topLevelLocalArrays && node.value &&
+            if (exitVisibleArrayCarriers && node.value &&
                 node.value->kind == ASTNodeKind::IdentifierExpr) {
                 auto& tgt = static_cast<const IdentifierExpr&>(*node.target);
-                if (topLevelLocalArrays->count(low(tgt.name)))
+                if (exitVisibleArrayCarriers->count(low(tgt.name)))
                     exempt.insert(node.value.get());
             }
         }
@@ -796,14 +798,13 @@ struct EscapeScan : public ASTVisitor {
     }
 };
 
-// 「这条声明是不是过程体的直接子句」—— 只收数组那一档的名字 (逗号声明要展开成子声明逐条看)。
-// 嵌在 If / For / With 块里的 `Dim q(5)` 发在**那个块的括号内**, 出口那一发在它的括号外 ⇒ 拿一个
-// 当时并不存在的名字去销毁 = cl C2065 (门 #821 的 FlexGridX86 十二发全在这个形状上)。
-void collectTopLevelArrayNames(const Decl* d, std::set<std::string>& out) {
+// 「这条声明是不是数组载体」+ 是就把名字记进名单 (逗号声明要展开成子声明逐条看)。
+// 以什么范围调用它 = 闸① 那一条规则, 只住在 scanLocalArrayEscapes; 这一位只管认形状、收名字。
+void collectArrayCarrierNames(const Decl* d, std::set<std::string>& out) {
     if (!d) return;
     if (d->kind == ASTNodeKind::MultiDecl) {
         for (const DeclPtr& child : static_cast<const MultiDecl&>(*d).declarations) {
-            collectTopLevelArrayNames(child.get(), out);
+            collectArrayCarrierNames(child.get(), out);
         }
         return;
     }
@@ -820,15 +821,29 @@ void collectTopLevelArrayNames(const Decl* d, std::set<std::string>& out) {
 
 void CCodeGen::scanLocalArrayEscapes(const StmtList& body) {
     escapedLocalArrays_.clear();
-    topLevelLocalArrays_.clear();
+    exitVisibleArrayCarriers_.clear();
+    // 直接子句那几条: 提升开没开, 它们的 C 变量在出口那一刻都在场 (第一百五十六刀的原口径)。
     for (const StmtPtr& st : body) {
         if (st && st->kind == ASTNodeKind::LocalDeclStmt) {
-            collectTopLevelArrayNames(static_cast<const LocalDeclStmt&>(*st).decl.get(),
-                                      topLevelLocalArrays_);
+            collectArrayCarrierNames(static_cast<const LocalDeclStmt&>(*st).decl.get(),
+                                      exitVisibleArrayCarriers_);
+        }
+    }
+    // 第一百六十四刀: 提升开着 ⇒ 嵌在块里那几档也算在场 —— 动态那一档整条声明就在序言 (Fix 086),
+    // 定长与多维那一档由本刀把声明提上来 (hoistLocalDecls 写 preludeArrayCarriers_, 创建留原位)。
+    // 走的是提升那一位主人自己的递归 (collectLocalDeclStmts), 不是第二把尺; C3_NO_HOIST 关掉提升
+    //  ⇒ 这一问跟着答否, 门 #821 那一形立刻回来。
+    if (hoistingLocalDeclsEnabled()) {
+        std::vector<LocalDeclStmt*> decls;
+        collectLocalDeclStmts(body, decls);
+        for (auto* d : decls) {
+            if (d && d->decl) {
+                collectArrayCarrierNames(d->decl.get(), exitVisibleArrayCarriers_);
+            }
         }
     }
     EscapeScan scan;
-    scan.topLevelLocalArrays = &topLevelLocalArrays_;
+    scan.exitVisibleArrayCarriers = &exitVisibleArrayCarriers_;
     for (const auto& st : body) {
         if (st) traverseStmt(*st, scan);
     }

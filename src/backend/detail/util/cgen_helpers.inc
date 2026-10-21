@@ -303,8 +303,22 @@
     //   静态那一档发 `static T* x = NULL;` + 一发「指针本身」当首轮守卫 (C 不许静态局部用非常量
     //   初始化器, 同 Fix 084aa 那条老规矩)。initCode 本来就是 NULL (动态数组那一支) ⇒ 只加前缀、
     //   不发守卫 —— VB6「没 ReDim 过就读 = 错误 9」那条语义由 NULL 这一格自己保住。
+    //   第一百六十四刀加第三档 (declaredInPrelude): 嵌在块里那几档定长/多维载体的**声明**由提升
+    //   那一趟发到序言, 原位这一发只剩那一发创建 —— 块可能一次都不进、也可能进多次, 守卫同 Static。
     void emitArrayCarrierDecl(const std::string& cType, const std::string& cName,
-                              const std::string& initCode, bool staticStorage);
+                              const std::string& initCode, bool staticStorage,
+                              bool declaredInPrelude);
+    // 账 #305 §B218 (甲) 第一百六十四刀: 「拿指针本身当首建守卫」那一块的形状 —— Static 那一档与
+    //   序言那一档共用 (两处不同成因、同一个下限: 那一发创建每调用只许落地一次)。
+    void emitArrayCarrierGuardedCreate(const std::string& cName, const std::string& initCode,
+                                       const std::string& why);
+    // 「这枚载体在 C 里是哪一档描述符指针」的唯一一问 —— 序言那一发与原位那三支同一个答案
+    //   (答错 = 拿 1D 的指针去接 ND 的创建, cl C2440)。
+    std::string arrayCarrierCType(const VariableDecl& var);
+    // 序言那一发的形状: 只有指针、没有创建。
+    void emitArrayCarrierPreludeDecl(const VariableDecl& var);
+    // 「提升开着没有」那一问 (C3_NO_HOIST ⇒ 关): 提升那一趟与闸① 那一问共用一位主人。
+    bool hoistingLocalDeclsEnabled();
     // 账 #305 §B218 (甲) 第一百五十六刀: 过程入口跑一趟, 把「载体被整体用掉」的数组名收进
     // escapedLocalArrays_ (与 clear 那张表同一位置调用)。
     void scanLocalArrayEscapes(const StmtList& body);
@@ -863,7 +877,9 @@
     // 预扫描收集所有可提升的 LocalDeclStmt (非数组标量/动态数组指针/Const),
     // 在函数序言处统一声明, 原位置的 visit 跳过.
     void hoistLocalDecls(StmtList& body);
-    void collectLocalDeclStmts(StmtList& stmts, std::vector<LocalDeclStmt*>& out);
+    // 「把这枚嵌在块里的定长/多维载体的声明提到序言」那一小步 = 发那一行 + 写名单。
+    void hoistFixedArrayDeclToPrelude(const VariableDecl& var);
+    void collectLocalDeclStmts(const StmtList& stmts, std::vector<LocalDeclStmt*>& out);
     // 已提升的声明节点集合 (按指针, 每过程清空)
     std::set<const ASTNode*> hoistedLocalDeclSet_;
     // Fix 086: 工程内窗体模块名集合 (小写), driver预扫描填充

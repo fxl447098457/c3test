@@ -13,20 +13,48 @@ bool CCodeGen::wantsStaticLocalStorage(const VariableDecl& var) const {
     return var.isStatic || inStaticProc_;
 }
 
-// 账 #305 §B218 (甲) 第一百六十刀: 数组载体的声明形状只许住在这里。
+// 账 #305 §B218 (甲) 第一百六十四刀: 「拿指针本身当首建守卫」那一块的形状只许住在这里。
+// Static 那一档与序言那一档共用 —— 两处成因不同, 下限同一个: 那一发创建每调用只许落地一次。
+void CCodeGen::emitArrayCarrierGuardedCreate(const std::string& cName,
+                                             const std::string& initCode,
+                                             const std::string& why) {
+    c_.emitLine("if (" + cName + " == NULL) {  /* 账 #305 (甲) 腿⑤ " + why + " */");
+    c_.indent();
+    c_.emitLine(cName + " = " + initCode + ";");
+    c_.dedent();
+    c_.emitLine("}");
+}
+
+// 账 #305 §B218 (甲) 第一百六十刀: 数组载体声明那一发的形状只许住在这里。
 void CCodeGen::emitArrayCarrierDecl(const std::string& cType, const std::string& cName,
-                                    const std::string& initCode, bool staticStorage) {
+                                    const std::string& initCode, bool staticStorage,
+                                    bool declaredInPrelude) {
+    if (declaredInPrelude) {
+        emitArrayCarrierGuardedCreate(cName, initCode,
+            "第一百六十四刀: 声明在序言, 这一站只在第一次走到时建");
+        return;
+    }
     if (!staticStorage) {
         c_.emitLine(cType + "* " + cName + " = " + initCode + ";");
         return;
     }
     c_.emitLine("static " + cType + "* " + cName + " = NULL;");
     if (initCode == "NULL") return;
-    c_.emitLine("if (" + cName + " == NULL) {  /* 账 #305 (甲) 腿⑤ 第一百六十刀: Static 那一格只在第一次进来建 */");
-    c_.indent();
-    c_.emitLine(cName + " = " + initCode + ";");
-    c_.dedent();
-    c_.emitLine("}");
+    emitArrayCarrierGuardedCreate(cName, initCode,
+        "第一百六十刀: Static 那一格只在第一次进来建");
+}
+
+// 账 #305 §B218 (甲) 第一百六十四刀: 「这枚载体在 C 里是哪一档描述符指针」只许答在这里 ——
+// 序言那一发与原位那三支共用同一个答案 (答错 = 拿 1D 的指针去接 ND 的创建, cl C2440)。
+std::string CCodeGen::arrayCarrierCType(const VariableDecl& var) {
+    return var.dimensions.size() >= 2 ? "vb6_SafeArrayND" : "vb6_SafeArray1D";
+}
+
+// 序言那一发的形状: 只有指针、没有创建 (创建留在原位)。存储级那一问照旧单独问
+// wantsStaticLocalStorage —— 少问一条, 嵌在块里的 `Static q(5)` 就掉回「每调用换一块」那一档。
+void CCodeGen::emitArrayCarrierPreludeDecl(const VariableDecl& var) {
+    c_.emitLine((wantsStaticLocalStorage(var) ? "static " : "") + arrayCarrierCType(var)
+                + "* " + cIdent(var.name) + " = NULL;");
 }
 
 void CCodeGen::visit(OptionStmt& node) {
@@ -75,6 +103,11 @@ void CCodeGen::emitLocalDeclCode(LocalDeclStmt& node) {
                 std::string udtCType = resolveArrayUdtElemCType(var.asType.get());
                 bool isUdtArr = !udtCType.empty();
                 int dimCount = (int)var.dimensions.size();
+                // 账 #305 §B218 (甲) 第一百六十四刀: 名字先算下来 —— 序言那一发写的、注册那一段读的是
+                // 同一枚; declaredInPrelude 只问提升那一位主人写的名单, 原位不许自己再推形状。
+                std::string lower = var.name;
+                std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+                const bool declaredInPrelude = preludeArrayCarriers_.count(lower) > 0;
 
                 if (dimCount == 1) {
                     // 一维数组: 保持原有1D代码
@@ -95,8 +128,8 @@ void CCodeGen::emitLocalDeclCode(LocalDeclStmt& node) {
                     } else {
                         initCode = "vb6_SafeArrayCreate1D(" + saElemType + ", " + lBound + ", " + uBound + ")";
                     }
-                    emitArrayCarrierDecl("vb6_SafeArray1D", cName, initCode,
-                                         wantsStaticLocalStorage(var));
+                    emitArrayCarrierDecl(arrayCarrierCType(var), cName, initCode,
+                                         wantsStaticLocalStorage(var), declaredInPrelude);
                 } else {
                     // 多维数组: 使用ND运行时
                     std::string boundsVar = "_bounds_" + cName;
@@ -115,15 +148,13 @@ void CCodeGen::emitLocalDeclCode(LocalDeclStmt& node) {
                     c_.dedent();
                     c_.emitLine("};");
                     emitArrayCarrierDecl(
-                        "vb6_SafeArrayND", cName,
+                        arrayCarrierCType(var), cName,
                         "vb6_SafeArrayCreateND(" + saElemType + ", " +
                             std::to_string(dimCount) + ", " + boundsVar + ")",
-                        wantsStaticLocalStorage(var));
+                        wantsStaticLocalStorage(var), declaredInPrelude);
                 }
 
-                // 注册到已知数组集合
-                std::string lower = var.name;
-                std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+                // 注册到已知数组集合 (lower 已在分支头上算好)
                 knownArrays_.insert(lower);
                 arrayElemTypes_[lower] = elemType;
                 arrayDimCounts_[lower] = dimCount;
@@ -163,8 +194,9 @@ void CCodeGen::emitLocalDeclCode(LocalDeclStmt& node) {
                     emitExpr(*var.initializer);
                     dynInit = rewriteByteArrayValue(lastExpr_);
                 }
-                emitArrayCarrierDecl("vb6_SafeArray1D", cName, dynInit,
-                                     wantsStaticLocalStorage(var));
+                // 动态那一档整条声明本来就在序言 (Fix 086) ⇒ 没有「声明与创建分两腿」这一形。
+                emitArrayCarrierDecl(arrayCarrierCType(var), cName, dynInit,
+                                     wantsStaticLocalStorage(var), false);
 
                 // 注册到已知数组集合
                 std::string lower = var.name;
