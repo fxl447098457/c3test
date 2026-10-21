@@ -505,6 +505,20 @@ $carrierShapeFiles = @(FilesOf 'emitArrayCarrierDecl')
 if ($carrierShapeFiles.Count -ne 2) {
     $fail += ("array-carrier decl shape files = " + ($carrierShapeFiles -join ', ') + " (want exactly 2 files)")
 }
+# ㉖ 第一百六十一刀: 「Static 后面跟的是不是过程头」那一问收成一处 = tryParseStaticProcDecl。
+#    多一处 = 又有第二位作者自己拼了一遍前瞻形状。这一族从前是**两个分派点各自**把 TokenKind::Static
+#    当成变量声明关键字吃（裸写那一形走 :75 那条、带访问修饰符那一形落到 default 那条），于是真语料里
+#    10 处 `Private Static Sub` 压根进不了发码阶段（VB2001 expected variable name），后端 inStaticProc_
+#    那一腿从头到尾没有读者。只许有一份声明 + 一份定义 + 两个分派点，且两处都得走同一位主人。
+$staticProcAsk = CountOf 'tryParseStaticProcDecl'
+if ($staticProcAsk -ne 4) {
+    $fail += ("static-proc-header question sites = " + $staticProcAsk + " (want exactly 4: 定义 + 声明 + 裸写那一形 + 带访问修饰符那一形)")
+}
+$staticProcAskFiles = @(FilesOf 'tryParseStaticProcDecl')
+if ($staticProcAskFiles.Count -ne 2) {
+    $fail += ("static-proc-header question files = " + ($staticProcAskFiles -join ", ") + " (want exactly 2 files: parser.hpp + parser_decl.cpp)")
+}
+
 # ㉔ 第一百五十二刀: 那张带档的表 (+第三档) 的形状 —— isCarrier 只许住在表与出口那一趟 (2 份文件 / 4 处)。
 $carrierFlag = CountOf 'isCarrier'
 if ($carrierFlag -ne 4) {

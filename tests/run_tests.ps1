@@ -8012,6 +8012,34 @@ if ($Category -in @("all", "run", "vbp")) {
         'static vb6_SafeArrayND* nd = NULL;',
         'static vb6_SafeArray1D* src = NULL;',
         'if (d == NULL) {')
+    # 账 #305 §B218 (甲) 第一百六十一刀: 语法面接通 `Static Sub` / `Static Function` 头之后，
+    #   Static 过程里的每一条局部声明都落 C 的 static 存储 —— 这一问的主人 (wantsStaticLocalStorage) 与
+    #   那一形状 (emitArrayCarrierDecl) 都是第一百六十刀立的，本刀只把语法面缺的那一位读者接上。
+    #   夹具五格: cnt = Static Sub 里标量跨三次调用累加 / fa = 同一过程里定长数组第一次写第二次读 /
+    #   a1 a2 a3 = Static Function 里那枚标量 (3 6 9，逐条各打一行的原因是同一条 Print 里三个调用
+    #   的发码求值序是反的，读数会成 9/6/3) / plain = 反面证人 (普通 Sub 的同形状标量每次归零) /
+    #   mg = 模块级 Static 数组那一档不受本刀影响 (Static 后面跟标识符，仍走变量声明那条老路)。
+    #   负控 = 拿门 #830 那台二进制 (gh run download 取的 CI 产物) 编同一份夹具：两条 VB2001
+    #   expected variable name (行 12 与行 22 那两个过程头)，压根进不了发码阶段。
+    $b161Needles = @("K161-cnt=1 fa2=77", "K161-cnt=2 fa2=77", "K161-cnt=3 fa2=77",
+                     "K161-a1=3", "K161-a2=6", "K161-a3=9",
+                     "K161-plain=1", "K161-mg=5", "K161-DONE=1")
+    Add-BasTest "test_static_proc" "$Tests\test_static_proc.bas" $b161Needles
+    Add-BasTest "test_static_proc_x86" "$Tests\test_static_proc.bas" $b161Needles -Arch "x86"
+    # 发码两面: Static 过程里那三枚局部 (两枚标量 + 一枚定长数组载体) 各带 static 前缀，
+    #   而同一份夹具里普通 Sub 的那枚标量不许带上 —— 反面针钉的是「这一问只认过程头那一位主人」。
+    #   动态数组那一支在本夹具里没出现: 它由模块级那一档 (mg) 代表，形状只有前缀、没有守卫。
+    Test-EmitcShape 'b161_static_proc_header_lands_static_storage' @(
+        "$Tests\test_static_proc.bas") @(
+        'static int32_t n = 0;',
+        'static vb6_SafeArray1D* fa = NULL;',
+        'static int32_t t = 0;',
+        'if (fa == NULL) {',
+        'static vb6_SafeArray1D* mg = NULL;')
+    Test-EmitcAbsent 'b161_plain_proc_locals_stay_automatic' @(
+        "$Tests\test_static_proc.bas") @(
+        'static int32_t n2 = 0;',
+        'if (mg == NULL) {')
     # 账 #305 §B188 ④ (第九十刀): 出厂那一腿的**尾巴**。`Class_Terminate` 抛错时, `_Destroy` 里体之后
     # 那三截(字段 BSTR / 数组字段 / vb6_Free(me))曾被 ComObj_Release 的帧一起 longjmp 跳掉 —— 实测每枚
     # 抛错的出厂漏一份实例资源: x64 每枚 35~37 字节、x86 每枚 17 字节, 多一枚 20 字符 String 字段就涨到
