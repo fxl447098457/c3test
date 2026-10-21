@@ -295,6 +295,16 @@
     // 收尾那一发只在过程入口预扫说「这枚载体在本过程里没被整体用掉」时才发。
     void trackArrayCarrierForRelease(const std::string& cName,
                                      const std::string& arrayName);
+    // 账 #305 §B218 (甲) 第一百六十刀: 「这枚局部声明要不要 C 的 static 存储」的唯一一问。
+    //   标量那一路 (storageClass) 与数组那三支都问它, 站点不许自己再拼 `var.isStatic || inStaticProc_`
+    //   —— 那正是数组三支从前掉这一档的成因 (判据只长在出口那道闸上, 存储级没人问)。
+    bool wantsStaticLocalStorage(const VariableDecl& var) const;
+    // 账 #305 §B218 (甲) 第一百六十刀: 数组载体声明那一发的唯一形状。非静态照旧就地建;
+    //   静态那一档发 `static T* x = NULL;` + 一发「指针本身」当首轮守卫 (C 不许静态局部用非常量
+    //   初始化器, 同 Fix 084aa 那条老规矩)。initCode 本来就是 NULL (动态数组那一支) ⇒ 只加前缀、
+    //   不发守卫 —— VB6「没 ReDim 过就读 = 错误 9」那条语义由 NULL 这一格自己保住。
+    void emitArrayCarrierDecl(const std::string& cType, const std::string& cName,
+                              const std::string& initCode, bool staticStorage);
     // 账 #305 §B218 (甲) 第一百五十六刀: 过程入口跑一趟, 把「载体被整体用掉」的数组名收进
     // escapedLocalArrays_ (与 clear 那张表同一位置调用)。
     void scanLocalArrayEscapes(const StmtList& body);

@@ -8,6 +8,27 @@ namespace vb6c3 {
 
 // --- cgen_localdecl.cpp: 局部声明与提升 (Option/Dim/Const/hoist) ---
 
+// 账 #305 §B218 (甲) 第一百六十刀: 这一问只许住在这里 (声明口), 站点调用。
+bool CCodeGen::wantsStaticLocalStorage(const VariableDecl& var) const {
+    return var.isStatic || inStaticProc_;
+}
+
+// 账 #305 §B218 (甲) 第一百六十刀: 数组载体的声明形状只许住在这里。
+void CCodeGen::emitArrayCarrierDecl(const std::string& cType, const std::string& cName,
+                                    const std::string& initCode, bool staticStorage) {
+    if (!staticStorage) {
+        c_.emitLine(cType + "* " + cName + " = " + initCode + ";");
+        return;
+    }
+    c_.emitLine("static " + cType + "* " + cName + " = NULL;");
+    if (initCode == "NULL") return;
+    c_.emitLine("if (" + cName + " == NULL) {  /* 账 #305 (甲) 腿⑤ 第一百六十刀: Static 那一格只在第一次进来建 */");
+    c_.indent();
+    c_.emitLine(cName + " = " + initCode + ";");
+    c_.dedent();
+    c_.emitLine("}");
+}
+
 void CCodeGen::visit(OptionStmt& node) {
     // P18-C: Option Compare Text/Binary
     if (node.optionKind == OptionKind::CompareText) {
@@ -74,7 +95,8 @@ void CCodeGen::emitLocalDeclCode(LocalDeclStmt& node) {
                     } else {
                         initCode = "vb6_SafeArrayCreate1D(" + saElemType + ", " + lBound + ", " + uBound + ")";
                     }
-                    c_.emitLine("vb6_SafeArray1D* " + cName + " = " + initCode + ";");
+                    emitArrayCarrierDecl("vb6_SafeArray1D", cName, initCode,
+                                         wantsStaticLocalStorage(var));
                 } else {
                     // 多维数组: 使用ND运行时
                     std::string boundsVar = "_bounds_" + cName;
@@ -92,7 +114,11 @@ void CCodeGen::emitLocalDeclCode(LocalDeclStmt& node) {
                     }
                     c_.dedent();
                     c_.emitLine("};");
-                    c_.emitLine("vb6_SafeArrayND* " + cName + " = vb6_SafeArrayCreateND(" + saElemType + ", " + std::to_string(dimCount) + ", " + boundsVar + ");");
+                    emitArrayCarrierDecl(
+                        "vb6_SafeArrayND", cName,
+                        "vb6_SafeArrayCreateND(" + saElemType + ", " +
+                            std::to_string(dimCount) + ", " + boundsVar + ")",
+                        wantsStaticLocalStorage(var));
                 }
 
                 // 注册到已知数组集合
@@ -137,7 +163,8 @@ void CCodeGen::emitLocalDeclCode(LocalDeclStmt& node) {
                     emitExpr(*var.initializer);
                     dynInit = rewriteByteArrayValue(lastExpr_);
                 }
-                c_.emitLine("vb6_SafeArray1D* " + cName + " = " + dynInit + ";");
+                emitArrayCarrierDecl("vb6_SafeArray1D", cName, dynInit,
+                                     wantsStaticLocalStorage(var));
 
                 // 注册到已知数组集合
                 std::string lower = var.name;
@@ -491,7 +518,8 @@ void CCodeGen::emitLocalDeclCode(LocalDeclStmt& node) {
 
             // VB6 Static变量: 跨调用持久化 → C static局部变量
             // 包括: 显式Static声明 或 Static Sub/Function内的所有局部变量
-            std::string storageClass = (var.isStatic || inStaticProc_) ? "static " : "";
+            // 账 #305 §B218 (甲) 第一百六十刀: 这一问搬进 wantsStaticLocalStorage (与数组三支同源)。
+            std::string storageClass = wantsStaticLocalStorage(var) ? "static " : "";
 
             // Fix 010r-12c: Register non-array local variable to knownLocalVars_
             // so it shadows cross-module external Public symbols with the same name.
