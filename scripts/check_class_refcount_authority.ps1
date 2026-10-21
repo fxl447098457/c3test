@@ -467,22 +467,23 @@ if ($rhsExemptFiles.Count -ne 1 -or $rhsExemptFiles[0] -ne 'cgen_iface_vtbl.cpp'
 }
 #    · 第一百五十九刀: dst 那一问也只许有一位作者，且必须问的是**那两道现成的闸** (出口收尾同一对)。
 #      另起一处 = 「谁持有旧载体」这条口径被重述; 撤掉 = 每一发整数组赋值把旧载体丢在原槽外面。
-$dstAsk = CountOf 'topLevelLocalArrays_.count(lower) && escapedLocalArrays_.count(lower) == 0'
+$dstAsk = CountOf 'exitVisibleArrayCarriers_.count(lower) && escapedLocalArrays_.count(lower) == 0'
 if ($dstAsk -ne 1) {
     $fail += ("whole-array-assign dst gate sites = " + $dstAsk + " (want exactly 1, in wrapWholeArrayAssign)")
 }
-$dstAskFiles = @(FilesOf 'topLevelLocalArrays_.count(lower) && escapedLocalArrays_.count(lower) == 0')
+$dstAskFiles = @(FilesOf 'exitVisibleArrayCarriers_.count(lower) && escapedLocalArrays_.count(lower) == 0')
 if ($dstAskFiles.Count -ne 1 -or $dstAskFiles[0] -ne 'cgen_util_type.cpp') {
     $fail += ("whole-array-assign dst gate file = " + ($dstAskFiles -join ', ') + " (want exactly cgen_util_type.cpp)")
 }
-#    · topLevelLocalArrays_ = 出口那一发的第二道闸 (声明那条 Dim 必须是过程体的**直接子句**, 否则那枚
-#      C 变量在出口不在作用域内 = 门 #821 的 FlexGridX86 十二发 C2065) ⇒ 字段 + clear + insert + count
-#      = 4 处 / 2 份文件。少了这一道闸 = 嵌套块里的 Dim 又被出口放手。
-$scopeRoster = CountOf 'topLevelLocalArrays_'
-if ($scopeRoster -ne 7) {
-    $fail += ("declaration-scope roster sites = " + $scopeRoster + " (want exactly 7: 字段 + clear + insert + 出口那道 count + 第一百五十九刀 dst 那一问的 count + 递给 EscapeScan 的那一枚指针 + 注释)")
+#    · exitVisibleArrayCarriers_ (原名 topLevelLocalArrays_, 第一百六十四刀改口径又改名) = 出口那一发的
+#      第二道闸: 「这枚载体的 C 声明在过程出口那一刻还在不在场」。提升开着 ⇒ 每一档局部数组都在场
+#      (嵌在块里那几档的声明现在住在序言); C3_NO_HOIST ⇒ 缩回「只有过程体直接子句」那一个答案 (门 #821
+#      的 FlexGridX86 十二发 C2065 就是靠这一问挡的)。少这一道闸 = 关掉提升时嵌套块里的名字又被出口放手。
+$scopeRoster = CountOf 'exitVisibleArrayCarriers_'
+if ($scopeRoster -ne 8) {
+    $fail += ("declaration-scope roster sites = " + $scopeRoster + " (want exactly 8: 字段 + clear + 两条 insert (直接子句一趟 + 提升开着再递归一趟) + 出口那道 count + dst 那一问的 count + 递给 EscapeScan 的那一枚指针 + 注释)")
 }
-$scopeRosterFiles = @(FilesOf 'topLevelLocalArrays_')
+$scopeRosterFiles = @(FilesOf 'exitVisibleArrayCarriers_')
 if ($scopeRosterFiles.Count -ne 3) {
     $fail += ("declaration-scope roster files = " + ($scopeRosterFiles -join ', ') + " (want exactly 3 files: cgen_state.inc + cgen_iface_vtbl.cpp + cgen_util_type.cpp)")
 }
@@ -490,8 +491,8 @@ if ($scopeRosterFiles.Count -ne 3) {
 #    数组载体声明那一发的形状收成一处 = emitArrayCarrierDecl。多一处 = 第二位作者又自己拼了一遍
 #    (数组那三支从前就是这么掉掉这一档：只有标量那一路问判据，于是 Static 数组每调用换一块)。
 $staticAsk = CountOf 'wantsStaticLocalStorage'
-if ($staticAsk -ne 7) {
-    $fail += ("static-storage question sites = " + $staticAsk + " (want exactly 7: 定义 + 声明 + 数组三支的调用 + 标量那一路的调用 + 那条注释)")
+if ($staticAsk -ne 9) {
+    $fail += ("static-storage question sites = " + $staticAsk + " (want exactly 9: 定义 + 声明 + 数组三支的调用 + 标量那一路的调用 + 第一百六十四刀序言那一发的调用 + 那两条注释)")
 }
 $staticAskFiles = @(FilesOf 'wantsStaticLocalStorage')
 if ($staticAskFiles.Count -ne 2) {
@@ -504,6 +505,67 @@ if ($carrierShape -ne 5) {
 $carrierShapeFiles = @(FilesOf 'emitArrayCarrierDecl')
 if ($carrierShapeFiles.Count -ne 2) {
     $fail += ("array-carrier decl shape files = " + ($carrierShapeFiles -join ', ') + " (want exactly 2 files)")
+}
+# ㉗ 第一百六十四刀: 「嵌在块里的定长/多维数组载体 —— 声明提到过程序言」这一族五问各只许一位主人:
+#    · hoistingLocalDeclsEnabled = 「提升开着没有」(早退那一发与闸① 同一位主人; C3_NO_HOIST 关掉时闸①
+#      必须跟着答否, 否则门 #821 那一形立刻回来) = 声明 + 定义 + 两处调用 = 4 处 / 3 份文件。
+#    · preludeArrayCarriers_ = 序言发过声明的那几张名 (主人写、原位那一发读) = 5 处 / 4 份文件。
+#    · hoistFixedArrayDeclToPrelude = 「把这枚声明提到序言」那一小步 (发一行 + 写名单) = 4 处 / 2 份文件。
+#    · arrayCarrierCType = 「哪一档描述符指针」(序言那一发与原位那三支同一个答案) = 6 处 / 2 份文件。
+#    · emitArrayCarrierPreludeDecl = 序言那一行的形状 = 3 处 / 3 份文件; emitArrayCarrierGuardedCreate =
+#      「拿指针本身当首建守卫」那一块 (Static 档与序言档共用) = 4 处 / 2 份文件。
+#    · collectArrayCarrierNames = 「这条声明是不是数组载体」+ 收名 = 4 处 / 1 份文件 (只住在预扫那一趟)。
+$hoistAsk = CountOf 'hoistingLocalDeclsEnabled'
+if ($hoistAsk -ne 4) {
+    $fail += ("hoisting-enabled question sites = " + $hoistAsk + " (want exactly 4: 声明 + 定义 + 早退那一发 + 闸① 那一问)")
+}
+$hoistAskFiles = @(FilesOf 'hoistingLocalDeclsEnabled')
+if ($hoistAskFiles.Count -ne 3) {
+    $fail += ("hoisting-enabled question files = " + ($hoistAskFiles -join ', ') + " (want exactly 3 files)")
+}
+$preludeRoster = CountOf 'preludeArrayCarriers_'
+if ($preludeRoster -ne 5) {
+    $fail += ("prelude-carrier roster sites = " + $preludeRoster + " (want exactly 5: 字段 + clear + insert + 原位那一发的 count + 那条注释)")
+}
+$preludeRosterFiles = @(FilesOf 'preludeArrayCarriers_')
+if ($preludeRosterFiles.Count -ne 4) {
+    $fail += ("prelude-carrier roster files = " + ($preludeRosterFiles -join ', ') + " (want exactly 4 files)")
+}
+$hoistStep = CountOf 'hoistFixedArrayDeclToPrelude'
+if ($hoistStep -ne 4) {
+    $fail += ("decl-to-prelude step sites = " + $hoistStep + " (want exactly 4: 声明 + 定义 + VariableDecl 那一支 + MultiDecl 那一支)")
+}
+$hoistStepFiles = @(FilesOf 'hoistFixedArrayDeclToPrelude')
+if ($hoistStepFiles.Count -ne 2) {
+    $fail += ("decl-to-prelude step files = " + ($hoistStepFiles -join ', ') + " (want exactly 2 files)")
+}
+$carrierKind = CountOf 'arrayCarrierCType'
+if ($carrierKind -ne 6) {
+    $fail += ("carrier descriptor-kind question sites = " + $carrierKind + " (want exactly 6: 声明 + 定义 + 原位三支 + 序言那一发)")
+}
+$carrierKindFiles = @(FilesOf 'arrayCarrierCType')
+if ($carrierKindFiles.Count -ne 2) {
+    $fail += ("carrier descriptor-kind question files = " + ($carrierKindFiles -join ', ') + " (want exactly 2 files)")
+}
+$preludeShape = CountOf 'emitArrayCarrierPreludeDecl'
+if ($preludeShape -ne 3) {
+    $fail += ("prelude decl shape sites = " + $preludeShape + " (want exactly 3: 声明 + 定义 + 那一小步的调用)")
+}
+$guardShape = CountOf 'emitArrayCarrierGuardedCreate'
+if ($guardShape -ne 4) {
+    $fail += ("first-build guard shape sites = " + $guardShape + " (want exactly 4: 声明 + 定义 + Static 那一档 + 序言那一档)")
+}
+$guardShapeFiles = @(FilesOf 'emitArrayCarrierGuardedCreate')
+if ($guardShapeFiles.Count -ne 2) {
+    $fail += ("first-build guard shape files = " + ($guardShapeFiles -join ', ') + " (want exactly 2 files)")
+}
+$carrierNames = CountOf 'collectArrayCarrierNames'
+if ($carrierNames -ne 4) {
+    $fail += ("carrier-name collector sites = " + $carrierNames + " (want exactly 4: 定义 + 逗号声明递归 + 两趟调用)")
+}
+$carrierNamesFiles = @(FilesOf 'collectArrayCarrierNames')
+if ($carrierNamesFiles.Count -ne 1 -or $carrierNamesFiles[0] -ne 'cgen_iface_vtbl.cpp') {
+    $fail += ("carrier-name collector files = " + ($carrierNamesFiles -join ', ') + " (want exactly cgen_iface_vtbl.cpp)")
 }
 # ㉖ 第一百六十一刀: 「Static 后面跟的是不是过程头」那一问收成一处 = tryParseStaticProcDecl。
 #    多一处 = 又有第二位作者自己拼了一遍前瞻形状。这一族从前是**两个分派点各自**把 TokenKind::Static

@@ -8059,6 +8059,45 @@ if ($Category -in @("all", "run", "vbp")) {
         "$Tests\test_static_proc.bas") @(
         'static int32_t n2 = 0;',
         'if (mg == NULL) {')
+
+    # 账 #305 §B218 (甲) 第一百六十四刀: 嵌在 If / For / Select 括号里那几档数组载体 —— 要动的不是「销毁发
+    #   在哪个括号」, 而是「这枚载体的名字住在哪一层」。声明提到过程序言 (创建留在原位, 带第一百六十刀为
+    #   Static 立的那一发「指针本身当首建守卫」), 出口那一发就够得着了; 闸① 那一问从「位置」换成「名字在
+    #   不在场」, 由提升那一位主人答 (C3_NO_HOIST 关掉提升 ⇒ 这一问跟着答否, 门 #821 那一形立刻回来)。
+    #   尺 = tests/test_nested_array.bas 七格, 两台 (x64 / x86) 期望串一字相同:
+    #     twice = 块进两次只建一枚、第二次读到第一次写的值 (14/2; 没有守卫 ⇒ 第二次进来归零 = 7/2);
+    #     nd = 多维那一档嵌在 For 体里, 同一格形状 (10); dyn = 动态那一档嵌在 For 体里 (名字本来就在序言,
+    #       本刀补的是闸① 那一问 ⇒ 出口收尾; 每轮 ReDim 各自退旧 ⇒ 2);
+    #     never = 块一次都不进, 出口那一发拿 NULL 空转不崩 (RTL 两发销毁第一句都吃 NULL);
+    #     multi = 逗号声明里嵌在块里那两档数组, 名字各自都进序言 (4/6);
+    #     top / esc = 两条反面证人 —— 体顶层那条 Dim 形状一个字没动 (8)，整枚交给 UBound 的那一档仍算
+    #       逃逸、出口照旧不碰 (2)。
+    #   负控 = 同一台新二进制带 C3_NO_HOIST=1 发码: 序言那五枚指针一枚都不发、守卫一发都不发、出口那一发
+    #     对 q / m / z / p / r 全不点名 (读数 .build/k2191_emit164_nohoist.c) = 闸① 跟着提升那一位主人答。
+    $b164Needles = @("K164-twice=14/2", "K164-nd=10", "K164-dyn=2", "K164-never=1",
+                     "K164-multi=4/6", "K164-top=8", "K164-esc=2", "K164-DONE=1")
+    Add-BasTest "test_nested_array" "$Tests\test_nested_array.bas" $b164Needles
+    Add-BasTest "test_nested_array_x86" "$Tests\test_nested_array.bas" $b164Needles -Arch "x86"
+    Test-EmitcShape 'b164_nested_carrier_decl_lands_in_prelude' @(
+        "$Tests\test_nested_array.bas") @(
+        'vb6_SafeArray1D* q = NULL;',
+        'vb6_SafeArrayND* m = NULL;',
+        'vb6_SafeArray1D* z = NULL;',
+        'vb6_SafeArray1D* p = NULL;',
+        'vb6_SafeArray1D* r = NULL;',
+        'if (q == NULL) {',
+        'if (m == NULL) {',
+        'vb6_SafeArrayDestroy1D(q);  /* 账 #305 (甲) 腿⑤: 作用域出口销毁载体 (本过程内它从没整体用掉) */',
+        'vb6_SafeArrayDestroyND((vb6_SafeArrayND*)m);',
+        'vb6_SafeArrayDestroy1D(d);',
+        'vb6_SafeArrayDestroy1D(z);',
+        'vb6_SafeArrayDestroy1D(t);')
+    Test-EmitcAbsent 'b164_top_level_shape_and_escaped_carrier_untouched' @(
+        "$Tests\test_nested_array.bas") @(
+        'vb6_SafeArray1D* t = NULL;',
+        'if (t == NULL) {',
+        'vb6_SafeArrayDestroy1D(e2);',
+        'vb6_SafeArray1D* q = vb6_SafeArrayCreate1D')
     # 账 #305 §B188 ④ (第九十刀): 出厂那一腿的**尾巴**。`Class_Terminate` 抛错时, `_Destroy` 里体之后
     # 那三截(字段 BSTR / 数组字段 / vb6_Free(me))曾被 ComObj_Release 的帧一起 longjmp 跳掉 —— 实测每枚
     # 抛错的出厂漏一份实例资源: x64 每枚 35~37 字节、x86 每枚 17 字节, 多一枚 20 字符 String 字段就涨到
