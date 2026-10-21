@@ -1638,23 +1638,31 @@ std::string CCodeGen::wrapWholeArrayAssign(const std::string& target,
             }
         }
     }
-    // 第一百五十八刀 (新账 #460): 裸名那一形 (`d = b`) 的 dst 恒传 NULL = 只克隆新载体、
-    // 不碰旧的那一枚 (`vb6_ArrayAssign1D` 里那句 `if (dst && !sameCarrier)` 天然跳过)。
-    // 为什么这一刀不带退旧:
-    //   甲 局部数组 (动态 / 定长两档) 退旧是安全的, 但今天不带 = 旧载体继续漏, 与改前的别名
-    //      同量 (那一发同样把旧载体丢了) ⇒ 不是回归, 是欠的那一格;
-    //   乙 模块级数组 (`mFix = b`): 别的过程也经这枚全局指针看它, 本站 free 旧描述符 =
-    //      跨过程的悬空读;
-    //   丙 定长数组能不能整体赋值, VB6 压根不让编 (固定数组不可赋值) —— 门内有没有这种写法
-    //      还没数 (乙丙两句 = 下一刀「量」要交的口)。
-    // 新克隆的那一枚已经交回给过程出口收尾 (EscapeScan 里左值那一格的豁免就是为它):
-    // 尺 = 第一百五十六刀那把, B225-take 那一档必须回到 leak=0 —— 回不去就是本刀把别名换成了漏。
+    // 第一百五十八刀 (新账 #460): 裸名那一形 (`d = b`) 从前 dst 恒传 NULL = 只克隆新载体、
+    // 不碰旧的那一枚。第一百五十九刀把**甲档**接上退旧, 门就用第一百五十六刀出口那两道闸:
+    //   甲 本过程顶层那条 `Dim` 的局部数组 (动态 / 定长两档, 两档的描述符都是堆上的 —— 定长那档
+    //      发 `vb6_SafeArrayCreate1D`) 且预扫说它没被整体用掉 ⇒ 这一格的旧载体唯一主人就是本站
+    //      ⇒ dst 交实参, RTL 里那句 `if (dst && !sameCarrier) vb6_SafeArrayDestroy1D(dst)` 才真活着。
+    //      不放行的实测代价 (页尺 .build/k2086_dst.bas, 两台): 「先 ReDim 再整体赋值」每调用净漏
+    //      一枚 (x64 346 / x86 323 字节), 「同一枚连赋两次」同样漏 (102 / 88)。
+    //   乙 模块级数组与工程类字段: 别的过程 / 别的实例也经这枚全局指针或同一枚字段看它 ⇒ 恒 NULL。
+    //      这一档在真语料里是主量 (9400 份 = 字段动态 700 + 模块级动态 253), 不是纸面缺口。
+    //   丙 `Static d()` 那一形: 出口收尾本来就不认它 (`cgen_localdecl.cpp` 那几道 `!var.isStatic`),
+    //      所以这一格的旧载体只有本站这发能放 —— 交实参 = 比今天少漏一枚, 不会双放。
+    //      (顺带记下: `Static` 那一形今天压根没发成 C 的 `static` 存储 ⇒ 静态局部数组**不跨调用存活**,
+    //       另一条账, 本刀不动。)
+    // `d = d` 那一形由 RTL 的 sameCarrier 那一支兜住 (克隆但不销毁手里这枚) ⇒ 最坏是漏一次, 不是拆活物。
     //
     // 只许管新认下来的裸名那一形。`A() = B()` (Fix 170 那一形) 照旧发 dst=A = 退旧, 一个字没动:
     //   那一形的左值本来就是它自己那枚描述符的唯一主人, 把 NULL 套上去 = 静默撤掉 Fix 170 的
     //   回收 (形状门的行照过, 因为哈希仍然变)。
     std::string dstArg = target;
-    if (targetNode && targetNode->kind == ASTNodeKind::IdentifierExpr) dstArg = "NULL";
+    if (targetNode && targetNode->kind == ASTNodeKind::IdentifierExpr) {
+        auto& tgt = static_cast<const IdentifierExpr&>(*targetNode);
+        std::string lower = Symbol::toLower(tgt.name);
+        dstArg = (topLevelLocalArrays_.count(lower) && escapedLocalArrays_.count(lower) == 0)
+                     ? target : "NULL";
+    }
     if (!elemUdt.empty() && elemUdt.compare(0, 9, "vb6_type_") == 0
         && udtHasOwnedMembers(elemUdt)) {
         requestUdtCopy(elemUdt, true);

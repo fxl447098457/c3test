@@ -728,19 +728,28 @@ void CCodeGen::trackArrayCarrierForRelease(const std::string& cName,
 // 「这枚局部数组有没有被整体用掉」那一问的唯一答案。判据按**节点地址**认, 不按文本:
 // traverseExpr 先 visit 父节点再下钻 ⇒ 在父节点里把「这一格不算逃逸」的子节点指针记下,
 // 到 IdentifierExpr 那一访按指针放行。认不出的形状默认算逃逸 (fail-safe: 少发一发销毁)。
-// 放行的只有那一形: 带实参的元素访问 `a(i)` / `a(i)=v` 里那个被调者 —— 它只碰一格, 载体没交出去。
-// 算逃逸的 = 其余每一次裸出现: 右值 (`v = a` / `pv = a`)、实参 (`P(a)` / `UBound(a)`)、
+// 算逃逸的 = 其余每一次裸出现: 右值装箱 (`v = a`, 装的正是这枚载体)、实参 (`P(a)` / `UBound(a)`)、
 // 零实参的整枚数组那一形 (`v = a()`, 载体当场交给调用方)、`For Each x In a` 的集合、成员链的宿主 (`a.Field`)。
-// 放行的两格: ① 带实参的元素访问 `a(i)` 里那个被调者 (只碰一格, 载体没交出去); ② 第一百五十八刀起
-// **整数组赋值的左值** `a = ...` —— 旧话是「刻意不放行」, 那时那一发是 `d = b;` 裸指针赋值 (两边共用
-// 同一枚载体, 出口按自己的名义去销毁 = 把别人还活着的东西拆了); 现在那一行走 vb6_ArrayAssign1D = 复制,
-// 槽里握的是自己新克隆的那一枚 ⇒ 出口收尾才是正确答案, 不放行的实测代价 = 那把尺的 B225-take 从
-// leak=0 涨成 leak=1 (每调用一次净漏一枚载体)。放行只免**这一格**: 同一个名字在别处任何裸出现照旧算,
-// 所以 `v = a` 之后再 `a = b` 仍然不放手 (夹具 B263 那一档钉的就是它)。
+// 放行三格, 每一格都有一发实测撑着:
+//   ① 带实参的元素访问 `a(i)` 里那个被调者 —— 只碰一格, 载体没交出去;
+//   ② 第一百五十八刀: **整数组赋值的左值** `a = ...` —— 旧话是「刻意不放行」, 那时那一发是
+//      `d = b;` 裸指针赋值 (两边共用同一枚载体, 出口按自己的名义去销毁 = 把别人还活着的东西拆了);
+//      现在那一行走 vb6_ArrayAssign1D = 复制, 槽里握的是自己新克隆的那一枚 ⇒ 出口收尾才是正确答案,
+//      不放行的实测代价 = 第一百五十六刀那把尺的 B225-take 从 leak=0 涨成 leak=1;
+//   ③ 第一百五十九刀: **整数组赋值的右值** —— 复制不吃源的载体 (`vb6_ArrayAssign1D_Cb` calloc 新描述符,
+//      元素按档各建副本), 源那枚仍是这一站自己的东西 ⇒ 出口该收尾; 不放行的实测代价 = 同一把页尺的
+//      「ReDim 一枚局部数组、只把它复制给另一枚局部数组」那一格 leak=1。放行条件问的是**左值**在
+//      topLevelLocalArrays_ 里 —— 左值是 Variant 槽那一发是装箱 (②③都不免), 左值是形参 / 模块级数组
+//      那两档压根没有出口收尾, 免不免都不发东西。
+// 三格只免**那一格**: 同一个名字在别处任何裸出现照旧算, 所以 `v = a` 之后再 `a = b` 仍然不放手
+// (夹具 B263 那一档钉的就是它)。
 namespace {
 struct EscapeScan : public ASTVisitor {
     std::set<const ASTNode*> exempt;
     std::map<std::string, int> bare;
+    // 第一百五十九刀: 右值那一格要不要放行, 问的是「左值是不是本过程的局部数组」——
+    // 这张名单由 scanLocalArrayEscapes 先填好, 指针递进来, 不再另起一趟扫描。
+    const std::set<std::string>* topLevelLocalArrays = nullptr;
     static std::string low(const std::string& s) {
         std::string r = s;
         for (char& ch : r) ch = (char)tolower((unsigned char)ch);
@@ -758,8 +767,23 @@ struct EscapeScan : public ASTVisitor {
     // 只豁免左值**这一格**: 同一个名字在别处的任何裸出现 (右值装箱 / 实参位 / `A()` 整枚交给
     // 调用方) 照旧算逃逸。标量目标那格豁免是空转 —— 这张名单只被数组那一档消费。
     void visit(AssignmentStmt& node) override {
-        if (node.target && node.target->kind == ASTNodeKind::IdentifierExpr)
+        if (node.target && node.target->kind == ASTNodeKind::IdentifierExpr) {
             exempt.insert(node.target.get());
+            // 第一百五十九刀 (第二格): **整数组赋值的右值那一格也放行**。
+            // 复制这一发不吃源的载体: `vb6_ArrayAssign1D_Cb`  calloc 一枚新描述符, 元素按档各自
+            // 建副本 (bstr 走 SysAllocString, variant 先 memset 再 VariantCopy, UDT 交生成的
+            // vb6_udtcpy_*), 发完源那枚仍然是它自己那一站的东西, 没有第二个持有者 ⇒ 出口该收尾。
+            // 不放的代价实测 = 第一百五十九刀那把页尺里「ReDim 一枚局部数组、只把它当右值复制走」
+            // 那一格 leak=1 = 每调用净漏一枚 (与 W2/W3 那两格同源)。
+            // 只在**左值也是本过程的局部数组**时放行: 左值是 Variant 槽 (`mv = a`) 那一发是装箱,
+            // 装的正是这枚载体 ⇒ 照旧算逃逸 (夹具 B263 钉的那一发); 左值是标量同理不走复制。
+            if (topLevelLocalArrays && node.value &&
+                node.value->kind == ASTNodeKind::IdentifierExpr) {
+                auto& tgt = static_cast<const IdentifierExpr&>(*node.target);
+                if (topLevelLocalArrays->count(low(tgt.name)))
+                    exempt.insert(node.value.get());
+            }
+        }
     }
     void visit(IndexOrCallExpr& node) override {
         // `a(i)` 那一形: 被调者就是数组本身, 只碰一格, 载体不交出去 ⇒ 放行。
@@ -804,6 +828,7 @@ void CCodeGen::scanLocalArrayEscapes(const StmtList& body) {
         }
     }
     EscapeScan scan;
+    scan.topLevelLocalArrays = &topLevelLocalArrays_;
     for (const auto& st : body) {
         if (st) traverseStmt(*st, scan);
     }
