@@ -730,12 +730,13 @@ void CCodeGen::trackArrayCarrierForRelease(const std::string& cName,
 // 到 IdentifierExpr 那一访按指针放行。认不出的形状默认算逃逸 (fail-safe: 少发一发销毁)。
 // 放行的只有那一形: 带实参的元素访问 `a(i)` / `a(i)=v` 里那个被调者 —— 它只碰一格, 载体没交出去。
 // 算逃逸的 = 其余每一次裸出现: 右值 (`v = a` / `pv = a`)、实参 (`P(a)` / `UBound(a)`)、
-// 零实参的整枚数组那一形 (`v = a()`, 载体当场交给调用方)、`For Each x In a` 的集合、
-// 成员链的宿主 (`a.Field`)、以及**整数组赋值的左值** `a = ...`。
-// 左值那一格刻意不放行 (实测发码 = `d = b;` 一发裸指针赋值, 两边共用同一枚载体):
-// 那一格之后槽里握的是**别人**的载体, 出口按自己的名义去销毁 = 把别人还活着的东西拆了
-// (最坏那形 = `loc = mg` 左值接的是模块级数组的载体 ⇒ 出口一发把整个模块的数组销毁)。
-// 代价 = `loc = <新造的那枚>` 这一子集接着漏, 与漏判同方向; 换悬空读的代价不值这一格。
+// 零实参的整枚数组那一形 (`v = a()`, 载体当场交给调用方)、`For Each x In a` 的集合、成员链的宿主 (`a.Field`)。
+// 放行的两格: ① 带实参的元素访问 `a(i)` 里那个被调者 (只碰一格, 载体没交出去); ② 第一百五十八刀起
+// **整数组赋值的左值** `a = ...` —— 旧话是「刻意不放行」, 那时那一发是 `d = b;` 裸指针赋值 (两边共用
+// 同一枚载体, 出口按自己的名义去销毁 = 把别人还活着的东西拆了); 现在那一行走 vb6_ArrayAssign1D = 复制,
+// 槽里握的是自己新克隆的那一枚 ⇒ 出口收尾才是正确答案, 不放行的实测代价 = 那把尺的 B225-take 从
+// leak=0 涨成 leak=1 (每调用一次净漏一枚载体)。放行只免**这一格**: 同一个名字在别处任何裸出现照旧算,
+// 所以 `v = a` 之后再 `a = b` 仍然不放手 (夹具 B263 那一档钉的就是它)。
 namespace {
 struct EscapeScan : public ASTVisitor {
     std::set<const ASTNode*> exempt;
@@ -748,6 +749,17 @@ struct EscapeScan : public ASTVisitor {
     void visit(IdentifierExpr& node) override {
         if (exempt.count(&node)) return;
         bare[low(node.name)]++;
+    }
+    // 第一百五十八刀: **整数组赋值的左值那一格不再算逃逸**。
+    // 第一百五十六刀把它算进去的理由是「发完 `l = mg` 之后本地槽里握的是别人的载体」——
+    // 那是别名时代的事实。这一刀把那一发改成复制 (vb6_ArrayAssign1D 交一枚新载体) ⇒ 左值就是
+    // 那枚新载体的唯一主人, 出口销毁它既安全又是唯一不漏的去处。不豁免的实测代价 (本机两台,
+    // 第一百五十六刀那把尺): B225-take 从 leak=0 涨成 leak=1 = 每一发整数组赋值净漏一枚载体。
+    // 只豁免左值**这一格**: 同一个名字在别处的任何裸出现 (右值装箱 / 实参位 / `A()` 整枚交给
+    // 调用方) 照旧算逃逸。标量目标那格豁免是空转 —— 这张名单只被数组那一档消费。
+    void visit(AssignmentStmt& node) override {
+        if (node.target && node.target->kind == ASTNodeKind::IdentifierExpr)
+            exempt.insert(node.target.get());
     }
     void visit(IndexOrCallExpr& node) override {
         // `a(i)` 那一形: 被调者就是数组本身, 只碰一格, 载体不交出去 ⇒ 放行。

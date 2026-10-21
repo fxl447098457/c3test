@@ -1522,7 +1522,23 @@ std::string CCodeGen::rewriteByteArrayValue(const std::string& value) const {
 // 模块级数组。判定口径与 cgen_expr_call_prelude.inc 的 isArrayAccess 一致 (先 knownArrays_,
 // 再查模块符号表 sym->isArray), 因此 `GetTickCount()` / `Command()` 这类零参调用不会误判。
 bool CCodeGen::isWholeArrayRef(const Expr* e) const {
-    if (!e || e->kind != ASTNodeKind::IndexOrCallExpr) return false;
+    if (!e) return false;
+    // 账 #305 §B218 第一百五十八刀 (新账 #460): **裸名那一形也是整枚数组**。
+    // `Dim d() As Long ... d = b` 在 VB6 里是合法的整体赋值 (语料 125 处), 而这一问原先只认
+    // `A()` 那对空括号 ⇒ 裸名退化成载体指针直赋: 两个名字共用一枚载体 (别名), 而定长那一形
+    // 还要再过一遍窄整型闸 (`pv = vb6_ChkLong(b)`) = 把载体指针截成 int32, x64 上当场 AV。
+    // 两条排除各有主人: Variant 槽的 C 类型是 vb6_VARIANT 结构体 (装箱那一站负责),
+    // Object 槽是指针但不是载体 ⇒ 都不许按载体处置。
+    if (e->kind == ASTNodeKind::IdentifierExpr) {
+        auto& bare = static_cast<const IdentifierExpr&>(*e);
+        std::string bareLower = Symbol::toLower(bare.name);
+        if (knownVariantVars_.count(bareLower) || knownObjectVars_.count(bareLower))
+            return false;
+        if (knownArrays_.count(bareLower)) return true;
+        Symbol* bsym = symTab_.lookupModule(bare.name);
+        return bsym && bsym->kind == SymbolKind::Variable && bsym->isArray;
+    }
+    if (e->kind != ASTNodeKind::IndexOrCallExpr) return false;
     auto& n = static_cast<const IndexOrCallExpr&>(*e);
     if (!n.positional.empty() || !n.named.empty()) return false;
     if (!n.callee) return false;
@@ -1622,13 +1638,30 @@ std::string CCodeGen::wrapWholeArrayAssign(const std::string& target,
             }
         }
     }
+    // 第一百五十八刀 (新账 #460): 裸名那一形 (`d = b`) 的 dst 恒传 NULL = 只克隆新载体、
+    // 不碰旧的那一枚 (`vb6_ArrayAssign1D` 里那句 `if (dst && !sameCarrier)` 天然跳过)。
+    // 为什么这一刀不带退旧:
+    //   甲 局部数组 (动态 / 定长两档) 退旧是安全的, 但今天不带 = 旧载体继续漏, 与改前的别名
+    //      同量 (那一发同样把旧载体丢了) ⇒ 不是回归, 是欠的那一格;
+    //   乙 模块级数组 (`mFix = b`): 别的过程也经这枚全局指针看它, 本站 free 旧描述符 =
+    //      跨过程的悬空读;
+    //   丙 定长数组能不能整体赋值, VB6 压根不让编 (固定数组不可赋值) —— 门内有没有这种写法
+    //      还没数 (乙丙两句 = 下一刀「量」要交的口)。
+    // 新克隆的那一枚已经交回给过程出口收尾 (EscapeScan 里左值那一格的豁免就是为它):
+    // 尺 = 第一百五十六刀那把, B225-take 那一档必须回到 leak=0 —— 回不去就是本刀把别名换成了漏。
+    //
+    // 只许管新认下来的裸名那一形。`A() = B()` (Fix 170 那一形) 照旧发 dst=A = 退旧, 一个字没动:
+    //   那一形的左值本来就是它自己那枚描述符的唯一主人, 把 NULL 套上去 = 静默撤掉 Fix 170 的
+    //   回收 (形状门的行照过, 因为哈希仍然变)。
+    std::string dstArg = target;
+    if (targetNode && targetNode->kind == ASTNodeKind::IdentifierExpr) dstArg = "NULL";
     if (!elemUdt.empty() && elemUdt.compare(0, 9, "vb6_type_") == 0
         && udtHasOwnedMembers(elemUdt)) {
         requestUdtCopy(elemUdt, true);
-        return "vb6_ArrayAssign1D_Cb(" + target + ", " + rhs + ", vb6_udtcpy_"
+        return "vb6_ArrayAssign1D_Cb(" + dstArg + ", " + rhs + ", vb6_udtcpy_"
              + elemUdt.substr(9) + "_v)";
     }
-    return "vb6_ArrayAssign1D(" + target + ", " + rhs + ")";
+    return "vb6_ArrayAssign1D(" + dstArg + ", " + rhs + ")";
 }
 
 // ============================================================
@@ -1768,6 +1801,13 @@ Vb6Type CCodeGen::narrowTargetTypeOf(Expr* target) const {
     auto& id = static_cast<IdentifierExpr&>(*target);
     std::string lower = id.name;
     std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+
+    // 账 #305 §B218 第一百五十八刀 (新账 #460): 裸名那一形现在也算整体数组左值
+    // (`isWholeArrayRef` 那一位主人), 而载体指针不是标量槽 —— 套上窄整型闸就是把指针
+    // 截成 int32 (`mFix = vb6_ChkLong(b)`: x64 当场 AV, x86 静默别名)。下面那三张
+    // Byte/Integer/Long 表对数组名也可能命中 (模块级数组登记在 knownLongVars_ 里),
+    // 所以这一问必须排在它们之前。
+    if (isWholeArrayRef(target)) return Vb6Type::Unknown;
 
     // Fix <vbeclipse> rev36: **Byte 数组成员**不是标量, 绝不套窄整型溢出检查。
     //
