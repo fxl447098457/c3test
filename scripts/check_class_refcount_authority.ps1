@@ -557,16 +557,16 @@ if ($legacyTblEmitFiles.Count -ne 4) {
     $fail += ("legacy iface table emit files = " + ($legacyTblEmitFiles -join ', ') + " (want exactly 4 files)")
 }
 $legacySlotRead = CountOf 'legacyIfaceSlots'
-if ($legacySlotRead -ne 4) {
-    $fail += ("legacy iface slot question sites = " + $legacySlotRead + " (want exactly 4: 声明 + 定义 + 两处消费)")
+if ($legacySlotRead -ne 5) {
+    $fail += ("legacy iface slot question sites = " + $legacySlotRead + " (want exactly 5: 声明 + 定义 + 两处消费 + 第一百七十四刀 view_from 那道闸)")
 }
 $legacySlotReadFiles = @(FilesOf 'legacyIfaceSlots')
 if ($legacySlotReadFiles.Count -ne 3) {
     $fail += ("legacy iface slot question files = " + ($legacySlotReadFiles -join ', ') + " (want exactly 3 files)")
 }
 $legacyWrapMint = CountOf 'legacyIfaceWrapFn'
-if ($legacyWrapMint -ne 9) {
-    $fail += ("legacy iface wrap-name sites = " + $legacyWrapMint + " (want exactly 9: 声明 + 定义 + Set 三臂 + cgen_com 铸表一处 + 第一百七十二刀站B 一问 + 两条注释)")
+if ($legacyWrapMint -ne 10) {
+    $fail += ("legacy iface wrap-name sites = " + $legacyWrapMint + " (want exactly 10: 声明 + 定义 + Set 三臂 + cgen_com 铸表一处 + 第一百七十二刀站B 一问 + 两条注释 + 第一百七十四刀铸 view_from 那一问)")
 }
 $legacyWrapFiles = @(FilesOf 'legacyIfaceWrapFn')
 if ($legacyWrapFiles.Count -ne 6) {
@@ -597,6 +597,35 @@ if ($viewSlotAsk -ne 7) {
 $viewSlotAskFiles = @(FilesOf 'slotIsLegacyIfaceView')
 if ($viewSlotAskFiles.Count -ne 5) {
     $fail += ("iface-view-slot question files = " + ($viewSlotAskFiles -join ', ') + " (want exactly 4 files)")
+}
+# ㉛ 第一百七十四刀 (账 #471 站A): 「集合交回来的那一枚元素是哪一枚实现类」那一问收成一处 ——
+#    每枚 legacy 接口在自己那份 TU 里铸一枚 view_from, 按运行期类名选中在册的那一对 wrap。
+#    四问各一位主人 + 一把尺只许一处 (多一处 = 又有人在站点自己拼名字或自己比名):
+#    · slotLegacyIfaceViewName = 「这一格槽装的是视图, 装的是哪一枚」= 声明 + 定义 + 它自己的 bool 投影
+#      (slotIsLegacyIfaceView 从此是这张名册的投影, 不再第二次读 knownIfaceVars_) + For Each 那一站 = 4 处 / 3 份文件。
+#    · legacyIfaceViewFromFn = view_from 那个名字的唯一出口 = 声明 + 定义 + 铸那一发 + 站点 + 一条注释 = 5 处 / 4 份文件。
+#    · emitLegacyIfaceViewFrom = 那一发的发码主人 (.h 交原型 / .c 交定义) = 声明 + 定义 + 调用 = 3 处 / 3 份文件,
+#      且调用只许挂在接口宿主那一站 (body_pass) —— 别处再挂一处就是第二个 mint。
+#      (比名那把尺 _stricmp 只许一处的针在 check_legacy_view_arg_owners.ps1 的 V8, 与 V1 那条同规, 不在这里重复钉)
+$viewNameAsk = CountOf 'slotLegacyIfaceViewName'
+if ($viewNameAsk -ne 4) {
+    $fail += ("iface-view-name question sites = " + $viewNameAsk + " (want exactly 4: 声明 + 定义 + bool 投影 + For Each 那一站)")
+}
+$viewNameAskFiles = @(FilesOf 'slotLegacyIfaceViewName')
+if ($viewNameAskFiles.Count -ne 3) {
+    $fail += ("iface-view-name question files = " + ($viewNameAskFiles -join ', ') + " (want exactly 3 files)")
+}
+$viewFromName = CountOf 'legacyIfaceViewFromFn'
+if ($viewFromName -ne 5) {
+    $fail += ("view_from name-owner sites = " + $viewFromName + " (want exactly 5: 声明 + 定义 + 铸那一发 + 站点 + 一条注释)")
+}
+$viewFromEmit = CountOf 'emitLegacyIfaceViewFrom'
+if ($viewFromEmit -ne 3) {
+    $fail += ("view_from mint sites = " + $viewFromEmit + " (want exactly 3: 声明 + 定义 + 接口宿主那一站)")
+}
+$viewFromEmitFiles = @(FilesOf 'emitLegacyIfaceViewFrom')
+if ($viewFromEmitFiles -notcontains 'cgen_base_generate_body_pass.inc') {
+    $fail += ("view_from 的调用不在接口宿主那一站 (body_pass) - 现在挂在: " + ($viewFromEmitFiles -join ', '))
 }
 # ㉗ 第一百六十四刀: 「嵌在块里的定长/多维数组载体 —— 声明提到过程序言」这一族五问各只许一位主人:
 #    · hoistingLocalDeclsEnabled = 「提升开着没有」(早退那一发与闸① 同一位主人; C3_NO_HOIST 关掉时闸①
@@ -698,5 +727,5 @@ if ($fail.Count -gt 0) {
     foreach ($f in $fail) { Write-Host ("  - " + $f) }
     exit 1
 }
-Write-Host "CLASS-REFCOUNT-AUTHORITY OK (1 pair mint / 1 header / 2 leg consumers / 3+9 formals / 10 roster files / 6 literal files / 0 stale / 5 registry files + 2 registrants / 1+1 out-slot / 1+1 foreign-write drop / 1 field-teardown shape + file / 6 field-type questions (标量 + 数组两档) / 6 transfer-question sites in 2 files / 1 view-leg hand-back + 2 QiSet calls / 1+2+1 transfer-arm questions / 3 static-gate sites in 1 file + 1 ivref registration / 1 arg-station hand-back + 4+4 helper sites in 4 files / 4+4 index-slot + project-class questions / 1 address-temp mint / 3 element-teardown sites + 4+4 carrier-destroy questions + 4 preserve-with-release sites in 4 files / 4+4 形A questions (out-slot class + owner pass) + 5 copy-in claim sites in 4 files / 3+4 carrier-destroy sites in 3 files / 8 hand-back stations (5 in cgen_redim.cpp + 过程出口) + 4 shape questions + 3 multidim export sites + 4+2 carrier-scope registrar + flag sites / 7+3 carrier-free flag + 5+5 escape pre-pass + 6 roster sites in 4 files + 1 LHS + 1 RHS exemption + 1 dst gate + 7+3 declaration-scope roster / 5 static gates / 4+3 ND Preserve-with-release export sites / 6 legacyViewBoxExpr sites in 4 files + 7 rtl-name sites in 6 files + 9 wrap-name sites in 6 files + 7 view-slot sites in 5 files (㉘㉚，第一百七十二刀三站)"
+Write-Host "CLASS-REFCOUNT-AUTHORITY OK (1 pair mint / 1 header / 2 leg consumers / 3+9 formals / 10 roster files / 6 literal files / 0 stale / 5 registry files + 2 registrants / 1+1 out-slot / 1+1 foreign-write drop / 1 field-teardown shape + file / 6 field-type questions (标量 + 数组两档) / 6 transfer-question sites in 2 files / 1 view-leg hand-back + 2 QiSet calls / 1+2+1 transfer-arm questions / 3 static-gate sites in 1 file + 1 ivref registration / 1 arg-station hand-back + 4+4 helper sites in 4 files / 4+4 index-slot + project-class questions / 1 address-temp mint / 3 element-teardown sites + 4+4 carrier-destroy questions + 4 preserve-with-release sites in 4 files / 4+4 形A questions (out-slot class + owner pass) + 5 copy-in claim sites in 4 files / 3+4 carrier-destroy sites in 3 files / 8 hand-back stations (5 in cgen_redim.cpp + 过程出口) + 4 shape questions + 3 multidim export sites + 4+2 carrier-scope registrar + flag sites / 7+3 carrier-free flag + 5+5 escape pre-pass + 6 roster sites in 4 files + 1 LHS + 1 RHS exemption + 1 dst gate + 7+3 declaration-scope roster / 5 static gates / 4+3 ND Preserve-with-release export sites / 6 legacyViewBoxExpr sites in 4 files + 7 rtl-name sites in 6 files + 9 wrap-name sites in 6 files + 7 view-slot sites in 5 files (㉘㉚，第一百七十二刀三站) + 4 view-name sites in 3 files + 5 view_from-name sites + 3 mint sites + 1 name-ruler (㉛，第一百七十四刀站A)"
 exit 0

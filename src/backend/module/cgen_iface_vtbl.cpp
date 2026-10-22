@@ -473,6 +473,49 @@ std::string CCodeGen::legacyIfaceWrapFn(const std::string& ifaceName,
     return "vb6_iface_" + cIdent(ifaceName) + "_wrap_" + cIdent(implName);
 }
 
+// 账 #305 新账 #471 (第一百七十四刀): 「运行期手里那一枚实例是哪一枚工程类 → 交回这一枚接口的
+// 视图」这一发的名字唯一出口。与上面那位主人同一格 —— `vb6_iface_` 那串前缀不许在这里长第三份。
+std::string CCodeGen::legacyIfaceViewFromFn(const std::string& ifaceName) const {
+    return "vb6_iface_" + cIdent(ifaceName) + "_view_from";
+}
+
+// 铸在**接口自己**那份 TU 里 (原型进它的 .h、定义进它的 .c —— 视图怎么造出来归接口自己定,
+// 与 `emitLegacyIfaceWrapDefs` 那一批同处)。
+// 为什么必须在运行期问: `For Each Obj In 集合` 的循环变量声明成视图 (`Dim Obj As <接口>`) 时,
+// 元素是集合交回来的一枚 COM VARIANT, 里面装的是哪一枚实现类**编译期不知道** —— 而视图的 vtbl
+// 是 `static` 在各实现类那份 TU 里的 (第一百六十六刀), 消费侧手里只有 wrap 的原型。
+// 交回的是**具名结构体值**, 与 wrap 那一族同形 ⇒ 不赌「返回结构体」那一族的调用约定。
+// 认不出 (不是本族包装器 / 外部 COM 对象 / 控件句柄 / 名字不在这份名单里) 一律 `{0}` 静默 ——
+// VB6 那一形报 13 类型不匹配, 那是这条线在册的欠项口径 (#471 那一格), 本刀不引错误腿。
+void CCodeGen::emitLegacyIfaceViewFrom(Module& module) {
+    if (!legacyIfaceShapes_) return;
+    const std::string ifaceName = module.moduleName;
+    if (legacyIfaceShapes_->find(ifaceLower(ifaceName)) == legacyIfaceShapes_->end()) return;
+    if (legacyIfaceSlots(ifaceName).empty()) return;   // 与表类型那一趟同一个闸
+
+    const std::string ifaceType = "vb6_iface_" + cIdent(ifaceName);
+    const std::string fn = legacyIfaceViewFromFn(ifaceName);
+    const std::vector<std::string> impls = allImplementationClasses(ifaceName);
+
+    h_.emitBlank();
+    h_.emitLine(ifaceType + " " + fn + "(void* instance, const char* className);");
+
+    c_.emitBlank();
+    c_.emitLine("// === 账 #305 #471: 运行期那一枚元素 → " + ifaceName + " 的视图 (For Each 那一站) ===");
+    c_.emitLine(ifaceType + " " + fn + "(void* instance, const char* className) {");
+    c_.indent();
+    c_.emitLine(ifaceType + " v = {0};");
+    c_.emitLine("if (!instance || !className) return v;");
+    for (const std::string& impl : impls) {
+        c_.emitLine("if (_stricmp(className, \"" + impl + "\") == 0)"
+                    " return " + legacyIfaceWrapFn(ifaceName, impl) +
+                    "((vb6_cls_" + cIdent(impl) + "*)instance);");
+    }
+    c_.emitLine("return v;  /* 认不出 = 空视图; 在册欠项 = 这一形 VB6 报 13 */");
+    c_.dedent();
+    c_.emitLine("}");
+}
+
 // ============================================================
 // 类结构体字段 + _New 初始化
 // ============================================================

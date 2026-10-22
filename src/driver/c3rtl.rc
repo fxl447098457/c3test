@@ -910,3 +910,9 @@
  *   发码两位调用者 (wrapVariantValue / boxToVariant) 共用一处问句 legacyViewBoxExpr，名单仍是
  *   knownIfaceVars_ (第一百六十五刀那一位主人)。
  *   touch 本文件 = 让 RCDATA 重包一次 (§B99②)。 */
+/* 账 #305 新账 #471 第一百七十四刀 (2026-10-23): For Each 的循环变量是一枚 legacy 接口视图时, 元素是哪一枚实现类
+ *   只有运行期知道 —— 接口自己那份 TU 从此铸一发 vb6_iface_<I>_view_from(instance, className), 逐实现类 _stricmp
+ *   比名 (尺与 vb6_FindCoClassDesc 同一把) 选中第一百六十六刀那批 wrap; 认不出交 {0} (在册欠项 = 这一形 VB6 报 13)。
+ *   新 RTL 出口 vb6_ComObject_ClassNameA = 兄弟 ClassNameBStr 的不分配那一档: 这一站每迭代一枚都要问一次,
+ *   不能每问一次 SysAllocString; 认不出交 NULL 的口径与兄弟一字相同。
+ *   touch 本文件 = 让 RCDATA 重包一次 (§B99②)。 */

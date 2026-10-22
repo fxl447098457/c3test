@@ -7071,6 +7071,36 @@ if ($Category -in @("all", "run", "vbp")) {
         "(v == w)",
         "(v == u)",
         "(nVar == NULL)")
+    # <vbeclipse> 回归夹子 (k174_vieweach, 账 #305 第一百七十四刀 = 新账 #471 站A): For Each 的循环变量是一枚
+    # legacy 接口的**视图** (值结构体 vb6_iface_<I>) —— 上一刀之前这一站发的是 `o = vb6_VariantFromStackVARIANT(&_fe_var_N)`
+    # (把元素按泛对象槽存) ⇒ cl C2440, 语料 Ray.vbp 里 14 站全撞这一发。修法不新立答案: 集合交回来的元素是本族
+    # 包装器, 「它是哪一枚实现类」只有运行期知道 (wrap 那一对的 vtbl 是 static, 住在实现类那份 TU 里, 消费侧看不见),
+    # 所以由**接口自己**铸一枚 view_from, 按运行期类名选中在册的那一对 wrap; 站点三行的次序也是判据的一节 ——
+    # 先取类名 (它内里问的就是那位唯一权威 vb6_ComObject_IsBoxed), 名字非空才敢要实例, 因为 GetInstance 头一句
+    # 就是 obj->vtable 的裸读 (vb6comserver_obj.c 那条 0x20404 崩记录的同族)。视图是**借来的值** ⇒ 不退旧, 与第一百七十二刀站B 一字口径。
+    # BASE(= 第一百七十二刀收线那台)编这份夹具 = mdlK174.c(39) 一发 C2440「vb6_VARIANT → vb6_iface_IK174」且
+    # **没有 exe** (.build/k2506_base_cl.txt)；两台读数一字相同 (.build/k2500_k174_run.txt):
+    #   K174-sum=303     两枚实现类各认出自己那一枚 vtbl (101 + 202) —— 站点认错 wrap 就得 0 或当场崩;
+    #   K174-skipped=2   反面证人两形: 一枚没 Implements 的同族工程类 (认得出名字但配不上任何一对 wrap) +
+    #                    一枚压根不是对象的数值元素 (解包交回 NULL) —— 两形都落**空视图**, 由 Is Nothing
+    #                    那一问认出来 (视图档就是 .obj == NULL), 循环走完不退;
+    #   K174-DONE        VB6 在这两形报 13 类型不匹配, 这里交空视图静默 = 在册的欠项口径 (ai/033 §34 末条), 本刀不引错误腿。
+    $k174Expected = @(
+        "K174-sum=303",
+        "K174-skipped=2",
+        "K174-DONE")
+    Test-Vbp 'k174_vieweach_station_a' "$Tests\k174_vieweach\K174.vbp" $k174Expected
+    Test-Vbp 'k174_vieweach_station_a_x86' "$Tests\k174_vieweach\K174.vbp" $k174Expected -Arch "x86"
+    Test-EmitcShape "k174_vieweach_shape" @("$Tests\k174_vieweach\K174.vbp") @(
+        'vb6_iface_IK174 vb6_iface_IK174_view_from(void* instance, const char* className);',
+        'if (_stricmp(className, "K174Alpha") == 0) return vb6_iface_IK174_wrap_K174Alpha((vb6_cls_K174Alpha*)instance);',
+        'if (_stricmp(className, "K174Beta") == 0) return vb6_iface_IK174_wrap_K174Beta((vb6_cls_K174Beta*)instance);',
+        'void* _vb6_fe_box_0 = vb6_ComUnpackObject(&_fe_var_0);',
+        'const char* _vb6_fe_name_0 = vb6_ComObject_ClassNameA(_vb6_fe_box_0);',
+        'o = vb6_iface_IK174_view_from(_vb6_fe_name_0 ? vb6_ComObject_GetInstance(_vb6_fe_box_0) : (void*)0, _vb6_fe_name_0);')
+    Test-EmitcAbsent "k174_vieweach_variant_store_gone" @("$Tests\k174_vieweach\K174.vbp") @(
+        'o = vb6_VariantFromStackVARIANT(&_fe_var_0);',
+        'vb6_VariantClear(&o);')
     # <vbeclipse> 回归夹子 (b174_numstrarg, 账 #305 §B174 第六十五刀): 数值实参交进内在函数的
     # BSTR 形参。修前 InStr 那一路把 int32_t / double / int16_t 裸交给 wchar_t* —— cl 只给 C4047
     # (在 -W3 之外) ⇒ **编得过**, 而 BASE 那一台在别处 (Mid$(1.1,...) 那类) 拿的是 C2440, 本机

@@ -712,6 +712,18 @@ BSTR vb6_ComObject_ClassNameBStr(void* v) {
     return r;
 }
 
+/* 账 #305 新账 #471 第一百七十四刀: 「这枚包装器是哪一枚工程类」的不分配那一档 —— 论证见
+ * vb6comserver.h 声明处。三闸与身份判据全走兄弟那位主人 vb6_ComObject_IsBoxed, 这里只把
+ * desc 里那根 ANSI 名交回去 (不复制、不分配、不归调用方释放)。 */
+const char* vb6_ComObject_ClassNameA(void* v) {
+    const vb6_ComObject* obj;
+    const char* s;
+    if (!vb6_ComObject_IsBoxed(v)) return NULL;
+    obj = (const vb6_ComObject*)v;
+    s = obj->desc ? obj->desc->classVariable : NULL;
+    return (s && s[0]) ? s : NULL;
+}
+
 // ============================================================
 // ExeComBridge 03: 工程类实例 → COM 调用实参 (VT_DISPATCH VARIANT*)
 // ============================================================

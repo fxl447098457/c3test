@@ -323,6 +323,10 @@
     void emitLegacyIfaceContractTypedefs();           // .h: 每枚 legacy 接口一份 vb6_vtbl_/vb6_iface_
     std::string legacyIfaceWrapFn(const std::string& ifaceName,
                                   const std::string& implName) const;  // wrap 名唯一出口
+    // 账 #305 新账 #471 (第一百七十四刀): 「按运行期类名选中那一枚 wrap」这一发 —— 名字唯一出口
+    // 与铸那一发 (声明跟着表类型走, 定义铸在接口自己那份 .c)。站点只问这一处: For Each 那一站。
+    std::string legacyIfaceViewFromFn(const std::string& ifaceName) const;
+    void emitLegacyIfaceViewFrom(Module& module);     // .h 声明 + .c 定义, 都在接口自己那份 TU
     void emitIfaceClassFields(Module& module);        // .h: 类结构体里的 __iv_<I> 字段
     void emitIfaceImplTables(Module& module);         // .c: 适配器 + 类侧槽表实例
     void emitIfaceNewInit(Module& module);            // .c: _New() 里回填 vt
@@ -381,6 +385,9 @@
     // (vb6_ivref_<I>*) 与「返回接口的调用」，本问只认名册里那一档值结构体 (vb6_iface_<I>)。
     // 工程类那一位主人 (emitClassSlotRefSet) 接手它就铸一枚从没造过的 `vb6_cls_<接口名>`。
     bool slotIsLegacyIfaceView(const std::string& nameLower) const;
+    // 账 #305 新账 #471 (第一百七十四刀): 同一次查表的**带名字**那一档 (不是视图 ⇒ 空串)。
+    // 上面那句问句是这一句的投影 ⇒ 名册只这一处读。For Each 那一站 (站A) 是唯一要名字的读者。
+    std::string slotLegacyIfaceViewName(const std::string& nameLower) const;
     // 账 #305 新账 #407 第一百七十一刀: 视图值进 Variant 装箱站该发的那一句 (唯一出口)。
     // 不是视图 ⇒ 空串。调用者只有两位 = wrapVariantValue 与 boxToVariant，别添第三位。
     std::string legacyViewBoxExpr(const ASTNode* expr, const std::string& cExpr) const;

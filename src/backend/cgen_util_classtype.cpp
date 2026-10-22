@@ -347,8 +347,16 @@ std::string CCodeGen::ifaceViewOfExpr(const ASTNode& expr) {
 // 接口名也照样答得出，于是铸出一枚声明侧从没造过的 `vb6_cls_<接口名>` (实测 = cl C2440，
 // #407 那十二形全撞在这一发上)。视图那一档的覆写/置空本就有自己的形状 (wrap / ReleaseObject)，
 // 站点问这一句落空才归工程类那位主人管，别再长第三种答案。
+// 账 #305 新账 #471 (第一百七十四刀): 名册那一问从此有**带名字**的那一档 —— For Each 那一站要拿
+// 接口名去拼「按运行期类名选中那一枚 wrap」的发码 (`legacyIfaceViewFromFn`)，而名字与 bool 必须
+// 出自同一次查表：上面那句问句从此是这一句的投影 (count → find，答案同源、名单还是那一张)。
+std::string CCodeGen::slotLegacyIfaceViewName(const std::string& nameLower) const {
+    auto it = knownIfaceVars_.find(nameLower);
+    return it == knownIfaceVars_.end() ? std::string() : it->second;
+}
+
 bool CCodeGen::slotIsLegacyIfaceView(const std::string& nameLower) const {
-    return knownIfaceVars_.count(nameLower) > 0;
+    return !slotLegacyIfaceViewName(nameLower).empty();
 }
 
 // 账 #305 新账 #407 / §B190 第一百七十一刀: 「这一枚表达式是不是视图值、装箱该发哪一句」。

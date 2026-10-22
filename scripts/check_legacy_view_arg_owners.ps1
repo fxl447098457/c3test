@@ -13,7 +13,7 @@
 #       且住在 cgen_base_type.cpp (那张形参槽名单出生的地方)。
 #   V2  cParamLegacyIfaceSlotName 恰好 3 处 = 定义 1 (cgen_base_type.cpp) + 声明 1
 #       (cgen_helpers.inc) + 站点 1 (cgen_expr_call_arg_emit.inc)。
-#   V3  legacyIfaceWrapFn( 在代码里恰好 7 处 = 定义 1 + 声明 1 + 调用 5
+#   V3  legacyIfaceWrapFn( 在代码里恰好 8 处 = 定义 1 + 声明 1 + 调用 6
 #       (Set 那三臂 3 / cgen_com 发定义那 1 / 实参位 1)。
 #   V4  legacyViewBoxExpr( 在代码里恰好 5 处 = 定义 1 + 声明 1 + 调用 3
 #       (wrapVariantValue / boxToVariant / ByRef Variant 实参位)。
@@ -70,7 +70,7 @@ if ((CountWhere "cParamLegacyIfaceSlotName" "cgen_expr_call_arg_emit.inc") -ne 1
 }
 
 $v3 = CountWhere "legacyIfaceWrapFn(" ""
-if ($v3 -ne 7) { $fail += ("V3 wrap 主人(定义+声明+调用)位数: 期望 7 = 5 处调用 + 定义 + 声明, 实到 " + $v3) }
+if ($v3 -ne 8) { $fail += ("V3 wrap 主人(定义+声明+调用)位数: 期望 8 = 6 处调用 + 定义 + 声明, 实到 " + $v3) }
 
 $v4 = CountWhere "legacyViewBoxExpr(" ""
 if ($v4 -ne 5) { $fail += ("V4 装箱主人(定义+声明+调用)位数: 期望 5 = 3 处调用 + 定义 + 声明, 实到 " + $v4) }
@@ -85,9 +85,26 @@ if ($v6a -ne 1 -or $v6b -ne 2) {
 }
 if ((CountWhere ").obj == " "") -gt 3) { $fail += "V6 视图比较发码在别处又长了读者" }
 
+# V7/V8 开线 (2026-10-23, 账 #305 第一百七十四刀 = 新账 #471 站A): For Each 那一站把集合交回来的元素
+#   换成视图, 靠的是「认视图槽」那一问 (slotLegacyIfaceViewName = 名册只读一次, slotIsLegacyIfaceView
+#   从此是它的投影) 与「按运行期类名选中那一对 wrap」的那一发。两条都不许在站点自己长出来。
+#   V7  slotLegacyIfaceViewName( 在代码行里恰好 4 处 = 定义 1 + 声明 1 + bool 投影 1 + For Each 那一站 1,
+#        且 cgen_control.cpp 里恰好 1 处 (站点只问一次)。
+#   V8  比名那把尺 `_stricmp(className` 全仓恰好 1 处, 且在 cgen_iface_vtbl.cpp (接口自己铸的那一发 view_from
+#        里) —— 站点自己比名 = 第二条答案; mint 外再比一次名 = 又一位主人。
+$v7 = CountWhere "slotLegacyIfaceViewName(" ""
+if ($v7 -ne 4) { $fail += ("V7 认视图槽那一问位址: 期望 4 = 定义 + 声明 + bool 投影 + For Each 那一站, 实际到 " + $v7) }
+if ((CountWhere "slotLegacyIfaceViewName(" "cgen_control.cpp") -ne 1) {
+    $fail += "V7 站点: For Each 那一站只许问一次认视图槽那一问"
+}
+$v8 = CountWhere "_stricmp(className" ""
+if ($v8 -ne 1) { $fail += ("V8 视图那一族的比名尺: 期望 1 (只许写在接口自己铸的 view_from 里), 实际到 " + $v8) }
+if ((CountWhere "_stricmp(className" "cgen_iface_vtbl.cpp") -ne 1) {
+    $fail += "V8 比名尺住错了文件 - 那一行应当在接口自己铸的那一发 view_from 里"
+}
 if ($fail.Count -gt 0) {
     foreach ($m in $fail) { Write-Host ("FAIL " + $m) }
     exit 1
 }
-Write-Host ("PASS 前缀名单=1(cgen_base_type.cpp) 形参问句=3 wrap调用=5 装箱调用=3 认槽调用=4 比较发码=1+2")
+Write-Host ("PASS 前缀名单=1(cgen_base_type.cpp) 形参问句=3 wrap调用=6 装箱调用=3 认槽调用=4 比较发码=1+2 认视图槽=4 比名尺=1")
 exit 0
