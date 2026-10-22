@@ -1140,6 +1140,11 @@ bool CCodeGen::cExprIsVariant(const std::string& cExpr) const {
         // 账 #305 §B150: 秩 ≥ 2 的晚绑定槽元素读走这一枚新出口 (variantSlotElemRead 按实参
         //   个数二选一)。不登记 = 表只认识单下标那一形, 新出口发出去下游按裸标量读它。
         "vb6_VariantArrayGetND(",
+        // 账 #305 新账 #407 第一百七十一刀: 视图/裸实例进对象档的那枚新出口交回的也是整只槽
+        //   (RTL 签名 vb6_VARIANT vb6_VariantFromProjectInstance(void*))。不登记 = 站点第二次拿到
+        //   同一枚 AST 时按裸值发码, 实测就是 `FromProjectInstance((void*)(FromProjectInstance(...)).obj)`
+        //   这种自套 (cl C2039「obj 不是 vb6_VARIANT 的成员」)。
+        "vb6_VariantFromProjectInstance(",
         "vb6_VariantFromComResult(",
         "vb6_VariantFromStackVARIANT(",
         "vb6_VariantFromValue(",

@@ -377,6 +377,9 @@
     // (vb6_ivref_<I>*) 与「返回接口的调用」，本问只认名册里那一档值结构体 (vb6_iface_<I>)。
     // 工程类那一位主人 (emitClassSlotRefSet) 接手它就铸一枚从没造过的 `vb6_cls_<接口名>`。
     bool slotIsLegacyIfaceView(const std::string& nameLower) const;
+    // 账 #305 新账 #407 第一百七十一刀: 视图值进 Variant 装箱站该发的那一句 (唯一出口)。
+    // 不是视图 ⇒ 空串。调用者只有两位 = wrapVariantValue 与 boxToVariant，别添第三位。
+    std::string legacyViewBoxExpr(const ASTNode* expr, const std::string& cExpr) const;
     // B04 那条 vtable 发射 (`x->vt-><slot>(x, args)`) 的唯一作者：com_bind 与
     // 「接收者是视图值的调用」那一站都调它 (账 #305 §B221 形②)。槽名解析不出来返回空串。
     std::string ivrefVtableCall(const std::string& ifaceName, const std::string& member,

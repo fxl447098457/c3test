@@ -902,3 +902,11 @@
  *   判据读数: 探针 k1591_probe 的 A10 一格 (2x3 缩到 2x1) 修前 after-shrink term 不动、修后 +2,
  *   K145-END made=24 term=22 -> 24; 夹具 b445 新增 W37 (ND Preserve 收缩), W33/W35 继续 = 反面证人。
  *   touch 本文件 = 让 RCDATA 重包一次 (§B99②)。 */
+/* 账 #305 新账 #407 / §B190 第一百七十一刀 (2026-10-22): 视图值进 Variant 装箱站那一句发错。
+ *   vb6_VariantFromValue 的 _Generic default = vb6_VariantObject(指针)，视图是值结构体 ⇒ cl C2172
+ *   「实参不是指针」(实物 = 门禁在册 tests/b189_gate 的 B189Drv.c(11)，改前两台同红)。
+ *   新出口 vb6_VariantFromProjectInstance 按**指针**问身份 (vb6_FindProjectClassDesc，写者是每枚
+ *   工程类 _New 里那句 RegisterProjectClassInstance)，认不出就交 VT_EMPTY (不冒充对象，§B85 那条)。
+ *   发码两位调用者 (wrapVariantValue / boxToVariant) 共用一处问句 legacyViewBoxExpr，名单仍是
+ *   knownIfaceVars_ (第一百六十五刀那一位主人)。
+ *   touch 本文件 = 让 RCDATA 重包一次 (§B99②)。 */

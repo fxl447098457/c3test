@@ -2856,6 +2856,17 @@ std::string CCodeGen::wrapVariantValue(ASTNode* valueNode, const std::string& cE
         }
     }
 
+    // 账 #305 新账 #407 / §B190 第一百七十一刀: **视图值进装箱站**（`TypeName(mv)` / 赋给
+    // Variant 槽那一族）。这一问排在下面那张 inferExprType 表之前 —— 那张表对视图名答的是
+    // **接口模块名**，而 C 侧那一档是值结构体，落 _Generic 的 default = vb6_VariantObject(整枚
+    // 结构体) ⇒ cl C2172「实参不是指针」(实物 = 门禁在册的 tests/b189_gate，B189Drv.c(11)，
+    // 改前两台同红、第一百六十六刀收线时数到的)。改的是一条从前**编不过**的路 ⇒ 存量产物
+    // 按定义一个字不许动。
+    {
+        std::string viewBox171 = legacyViewBoxExpr(valueNode, cExpr);
+        if (!viewBox171.empty()) return viewBox171;
+    }
+
     // 使用inferExprType推断表达式类型
     if (valueNode->kind == ASTNodeKind::BinaryExpr ||
         valueNode->kind == ASTNodeKind::UnaryExpr ||
@@ -2958,6 +2969,12 @@ std::string CCodeGen::boxToVariant(Expr* expr, const std::string& cExpr) const {
                    || (cExpr.compare(cs, 15, "vb6_ComGetProp(") == 0)
                    || (cExpr.compare(cs, 21, "vb6_ComGetObjectProp(") == 0);
         if (comRes) return "vb6_VariantFromComResult(" + cExpr + ")";
+    }
+    // 账 #305 新账 #407 第一百七十一刀: 与上面 wrapVariantValue 同一问、同一出口 (视图值进装箱站)。
+    // 这一站也必须在 inferExprType 之前问: 它对视图名给的是接口模块名，不是 C 侧那一档。
+    {
+        std::string viewBox171b = legacyViewBoxExpr(expr, cExpr);
+        if (!viewBox171b.empty()) return viewBox171b;
     }
     if (!expr) return "vb6_VariantFromValue(" + cExpr + ")";
     // 已经是 VARIANT 的表达式交给 _Generic 的 vb6_VariantIdentity 档恒等直传,

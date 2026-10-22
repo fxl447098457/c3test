@@ -351,6 +351,20 @@ bool CCodeGen::slotIsLegacyIfaceView(const std::string& nameLower) const {
     return knownIfaceVars_.count(nameLower) > 0;
 }
 
+// 账 #305 新账 #407 / §B190 第一百七十一刀: 「这一枚表达式是不是视图值、装箱该发哪一句」。
+// 名单还是第一百六十五刀那一张 (knownIfaceVars_)，这里只是它在**装箱**这一维的投影；
+// 不是视图就交空串，让站点按它原来的路走 —— 别在这一处发明第二种答案。
+// .obj 就是视图里那枚裸实例指针 (vb6_iface_<I> { vtbl, obj })，也是 _New 登记进表的那个值。
+std::string CCodeGen::legacyViewBoxExpr(const ASTNode* expr, const std::string& cExpr) const {
+    if (!expr || expr->kind != ASTNodeKind::IdentifierExpr || cExpr.empty()) return std::string();
+    // 同一枚 AST 可能被连问两站 (wrapVariantValue 之后 boxToVariant 还问一次)。第二次的 cExpr
+    // 已经是槽文本, 再套一层就是自套 ⇒ 「这段文本是不是一枚槽」也问既有那一位主人。
+    if (cExprIsVariantCarrier(cExpr)) return std::string();
+    const auto& id = static_cast<const IdentifierExpr&>(*expr);
+    if (!slotIsLegacyIfaceView(Symbol::toLower(id.name))) return std::string();
+    return "vb6_VariantFromProjectInstance((void*)(" + cExpr + ").obj)";
+}
+
 
 // Fix 219: Variant 载体判定 —— 见 cgen_helpers.inc 的声明注释。
 bool CCodeGen::isVariantCarrierExpr(const std::string& cExpr) const {
