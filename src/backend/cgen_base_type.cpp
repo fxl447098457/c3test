@@ -259,6 +259,22 @@ bool CCodeGen::clsPtrIsViewSlot(const std::string& clsPtr) {
     return clsPtr.compare(0, 10, "vb6_ivref_") == 0;  // vb6_ivref_ = 10 个字符
 }
 
+// 账 #305 第一百七十二刀 站B: 「这一档形参槽收不收 legacy 接口的**视图值**」(交回声明名,
+// 认不出 = 空串)。上面那位主人刻意只认 vb6_cls_ / vb6_ivref_ 两档 ⇒ legacy 的 `vb6_iface_<I>`
+// 值结构体在它那儿是"不是类槽"，调用点于是把裸实例直交 (实测 Ray.vbp 四枚类各一发 C2440:
+// `vb6_RayTrace_CalculateHitColor(Objects, me, …)` 对着 `vb6_iface_RayTraceable TargetObj`)。
+// 交回的是 **VB 声明名** (与 `Set <视图> = <实例>` 那三臂喂 legacyIfaceWrapFn 的入参同一形状)，
+// 前缀知识照旧只住这份文件。
+std::string CCodeGen::cParamLegacyIfaceSlotName(const ParameterInfo& p) {
+    if (p.typeRefName.empty()) return {};
+    const std::string t = cTypeForDeclaredTypeName(p.typeRefName);
+    if (t.compare(0, 10, "vb6_iface_") != 0) return {};  // vb6_iface_ = 10 个字符
+    std::string nm = p.typeRefName;
+    const size_t dot = nm.rfind('.');
+    if (dot != std::string::npos) nm = nm.substr(dot + 1);
+    return nm;
+}
+
 // 账 #305 §B218 第一百四十刀: 「这枚目标表达式是不是一个**可寻址的数组元素槽**」—— 唯一出口。
 // VB6_SA_AT(<元素档>, <数组>, <下标>) 是 RTL 里唯一产出左值的函数式宏 (Fix 113f 定的口径,
 // ByRef 实参那一族早就按它取址)，所以「带括号 = 函数调用 = 非左值」那条老判据对它不成立。

@@ -457,6 +457,40 @@ void CCodeGen::visit(BinaryExpr& node) {
         // 两侧各自独立剥 (都装箱时剥回同一裸实例, 照样相等)。
         if (varHoldsComWrapper(left))  left  = unwrapComVarExpr(left);
         if (varHoldsComWrapper(right)) right = unwrapComVarExpr(right);
+        // 账 #305 第一百七十二刀 站C: 操作数是一枚 legacy 接口的**视图** (值结构体
+        // `vb6_iface_<I> { vtbl; obj; }`) 时 `Is` 不许落进 C 内置 `==` —— 结构体不能比
+        // (实测 Ray.vbp RayTrace.c(114/210/223) 三发 C2088「"==": 对 struct 非法」)。
+        // 同一性比的是 `.obj` 那一格: 它既是视图持有的裸实例指针，也是第一百七十一刀
+        // `vb6_VariantFromProjectInstance` 按指针查身份用的同一格 ⇒ "是不是同一只" 只有一个答案。
+        // `Is Nothing` 也就是 `.obj == NULL` (视图出厂就是 `{0}`，接管值时两格一起写)。
+        // 认槽只问第一百六十五刀那位唯一主人 slotIsLegacyIfaceView，本刀给它添第三个读者。
+        {
+            auto viewOperand172 = [&](const Expr* ast) -> bool {
+                if (!ast || ast->kind != ASTNodeKind::IdentifierExpr) return false;
+                return slotIsLegacyIfaceView(Symbol::toLower(
+                    static_cast<const IdentifierExpr&>(*ast).name));
+            };
+            auto isNothing172 = [](const std::string& s) -> bool {
+                std::string t2 = s;
+                while (t2.size() >= 2 && t2.front() == '(' && t2.back() == ')')
+                    t2 = t2.substr(1, t2.size() - 2);
+                return t2 == "NULL" || t2 == "0";
+            };
+            const bool lv172 = viewOperand172(node.left.get());
+            const bool rv172 = viewOperand172(node.right.get());
+            if (lv172 && rv172) {
+                lastExpr_ = "((" + left + ").obj == (" + right + ").obj)";
+                return;
+            }
+            if (lv172 && isNothing172(right)) {
+                lastExpr_ = "((" + left + ").obj == NULL)";
+                return;
+            }
+            if (rv172 && isNothing172(left)) {
+                lastExpr_ = "((" + right + ").obj == NULL)";
+                return;
+            }
+        }
         auto varLike158n = [&](const std::string& c, Expr* ast) -> bool {
             // Fix <vbeclipse> rev6: `Property Get Foo() As <工程类>` 的返回变量
             // (**vb6_cls_X\* 类型**) 不是 Variant, 尽管 cExprIsVariant /

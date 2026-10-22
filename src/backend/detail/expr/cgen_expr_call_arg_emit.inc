@@ -113,6 +113,29 @@
            VariantToString / wrapToBSTR / boxToVariant 那一层包装全在下面, 于是包装套在
            读入口**外面**, 与 4a "外层 vb6_ChkInt 照旧套着" 同款。 */
         argVal = extenderMemberReadExpr(argVal);
+        // 账 #305 第一百七十二刀 站B = 实例递进 legacy 接口的**视图形参**那一档。视图
+        // (`vb6_iface_<I> { vtbl; obj; }`) 是一枚值结构体，C 里没有任何转换能把裸实例
+        // `vb6_cls_<Impl>*` 喂进去 (实测 Ray.vbp: Sphere.c(146) / Plane.c(83) / Disk.c(110) /
+        // Cylinder.c(76) 各一发 C2440 = `CalculateHitColor Objects, Me, …` 对着
+        // `vb6_iface_RayTraceable TargetObj`)。包装那一发今天已有唯一主人 `legacyIfaceWrapFn`
+        // (第一百六十六刀收的口，`Set <视图> = <实例>` 那三臂都在用它) ⇒ 本刀只给它添第二个读者，
+        // 不在赋值/实参两条支上各拼一种名字。实现者名单问 `allImplementationClasses`: 实参那枚类
+        // 不在名单里就**原样直交** —— 宁可留着 cl 那一声响，也不许凭空铸一枚没定义的 `_wrap_` 名。
+        if (i < calleeParams.size() && node.positional[i]) {
+            const std::string iface172b = cParamLegacyIfaceSlotName(calleeParams[i]);
+            if (!iface172b.empty()) {
+                const std::string impl172b = inferClassTypeOfExpr(*node.positional[i]);
+                if (!impl172b.empty() && Symbol::toLower(impl172b) != Symbol::toLower(iface172b)) {
+                    bool knowsImpl = false;
+                    for (const std::string& c : allImplementationClasses(iface172b)) {
+                        if (Symbol::toLower(c) == Symbol::toLower(impl172b)) { knowsImpl = true; break; }
+                    }
+                    if (knowsImpl) {
+                        argVal = legacyIfaceWrapFn(iface172b, impl172b) + "(" + argVal + ")";
+                    }
+                }
+            }
+        }
         // 账 #305 §B187 第四腿 实参那一站: ByVal <泛对象形参> (VB 写 `As Object`, C 侧是
         // void* 里该装 IDispatch*) 收到工程内实例时交**借用型包装器** —— 与 Set 那一站同一句
         // (唯一发码处 boxIntoLateSlot)。为什么这一站单独欠着: 装箱腿只管 `Set` 语句那一站，
@@ -1028,6 +1051,28 @@
                                 //     FromInstance 的 1 个引用按头文件说明直接转移给 VARIANT。
                                 //     判据 inferClassTypeOfExpr (与 Fix 101 同源)。
                                 const bool isObjVar92y = knownObjectVars_.count(argLs92y) > 0;
+                                // 账 #305 第一百七十二刀 站E: 实参本身是一枚**视图**
+                                // (`Dim/形参 As <legacy 接口>`) ⇒ 问第一百七十一刀那位唯一主人
+                                // `legacyViewBoxExpr`，与 wrapVariantValue / boxToVariant 那两站共用
+                                // 同一句答案 (身份按指针查 `vb6_VariantFromProjectInstance`)。
+                                // 为什么这一站单独欠着: inferClassTypeOfExpr 对视图槽答的是**接口宿主
+                                // 名** (Ray.vbp 实测 = "RayTraceable")，于是下面那句按类名包的
+                                // `vb6_FindCoClassDesc("RayTraceable")` 查不中 desc，还把整枚值结构体
+                                // `(void*)(TargetObj)` 喂进形参 = C2440 + C2198 (RayTrace.c(158))。
+                                // 所有权口径与 §B217 那条一字相同: 装箱多取的那一枚仍登记给语句末。
+                                {
+                                    const std::string viewBox172e =
+                                        legacyViewBoxExpr(node.positional[i].get(), argVal);
+                                    if (!viewBox172e.empty()) {
+                                        const std::string tmp172e = "_vb6_vararg_"
+                                            + std::to_string(ansiCounter_++);
+                                        c_.emitLine("vb6_VARIANT " + tmp172e + " = " + viewBox172e
+                                                    + ";  /* Fix <vbeclipse>: ByRef Variant 实参装箱 */");
+                                        boxTempsToClear_.push_back({tmp172e, c_.indentLevel()});
+                                        argVal = "&" + tmp172e;
+                                        break;
+                                    }
+                                }
                                 std::string argCls92y =
                                     isObjVar92y ? std::string()
                                                 : inferClassTypeOfExpr(*node.positional[i]);

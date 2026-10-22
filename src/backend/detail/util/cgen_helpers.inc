@@ -853,6 +853,10 @@
     // 装的是**视图薄指针**还是工程类实例 —— 前缀名单只住在上面那位主人出生的那份文件里,
     // 站点与所有权主人都不许再抄一遍视图那一档的前缀 (check_iface_view_authority ③ 钉的就是这张名单)。
     bool clsPtrIsViewSlot(const std::string& clsPtr);
+    // 账 #305 第一百七十二刀 站B: 上面那位主人**不认**的那一档 —— legacy 接口的 `vb6_iface_<I>`
+    // 值结构形参槽 (交回 VB 声明名, 认不出 = 空串)。与 clsPtrIsViewSlot 同住 cgen_base_type.cpp,
+    // `vb6_iface_` 这串前缀别处不许再抄 (哨兵 check_legacy_view_arg_owners V1 钉的就是这一处)。
+    std::string cParamLegacyIfaceSlotName(const ParameterInfo& p);
     // 账 #305 §B218 第一百四十刀: 「这枚目标表达式是不是可寻址的数组元素槽」= VB6_SA_AT 那一形，
     // 交回元素 C 档 (认不出 = 空串)。与上面那位前缀主人同住 cgen_base_type.cpp。
     std::string classArraySlotElemType(const std::string& target);
