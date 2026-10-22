@@ -20,5 +20,7 @@ Sub Main()
     r = b.Three()
     Debug.Print "B-THREE-ERR=" & Err.Number
     On Error GoTo 0
+    Debug.Print "A-TNAME=" & TypeName(a)
+    Debug.Print "B-TNAME=" & TypeName(b)
     Debug.Print "MULTI-DONE"
 End Sub

@@ -1,5 +1,5 @@
 ﻿# check_class_refcount_authority.ps1 - 账 #305 §B218 (甲)：工程类实例的引用计数只许有一位主人。
-# 二十二条钉（每条都能单独红，红了就说明同一问长出了第二位主人）：
+# 三十条钉（每条都能单独红，红了就说明同一问长出了第二位主人）：
 #   ① 出入口那一对的 mint 各恰好 1 处，且住在 module/cgen_com.cpp（每条腿只许转调它）。
 #   ② 计数头 `int32_t __refcount;` 的 mint 恰好 1 处，且住在 cgen_iface_vtbl.cpp 的
 #      emitIfaceClassFields 里 —— 它必须紧跟 __comObj 那一句（ai/022 D19：偏移 0 恒是 __comObj）。
@@ -27,7 +27,7 @@
 #   ⑮ Static 那道闸 `!var.isStatic && !inStaticProc_` 全仓恰好 3 处、且全住在一份文件 (cgen_localdecl.cpp)：登记「出口放手」的三条腿 (两条工程类 + 一条接口视图) 共用同一道闸 —— 第一百三十三刀补的就是视图那条腿缺的那半。视图注册口 `trackIvrefLocalForRelease(cIdent(var.name));` 恰好 1 处。
 #   ⑰ 第一百三十七刀: 实参那一站「交回进站那一枚」只许住在 registerClassArgRefHandback 里 (注释串全仓 1 处、文件 = cgen_com.cpp)，两位站点 (ByVal 那一档 + ByRef 092r 那一档) 都只调它，谁也不许自己补一行 Release。问句 `argHandsOverProjectRef` = 契约问句 + New 那一形的合起来答一次: 声明 + 定义 + 两处调用 = 4 处 / 4 份文件。
 #   ⑯ 第一百三十四刀: 视图腿② 的「交回接管来的那一枚」只许住在 emitIvrefQiSet 里 (全仓 1 处、文件 = cgen_iface_vtbl.cpp)，而它两位调用点都住在 cgen_setlet_set_prop.inc —— 移交那一问 (⑬/⑭) 现在是两站三处：工程类站 1 处 (forViewSlot=false) + 视图站 2 处 (true)；再冒出一处自己补 Release 的站点就是第二套判据。
-# 退出码：0 = 十五条都过；1 = 任一条红；2 = 找不到 src/backend。
+# 退出码：0 = 三十条都过；1 = 任一条红；2 = 找不到 src/backend。
 param(
     [string]$Root = ""
 )
@@ -506,6 +506,36 @@ $carrierShapeFiles = @(FilesOf 'emitArrayCarrierDecl')
 if ($carrierShapeFiles.Count -ne 2) {
     $fail += ("array-carrier decl shape files = " + ($carrierShapeFiles -join ', ') + " (want exactly 2 files)")
 }
+# ㉚ 第一百七十一刀 / 新账 #407: 「视图值怎么进 Variant 装箱站」收成一处。
+#    病灶形状 = 视图 (vb6_iface_<I>) 是值结构体, 落 vb6_VariantFromValue 那张 _Generic 的 default
+#    = vb6_VariantObject(指针) ⇒ cl C2172「实参不是指针」(实物 = 门禁在册的 tests/b189_gate,
+#    B189Drv.c(11), 改前两台同红、门一直绿是因为那夹具只走发码针)。现在两位主人各只许一站:
+#    · legacyViewBoxExpr = 发码侧那一句的唯一拼法 (声明 + 定义 + wrapVariantValue 与 boxToVariant
+#      各一问) = 4 处 / 3 份文件。
+#    · vb6_VariantFromProjectInstance = RTL 侧那枚出口 (声明 + 定义 + 发码字符串 + 「交回整枚槽」
+#      那张表那一行含注释共两处) = 5 处 / 4 份文件。
+#    再加一条反面的: .obj 那一截拼装**只许**住在 cgen_util_classtype.cpp —— 站点自己拼 = 第二位作者。
+$viewBoxQ = CountOf 'legacyViewBoxExpr'
+if ($viewBoxQ -ne 4) {
+    $fail += ("legacy view boxing question sites = " + $viewBoxQ + " (want exactly 4: 声明 + 定义 + 两位调用者)")
+}
+$viewBoxQFiles = @(FilesOf 'legacyViewBoxExpr')
+if ($viewBoxQFiles.Count -ne 3) {
+    $fail += ("legacy view boxing question files = " + ($viewBoxQFiles -join ', ') + " (want exactly 3 files)")
+}
+$viewBoxRtl = CountOf 'vb6_VariantFromProjectInstance'
+if ($viewBoxRtl -ne 5) {
+    $fail += ("view boxing rtl 出口 sites = " + $viewBoxRtl + " (want exactly 5: RTL 声明 + 定义 + 发码串 + 槽表那一行两处)")
+}
+$viewBoxRtlFiles = @(FilesOf 'vb6_VariantFromProjectInstance')
+if ($viewBoxRtlFiles.Count -ne 4) {
+    $fail += ("view boxing rtl 出口 files = " + ($viewBoxRtlFiles -join ', ') + " (want exactly 4 files)")
+}
+$ctrlTxt171 = [IO.File]::ReadAllText((Join-Path $Root "src\backend\cgen_util_ctrl.cpp"))
+if ($ctrlTxt171.Contains('.obj)')) {
+    $fail += 'cgen_util_ctrl.cpp 又自己拼 .obj) —— 视图装箱的拼装只许住在 cgen_util_classtype.cpp'
+}
+
 # ㉙ 第一百六十六刀 / 新账 #464: legacy VB6 接口 (.cls 宿主、没进 tB 登记表) 那张**槽表的形状**收成一处。
 #    病灶形状 = `emitInterfaceVtable` 过去在**每枚实现类里**按自家成员声明顺序 + 自家 `classMeParam()`
 #    现铸一份同名 `vb6_vtbl_<I>` / `vb6_iface_<I>` / `vb6_iface_<I>_wrap` —— 一枚接口被 N 枚类 Implements
@@ -557,12 +587,12 @@ if ($cgenComText.Contains('typedef struct " + vtblName')) {
 # ㉘ 第一百六十五刀: 「这一格槽装的是不是 legacy 那一档接口视图」那一问收成一处 = slotIsLegacyIfaceView。
 #    病灶形状 = 腿②/腿③ 那两站先问类名 (inferClassTypeOfExpr 把接口名也答出来)，于是铸出一枚声明侧从没造过的
 #    `vb6_cls_<接口名>*` = cl C2440 (#407 那十二形全撞在这一发上，且门内没有一份输入走到这一形)。
-#    只许一份声明 + 一份定义 + 两处调用 (= 4 处 / 4 份文件)：多一处 = 又有站点自己拼名单，少一处 = 有一站还没问它。
+#    只许一份声明 + 一份定义 + 三处调用 (= 5 处 / 4 份文件)：多一处 = 又有站点自己拼名单，少一处 = 有一站还没问它。
 #    ⚠ 这一问不许被并进 ifaceViewOfExpr: 那一问问的是**新式薄指针** (vb6_ivref_<I>*)，两档的主人与形状都不同，
 #    合一起会让 b448 / iface_wrap 那两片真跑夹具当场换形状。
 $viewSlotAsk = CountOf 'slotIsLegacyIfaceView'
-if ($viewSlotAsk -ne 4) {
-    $fail += ("iface-view-slot question sites = " + $viewSlotAsk + " (want exactly 4: 声明 + 定义 + 腿② 那一站 + 腿③ 那一站)")
+if ($viewSlotAsk -ne 5) {
+    $fail += ("iface-view-slot question sites = " + $viewSlotAsk + " (want exactly 5: 声明 + 定义 + 腿② + 腿③ + 第一百七十一刀的装箱站)")
 }
 $viewSlotAskFiles = @(FilesOf 'slotIsLegacyIfaceView')
 if ($viewSlotAskFiles.Count -ne 4) {

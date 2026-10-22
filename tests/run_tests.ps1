@@ -7003,8 +7003,12 @@ if ($Category -in @("all", "run", "vbp")) {
     # 改后表由接口自己发一份 (`#ifndef VB6_IFACE_IMUL_TBL` + 槽的 `me` 一律 `void*`), 实现类只发
     # 自家实例与 `_wrap_<实现类名>`。Alpha 刻意把成员声明序倒过来 (钉「槽序归接口」), Beta 刻意少写
     # `Three` (那一席发 438 桩 —— 表是工程级一份, 槽必须在; 留空 = 一枚静默 NULL 槽, 一跑就是原生 AV)。
+    # 第一百七十一刀加的两发 (A-TNAME / B-TNAME) = 视图值进装箱站的**运行期**读数。
+    # 两台实测都答 Empty: Exe 工程连工程类登记都不发 (§B187 第二格那条按工程类型分档的口径),
+    # 所以按指针问身份那一张表是空的 ⇒ 本刀只保证「发码编得过 + 不冒充对象」;
+    # 行为面 (VB6 答实现类名) 欠的是一枚 per-interface 的静态身份 resolver, 已另记在册。
     $ifaceMultiExpected = @("A-ONE=11", "A-TWO=12", "A-THREE=13", "B-ONE=21", "B-TWO=22",
-                            "B-THREE-ERR=438", "MULTI-DONE")
+                            "B-THREE-ERR=438", "A-TNAME=Empty", "B-TNAME=Empty", "MULTI-DONE")
     Test-Vbp "iface_multi" "$Tests\iface_multi\IfaceMulti.vbp" $ifaceMultiExpected
     Test-Vbp "iface_multi_x86" "$Tests\iface_multi\IfaceMulti.vbp" $ifaceMultiExpected -Arch "x86"
     Test-EmitcShape "k166_emitc_shape" @("$Tests\iface_multi\IfaceMulti.vbp") @(
@@ -7025,6 +7029,18 @@ if ($Category -in @("all", "run", "vbp")) {
         "// Interface vtable: IMul",
         "(*Three)(vb6_cls_",
         "vb6_iface_IMul_wrap(")
+
+    # <vbeclipse> 回归夹子 (k171) = 账 #407 / §B190 第一百七十一刀: 视图值进 Variant 装箱站。
+    # 真编证人 = b189_gate (Type=DLL) —— 它是门禁 495 份登记输入里**唯一**真撞这一族的一份,
+    # 而从前它只有 --emit-c 的针、从没真编 ⇒ cl C2172「实参不是指针」在门十二格全绿下面存在了两轮
+    # (第一百六十六刀收线时才发现, 台账与 022 已就地订正)。Test-Compile = 真编 rc=0、不跑产物。
+    Test-Compile "b189_gate_real_build" "$Tests\b189_gate\B189g.vbp"
+    Test-EmitcShape "k171_view_box_shape" @("$Tests\b189_gate\B189g.vbp") @(
+        "vb6_VariantFromProjectInstance((void*)(o).obj)",
+        "vb6_TypeName(vb6_VariantFromProjectInstance")
+    # 反面针: 旧的那一发是「整枚值结构体喂进 _Generic 的 default 档」⇒ 必须绝迹。
+    Test-EmitcAbsent "k171_view_box_generic_default_gone" @("$Tests\b189_gate\B189g.vbp") @(
+        "vb6_VariantFromValue(o)")
 
     # <vbeclipse> 回归夹子 (ve_units): 控件**自己的坐标系**读数。两枚 UC 同尺寸、同字体,
     # 只差 .ctl 声明的 ScaleMode (1=缇 / 3=像素)。判据写成「缇型 = 像素型 x TwipsPerPixelX」
