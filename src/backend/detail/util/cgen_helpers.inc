@@ -394,10 +394,15 @@
     // 账 #305 新账 #471 站D (第一百七十五刀): 「接收者是一枚视图时那一发方法调用怎么拼」的唯一出口
     // (`x.vtbl-><成员>(x.obj, 实参…)`)。两位消费者 = 表达式路 (cgen_expr_call_com_bind.inc 的 P6.4，
     // 换主人不换形状) 与语句路 (cgen_call.cpp 落在 COM 兜底之前)。不是视图 ⇒ 空串，站点按原路走。
-    // 站D′（`With <视图>` 那一路：临时量 `(void*)视图` 的 C2440 + 体内成员落 COM 兜底）刻意**没接**，
-    // 它要先给 WithObjKind 添一档，见台账第一百七十五刀「量」那一行。
+    // 站D′（`With <视图>`）已由第一百七十七刀接上：它不需要第二位形状主人 —— 临时量按视图值发 +
+    // 把临时量登记进名册，体内成员本来就由下面这两位消费者答。属性读写那一站是站F (#474)，见下面那位读者。
     std::string legacyViewCallExpr(const std::string& objExpr, const std::string& memberName,
                                    const std::vector<std::string>& args) const;
+    // 账 #305 新账 #474 站F (第一百七十八刀): 视图接收者的**属性读**那一发。站点把自己本来要发的
+    // 那一发 (晚绑定 helper 文本) 交进来，同型且那一席是零实参有返回值的槽 ⇒ 换成 `.vtbl-><槽>(….obj)`
+    // (形状仍由上面那位主人答)；任何不合 ⇒ 空串，站点保留自己那一发。
+    std::string legacyViewGetterReadExpr(const std::string& objExpr, const std::string& memberName,
+                                         const std::string& lateCall);
     // B04 那条 vtable 发射 (`x->vt-><slot>(x, args)`) 的唯一作者：com_bind 与
     // 「接收者是视图值的调用」那一站都调它 (账 #305 §B221 形②)。槽名解析不出来返回空串。
     std::string ivrefVtableCall(const std::string& ifaceName, const std::string& member,
@@ -1078,6 +1083,11 @@
     // 保留自己的晚绑定路；类型未知 ⇒ 交回原生 VARIANT，绝不按上下文猜一档。
     std::string comGetterExpr(const ComSigView& sv, const std::string& objExpr,
                               const std::string& memberName) const;
+
+    // 上面那一条的 switch 本体，**按返回类型**答（账 #305 #474: 站F 那位读者要问的就是这一问，
+    // 第二处不许再抄一份档位表）。未知档 ⇒ 交回原生 VARIANT 那一发，与 comGetterExpr 同一答案。
+    std::string comGetterExprForRetCType(const std::string& retCType, const std::string& objExpr,
+                                         const std::string& memberName) const;
 
     // 带实参调用的类型化表达式；callArgs 已是 `obj, L"Name", (void*[]){…}, argc`。
     // 类型未知或表里没有这条签名 ⇒ 裸 vb6_ComCall（返回 void* 那一档）。

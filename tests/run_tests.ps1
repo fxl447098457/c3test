@@ -7196,6 +7196,37 @@ if ($Category -in @("all", "run", "vbp")) {
     Test-EmitcAbsent "k177_viewwith_void_temp_gone" @("$Tests\k177_viewwith\K177.vbp") @(
         'void* _vb6_with_0 = (void*)x',
         'vb6_ComCall(_vb6_with_0, L"Ping", NULL, 0)')
+    # <vbeclipse> 回归夹子 (k178_viewprop, 账 #305 第一百七十八刀 = 新账 #474 站F 的**读侧**那一半):
+    # 视图的属性读。修前 With 内外都落晚绑定 helper 的首枚 `void*` 槽 = cl C2172 (两台同红、没有 exe);
+    # 修后同一位读者只把**访问路**换成 `.vtbl-><槽>(….obj)` —— 类型那一问不自答, 拿站点本来要发的那一发
+    # 逐字节比对, 同型才换 (换算与所有权口径一字不动)。
+    # 两台实测读数逐行相同 (.build/k2699_k178_run.txt): rc=4 / rn=2 = 每一发真跑到自己那枚 vtbl 的 getter,
+    # beta=1 / betan=1 / s=B1 = 换实现类之后选中的是 beta 那一份表, w=8 = 同一条链上的**方法**路没漂,
+    # let=0 = 读从没落进同名 Let 那一档 (新账 #489 那条「槽只认裸成员名」的证人)。
+    $k178Expected = @(
+        "K178-s=B1",
+        "K178-n=501",
+        "K178-rc=4",
+        "K178-rn=2",
+        "K178-beta=1",
+        "K178-betan=1",
+        "K178-w=8",
+        "K178-let=0",
+        "K178-DONE")
+    Test-Vbp 'k178_viewprop_station_f_read' "$Tests\k178_viewprop\K178.vbp" $k178Expected
+    Test-Vbp 'k178_viewprop_station_f_read_x86' "$Tests\k178_viewprop\K178.vbp" $k178Expected -Arch "x86"
+    Test-EmitcShape "k178_viewprop_shape" @("$Tests\k178_viewprop\K178.vbp") @(
+        'vb6_BSTR_Assign(&s, x.vtbl->Label(x.obj));',
+        'n = x.vtbl->Num(x.obj);',
+        'wchar_t* _dbg_com_bstr = x.vtbl->Label(x.obj);',
+        'vb6_BSTR_Assign(&s, _vb6_with_0.vtbl->Label(_vb6_with_0.obj));',
+        'n = _vb6_with_0.vtbl->Num(_vb6_with_0.obj);',
+        'w = x.vtbl->Twice(x.obj, 4);')
+    # 两条负针抄自**改前那台的真实产物** (同一批语句, 探针 `.local/k2690_sd3` = `.build/k2691_emit.txt`,
+    # 变量名与成员名与本夹具一字相同): 这一族从此不再走 helper。
+    Test-EmitcAbsent "k178_viewprop_helper_gone" @("$Tests\k178_viewprop\K178.vbp") @(
+        'vb6_ComGetStringProp(x, L"Label")',
+        'vb6_ComGetIntProp(x, L"Num")')
     # <vbeclipse> 回归夹子 (b174_numstrarg, 账 #305 §B174 第六十五刀): 数值实参交进内在函数的
     # BSTR 形参。修前 InStr 那一路把 int32_t / double / int16_t 裸交给 wchar_t* —— cl 只给 C4047
     # (在 -W3 之外) ⇒ **编得过**, 而 BASE 那一台在别处 (Mid$(1.1,...) 那类) 拿的是 C2440, 本机

@@ -170,7 +170,11 @@ void CCodeGen::visit(CallStmt& node) {
                                 if (isComMarker_) {
                                     isComMarker_ = false;
                                     // 使用一体化函数, 内部处理VARIANT清理
-                                    std::string comPropCall = "vb6_ComGetStringProp(" + comObjExpr_ + ", L\"" + comMemberName_ + "\")";
+                                    // 账 #305 #474 (第一百七十八刀): 这一处本来就写着 BSTR 那一档 ——
+                                    // 交给站F 那位读者判「接收者是视图且这一席同型吗」，不合就留原发。
+                                    std::string dbgLate = "vb6_ComGetStringProp(" + comObjExpr_ + ", L\"" + comMemberName_ + "\")";
+                                    std::string dbgView = legacyViewGetterReadExpr(comObjExpr_, comMemberName_, dbgLate);
+                                    std::string comPropCall = dbgView.empty() ? dbgLate : std::move(dbgView);
                                     c_.emitLine("{");
                                     c_.indent();
                                     c_.emitLine("wchar_t* _dbg_com_bstr = " + comPropCall + ";");
