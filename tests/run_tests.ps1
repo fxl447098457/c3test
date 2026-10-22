@@ -7196,7 +7196,7 @@ if ($Category -in @("all", "run", "vbp")) {
     Test-EmitcAbsent "k177_viewwith_void_temp_gone" @("$Tests\k177_viewwith\K177.vbp") @(
         'void* _vb6_with_0 = (void*)x',
         'vb6_ComCall(_vb6_with_0, L"Ping", NULL, 0)')
-    # <vbeclipse> 回归夹子 (k178_viewprop, 账 #305 第一百七十九刀 = 新账 #474 站F 的**读侧**那一半):
+    # <vbeclipse> 回归夹子 (k178_viewprop, 账 #305 第一百七十八刀 = 新账 #474 站F 的**读侧**那一半):
     # 视图的属性读。修前 With 内外都落晚绑定 helper 的首枚 `void*` 槽 = cl C2172 (两台同红、没有 exe);
     # 修后同一位读者只把**访问路**换成 `.vtbl-><槽>(….obj)` —— 类型那一问不自答, 拿站点本来要发的那一发
     # 逐字节比对, 同型才换 (换算与所有权口径一字不动)。

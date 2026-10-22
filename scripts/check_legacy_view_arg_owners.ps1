@@ -89,7 +89,7 @@ if ((CountWhere ").obj == " "") -gt 3) { $fail += "V6 视图比较发码在别�
 #   换成视图, 靠的是「认视图槽」那一问 (slotLegacyIfaceViewName = 名册只读一次, slotIsLegacyIfaceView
 #   从此是它的投影) 与「按运行期类名选中那一对 wrap」的那一发。两条都不许在站点自己长出来。
 #   V7  slotLegacyIfaceViewName( 在代码行里恰好 7 处 = 定义 1 + 声明 1 + bool 投影 1 + For Each 那一站 1 + 视图调用主人自己那一问 1
-#        + With 那一站 1 (第一百七十七刀站D′) + 站F 属性读那一位读者 1 (第一百七十九刀),
+#        + With 那一站 1 (第一百七十七刀站D′) + 站F 属性读那一位读者 1 (第一百七十八刀),
 #        且 cgen_control.cpp / cgen_with.cpp 各恰好 1 处、cgen_util_classtype.cpp 恰好 4 处 (定义 + bool 投影 + 方法主人那一问 + 站F 读者)。
 #   V8  比名那把尺 `_stricmp(className` 全仓恰好 1 处, 且在 cgen_iface_vtbl.cpp (接口自己铸的那一发 view_from
 #        里) —— 站点自己比名 = 第二条答案; mint 外再比一次名 = 又一位主人。
@@ -115,7 +115,7 @@ if ((CountWhere "_stricmp(className" "cgen_iface_vtbl.cpp") -ne 1) {
 #   语句路那一问住在 cgen_call.cpp 的 COM 兜底之前 (与 C29-SL-l 那条「语句路也要问一次」同规)；
 #   With 那一头 (站D′) 由第一百七十七刀接上，接的**不是形状**: 它把 With 临时量登记进名册，
 #   于是体内成员由上面那两路主人接手 —— 所以 V9 的位数一枚都不许因为站D′ 而涨。
-#   第一百七十九刀站F 的读者是**第三位消费者** (属性读的形状也交回这位主人, 站点自己一枚都不拼)。
+#   第一百七十八刀站F 的读者是**第三位消费者** (属性读的形状也交回这位主人, 站点自己一枚都不拼)。
 $v9 = CountWhere "legacyViewCallExpr(" ""
 if ($v9 -ne 5) { $fail += ("V9 视图调用主人位数: 期望 5 = 定义 + 声明 + 表达式路 + 语句路 + 站F 读者, 实际到 " + $v9) }
 if ((CountWhere "legacyViewCallExpr(" "cgen_call.cpp") -ne 1) {

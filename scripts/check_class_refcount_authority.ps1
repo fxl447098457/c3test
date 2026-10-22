@@ -558,7 +558,7 @@ if ($legacyTblEmitFiles.Count -ne 4) {
 }
 $legacySlotRead = CountOf 'legacyIfaceSlots'
 if ($legacySlotRead -ne 6) {
-    $fail += ("legacy iface slot question sites = " + $legacySlotRead + " (want exactly 6: 声明 + 定义 + 两处消费 + 第一百七十四刀 view_from 那道闸 + 第一百七十九刀站F 属性读读者)")
+    $fail += ("legacy iface slot question sites = " + $legacySlotRead + " (want exactly 6: 声明 + 定义 + 两处消费 + 第一百七十四刀 view_from 那道闸 + 第一百七十八刀站F 属性读读者)")
 }
 $legacySlotReadFiles = @(FilesOf 'legacyIfaceSlots')
 if ($legacySlotReadFiles.Count -ne 4) {
@@ -604,7 +604,7 @@ if ($viewSlotAskFiles.Count -ne 6) {
 #    · slotLegacyIfaceViewName = 「这一格槽装的是视图, 装的是哪一枚」= 声明 + 定义 + 它自己的 bool 投影
 #      (slotIsLegacyIfaceView 从此是这张名册的投影, 不再第二次读 knownIfaceVars_) + For Each 那一站
 #      + 第一百七十五刀那位「视图方法调用」主人自己那一问 + 第一百七十七刀 With 那一站
-#      + 第一百七十九刀站F 属性读那一位读者 = 7 处 / 4 份文件。
+#      + 第一百七十八刀站F 属性读那一位读者 = 7 处 / 4 份文件。
 #    · legacyIfaceViewFromFn = view_from 那个名字的唯一出口 = 声明 + 定义 + 铸那一发 + 站点 + 一条注释 = 5 处 / 4 份文件。
 #    · emitLegacyIfaceViewFrom = 那一发的发码主人 (.h 交原型 / .c 交定义) = 声明 + 定义 + 调用 = 3 处 / 3 份文件,
 #      且调用只许挂在接口宿主那一站 (body_pass) —— 别处再挂一处就是第二个 mint。
