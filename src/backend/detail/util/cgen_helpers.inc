@@ -126,6 +126,10 @@
     bool hoistOwnedTempSlot(std::string& arg, const std::string& consumer, int slot,
                             const std::string& siblingText = "");
 
+    // 账 #468 §B164 拼接站那一族：这一枚文本**整枚**是不是一个「owned 且档是 BSTR」的 mint？
+    //   拼接站的左操作数若是 ⇒ 拼接站**自己**放掉它（发 ConcatFree）⇒ 那一枚不漏。
+    bool exprIsOwnedBstrMint(const std::string& text);
+
     // Fix 198: 装箱点上的布尔口径修正. `As Boolean` 在 C 层就是 int16_t (与 Integer
     // 同型), 布尔字面量又是裸 (-1) (int) → 交给 _Generic vb6_VariantFromValue 会分别
     // 选到 short:/int: 分支, 装箱成 VT_I2 / VT_I4: 实测 VarType(b)=2、

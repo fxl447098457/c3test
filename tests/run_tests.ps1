@@ -5305,6 +5305,8 @@ if ($Category -in @("all", "run", "vbp")) {
                      "SQ1-dt=Arial/20", "SQ2-child-dt=20", "SQ3-real=Y")
     Test-Vbp "ctrlslider" "$Tests\ctrlslider\SlidApp.vbp" $slidNeedles
     Test-Vbp "ctrlslider_x86" "$Tests\ctrlslider\SlidApp.vbp" $slidNeedles -Arch "x86"
+    # 账 #468 §B164: 拼接站**自己**放掉左操作数（那一枚左操作数是「整枚就是一个 owned BSTR 档的 mint」
+    #   ⇒ 那一站的发法从 Concat 变成 ConcatFree：值一个字没变，只是那一枚终于有人放了）⇒ 这几针随刀改钉。
     Test-EmitcShape "sl_emitc_native" @("$Tests\ctrlslider\SlidApp.vbp") @(
         '"msctls_trackbar32", "",',
         '1409351681L, 0L,',                                        # 横杆: TBS_AUTOTICKS, 无 TBS_VERT
@@ -5320,8 +5322,8 @@ if ($Category -in @("all", "run", "vbp")) {
         'vb6_CStrLong(vb6_Slider_GetMin(vb6_hwnd_sld4',
         'vb6_CStrBool(vb6_Slider_GetSelectRange(',
         # C29-SL-e: 归到 String 档之后 CStr 被折掉，两条读侧直接用 getter
-        'vb6_BSTR_Concat(vb6_BSTR_FromStr(L"SE1-tip="), vb6_GetToolTipText(vb6_hwnd_sld3)',
-        'vb6_BSTR_Concat(vb6_BSTR_FromStr(L"SE2-tag="), vb6_GetControlTag(vb6_hwnd_sld3)',
+        'vb6_BSTR_ConcatFree(vb6_BSTR_FromStr(L"SE1-tip="), vb6_GetToolTipText(vb6_hwnd_sld3)',
+        'vb6_BSTR_ConcatFree(vb6_BSTR_FromStr(L"SE2-tag="), vb6_GetControlTag(vb6_hwnd_sld3)',
         'vb6_SetToolTipText((void*)vb6_hwnd_sld5, L"dtip");',
         'vb6_SetControlTag((void*)vb6_hwnd_sld5, L"dtag");'                  # #124 那条布尔口径
         # C29-SL-h: 设计期那一条 TickStyle=2 必须出现在**创建参数**里（1409286145 那枚是
@@ -5374,7 +5376,7 @@ if ($Category -in @("all", "run", "vbp")) {
         'vb6_SetControlFontNameW((void*)vb6_hwnd_txtH, L"Arial");  /* design FontName */',
         'vb6_SetControlFontSize((void*)vb6_hwnd_txtI, 20.000000f);  /* design FontSize */',
         # 读侧 String 档：与 ToolTipText / Tag 同一形状（直接进 Concat，不再装箱）。
-        'vb6_BSTR_Concat(vb6_BSTR_FromStr(L"SQ1-dt="), vb6_GetControlFontName(vb6_hwnd_txtH)'
+        'vb6_BSTR_ConcatFree(vb6_BSTR_FromStr(L"SQ1-dt="), vb6_GetControlFontName(vb6_hwnd_txtH)'
     )
     # C29-SL-c: 事件派发那一段的形状。钉的是"认来源的那枚句柄 + 分流那一档"这一整对 ——
     # Slider 与 ScrollBar 共用一扇 case WM_HSCROLL/WM_VSCROLL 的门，写错句柄比对比就是静默不派发。
@@ -6375,8 +6377,10 @@ if ($Category -in @("all", "run", "vbp")) {
     # 只钉读数会放过"两边都不套"那一族；这一格是发码面的形状，直接钉形状。
     # (整条语句作针：PSParser 在 `@(` 续行里按**字面**数括号，单引号串里不配平的括号会让
     #  后面的 `)` 变成野 token —— 整份 run_tests.ps1 ParserError，而退出码照旧 0。)
+    # 账 #468 §B164: 拼接站**自己**放掉左操作数（那一枚左操作数是「整枚就是一个 owned BSTR 档的 mint」
+    #   ⇒ 那一站的发法从 Concat 变成 ConcatFree：值一个字没变，只是那一枚终于有人放了）⇒ 这几针随刀改钉。
     Test-EmitcShape "gc_emitc_meleft_wrap" @("$Tests\geomcache\GCCache.vbp") @(
-        'vb6_BSTR_AssignMove(&s16, vb6_BSTR_Concat(vb6_BSTR_FromStr(L"L"), vb6_CStrLong(vb6_GetControlLeft(vb6_hwnd_GCForm)  /* Form.Left via Me */)));'
+        'vb6_BSTR_AssignMove(&s16, vb6_BSTR_ConcatFree(vb6_BSTR_FromStr(L"L"), vb6_CStrLong(vb6_GetControlLeft(vb6_hwnd_GCForm)  /* Form.Left via Me */)));'
     )
     Test-EmitcAbsent "gc_emitc_meleft_raw" @("$Tests\geomcache\GCCache.vbp") @(
         'vb6_BSTR_AssignMove(&s16, vb6_BSTR_Concat(vb6_BSTR_FromStr(L"L"), vb6_GetControlLeft(vb6_hwnd_GCForm)  /* Form.Left via Me */));'
@@ -8216,13 +8220,15 @@ if ($Category -in @("all", "run", "vbp")) {
     Add-BasTest "test_static_proc_x86" "$Tests\test_static_proc.bas" $b161Needles -Arch "x86"
     # 账 #464 §B164 (第一百六十四刀): 「一条语句里现造的带权临时量」提成具名临时量 `_own_N`
     #   之后**语句末按档收回**（BSTR ⇒ vb6_BSTR_Free / VARIANT ⇒ vb6_VariantClear）。
-    #   夹具八格: T1 整枚实参 = 拼接 / T2 拼接站的右操作数 / T3 双实参另一格是纯字面量 /
+    #   夹具九格: T1 整枚实参 = 拼接 / T2 拼接站的右操作数 / T3 双实参另一格是纯字面量 /
     #   T4 双实参那一格在头 / T5 **拼接站暗道**（mint 在左操作数里 ⇒ 不许提名, 读数不许动）/
-    #   T6 赋值站（那一格归赋值站管, 不归本刀）/ T7 链式拼接 / T8 更大的表达式里的一枚。
+    #   T6 赋值站（那一格归赋值站管, 不归本刀）/ T7 链式拼接 / T8 更大的表达式里的一枚 /
+    #   T9 拼接站**自己**放掉左操作数（账 #468 §B164：左操作数整枚是一枚现造的带权临时量
+    #      ⇒ 拼接站放它一次 ⇒ 值不动, 双放会崩）。
     #   x64 与 x86 读数必须**逐行相同**（提了名只是把回收提前, 值不许变）。
     $b164Needles = @("T1-len=4", "T2-right=ab42", "T3-strcmp=0", "T4-left=ab",
                       "T5-trap=4!", "T6-assign=abcd", "T7-chain=abcd!42",
-                      "T8-mix=6", "B164-DONE")
+                      "T8-mix=6", "T9-concatleft=abcd", "B164-DONE")
     Add-BasTest "test_b164_owned_temp" "$Tests\test_b164_owned_temp.bas" $b164Needles
     Add-BasTest "test_b164_owned_temp_x86" "$Tests\test_b164_owned_temp.bas" $b164Needles -Arch "x86"
     # 发码两面: Static 过程里那三枚局部 (两枚标量 + 一枚定长数组载体) 各带 static 前缀，
@@ -9737,8 +9743,10 @@ if ($Category -in @("all", "syntax")) {
     # 会补 `, 1, 1` (vbSunday / vbFirstJan1) —— 与 VBFlexGrid.ctl:20425 的
     # `Format$(Text, Col.Format, vbUseSystemDayOfWeek, vbUseSystem)` 共用一张签名, 否则
     # cl 19.51 C2197 too many args。这里第二枚针一起带四参尾巴, 才与 emit 对齐。
+    # 账 #468 §B164: 拼接站**自己**放掉左操作数（那一枚左操作数是「整枚就是一个 owned BSTR 档的 mint」
+    #   ⇒ 那一站的发法从 Concat 变成 ConcatFree：值一个字没变，只是那一枚终于有人放了）⇒ 这几针随刀改钉。
     Test-EmitcShape "ri_emitc_shape" @("$Tests\test_interp.bas") @(
-        'vb6_BSTR_Concat(vb6_BSTR_FromStr(L"n="), vb6_CStrLong(n))',
+        'vb6_BSTR_ConcatFree(vb6_BSTR_FromStr(L"n="), vb6_CStrLong(n))',
         'vb6_Format(vb6_VariantLong(n), vb6_BSTR_FromStr(L"#,##0"), 1, 1)')
     Test-EmitcShape "rs_emitc_shape" @("$Tests\test_rawstr.bas") @(
         'vb6_BSTR_FromStr(L"line1\r\nline2")',

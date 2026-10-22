@@ -119,6 +119,23 @@ function Scan-ConcatSites([string]$text) {
     }
 }
 
+# ---- 工具：这一段文本**整枚**是不是一个调用？返回那个被调的名字（不是调用 ⇒ 空）----
+function Get-TopLevelCallee([string]$text) {
+    $t = $text.Trim()
+    if ($t -notmatch '^([A-Za-z_][A-Za-z0-9_]*)\s*\(') { return '' }
+    $name = $Matches[1]
+    # 括号必须**配平到末尾**（f(a)(b) / f(a) + g(b) 都不算「整枚就是一个调用」）
+    $depth = 0
+    for ($i = $t.IndexOf('('); $i -lt $t.Length; $i++) {
+        if ($t[$i] -eq '(') { $depth++ }
+        elseif ($t[$i] -eq ')') {
+            $depth--
+            if ($depth -eq 0) { if ($i -eq $t.Length - 1) { return $name } else { return '' } }
+        }
+    }
+    return ''
+}
+
 # ---- 被检查的语料（够覆盖那一族，又不至于慢到不能进 CI）----
 # 语料里**两档**都要有样例：档 1 = BSTR（多数）、档 2 = VARIANT（少数）。
 #   VARIANT 那一档的样例是 test_builtin_arity.bas（vb6_VariantDate / vb6_VariantLong 当整枚实参）
@@ -153,19 +170,38 @@ foreach ($rel in $samples) {
     for ($i = 0; $i -lt $lines.Count; $i++) {
         $ln = $lines[$i]
         # R4 / R5: 拼接站（vb6_BSTR_Concat / vb6_BSTR_ConcatFree）逐站查
-        $script:concatSites = @()
-        Scan-ConcatSites $ln
+        # ⚠ **#define 那一行不算**：编译期**常量**是**另一条路**折出来的
+        #   （cgen_decl.cpp 的常量折叠：把常量的表达式折成一段文本再发成 #define），
+        #   那条路**不走**表达式生成器 ⇒ 拼接站那一条规则压根没经过它。
+        #   ⇒ 常量里那一串拼接的中间量**仍然漏**（另一族，另记），本哨兵不替它背书。
+        if ($ln.StartsWith('#')) { $script:concatSites = @() } else {
+            $script:concatSites = @()
+            Scan-ConcatSites $ln
+        }
         foreach ($st in $script:concatSites) {
             $totalSites++
             $leftShow = $st.Left.Trim()
             if ($leftShow.Length -gt 100) { $leftShow = $leftShow.Substring(0, 100) + " ..." }
-            # R4: 左操作数里不许出现 _own_（提了名 ⇒ 那条子串判据会翻面 ⇒ 行为变了）
-            if ($st.Left -match '_own_\d+') {
-                $fail += ($rel + " 第 " + ($i + 1) + " 行: 拼接站左操作数里出现了 _own_ ⇒ 拼接站判据会翻面: " + $leftShow)
+            # R4: 拼接站**自己**放掉左操作数（ConcatFree）⇒ 若左操作数**整枚就是**一枚
+            #     被语句末收回的临时量, 就会被放**两次** ⇒ 双放 ⇒ 堆损坏。
+            #     （左操作数**里面**含一枚临时量是安全的: 那一站放掉的是**外层**那个表达式的值,
+            #       不是里面那一枚 ⇒ 里面那一枚仍只由语句末放一次。）
+            if ($st.Left.Trim() -match '^_own_\d+$') {
+                $fail += ($rel + " 第 " + ($i + 1) + " 行: 拼接站的左操作数**整枚就是**一枚临时量 ⇒ 拼接站会放它 + 语句末也放它 ⇒ 双放: " + $leftShow)
             }
-            # R5: 不带 Free 的那一站, 左操作数里不许含 "vb6_BSTR_Concat" 子串
-            if ($st.Name -eq 'vb6_BSTR_Concat' -and $st.Left.Contains('vb6_BSTR_Concat')) {
-                $fail += ($rel + " 第 " + ($i + 1) + " 行: 拼接站发的是 " + $st.Name + " 而左操作数里含 vb6_BSTR_Concat ⇒ 判据翻面: " + $leftShow)
+            # R5: 那一站的**发法**必须与**那条规则**一致（账 #468 §B164）：
+            #     ConcatFree ⇔（左操作数文本含 "vb6_BSTR_Concat" 子串）**或**
+            #                （左操作数整枚是一个 owned 且档是 BSTR 的 mint ⇒ 拼接站自己放掉它）
+            #     少了那一支 ⇒ 那一枚没人放（漏）；多了 ⇒ 放了一枚不该放的（双放/悬空）。
+            $leftMint = Get-TopLevelCallee $st.Left
+            $leftIsOwnedBstr = ($leftMint -ne '' -and $own.ContainsKey($leftMint) -and $own[$leftMint] -eq 'BSTR')
+            $wantFree = ($st.Left.Contains('vb6_BSTR_Concat') -or $leftIsOwnedBstr)
+            $isFree = ($st.Name -eq 'vb6_BSTR_ConcatFree')
+            if ($wantFree -ne $isFree) {
+                $fail += ($rel + " 第 " + ($i + 1) + " 行: 拼接站发的是 " + $st.Name +
+                          " 而按规则该发 " + $(if ($wantFree) { 'vb6_BSTR_ConcatFree' } else { 'vb6_BSTR_Concat' }) +
+                          "（左操作数含拼接子串=" + $st.Left.Contains('vb6_BSTR_Concat') +
+                          " / 左操作数整枚是 owned BSTR mint=" + $leftIsOwnedBstr + "）: " + $leftShow)
             }
         }
         # 新过程入口: 顶格、以 ) { 结尾

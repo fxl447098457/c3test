@@ -2721,7 +2721,18 @@ bool argHasCall464(const std::string& arg) {
     }
     return false;
 }
+// 这一枚文本**整枚**是不是一个「owned 且档是 BSTR」的 mint 调用？
+//   （账 #468 §B164 拼接站那一族：左操作数若是这样一枚，拼接站**自己**放掉它 ⇒ 不漏）
+// 判据全在 src/common/owned_temp_keeps.hpp 一个权威里：档由 mint 出口的 RTL 返回档定
+//   （BSTR 档 ⇒ 拼接站发 ConcatFree 时 vb6_BSTR_Free 放的就是它 ⇒ 放一次，不双放）。
 }  // namespace
+
+bool CCodeGen::exprIsOwnedBstrMint(const std::string& text) {
+    if (!currentProc_) return false;
+    const std::string mint = topLevelCallee464(text);
+    if (mint.empty()) return false;
+    return ownedTempMintKind(mint.c_str()) == 'B';
+}
 
 // 提名**指定那一格**（拼接站的右操作数用；实参站用整张表那一版）。
 // 这一格改写成具名临时量; 返回 true = 提了名。

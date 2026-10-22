@@ -49,6 +49,11 @@ Public Sub Main()
     Debug.Print "T7-chain=" & (a & b & "!" & CStr(n))
     ' (8) a mint inside a bigger expression
     Debug.Print "T8-mix=" & (Len(a & b) + Len(CStr(n)))
+    ' (9) the concat station's LEFT operand is itself a freshly built owned temp
+    '     => the station frees it itself (that is what ledger #468 §B164 adds).
+    '     The value must not move; and if it were freed twice this line would crash.
+    x = "ab" & b
+    Debug.Print "T9-concatleft=" & x
 
     Debug.Print "B164-DONE"
 End Sub
