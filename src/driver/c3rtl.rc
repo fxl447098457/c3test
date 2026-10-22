@@ -1,4 +1,12 @@
 // c3rtl.rc - RTL runtime library embedded as resources
+// 2026-10-23 (ledger #305, ScaleLeft / ScaleTop): the form's custom coordinate
+//   system has four numbers (ScaleLeft / ScaleTop / ScaleWidth / ScaleHeight); only the
+//   last two were wired. `Me.ScaleLeft` / `Me.ScaleTop` had no row in kFormPseudoRows
+//   and fell through to the COM stub `vb6_ComGetIntProp(hwnd, L"ScaleLeft")` = compiles,
+//   runs, reads a constant 0. Added vb6_GetScaleLeft / vb6_GetScaleTop (both ask the same
+//   authority vb6_UserScaleOf; 0 when no coordinate system is set, per VB6) and registered
+//   them formOnly - PictureBox / UserControl / Printer keep failing honestly, not faked.
+
 // 2026-10-15 (账 #305 §B188, 第八十刀): ComObj_Release 的出厂那条腿 (destroyFunc 与
 //   instanceClaimRelease 两处) 以前是本文件三站里唯一没接错误边界的一站 —— 体里没人接住的
 //   错走到 vb6_RaiseError, 那里没帧 ⇒ 打一行 stderr 再 ExitProcess(错误号), 把正在放手的
