@@ -1,0 +1,93 @@
+﻿# check_legacy_view_arg_owners.ps1 - legacy 接口**视图**在被接收那一头只有这几位主人
+#
+# 起因 (2026-10-22, 账 #305 第一百七十二刀): 真语料 Ray.vbp 里 `vb6_iface_<I> { vtbl; obj }`
+# 这枚值结构体站在被赋值/被传参那一头共 23 站。修的时候三条都不许长第二种答案 ——
+# 谁拼 wrap 名 (legacyIfaceWrapFn, 第一百六十六刀)、谁认视图槽 (slotIsLegacyIfaceView,
+# 第一百六十五刀)、谁答视图进装箱 (legacyViewBoxExpr, 第一百七十一刀)、谁把类型名认成
+# 视图槽 (cParamLegacyIfaceSlotName, 本刀新增, 与 cParamClassPtrType 同住一份文件)。
+# 这条线一旦有人自己拼 `vb6_iface_` 前缀、自己查 knownIfaceVars_、或者在别处再发一句
+# `.obj ==`, 同一件事就又有了两位主人 ⇒ 本哨兵按"位数"钉死, 加读者要回台账改数。
+#
+# 规则 (改坏了会红, 不是装饰):
+#   V1  `vb6_iface_` 那一串前缀比较 compare(0, 10, "vb6_iface_") 在代码里恰好 1 处,
+#       且住在 cgen_base_type.cpp (那张形参槽名单出生的地方)。
+#   V2  cParamLegacyIfaceSlotName 恰好 3 处 = 定义 1 (cgen_base_type.cpp) + 声明 1
+#       (cgen_helpers.inc) + 站点 1 (cgen_expr_call_arg_emit.inc)。
+#   V3  legacyIfaceWrapFn( 在代码里恰好 7 处 = 定义 1 + 声明 1 + 调用 5
+#       (Set 那三臂 3 / cgen_com 发定义那 1 / 实参位 1)。
+#   V4  legacyViewBoxExpr( 在代码里恰好 5 处 = 定义 1 + 声明 1 + 调用 3
+#       (wrapVariantValue / boxToVariant / ByRef Variant 实参位)。
+#   V5  slotIsLegacyIfaceView( 在代码里恰好 6 处 = 定义 1 + 声明 1 + 调用 4
+#       (legacyViewBoxExpr 自己 / 腿② 覆写 / 腿③ 置空 / Is 比较那一站)。
+#   V6  视图参与比较那两句发码: `).obj == (` 恰好 1 处、`).obj == NULL` 恰好 2 处,
+#       都住在 cgen_expr_binary.cpp。
+#
+# 用法: powershell -File scripts\check_legacy_view_arg_owners.ps1 [-Root <副本目录>]  (PASS = exit 0)
+
+param([string]$Root = "")
+
+$ErrorActionPreference = "Stop"
+if ($Root -eq "") { $Root = Split-Path -Parent $PSScriptRoot }
+
+$srcDir = Join-Path $Root "src"
+if (-not (Test-Path -LiteralPath $srcDir)) { Write-Host ("FAIL missing src dir: " + $srcDir); exit 1 }
+
+# 只认**代码行**: 以 // 、/* 、* 开头的整行不算, 其余行裁掉行内 // 之后才算。
+$code = @{}
+foreach ($f in Get-ChildItem -LiteralPath $srcDir -Recurse -Include *.cpp,*.h,*.inc -File) {
+    $keep = New-Object System.Collections.Generic.List[string]
+    foreach ($line in [System.IO.File]::ReadAllLines($f.FullName)) {
+        $t = $line.TrimStart()
+        if ($t.StartsWith("//") -or $t.StartsWith("/*") -or $t.StartsWith("*")) { continue }
+        $idx = $line.IndexOf("//")
+        if ($idx -ge 0) { $line = $line.Substring(0, $idx) }
+        $keep.Add($line)
+    }
+    $code[$f.FullName] = $keep
+}
+
+function CountWhere([string]$needle, [string]$fileName) {
+    $n = 0
+    foreach ($kv in $code.GetEnumerator()) {
+        if ($fileName -and ($kv.Key -notlike ("*" + $fileName))) { continue }
+        foreach ($line in $kv.Value) {
+            if ($line.Contains($needle)) { $n++ }
+        }
+    }
+    return $n
+}
+
+$fail = @()
+
+$v1 = CountWhere 'compare(0, 10, "vb6_iface_")' "cgen_base_type.cpp"
+$v1all = CountWhere 'compare(0, 10, "vb6_iface_")' ""
+if ($v1 -ne 1 -or $v1all -ne 1) { $fail += ("V1 前缀名单: 期望 1 处且住在 cgen_base_type.cpp, 实到 本文件=" + $v1 + " 全仓=" + $v1all) }
+
+$v2 = CountWhere "cParamLegacyIfaceSlotName" ""
+if ($v2 -ne 3) { $fail += ("V2 cParamLegacyIfaceSlotName: 期望 3 处(定义+声明+站点), 实到 " + $v2) }
+if ((CountWhere "cParamLegacyIfaceSlotName" "cgen_expr_call_arg_emit.inc") -ne 1) {
+    $fail += "V2 站点: 实参位那一问恰好 1 处才许包视图"
+}
+
+$v3 = CountWhere "legacyIfaceWrapFn(" ""
+if ($v3 -ne 7) { $fail += ("V3 wrap 主人(定义+声明+调用)位数: 期望 7 = 5 处调用 + 定义 + 声明, 实到 " + $v3) }
+
+$v4 = CountWhere "legacyViewBoxExpr(" ""
+if ($v4 -ne 5) { $fail += ("V4 装箱主人(定义+声明+调用)位数: 期望 5 = 3 处调用 + 定义 + 声明, 实到 " + $v4) }
+
+$v5 = CountWhere "slotIsLegacyIfaceView(" ""
+if ($v5 -ne 6) { $fail += ("V5 认视图槽(定义+声明+调用)位数: 期望 6 = 4 处调用 + 定义 + 声明, 实到 " + $v5) }
+
+$v6a = CountWhere ").obj == (" "cgen_expr_binary.cpp"
+$v6b = CountWhere ").obj == NULL" "cgen_expr_binary.cpp"
+if ($v6a -ne 1 -or $v6b -ne 2) {
+    $fail += ("V6 视图比较发码: 期望 ).obj == ( =1 / ).obj == NULL =2, 实到 " + $v6a + " / " + $v6b)
+}
+if ((CountWhere ").obj == " "") -gt 3) { $fail += "V6 视图比较发码在别处又长了读者" }
+
+if ($fail.Count -gt 0) {
+    foreach ($m in $fail) { Write-Host ("FAIL " + $m) }
+    exit 1
+}
+Write-Host ("PASS 前缀名单=1(cgen_base_type.cpp) 形参问句=3 wrap调用=5 装箱调用=3 认槽调用=4 比较发码=1+2")
+exit 0

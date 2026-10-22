@@ -1630,6 +1630,22 @@ function Test-CrossmodUdtMembers {
     }
 }
 
+# ai/022 §B218 (第一百七十二刀): 视图在被接收那一头只有这几位主人 —— wrap 名 / 认视图槽 /
+# 装箱答案 / 形参槽名单 各一处答，加读者要回台账改数 (六条规则各配一枚沙盒负控)
+function Test-LegacyViewArgOwners {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] legacy_view_arg_owners ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\check_legacy_view_arg_owners.ps1" 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        $out | Select-Object -First 8 | ForEach-Object { Write-Host "  $_" }
+    }
+}
+
 # ai/022 §B187 第二腿 (第八十三刀): 泛对象槽的装箱腿只许一站 + coclass 判据只许一处答
 function Test-ObjectSlotBoxing {
     $script:total++
@@ -7012,6 +7028,49 @@ if ($Category -in @("all", "run", "vbp")) {
         "Inner.Row(2)",
         "_vb6_with_0->Coord(2)",
         "b.Items(2)")
+    # <vbeclipse> 回归夹子 (k172_viewarg, 账 #305 第一百七十二刀): legacy 接口的**视图**
+    # (vb6_iface_<I> = 值结构体 {vtbl; obj}) 站在**被接收**那一头的三站, 三站各问一位在册主人,
+    # 没长第二种答案 —— 站B 实例递进视图形参问 legacyIfaceWrapFn (第一百六十六刀);
+    # 站C 视图参与 Is 问 slotIsLegacyIfaceView (第一百六十五刀), 同一性就是 .obj 那一格;
+    # 站E 视图递进 ByRef Variant 形参问 legacyViewBoxExpr (第一百七十一刀, 身份按指针查)。
+    # BASE(= 第一百七十三刀收线那台) 编这份夹具 = 4 发 C2088 + 2 发 C2440、**没有 exe**
+    # (.build/k2392_base_err.txt)；而站E 那一形在 BASE 上是**静默**的: 发的是
+    # `vb6_mdlK172_BoxValue(&v)`, 把 16 字节的视图描述符当 24 字节的 vb6_VARIANT 读 (越界读),
+    # C 侧只是不兼容指针警告 ⇒ 只有门上的针看得见。两台读数一字相同 (.build/k2390_k172_run.txt)。
+    #   K172-pushA=101 / pushB=202   同一枚形参收两枚不同实现类的 Me ⇒ 各拿自己那份 vtbl;
+    #   K172-view2view=101           视图→视图形参 = 值结构体直传, 不许再套一层 wrap (反面证人);
+    #   K172-is-diff=0 / is-same=1   比的是 .obj: 不同实例 False、同一实例 True;
+    #   K172-nothing=1 / after=0     Is Nothing 认未赋值那一格, 接管值后翻面;
+    #   K172-boxtype=0               ⚠ 这一条是**已知欠项的读数**, 不是 VB6 那一面的正确答案:
+    #                                Exe 工程里工程类登记表恒空 (登记腿被 isDll_ 夹着, 账 #407 的
+    #                                欠项), 所以按指针查身份交回 VT_EMPTY。它钉的是"这一站走的是
+    #                                那位主人", 真值那一腿欠 ActiveX 档的正面对手 (任务 #481/#484)。
+    $k172Expected = @(
+        "K172-pushA=101",
+        "K172-pushB=202",
+        "K172-view2view=101",
+        "K172-is-diff=0",
+        "K172-is-same=1",
+        "K172-nothing=1",
+        "K172-after=0",
+        "K172-boxtype=0",
+        "K172-DONE=1")
+    Test-Vbp 'k172_view_arg_wrap' "$Tests\k172_viewarg\K172.vbp" $k172Expected
+    Test-Vbp 'k172_view_arg_wrap_x86' "$Tests\k172_viewarg\K172.vbp" $k172Expected -Arch "x86"
+    Test-EmitcShape "k172_view_arg_shape" @("$Tests\k172_viewarg\K172.vbp") @(
+        "vb6_ret_PushInto = vb6_mdlK172_ViewValue(vb6_iface_IK172_wrap_K172Alpha(me));",
+        "vb6_ret_PushInto = vb6_mdlK172_ViewValue(vb6_iface_IK172_wrap_K172Beta(me));",
+        "if (((v).obj == (w).obj)) {",
+        "if (((v).obj == (u).obj)) {",
+        "if (((nVar).obj == NULL)) {",
+        "vb6_VARIANT _vb6_vararg_0 = vb6_VariantFromProjectInstance((void*)(v).obj);",
+        "vb6_VariantClear(&_vb6_vararg_0);")
+    Test-EmitcAbsent "k172_view_arg_bare_shapes_gone" @("$Tests\k172_viewarg\K172.vbp") @(
+        "vb6_mdlK172_ViewValue(me);",
+        "vb6_mdlK172_BoxValue(&v);",
+        "-(v == w)",
+        "-(v == u)",
+        "-(nVar == NULL)")
     # <vbeclipse> 回归夹子 (b174_numstrarg, 账 #305 §B174 第六十五刀): 数值实参交进内在函数的
     # BSTR 形参。修前 InStr 那一路把 int32_t / double / int16_t 裸交给 wchar_t* —— cl 只给 C4047
     # (在 -W3 之外) ⇒ **编得过**, 而 BASE 那一台在别处 (Mid$(1.1,...) 那类) 拿的是 C2440, 本机
@@ -8994,6 +9053,7 @@ if ($Category -in @("all", "compile")) {
     Test-ProjClassScanBound
     Test-ObjectSlotBoxing
     Test-CrossmodUdtMembers
+    Test-LegacyViewArgOwners
     Test-BoxTempReclaim
     Test-IfaceViewAuthority
     Test-OwnedTempKeeps
