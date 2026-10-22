@@ -313,7 +313,7 @@ if ($rdAsOnly -ne 0) { $bad += ("A8 cgen_redim.cpp 里「声明处只问 As」�
 if ($rdDef -eq 1 -and $rdBodyBoth -ne 1) { $bad += "A8 resolveReDimElemType 的体里没同时问 As 子句与 arrayElemTypes_（只剩一头 = 修前的形状）" }
 if ($rdDef -eq 1 -and $rdBodyMember -ne 1) { $bad += "A8 resolveReDimElemType 不再问点号链 UDT 成员（成员动态数组的元素档又回落 Variant ⇒ 账 #475 的 16/4 字节步长错位回来）" }
 
-# A20: UDT 成员动态数组的元素档只许一位主人 (账 #475 §B220, 第一百七十八刀)
+# A20: UDT 成员动态数组的元素档只许一位主人 (账 #475 §B220, 第一百七十九刀)
 # 修前: `ReDim t.Items(1 To 3)` 走裸名回退, 分配 vb6_sa_variant, 访问 Pattern B 按
 # `VB6_SA_AT(int32_t, t.Items, i)` 4 字节步 —— 16 vs 4。修后成员表那一问收进
 # resolveUdtMemberElemInfo, 复杂目标与点号链目标各问一次, 谁也不许自己抄一份 udtMembers 循环。

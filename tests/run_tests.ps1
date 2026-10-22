@@ -4558,6 +4558,66 @@ if ($Category -in @("all", "run", "bas")) {
     Add-BasTest "test_overflow" "$Tests\test_overflow.bas" $ovfNeedles
     Add-BasTest "test_overflow_x86" "$Tests\test_overflow.bas" $ovfNeedles -Arch "x86"
 
+    # 账 #475 §B220 (第一百七十九刀) 归位: 下面这八份运行期夹具的注册原先被写在 vbp 分类块里,
+    #   而纯 .bas 队列在本块末尾就已消费 ⇒ 门上一次都没跑 (只有它们各自的 EMITC 形状侧在 vbp
+    #   分片上验过)。搬进本块后 x64 / x86 各钉一头。八份 = 定长串收口 (账 #118) / 局部数组载体
+    #   出口销毁 (账 #305 甲·第一百五十六刀) / 整数组赋值 (第一百五十八刀) / Static 局部数组
+    #   (第一百六十刀) / Static 过程存储 (第一百六十一刀) / 带权临时量 (账 #464) / 嵌套载体提升
+    #   (账 #305 甲·第一百六十四刀) / UDT 成员动态数组元素档 (账 #475)。
+    $fsSemNeedles = @(
+        "FS-a-len=5", "FS-a=[ab   ]",                   # 模块级: 短→右补空格
+        "FS-b-len=5", "FS-b=[abcde]",                   # 模块级: 长→截右
+        "FS-c-len=5", "FS-c=[cd   ]",                   # 局部: 短
+        "FS-d-len=5", "FS-d=[cdefg]",                   # 局部: 长
+        "FS-e-len=8", "FS-e=[ef      ]",                # UDT 定长成员: 短
+        "FS-f-len=8", "FS-f=[efghijkl]",                # UDT 定长成员: 长
+        "FS-g-len=5", "FS-g=[ab   ]",                   # Function 返回值槽
+        "FS-h-len=4", "FS-h=[z   ]",                    # Property Get 返回值槽
+        "FS-i-len=4",                                   # ByVal 定长形参: Len=声明长度 (旧: sizeof=8)
+        "FS-j-len=5", "FS-j=[zz   ]", "FS-j2=[zz   ]",  # 借用侧: 收口 + 深拷贝 (改 v 不改 l)
+        "FS-k-len=5", "FS-k=[200  ]",                   # 循环内反复收口
+        "FIXEDSTR-DONE")
+    Add-BasTest "test_fixedstr_sem" "$Tests\test_fixedstr_sem.bas" $fsSemNeedles
+    Add-BasTest "test_fixedstr_sem_x86" "$Tests\test_fixedstr_sem.bas" $fsSemNeedles -Arch "x86"
+    $b156Needles = @("B218-fix-ok=Y", "B219-dyn-ok=Y", "B220-nd-ok=Y",
+                     "B221-alias-leak=1 read=123456", "B222-bound-leak=1 ubound=63",
+                     "B223-give-leak=1 read=246810", "B225-take-leak=0 module-read=123456",
+                     "B226-dst-reclaim-leak=0", "B227-src-copy-leak=0",
+                     "B228-dst-borrowed-leak=1 read=123456", "B224-DONE")
+    Add-BasTest "test_local_array_carrier" "$Tests\test_local_array_carrier.bas" $b156Needles
+    Add-BasTest "test_local_array_carrier_x86" "$Tests\test_local_array_carrier.bas" $b156Needles -Arch "x86"
+    $b158Needles = @("B259-copy=123456 ubound=5 src=999", "B260-fix=234567 ubound=6",
+                     "B261-locfix=345678", "B262-var=22 copy=44",
+                     "B263-hold=5 own=6", "B264-DONE=1")
+    Add-BasTest "test_whole_array_copy" "$Tests\test_whole_array_copy.bas" $b158Needles
+    Add-BasTest "test_whole_array_copy_x86" "$Tests\test_whole_array_copy.bas" $b158Needles -Arch "x86"
+    $b160Needles = @("K160-fix=42 fresh=0", "K160-dyn=7 ub=2 nd=9 freshnd=0",
+                     "K160-copy=123456", "K160-erase=0 ub=3", "K160-ptr=Y", "K160-DONE=1")
+    Add-BasTest "test_static_array" "$Tests\test_static_array.bas" $b160Needles
+    Add-BasTest "test_static_array_x86" "$Tests\test_static_array.bas" $b160Needles -Arch "x86"
+    $b161Needles = @("K161-cnt=1 fa2=77", "K161-cnt=2 fa2=77", "K161-cnt=3 fa2=77",
+                     "K161-a1=3", "K161-a2=6", "K161-a3=9",
+                     "K161-plain=1", "K161-mg=5", "K161-DONE=1")
+    Add-BasTest "test_static_proc" "$Tests\test_static_proc.bas" $b161Needles
+    Add-BasTest "test_static_proc_x86" "$Tests\test_static_proc.bas" $b161Needles -Arch "x86"
+    $b164Needles = @("T1-len=4", "T2-right=ab42", "T3-strcmp=0", "T4-left=ab",
+                      "T5-trap=4!", "T6-assign=abcd", "T7-chain=abcd!42",
+                      "T8-mix=6", "T9-concatleft=abcd", "T10-addright=ab42",
+                      "T10-loop-bad=0", "T11-value=A7", "T11-log=21",
+                      "T12-both=abcd42", "T12-loop-bad=0", "B164-DONE")
+    Add-BasTest "test_b164_owned_temp" "$Tests\test_b164_owned_temp.bas" $b164Needles
+    Add-BasTest "test_b164_owned_temp_x86" "$Tests\test_b164_owned_temp.bas" $b164Needles -Arch "x86"
+    $b164Needles = @("K164-twice=14/2", "K164-nd=10", "K164-dyn=2", "K164-never=1",
+                     "K164-multi=4/6", "K164-top=8", "K164-esc=2", "K164-DONE=1")
+    Add-BasTest "test_nested_array" "$Tests\test_nested_array.bas" $b164Needles
+    Add-BasTest "test_nested_array_x86" "$Tests\test_nested_array.bas" $b164Needles -Arch "x86"
+    $k483Needles = @("K483-long-vt=8195", "K483-long=11,22,33",
+                      "K483-long-preserve=11,22,33,44", "K483-int-vt=8194/5,6",
+                      "K483-dbl-vt=8197/2,3", "K483-str-vt=8200/A,B",
+                      "K483-udt-vt=8204/7,8", "K483-complex-vt=8195/9,10", "K483-DONE")
+    Add-BasTest "k483_redim_member_elem" "$Tests\k483_redim_member_elem.bas" $k483Needles
+    Add-BasTest "k483_redim_member_elem_x86" "$Tests\k483_redim_member_elem.bas" $k483Needles -Arch "x86"
+
     # ---- 注册表自检 (2026-09-30, 门 #233 的教训) --------------------------------
     # 为什么单开一道: `test_variant_boxing` 那条注册里 `\t` 被写成了**真 TAB**
     # (`"$Tests<TAB>est_variant_boxing.bas"`), PowerShell 把它原样传给了 C3 ⇒ 门里读到
@@ -5572,21 +5632,7 @@ if ($Category -in @("all", "run", "vbp")) {
     # 账 #118 运行侧判据: 七个落点的补空格/截断/Len≡N, 双架构。
     # 「初始化用 0 填充」那一条**不在这里钉** —— NUL 在 Debug.Print 上不可见, 见用例头注释;
     # 第 ⑦ 段 `FS-i=[...]` 也**不做判据**: 调用点实参侧的收口本批没做 (用例头写了原因与修法)。
-    $fsSemNeedles = @(
-        "FS-a-len=5", "FS-a=[ab   ]",                   # 模块级: 短→右补空格
-        "FS-b-len=5", "FS-b=[abcde]",                   # 模块级: 长→截右
-        "FS-c-len=5", "FS-c=[cd   ]",                   # 局部: 短
-        "FS-d-len=5", "FS-d=[cdefg]",                   # 局部: 长
-        "FS-e-len=8", "FS-e=[ef      ]",                # UDT 定长成员: 短
-        "FS-f-len=8", "FS-f=[efghijkl]",                # UDT 定长成员: 长
-        "FS-g-len=5", "FS-g=[ab   ]",                   # Function 返回值槽
-        "FS-h-len=4", "FS-h=[z   ]",                    # Property Get 返回值槽
-        "FS-i-len=4",                                   # ByVal 定长形参: Len=声明长度 (旧: sizeof=8)
-        "FS-j-len=5", "FS-j=[zz   ]", "FS-j2=[zz   ]",  # 借用侧: 收口 + 深拷贝 (改 v 不改 l)
-        "FS-k-len=5", "FS-k=[200  ]",                   # 循环内反复收口
-        "FIXEDSTR-DONE")
-    Add-BasTest "test_fixedstr_sem" "$Tests\test_fixedstr_sem.bas" $fsSemNeedles
-    Add-BasTest "test_fixedstr_sem_x86" "$Tests\test_fixedstr_sem.bas" $fsSemNeedles -Arch "x86"
+    # (注册已归位到 bas 块的「八份运行期夹具」段 —— 账 #475 第一百七十九刀。)
     # 账 #119: AssignMove 铺到局部/形参/ByRef 写穿三类目标 (以前只有模块级目标走这条)。
     # 这四行是"机制本体"的直接断言 —— 真跑那只 S119-leak-ok 只说结果, 这里钉的是发码形状:
     #   136 行那条循环体 (Left 的自有临时) / 定长串 String$ / ByRef 形参解引用目标
@@ -8246,13 +8292,7 @@ if ($Category -in @("all", "run", "vbp")) {
     #   第一百五十九刀那一头的负控 = 拿第一百五十八刀的二进制编同一份新夹具 (本机两台):
     #   B226 与 B227 两针同时翻 1 (每调用净漏 346/323 与 102/88 字节，读数 .build/k2086_x64.txt
     #   / k2086_x86.txt)，其余八行一字不动 ⇒ 新针吃得到这一刀的改动。
-    $b156Needles = @("B218-fix-ok=Y", "B219-dyn-ok=Y", "B220-nd-ok=Y",
-                     "B221-alias-leak=1 read=123456", "B222-bound-leak=1 ubound=63",
-                     "B223-give-leak=1 read=246810", "B225-take-leak=0 module-read=123456",
-                     "B226-dst-reclaim-leak=0", "B227-src-copy-leak=0",
-                     "B228-dst-borrowed-leak=1 read=123456", "B224-DONE")
-    Add-BasTest "test_local_array_carrier" "$Tests\test_local_array_carrier.bas" $b156Needles
-    Add-BasTest "test_local_array_carrier_x86" "$Tests\test_local_array_carrier.bas" $b156Needles -Arch "x86"
+    # (注册已归位到 bas 块的「八份运行期夹具」段 —— 账 #475 第一百七十九刀。)
     # 发码两面: 该销毁的六形各发一条 (1D 各形 + ND 那一形带兄弟出口与转型)，
     #   逃逸的四形一条都不许有 —— 反面针钉的是「带注释那一发」的形状, 因为 ReDim 换载体那一发
     #   长得一模一样、只是没有注释 (少了这个限定, 反面针在修前就红了)。
@@ -8282,11 +8322,7 @@ if ($Category -in @("all", "run", "vbp")) {
     #   其余 (模块级 `mFix` / 已经借出去的 `loc` / 只出现在 `UBound(d)` 那种实参位的 `d`) 照旧 NULL。
     #   判据两头都钉: 正面 = 三形交实参 (p / e / 第一百五十六刀夹具的 q、l、q2), 反面 = 那一发 NULL
     #   还在 (mFix / loc / d) 且借出去那一枚的出口销毁仍然缺席 —— 只放该放的那一格。
-    $b158Needles = @("B259-copy=123456 ubound=5 src=999", "B260-fix=234567 ubound=6",
-                     "B261-locfix=345678", "B262-var=22 copy=44",
-                     "B263-hold=5 own=6", "B264-DONE=1")
-    Add-BasTest "test_whole_array_copy" "$Tests\test_whole_array_copy.bas" $b158Needles
-    Add-BasTest "test_whole_array_copy_x86" "$Tests\test_whole_array_copy.bas" $b158Needles -Arch "x86"
+    # (注册已归位到 bas 块的「八份运行期夹具」段 —— 账 #475 第一百七十九刀。)
     Test-EmitcShape 'b158_whole_array_assign_goes_through_the_copy' @(
         "$Tests\test_whole_array_copy.bas") @(
         'd = vb6_ArrayAssign1D(NULL, b);',
@@ -8325,10 +8361,7 @@ if ($Category -in @("all", "run", "vbp")) {
     #     `static T* x = NULL;` + 一发拿指针本身当首轮守卫 (C 不许静态局部用非常量初始化器，Fix 084aa 那条老规矩)。
     #     inStaticProc_ 那一档今天判不了：parser 从不给过程头传 isStatic (parser_decl.cpp:35/40/95/100 全传 false)，
     #     实测 `Static Sub Foo()` 交 VB2001 ⇒ 另开一条账，本刀的针只覆盖显式 Static 那一形。
-    $b160Needles = @("K160-fix=42 fresh=0", "K160-dyn=7 ub=2 nd=9 freshnd=0",
-                     "K160-copy=123456", "K160-erase=0 ub=3", "K160-ptr=Y", "K160-DONE=1")
-    Add-BasTest "test_static_array" "$Tests\test_static_array.bas" $b160Needles
-    Add-BasTest "test_static_array_x86" "$Tests\test_static_array.bas" $b160Needles -Arch "x86"
+    # (注册已归位到 bas 块的「八份运行期夹具」段 —— 账 #475 第一百七十九刀。)
     # 发码两面：静态那六形各发一条 static 声明；同一过程里普通 Dim 那三形一条都不许带上前缀，
     #   而动态那一支 (初值本来就是 NULL) 不许多发一发守卫 —— 发了就挡住用户 ReDim 那一发的退旧。
     Test-EmitcShape 'b160_static_array_decls_get_static_storage' @(
@@ -8354,11 +8387,7 @@ if ($Category -in @("all", "run", "vbp")) {
     #   mg = 模块级 Static 数组那一档不受本刀影响 (Static 后面跟标识符，仍走变量声明那条老路)。
     #   负控 = 拿门 #830 那台二进制 (gh run download 取的 CI 产物) 编同一份夹具：两条 VB2001
     #   expected variable name (行 12 与行 22 那两个过程头)，压根进不了发码阶段。
-    $b161Needles = @("K161-cnt=1 fa2=77", "K161-cnt=2 fa2=77", "K161-cnt=3 fa2=77",
-                     "K161-a1=3", "K161-a2=6", "K161-a3=9",
-                     "K161-plain=1", "K161-mg=5", "K161-DONE=1")
-    Add-BasTest "test_static_proc" "$Tests\test_static_proc.bas" $b161Needles
-    Add-BasTest "test_static_proc_x86" "$Tests\test_static_proc.bas" $b161Needles -Arch "x86"
+    # (注册已归位到 bas 块的「八份运行期夹具」段 —— 账 #475 第一百七十九刀。)
     # 账 #464 §B164 (第一百六十四刀): 「一条语句里现造的带权临时量」提成具名临时量 `_own_N`
     #   之后**语句末按档收回**（BSTR ⇒ vb6_BSTR_Free / VARIANT ⇒ vb6_VariantClear）。
     #   夹具九格: T1 整枚实参 = 拼接 / T2 拼接站的右操作数 / T3 双实参另一格是纯字面量 /
@@ -8376,13 +8405,7 @@ if ($Category -in @("all", "run", "vbp")) {
     #      日志读数 "21" 是 C3/MSVC 的现状（实参从右往左），VB 参考是 "12" —— 那条差异
     #      早于本刀、另账；这里只钉「本刀没有把它挪动」。
     #   x64 与 x86 读数必须**逐行相同**（提了名只是把回收提前, 值不许变）。
-    $b164Needles = @("T1-len=4", "T2-right=ab42", "T3-strcmp=0", "T4-left=ab",
-                      "T5-trap=4!", "T6-assign=abcd", "T7-chain=abcd!42",
-                      "T8-mix=6", "T9-concatleft=abcd", "T10-addright=ab42",
-                      "T10-loop-bad=0", "T11-value=A7", "T11-log=21",
-                      "T12-both=abcd42", "T12-loop-bad=0", "B164-DONE")
-    Add-BasTest "test_b164_owned_temp" "$Tests\test_b164_owned_temp.bas" $b164Needles
-    Add-BasTest "test_b164_owned_temp_x86" "$Tests\test_b164_owned_temp.bas" $b164Needles -Arch "x86"
+    # (注册已归位到 bas 块的「八份运行期夹具」段 —— 账 #475 第一百七十九刀。)
     # 发码两面（账 #473）：`+` 当拼接站的右操作数现在提成 `_own_N`（正向），旧的
     #   裸传形状 `vb6_BSTR_Concat(a, vb6_CStrLong(n))` 必须消失（反向）。
     #   同一条 `+` 站的门 ⑩ 负控：左操作数有调用 ⇒ 右操作数不许提名 ⇒ 两枚调用仍内联。
@@ -8420,18 +8443,13 @@ if ($Category -in @("all", "run", "vbp")) {
         "$Tests\test_static_proc.bas") @(
         'static int32_t n2 = 0;',
         'if (mg == NULL) {')
-    # 账 #475 §B220 (第一百七十八刀): UDT 成员动态数组 (`ReDim t.Numbers(...)`) 的元素档改问
+    # 账 #475 §B220 (第一百七十九刀): UDT 成员动态数组 (`ReDim t.Numbers(...)`) 的元素档改问
     #   成员表。诊断口径 = VarType(数组) (它读描述符自己的档, 不是访问宏的假设): 修前一律 8204
     #   (vtArray|vtVariant), 修后按声明 vtArray|vt<type> —— Long 8195 / Integer 8194 /
     #   Double 8197 / String 8200, UDT 成员仍 8204 (那一档原本就对)。complex 那一格钉住
     #   `ReDim arr(1).Longs(...)` 的 node.varName 只是基数组名, 裸名回退不许再命中基数组元素 UDT。
     #   两台 (x64 / x86) 读数必须逐行相同。
-    $k483Needles = @("K483-long-vt=8195", "K483-long=11,22,33",
-                      "K483-long-preserve=11,22,33,44", "K483-int-vt=8194/5,6",
-                      "K483-dbl-vt=8197/2,3", "K483-str-vt=8200/A,B",
-                      "K483-udt-vt=8204/7,8", "K483-complex-vt=8195/9,10", "K483-DONE")
-    Add-BasTest "k483_redim_member_elem" "$Tests\k483_redim_member_elem.bas" $k483Needles
-    Add-BasTest "k483_redim_member_elem_x86" "$Tests\k483_redim_member_elem.bas" $k483Needles -Arch "x86"
+    # (注册已归位到 bas 块的「八份运行期夹具」段 —— 账 #475 第一百七十九刀。)
     # 发码两面 (账 #475): 点号链与复杂目标的分配档按成员声明走; 旧的 vb6_sa_variant 兜底绝迹。
     Test-EmitcShape 'k483_member_elem_flavour_by_declaration' @(
         "$Tests\k483_redim_member_elem.bas") @(
@@ -8461,10 +8479,7 @@ if ($Category -in @("all", "run", "vbp")) {
     #       逃逸、出口照旧不碰 (2)。
     #   负控 = 同一台新二进制带 C3_NO_HOIST=1 发码: 序言那五枚指针一枚都不发、守卫一发都不发、出口那一发
     #     对 q / m / z / p / r 全不点名 (读数 .build/k2191_emit164_nohoist.c) = 闸① 跟着提升那一位主人答。
-    $b164Needles = @("K164-twice=14/2", "K164-nd=10", "K164-dyn=2", "K164-never=1",
-                     "K164-multi=4/6", "K164-top=8", "K164-esc=2", "K164-DONE=1")
-    Add-BasTest "test_nested_array" "$Tests\test_nested_array.bas" $b164Needles
-    Add-BasTest "test_nested_array_x86" "$Tests\test_nested_array.bas" $b164Needles -Arch "x86"
+    # (注册已归位到 bas 块的「八份运行期夹具」段 —— 账 #475 第一百七十九刀。)
     Test-EmitcShape 'b164_nested_carrier_decl_lands_in_prelude' @(
         "$Tests\test_nested_array.bas") @(
         'vb6_SafeArray1D* q = NULL;',
