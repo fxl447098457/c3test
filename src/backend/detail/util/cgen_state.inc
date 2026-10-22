@@ -408,6 +408,33 @@
     int ansiCounter_ = 0;
     int vcmpCounter_ = 0;  // P25: Variant比较临时变量计数器
 
+    // 账 #464 §B164 回收刀: 一条语句里现造的带权临时量（**整枚实参 = 一个 mint 调用**）
+    // 提成具名临时量之后, 语句末按**档**收回。
+    // 档: 1 = BSTR（vb6_BSTR_Free）· 2 = VARIANT（vb6_VariantClear(&t)）。
+    // 档号**只由 mint 出口的返回档定**（owned_temp_keeps.hpp 的 [own] 节）——
+    // 源表达式的 VB 档不作数, 消费者的 VB 形参档也不作数。
+    // 连着记下**发声明时那层的缩进**: 语句末的收回行只在同层落地, 层不同就说明声明发在
+    // 一对已经合上的花括号里 ⇒ 那时**宁可不收**也不许发成引用越界的 C（同 boxTempsToClear_）。
+    struct OwnedTemp { std::string name; int level; int kind; };
+    std::vector<OwnedTemp> ownedTempsToFree_;
+    int ownedTempCounter_ = 0;
+    // 拼接站左操作数守卫: 左操作数的**发码文本**被拼接站那条「含 vb6_BSTR_Concat 子串」的
+    // 判据读过 ⇒ 左操作数里的一切**不许提名**（提了名那条判据会翻面 ⇒ 行为变了）。
+    // 左操作数发码期间把计数抬起来, 右操作数发码期间落回去（递归地护住每一层的左操作数）。
+    int concatLeftDepth_ = 0;
+    // 当前**语句**所在的那一层（emitStmtList 每进一条语句记一次）——
+    // 回收刀只在「这一枚临时量的声明与它的收回落在同一层」时才提名：
+    // 声明发在语句这一层 ⇒ 语句末的收回行也发在语句这一层 ⇒ 同作用域，引用不越界。
+    // 声明若发在更深的块里（那一层的块已经合上了）⇒ 宁可不收。
+    int stmtLevel_ = 0;
+    // 账 #464 §B164: **块内条件**的深度 —— 回收刀的门 ⑨。
+    // 有一类表达式是在**块已经开起来之后**才求值的：ElseIf 的条件
+    //   （生成器发成 `} else {` + 条件 + `if (...) {`，见 visit(IfStmt) 的 Fix 063b）
+    //   —— 那一枚临时量的**声明**因此落在 else 块**内**，而语句末的收回行落在 else 块**外**
+    //   ⇒ 引用越界（cl C2065: '_own_N': 未声明的标识符）。
+    // 这一格只许在「块内条件」里挡下提名（宁可不收 ⇒ 与基线同漏，不新增漏）。
+    int blockCondDepth_ = 0;
+
     // 已知COM对象变量名集合 (小写) - 用于后期绑定 obj.Method → vb6_ComCall(obj, L"Method", ...)
     std::unordered_set<std::string> knownObjectVars_;
 

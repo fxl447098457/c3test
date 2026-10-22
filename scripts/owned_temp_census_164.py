@@ -12,6 +12,12 @@
 #     ③ 站点的形状 = 「整枚实参 = 一个 mint 调用」—— 站点取**发码文本**（--emit-c），
 #        所以「消费者第几格」取的是**发码里那一格的位号**（不是 VB 实参下标）
 #
+# 追记（账 #464 §B164 落地时加的，不动 #463 那行里的数字）：
+#   实现里还多两道门，本工具**没有**建模（下面的数字是**上界**）：
+#     门 ⑨ ElseIf 的条件（那一枚的声明落在 else 块内、收回落在块外 ⇒ 引用越界）
+#     门 ⑩ 拼接站右操作数提名时，左操作数不许含调用（求值次序不许动）
+#   两道门只会**减少**提名面 ⇒ 上面的数字仍然是上界。
+#
 # 跑法:
 #   python scripts/owned_temp_census_164.py --dump     # 只把语料发码落到缓存
 #   python scripts/owned_temp_census_164.py            # 清点 + 机械证明
@@ -213,12 +219,27 @@ def main():
             return 0
         return 1
 
+    # ---- 拼接站左操作数那一族: 左操作数的**发码文本**被拼接站那条
+    #      「含 vb6_BSTR_Concat 子串」的判据读过 ⇒ 左操作数里的一切不许提名
+    #      （提了名那条判据会翻面 ⇒ 行为变了）。发码这一侧用 concatLeftDepth_ 护住。
+    CONCAT_STATIONS = ('vb6_BSTR_Concat', 'vb6_BSTR_ConcatFree')
+
+    def arg_has_call(text):
+        for i in range(len(text) - 1):
+            if text[i] != '(':
+                continue
+            j = i
+            while j > 0 and (text[j - 1].isalnum() or text[j - 1] == '_'):
+                j -= 1
+            if j != i:
+                return True
+        return False
+
     nom = []
     shapes = collections.Counter()
-    for path in sorted(os.listdir(CACHE)):
-        if not path.endswith('.c'):
-            continue
-        code = strip_code(open(os.path.join(CACHE, path), encoding='latin-1').read())
+
+    def scan(code, protected):
+        """扫一段发码文本; protected = 处在拼接站左操作数里（那里不许提名）"""
         i = 0
         while i < len(code):
             m = IDENT.match(code, i)
@@ -229,7 +250,8 @@ def main():
                 if c < 0:
                     i += 1
                     continue
-                for slot, a in enumerate(split_args(code, o, c)):
+                args = split_args(code, o, c)
+                for slot, a in enumerate(args):
                     mm = CALL.match(a)
                     if not mm or a.count('(') != a.count(')'):
                         continue
@@ -237,27 +259,43 @@ def main():
                     kind = mint_kind(mint)
                     if not kind:
                         continue
-                    if not verdict(consumer, slot):
-                        continue
-                    nom.append((path[:-2], consumer, slot, mint, kind))
-                    shapes[(mint, kind, consumer, slot)] += 1
+                    if not protected:
+                        # 别的实参有没有调用？（有 ⇒ 提名单会改动求值次序 ⇒ 不提名）
+                        others_pure = True
+                        for j in range(len(args)):
+                            if j == slot:
+                                continue
+                            if arg_has_call(args[j]):
+                                others_pure = False
+                        if others_pure and verdict(consumer, slot):
+                            nom.append((consumer, slot, mint, kind))
+                            shapes[(mint, kind, consumer, slot)] += 1
+                    # 拼接站的**左操作数**（slot 0）整支受保护 ⇒ 递归进去时带上 protected
+                    if consumer in CONCAT_STATIONS and slot == 0:
+                        scan(a, True)
                 i = m.end()
                 continue
             i += 1
 
-    print('\nnomination set =', len(nom), ' in', len({n[0] for n in nom}), 'files')
+    for path in sorted(os.listdir(CACHE)):
+        if not path.endswith('.c'):
+            continue
+        code = strip_code(open(os.path.join(CACHE, path), encoding='latin-1').read())
+        scan(code, False)
+
+    print('\nnomination set =', len(nom))
     proofs = [
-        ('intersect closed', sum(1 for n in nom if n[1] in closed)),
-        ('intersect borrow', sum(1 for n in nom if n[3] in borrowed)),
-        ('intersect alias', sum(1 for n in nom if n[3] in alias)),
-        ('intersect consumes', sum(1 for n in nom if (n[1], n[2]) in consumes)),
+        ('intersect closed', sum(1 for n in nom if n[0] in closed)),
+        ('intersect borrow', sum(1 for n in nom if n[2] in borrowed)),
+        ('intersect alias', sum(1 for n in nom if n[2] in alias)),
+        ('intersect consumes', sum(1 for n in nom if (n[0], n[1]) in consumes)),
     ]
     bad = 0
     for name, v in proofs:
         print('  proof %-20s = %d' % (name, v))
         if v != 0:
             bad += 1
-    b = sum(1 for n in nom if n[4] == 'B')
+    b = sum(1 for n in nom if n[3] == 'B')
     print('  kinds: BSTR = %d  VARIANT = %d' % (b, len(nom) - b))
     print('\n--- top shapes ---')
     for (mint, kind, cons, slot), n in shapes.most_common(25):

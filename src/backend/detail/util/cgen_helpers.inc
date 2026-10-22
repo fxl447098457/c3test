@@ -98,6 +98,34 @@
     // 上面那一问的第二形, 单独露出来是给哨兵与后来的站点(§B164 形⑥ 那一站)当口径用的。
     bool exprBorrowsBstrStorage(Expr* rhs, const std::string& rawC) const;
 
+    // 账 #464 §B164 回收刀: 在**发码的实参表**上提名「整枚实参 = 一个 mint 调用」的那一格,
+    // 把它提成一个**具名临时量**, 语句末按**档**收回。
+    //
+    // 提名的口径全部来自 src/common/owned_temp_keeps.hpp（那张表由
+    // scripts/check_owned_temp_keeps.ps1 从 RTL **推导** ⇒ 哨兵双向对账 ⇒ 漂不了）:
+    //   ① 档号 = **mint 出口的返回档**（BSTR / VARIANT），**不是**消费者的 VB 形参档
+    //      （#461 拿形参档当 C 档 ⇒ 一枚 double 被声明成 BSTR ⇒ cl C2440）
+    //   ② 消费者那一格：不带走指针（keeps=0）· 不在 closed 族 · **不在消费轴**上
+    //      （消费者自己放掉这一格 ⇒ 再放就是双放 ⇒ 堆损坏）
+    //   ③ mint 出口在 [own] 节（新造且归我们所有）—— 借来/别名/「返回值是形参」一律不提名
+    // 另外三道「宁可不收」的闸（发码这一侧独有的）：
+    //   ④ **只提名单实参的调用** —— 多实参时把一枚实参提成临时量会**改动求值次序**
+    //      （那一枚提前到调用之前求值，而基线里实参的求值次序本来就是编译器定的）
+    //   ⑤ **拼接站的左操作数里的一切不提名** —— 拼接站那条判据读的是**左操作数的发码文本**
+    //      （"左文本里含 vb6_BSTR_Concat 子串" ⇒ 发 ConcatFree，而 ConcatFree 放掉左操作数）
+    //      ⇒ 提了名那条子串判据会**翻面** ⇒ 行为变了（台账 #463 记的那条暗道）
+    //   ⑥ 文件作用域（!currentProc_）不收 —— 那里没有「语句末」可以收回
+    //
+    // 返回 true = argList 被改写过（有临时量提了出来）。
+    bool hoistOwnedTempArgs(std::string& argList, const std::string& callee);
+
+    // 同一把刀的**单格**那一版：只提名**指定的那一格**（拼接站的右操作数用 ——
+    // 左操作数那条「含 vb6_BSTR_Concat 子串」的判据不许动，右操作数可以）。
+    // 拼接站那一格是安全的：左操作数**在右操作数之前就已经求完值**了（发码时先发左后发右），
+    // ⇒ 把右操作数提成临时量**不动求值次序**。
+    bool hoistOwnedTempSlot(std::string& arg, const std::string& consumer, int slot,
+                            const std::string& siblingText = "");
+
     // Fix 198: 装箱点上的布尔口径修正. `As Boolean` 在 C 层就是 int16_t (与 Integer
     // 同型), 布尔字面量又是裸 (-1) (int) → 交给 _Generic vb6_VariantFromValue 会分别
     // 选到 short:/int: 分支, 装箱成 VT_I2 / VT_I4: 实测 VarType(b)=2、

@@ -80,7 +80,14 @@ void CCodeGen::visit(BinaryExpr& node) {
         if (inferExprType(*sib) == Vb6Type::String) return "BSTR";
         return "Long";
     };
+    // 账 #464 §B164: 拼接站那条判据读的是**左操作数的发码文本**（"左文本里含
+    // vb6_BSTR_Concat 子串" ⇒ 发 vb6_BSTR_ConcatFree，而 ConcatFree 会放掉左操作数）
+    // ⇒ 左操作数里的一切**不许**被回收刀提名（提了名那条子串判据会翻面 ⇒ 行为变了）。
+    // 左操作数发码期间把计数抬起来, 右操作数发码期间落回去（递归地护住每一层的左操作数）。
+    const bool guardConcatLeft464 = (node.op == BinaryOp::Concat);
+    if (guardConcatLeft464) ++concatLeftDepth_;
     emitExpr(*node.left);
+    if (guardConcatLeft464) --concatLeftDepth_;
     // COM标记解析: 如果左操作数是COM属性, 解析为值
     // P24-02: 算术运算默认Long解包
     if (isComMarker_) {
@@ -110,6 +117,14 @@ void CCodeGen::visit(BinaryExpr& node) {
     if (node.op == BinaryOp::Concat) {
         left = wrapToBSTR(left, *node.left);
         right = wrapToBSTR(right, *node.right);
+        // 账 #464 §B164 回收刀: **右操作数**若是「整枚就是一个 mint 调用」, 提成具名临时量,
+        // 语句末按档收回（拼接站这一族是漏面里最大的一支: 右操作数没人放）。
+        // 为什么只动右操作数: ① 左操作数的**发码文本**被下面那条「含 vb6_BSTR_Concat 子串」的
+        //    判据读过 ⇒ 动它那条判据会翻面（ConcatFree ⇢ Concat）⇒ 行为变了 ⇒ 不许动;
+        // ② 右操作数是安全的: 左操作数**在右操作数之前就已经求完值**了（发码时先发左后发右），
+        //    ⇒ 把右操作数提成临时量**不动求值次序**。
+        // ③ 判据本身（现造? 消费者留不留? 消费者自己放不放? closed?）全在头里那位主人身上。
+        hoistOwnedTempSlot(right, "vb6_BSTR_Concat", 1, left);
         bool leftIsConcat = (left.find("vb6_BSTR_Concat") != std::string::npos);
         if (leftIsConcat) {
             lastExpr_ = "vb6_BSTR_ConcatFree(" + left + ", " + right + ")";

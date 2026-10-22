@@ -1710,6 +1710,22 @@ function Test-OwnedTempSemantics {
     }
 }
 
+# 账 #464 §B164 (第一百六十四刀): 「现造的带权临时量」提成具名临时量之后**收回**的那一族发码形状 ——
+# 档对不对 / 放几次 / 用完才放 / 拼接站那条暗道没被动过 / 判据没翻面 / 声明与收回同过程。
+function Test-OwnedTempReclaim {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] owned_temp_reclaim ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\check_owned_temp_reclaim.ps1" 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        $out | Select-Object -First 8 | ForEach-Object { Write-Host "  $_" }
+    }
+}
+
 # 账 #305 #416 (第九十三刀): 文本进严格转换的那一句解析只许问 oleaut32 一次 + 两位桥分开
 function Test-ConvStrictParse {
     $script:total++
@@ -3623,7 +3639,11 @@ if ($Category -in @("all", "run", "bas")) {
         'vb6_B171Main_EchoBack(&(h->PV  /* class var .PV field variant */))',
         'vb6_B171Main_Mutate(&(h->PV  /* class var .PV field variant */))',
         'vb6_B171Main_EchoBack(&(_vb6_with_0->PN  /* With class .PN field variant */))',
-        'vb6_Len(vb6_VariantToString(h->PV  /* class var .PV field variant */))',
+        # 账 #464 §B164: 那一格 (Len 的实参) 现在是**一枚具名带权临时量** ——
+        # 转换本身 (vb6_VariantToString) 没变, 只是它落进了临时量的声明里, 语句末按档收回。
+        # ⇒ 钉的形状从「内联」改成「声明 + 引用」两枚 (档 = BSTR ⇒ 收回用 vb6_BSTR_Free)。
+        'BSTR _own_1 = vb6_VariantToString(h->PV  /* class var .PV field variant */);',
+        'vb6_CStrLong(vb6_Len(_own_1))',
         'vb6_B171Main_EchoBack((&(vb6_VARIANT){.vt=VT_BSTR, .bstrVal=h->PS  /* class var .PS field */}))'
     )
     Test-EmitcAbsent 'b171_class_slot_arg_lesion' @(
@@ -3672,8 +3692,13 @@ if ($Category -in @("all", "run", "bas")) {
         'vb6_InStr(1, vb6_VariantToString((*h)->PV  /* class var .PV field variant */)',
         'vb6_InStr(1, vb6_VariantToString(m_h->PV  /* class var .PV field variant */)',
         'vb6_InStr(1, vb6_VariantToString(VB6_SA_AT(vb6_VARIANT, a, 1))',
-        'vb6_Len(vb6_VariantToString(u.UV))',
-        'vb6_InStr(1, s, vb6_BSTR_FromStr(L"t"))'
+        # 账 #464 §B164: 这两格 (Len 的实参 / needle 位的字面量) 现在是**具名带权临时量** ——
+        # 转换与字面量本身没变, 只是落进了临时量的声明里, 语句末按档收回 ⇒ 钉的形状改成
+        # 「声明 + 引用」两枚 (档 = BSTR ⇒ 收回用 vb6_BSTR_Free)。
+        'BSTR _own_1 = vb6_VariantToString(u.UV);',
+        'vb6_CStrLong(vb6_Len(_own_1))',
+        'BSTR _own_4 = vb6_BSTR_FromStr(L"t");',
+        'vb6_InStr(1, s, _own_4)'
     )
     Test-EmitcAbsent 'b173_udt_slot_arg_lesion' @(
         "$Tests\b173_udtarg\B173Main.bas", "$Tests\b173_udtarg\B173Holder.cls") @(
@@ -3698,8 +3723,13 @@ if ($Category -in @("all", "run", "bas")) {
         'vb6_InStr(1, vb6_CStrDbl(d), vb6_BSTR_FromStr(L"5"))',
         'vb6_InStr(1, vb6_CStrBool(b), vb6_BSTR_FromStr(L"-1"))',
         'vb6_InStr(1, vb6_VariantToString(u.UV), vb6_BSTR_FromStr(L"t"))',
-        'vb6_Left(vb6_CStrULong(q), 10)',
-        'vb6_InStr(2, s, vb6_BSTR_FromStr(L"t"))',
+        # 账 #464 §B164: 这两格 (Left 的实参 / needle 位的字面量) 现在是**具名带权临时量** ——
+        # 转换与字面量本身没变, 只是落进了临时量的声明里, 语句末按档收回 ⇒ 钉的形状改成
+        # 「声明 + 引用」两枚 (档 = BSTR ⇒ 收回用 vb6_BSTR_Free)。
+        'BSTR _own_6 = vb6_CStrULong(q);',
+        'vb6_Left(_own_6, 10)',
+        'BSTR _own_7 = vb6_BSTR_FromStr(L"t");',
+        'vb6_InStr(2, s, _own_7)',
         '(int32_t)sizeof(n)',
         '(int32_t)sizeof(vb6_type_U74)'
     )
@@ -3801,7 +3831,10 @@ if ($Category -in @("all", "run", "bas")) {
         'vb6_MsgBox(vb6_VariantToString(vP), vb6_VariantToLong(vBtn), vb6_VariantToString(vTitle))',
         'vb6_SendKeys(vb6_VariantToString(vKeys), vb6_VariantToLong(vWait))',
         'vb6_SetAttr(vb6_VariantToString(vName), vb6_VariantToLong(vAttr))',
-        'vb6_SavePicture(pic, vb6_VariantToString(vName))',
+        # 账 #464 §B164: 那一格 (SavePicture 的实参) 现在是**一枚具名带权临时量** ——
+        # 转换本身没变, 只是它落进了临时量的声明里, 语句末按档收回。
+        'BSTR _own_5 = vb6_VariantToString(vName);',
+        'vb6_SavePicture(pic, _own_5)',
         'vb6_InStr(vb6_VariantToLong(vS3), w1, vNeedle)',
         'vb6_InStrC(vb6_VariantToLong(vS3), w1, vb6_BSTR_FromStr(L"7"), vb6_VariantToLong(vCmp))',
         'vb6_InStr(vb6_VariantToLong(vS4), s1, vb6_BSTR_FromStr(L"7"))',
@@ -3857,17 +3890,29 @@ if ($Category -in @("all", "run", "bas")) {
     # + 一枚 haystack 位照旧解包（宏不按那一维分派 ⇒ 那一位的折是必须的，别跟着改）。
     Test-EmitcShape 'b177_instr_needle_shape' @(
         "$Tests\b177_instr_needle.bas") @(
-        'vb6_InStr(1, hay, vb6_CStrLong(7))',
-        'vb6_InStr(1, hay, vb6_CStrLong(nLong))',
-        'vb6_InStr(2, hay, vb6_CStrLong(7))',
-        'vb6_InStr(2, hay, vb6_CStrLong(nLong))',
-        'vb6_InStrC(1, hay, vb6_CStrLong(nLong), 1)',
-        'vb6_InStrC(2, hay, vb6_CStrLong(nLong), 1)',
+        # 账 #464 §B164: needle 位 / haystack 位上**现造**的那些带权临时量现在都**提了名**
+        #   (BSTR _own_N = ...; 实参换成 _own_N; 语句末 vb6_BSTR_Free(_own_N);) ——
+        #   转换本身 (vb6_CStrLong / vb6_VariantToString) 没变, 只是落进了声明里。
+        # ⇒ 钉的形状从「内联」改成「声明 + 引用」两枚 (档 = BSTR)。
+        'BSTR _own_1 = vb6_CStrLong(7);',
+        'vb6_InStr(1, hay, _own_1)',
+        'BSTR _own_2 = vb6_CStrLong(nLong);',
+        'vb6_InStr(1, hay, _own_2)',
+        'BSTR _own_3 = vb6_CStrLong(7);',
+        'vb6_InStr(2, hay, _own_3)',
+        'BSTR _own_4 = vb6_CStrLong(nLong);',
+        'vb6_InStr(2, hay, _own_4)',
+        'BSTR _own_5 = vb6_CStrLong(nLong);',
+        'vb6_InStrC(1, hay, _own_5, 1)',
+        'BSTR _own_6 = vb6_CStrLong(nLong);',
+        'vb6_InStrC(2, hay, _own_6, 1)',
         'vb6_InStr(1, hay, vStr)',
         'vb6_InStrC(1, hay, vStr, 1)',
         'vb6_InStrC(wNum, wHay, wVar, vb6_VariantToLong(wCmp))',
-        'vb6_InStr(1, vb6_VariantToString(wVar), wHay)',
-        'vb6_InStr(wNum, wHay, vb6_CStrLong(7))'
+        'BSTR _own_9 = vb6_VariantToString(wVar);',
+        'vb6_InStr(1, _own_9, wHay)',
+        'BSTR _own_10 = vb6_CStrLong(7);',
+        'vb6_InStr(wNum, wHay, _own_10)'
     )
     # 反针：前两枚 = 六十七刀丢掉的那一半（裸数值进 needle 位），中两枚 = 多折的那一半
     # （needle 位被预先解包），第五枚钉「不许二次折」，最后一枚钉四参形也不许预先解包。
@@ -4340,7 +4385,10 @@ if ($Category -in @("all", "run", "bas")) {
         'v = vb6_VariantFromComResult(vb6_ComGetProp(at, L"value"));',
         'vb6_BSTR_Assign(&s1, vb6_VariantToString(vb6_VariantFromComResult(vb6_ComGetProp(at, L"value"))));',
         'vb6_BSTR_Assign(&s2, vb6_VariantToString(vb6_VariantFromComResult(vb6_ComGetProp(at, L"value"))));',
-        'n = vb6_Len(vb6_VariantToString(vb6_VariantFromComResult(vb6_ComGetProp(at, L"value"))))'
+        # 账 #464 §B164: 那一格 (Len 的实参) 现在是**一枚具名带权临时量** ——
+        # 转换本身没变, 只是它落进了临时量的声明里, 语句末按档收回。
+        'BSTR _own_1 = vb6_VariantToString(vb6_VariantFromComResult(vb6_ComGetProp(at, L"value")));',
+        'n = vb6_Len(_own_1);'
     )
     # 两面钉：证人（同一次读取里 nodeName 是真 BSTR 档，必须仍走 GetStringProp）+ 反面 —— 一旦有人
     # 让上下文或成员名去猜档，这两种形状就会进场。
@@ -8076,6 +8124,17 @@ if ($Category -in @("all", "run", "vbp")) {
                      "K161-plain=1", "K161-mg=5", "K161-DONE=1")
     Add-BasTest "test_static_proc" "$Tests\test_static_proc.bas" $b161Needles
     Add-BasTest "test_static_proc_x86" "$Tests\test_static_proc.bas" $b161Needles -Arch "x86"
+    # 账 #464 §B164 (第一百六十四刀): 「一条语句里现造的带权临时量」提成具名临时量 `_own_N`
+    #   之后**语句末按档收回**（BSTR ⇒ vb6_BSTR_Free / VARIANT ⇒ vb6_VariantClear）。
+    #   夹具八格: T1 整枚实参 = 拼接 / T2 拼接站的右操作数 / T3 双实参另一格是纯字面量 /
+    #   T4 双实参那一格在头 / T5 **拼接站暗道**（mint 在左操作数里 ⇒ 不许提名, 读数不许动）/
+    #   T6 赋值站（那一格归赋值站管, 不归本刀）/ T7 链式拼接 / T8 更大的表达式里的一枚。
+    #   x64 与 x86 读数必须**逐行相同**（提了名只是把回收提前, 值不许变）。
+    $b164Needles = @("T1-len=4", "T2-right=ab42", "T3-strcmp=0", "T4-left=ab",
+                      "T5-trap=4!", "T6-assign=abcd", "T7-chain=abcd!42",
+                      "T8-mix=6", "B164-DONE")
+    Add-BasTest "test_b164_owned_temp" "$Tests\test_b164_owned_temp.bas" $b164Needles
+    Add-BasTest "test_b164_owned_temp_x86" "$Tests\test_b164_owned_temp.bas" $b164Needles -Arch "x86"
     # 发码两面: Static 过程里那三枚局部 (两枚标量 + 一枚定长数组载体) 各带 static 前缀，
     #   而同一份夹具里普通 Sub 的那枚标量不许带上 —— 反面针钉的是「这一问只认过程头那一位主人」。
     #   动态数组那一支在本夹具里没出现: 它由模块级那一档 (mg) 代表，形状只有前缀、没有守卫。
@@ -8842,6 +8901,7 @@ if ($Category -in @("all", "compile")) {
     Test-IfaceViewAuthority
     Test-OwnedTempKeeps
     Test-OwnedTempSemantics
+    Test-OwnedTempReclaim
     Test-ClassRefcountAuthority
     Test-ConvStrictParse
     Test-DateConv
