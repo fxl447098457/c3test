@@ -12,11 +12,27 @@
 #     ③ 站点的形状 = 「整枚实参 = 一个 mint 调用」—— 站点取**发码文本**（--emit-c），
 #        所以「消费者第几格」取的是**发码里那一格的位号**（不是 VB 实参下标）
 #
-# 追记（账 #464 §B164 落地时加的，不动 #463 那行里的数字）：
-#   实现里还多两道门，本工具**没有**建模（下面的数字是**上界**）：
-#     门 ⑨ ElseIf 的条件（那一枚的声明落在 else 块内、收回落在块外 ⇒ 引用越界）
-#     门 ⑩ 拼接站右操作数提名时，左操作数不许含调用（求值次序不许动）
-#   两道门只会**减少**提名面 ⇒ 上面的数字仍然是上界。
+# 追记（账 #466 §B164 清点，2026-10-22）：
+#   ① **门 ⑩**（拼接站右操作数提名时，左操作数不许含调用 ⇒ 求值次序不许动）**已建模**
+#      ⇒ 理由桶里多一项 concat-left-has-call。
+#   ② **门 ⑨**（ElseIf 的条件：那一枚的声明落在 else 块内、收回落在块外 ⇒ 引用越界）
+#      **没法从发码文本建模**（那条结构在发码里已经看不出是 ElseIf）⇒ 那一项仍缺 ⇒
+#      本工具的**提名面仍是上界**（门 ⑨ 只会**减少**它）。
+#   ③ 扫法修了一处**真缺陷**：老写法在找到一枚调用后，外层接着扫**它里面**的文本，
+#      而递归进左操作数时又把同一段文本再扫一遍 ⇒ 深链（Charts 2020 那种几十层拼接）
+#      上是**指数级** ⇒ 上一版在真语料上**跑不完**（>30 分钟被杀）。现在：整枚调用**只数一次**
+#      （外层扫到它的右括号之后），左操作数整支归 'left' 族单独记 ⇒ 496 份语料 5.7 分钟跑完。
+#
+#   **这一版量到的三笔数**（496 份语料 / 本机 C3.exe）：
+#     判据面（criteria） = 8,400 枚（BSTR 7,660 / VARIANT 740）
+#     左操作数族（下一刀的承面，不进提名面）= 5,949 枚（BSTR 5,793 / VARIANT 156）
+#     没进提名面的理由：others-have-call 5,882 / concat-left-has-call 2,611 / keeps 1,749 / closed 11
+#     （borrow / alias / consumes 三条机械证明仍**全为 0**）
+#   ⚠ **判据面 ≠ 实现面**：实现在真语料上只提名了 **1,757** 枚（BSTR 1,749 / VARIANT 8）⇒
+#     判据的 8,400 里有一大半**够不着** —— 那些站点是发码层用**裸字符串**拼出来的
+#     （`"vb6_CStr(" + expr + ")"` / `"vb6_VariantToString(" + expr + ")"` 那一族，
+#     见 src/backend/expr/cgen_expr_binary_util.cpp）⇒ **压根不走实参表那条钩子**。
+#     那不是判据的错，是**覆盖面**的账：谁想收那一族，得先把那些站点改成走实参表。
 #
 # 跑法:
 #   python scripts/owned_temp_census_164.py --dump     # 只把语料发码落到缓存
@@ -190,7 +206,13 @@ def dump_corpus(inputs):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--dump', action='store_true', help='只把语料发码落到缓存')
+    ap.add_argument('--c3', default='', help='用哪一个 C3.exe 发码（默认 .build/C3.exe）')
+    ap.add_argument('--cache', default='', help='发码缓存目录（默认 output/_tmp/census_c）')
     args = ap.parse_args()
+    if args.c3:
+        globals()['C3'] = os.path.abspath(args.c3)
+    if args.cache:
+        globals()['CACHE'] = os.path.abspath(args.cache)
 
     own, alias, borrowed, keeps, closed, consumes = load_table()
     print('evidence: own=%d alias=%d borrow=%d keeps=%d closed=%d consumes=%d'
@@ -198,6 +220,8 @@ def main():
 
     inputs = corpus_inputs()
     print('corpus inputs =', len(inputs))
+    print('measured binary =', C3)
+    print('cache =', CACHE)
     rc_bad = dump_corpus(inputs)
     print('emit rc!=0 =', rc_bad, '(那一族是 *_neg* 负例夹具，本来就红)')
     if args.dump:
@@ -237,51 +261,83 @@ def main():
 
     nom = []
     shapes = collections.Counter()
+    left_family = []          # 拼接站**左操作数**里那一族（下一刀的承面，不进提名面）
+    reasons = collections.Counter()   # 每一格**为什么没进**提名面
 
-    def scan(code, protected):
+    def classify(consumer, slot, mint, kind, args, protected, bucket):
+        """把一格「整枚实参 = mint」归到提名面 / 某一族理由 / 左操作数族。"""
+        if protected:
+            left_family.append((consumer, slot, mint, kind))
+            return
+        if mint in borrowed:
+            reasons['borrow'] += 1
+            return
+        if mint in alias:
+            reasons['alias'] += 1
+            return
+        # 门 ⑩: 拼接站**右操作数**提名时，左操作数不许含调用（提了名 ⇒ 求值次序会动）
+        if consumer in CONCAT_STATIONS and slot == 1 and arg_has_call(args[0]):
+            reasons['concat-left-has-call'] += 1
+            return
+        # 别的实参有没有调用？（有 ⇒ 提名单会改动求值次序 ⇒ 不提名）
+        others_pure = True
+        for j in range(len(args)):
+            if j == slot:
+                continue
+            if arg_has_call(args[j]):
+                others_pure = False
+        if not others_pure:
+            reasons['others-have-call'] += 1
+            return
+        if consumer in closed:
+            reasons['closed'] += 1
+            return
+        if keeps.get((consumer, slot), '0') != '0':
+            reasons['keeps'] += 1
+            return
+        if (consumer, slot) in consumes:
+            reasons['consumes'] += 1
+            return
+        nom.append((consumer, slot, mint, kind))
+        shapes[(mint, kind, consumer, slot)] += 1
+
+    def scan(code, protected, bucket):
         """扫一段发码文本; protected = 处在拼接站左操作数里（那里不许提名）"""
         i = 0
-        while i < len(code):
+        n = len(code)
+        while i < n:
             m = IDENT.match(code, i)
-            if m and m.end() < len(code) and code[m.end()] == '(':
-                consumer = code[i:m.end()]
-                o = m.end()
-                c = match_paren(code, o)
-                if c < 0:
-                    i += 1
-                    continue
-                args = split_args(code, o, c)
-                for slot, a in enumerate(args):
-                    mm = CALL.match(a)
-                    if not mm or a.count('(') != a.count(')'):
-                        continue
+            if not (m and m.end() < n and code[m.end()] == '('):
+                i += 1
+                continue
+            consumer = code[i:m.end()]
+            o = m.end()
+            c = match_paren(code, o)
+            if c < 0:
+                i += 1
+                continue
+            args = split_args(code, o, c)
+            is_concat = consumer in CONCAT_STATIONS
+            for slot, a in enumerate(args):
+                mm = CALL.match(a)
+                if mm and a.count('(') == a.count(')'):
                     mint = mm.group(1)
                     kind = mint_kind(mint)
-                    if not kind:
-                        continue
-                    if not protected:
-                        # 别的实参有没有调用？（有 ⇒ 提名单会改动求值次序 ⇒ 不提名）
-                        others_pure = True
-                        for j in range(len(args)):
-                            if j == slot:
-                                continue
-                            if arg_has_call(args[j]):
-                                others_pure = False
-                        if others_pure and verdict(consumer, slot):
-                            nom.append((consumer, slot, mint, kind))
-                            shapes[(mint, kind, consumer, slot)] += 1
-                    # 拼接站的**左操作数**（slot 0）整支受保护 ⇒ 递归进去时带上 protected
-                    if consumer in CONCAT_STATIONS and slot == 0:
-                        scan(a, True)
-                i = m.end()
-                continue
-            i += 1
+                    if kind:
+                        classify(consumer, slot, mint, kind, args, protected, bucket)
+                # 递归进这一格: 拼接站的**左操作数**（slot 0）整支受保护 ⇒ 归 'left' 族;
+                # 其余实参继承 protected。外层扫到 c+1 ⇒ 整枚调用**只数一次**。
+                if is_concat and slot == 0:
+                    scan(a, True, 'left')
+                else:
+                    scan(a, protected, bucket)
+            i = c + 1
 
     for path in sorted(os.listdir(CACHE)):
         if not path.endswith('.c'):
             continue
         code = strip_code(open(os.path.join(CACHE, path), encoding='latin-1').read())
-        scan(code, False)
+        scan(code, False, 'nom')
 
     print('\nnomination set =', len(nom))
     proofs = [
@@ -297,6 +353,12 @@ def main():
             bad += 1
     b = sum(1 for n in nom if n[3] == 'B')
     print('  kinds: BSTR = %d  VARIANT = %d' % (b, len(nom) - b))
+    print('  左操作数族（不进提名面，下一刀的承面）= %d' % len(left_family))
+    lb = sum(1 for n in left_family if n[3] == 'B')
+    print('    其中 BSTR = %d  VARIANT = %d' % (lb, len(left_family) - lb))
+    print('  没进提名面的理由:')
+    for r, v in reasons.most_common():
+        print('    %-22s = %d' % (r, v))
     print('\n--- top shapes ---')
     for (mint, kind, cons, slot), n in shapes.most_common(25):
         print('  mint=%-22s(%s) -> consumer=%-26s slot=%d n=%d' % (mint, kind, cons, slot, n))

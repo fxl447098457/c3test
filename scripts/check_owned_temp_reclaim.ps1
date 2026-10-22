@@ -120,18 +120,25 @@ function Scan-ConcatSites([string]$text) {
 }
 
 # ---- 被检查的语料（够覆盖那一族，又不至于慢到不能进 CI）----
+# 语料里**两档**都要有样例：档 1 = BSTR（多数）、档 2 = VARIANT（少数）。
+#   VARIANT 那一档的样例是 test_builtin_arity.bas（vb6_VariantDate / vb6_VariantLong 当整枚实参）
+#   与 b432（vb6_VariantDate）⇒ 本哨兵下面那道「VARIANT 枚数 > 0」才立得住：
+#   否则那一支就是**死的**（语料走不到 ⇒ 没人证它对）。
 $samples = @(
     'tests\test_b164_owned_temp.bas',
+    'tests\test_builtin_arity.bas',
     'tests\acc\acc_fam_main.bas',
     'tests\arr_cls\ArrCls.vbp',
     'tests\asm\asm_ok.vbp',
     'tests\b176_var_slot.bas',
+    'tests\b432\B432.vbp',
     'tests\Charts 2020\ucTreeMaps\Proyecto1.vbp',
     'tests\VBFlexGridDemo\VBFlexGridDemo.vbp'
 )
 
 $tmp = Join-Path ([System.IO.Path]::GetTempPath()) ("own464_" + [guid]::NewGuid().ToString("N") + ".c")
 $totalDecl = 0; $totalFree = 0; $totalSites = 0
+$declB = 0; $declV = 0
 foreach ($rel in $samples) {
     $src = Join-Path $Root $rel
     if (-not (Test-Path -LiteralPath $src)) { $fail += ("样例不存在: " + $rel); continue }
@@ -179,6 +186,7 @@ foreach ($rel in $samples) {
             $callee = $m.Groups[3].Value
             $decl[$name] = @{ line = $i; kind = $kind; callee = $callee }
             $totalDecl++
+            if ($kind -eq 'BSTR') { $declB++ } else { $declV++ }
             # R1: 档必须等于 mint 出口自己的返回档
             if (-not $own.ContainsKey($callee)) {
                 $fail += ($rel + " 第 " + ($i + 1) + " 行: " + $name + " 的 mint 出口 " + $callee + " 不在 [own] 表里")
@@ -250,6 +258,10 @@ Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
 
 if ($totalDecl -eq 0) { $fail += '一样本里一枚 _own_ 都没有 ⇒ 这一刀根本没生效（哨兵不许空转）' }
 if ($totalDecl -ne $totalFree) { $fail += ("声明 " + $totalDecl + " 枚，放 " + $totalFree + " 次 ⇒ 数目对不上") }
+# R7: **两档都得有样例** —— VARIANT 那一档（vb6_VariantClear）若语料走不到，
+#     那一支就是**死的**（没人证它对）⇒ 语料里必须真的有一枚 VARIANT 档的临时量。
+if ($declV -eq 0) { $fail += '语料里一枚 VARIANT 档的临时量都没有 ⇒ VARIANT 那一支（vb6_VariantClear）没被走到 ⇒ 那一支是死的' }
+if ($declB -eq 0) { $fail += '语料里一枚 BSTR 档的临时量都没有 ⇒ BSTR 那一支（vb6_BSTR_Free）没被走到' }
 
 if ($fail.Count -gt 0) {
     Write-Host "OWNED-TEMP-RECLAIM FAIL"
@@ -257,6 +269,6 @@ if ($fail.Count -gt 0) {
     exit 1
 }
 Write-Host ("OWNED-TEMP-RECLAIM OK (样例 " + $samples.Count + " 份 / 声明 " + $totalDecl +
-    " 枚 / 收回 " + $totalFree + " 次 / 档全对 / 放一次 / 用完才放 / 拼接站 " + $totalSites +
+    " 枚 [BSTR " + $declB + " / VARIANT " + $declV + "] / 收回 " + $totalFree + " 次 / 档全对 / 放一次 / 用完才放 / 拼接站 " + $totalSites +
     " 站暗道未动 / 判据未翻面)")
 exit 0
