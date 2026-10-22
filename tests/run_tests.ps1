@@ -7108,7 +7108,8 @@ if ($Category -in @("all", "run", "vbp")) {
     # legacyViewCallExpr，表达式路**换主人不换形状**（产物逐字节相同 = 清单零移动），语句路在兜底之前问第二次
     # （与账 #143/C29-SL-l 那条「语句路也要问一次」同规）。
     # 带实参那两形（`x.Twice 5` / `x.Twice(5)`）本来就走表达式路 —— 本夹子把它们与零实参那形放在同一份产物里,
-    # 就是为了让「换主人不换形状」被同日钉住（下面那条 Twice 针）。With 那一头（站D′）刻意没接。
+    # 就是为了让「换主人不换形状」被同日钉住（下面那条 Twice 针）。
+    # With 那一头（站D′）= 第一百七十七刀，见下面那份 k177_viewwith 夹具 —— 同一位主人、同一次查表，只是多一个登记进名册的名字。
     # 两台真编真跑读数一字相同 (.build/k2571_k175_run.txt): K175-alpha=2（两发 Ping 各落 Alpha 的 vtbl）、
     # K175-beta=10（换一枚实现类后同一句 Ping 落 Beta 的 vtbl，×10）—— 认错 wrap 就得 0 或当场崩；
     # K175-t=15 = Beta.Twice(5)=3*5，即表达式路那一站在同一枚视图上也没漂。
@@ -7125,6 +7126,33 @@ if ($Category -in @("all", "run", "vbp")) {
     Test-EmitcAbsent "k175_viewstmt_com_fallback_gone" @("$Tests\k175_viewstmt\K175.vbp") @(
         'vb6_ComCall(x, L"Ping", NULL, 0)',
         'vb6_ComVarFree((void*)vb6_ComCall(x')
+    # <vbeclipse> 回归夹子 (k177_viewwith, 账 #305 第一百七十七刀 = 新账 #471 站D′): With 的**接收者**是一枚视图。
+    # 改前那一格发 "void* _vb6_with_0 = (void*)x" —— 整枚值结构体 vb6_iface_<I> 进 void* 槽 = cl **C2440**，
+    # 一发把整块 With 打死（于是体内每一档成员的那条红在错误清单里压根排不上号）。
+    # 修法 = 临时量按**视图值**发（同型值拷贝: 不取址、不强转、不退旧 = 与第一百七十二刀站B 一字口径），
+    # 再把临时量自己的名字登记进那张名册（出块撤销，与本文件 listViewSlotVars_ / knownUdtVars_ 那两档同款），
+    # 体内成员从此交给**在册的那两位主人** —— With 这一路一枚形状都不自己拼，也不给 WithObjKind 添档
+    # （那一族被 15 份文件读，添一档 = 整张判定表重排，收益是零）。
+    # 两台真编真跑读数一字相同 (.build/k2634_k175_run.txt): K177-alpha=2（块内两发零实参裸形各落 Alpha 的 vtbl）、
+    # K177-beta=10（第二枚块换了实现类，认的是自己那枚 vtbl；"_vb6_with_1" 那一问没被上一块的登记污染 = 撤销那一腿的证人）、
+    # K177-t1=6（块内 "t1 = .Twice(3)" = 表达式路 P6.4 吃同一枚临时量）、K177-t2=15（块外那一形没漂）。
+    # 还红的那一族 = 视图的**属性**读写（"x.Label" / "x.Label = ..."），With 内外同红 ⇒ 另开新账 #488 站F。
+    $k177Expected = @(
+        "K177-alpha=2",
+        "K177-beta=10",
+        "K177-t1=6",
+        "K177-t2=15",
+        "K177-DONE")
+    Test-Vbp 'k177_viewwith_station_d_prime' "$Tests\k177_viewwith\K177.vbp" $k177Expected
+    Test-Vbp 'k177_viewwith_station_d_prime_x86' "$Tests\k177_viewwith\K177.vbp" $k177Expected -Arch "x86"
+    Test-EmitcShape "k177_viewwith_shape" @("$Tests\k177_viewwith\K177.vbp") @(
+        'vb6_iface_IK177 _vb6_with_0 = x',
+        '_vb6_with_0.vtbl->Ping(_vb6_with_0.obj);',
+        't1 = vb6_ChkLong(_vb6_with_0.vtbl->Twice(_vb6_with_0.obj, 3));',
+        '_vb6_with_1.vtbl->Ping(_vb6_with_1.obj);')
+    Test-EmitcAbsent "k177_viewwith_void_temp_gone" @("$Tests\k177_viewwith\K177.vbp") @(
+        'void* _vb6_with_0 = (void*)x',
+        'vb6_ComCall(_vb6_with_0, L"Ping", NULL, 0)')
     # <vbeclipse> 回归夹子 (b174_numstrarg, 账 #305 §B174 第六十五刀): 数值实参交进内在函数的
     # BSTR 形参。修前 InStr 那一路把 int32_t / double / int16_t 裸交给 wchar_t* —— cl 只给 C4047
     # (在 -W3 之外) ⇒ **编得过**, 而 BASE 那一台在别处 (Mid$(1.1,...) 那类) 拿的是 C2440, 本机
