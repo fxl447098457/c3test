@@ -393,7 +393,7 @@ std::string CCodeGen::legacyViewCallExpr(const std::string& objExpr, const std::
     return call + ")";
 }
 
-// 账 #305 新账 #474 站F (第一百七十八刀): 「接收者是一枚视图，它的**属性读**那一发怎么发」。
+// 账 #305 新账 #474 站F (第一百七十九刀): 「接收者是一枚视图，它的**属性读**那一发怎么发」。
 // 站点从前只认 IDispatch：视图是值结构体，塞进 helper 首枚 `void*` 槽 = cl C2172 (With 内外同红，
 // 外部真语料 读 25 处)。形状仍交回上一行那位主人 (`legacyViewCallExpr`) —— 零实参的 Property Get
 // 与零实参的方法在本族的表里本来就是同一发；这里只补两问:

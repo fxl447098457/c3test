@@ -398,7 +398,7 @@
     // 把临时量登记进名册，体内成员本来就由下面这两位消费者答。属性读写那一站是站F (#474)，见下面那位读者。
     std::string legacyViewCallExpr(const std::string& objExpr, const std::string& memberName,
                                    const std::vector<std::string>& args) const;
-    // 账 #305 新账 #474 站F (第一百七十八刀): 视图接收者的**属性读**那一发。站点把自己本来要发的
+    // 账 #305 新账 #474 站F (第一百七十九刀): 视图接收者的**属性读**那一发。站点把自己本来要发的
     // 那一发 (晚绑定 helper 文本) 交进来，同型且那一席是零实参有返回值的槽 ⇒ 换成 `.vtbl-><槽>(….obj)`
     // (形状仍由上面那位主人答)；任何不合 ⇒ 空串，站点保留自己那一发。
     std::string legacyViewGetterReadExpr(const std::string& objExpr, const std::string& memberName,

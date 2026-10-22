@@ -94,7 +94,7 @@ if ($geIdx -lt 0) {
         $fails += 'C3 the getter exit guesses a shape from the call context again (that is how BSTR props became ComGetIntProp)'
     }
 }
-# 第一百七十八刀: 那张 switch 搬进「按返回类型答」的那一位出口 (站F 的读者与 comGetterExpr 共用它)。
+# 第一百七十九刀: 那张 switch 搬进「按返回类型答」的那一位出口 (站F 的读者与 comGetterExpr 共用它)。
 $swIdx = $com.IndexOf('std::string CCodeGen::comGetterExprForRetCType(')
 if ($swIdx -lt 0) {
     $fails += 'C3 comGetterExprForRetCType (the by-type property-read tier switch, shared by comGetterExpr and station F) is gone'

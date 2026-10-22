@@ -530,6 +530,8 @@ sha256=9d7b781358b544c0bc24f36aa0148cdb04ffb3c85b6a784d9dcebabbebec394d ascii256
 sha256=da8495d6cf85d116474300567f0606e6125c0efef1e62ed6b25ec04fea03f1b3 ascii256=7d4506d9fd0254c6831906618fe72a924c3a6d4f763cf7bbd57e97f09914c0de rc=0 bytes=2389 tests/k175_viewstmt/mdlK175.bas
 sha256=fcea7d9a54acbe6aff9c2d04b37ad4b7c5eb806034c686fd69887e093a319d2d ascii256=7691b74c1b678f06b87b5fa27bd49d70d1c3c4fd0dc023281f6674941f31de40 rc=0 bytes=16148 tests/k177_viewwith/K177.vbp
 sha256=3e5f0d9a6a1141589b2520743070ce772d8952f3897c40e063e43429472728eb ascii256=0240a84495e2073314f99d3abdb423d7e255801e4968f003af8a0c5b5f8fbfc2 rc=0 bytes=2841 tests/k177_viewwith/mdlK177.bas
+sha256=c34ccff210649b12f5aadbd48e2dfddb8a72de2e2b4d5cc8db0828d639d2e23a ascii256=ee5a0c6d5aac933d0b658742a74e07b30970b79d50d27e21557d289f49c9e31e rc=0 bytes=18828 tests/k178_viewprop/K178.vbp
+sha256=8509d172d8c7af22a44adcd698eb50f250ea367976bebe54626bbed16168ff83 ascii256=9bcd7943537e6d583efd6ae2ed6d5b4c726d57dec73cdd0a1fcd5b5409518ee7 rc=0 bytes=3676 tests/k178_viewprop/mdlK178.bas
 sha256=f7efb1462d50e23a3d21d6e0f93893a92f344a40e799407ab7cd7c73bba0f5c3 ascii256=939b67937c8162cd384f6a0387f80a887a92d3fbd7007f55ff3a7df05978b162 rc=0 bytes=10133 tests/test_nested_array.bas
 sha256=c0a247adaed880c18596ece21ad4eb15fa33c34ec6f26b988eacf1d2011861ad ascii256=f79670687818c677430f9e7c189bc61af8c471b594005ff9f2111861da45c990 rc=0 bytes=11220 tests/k173_udtmem/K173.vbp
 sha256=363140e26bf923a62cc19840d39c9db9b0bd0990f97bdd43d5a82a39c8e8b892 ascii256=84183091be937f6cb14a7e771ca343fbedaf9594770209ebcf14b04e7cfe38fd rc=0 bytes=5845 tests/k173_udtmem/K173Main.bas
@@ -791,3 +793,14 @@ sha256=b0383dfee073c214b3522fef282d578bad64b64a324283abc4937eb967a397fb ascii256
 #   新增 1 行 = 本刀夹具 tests/k483_redim_member_elem.bas（两台 x64/x86 读数逐行相同）。
 #   负控（同一夹具换 HEAD 那台编译器）= long/int/dbl/str/complex-vt 全答 8204 (vtArray|vtVariant)，
 #   修后 8195/8194/8197/8200/8195；UDT 成员那一档两造都是 8204（原本就对）。
+# 2026-10-23 第一百七十九刀的登记来源：本刀改的是视图**属性读**那一站（站F 读侧 = 同型才把晚绑定
+#   helper 换成视图自己的直槽；写侧那一发照旧落 `vb6_cls_<接口名>*`，本刀刻意没接）。
+#   ⚠ 下面这几行数字 = 合并 dev（他们的第一百七十八刀 = 账 #475）之前本机那一份树的复算；
+#   合并后的树本机没来得及重算（工作树正被别人占着编），所以这两格数**只算预测**：
+#   刀号说明：本刀先前记作「第一百七十八刀」，与 dev 上那一刀（账 #475 = UDT 成员动态数组元素档）撞号
+#     ⇒ 刀号改第一百七十九刀；夹具与判据针仍叫 k178_viewprop（两台的针按夹具名认，不改名）。
+#   门的形状门若报差异，按 CI 那台自己交的清单逐行订正（登记来源 = 本机 ⇒ 必须被 CI 独立复算证过才算数）。
+#   本机全语料复算 = 存量 507 行 / 实得 509 行 / 相同 **507** / 哈希不同 **0** / 缺席 0 / 多出 2，
+#   多出的两行就是本刀那枚新夹具 K178.vbp 与 mdlK178.bas ⇒ **零移动** = 这条读者只可能改到「接收者是
+#   legacy 视图且属性读那一发同型」的产物，其余每一行逐字节没动（507 份存量输入逐行哈希全同由本机背书）；
+#   判据与登记同批推一趟门（同规先例 = 第一百六十一刀、第一百七十五刀、第一百七十七刀）。
