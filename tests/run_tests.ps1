@@ -1614,6 +1614,22 @@ function Test-ProjClassScanBound {
     }
 }
 
+# ai/022 §B218 (第一百七十三刀): Type 的成员表 —— 作者只许一个、跨模块转抄只许三处、
+# 代表表换人只许 空→非空 一个方向 (反向一出现, 空占位又能当代表, 新账 #468 原样复发)
+function Test-CrossmodUdtMembers {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] crossmod_udt_members ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\check_crossmod_udt_members.ps1" 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        $out | Select-Object -First 8 | ForEach-Object { Write-Host "  $_" }
+    }
+}
+
 # ai/022 §B187 第二腿 (第八十三刀): 泛对象槽的装箱腿只许一站 + coclass 判据只许一处答
 function Test-ObjectSlotBoxing {
     $script:total++
@@ -6946,6 +6962,52 @@ if ($Category -in @("all", "run", "vbp")) {
         "B73-DONE")
     Test-Vbp 'b173_udt_slot_arg' "$Tests\b173_udtarg\B173.vbp" $b173Expected
     Test-Vbp 'b173_udt_slot_arg_x86' "$Tests\b173_udtarg\B173.vbp" $b173Expected -Arch "x86"
+    # <vbeclipse> 回归夹子 (k173_udtmem, 账 #305 第一百七十三刀 / 新账 #468): 跨模块声明的 Type,
+    # 它的**成员表**在消费者模块里从来没送到 —— 那格答案住在 driver_crossmod.cpp 的代表表
+    # (globalPublicSyms, 按 storageKey 先到先得) 里, 而消费者自己解析 `As <跨模块 Type>` 时先立的
+    # 无成员占位符号也进 getPublicSymbols(), 模块遍历顺序又不固定 (§B97) ⇒ 占位版常当上代表,
+    # Fix 047 那条回填闸门 (`localSym 空 && srcSym 非空 → 抄') 无物可抄, 每个消费者只抄到空表。
+    # 于是成员数组的下标没人折算秩: 六种接收者形状 (类字段 / 局部 / 模块级 / ByRef 形参 /
+    # 嵌套一层 / With 那一层) 全发成 Coord(1) —— BASE 那台编这份夹具 = 28 发 C2064 + 1 发 C2440、
+    # **没有 exe** (.build/k2342_base_cause.txt)。修后两台都有 exe、九条读数一字相同
+    # (.build/k2339_k173_run.txt):
+    #   K173-field=6 / K173-gridsep=20/40  类字段那一层 (Ray.vbp 的实物形状) + 多维成员两格互不覆盖
+    #                                       (那是账 #262 §B90 的秩, 跨模块时同样没人答);
+    #   K173-local=11 / K173-localgrid=7    局部 Dim 与它的一次函数外调用 (整枚 UDT 作实参);
+    #   K173-modlevel=7                     模块级 Private 那一形;
+    #   K173-nested=9                       套一层的 o.Inner.Row(3) = 读回刚写的那一格;
+    #   K173-with=10                        With 那一层 (_vb6_with_0->Coord[2]) 自增读回;
+    #   K173-dyn=21                         成员**动态**数组 (VB6_SA_AT 那一族) 也一起通了 ——
+    #                                       同一格空成员表本来也压着它。
+    #   欠一句(本刀不动, 已回台账): 这一发 ReDim 的元素档答 vb6_sa_variant 而访问档答 int32_t,
+    #   两档不合账 (= 账 #42 那一族在"成员数组"这一支的残留), 值今天能往返是因为写读同偏。
+    $k173Expected = @(
+        "K173-field=6",
+        "K173-gridsep=20/40",
+        "K173-local=11",
+        "K173-localgrid=7",
+        "K173-modlevel=7",
+        "K173-nested=9",
+        "K173-with=10",
+        "K173-dyn=21",
+        "K173-DONE=1")
+    Test-Vbp 'k173_udt_member_subscript' "$Tests\k173_udtmem\K173.vbp" $k173Expected
+    Test-Vbp 'k173_udt_member_subscript_x86' "$Tests\k173_udtmem\K173.vbp" $k173Expected -Arch "x86"
+    # 发码两面: 正面钉六种接收者形状都折成方括号 (多维那发要两层括号), 反面钉"原样把括号发进 C"
+    # 那一形不许在任何一站复活。
+    Test-EmitcShape "k173_udt_member_index_shape" @("$Tests\k173_udtmem\K173.vbp") @(
+        "me->Loc.Coord[1] = a;",
+        "me->Loc.Grid[1][2] = (a * 10);",
+        "o.Inner.Row[2] = 8;",
+        "_vb6_with_0->Coord[2] = vb6_ChkLong((_vb6_with_0->Coord[2] + 1));",
+        "VB6_SA_AT(int32_t, b.Items, 2) = 21;",
+        "int32_t Coord[5];")
+    Test-EmitcAbsent "k173_udt_member_index_parens_gone" @("$Tests\k173_udtmem\K173.vbp") @(
+        "Loc.Coord(1)",
+        "Loc.Grid(1, 2)",
+        "Inner.Row(2)",
+        "_vb6_with_0->Coord(2)",
+        "b.Items(2)")
     # <vbeclipse> 回归夹子 (b174_numstrarg, 账 #305 §B174 第六十五刀): 数值实参交进内在函数的
     # BSTR 形参。修前 InStr 那一路把 int32_t / double / int16_t 裸交给 wchar_t* —— cl 只给 C4047
     # (在 -W3 之外) ⇒ **编得过**, 而 BASE 那一台在别处 (Mid$(1.1,...) 那类) 拿的是 C2440, 本机
@@ -8925,6 +8987,7 @@ if ($Category -in @("all", "compile")) {
     Test-ComServerErrorFrame
     Test-ProjClassScanBound
     Test-ObjectSlotBoxing
+    Test-CrossmodUdtMembers
     Test-BoxTempReclaim
     Test-IfaceViewAuthority
     Test-OwnedTempKeeps
