@@ -1,5 +1,5 @@
-# c3-exe sha256=da4b618e2f4a9f51bffea08ae6e06607568e1acbf52c95f6ae90e03226e67315 size=6855168
-# toolset pe-lnk=14.51 vs=18.11.12306.390 msvc-installed=14.29.30133+14.44.35207+14.51.36231 runner=runnervmuzpk7
+# c3-exe sha256=dc0c6b33ad90b522a4abbee82645321c5a8b8410f76881168725d69579af7af3 size=6855168
+# toolset pe-lnk=14.51 vs=18.10.12224.181 msvc-installed=14.29.30133+14.44.35207+14.51.36231 runner=runnervm0xl3a
 # arch=x64 inputs=496
 # columns: sha256=<normalized全文> ascii256=<仅ASCII行> rc=<退出码> bytes=<归一化字节> <relpath>
 sha256=cc5442d3a253db96f710f36211ac65ef3d1a0f57741437ef388d80afc192b380 ascii256=0bb6b6f96b4a8c3decdce233e48a15cdaf847773b3e980b558b132c80072a8ff rc=0 bytes=1769 tests/acc/acc_fam_main.bas
