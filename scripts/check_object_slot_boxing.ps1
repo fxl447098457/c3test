@@ -255,10 +255,10 @@ if (-not (Test-Path -LiteralPath (Join-Path $root "tests\b187_box\B187Decl.cls")
     $script:bad += "B6 缺第八臂夹具 tests/b187_box/B187Decl.cls (TypeName 按声明档折叠)"
 }
 if (-not (Test-Path -LiteralPath (Join-Path $root "tests\b189_gate\B189g.vbp"))) {
-    $script:bad += "B6 缺闸门夹具 tests/b189_gate/B189g.vbp (折叠那问的接口视图那一头, 只发码不建)"
+    $script:bad += "B6 缺闸门夹具 tests/b189_gate/B189g.vbp (折叠那问的接口视图那一头; 第一百七十一刀起它还是这一族唯一一枚真编证人)"
 }
 $nGateCells = @([regex]::Matches($rtTxt, "b189_gate_")).Count
-if ($nGateCells -ne 3) { $script:bad += ("B6 b189_gate_ 那三枚发码判据 = $nGateCells (要 3: 视图反针 + 实体正针 + 同名槽那一双)") }
+if ($nGateCells -ne 4) { $script:bad += ("B6 b189_gate_ 那四枚判据 = $nGateCells (要 4: 视图反针 + 实体正针 + 同名槽那一双 + 第一百七十一刀那枚真编 b189_gate_real_build)") }
 
 # B8 — TypeName 认自家包装器 (§B189 第一档): 一处出口、一处消费, 且排在宿主那一问之后
 $convRel = "src\rtl\core\vb6rtl\vb6rtl_conv.c"
