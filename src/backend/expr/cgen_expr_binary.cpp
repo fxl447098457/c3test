@@ -126,7 +126,7 @@ void CCodeGen::visit(BinaryExpr& node) {
         // ③ 判据本身（现造? 消费者留不留? 消费者自己放不放? closed?）全在头里那位主人身上。
         hoistOwnedTempSlot(right, "vb6_BSTR_Concat", 1, left);
         bool leftIsConcat = (left.find("vb6_BSTR_Concat") != std::string::npos);
-        // 账 #468 §B164 拼接站那一族: **左操作数自己**若是「整枚就是一个 owned 且档是 BSTR 的
+        // 账 #469 §B164 拼接站那一族: **左操作数自己**若是「整枚就是一个 owned 且档是 BSTR 的
         // mint 调用」⇒ 那一枚**没人放**（拼接站发 Concat 时只放右操作数… 准确说：发 Concat
         // 时左操作数**根本不放**）⇒ 漏。
         // 修法**不是**把它提成临时量（那会把求值次序往前挪 ⇒ 有次序风险），
@@ -219,8 +219,13 @@ void CCodeGen::visit(BinaryExpr& node) {
     if (node.op == BinaryOp::Add && addIsConcat092i) {
         left = wrapToBSTR(left, *node.left);
         right = wrapToBSTR(right, *node.right);
+        // 账 #473 §B164: 这一站（`+` 当拼接, Fix 092i）也有**右操作数**那一格 —— #465
+        // 落地时只改了 `&` 那一站, 于是 `s + CStr(n)` 里现造的那枚串临时量一直没人放。
+        // 两站同一个消费者 (vb6_BSTR_Concat, slot 1) ⇒ 同一条提名判据; 门 ⑩ 仍拿 `left`
+        // 当旁证 (左操作数里有调用 ⇒ 不提名) ⇒ 求值次序不动。
+        hoistOwnedTempSlot(right, "vb6_BSTR_Concat", 1, left);
         bool leftIsConcat = (left.find("vb6_BSTR_Concat") != std::string::npos);
-        // 账 #468 §B164: 与 `&` 那一站**同一条规则** —— 左操作数整枚若是 owned BSTR 档的 mint,
+        // 账 #469 §B164: 与 `&` 那一站**同一条规则** —— 左操作数整枚若是 owned BSTR 档的 mint,
         // 这一站**自己**放掉它（vb6_BSTR_Concat 是**拷贝**内容 ⇒ 放掉左操作数安全）。
         bool leftIsOwnedMint = exprIsOwnedBstrMint(left);
         if (leftIsConcat || leftIsOwnedMint) {

@@ -55,7 +55,10 @@ if ($out -notmatch 'ALL-PASS') { $fail += '参考实现没有 ALL-PASS 那一行
 # ④ **求值次序**那三条必须在（它们是回收刀那几道次序门的**外部权威**：
 #    "&" 的两个操作数左到右、调用实参左到右、链式拼接左到右）
 #    —— 少了任何一条 ⇒ 那些门就只剩 C 侧自己的假设 ⇒ 钉住。
-foreach ($needle in @('concat-operand-order', 'call-argument-order', 'concat-chain-order')) {
+#    账 #473 再补 `+` 当拼接那一站的三条（值 / 两操作数次序 / 链式次序）：那一站
+#    现在也回收右操作数 ⇒ 同样要外部权威证明「值不动、次序左到右」。
+foreach ($needle in @('concat-operand-order', 'call-argument-order', 'concat-chain-order',
+                      'add-concat-value', 'add-concat-operand-order', 'add-concat-chain-order')) {
     if ($out -notmatch ('(?m)^PASS ' + [regex]::Escape($needle) + ' ')) {
         $fail += ("参考实现里少了一条求值次序的读数：" + $needle + "（次序门失去外部权威）")
     }

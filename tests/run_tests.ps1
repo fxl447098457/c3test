@@ -8336,14 +8336,48 @@ if ($Category -in @("all", "run", "vbp")) {
     #   夹具九格: T1 整枚实参 = 拼接 / T2 拼接站的右操作数 / T3 双实参另一格是纯字面量 /
     #   T4 双实参那一格在头 / T5 **拼接站暗道**（mint 在左操作数里 ⇒ 不许提名, 读数不许动）/
     #   T6 赋值站（那一格归赋值站管, 不归本刀）/ T7 链式拼接 / T8 更大的表达式里的一枚 /
-    #   T9 拼接站**自己**放掉左操作数（账 #468 §B164：左操作数整枚是一枚现造的带权临时量
+    #   T9 拼接站**自己**放掉左操作数（账 #469 §B164：左操作数整枚是一枚现造的带权临时量
     #      ⇒ 拼接站放它一次 ⇒ 值不动, 双放会崩）。
+    #   T10 `+` 当拼接那一站（Fix 092i）的**右操作数**也要有人放（账 #473 §B164：补上
+    #      #465 只改了 `&` 站的那一格）；T10b 用 2000 条同形语句压双放/悬空（崩或值变都红）。
+    #   T12 是**耦合**负控：左操作数整枚是 mint（文本含调用）⇒ 门 ⑩ 挡住右提名，左那一枚
+    #      仍由拼接站自己放一次（ConcatFree）；右那一枚保持内联。等门学会分纯 mint / 真调用
+    #      时，这一格要跟着翻成正控。
+    #   T11 是门 ⑩ 的**负控**：左操作数里有调用 ⇒ 右操作数不许被提名 ⇒ 那两枚调用必须
+    #      **同一条发码行内联**（下面 b164_add_gate10_left_call_keeps_inline 那一针钉死）。
+    #      日志读数 "21" 是 C3/MSVC 的现状（实参从右往左），VB 参考是 "12" —— 那条差异
+    #      早于本刀、另账；这里只钉「本刀没有把它挪动」。
     #   x64 与 x86 读数必须**逐行相同**（提了名只是把回收提前, 值不许变）。
     $b164Needles = @("T1-len=4", "T2-right=ab42", "T3-strcmp=0", "T4-left=ab",
                       "T5-trap=4!", "T6-assign=abcd", "T7-chain=abcd!42",
-                      "T8-mix=6", "T9-concatleft=abcd", "B164-DONE")
+                      "T8-mix=6", "T9-concatleft=abcd", "T10-addright=ab42",
+                      "T10-loop-bad=0", "T11-value=A7", "T11-log=21",
+                      "T12-both=abcd42", "T12-loop-bad=0", "B164-DONE")
     Add-BasTest "test_b164_owned_temp" "$Tests\test_b164_owned_temp.bas" $b164Needles
     Add-BasTest "test_b164_owned_temp_x86" "$Tests\test_b164_owned_temp.bas" $b164Needles -Arch "x86"
+    # 发码两面（账 #473）：`+` 当拼接站的右操作数现在提成 `_own_N`（正向），旧的
+    #   裸传形状 `vb6_BSTR_Concat(a, vb6_CStrLong(n))` 必须消失（反向）。
+    #   同一条 `+` 站的门 ⑩ 负控：左操作数有调用 ⇒ 右操作数不许提名 ⇒ 两枚调用仍内联。
+    Test-EmitcShape 'b164_add_right_operand_reclaimed' @(
+        "$Tests\test_b164_owned_temp.bas") @(
+        'vb6_BSTR_Concat(a, _own_',
+        '= vb6_CStrLong(n);',
+        '= vb6_CStrLong(i);')
+    Test-EmitcAbsent 'b164_add_right_operand_raw_gone' @(
+        "$Tests\test_b164_owned_temp.bas") @(
+        'vb6_BSTR_Concat(a, vb6_CStrLong(n))')
+    Test-EmitcShape 'b164_add_left_mint_blocks_right_hoist' @(
+        "$Tests\test_b164_owned_temp.bas") @(
+        'vb6_BSTR_ConcatFree(vb6_BSTR_Concat(a, b), vb6_CStrLong(n))')
+    Test-EmitcAbsent 'b164_add_left_mint_right_not_hoisted' @(
+        "$Tests\test_b164_owned_temp.bas") @(
+        'vb6_BSTR_ConcatFree(vb6_BSTR_Concat(a, b), _own_')
+    Test-EmitcShape 'b164_add_gate10_left_call_keeps_inline' @(
+        "$Tests\test_b164_owned_temp.bas") @(
+        'vb6_BSTR_Concat(vb6_Mark164(1), vb6_CStrLong(vb6_MarkNum164(2, 7)))')
+    Test-EmitcAbsent 'b164_add_gate10_left_call_no_hoist' @(
+        "$Tests\test_b164_owned_temp.bas") @(
+        'BSTR _own_ = vb6_CStrLong(vb6_MarkNum164')
     # 发码两面: Static 过程里那三枚局部 (两枚标量 + 一枚定长数组载体) 各带 static 前缀，
     #   而同一份夹具里普通 Sub 的那枚标量不许带上 —— 反面针钉的是「这一问只认过程头那一位主人」。
     #   动态数组那一支在本夹具里没出现: 它由模块级那一档 (mg) 代表，形状只有前缀、没有守卫。

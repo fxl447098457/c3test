@@ -126,6 +126,23 @@ gLog = ""
 s = LogIt("A", "a") & LogIt("B", "b") & LogIt("C", "c")
 Call Check("concat-chain-order", gLog, "ABC")
 
+' ---- 8) "+" used as concatenation (the Fix 092i station) -----------------
+' Same VB-family value and order semantics as "&": String + String is a new
+' value, and the operands are evaluated left to right.  The reclaim knife now
+' names the RIGHT operand of this station too (ledger #473), so both facts are
+' pinned here: the value must not move, and the order must stay left-to-right
+' whenever the left operand has an observable call.
+a = "ab"
+Call Check("add-concat-value", a + CStr(42), "ab42")
+
+gLog = ""
+s = LogIt("L", "a") + LogIt("R", "b")
+Call Check("add-concat-operand-order", gLog, "LR")
+
+gLog = ""
+s = LogIt("A", "a") + LogIt("B", "b") + LogIt("C", "c")
+Call Check("add-concat-chain-order", gLog, "ABC")
+
 If nFail > 0 Then
     WScript.Echo "FAILURES = " & nFail
     WScript.Quit 1
