@@ -284,7 +284,7 @@ if ($offsetEmit -ne 0) {
 
 # A8: ReDim 的元素档只问一处出口
 $beFiles = @(Get-ChildItem -LiteralPath $beDir -Recurse -File | Where-Object { $_.Extension -in ".cpp", ".inc", ".hpp" })
-$rdDef = 0; $rdDecl = 0; $rdCall = 0; $rdAsOnly = 0; $rdBodyBoth = 0
+$rdDef = 0; $rdDecl = 0; $rdCall = 0; $rdAsOnly = 0; $rdBodyBoth = 0; $rdBodyMember = 0
 foreach ($f in $beFiles) {
     $txt = [System.IO.File]::ReadAllText($f.FullName)
     foreach ($line in (Lines $f.FullName)) {
@@ -298,8 +298,12 @@ foreach ($f in $beFiles) {
         }
     }
     if ($f.Name -eq "cgen_expr_array.cpp") {
-        $blk = [regex]::Match($txt, 'Vb6Type\s+CCodeGen::resolveReDimElemType[\s\S]{0,900}?\r?\n\}')
+        # 账 #475 §B220: 体里现在三头都在 —— As 子句 / arrayElemTypes_ / 点号链 UDT 成员
+        # (resolveUdtMemberElemInfo)。窗口不设上限: 函数体首个 col-0 的 `}` 就是收尾，
+        # 从前那个 900 字上限会在加了几行之后就量不到 arrayElemTypes_ (假红)。
+        $blk = [regex]::Match($txt, 'Vb6Type\s+CCodeGen::resolveReDimElemType[\s\S]*?\r?\n\}')
         if ($blk.Value -match 'resolveArrayElemType\(\s*typeRef\s*\)' -and $blk.Value -match 'arrayElemTypes_\.find') { $rdBodyBoth++ }
+        if ($blk.Value -match 'resolveUdtMemberElemInfo\s*\(') { $rdBodyMember++ }
     }
 }
 if ($rdDef -ne 1) { $bad += ("A8 resolveReDimElemType 定义 = " + $rdDef + " (要求 1；两处定义 = 第二份答案)") }
@@ -307,6 +311,26 @@ if ($rdDecl -ne 1) { $bad += ("A8 resolveReDimElemType 声明(cgen_helpers.inc) 
 if ($rdCall -lt 1) { $bad += "A8 cgen_redim.cpp 不再调 resolveReDimElemType（ReDim 的元素档又回到只问 As 子句）" }
 if ($rdAsOnly -ne 0) { $bad += ("A8 cgen_redim.cpp 里「声明处只问 As」的老形状 = " + $rdAsOnly + " 处 (要求 0；那正是本刀改掉的那一行)") }
 if ($rdDef -eq 1 -and $rdBodyBoth -ne 1) { $bad += "A8 resolveReDimElemType 的体里没同时问 As 子句与 arrayElemTypes_（只剩一头 = 修前的形状）" }
+if ($rdDef -eq 1 -and $rdBodyMember -ne 1) { $bad += "A8 resolveReDimElemType 不再问点号链 UDT 成员（成员动态数组的元素档又回落 Variant ⇒ 账 #475 的 16/4 字节步长错位回来）" }
+
+# A20: UDT 成员动态数组的元素档只许一位主人 (账 #475 §B220, 第一百七十八刀)
+# 修前: `ReDim t.Items(1 To 3)` 走裸名回退, 分配 vb6_sa_variant, 访问 Pattern B 按
+# `VB6_SA_AT(int32_t, t.Items, i)` 4 字节步 —— 16 vs 4。修后成员表那一问收进
+# resolveUdtMemberElemInfo, 复杂目标与点号链目标各问一次, 谁也不许自己抄一份 udtMembers 循环。
+$memDecl = 0; $memDef = 0; $memAll = 0
+foreach ($f in $beFiles) {
+    foreach ($line in (Lines $f.FullName)) {
+        $t = $line.Trim()
+        if ($t.StartsWith("//")) { continue }
+        if ($f.Name -eq "cgen_helpers.inc" -and $t -match '^bool\s+resolveUdtMemberElemInfo\s*\(') { $memDecl++ }
+        if ($f.Name -eq "cgen_redim.cpp" -and $t -match '^bool\s+CCodeGen::resolveUdtMemberElemInfo\s*\(') { $memDef++ }
+        if ($t -match '\bresolveUdtMemberElemInfo\s*\(' -and $t -notmatch '^bool\s+(CCodeGen::)?resolveUdtMemberElemInfo') { $memAll++ }
+    }
+}
+if ($memAll -ne 2) { $bad += ("A20 resolveUdtMemberElemInfo 调用点 = " + $memAll + " (恰 2: cgen_expr_array.cpp 点号链 + cgen_redim.cpp 复杂目标转调)") }
+if ($memDecl -ne 1) { $bad += ("A20 resolveUdtMemberElemInfo 的声明(cgen_helpers.inc) = " + $memDecl + " (恰好 1；0 = 点号链那一头又问不到成员表)") }
+if ($memDef -ne 1)  { $bad += ("A20 resolveUdtMemberElemInfo 的定义(cgen_redim.cpp) = " + $memDef + " (恰好 1；>1 = 第二份成员循环)") }
+
 
 # A9: 字面量兜底档的名单恰好三条
 $saVariant = @()

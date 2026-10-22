@@ -8420,6 +8420,32 @@ if ($Category -in @("all", "run", "vbp")) {
         "$Tests\test_static_proc.bas") @(
         'static int32_t n2 = 0;',
         'if (mg == NULL) {')
+    # 账 #475 §B220 (第一百七十八刀): UDT 成员动态数组 (`ReDim t.Numbers(...)`) 的元素档改问
+    #   成员表。诊断口径 = VarType(数组) (它读描述符自己的档, 不是访问宏的假设): 修前一律 8204
+    #   (vtArray|vtVariant), 修后按声明 vtArray|vt<type> —— Long 8195 / Integer 8194 /
+    #   Double 8197 / String 8200, UDT 成员仍 8204 (那一档原本就对)。complex 那一格钉住
+    #   `ReDim arr(1).Longs(...)` 的 node.varName 只是基数组名, 裸名回退不许再命中基数组元素 UDT。
+    #   两台 (x64 / x86) 读数必须逐行相同。
+    $k483Needles = @("K483-long-vt=8195", "K483-long=11,22,33",
+                      "K483-long-preserve=11,22,33,44", "K483-int-vt=8194/5,6",
+                      "K483-dbl-vt=8197/2,3", "K483-str-vt=8200/A,B",
+                      "K483-udt-vt=8204/7,8", "K483-complex-vt=8195/9,10", "K483-DONE")
+    Add-BasTest "k483_redim_member_elem" "$Tests\k483_redim_member_elem.bas" $k483Needles
+    Add-BasTest "k483_redim_member_elem_x86" "$Tests\k483_redim_member_elem.bas" $k483Needles -Arch "x86"
+    # 发码两面 (账 #475): 点号链与复杂目标的分配档按成员声明走; 旧的 vb6_sa_variant 兜底绝迹。
+    Test-EmitcShape 'k483_member_elem_flavour_by_declaration' @(
+        "$Tests\k483_redim_member_elem.bas") @(
+        's.Longs = vb6_SafeArrayReDim1D(vb6_sa_long, 1, 3);',
+        's.Ints = vb6_SafeArrayReDim1D(vb6_sa_int, 1, 2);',
+        's.Doubles = vb6_SafeArrayReDim1D(vb6_sa_double, 1, 2);',
+        't.Names = vb6_SafeArrayReDim1D(vb6_sa_bstr, 1, 2);',
+        'VB6_SA_AT(vb6_type_TScalars, arr, 1).Longs = vb6_SafeArrayReDim1D(vb6_sa_long, 1, 2);')
+    Test-EmitcShape 'k483_udt_member_elem_still_udt' @(
+        "$Tests\k483_redim_member_elem.bas") @(
+        'o.Items = vb6_SafeArrayReDim1D_Udt((int32_t)sizeof(vb6_type_TItem), 1, 2);')
+    Test-EmitcAbsent 'k483_member_elem_no_variant_fallback' @(
+        "$Tests\k483_redim_member_elem.bas") @(
+        'vb6_SafeArrayReDim1D(vb6_sa_variant')
 
     # 账 #305 §B218 (甲) 第一百六十四刀: 嵌在 If / For / Select 括号里那几档数组载体 —— 要动的不是「销毁发
     #   在哪个括号」, 而是「这枚载体的名字住在哪一层」。声明提到过程序言 (创建留在原位, 带第一百六十刀为

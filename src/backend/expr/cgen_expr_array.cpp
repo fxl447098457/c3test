@@ -125,12 +125,30 @@ Vb6Type CCodeGen::resolveArrayElemType(ASTNode* typeRef) const {
 // `a(2,3)="X"` 之后 `v = a` 再读 v(2,3) 交**空串**, VarType 交 8204 而不是声明那一档。
 // 收成一处 = 这一枚出口: As 子句在场时**仍然优先** (VB6 语义, 且语料实测 declared==As
 // 占 1580/1588, 两处相异的形状今天没有实物), 缺席时问声明表, 表里没有才回落 Variant
-// (隐式 Variant 数组 / 成员链 / With 成员 —— 沿用 Fix 180 的「不去猜」纪律)。
+// (隐式 Variant 数组 / With 成员 —— 沿用 Fix 180 的「不去猜」纪律)。
+// 账 #475 §B220 (第一百七十八刀): UDT 成员的动态数组 (`ReDim t.Items(1 To 3)`) 不在
+// arrayElemTypes_ 里 (那张表只按裸变量名登记), 于是分配侧回落 vb6_sa_variant 而访问侧
+// Pattern B 按成员声明发 VB6_SA_AT(int32_t, t.Items, i) —— 16 字节一步 vs 4 字节一步。
+// owner 能由 knownUdtVars_ 认出来时, 就问**同一份** udtMembers 的 mi.type (与 Pattern B
+// 同源); 认不出 (类字段 me->Foo.Items / With 成员 / 跨模块表为空) 仍回落 Variant,
+// 与 Fix 180 的 resolveUdtMemberArrayCType 保持同一条边界。
 Vb6Type CCodeGen::resolveReDimElemType(const std::string& lowerVar, ASTNode* typeRef) const {
     if (typeRef) return resolveArrayElemType(typeRef);
     if (!lowerVar.empty()) {
         auto it = arrayElemTypes_.find(lowerVar);
         if (it != arrayElemTypes_.end()) return it->second;
+        const size_t dot = lowerVar.rfind('.');
+        if (dot != std::string::npos && dot > 0 && dot + 1 < lowerVar.size()) {
+            auto owner = knownUdtVars_.find(lowerVar.substr(0, dot));
+            if (owner != knownUdtVars_.end()) {
+                Vb6Type memberType = Vb6Type::Variant;
+                std::string memberUdtCType;
+                if (resolveUdtMemberElemInfo(owner->second, lowerVar.substr(dot + 1),
+                                             memberType, memberUdtCType)) {
+                    return memberType;
+                }
+            }
+        }
     }
     return Vb6Type::Variant;
 }
