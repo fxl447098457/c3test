@@ -23,10 +23,16 @@
 #      上是**指数级** ⇒ 上一版在真语料上**跑不完**（>30 分钟被杀）。现在：整枚调用**只数一次**
 #      （外层扫到它的右括号之后），左操作数整支归 'left' 族单独记 ⇒ 496 份语料 5.7 分钟跑完。
 #
-#   **这一版量到的三笔数**（496 份语料 / 本机 C3.exe）：
-#     判据面（criteria） = 8,400 枚（BSTR 7,660 / VARIANT 740）
-#     左操作数族（下一刀的承面，不进提名面）= 5,949 枚（BSTR 5,793 / VARIANT 156）
-#     没进提名面的理由：others-have-call 5,882 / concat-left-has-call 2,611 / keeps 1,749 / closed 11
+#   **这一版量到的三笔数**（496 份语料 / 本机 C3.exe；账 #467 §B164 左操作数那一刀之后）：
+#     判据面（criteria） = 8,259 枚（BSTR 7,519 / VARIANT 740）
+#     左操作数族（下一刀的承面，不进提名面）= 9,429 枚（BSTR 9,273 / VARIANT 156）
+#       —— 比 #466 那版（5,949）大：这一版把**拼接站的左操作数本身**也算进这一族了
+#          （那一版只算了「左操作数**里面**」的那些）
+#       够得着（自己的文本不含 vb6_BSTR_Concat 子串）= 6,390
+#         其中左操作数**整枚就是**它 = 2,454（在拼接站内部次序不变）
+#         其中左操作数里还有别的部分 = 3,936（次序要另算）
+#       够不着（含那个子串 ⇒ 拼接站那条判据会翻面）= 3,039
+#     没进提名面的理由：concat-left-has-call 2,611 / others-have-call 2,543 / keeps 1,749 / closed 11
 #     （borrow / alias / consumes 三条机械证明仍**全为 0**）
 #   ⚠ **判据面 ≠ 实现面**：实现在真语料上只提名了 **1,757** 枚（BSTR 1,749 / VARIANT 8）⇒
 #     判据的 8,400 里有一大半**够不着** —— 那些站点是发码层用**裸字符串**拼出来的
@@ -262,12 +268,38 @@ def main():
     nom = []
     shapes = collections.Counter()
     left_family = []          # 拼接站**左操作数**里那一族（下一刀的承面，不进提名面）
+    left_ok = []              # 那一族里**够得着**的（自己的文本不含拼接子串）
+    left_reasons = collections.Counter()
+    left_whole = 0            # 够得着 ∧ 左操作数**整枚就是**它（次序上最干净）
+    left_parts = 0            # 够得着 ∧ 左操作数里还有**别的**部分（次序要另算）
     reasons = collections.Counter()   # 每一格**为什么没进**提名面
 
-    def classify(consumer, slot, mint, kind, args, protected, bucket):
-        """把一格「整枚实参 = mint」归到提名面 / 某一族理由 / 左操作数族。"""
-        if protected:
+    def classify(consumer, slot, mint, kind, args, protected, bucket, argtext, lefttext):
+        """把一格「整枚实参 = mint」归到提名面 / 某一族理由 / 左操作数族。
+
+           lefttext = 所在那一格的**外层左操作数文本**（左操作数族专用；其余为空）。
+        """
+        nonlocal left_whole, left_parts
+        # 「在拼接站的左操作数里」有两种形态：
+        #   ① 这一格**就是**某个拼接站的左操作数（consumer ∈ 拼接站 ∧ slot = 0）
+        #   ② 这一格在**某个**拼接站的左操作数**里面**（protected = 真）
+        in_left = protected or (consumer in CONCAT_STATIONS and slot == 0)
+        if in_left:
+            # **够不够得着**（下一刀的那条本地判据）：那一枚**自己的文本**里不许含
+            # 「vb6_BSTR_Concat」子串 —— 含了 ⇒ 拼接站那条判据会翻面（ConcatFree ⇒ Concat）
+            # ⇒ 不够得着；不含 ⇒ ① 判据不翻面 ② 那一枚不可能是任何 ConcatFree 的左操作数
+            # （ConcatFree 的左必是拼接，其文本必含子串）⇒ 不会双放。
+            has_concat = 'vb6_BSTR_Concat' in argtext
+            is_whole_left = (not protected) or (bool(lefttext) and lefttext.strip() == argtext.strip())
             left_family.append((consumer, slot, mint, kind))
+            if has_concat:
+                left_reasons['含拼接子串（判据会翻面）'] += 1
+            else:
+                left_ok.append((consumer, slot, mint, kind, is_whole_left))
+                if is_whole_left:
+                    left_whole += 1
+                else:
+                    left_parts += 1
             return
         if mint in borrowed:
             reasons['borrow'] += 1
@@ -301,7 +333,7 @@ def main():
         nom.append((consumer, slot, mint, kind))
         shapes[(mint, kind, consumer, slot)] += 1
 
-    def scan(code, protected, bucket):
+    def scan(code, protected, bucket, lefttext=''):
         """扫一段发码文本; protected = 处在拼接站左操作数里（那里不许提名）"""
         i = 0
         n = len(code)
@@ -324,13 +356,13 @@ def main():
                     mint = mm.group(1)
                     kind = mint_kind(mint)
                     if kind:
-                        classify(consumer, slot, mint, kind, args, protected, bucket)
+                        classify(consumer, slot, mint, kind, args, protected, bucket, a, lefttext)
                 # 递归进这一格: 拼接站的**左操作数**（slot 0）整支受保护 ⇒ 归 'left' 族;
                 # 其余实参继承 protected。外层扫到 c+1 ⇒ 整枚调用**只数一次**。
                 if is_concat and slot == 0:
-                    scan(a, True, 'left')
+                    scan(a, True, 'left', a)
                 else:
-                    scan(a, protected, bucket)
+                    scan(a, protected, bucket, lefttext)
             i = c + 1
 
     for path in sorted(os.listdir(CACHE)):
@@ -356,6 +388,11 @@ def main():
     print('  左操作数族（不进提名面，下一刀的承面）= %d' % len(left_family))
     lb = sum(1 for n in left_family if n[3] == 'B')
     print('    其中 BSTR = %d  VARIANT = %d' % (lb, len(left_family) - lb))
+    print('    够得着（自己的文本不含 vb6_BSTR_Concat 子串）= %d' % len(left_ok))
+    print('      其中左操作数**整枚就是**它 = %d（次序上最干净）' % left_whole)
+    print('      其中左操作数里还有别的部分 = %d（次序要另算）' % left_parts)
+    for r, v in left_reasons.most_common():
+        print('      够不着: %-22s = %d' % (r, v))
     print('  没进提名面的理由:')
     for r, v in reasons.most_common():
         print('    %-22s = %d' % (r, v))

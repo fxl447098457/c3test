@@ -94,6 +94,38 @@ Call Check("variant-cstr-after-change", CStr(v2), "13")
 Call Check("cstr-of-cdbl", CStr(CDbl("2.25")), "2.25")
 Call Check("len-of-cstr-of-cdbl", Len(CStr(CDbl("2.25"))), 4)
 
+' ---- 7) EVALUATION ORDER (the authority the reclaim knife's guards need) --
+' The reclaim knife moves a minted value to the FRONT of the statement (it names
+' it and frees it at the statement end).  That is only allowed if the order of
+' the pieces around it cannot be observed.  This section measures the VB-family
+' order with a logging function, so the guards have an EXTERNAL authority
+' instead of a C-side assumption:
+'   (a) the two operands of "&"      => left first, then right
+'   (b) the arguments of a call      => left first, then right
+' Both matter: (a) is what the concat station's left/right guards are about,
+' (b) is what the "the other arguments have no side effect" guard is about.
+Dim gLog
+
+Function LogIt(tag, val)
+    gLog = gLog & tag
+    LogIt = val
+End Function
+
+Sub TwoArgs(x, y)
+End Sub
+
+gLog = ""
+s = LogIt("L", "a") & LogIt("R", "b")
+Call Check("concat-operand-order", gLog, "LR")
+
+gLog = ""
+Call TwoArgs(LogIt("1", "x"), LogIt("2", "y"))
+Call Check("call-argument-order", gLog, "12")
+
+gLog = ""
+s = LogIt("A", "a") & LogIt("B", "b") & LogIt("C", "c")
+Call Check("concat-chain-order", gLog, "ABC")
+
 If nFail > 0 Then
     WScript.Echo "FAILURES = " & nFail
     WScript.Quit 1

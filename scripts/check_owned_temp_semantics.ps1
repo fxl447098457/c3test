@@ -52,6 +52,14 @@ $bad = @([regex]::Matches($out, '(?m)^FAIL ')).Count
 if ($p.ExitCode -ne 0) { $fail += ("参考实现退出码 " + $p.ExitCode + "（0 = 全过）") }
 if ($bad -gt 0) { $fail += ("参考实现里有 " + $bad + " 条 FAIL") }
 if ($out -notmatch 'ALL-PASS') { $fail += '参考实现没有 ALL-PASS 那一行' }
+# ④ **求值次序**那三条必须在（它们是回收刀那几道次序门的**外部权威**：
+#    "&" 的两个操作数左到右、调用实参左到右、链式拼接左到右）
+#    —— 少了任何一条 ⇒ 那些门就只剩 C 侧自己的假设 ⇒ 钉住。
+foreach ($needle in @('concat-operand-order', 'call-argument-order', 'concat-chain-order')) {
+    if ($out -notmatch ('(?m)^PASS ' + [regex]::Escape($needle) + ' ')) {
+        $fail += ("参考实现里少了一条求值次序的读数：" + $needle + "（次序门失去外部权威）")
+    }
+}
 Remove-Item -LiteralPath $outFile, $errFile -Force -ErrorAction SilentlyContinue
 
 if ($fail.Count -gt 0) {
