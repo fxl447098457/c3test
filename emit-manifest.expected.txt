@@ -469,7 +469,7 @@ sha256=31fb45d9eb1a9f3c47cd5b0f316bc8ad67af0ee44ad3801f8e9c784364f8f776 ascii256
 sha256=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 ascii256=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 rc=1 bytes=0 tests/b188_term/DllBlocks.bas
 sha256=a97793cce8b1bb71db86a03219f62f6866d67fa986133e1f74ab44ea8a94051f ascii256=b27ede38e8a2271f5a1327763ab4e57b13756901b1cf4ed7a2b2d646a7c029b9 rc=0 bytes=49637 tests/b187_box/B187d.vbp
 sha256=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 ascii256=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 rc=1 bytes=0 tests/b187_box/DllBlocks.bas
-sha256=ef4fe2b8685036237f7b8c252b3b377b4b5154e305da862ef3cb1ac84c7eb38d ascii256=6305668efdf63aaa4b43bbee07d5c0ea48a7d57564c249dd9cd2507e4c4848ee rc=0 bytes=12207 tests/b189_gate/B189g.vbp
+sha256=8e05e15b23333cdc26cb2a2419538202b158e6623f734ecac5381d800911ade2 ascii256=a3b092c8d23b6e94b4d39ae6a4c94c8066ef87919d996661d99963622b71863b rc=0 bytes=12230 tests/b189_gate/B189g.vbp
 sha256=bfa4f6229cf535a07c93df56f74b1818b50d7b995ca488edb7a64afdac0d9676 ascii256=f0d8b5ad704d1ce6234d9bbc7456a230b660f4c5d93596dc77d2de29fdce2f61 rc=0 bytes=15425 tests/b190_scope/B190.vbp
 sha256=010a2af5e17095d64e3c432f6f1a0d5578cdc4fed6d51e1694ca8da38e9416ba ascii256=23059d5e457ddc7ffaa54797fc6b14521a7a9a35b8ca132f83808d118d46cdc2 rc=0 bytes=5738 tests/b190_scope/B190Main.bas
 sha256=dbf2a609f8a08ee358af092ef929ab860167ccfd229a360f6089b660a65114b1 ascii256=ed3de1418b1d350bcc82b3600ff7ea8ab583e4ecd3a2e39d066a0422f8f910d9 rc=0 bytes=14596 tests/b216_slot/B216d.vbp
@@ -518,8 +518,8 @@ sha256=8891c176806e48dec861001d9ad2305987e1295cc9aac685f6691e8849bb66b6 ascii256
 sha256=525cdb3ee47631e8ed529dc6dfe97808a8a4d6167be48105e8780957c0b9578e ascii256=ea237f1adcde1cec47367c438cf2b77ad9b24957ca7fbc4281182aa8484d626a rc=0 bytes=6529 tests/test_static_array.bas
 sha256=d3c673404aa7efab46a41040ceb1378aed60da1babccd7cdaeb94041aa4a1cb7 ascii256=59b2d7e7e8196f161b88e8cd70d063a800f33fb32cf72c2908d969d11b69ca82 rc=0 bytes=3470 tests/test_static_proc.bas
 sha256=b2511b9c0442d4db61968abecf086d732189b79f4b07f830fee859e95bffc524 ascii256=4414be99f1512798fe81cad67dcd683f1ca466d4312e998b0a2135af52bb4684 rc=0 bytes=3707 tests/test_b164_owned_temp.bas
-sha256=22ee1210e83b7720a6592f5c7fd516f4cd5a9d269407b7c9919dce6c9cf54599 ascii256=0d4f2b561792b732c0c326f9d808c9d6c2b05f64b2ba43bd84d44080f003dd21 rc=0 bytes=15608 tests/iface_multi/IfaceMulti.vbp
-sha256=b50dfe7e8f62a7f833fbba052a064f4b07c9986e8493bb659d633236d3806f93 ascii256=cc3483493150775d4e925a6ad960a953203118fb7ee6f8afe5b36eab67afdd52 rc=0 bytes=2955 tests/iface_multi/mdlMain.bas
+sha256=ec5d25e9a23067f7ce4f2a2096614c14f34ea073d0dd350f7ea16826ef70dc87 ascii256=e5b3be5f49e74af0e25e1e138942db97d8fc13970c5964bfb270a99cf919f5b7 rc=0 bytes=15982 tests/iface_multi/IfaceMulti.vbp
+sha256=e6fa373924b639fcfe918ae185c76424445457d3315ba69320bf80964bc05bb8 ascii256=20e0d313da8d918218661efb9d7e0c217464193a15b0fbeed313be7ad54f6cfb rc=0 bytes=3283 tests/iface_multi/mdlMain.bas
 sha256=43aea2bcf6cb36360ea0a5a23979a5cd5668ed8ff8d2af23e3eb6dd5b1783472 ascii256=7a641baad4593c1ba11dbd90bbb2147963508e50bdc7bcd8cc2a9059f9a1c95c rc=0 bytes=10824 tests/k165_iface_slot/K165Slot.vbp
 sha256=a42baf345c94e124c4f614aff6b33a3f40e3687ade34ec1b486e3db14762b46f ascii256=8b51fbf0d08649428d0e5629108b0c92d996472e535e713fbca630fc3e0e9e8a rc=0 bytes=2803 tests/k165_iface_slot/mdlK165.bas
 sha256=717cd5b9808c3dd3ae5d48a7fbbc85015151362df29711e036743213cf4984e0 ascii256=5ab11ead58e2da667be664a4a0bcfc612994f9b0fe90b03e34acc46d08c512e3 rc=0 bytes=10109 tests/test_nested_array.bas
@@ -759,3 +759,6 @@ sha256=717cd5b9808c3dd3ae5d48a7fbbc85015151362df29711e036743213cf4984e0 ascii256
 #   四列全等（只在 local = 0 / 只在 ci = 0 / 三列不同 = 0）；② CI 本头 vs CI 上一头（head `f9d79d1b`，
 #   run 39341501644 = 门 #779 十二格全绿）= 移动 2 / 新增 0 / 退场 0 ⇒ 「语料里
 #   `Static … As <工程接口>` 暴露面 0 处」这条主张由 CI 自己的数背书：另外 484 行一个字没动。
+# 2026-10-22 第一百七十一刀的登记来源（账 #305 新账 #407 / §B190 = 视图值进 Variant 装箱站）: 本机按新二进制复算 (.build/k2266_manifest.txt, 496 份输入, inputs=496 / rc!=0=80) 登记, 第一百七十一刀的登记来源 = 496 行里**改写 3 / 新增 0 / 退场 0 / 移动 0**, 其余 493 行与 CI 那台 head=5020e731 的清单逐行相同 (pwsh scripts/rebless_emit_manifest.ps1 登记后复算 496/496 一致, coverage 哨兵 K1..K3 也过)。
+# 改写的三行逐行归因: ① tests/b189_gate/B189g.vbp = 本刀的目标那一发, B189Drv.c(11) 从 vb6_TypeName(vb6_VariantFromValue(o)) (整枚视图值结构体落 _Generic 的 default = vb6_VariantObject, cl C2172「实参不是指针」, 从前这一枚**编不过**、而它只走 --emit-c 的针所以门看不见) 改发 vb6_TypeName(vb6_VariantFromProjectInstance((void*)(o).obj)); ②③ tests/iface_multi/IfaceMulti.vbp 与 tests/iface_multi/mdlMain.bas = 判据夹具自己加的两行 Debug.Print (A-TNAME / B-TNAME), 产物跟着变.
+# 为什么其余 493 份按定义不许动: 新臂只在「标识符在 knownIfaceVars_ 名册里」时发, 而全语料按 C 侧显式类型数的装箱站承面就是上面那 1 处 (尺 .local/k2243_viewcensus.py, 读数 .build/k2243_viewcensus.txt) —— 改的又是一条从前硬报错的路 ⇒ 动了才该红。注脚 265 行 (头 29 + 尾 236) 登记前后都数过。
