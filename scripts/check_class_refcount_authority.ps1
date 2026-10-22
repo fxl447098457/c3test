@@ -511,24 +511,24 @@ if ($carrierShapeFiles.Count -ne 2) {
 #    = vb6_VariantObject(指针) ⇒ cl C2172「实参不是指针」(实物 = 门禁在册的 tests/b189_gate,
 #    B189Drv.c(11), 改前两台同红、门一直绿是因为那夹具只走发码针)。现在两位主人各只许一站:
 #    · legacyViewBoxExpr = 发码侧那一句的唯一拼法 (声明 + 定义 + wrapVariantValue 与 boxToVariant
-#      各一问) = 4 处 / 3 份文件。
+#      各一问 + 第一百七十二刀站E 一问 + 那一站自己的注释一行) = 6 处 / 4 份文件。
 #    · vb6_VariantFromProjectInstance = RTL 侧那枚出口 (声明 + 定义 + 发码字符串 + 「交回整枚槽」
-#      那张表那一行含注释共两处) = 5 处 / 4 份文件。
+#      那张表那一行含注释共两处 + 第一百七十二刀两条注释) = 7 处 / 6 份文件。
 #    再加一条反面的: .obj 那一截拼装**只许**住在 cgen_util_classtype.cpp —— 站点自己拼 = 第二位作者。
 $viewBoxQ = CountOf 'legacyViewBoxExpr'
-if ($viewBoxQ -ne 4) {
-    $fail += ("legacy view boxing question sites = " + $viewBoxQ + " (want exactly 4: 声明 + 定义 + 两位调用者)")
+if ($viewBoxQ -ne 6) {
+    $fail += ("legacy view boxing question sites = " + $viewBoxQ + " (want exactly 6: 声明 + 定义 + 三位调用者(含第一百七十二刀站E) + 那一站一条注释)")
 }
 $viewBoxQFiles = @(FilesOf 'legacyViewBoxExpr')
-if ($viewBoxQFiles.Count -ne 3) {
+if ($viewBoxQFiles.Count -ne 4) {
     $fail += ("legacy view boxing question files = " + ($viewBoxQFiles -join ', ') + " (want exactly 3 files)")
 }
 $viewBoxRtl = CountOf 'vb6_VariantFromProjectInstance'
-if ($viewBoxRtl -ne 5) {
-    $fail += ("view boxing rtl 出口 sites = " + $viewBoxRtl + " (want exactly 5: RTL 声明 + 定义 + 发码串 + 槽表那一行两处)")
+if ($viewBoxRtl -ne 7) {
+    $fail += ("view boxing rtl 出口 sites = " + $viewBoxRtl + " (want exactly 7: RTL 声明 + 定义 + 发码串 + 槽表那一行两处 + 第一百七十二刀两条注释)")
 }
 $viewBoxRtlFiles = @(FilesOf 'vb6_VariantFromProjectInstance')
-if ($viewBoxRtlFiles.Count -ne 4) {
+if ($viewBoxRtlFiles.Count -ne 6) {
     $fail += ("view boxing rtl 出口 files = " + ($viewBoxRtlFiles -join ', ') + " (want exactly 4 files)")
 }
 $ctrlTxt171 = [IO.File]::ReadAllText((Join-Path $Root "src\backend\cgen_util_ctrl.cpp"))
@@ -565,11 +565,11 @@ if ($legacySlotReadFiles.Count -ne 3) {
     $fail += ("legacy iface slot question files = " + ($legacySlotReadFiles -join ', ') + " (want exactly 3 files)")
 }
 $legacyWrapMint = CountOf 'legacyIfaceWrapFn'
-if ($legacyWrapMint -ne 6) {
-    $fail += ("legacy iface wrap-name sites = " + $legacyWrapMint + " (want exactly 6: 声明 + 定义 + Set 三臂 + 注释)")
+if ($legacyWrapMint -ne 9) {
+    $fail += ("legacy iface wrap-name sites = " + $legacyWrapMint + " (want exactly 9: 声明 + 定义 + Set 三臂 + cgen_com 铸表一处 + 第一百七十二刀站B 一问 + 两条注释)")
 }
 $legacyWrapFiles = @(FilesOf 'legacyIfaceWrapFn')
-if ($legacyWrapFiles.Count -ne 4) {
+if ($legacyWrapFiles.Count -ne 6) {
     $fail += ("legacy iface wrap-name files = " + ($legacyWrapFiles -join ', ') + " (want exactly 4 files)")
 }
 $legacyShapeInject = CountOf 'setLegacyIfaceShapes'
@@ -587,15 +587,15 @@ if ($cgenComText.Contains('typedef struct " + vtblName')) {
 # ㉘ 第一百六十五刀: 「这一格槽装的是不是 legacy 那一档接口视图」那一问收成一处 = slotIsLegacyIfaceView。
 #    病灶形状 = 腿②/腿③ 那两站先问类名 (inferClassTypeOfExpr 把接口名也答出来)，于是铸出一枚声明侧从没造过的
 #    `vb6_cls_<接口名>*` = cl C2440 (#407 那十二形全撞在这一发上，且门内没有一份输入走到这一形)。
-#    只许一份声明 + 一份定义 + 三处调用 (= 5 处 / 4 份文件)：多一处 = 又有站点自己拼名单，少一处 = 有一站还没问它。
+#    只许一份声明 + 一份定义 + 四处调用 + 第一百七十二刀站C 自己那条注释 (= 7 处 / 5 份文件)：多一处 = 又有站点自己拼名单，少一处 = 有一站还没问它。
 #    ⚠ 这一问不许被并进 ifaceViewOfExpr: 那一问问的是**新式薄指针** (vb6_ivref_<I>*)，两档的主人与形状都不同，
 #    合一起会让 b448 / iface_wrap 那两片真跑夹具当场换形状。
 $viewSlotAsk = CountOf 'slotIsLegacyIfaceView'
-if ($viewSlotAsk -ne 5) {
-    $fail += ("iface-view-slot question sites = " + $viewSlotAsk + " (want exactly 5: 声明 + 定义 + 腿② + 腿③ + 第一百七十一刀的装箱站)")
+if ($viewSlotAsk -ne 7) {
+    $fail += ("iface-view-slot question sites = " + $viewSlotAsk + " (want exactly 7: 声明 + 定义 + 腿② + 腿③ + 装箱站那一问 + 第一百七十二刀站C 一问与其注释)")
 }
 $viewSlotAskFiles = @(FilesOf 'slotIsLegacyIfaceView')
-if ($viewSlotAskFiles.Count -ne 4) {
+if ($viewSlotAskFiles.Count -ne 5) {
     $fail += ("iface-view-slot question files = " + ($viewSlotAskFiles -join ', ') + " (want exactly 4 files)")
 }
 # ㉗ 第一百六十四刀: 「嵌在块里的定长/多维数组载体 —— 声明提到过程序言」这一族五问各只许一位主人:
@@ -698,5 +698,5 @@ if ($fail.Count -gt 0) {
     foreach ($f in $fail) { Write-Host ("  - " + $f) }
     exit 1
 }
-Write-Host "CLASS-REFCOUNT-AUTHORITY OK (1 pair mint / 1 header / 2 leg consumers / 3+9 formals / 10 roster files / 6 literal files / 0 stale / 5 registry files + 2 registrants / 1+1 out-slot / 1+1 foreign-write drop / 1 field-teardown shape + file / 6 field-type questions (标量 + 数组两档) / 6 transfer-question sites in 2 files / 1 view-leg hand-back + 2 QiSet calls / 1+2+1 transfer-arm questions / 3 static-gate sites in 1 file + 1 ivref registration / 1 arg-station hand-back + 4+4 helper sites in 4 files / 4+4 index-slot + project-class questions / 1 address-temp mint / 3 element-teardown sites + 4+4 carrier-destroy questions + 4 preserve-with-release sites in 4 files / 4+4 形A questions (out-slot class + owner pass) + 5 copy-in claim sites in 4 files / 3+4 carrier-destroy sites in 3 files / 8 hand-back stations (5 in cgen_redim.cpp + 过程出口) + 4 shape questions + 3 multidim export sites + 4+2 carrier-scope registrar + flag sites / 7+3 carrier-free flag + 5+5 escape pre-pass + 6 roster sites in 4 files + 1 LHS + 1 RHS exemption + 1 dst gate + 7+3 declaration-scope roster / 5 static gates / 4+3 ND Preserve-with-release export sites)"
+Write-Host "CLASS-REFCOUNT-AUTHORITY OK (1 pair mint / 1 header / 2 leg consumers / 3+9 formals / 10 roster files / 6 literal files / 0 stale / 5 registry files + 2 registrants / 1+1 out-slot / 1+1 foreign-write drop / 1 field-teardown shape + file / 6 field-type questions (标量 + 数组两档) / 6 transfer-question sites in 2 files / 1 view-leg hand-back + 2 QiSet calls / 1+2+1 transfer-arm questions / 3 static-gate sites in 1 file + 1 ivref registration / 1 arg-station hand-back + 4+4 helper sites in 4 files / 4+4 index-slot + project-class questions / 1 address-temp mint / 3 element-teardown sites + 4+4 carrier-destroy questions + 4 preserve-with-release sites in 4 files / 4+4 形A questions (out-slot class + owner pass) + 5 copy-in claim sites in 4 files / 3+4 carrier-destroy sites in 3 files / 8 hand-back stations (5 in cgen_redim.cpp + 过程出口) + 4 shape questions + 3 multidim export sites + 4+2 carrier-scope registrar + flag sites / 7+3 carrier-free flag + 5+5 escape pre-pass + 6 roster sites in 4 files + 1 LHS + 1 RHS exemption + 1 dst gate + 7+3 declaration-scope roster / 5 static gates / 4+3 ND Preserve-with-release export sites / 6 legacyViewBoxExpr sites in 4 files + 7 rtl-name sites in 6 files + 9 wrap-name sites in 6 files + 7 view-slot sites in 5 files (㉘㉚，第一百七十二刀三站)"
 exit 0
