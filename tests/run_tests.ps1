@@ -7101,6 +7101,30 @@ if ($Category -in @("all", "run", "vbp")) {
     Test-EmitcAbsent "k174_vieweach_variant_store_gone" @("$Tests\k174_vieweach\K174.vbp") @(
         'o = vb6_VariantFromStackVARIANT(&_fe_var_0);',
         'vb6_VariantClear(&o);')
+    # <vbeclipse> 回归夹子 (k175_viewstmt, 账 #305 第一百七十五刀 = 新账 #471 站D): 视图接收者的**零实参 + 无括号**
+    # 方法调用写在**语句位**。改前这一形直接落 COM 兜底 `vb6_ComCall(x, L"Ping", NULL, 0)` —— 第一枚槽是 void*,
+    # 整枚值结构体 vb6_iface_<I> 递进去 = cl **C2172 实参不是指针 : 参数 1**（外部真语料 24 行 / 去重 8 份文件，
+    # 门禁语料 0）。修法不新立答案: P6.4 那一臂（表达式路现场拼 `x.vtbl->M(x.obj, …)`）提成一位主人
+    # legacyViewCallExpr，表达式路**换主人不换形状**（产物逐字节相同 = 清单零移动），语句路在兜底之前问第二次
+    # （与账 #143/C29-SL-l 那条「语句路也要问一次」同规）。
+    # 带实参那两形（`x.Twice 5` / `x.Twice(5)`）本来就走表达式路 —— 本夹子把它们与零实参那形放在同一份产物里,
+    # 就是为了让「换主人不换形状」被同日钉住（下面那条 Twice 针）。With 那一头（站D′）刻意没接。
+    # 两台真编真跑读数一字相同 (.build/k2571_k175_run.txt): K175-alpha=2（两发 Ping 各落 Alpha 的 vtbl）、
+    # K175-beta=10（换一枚实现类后同一句 Ping 落 Beta 的 vtbl，×10）—— 认错 wrap 就得 0 或当场崩；
+    # K175-t=15 = Beta.Twice(5)=3*5，即表达式路那一站在同一枚视图上也没漂。
+    $k175Expected = @(
+        "K175-alpha=2",
+        "K175-beta=10",
+        "K175-t=15",
+        "K175-DONE")
+    Test-Vbp 'k175_viewstmt_station_d' "$Tests\k175_viewstmt\K175.vbp" $k175Expected
+    Test-Vbp 'k175_viewstmt_station_d_x86' "$Tests\k175_viewstmt\K175.vbp" $k175Expected -Arch "x86"
+    Test-EmitcShape "k175_viewstmt_shape" @("$Tests\k175_viewstmt\K175.vbp") @(
+        'x.vtbl->Ping(x.obj);',
+        't = x.vtbl->Twice(x.obj, 5);')
+    Test-EmitcAbsent "k175_viewstmt_com_fallback_gone" @("$Tests\k175_viewstmt\K175.vbp") @(
+        'vb6_ComCall(x, L"Ping", NULL, 0)',
+        'vb6_ComVarFree((void*)vb6_ComCall(x')
     # <vbeclipse> 回归夹子 (b174_numstrarg, 账 #305 §B174 第六十五刀): 数值实参交进内在函数的
     # BSTR 形参。修前 InStr 那一路把 int32_t / double / int16_t 裸交给 wchar_t* —— cl 只给 C4047
     # (在 -W3 之外) ⇒ **编得过**, 而 BASE 那一台在别处 (Mid$(1.1,...) 那类) 拿的是 C2440, 本机

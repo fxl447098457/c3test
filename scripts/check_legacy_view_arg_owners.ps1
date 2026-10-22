@@ -17,8 +17,8 @@
 #       (Set 那三臂 3 / cgen_com 发定义那 1 / 实参位 1)。
 #   V4  legacyViewBoxExpr( 在代码里恰好 5 处 = 定义 1 + 声明 1 + 调用 3
 #       (wrapVariantValue / boxToVariant / ByRef Variant 实参位)。
-#   V5  slotIsLegacyIfaceView( 在代码里恰好 6 处 = 定义 1 + 声明 1 + 调用 4
-#       (legacyViewBoxExpr 自己 / 腿② 覆写 / 腿③ 置空 / Is 比较那一站)。
+#   V5  slotIsLegacyIfaceView( 在代码里恰好 7 处 = 定义 1 + 声明 1 + 调用 5
+#       (legacyViewBoxExpr 自己 / 腿② 覆写 / 腿③ 置空 / Is 比较那一站 / 第一百七十五刀表达式路那一问)。
 #   V6  视图参与比较那两句发码: `).obj == (` 恰好 1 处、`).obj == NULL` 恰好 2 处,
 #       都住在 cgen_expr_binary.cpp。
 #
@@ -76,7 +76,7 @@ $v4 = CountWhere "legacyViewBoxExpr(" ""
 if ($v4 -ne 5) { $fail += ("V4 装箱主人(定义+声明+调用)位数: 期望 5 = 3 处调用 + 定义 + 声明, 实到 " + $v4) }
 
 $v5 = CountWhere "slotIsLegacyIfaceView(" ""
-if ($v5 -ne 6) { $fail += ("V5 认视图槽(定义+声明+调用)位数: 期望 6 = 4 处调用 + 定义 + 声明, 实到 " + $v5) }
+if ($v5 -ne 7) { $fail += ("V5 认视图槽(定义+声明+调用)位数: 期望 7 = 5 处调用 + 定义 + 声明, 实到 " + $v5) }
 
 $v6a = CountWhere ").obj == (" "cgen_expr_binary.cpp"
 $v6b = CountWhere ").obj == NULL" "cgen_expr_binary.cpp"
@@ -88,12 +88,12 @@ if ((CountWhere ").obj == " "") -gt 3) { $fail += "V6 视图比较发码在别�
 # V7/V8 开线 (2026-10-23, 账 #305 第一百七十四刀 = 新账 #471 站A): For Each 那一站把集合交回来的元素
 #   换成视图, 靠的是「认视图槽」那一问 (slotLegacyIfaceViewName = 名册只读一次, slotIsLegacyIfaceView
 #   从此是它的投影) 与「按运行期类名选中那一对 wrap」的那一发。两条都不许在站点自己长出来。
-#   V7  slotLegacyIfaceViewName( 在代码行里恰好 4 处 = 定义 1 + 声明 1 + bool 投影 1 + For Each 那一站 1,
+#   V7  slotLegacyIfaceViewName( 在代码行里恰好 5 处 = 定义 1 + 声明 1 + bool 投影 1 + For Each 那一站 1 + 视图调用主人自己那一问 1,
 #        且 cgen_control.cpp 里恰好 1 处 (站点只问一次)。
 #   V8  比名那把尺 `_stricmp(className` 全仓恰好 1 处, 且在 cgen_iface_vtbl.cpp (接口自己铸的那一发 view_from
 #        里) —— 站点自己比名 = 第二条答案; mint 外再比一次名 = 又一位主人。
 $v7 = CountWhere "slotLegacyIfaceViewName(" ""
-if ($v7 -ne 4) { $fail += ("V7 认视图槽那一问位址: 期望 4 = 定义 + 声明 + bool 投影 + For Each 那一站, 实际到 " + $v7) }
+if ($v7 -ne 5) { $fail += ("V7 认视图槽那一问位址: 期望 5 = 定义 + 声明 + bool 投影 + For Each 那一站 + 调用主人自己那一问, 实际到 " + $v7) }
 if ((CountWhere "slotLegacyIfaceViewName(" "cgen_control.cpp") -ne 1) {
     $fail += "V7 站点: For Each 那一站只许问一次认视图槽那一问"
 }
@@ -102,9 +102,22 @@ if ($v8 -ne 1) { $fail += ("V8 视图那一族的比名尺: 期望 1 (只许写�
 if ((CountWhere "_stricmp(className" "cgen_iface_vtbl.cpp") -ne 1) {
     $fail += "V8 比名尺住错了文件 - 那一行应当在接口自己铸的那一发 view_from 里"
 }
+# V9 开线 (2026-10-23, 账 #305 第一百七十五刀 = 新账 #471 站D): 「接收者是一枚视图时那一发方法调用怎么拼」
+#   收成一处 = legacyViewCallExpr。病灶形状 = 表达式路现场拼了一份 (P6.4)，语句路压根没问、直接落
+#   vb6_ComCall(视图, …) ⇒ 整枚结构体进 void* 槽 = cl C2172 (真语料 24 行)。只许 定义 + 声明 + 两路各一问。
+#   语句路那一问住在 cgen_call.cpp 的 COM 兜底之前 (与 C29-SL-l 那条「语句路也要问一次」同规)；
+#   With 那一头 (站D′) 刻意**没接** —— 它先得给 WithObjKind 添一档，接进来了就是半个答案。
+$v9 = CountWhere "legacyViewCallExpr(" ""
+if ($v9 -ne 4) { $fail += ("V9 视图调用主人位数: 期望 4 = 定义 + 声明 + 表达式路 + 语句路, 实际到 " + $v9) }
+if ((CountWhere "legacyViewCallExpr(" "cgen_call.cpp") -ne 1) {
+    $fail += "V9 语句路: cgen_call.cpp 只许问一次视图调用主人"
+}
+if ((CountWhere "legacyViewCallExpr(" "cgen_expr_call_com_bind.inc") -ne 1) {
+    $fail += "V9 表达式路: com_bind 只许问一次视图调用主人 (别把形状又现场拼一遍)"
+}
 if ($fail.Count -gt 0) {
     foreach ($m in $fail) { Write-Host ("FAIL " + $m) }
     exit 1
 }
-Write-Host ("PASS 前缀名单=1(cgen_base_type.cpp) 形参问句=3 wrap调用=6 装箱调用=3 认槽调用=4 比较发码=1+2 认视图槽=4 比名尺=1")
+Write-Host ("PASS 前缀名单=1(cgen_base_type.cpp) 形参问句=3 wrap调用=6 装箱调用=3 认槽调用=5 比较发码=1+2 认视图槽=5 比名尺=1 视图调用主人=4(两路各一问)")
 exit 0

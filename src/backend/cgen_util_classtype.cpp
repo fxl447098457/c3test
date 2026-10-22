@@ -373,6 +373,26 @@ std::string CCodeGen::legacyViewBoxExpr(const ASTNode* expr, const std::string& 
     return "vb6_VariantFromProjectInstance((void*)(" + cExpr + ").obj)";
 }
 
+// 账 #305 新账 #471 站D (第一百七十五刀): 「接收者是一枚视图，它的方法那一发怎么发」收成一处。
+// 从前这一发只在表达式路现场拼 (P6.4)，语句路（不写括号的零实参那一形）直接落 `vb6_ComCall(视图, …)`
+// —— 整枚结构体进 `void*` 槽 = cl C2172（探针实测，外部真语料 24 行 / 去重 8 份文件）。
+// 是不是视图只问名册那一位主人（同一次查表），站点只许问、不许自己拼形状。
+// 带实参那两形（`x.M 5` / `x.M(5)`）本就由表达式路收尾 ⇒ 本刀接的是**第二条消费路**。
+std::string CCodeGen::legacyViewCallExpr(const std::string& objExpr, const std::string& memberName,
+                                         const std::vector<std::string>& args) const {
+    if (objExpr.empty() || slotLegacyIfaceViewName(Symbol::toLower(objExpr)).empty()) {
+        return std::string();
+    }
+    std::string argsStr;
+    for (size_t i = 0; i < args.size(); i++) {
+        if (i > 0) argsStr += ", ";
+        argsStr += args[i];
+    }
+    std::string call = objExpr + ".vtbl->" + cIdent(memberName) + "(" + objExpr + ".obj";
+    if (!argsStr.empty()) call += ", " + argsStr;
+    return call + ")";
+}
+
 
 // Fix 219: Variant 载体判定 —— 见 cgen_helpers.inc 的声明注释。
 bool CCodeGen::isVariantCarrierExpr(const std::string& cExpr) const {

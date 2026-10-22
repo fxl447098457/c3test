@@ -391,6 +391,13 @@
     // 账 #305 新账 #407 第一百七十一刀: 视图值进 Variant 装箱站该发的那一句 (唯一出口)。
     // 不是视图 ⇒ 空串。调用者只有两位 = wrapVariantValue 与 boxToVariant，别添第三位。
     std::string legacyViewBoxExpr(const ASTNode* expr, const std::string& cExpr) const;
+    // 账 #305 新账 #471 站D (第一百七十五刀): 「接收者是一枚视图时那一发方法调用怎么拼」的唯一出口
+    // (`x.vtbl-><成员>(x.obj, 实参…)`)。两位消费者 = 表达式路 (cgen_expr_call_com_bind.inc 的 P6.4，
+    // 换主人不换形状) 与语句路 (cgen_call.cpp 落在 COM 兜底之前)。不是视图 ⇒ 空串，站点按原路走。
+    // 站D′（`With <视图>` 那一路：临时量 `(void*)视图` 的 C2440 + 体内成员落 COM 兜底）刻意**没接**，
+    // 它要先给 WithObjKind 添一档，见台账第一百七十五刀「量」那一行。
+    std::string legacyViewCallExpr(const std::string& objExpr, const std::string& memberName,
+                                   const std::vector<std::string>& args) const;
     // B04 那条 vtable 发射 (`x->vt-><slot>(x, args)`) 的唯一作者：com_bind 与
     // 「接收者是视图值的调用」那一站都调它 (账 #305 §B221 形②)。槽名解析不出来返回空串。
     std::string ivrefVtableCall(const std::string& ifaceName, const std::string& member,

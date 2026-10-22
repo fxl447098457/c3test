@@ -405,6 +405,21 @@ void CCodeGen::visit(CallStmt& node) {
                     }
                 }
             }
+            // 账 #305 新账 #471 (第一百七十五刀) 站D: 接收者是一枚 legacy 接口**视图**（值结构体
+            // `vb6_iface_<I> { vtbl; obj }`）时，那一发不许进下面的 COM 兜底 —— `vb6_ComCall` 的第一
+            // 个槽是 `void*`，整枚结构体递过去 = cl **C2172 实参不是指针**（探针实测；外部真语料里
+            // 24 行 / 去重 8 份文件）。形状交给表达式路那位主人（P6.4 这一臂刚提成 `legacyViewCallExpr`），
+            // 站点不自己拼。带实参那两形（`x.M 5` / `x.M(5)`）本就由表达式路收尾，所以这一头只接
+            // 「零实参 + 无括号」那一臂 —— 与账 #143/C29-SL-l 那条「语句路也要问一次」同因同治。
+            {
+                const std::string viewCallS = legacyViewCallExpr(comObjExpr_, comMemberName_, {});
+                if (!viewCallS.empty()) {
+                    comObjExpr_.clear();
+                    comMemberName_.clear();
+                    c_.emitLine(viewCallS + ";  /* 视图.vtbl->方法 (站D 零实参裸形) */");
+                    return;
+                }
+            }
             // 无括号的COM方法调用: obj.Method → vb6_ComCall(obj, L"Method", NULL, 0)
             callExpr = "vb6_ComCall(" + comObjExpr_ + ", L\"" + comMemberName_ + "\", NULL, 0)";
             comObjExpr_.clear();

@@ -587,29 +587,30 @@ if ($cgenComText.Contains('typedef struct " + vtblName')) {
 # ㉘ 第一百六十五刀: 「这一格槽装的是不是 legacy 那一档接口视图」那一问收成一处 = slotIsLegacyIfaceView。
 #    病灶形状 = 腿②/腿③ 那两站先问类名 (inferClassTypeOfExpr 把接口名也答出来)，于是铸出一枚声明侧从没造过的
 #    `vb6_cls_<接口名>*` = cl C2440 (#407 那十二形全撞在这一发上，且门内没有一份输入走到这一形)。
-#    只许一份声明 + 一份定义 + 四处调用 + 第一百七十二刀站C 自己那条注释 (= 7 处 / 5 份文件)：多一处 = 又有站点自己拼名单，少一处 = 有一站还没问它。
+#    只许一份声明 + 一份定义 + 五处调用 + 第一百七十二刀站C 自己那条注释 (= 8 处 / 6 份文件)：多一处 = 又有站点自己拼名单，少一处 = 有一站还没问它。
 #    ⚠ 这一问不许被并进 ifaceViewOfExpr: 那一问问的是**新式薄指针** (vb6_ivref_<I>*)，两档的主人与形状都不同，
 #    合一起会让 b448 / iface_wrap 那两片真跑夹具当场换形状。
 $viewSlotAsk = CountOf 'slotIsLegacyIfaceView'
-if ($viewSlotAsk -ne 7) {
-    $fail += ("iface-view-slot question sites = " + $viewSlotAsk + " (want exactly 7: 声明 + 定义 + 腿② + 腿③ + 装箱站那一问 + 第一百七十二刀站C 一问与其注释)")
+if ($viewSlotAsk -ne 8) {
+    $fail += ("iface-view-slot question sites = " + $viewSlotAsk + " (want exactly 8: 声明 + 定义 + 腿② + 腿③ + 装箱站那一问 + 第一百七十二刀站C 一问与其注释 + 第一百七十五刀表达式路那一问)")
 }
 $viewSlotAskFiles = @(FilesOf 'slotIsLegacyIfaceView')
-if ($viewSlotAskFiles.Count -ne 5) {
-    $fail += ("iface-view-slot question files = " + ($viewSlotAskFiles -join ', ') + " (want exactly 4 files)")
+if ($viewSlotAskFiles.Count -ne 6) {
+    $fail += ("iface-view-slot question files = " + ($viewSlotAskFiles -join ', ') + " (want exactly 6 files)")
 }
 # ㉛ 第一百七十四刀 (账 #471 站A): 「集合交回来的那一枚元素是哪一枚实现类」那一问收成一处 ——
 #    每枚 legacy 接口在自己那份 TU 里铸一枚 view_from, 按运行期类名选中在册的那一对 wrap。
 #    四问各一位主人 + 一把尺只许一处 (多一处 = 又有人在站点自己拼名字或自己比名):
 #    · slotLegacyIfaceViewName = 「这一格槽装的是视图, 装的是哪一枚」= 声明 + 定义 + 它自己的 bool 投影
-#      (slotIsLegacyIfaceView 从此是这张名册的投影, 不再第二次读 knownIfaceVars_) + For Each 那一站 = 4 处 / 3 份文件。
+#      (slotIsLegacyIfaceView 从此是这张名册的投影, 不再第二次读 knownIfaceVars_) + For Each 那一站
+#      + 第一百七十五刀那位「视图方法调用」主人自己那一问 = 5 处 / 3 份文件。
 #    · legacyIfaceViewFromFn = view_from 那个名字的唯一出口 = 声明 + 定义 + 铸那一发 + 站点 + 一条注释 = 5 处 / 4 份文件。
 #    · emitLegacyIfaceViewFrom = 那一发的发码主人 (.h 交原型 / .c 交定义) = 声明 + 定义 + 调用 = 3 处 / 3 份文件,
 #      且调用只许挂在接口宿主那一站 (body_pass) —— 别处再挂一处就是第二个 mint。
 #      (比名那把尺 _stricmp 只许一处的针在 check_legacy_view_arg_owners.ps1 的 V8, 与 V1 那条同规, 不在这里重复钉)
 $viewNameAsk = CountOf 'slotLegacyIfaceViewName'
-if ($viewNameAsk -ne 4) {
-    $fail += ("iface-view-name question sites = " + $viewNameAsk + " (want exactly 4: 声明 + 定义 + bool 投影 + For Each 那一站)")
+if ($viewNameAsk -ne 5) {
+    $fail += ("iface-view-name question sites = " + $viewNameAsk + " (want exactly 5: 声明 + 定义 + bool 投影 + For Each 那一站 + 视图调用主人自己那一问)")
 }
 $viewNameAskFiles = @(FilesOf 'slotLegacyIfaceViewName')
 if ($viewNameAskFiles.Count -ne 3) {
