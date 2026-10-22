@@ -6306,6 +6306,11 @@ if ($Category -in @("all", "run", "vbp")) {
         # `Line [Step] (x1,y1) [Step] -(x2,y2)` 两个都可选), FD32 走 PictureBox 那一支码头,
         # 三枚的 pen 半钉的都是「相对坐标被当绝对坐标」那一形.
         "FD30-psetstep=True", "FD31-linestep=True", "FD32-piclinestep=True",
+        # 305 B227: 画布动词不写括号那一形 (Me.Scale / 裸 Scale = 复位坐标系)。改前这两形
+        # 落到 vb6_ComCall(hwnd, L"Scale", NULL, 0) = 假 IDispatch 上的 no-op, 复位不生效,
+        # 于是 after= 那一半读回的仍是设进去的数 (10,20 / 30,40) 而不是 0。两枚各钉两头:
+        # raw= 证明带坐标那一形没坏, after= 证明不写括号那一形真到了 RTL 出口。
+        "FD33-mescalereset=True", "FD34-barescalereset=True",
         "FD-DONE")
     Test-Vbp "fdrawstate" "$Tests\fdraw\FDemo.vbp" $fdrawExpected
     Test-Vbp "fdrawstate_x86" "$Tests\fdraw\FDemo.vbp" $fdrawExpected -Arch "x86"
@@ -9973,6 +9978,18 @@ if ($Category -in @("all", "syntax")) {
     Test-CodegenNote "form_unload_ownname" @("$Tests\fdraw\FDemo.vbp") @(
         "vb6_UnloadForm(vb6_hwnd_FDForm);") @(
         "vb6_UnloadForm(vb6_GetControlText(vb6_hwnd_FDForm)")
+    # 账 #305 §B227: 画布动词**不写括号**那一形 (`Me.Scale` / 裸 `Scale` = 复位坐标系)。
+    # 改前这一形走的是语句码头 (parser 对行尾无参数的成员调用交 CallStmt(callee=MemberAccessExpr)),
+    # 而那条码头的画布闸门写死成 `cls` / `print` 两个字面量 ⇒ `Scale` 没人接,
+    # 落到 vb6_ComCall(hwnd, L"Scale", NULL, 0) —— 假 IDispatch, 运行期 no-op。
+    # 四种写法现在必须**逐字同形**: 带坐标两枚 (has=1) 与不写括号两枚 (has=0, 全零)。
+    # Absent 那一条钉死"退回 COM 兜底" —— 那一形编得过、链接过、跑起来一声不响,
+    # 不能靠编译判据抓, 只能钉生成串 (运行期证人是 FD33/FD34)。
+    Test-CodegenNote "form_canvas_parenless" @("$Tests\fdraw\FDemo.vbp") @(
+        "vb6_Form_Scale((void*)vb6_hwnd_FDForm, 1, 10, 20, 100, 100); /* Form.Scale */",
+        "vb6_Form_Scale((void*)vb6_hwnd_FDForm, 0, 0, 0, 0, 0); /* Form.Scale */",
+        "vb6_Form_Scale((void*)vb6_hwnd_FDForm, 1, 30, 40, 200, 200); /* Form.Scale */") @(
+        "vb6_ComCall(vb6_hwnd_FDForm, L\"Scale\"")
 
 
     Test-CodegenNote "alias_type_spelling_same_ctype" @("$Tests\test_alias_spellings.bas") @(
