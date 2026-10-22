@@ -5629,7 +5629,7 @@ if ($Category -in @("all", "run", "vbp")) {
     # 账 #118 运行侧判据: 七个落点的补空格/截断/Len≡N, 双架构。
     # 「初始化用 0 填充」那一条**不在这里钉** —— NUL 在 Debug.Print 上不可见, 见用例头注释;
     # 第 ⑦ 段 `FS-i=[...]` 也**不做判据**: 调用点实参侧的收口本批没做 (用例头写了原因与修法)。
-    # (注册已归位到 bas 块的「八份运行期夹具」段 —— 账 #475 第一百七十九刀。)
+    # (注册已归位到 bas 块的「七份运行期夹具」段 —— 账 #475 第一百七十九刀。)
     # 账 #119: AssignMove 铺到局部/形参/ByRef 写穿三类目标 (以前只有模块级目标走这条)。
     # 这四行是"机制本体"的直接断言 —— 真跑那只 S119-leak-ok 只说结果, 这里钉的是发码形状:
     #   136 行那条循环体 (Left 的自有临时) / 定长串 String$ / ByRef 形参解引用目标
@@ -8353,7 +8353,7 @@ if ($Category -in @("all", "run", "vbp")) {
     #   其余 (模块级 `mFix` / 已经借出去的 `loc` / 只出现在 `UBound(d)` 那种实参位的 `d`) 照旧 NULL。
     #   判据两头都钉: 正面 = 三形交实参 (p / e / 第一百五十六刀夹具的 q、l、q2), 反面 = 那一发 NULL
     #   还在 (mFix / loc / d) 且借出去那一枚的出口销毁仍然缺席 —— 只放该放的那一格。
-    # (注册已归位到 bas 块的「八份运行期夹具」段 —— 账 #475 第一百七十九刀。)
+    # (注册已归位到 bas 块的「七份运行期夹具」段 —— 账 #475 第一百七十九刀。)
     Test-EmitcShape 'b158_whole_array_assign_goes_through_the_copy' @(
         "$Tests\test_whole_array_copy.bas") @(
         'd = vb6_ArrayAssign1D(NULL, b);',
@@ -8392,7 +8392,7 @@ if ($Category -in @("all", "run", "vbp")) {
     #     `static T* x = NULL;` + 一发拿指针本身当首轮守卫 (C 不许静态局部用非常量初始化器，Fix 084aa 那条老规矩)。
     #     inStaticProc_ 那一档今天判不了：parser 从不给过程头传 isStatic (parser_decl.cpp:35/40/95/100 全传 false)，
     #     实测 `Static Sub Foo()` 交 VB2001 ⇒ 另开一条账，本刀的针只覆盖显式 Static 那一形。
-    # (注册已归位到 bas 块的「八份运行期夹具」段 —— 账 #475 第一百七十九刀。)
+    # (注册已归位到 bas 块的「七份运行期夹具」段 —— 账 #475 第一百七十九刀。)
     # 发码两面：静态那六形各发一条 static 声明；同一过程里普通 Dim 那三形一条都不许带上前缀，
     #   而动态那一支 (初值本来就是 NULL) 不许多发一发守卫 —— 发了就挡住用户 ReDim 那一发的退旧。
     Test-EmitcShape 'b160_static_array_decls_get_static_storage' @(
@@ -8418,7 +8418,7 @@ if ($Category -in @("all", "run", "vbp")) {
     #   mg = 模块级 Static 数组那一档不受本刀影响 (Static 后面跟标识符，仍走变量声明那条老路)。
     #   负控 = 拿门 #830 那台二进制 (gh run download 取的 CI 产物) 编同一份夹具：两条 VB2001
     #   expected variable name (行 12 与行 22 那两个过程头)，压根进不了发码阶段。
-    # (注册已归位到 bas 块的「八份运行期夹具」段 —— 账 #475 第一百七十九刀。)
+    # (注册已归位到 bas 块的「七份运行期夹具」段 —— 账 #475 第一百七十九刀。)
     # 账 #464 §B164 (第一百六十四刀): 「一条语句里现造的带权临时量」提成具名临时量 `_own_N`
     #   之后**语句末按档收回**（BSTR ⇒ vb6_BSTR_Free / VARIANT ⇒ vb6_VariantClear）。
     #   夹具九格: T1 整枚实参 = 拼接 / T2 拼接站的右操作数 / T3 双实参另一格是纯字面量 /
@@ -8436,7 +8436,7 @@ if ($Category -in @("all", "run", "vbp")) {
     #      日志读数 "21" 是 C3/MSVC 的现状（实参从右往左），VB 参考是 "12" —— 那条差异
     #      早于本刀、另账；这里只钉「本刀没有把它挪动」。
     #   x64 与 x86 读数必须**逐行相同**（提了名只是把回收提前, 值不许变）。
-    # (注册已归位到 bas 块的「八份运行期夹具」段 —— 账 #475 第一百七十九刀。)
+    # (注册已归位到 bas 块的「七份运行期夹具」段 —— 账 #475 第一百七十九刀。)
     # 发码两面（账 #473）：`+` 当拼接站的右操作数现在提成 `_own_N`（正向），旧的
     #   裸传形状 `vb6_BSTR_Concat(a, vb6_CStrLong(n))` 必须消失（反向）。
     #   同一条 `+` 站的门 ⑩ 负控：左操作数有调用 ⇒ 右操作数不许提名 ⇒ 两枚调用仍内联。
@@ -8480,7 +8480,7 @@ if ($Category -in @("all", "run", "vbp")) {
     #   Double 8197 / String 8200, UDT 成员仍 8204 (那一档原本就对)。complex 那一格钉住
     #   `ReDim arr(1).Longs(...)` 的 node.varName 只是基数组名, 裸名回退不许再命中基数组元素 UDT。
     #   两台 (x64 / x86) 读数必须逐行相同。
-    # (注册已归位到 bas 块的「八份运行期夹具」段 —— 账 #475 第一百七十九刀。)
+    # (注册已归位到 bas 块的「七份运行期夹具」段 —— 账 #475 第一百七十九刀。)
     # 发码两面 (账 #475): 点号链与复杂目标的分配档按成员声明走; 旧的 vb6_sa_variant 兜底绝迹。
     Test-EmitcShape 'k483_member_elem_flavour_by_declaration' @(
         "$Tests\k483_redim_member_elem.bas") @(
@@ -8510,7 +8510,7 @@ if ($Category -in @("all", "run", "vbp")) {
     #       逃逸、出口照旧不碰 (2)。
     #   负控 = 同一台新二进制带 C3_NO_HOIST=1 发码: 序言那五枚指针一枚都不发、守卫一发都不发、出口那一发
     #     对 q / m / z / p / r 全不点名 (读数 .build/k2191_emit164_nohoist.c) = 闸① 跟着提升那一位主人答。
-    # (注册已归位到 bas 块的「八份运行期夹具」段 —— 账 #475 第一百七十九刀。)
+    # (注册已归位到 bas 块的「七份运行期夹具」段 —— 账 #475 第一百七十九刀。)
     Test-EmitcShape 'b164_nested_carrier_decl_lands_in_prelude' @(
         "$Tests\test_nested_array.bas") @(
         'vb6_SafeArray1D* q = NULL;',
