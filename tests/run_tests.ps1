@@ -5464,13 +5464,22 @@ if ($Category -in @("all", "run", "vbp")) {
     #   (见本文件上面那条注释「运行中弹 MsgBox 的用例需获得前台焦点」)。
     #   所以 tests/msgbox_num.bas 只喂 --emit-c，不登记为运行用例。
     Test-EmitcShape "mb_emitc_num_wrapped" @("$Tests\msgbox_num.bas") @(
-        'vb6_MsgBox1(vb6_CStrLong(vb6_Len(',    # Len 返回值 (int32_t)
-        'vb6_MsgBox1(vb6_CStrLong(n))',         # 数值变量
-        'vb6_MsgBox1(vb6_CStrLong(123))',       # 数值字面量
-        'vb6_MsgBox1(vb6_CStrLong((n + 1)))',   # 算术表达式
-        'vb6_MsgBox1(vb6_CStrDbl(d))',          # 浮点
-        'vb6_MsgBox1(vb6_CStrBool(b))',         # 布尔
-        'vb6_MsgBox1(s)'                        # 字符串: 必须原样, 不得被误包
+        # 账 #465 §B164: MsgBox 那一格现造的带权临时量现在**提了名**（BSTR _own_N = ...; 实参换成
+        # _own_N; 语句末按档收回）—— 转换本身（vb6_CStrLong / vb6_CStrDbl / vb6_CStrBool）没变，
+        # 只是落进了临时量的声明里 ⇒ 钉的形状改成「声明 + 引用」两枚。
+        'BSTR _own_2 = vb6_CStrLong(vb6_Len(_own_1));',   # Len 整数值 (int32_t)
+        'vb6_MsgBox1(_own_2)',
+        'BSTR _own_3 = vb6_CStrLong(n);',         # 整值变量
+        'vb6_MsgBox1(_own_3)',
+        'BSTR _own_4 = vb6_CStrLong(123);',       # 整值字面量
+        'vb6_MsgBox1(_own_4)',
+        'BSTR _own_5 = vb6_CStrLong((n + 1));',   # 整值表达式
+        'vb6_MsgBox1(_own_5)',
+        'BSTR _own_6 = vb6_CStrDbl(d);',          # 浮点
+        'vb6_MsgBox1(_own_6)',
+        'BSTR _own_7 = vb6_CStrBool(b);',         # 布尔
+        'vb6_MsgBox1(_own_7)',
+        'vb6_MsgBox1(s)'                        # 标识符: 保持原样, 不多包装
     )
     Test-EmitcAbsent "mb_emitc_no_bare_num" @("$Tests\msgbox_num.bas") @(
         'vb6_MsgBox1(vb6_Len(',    # 裸数值函数返回值
@@ -5566,7 +5575,10 @@ if ($Category -in @("all", "run", "vbp")) {
         'vb6_BSTR_AssignMove(&s, vb6_CStrLong(123));',
         'vb6_BSTR_AssignMove(&s, vb6_CStrDbl(d));',
         'vb6_BSTR_AssignMove(&s, vb6_CStrBool(bo));',
-        'vb6_BSTR_AssignMove(&s, vb6_CStrLong(vb6_Len(vb6_BSTR_FromStr(L"abcd"))));'
+        # 账 #465 §B164: 里层那一枚现造的带权临时量现在**提了名** —— 转换（vb6_CStrLong(vb6_Len(..))）
+        # 没变, 只是落进了临时量的声明里 ⇒ 钉的形状改成「声明 + 引用」两枚。
+        'BSTR _own_2 = vb6_BSTR_FromStr(L"abcd");',
+        'vb6_BSTR_AssignMove(&s, vb6_CStrLong(vb6_Len(_own_2)));'
     )
     Test-EmitcAbsent "cnum_emitc_no_overwrap" @("$Tests\test_str_cnum_assign.bas") @(
         'vb6_CStrLong(vb6_MakeStr(',                    # 返回 String 的工程函数不许当数值折
