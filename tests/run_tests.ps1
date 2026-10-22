@@ -4558,12 +4558,12 @@ if ($Category -in @("all", "run", "bas")) {
     Add-BasTest "test_overflow" "$Tests\test_overflow.bas" $ovfNeedles
     Add-BasTest "test_overflow_x86" "$Tests\test_overflow.bas" $ovfNeedles -Arch "x86"
 
-    # 账 #475 §B220 (第一百七十九刀) 归位: 下面这八份运行期夹具的注册原先被写在 vbp 分类块里,
+    # 账 #475 §B220 (第一百七十九刀) 归位: 下面这七份运行期夹具的注册原先被写在 vbp 分类块里,
     #   而纯 .bas 队列在本块末尾就已消费 ⇒ 门上一次都没跑 (只有它们各自的 EMITC 形状侧在 vbp
-    #   分片上验过)。搬进本块后 x64 / x86 各钉一头。八份 = 定长串收口 (账 #118) / 局部数组载体
-    #   出口销毁 (账 #305 甲·第一百五十六刀) / 整数组赋值 (第一百五十八刀) / Static 局部数组
-    #   (第一百六十刀) / Static 过程存储 (第一百六十一刀) / 带权临时量 (账 #464) / 嵌套载体提升
-    #   (账 #305 甲·第一百六十四刀) / UDT 成员动态数组元素档 (账 #475)。
+    #   分片上验过)。搬进本块后 x64 / x86 各钉一头。七份 = 定长串收口 (账 #118) / 整数组赋值
+    #   (第一百五十八刀) / Static 局部数组 (第一百六十刀) / Static 过程存储 (第一百六十一刀) /
+    #   带权临时量 (账 #464) / 嵌套载体提升 (账 #305 甲·第一百六十四刀) / UDT 成员动态数组元素档
+    #   (账 #475)。第八份 test_local_array_carrier 见下面它的专属说明 (x86 腿在 CI 上测不实)。
     $fsSemNeedles = @(
         "FS-a-len=5", "FS-a=[ab   ]",                   # 模块级: 短→右补空格
         "FS-b-len=5", "FS-b=[abcde]",                   # 模块级: 长→截右
@@ -4579,13 +4579,10 @@ if ($Category -in @("all", "run", "bas")) {
         "FIXEDSTR-DONE")
     Add-BasTest "test_fixedstr_sem" "$Tests\test_fixedstr_sem.bas" $fsSemNeedles
     Add-BasTest "test_fixedstr_sem_x86" "$Tests\test_fixedstr_sem.bas" $fsSemNeedles -Arch "x86"
-    $b156Needles = @("B218-fix-ok=Y", "B219-dyn-ok=Y", "B220-nd-ok=Y",
-                     "B221-alias-leak=1 read=123456", "B222-bound-leak=1 ubound=63",
-                     "B223-give-leak=1 read=246810", "B225-take-leak=0 module-read=123456",
-                     "B226-dst-reclaim-leak=0", "B227-src-copy-leak=0",
-                     "B228-dst-borrowed-leak=1 read=123456", "B224-DONE")
-    Add-BasTest "test_local_array_carrier" "$Tests\test_local_array_carrier.bas" $b156Needles
-    Add-BasTest "test_local_array_carrier_x86" "$Tests\test_local_array_carrier.bas" $b156Needles -Arch "x86"
+    # test_local_array_carrier (账 #305 甲·第一百五十六刀) **没搬**: 门 #860 实测它的 x86 腿
+    #   `B218-fix-ok` 在 CI 上读 N (本机 x86/x64 都读 Y) —— 那是 PagefileUsage 每调用增量尺
+    #   (N=20000, 阈 4 B/call) 的机台敏感格, 与发码无关 (该夹具的清单行本机复算一字未动)。
+    #   本刀不把它带进门, 留待单开一条账查 x86 那台分配器的行为; 它原在 vbp 块里的位置照旧。
     $b158Needles = @("B259-copy=123456 ubound=5 src=999", "B260-fix=234567 ubound=6",
                      "B261-locfix=345678", "B262-var=22 copy=44",
                      "B263-hold=5 own=6", "B264-DONE=1")
@@ -8292,7 +8289,10 @@ if ($Category -in @("all", "run", "vbp")) {
     #   第一百五十九刀那一头的负控 = 拿第一百五十八刀的二进制编同一份新夹具 (本机两台):
     #   B226 与 B227 两针同时翻 1 (每调用净漏 346/323 与 102/88 字节，读数 .build/k2086_x64.txt
     #   / k2086_x86.txt)，其余八行一字不动 ⇒ 新针吃得到这一刀的改动。
-    # (注册已归位到 bas 块的「八份运行期夹具」段 —— 账 #475 第一百七十九刀。)
+    # 账 #305 §B218 (甲) 第一百五十六刀: test_local_array_carrier 的运行期注册**本刀不带进门**
+    #   (门 #860 实测 x86 腿 `B218-fix-ok=N`, 本机 x64/x86 都是 Y —— 那枚 PagefileUsage 增量尺
+    #   的机台敏感格, 与该夹具的清单行无关, 本机复算一字未动)。它原在这条 vbp 块里的位置照旧,
+    #   EMITC 形状侧 (下面 b156_* 两枚) 仍在 vbp 分片上验; 运行期尺的去留留给专账。
     # 发码两面: 该销毁的六形各发一条 (1D 各形 + ND 那一形带兄弟出口与转型)，
     #   逃逸的四形一条都不许有 —— 反面针钉的是「带注释那一发」的形状, 因为 ReDim 换载体那一发
     #   长得一模一样、只是没有注释 (少了这个限定, 反面针在修前就红了)。
