@@ -7054,7 +7054,7 @@ if ($Category -in @("all", "run", "vbp")) {
         "K172-nothing=1",
         "K172-after=0",
         "K172-boxtype=0",
-        "K172-DONE=1")
+        "K172-DONE")
     Test-Vbp 'k172_view_arg_wrap' "$Tests\k172_viewarg\K172.vbp" $k172Expected
     Test-Vbp 'k172_view_arg_wrap_x86' "$Tests\k172_viewarg\K172.vbp" $k172Expected -Arch "x86"
     Test-EmitcShape "k172_view_arg_shape" @("$Tests\k172_viewarg\K172.vbp") @(
@@ -7068,9 +7068,9 @@ if ($Category -in @("all", "run", "vbp")) {
     Test-EmitcAbsent "k172_view_arg_bare_shapes_gone" @("$Tests\k172_viewarg\K172.vbp") @(
         "vb6_mdlK172_ViewValue(me);",
         "vb6_mdlK172_BoxValue(&v);",
-        "-(v == w)",
-        "-(v == u)",
-        "-(nVar == NULL)")
+        "(v == w)",
+        "(v == u)",
+        "(nVar == NULL)")
     # <vbeclipse> 回归夹子 (b174_numstrarg, 账 #305 §B174 第六十五刀): 数值实参交进内在函数的
     # BSTR 形参。修前 InStr 那一路把 int32_t / double / int16_t 裸交给 wchar_t* —— cl 只给 C4047
     # (在 -W3 之外) ⇒ **编得过**, 而 BASE 那一台在别处 (Mid$(1.1,...) 那类) 拿的是 C2440, 本机
