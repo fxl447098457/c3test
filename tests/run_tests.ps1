@@ -3535,6 +3535,22 @@ if ($Category -in @("all", "run", "bas")) {
         'vb6_VariantAssign(&e, vb6_VariantFromValue(VB6_SA_AT(BSTR, gArr, _fe_i5)));',
         'vb6_VariantAssign(&keep, vb6_VariantFromValue(e));'
     )
+    # 账 #305 §B164 形⑤ 站③ (第一百八十四刀): 显式 `Let <变体> = …`。目标是不是 Variant 槽
+    # 原先只有 AssignmentStmt 问 (六条判据内联), LetStmt 那一站从不问 ⇒ 非变体右值三形
+    # (字面量 / String 变量 / 拼接) 发成裸赋值 = cl C2440 (BASE 实测 3 发), 而变体槽与变体
+    # 数组元素两形编得过却不清旧值、借来的值还跟槽共用一只 BSTR。s3/s6 是深拷贝证人 (源头
+    # 改写后槽里必须仍是旧值)。判据问「值 × VarType」, 不看形状。
+    $letSlotNeedles = @("L171-s1=abc/8", "L171-s2=seed/8", "L171-s3=seed", "L171-s4=moved!",
+        "L171-s5=src", "L171-s6=src", "L171-s7=arr", "L171-s8=changed", "L171-DONE")
+    Add-BasTest "test_let_variant_slot" "$Tests\test_let_variant_slot.bas" $letSlotNeedles
+    Add-BasTest "test_let_variant_slot_x86" "$Tests\test_let_variant_slot.bas" $letSlotNeedles -Arch "x86"
+    # 发码形状针三形: 非变体右值经 vb6_VariantString 装箱 (前一行是先清旧值) / 槽对槽走深拷贝 /
+    # 数组元素走 vb6_VariantAssign。缺任何一条 = 那一站又回到裸赋值。
+    Test-EmitcShape "let_variant_slot_shape" @("$Tests\test_let_variant_slot.bas") @(
+        'gv = vb6_VariantString(vb6_BSTR_FromStr(L"abc"));',
+        'vb6_VariantAssign(&gv, vb6_VariantFromValue(v));',
+        'vb6_VariantAssign(&VB6_SA_AT(vb6_VARIANT, ga, 1), vb6_VariantString(vb6_BSTR_FromStr(L"arr")));'
+    )
     # 账 #305 §B166 (第五十六刀): 一枚 ParamArray 往返的两半回收各接上一枚出口 —— 调用点现造的
     # 数组归**被调方统一出口**销毁(此前 vb6_PA_Destroy 全仓 0 调用者), For Each 的中间槽 _pa_vN
     # 改问 §B164 那枚出口 + 块尾收尾。两台实测(BASE 存档 .build/k56_fix_base55_*.txt):

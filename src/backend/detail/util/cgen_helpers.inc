@@ -82,6 +82,13 @@
     void emitVariantSlotAssign(const std::string& target, Expr* rhs,
                                const std::string& value, bool udtFieldSlot);
 
+    // 账 #305 §B164 形⑤ 站③ (第一百八十四刀): 「这一发赋值的目标是不是一枚 Variant 槽」——
+    // AssignmentStmt 与 LetStmt 两站共用这一位主人 (原先只在 AssignmentStmt 里内联了一份)。
+    // 判据依序 = 裸名/本模块类成员表 / 目标标识符名 / `VB6_SA_*(vb6_VARIANT, …)` 下标宏 /
+    // UDT 的 Variant 字段 / `<对象>.<类的公共 Variant 字段>`; 命中 `udtField` 时交回 true
+    // (调用方据此选深拷贝槽位语义)。false = 不是槽, 调用方维持自己原来的路。
+    bool variantSlotTargetOf(const Expr* target, const std::string& targetText, bool& udtField);
+
     // 账 #305 §B166 (第五十六刀): 「这一次调用现造的 ParamArray 数组, 出口该销毁」收成这一枚 ——
     // Sub/Function/Property 三个过程出口各调一次, 站点不许再各自抄那三行。
     void emitParamArrayReclaim(const std::vector<std::unique_ptr<ParameterDecl>>& params);
