@@ -71,19 +71,28 @@ jobs:
         run: |
           $binDir = Join-Path $env:RUNNER_TEMP "sccache-bin"
           New-Item -ItemType Directory -Force -Path $binDir | Out-Null
-          $cached = Join-Path $binDir "sccache.exe"
-          if (Test-Path $cached) {
-            Write-Host "sccache from cache: $cached"
+          $tools = Join-Path $binDir "tools"
+          # ⚠ 与 ci_t0.yml 同一条纪律：choco 落在 bin\sccache.exe 的是一枚 **shim**，按相对路径
+          #   ..\lib\sccache\tools\<ver>\sccache.exe 找本体；只拷这枚 shim 到别处会炸（ci_t0 上实测
+          #   FAILED [code=4294967295] "Cannot find file at '..\lib\sccache\tools\...'"）。
+          #   所以连 tools 子树一起搬，且 USE_SCCACHE 指向**真本体**（绝不用 Get-Command 拿到的 shim）。
+          $exe = $null
+          if (Test-Path $tools) {
+            $exe = (Get-ChildItem $tools -Recurse -Filter sccache.exe -ErrorAction SilentlyContinue | Select-Object -First 1).FullName
+          }
+          if ($exe -and (Test-Path $exe)) {
+            Write-Host "sccache from cache: $exe"
           } else {
             choco install sccache -y --no-progress 2>&1 | Out-Null
-            $exe = (Get-Command sccache -ErrorAction SilentlyContinue).Source
-            if (-not $exe) { $exe = "C:\ProgramData\chocolatey\bin\sccache.exe" }
-            if (Test-Path $exe) { Copy-Item $exe $cached -Force }
+            $src = Join-Path ${env:ChocolateyInstall} "lib\sccache\tools"
+            if (-not $src -or -not (Test-Path $src)) { $src = "C:\ProgramData\chocolatey\lib\sccache\tools" }
+            if (Test-Path $src) { Copy-Item $src $tools -Recurse -Force }
+            $exe = (Get-ChildItem $tools -Recurse -Filter sccache.exe -ErrorAction SilentlyContinue | Select-Object -First 1).FullName
           }
-          if (Test-Path $cached) {
-            Write-Host "sccache available: $cached"
-            & $cached --version
-            "USE_SCCACHE=$cached" | Out-File -FilePath $env:GITHUB_ENV -Append
+          if ($exe -and (Test-Path $exe)) {
+            Write-Host "sccache available: $exe"
+            & $exe --version
+            "USE_SCCACHE=$exe" | Out-File -FilePath $env:GITHUB_ENV -Append
           } else {
             Write-Host "sccache not available; build will run without it"
           }
