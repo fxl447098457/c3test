@@ -6,7 +6,12 @@
 
 OPEN_LOCAL_DIVERGENCE: **已收口（2026-09-27 入夜 = C29-MV-d）** —— 本地 `ctrlmonthview` 的 MV24/MV25/MV30 三条红既不是"本地环境/增量缓存"、也不是"OS 版本相关"，而是**挂钟相关**：comctl v6 把当前时间混进 `MCM_GETCURSEL` 的负载里（日没错、零头 0.765），`CLng` 下午进位、上午舍掉 ⇒ 本机下午一直红、CI 跑在上午一直绿。修法与全部读数见 029 §九 C29-MV-d 那一格。留下的一般式：**日期面判据按 `CLng` / `=` 比之前，产品读数必须归成整数日**，否则同一棵树的判据随时段翻脸，而门只会读到"上午那一半"。
 STATUS: IDLE             # NOT_STARTED | DESIGN | BUSY | IDLE | ALL_DONE
-LAST_RUN: 2026-10-24T01:10:00+08:00 **第一百八十六刀已出并收线（账 #305 站F 写侧 = 多入口参数写在视图上：`x.Item(3) = "a"` 走 `put_` 席、带下标实参）**：`3145e9f2` → 门 **#890** = run 39992014706 / head `3145e9f2` / attempt 1 / **十六格**逐格 completed+success
+LAST_RUN: 2026-10-24T02:20:00+08:00 **第一百八十七刀已出并收线（账 #305 站F 读侧对象档 = `Set o = <视图>.Owner` 也走读槽，与普通类同形）**：`c257bd4e` → 门 **#891** = run 39996518842 / head `c257bd4e` / attempt 1 / **十六格**逐格 completed+success
+—— **一句话范围**：对象档 getter 的 C 返回是 void*，旧读者挡掉它 ⇒ 站点保留 `vb6_ComGetObjectProp(视图,…)`，值结构体进 void* 槽 = C2172。
+—— **修法**：读读者放开 void* 档（判据 = 槽 retType void* + 无实参 + 晚绑定那一发就是 vb6_ComGetObjectProp(），命中换回 视图.vtbl->Owner(视图.obj)；所有权与普通类那条路逐字一致（纯赋值、不 AddRef），不新开口径。
+—— **判据**：夹具 K2947 扩到 6 行（两台相同：a=1 / o=False / b=0 / p=True / i=3:a / DONE）+ 形状针与 ABSENT 针各一枚；哨兵 V9 6→7（util 3→4）；清单 518 行只动本夹具两行。站F 读侧两档、写侧四支全接，没有已知开口。
+
+# 上一轮（2026-10-24T01:10:00+08:00，原样留档）= LAST_RUN: 2026-10-24T01:10:00+08:00 **第一百八十六刀已出并收线（账 #305 站F 写侧 = 多入口参数写在视图上：`x.Item(3) = "a"` 走 `put_` 席、带下标实参）**：`3145e9f2` → 门 **#890** = run 39992014706 / head `3145e9f2` / attempt 1 / **十六格**逐格 completed+success
 —— **一句话范围**：目标 = `IndexOrCallExpr{callee=MemberAccess(视图, 成员), positional}`；通用路把 Get 槽当左值 `x.vtbl->Item(x.obj, 3) = …` ⇒ cl C2106。
 —— **修法**：写读者收前缀实参（形参串唯一解析口），新增只读查询供站点发码前问末形参档；四件全中才发 `x.vtbl->Item_put(x.obj, 3, 值)`，否则原样落回。
 —— **判据**：夹具 `tests/k2947_setview` 两台 4 行相同（`K2947-a=1 / b=0 / i=3:a / DONE`）+ 写/读两枚形状针 + 两枚 ABSENT 针；哨兵 P3 7→8、refcount 7→8 / 8→9、V10 8 与新增 V12；清单 518 行只动本夹具两行。
