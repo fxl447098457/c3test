@@ -6,7 +6,12 @@
 
 OPEN_LOCAL_DIVERGENCE: **已收口（2026-09-27 入夜 = C29-MV-d）** —— 本地 `ctrlmonthview` 的 MV24/MV25/MV30 三条红既不是"本地环境/增量缓存"、也不是"OS 版本相关"，而是**挂钟相关**：comctl v6 把当前时间混进 `MCM_GETCURSEL` 的负载里（日没错、零头 0.765），`CLng` 下午进位、上午舍掉 ⇒ 本机下午一直红、CI 跑在上午一直绿。修法与全部读数见 029 §九 C29-MV-d 那一格。留下的一般式：**日期面判据按 `CLng` / `=` 比之前，产品读数必须归成整数日**，否则同一棵树的判据随时段翻脸，而门只会读到"上午那一半"。
 STATUS: IDLE             # NOT_STARTED | DESIGN | BUSY | IDLE | ALL_DONE
-LAST_RUN: 2026-10-24T04:05:00+08:00 **第一百九十刀已收线（账 #305 视图表达式裸零参属性读 = m22 站落临时量 + 按值适配器）**：`413624a3` → 门 **#895** = run 40012465701 / head `413624a3` / attempt 1 / **十六格**逐格 completed+success
+LAST_RUN: 2026-10-24T04:35:00+08:00 **第一百九十一刀已收线（账 #305 `With Me`：类模块内的 Me 按本类实例处理）**：`32dd82b2` → 门 **#896** = run 40015246822 / head `32dd82b2` / attempt 1 / **十六格**逐格 completed+success
+—— **一句话范围**：`With Me` 的 Me 是 MeExpr，按名判定链够不着 ⇒ tempType void*、体内走 IDispatch。
+—— **修法**：`cgen_with.cpp` 加 `MeExpr + isClassModule_` ⇒ ClassInstance + `vb6_cls_<Cls>*`。
+—— **判据**：夹具 `K2947-k=1` 两架构 13 行同；99 道全绿；清单只动夹具两行。订正：VbEclipse `With Module` 早已对。下一格 = `With <返回视图的调用>`（0 处、卡在推断）。
+
+# 上一轮（2026-10-24T04:35:00+08:00，原样留档）= LAST_RUN: 2026-10-24T04:05:00+08:00 **第一百九十刀已收线（账 #305 视图表达式裸零参属性读 = m22 站落临时量 + 按值适配器）**：`413624a3` → 门 **#895** = run 40012465701 / head `413624a3` / attempt 1 / **十六格**逐格 completed+success
 —— **一句话范围**：`h.Items.Size`（无括号）走 m22 站，视图值被当类指针 ⇒ C2440；带括号那形 189 已接。
 —— **修法**：m22 站命中「类=legacy 接口 + 不在视名册 + 槽零参」⇒ `__vbvreadN` 临时量 + `legacyIfaceSlotCallFn`；With 与类字段不动。
 —— **判据**：夹具 `K2947-j=1` 两架构 12 行同；V7 10→11、V15 4→5、refcount 视图问句各 +1；清单只动夹具两行。下一格 = With 体内视图属性读。
