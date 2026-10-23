@@ -6,7 +6,13 @@
 
 OPEN_LOCAL_DIVERGENCE: **已收口（2026-09-27 入夜 = C29-MV-d）** —— 本地 `ctrlmonthview` 的 MV24/MV25/MV30 三条红既不是"本地环境/增量缓存"、也不是"OS 版本相关"，而是**挂钟相关**：comctl v6 把当前时间混进 `MCM_GETCURSEL` 的负载里（日没错、零头 0.765），`CLng` 下午进位、上午舍掉 ⇒ 本机下午一直红、CI 跑在上午一直绿。修法与全部读数见 029 §九 C29-MV-d 那一格。留下的一般式：**日期面判据按 `CLng` / `=` 比之前，产品读数必须归成整数日**，否则同一棵树的判据随时段翻脸，而门只会读到"上午那一半"。
 STATUS: IDLE             # NOT_STARTED | DESIGN | BUSY | IDLE | ALL_DONE
-LAST_RUN: 2026-10-23T23:30:00+08:00 **第一百八十五刀已出并收线（账 #305 站F 写侧 Set 档 = `Set <视图>.<属性> = …` 也问同一枚写读者，按 `setKind` 答 `put_` / `putref_` 两档）**：`69f24510` → 门 **#889** = run 39978359313 / head `69f24510` / attempt 1 / **十六格**逐格 completed+success
+LAST_RUN: 2026-10-24T01:10:00+08:00 **第一百八十六刀已出并收线（账 #305 站F 写侧 = 多入口参数写在视图上：`x.Item(3) = "a"` 走 `put_` 席、带下标实参）**：`3145e9f2` → 门 **#890** = run 39992014706 / head `3145e9f2` / attempt 1 / **十六格**逐格 completed+success
+—— **一句话范围**：目标 = `IndexOrCallExpr{callee=MemberAccess(视图, 成员), positional}`；通用路把 Get 槽当左值 `x.vtbl->Item(x.obj, 3) = …` ⇒ cl C2106。
+—— **修法**：写读者收前缀实参（形参串唯一解析口），新增只读查询供站点发码前问末形参档；四件全中才发 `x.vtbl->Item_put(x.obj, 3, 值)`，否则原样落回。
+—— **判据**：夹具 `tests/k2947_setview` 两台 4 行相同（`K2947-a=1 / b=0 / i=3:a / DONE`）+ 写/读两枚形状针 + 两枚 ABSENT 针；哨兵 P3 7→8、refcount 7→8 / 8→9、V10 8 与新增 V12；清单 518 行只动本夹具两行。
+—— **教训**：站点不许在「可能落回」之前 emit 任何东西 —— 先 emit 接收者让 b190 的 `Dim As New` 多一行自实例化（清单 +360 字节）；改成先按名问、命中才求值后 sha 逐字节回到登记值。
+
+# 上一轮（2026-10-23T23:30:00+08:00，原样留档）= LAST_RUN: 2026-10-23T23:30:00+08:00 **第一百八十五刀已出并收线（账 #305 站F 写侧 Set 档 = `Set <视图>.<属性> = …` 也问同一枚写读者，按 `setKind` 答 `put_` / `putref_` 两档）**：`69f24510` → 门 **#889** = run 39978359313 / head `69f24510` / attempt 1 / **十六格**逐格 completed+success
 —— **一句话范围**：视图是值结构体，Set 的两支出口却按「接收者是类指针」拼 ⇒ `= New O` 发 `vb6_IK_prop_set_Owner(视图,…)` C2440、`= Nothing` 发 `vb6_ComSetRef(视图,…)` C2172。
 —— **修法**：写读者加 `ProcKind setKind`，键仍由唯一主人按档拼；Set 三处出口（Nothing / 命名属性 / 链式 objRef）发原码之前先问它，命中发 `视图.vtbl->Owner_putref(视图.obj, 值)`。
 —— **判据**：新夹具 `tests/k2947_setview` 两台 3 行相同（`K2947-a=1 / K2947-b=0 / K2947-DONE`）+ 两条 EMITC 正针 + 两条 ABSENT 针；哨兵 V10 4→7；清单 518 行（新增 2 行，存量 517 行不动）。
