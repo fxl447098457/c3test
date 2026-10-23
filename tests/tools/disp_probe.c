@@ -14,6 +14,7 @@
 #include <oleauto.h>
 #include <oaidl.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 typedef HRESULT(STDAPICALLTYPE *PFN_GETCLASSOBJ)(REFCLSID, REFIID, LPVOID *);
@@ -166,6 +167,50 @@ static VARIANT mk_i4(LONG v) {
     x.vt = VT_I4;
     x.lVal = v;
     return x;
+}
+
+/* 账 #481 (第一百八十二刀注销腿的运行时证人, 第一百八十三刀接上): 调 Churn(n), 把 BSTR 答案本身
+ * 按 ASCII 打出来。既有 call_member 只打 resultvt (VARIANT 标签) —— 这一格要看的正是**答案内容**:
+ * "SatImpl"(表里查得到身份) 还是空(表已饱和, 那枚实例没登记进去)。只在命令行给了 CHURN=<n> 时才发,
+ * 其余夹具的输出一个字节都不动。 */
+static void call_churn(IDispatch *disp, LONG n) {
+    DISPID id = DISPID_UNKNOWN;
+    DISPPARAMS dp;
+    VARIANT res;
+    VARIANT arg;
+    EXCEPINFO ei;
+    UINT err = 0;
+    LPOLESTR names[1];
+    HRESULT hr;
+
+    names[0] = (LPOLESTR)L"Churn";
+    VariantInit(&res);
+    memset(&ei, 0, sizeof(ei));
+    memset(&dp, 0, sizeof(dp));
+    arg = mk_i4(n);
+    hr = IDispatch_GetIDsOfNames(disp, &IID_NULL, names, 1, LOCALE_USER_DEFAULT, &id);
+    printf("CHURN_NAMES hr=0x%08lX dispid=%ld\n", (unsigned long)hr, (long)id);
+    if (FAILED(hr)) return;
+    dp.rgvarg = &arg;
+    dp.cArgs = 1;
+    hr = IDispatch_Invoke(disp, id, &IID_NULL, LOCALE_USER_DEFAULT, DISPATCH_METHOD, &dp,
+                          &res, &ei, &err);
+    printf("CHURN_CALL hr=0x%08lX vt=%u\n", (unsigned long)hr, (unsigned)res.vt);
+    if (SUCCEEDED(hr) && res.vt == VT_BSTR && res.bstrVal) {
+        UINT i, len = SysStringLen(res.bstrVal);
+        printf("CHURN_TYPE=");
+        for (i = 0; i < len; i++) {
+            unsigned short c = res.bstrVal[i];
+            putchar(c < 128 ? (int)c : '?');
+        }
+        printf("\n");
+        if (len == 0) printf("CHURN_EMPTY=1\n");
+    } else {
+        printf("CHURN_EMPTY=1\n");
+    }
+    if (ei.bstrDescription) SysFreeString(ei.bstrDescription);
+    VariantClear(&res);
+    VariantClear(&arg);
 }
 
 /* Acct #305 SB159 (knife 50): a real one-element-per-slot VT_ARRAY|VT_I4 built the way a
@@ -432,6 +477,10 @@ int main(int argc, char **argv) {
         hr = IDispatch_GetIDsOfNames(disp, &IID_NULL, names, 1, LOCALE_USER_DEFAULT, &id);
         printf("NAMES=bogus hr=0x%08lX dispid=%ld\n", (unsigned long)hr, (long)id);
     }
+
+    /* 账 #481: 表饱和的运行时证人 (只在给了 CHURN=<n> 时发, 其余夹具输出不变). */
+    for (ai = 3; ai < argc; ai++)
+        if (strncmp(argv[ai], "CHURN=", 6) == 0) call_churn(disp, (LONG)strtol(argv[ai] + 6, NULL, 10));
 
     /* Acct #305 SB186 (knife 78): the factory-side arms, last, so the primary object's readings are
      * already on the pipe before anything here can kill the process. */

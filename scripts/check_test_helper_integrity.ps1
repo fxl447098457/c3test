@@ -154,6 +154,10 @@ if ($ast5) {
     # / -Tail 1 枚 CREATE= 臂 (7 个 CLSID 写在同一条里)
     'b187_boxed_object_slot'                    = @(8, 10, 6, 1)
     'b187_boxed_object_slot_x86'               = @(10, 10, 6, 1)
+    # 账 #481 (第一百八十三刀): 进程内客户端在 DLL 里 churn 600 次建/拆, 再问身份 —— 两架构各一条,
+    # Needles 4 (CREATE / CHURN_CALL / CHURN_TYPE=SatOther / DONE), Absent 0, -Tail 1 枚 CHURN= 臂。
+    'k481_projclass_identity_after_churn'      = @(8, 4, 0, 1)
+    'k481_projclass_identity_after_churn_x86'  = @(10, 4, 0, 1)
 }
 $ds = @($ast5.FindAll({ param($n)
     $n -is [System.Management.Automation.Language.CommandAst] -and

@@ -1,4 +1,7 @@
 // c3rtl.rc - RTL runtime library embedded as resources
+// 2026-10-23 (account #481, knife 182): vb6comserver_obj.c gained vb6_UnregisterProjectClassInstance
+//   (the registration table's other leg) and the register leg now reuses freed slots; this touch exists
+//   only so rc.exe re-embeds src/rtl/** into C3.exe -- check_rtl_embedded R1 caught the stale embed.
 // 2026-10-23 (ledger #305, ScaleLeft / ScaleTop): the form's custom coordinate
 //   system has four numbers (ScaleLeft / ScaleTop / ScaleWidth / ScaleHeight); only the
 //   last two were wired. `Me.ScaleLeft` / `Me.ScaleTop` had no row in kFormPseudoRows
