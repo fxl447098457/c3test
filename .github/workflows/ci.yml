@@ -53,9 +53,42 @@ jobs:
           key: c3build-${{ hashFiles('src/**', 'CMakeLists.txt', 'cmake/**') }}
           restore-keys: c3build-
 
+      # sccache: 编译缓存。构建每次 src 变更都要全编 128 个 TU（实测门 #881 Build=253s），
+      # 而多数 TU 在两次提交间不变 —— sccache 按「预处理后源 + 编译器身份 + flags」做键，命中即
+      # 跳过本次 cl 调用。实测（probe 分支两支：冷 290s / 热 84s、123/123 命中）⇒ 构建步骤提速约 3×。
+      # 装不上就退回直接编（install 是 best-effort），不给门添红风险。cache key 只用 runner.os：
+      # 编译器身份已经进了 sccache 自己的键，镜像滚动时自然整批 miss 重编一次（不误用旧对象）。
+      - name: Install sccache (best-effort)
+        id: sccache
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          choco install sccache -y --no-progress 2>&1 | Out-Null
+          $exe = (Get-Command sccache -ErrorAction SilentlyContinue).Source
+          if (-not $exe) { $exe = "C:\ProgramData\chocolatey\bin\sccache.exe" }
+          if (Test-Path $exe) {
+            Write-Host "sccache available: $exe"
+            & $exe --version
+            "USE_SCCACHE=$exe" | Out-File -FilePath $env:GITHUB_ENV -Append
+          } else {
+            Write-Host "sccache not available; build will run without it"
+          }
+        env:
+          SCCACHE_DIR: ${{ runner.temp }}/sccache
+          SCCACHE_CACHE_SIZE: 2G
+
+      - name: Cache sccache
+        uses: actions/cache@v6
+        with:
+          path: ${{ runner.temp }}/sccache
+          key: sccache-${{ runner.os }}
+
       - name: Build C3.exe from source (never ship a vendored binary)
         if: steps.c3exe.outputs.cache-hit != 'true'
         shell: pwsh
+        env:
+          SCCACHE_DIR: ${{ runner.temp }}/sccache
+          SCCACHE_CACHE_SIZE: 2G
         run: |
           # MSVC 官方只保证从 vcvarsall 拿到的环境有效; 这里在子进程里导出后注入当前进程。
           $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"
@@ -69,10 +102,13 @@ jobs:
             }
           }
           $buildDir = Join-Path $env:RUNNER_TEMP "c3build"
-          cmake -S . -B $buildDir -G Ninja -DVB6C3_ENABLE_LLVM=OFF -DCMAKE_BUILD_TYPE=Release
+          $launcherArgs = @()
+          if ($env:USE_SCCACHE) { $launcherArgs = @("-DCMAKE_CXX_COMPILER_LAUNCHER=$env:USE_SCCACHE") }
+          cmake -S . -B $buildDir -G Ninja -DVB6C3_ENABLE_LLVM=OFF -DCMAKE_BUILD_TYPE=Release @launcherArgs
           if ($LASTEXITCODE -ne 0) { throw "cmake configure failed" }
           cmake --build $buildDir
           if ($LASTEXITCODE -ne 0) { throw "cmake build failed" }
+          if ($env:USE_SCCACHE) { & $env:USE_SCCACHE --show-stats }
           New-Item -ItemType Directory -Force -Path .build | Out-Null
           Copy-Item (Join-Path $buildDir "C3.exe") .build\C3.exe -Force
           & .build\C3.exe --version
