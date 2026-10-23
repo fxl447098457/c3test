@@ -6,7 +6,13 @@
 
 OPEN_LOCAL_DIVERGENCE: **已收口（2026-09-27 入夜 = C29-MV-d）** —— 本地 `ctrlmonthview` 的 MV24/MV25/MV30 三条红既不是"本地环境/增量缓存"、也不是"OS 版本相关"，而是**挂钟相关**：comctl v6 把当前时间混进 `MCM_GETCURSEL` 的负载里（日没错、零头 0.765），`CLng` 下午进位、上午舍掉 ⇒ 本机下午一直红、CI 跑在上午一直绿。修法与全部读数见 029 §九 C29-MV-d 那一格。留下的一般式：**日期面判据按 `CLng` / `=` 比之前，产品读数必须归成整数日**，否则同一棵树的判据随时段翻脸，而门只会读到"上午那一半"。
 STATUS: IDLE             # NOT_STARTED | DESIGN | BUSY | IDLE | ALL_DONE
-LAST_RUN: 2026-10-23T20:10:00+08:00 **第一百八十三刀已出并收线（新账 #481 的运行时证人 = 进程内客户端在真 DLL 里 churn 600 次建/拆、再问最后一枚的身份）**：`d4f61b9a` → 门 **#884** = run 39949129416 / head `d4f61b9a` / attempt 1 / **十六格**逐格 completed+success（片数 12→16 是另一条会话的提速刀）
+LAST_RUN: 2026-10-23T22:05:00+08:00 **第一百八十四刀已出并收线（账 #305 §B164 形⑤ 站③ = 显式 `Let <变体> = …` 的目标也问同一枚「是不是 Variant 槽」的主人；三形 cl C2440 与两形「编得过但不清旧值」一并收口）**：`40cdddf4` → 门 **#888** = run 39964036824 / head `40cdddf4` / attempt 1 / **十六格**逐格 completed+success
+—— **一句话范围**：`AssignmentStmt` 早有六条判据答「目标是不是变体槽」，而 `LetStmt` 那一站只做文本判断 `VB6_SA_AT(vb6_VARIANT,` ⇒ 非变体右值三形（字面量 / String 变量 / 拼接）发成裸赋值 = cl C2440、无 exe，槽对槽与变体数组元素两形编得过却不清旧值。
+—— **修法**：六条判据**原样**提成 `variantSlotTargetOf`（`cgen_util_ctrl.cpp`），`AssignmentStmt` 与 `LetStmt` 共用；命中就交同一枚 `emitVariantSlotAssign`（装箱 + 所有权 + 清旧值）。零新答案，`AssignmentStmt` 那一站发码 BASE vs NEW 逐字节相同。
+—— **判据**：新夹具 `tests/test_let_variant_slot.bas`（x64/x86 两台 9 行一字相同；s3/s6 是深拷贝证人）+ `let_variant_slot_shape` 三条 EMITC 针；`check_variant_slot_store` R4（`cgen_setlet.cpp 1→0`）与 R5d（`cgen_assign_value_sem.inc 1→0`）各一处重钉；清单 516 行 = 存量 515 行逐哈希未动 + 新增 1 行（门那台独立复算同数）。
+—— **新读法**：并行 bas 分片**不打印逐例 PASS 行**（只有 `pass=N fail=0`）⇒ 按用例名验要从 `test-logs-bas-N` 工件里取 `output/**/*.out`；本条两台 `.out` 逐字节相同、两份 `.err` 各 0 字节。
+
+# 上一轮（2026-10-23T20:10:00+08:00，原样留档）= LAST_RUN: 2026-10-23T20:10:00+08:00 **第一百八十三刀已出并收线（新账 #481 的运行时证人 = 进程内客户端在真 DLL 里 churn 600 次建/拆、再问最后一枚的身份）**：`d4f61b9a` → 门 **#884** = run 39949129416 / head `d4f61b9a` / attempt 1 / **十六格**逐格 completed+success（片数 12→16 是另一条会话的提速刀）
 —— **一句话范围**：`g_vb6_projClass` 的读者从前只有形状与静态读数；本刀用现成的 B14-2 进程内客户端驱动新夹具 tests/k481_sat（Type=DLL），把「读者在 churn 之后仍答得出」变成运行期证据
 —— **夹具/探针**：`SatWorker.Churn(n)` 同时建 n 枚 SatImpl（地址各不相同）、全部拆掉、再建**另一个类** SatOther、经视图装箱问 TypeName；探针新增 `CHURN=<n>` 臂（没给参数时输出零变化）并把 BSTR 答案按 ASCII 打出来；runner 两架构各一条 DISPATCH 用例
 —— **读数**：两架构 `CHURN_TYPE=SatOther`；`[DISPATCH] k481_projclass_identity_after_churn(_x86) PASS`、`[STATIC] projclass_scan_bound PASS`、shape oracle 515/515 + `manifest-expectation OK`
