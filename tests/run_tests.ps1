@@ -7261,11 +7261,14 @@ if ($Category -in @("all", "run", "vbp")) {
     # = cl C2172。修法 = 两趟的键都改问 D2 那张词汇表 (ifaceSlotKeyNamed, 与 tB 式接口同一位主人);
     # 字段名只给 Let/Set 加 `_put` / `_putref` (Get/Sub/Function 一字不改 ⇒ 全部存量产物零移动)。
     # 本夹子钉的是 **Let 先写**那一形, K178 是 Get 先写那一形的证人 —— 同一趟里两形都钉住。
-    # 两台实测读数逐行相同 (.build/k2762_run.txt): s=H/0 = 视图那一发读的是 getter 自己的串
-    # (不是把 setter 的形状套在 getter 上), n=489 = 同表另一档 Num 没漂, DONE = 进程没崩。
-    # 写侧 (x.Label = ...) 仍欠 = 站F 的第二半 (#474), 本夹子只钉表与读, 不冒充钉住跑。
+    # 两台实测读数逐行相同: s=Hzzz/2 = 两发 `x.Label = ...` 真落进 Let 那一档 (写值与计数都在
+    # 实现类里), 紧接着那一发读的是 **getter 自己的串** (不是把 setter 的形状套在 getter 上);
+    # n=489 = 同表另一档 Num 没漂; DONE = 进程没崩。写侧改前那一发的病灶形状 = 改前那台真产物
+    # `vb6_IK489_prop_let_Label(x, ...)` = 把整枚视图交给接口模块自己的 `vb6_cls_IK489*` 形参
+    # = cl C2440、没有 exe (读数 .build/k2778_emit.txt:389 与 .build/k2780_clerr.txt);
+    # 本刀换成 `x.vtbl->Label_put(x.obj, 值)` = 视图调用主人的第四位消费者。
     $k489Expected = @(
-        "K489-s=H/0",
+        "K489-s=Hzzz/2",
         "K489-n=489",
         "K489-DONE")
     Test-Vbp 'k489_slot_dir_let_first' "$Tests\k489_slot_dir\K489.vbp" $k489Expected
@@ -7276,12 +7279,16 @@ if ($Category -in @("all", "run", "vbp")) {
         '.Label_put = (void (*)(void*, BSTR v))vb6_K489Holder_prop_let_IK489_Label,',
         '.Label = (BSTR (*)(void*))vb6_K489Holder_prop_get_IK489_Label,',
         'vb6_BSTR_Assign(&s, x.vtbl->Label(x.obj));',
-        'n = x.vtbl->Num(x.obj);')
-    # 两条负针逐字节抄自**改前那台的真实产物** (探针 .build/k2739_emit2.txt: 只把同名属性的
-    # 声明序调头, 接收者名与变量名与本夹具同形): 表里那一席裸名 + 属性读落回 helper。
+        'n = x.vtbl->Num(x.obj);',
+        'x.vtbl->Label_put(x.obj, vb6_BSTR_FromStr(L"abc"));',
+        'x.vtbl->Label_put(x.obj, vb6_BSTR_FromStr(L"zzz"));')
+    # 三条负针逐字节抄自**改前那台的真实产物**: 前两条 = Let-first 探针 .build/k2739_emit2.txt
+    # (表里那一席裸名 + 属性读落回 helper); 第三条 = 写侧改前那台的真产物 .build/k2778_emit.txt
+    # (站点按「接收者的类名」现场拼出口, 把整枚视图交给接口模块自己的 `vb6_cls_IK489*` 形参)。
     Test-EmitcAbsent "k489_slot_dir_bare_slot_gone" @("$Tests\k489_slot_dir\K489.vbp") @(
         'void (*Label)(void* me, BSTR v);',
-        'vb6_BSTR_Assign(&s, vb6_ComGetStringProp(x, L"Label"));')
+        'vb6_BSTR_Assign(&s, vb6_ComGetStringProp(x, L"Label"));',
+        'vb6_IK489_prop_let_Label(x, vb6_BSTR_FromStr(L"abc"));  /* Property Let */')
     # <vbeclipse> 回归夹子 (b174_numstrarg, 账 #305 §B174 第六十五刀): 数值实参交进内在函数的
     # BSTR 形参。修前 InStr 那一路把 int32_t / double / int16_t 裸交给 wchar_t* —— cl 只给 C4047
     # (在 -W3 之外) ⇒ **编得过**, 而 BASE 那一台在别处 (Mid$(1.1,...) 那类) 拿的是 C2440, 本机

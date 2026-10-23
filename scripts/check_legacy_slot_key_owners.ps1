@@ -17,9 +17,9 @@
 #   P1  ifacePropSlotPrefix( 恰好 3 处且全在 interface_sig.hpp = 定义 1 + 两位转调者各 1。
 #   P2  "get_" / "put_" / "putref_" 那三枚前缀字面量各恰好 1 处, 且都住在 interface_sig.hpp
 #       —— 那张词汇表从前住过两处 (ifaceSlotKeyNamed 与 ifaceSlotPrefix), 本刀合一。
-#   P3  ifaceSlotKeyNamed( 恰好 6 处 = 定义 1 + ifaceSlotKey 本体转调 1 + legacy 那四站各 1
+#   P3  ifaceSlotKeyNamed( 恰好 7 处 = 定义 1 + ifaceSlotKey 本体转调 1 + legacy 那五站
 #       (去重键 1 [driver inc] / 槽键与字段 1 [cgen_iface_vtbl] / 实现绑定 1 [cgen_com] /
-#        属性读那一问 1 [cgen_util_classtype])。
+#        属性读那一问 + 属性写那一问 = 2 [cgen_util_classtype 两位读者])。
 #   P4  ifaceDeclProcKind( 恰好 4 处 = 定义 1 + ifaceSlotKey 本体 1 + legacy 两站各 1。
 #   P5  legacy 槽键只许铸一次: `s.slotKey = ifaceSlotKeyNamed(` 恰好 1 处 (cgen_iface_vtbl.cpp)。
 #   P6  字段名的第二档只许这一处: `+ "_put"` 与 `+ "_putref"` 各恰好 1 处且都在
@@ -81,12 +81,15 @@ foreach ($pair in @(@('"get_"', 'return "get_"'), @('"put_"', 'return "put_"'), 
 }
 
 $p3 = CountWhere "ifaceSlotKeyNamed(" ""
-if ($p3 -ne 6) {
-    $fail += ("P3 槽键主人位数: 期望 6 = 定义 + ifaceSlotKey 转调 + legacy 那四站, 实到 " + $p3)
+if ($p3 -ne 7) {
+    $fail += ("P3 槽键主人位数: 期望 7 = 定义 + ifaceSlotKey 转调 + legacy 那五站, 实到 " + $p3)
 }
-foreach ($fn in @("driver_codegen_dup_module_vars.inc", "cgen_iface_vtbl.cpp", "cgen_com.cpp", "cgen_util_classtype.cpp")) {
+foreach ($fn in @("driver_codegen_dup_module_vars.inc", "cgen_iface_vtbl.cpp", "cgen_com.cpp")) {
     $c = CountWhere "ifaceSlotKeyNamed(" $fn
     if ($c -ne 1) { $fail += ("P3 legacy 那一站 " + $fn + ": 只许问一次槽键主人, 实到 " + $c) }
+}
+if ((CountWhere "ifaceSlotKeyNamed(" "cgen_util_classtype.cpp") -ne 2) {
+    $fail += "P3 那一份文件: 读侧与写侧两位读者各问一次槽键主人, 别处再问就是第二位主人"
 }
 
 $p4 = CountWhere "ifaceDeclProcKind(" ""
