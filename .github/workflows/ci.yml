@@ -202,7 +202,13 @@ jobs:
           # 用例本身只占剩下的三分之一 —— 再切细, 摊到的用例还不够付第二次 RTL 编译。
           # 所以 bas 留在 2 片, 要提速得改成跨 runner 共享 obj store (artifact), 不是分片能解决的。
           #
-          # 加用例时不必动这里: 两个分片都是按调用次序取模, 总数写不进代码。
+          # 2026-10-23 提速 (门 #876 读数): vbp 4→8 片, 并给每个 test job 挂 actions/cache 共享
+          # 那个内容寻址 obj store (%LOCALAPPDATA%\C3\objcache)。原来的死结就是「每个 shard 都要自己
+          # 编那 65 个 RTL .c」—— store 一旦跨 runner 复用, RTL 全流水线只编一次, 分片才真能摊薄墙钟。
+          # 实测 #876: build 272s + vbp 四片 704/528/479/449s, 既冗且不匀 (最重单片=704s, 单例最重
+          # VBP-DLL=116s)。既然 RTL 那 2.3 min 的固定项被缓存吃掉, 才敢把片数翻倍。
+          #
+          # 加用例时不必动这里: 各分片都是按调用次序取模, 总数写不进代码。
           #
           # shardArgs 逐条显式写出, 不用 matrix.category 三元表达式拼 —— 拼出来的式子要同时
           # 照顾 bas/vbp 两套开关, 再加一个分类时很容易拼错 (GitHub 表达式不报错, 只会静默少传参)。
@@ -216,16 +222,28 @@ jobs:
             shardArgs: "-BasShard 2 -BasShardTotal 2"
           - category: vbp
             shard: 1
-            shardArgs: "-VbpShard 1 -VbpShardTotal 4"
+            shardArgs: "-VbpShard 1 -VbpShardTotal 8"
           - category: vbp
             shard: 2
-            shardArgs: "-VbpShard 2 -VbpShardTotal 4"
+            shardArgs: "-VbpShard 2 -VbpShardTotal 8"
           - category: vbp
             shard: 3
-            shardArgs: "-VbpShard 3 -VbpShardTotal 4"
+            shardArgs: "-VbpShard 3 -VbpShardTotal 8"
           - category: vbp
             shard: 4
-            shardArgs: "-VbpShard 4 -VbpShardTotal 4"
+            shardArgs: "-VbpShard 4 -VbpShardTotal 8"
+          - category: vbp
+            shard: 5
+            shardArgs: "-VbpShard 5 -VbpShardTotal 8"
+          - category: vbp
+            shard: 6
+            shardArgs: "-VbpShard 6 -VbpShardTotal 8"
+          - category: vbp
+            shard: 7
+            shardArgs: "-VbpShard 7 -VbpShardTotal 8"
+          - category: vbp
+            shard: 8
+            shardArgs: "-VbpShard 8 -VbpShardTotal 8"
           - category: compile
             shardArgs: ""
           - category: syntax
@@ -247,6 +265,21 @@ jobs:
         run: |
           & .build\C3.exe --version
           if ($LASTEXITCODE -ne 0) { throw "downloaded C3.exe broken" }
+
+      # 跨 runner 共享**内容寻址**的增量 obj store（本机实测 2656 个 .obj / 51 MB）。-Incremental 下
+      # 每个 job 的第一例真编那 65 个 RTL .c (~2.3 min)；store 的键只含 {架构, 工具串, RTL 源内容}，
+      # 所以错配的 obj 只会没命中、绝不会被用错（见 ai/030 §六）—— 跨 run 缓存因此是安全的。
+      # x86/x64 的 obj 同处一店（架构本就是键的一部分），无需分成两份缓存。
+      # key 带 src 哈希: RTL 改动即换 key，旧 entry 自然过期；restore-keys 兜住"src 没变只是换了
+      # 工具链"这种 miss（那种情况 obj 仍不命中，只会重编，不会用错）。
+      # 路径是 GitHub 托管 Windows runner 的固定用户目录；万一哪天换了用户名，也只是 cache miss（不判红）。
+      - name: Cache C3 incremental obj store (shared across runners)
+        uses: actions/cache@v6
+        with:
+          path: C:\Users\runneradmin\AppData\Local\C3\objcache
+          key: c3objcache-${{ runner.os }}-${{ hashFiles('src/**', 'CMakeLists.txt', 'cmake/**') }}
+          restore-keys: |
+            c3objcache-${{ runner.os }}-
 
       # run_tests.ps1 内: 纯 .bas 用例支持 -Jobs 并行 (每个 worker 独立输出目录) 与
       # -BasShard 分片 (CI 用多 runner 并行跑 bas 用例); VBP/GUI 用例始终**在本 runner 内**串行
