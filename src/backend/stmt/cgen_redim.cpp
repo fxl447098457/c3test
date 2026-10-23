@@ -310,37 +310,25 @@ void CCodeGen::visit(ReDimStmt& node) {
     }
 }
 
-// 账 #475 §B220: UDT 成员类型解析的唯一出口。owner 的 C 类型名由调用方给出
-// (复杂目标是 inferUdtTypeOfExpr 的结果, 点号链目标是 knownUdtVars_ 的结果)，
-// 这里只负责「在 udtMembers 里查这一格」并交回 Vb6Type 与 UDT C 类型。
-// 与 cgen_expr_call.cpp Pattern B (动态数组成员元素访问 VB6_SA_AT) 使用同一来源。
+// 账 #476 §B190: 这一枚从"自己摸 udtMembers"改成**那一枚出口的薄委托** —— §B190 的口径是
+// 「三处同问同一个出口」(Pattern B 元素访问 / ReDim 分配侧 / 类字段类外访问), 而 §B220 那版
+// 自己查表, 于是 UDT 腿留下了第二份答案。现在它只负责把 udtCType 翻成出口的两个入参,
+// 答案一律由 resolveMemberArrayDecl 给。
+// ⚠ 它与 Pattern B 的差别只剩一个: 这里答的是"成员声明档"(定长也答), 而出口只认**动态**
+// 数组成员 —— 所以定长那一形照旧由调用点走 Pattern A, 不经本格。
 bool CCodeGen::resolveUdtMemberElemInfo(const std::string& udtCType,
                                         const std::string& memberName,
                                         Vb6Type& outType,
-                                        std::string& outUdtCType) const {
+                                        std::string& outUdtCType) {
     outType = Vb6Type::Variant;
     outUdtCType.clear();
-    const std::string prefix = "vb6_type_";
-    if (udtCType.size() <= prefix.size()
-        || udtCType.compare(0, prefix.size(), prefix) != 0) return false;
-    std::string udtName = udtCType.substr(prefix.size());
-
-    Symbol* udtSym = symTab_.lookupModule(udtName);
-    if (!udtSym) udtSym = symTab_.lookup(udtName);
-    if (!udtSym || udtSym->kind != SymbolKind::UserDefinedType) return false;
-
-    std::string memLower = Symbol::toLower(memberName);
-    std::string memLowerM = "m_" + memLower;
-    for (auto& mi : udtSym->udtMembers) {
-        std::string miLower = Symbol::toLower(mi.name);
-        if (miLower != memLower && miLower != memLowerM) continue;
-        outType = mi.type;
-        if (mi.type == Vb6Type::UserDefinedType && !mi.typeRefName.empty()) {
-            outUdtCType = "vb6_type_" + cIdent(mi.typeRefName);
-        }
-        return true;
+    MemberArrayDecl mad;
+    if (!resolveMemberArrayDecl(udtCType, std::string(), memberName, mad) || !mad.ok) {
+        return false;
     }
-    return false;
+    outType = mad.elemType;
+    if (mad.isUdt) outUdtCType = mad.elemCType;
+    return true;
 }
 
 // Fix 100: 解析 ReDim 复杂目标 (arr(i).Field) 的元素类型。
@@ -348,7 +336,7 @@ bool CCodeGen::resolveUdtMemberElemInfo(const std::string& udtCType,
 // inferUdtTypeOfExpr 推断 (UDT 数组元素 arr(idx) 走 arrayUdtElemTypes_),
 // 再交给 resolveUdtMemberElemInfo 问那唯一一份成员表。
 void CCodeGen::resolveReDimComplexElemType(const ReDimStmt& node, Vb6Type& outType,
-                                           std::string& outUdtCType) const {
+                                           std::string& outUdtCType) {
     outType = Vb6Type::Variant;
     outUdtCType.clear();
     if (!node.targetExpr) return;

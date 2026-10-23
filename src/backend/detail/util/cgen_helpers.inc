@@ -1462,18 +1462,41 @@
     // VB6类型 → SAFEARRAY元素类型C枚举名
     std::string mapSaElemType(Vb6Type type) const;
     // VB6类型 → SAFEARRAY元素C类型 (如int32_t)
+    // 账 #476 §B190 (拍板: 先收出口, 再接路由; 路由不得绕开出口) —— 「一个**动态数组成员**
+    // 的声明档」的唯一答案。元素类型 / 元素 C 类型 / 秩 / 是不是 UDT / 访问形状, 全部只从
+    // 这里解析, 三处同问: ① UDT 成员的 Pattern B 元素访问 ② ReDim 的分配侧 ③ **类字段**的
+    // 类外元素访问。§B220 的 `resolveUdtMemberElemInfo` 保留为 UDT 腿的薄委托 (它自己不再
+    // 摸 udtMembers), 以免留下第二份答案。
+    // 为什么必须是一枚: 这个决定今天有三份答案 (UDT 版 / ReDim 版 / 类字段版**没有**),
+    // 而 §B154 与 §B220 两次都是"分配侧与访问侧各问一处、漏问的那处回落 Variant"造成的
+    // 「分配 16 字节一步、访问 4 字节一步」。类字段那一腿以前压根没有答案 ⇒ 类外元素访问
+    // 发成 `obj->Field(idx)` (调用 vb6_SafeArray1D* 指针) ⇒ C2064, 连 exe 都出不来。
+    // owner 两种拼法由**调用方**解好再传进来 (它手上有接收者表达式): UDT 传 ownerUdtCType
+    // (`vb6_type_X`), 工程类传 ownerClassName (类名)。两者都空 = 这一问不接。
+    struct MemberArrayDecl {
+        bool        ok = false;        // 找到了一个**动态**数组成员
+        Vb6Type     elemType = Vb6Type::Variant;   // 声明的元素档
+        std::string elemCType;         // C 元素类型 (UDT → vb6_type_<UDT>; 其余 mapSaElemCType)
+        int         arrayRank = 0;     // 秩: 0 = 一维动态, >=2 = 多维
+        bool        isUdt = false;     // 元素是 UDT (Fix 092s: 必须发 vb6_type_, 不能退化 vb6_VARIANT)
+        bool        isDynamic = false; // 确认是动态数组 (`Field() As T`), 不是定长
+    };
+    bool resolveMemberArrayDecl(const std::string& ownerUdtCType,
+                               const std::string& ownerClassName,
+                               const std::string& memberName,
+                               MemberArrayDecl& out) const;
     std::string mapSaElemCType(Vb6Type type) const;
     // 从ArrayTypeRef或asType获取元素Vb6Type
     Vb6Type resolveArrayElemType(ASTNode* typeRef) const;
     // 账 #305 §B154: ReDim 那一问的元素档 —— 写了 As 子句按 As, **没写就问声明**
-    Vb6Type resolveReDimElemType(const std::string& lowerVar, ASTNode* typeRef) const;
+    Vb6Type resolveReDimElemType(const std::string& lowerVar, ASTNode* typeRef);
     // 账 #475 §B220: UDT 成员类型解析的唯一出口 (owner C 类型 + 成员名 → Vb6Type/UDT C 类型)。
     // resolveReDimComplexElemType 与 resolveReDimElemType 的点号链分支都问它, 与访问侧
     // Pattern B 的 udtMembers 来源一致。false = 不是已知 UDT / 成员查不到。
     bool resolveUdtMemberElemInfo(const std::string& udtCType,
                                   const std::string& memberName,
                                   Vb6Type& outType,
-                                  std::string& outUdtCType) const;
+                                  std::string& outUdtCType);
     // Fix 055: 从ArrayTypeRef获取UDT元素C类型名 (如"vb6_type_RECT"), 非UDT返回空串
     std::string resolveArrayUdtElemCType(ASTNode* typeRef) const;
     // Fix 192: 从ArrayTypeRef/asType获取元素**类名** (如"ShapeAct"), 非项目类返回空串
@@ -1486,7 +1509,7 @@
     std::string nextNDBoundsTemp(const std::string& base);
     // Fix 100: resolve element type of a complex ReDim target
     void resolveReDimComplexElemType(const ReDimStmt& node, Vb6Type& outType,
-                                     std::string& outUdtCType) const;
+                                     std::string& outUdtCType);
     // P6.4+: class-module default instance singleton
     void emitClassDefaultInstance(Module& module);
     // Fix 110: emit symbol support for .ctl/.pag designer sub-controls

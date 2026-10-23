@@ -108,6 +108,7 @@
         cgen.setViaRegistry(&vias_);          // tB 委托式实现 (B10): stage 2.7 Pass D 裁决表
         cgen.setDefaultInstanceClasses(&defaultInstanceClasses);  // P6.4+: 类模块默认实例
         cgen.setClassFieldKindMap(&classFieldKindMap);  // 账 #305 §B168/§B169: 工程级「类 → 标量字段 → 声明档」表
+        cgen.setClassMemberArrayMap(&classMemberArrayMap);  // 账 #476 §B190: 「类 → 动态数组成员 → 声明语法」表 (只运语法, 档位在出口里映射)
         cgen.setTrimIncludes(options.trimIncludes);  // opt4: 裁剪未实际引用的跨模块include
         cgen.setTargetArch(options.arch);            // ai/vb-asm-extension-spec: Asm 块仅 x64
         if (options.trimIncludes) {

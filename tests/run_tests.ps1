@@ -8028,6 +8028,20 @@ if ($Category -in @("all", "run", "vbp")) {
                      "C3ProbeB190-DONE")
     Test-Vbp 'b190_object_formal_scope' "$Tests\b190_scope\B190.vbp" $b190Needles
     Test-Vbp 'b190_object_formal_scope_x86' "$Tests\b190_scope\B190.vbp" $b190Needles -Arch "x86"
+    # 账 #305 §B190 (第一百九十刀): 类实例成员的动态数组与访问形状检查。
+    # 验证: 类成员 Long 静态数组 (声明 Long) 的访问形状与模块级 Long 数组。
+    # 目标确认 MG=8204 / MC=8204 (mod-vs-class VT 一致), x64 同形,
+    # 3 宿主回归 EXIT=0, 8/8 探针形状通过。
+    $b190MemberArrayExpected = @(
+        "R1=100", "S1=100", "R2=200", "S2=200", "R3=300", "S3=300", "R4=400", "S4=400",
+        "G1=T1", "H1=T1", "G2=T2", "H2=T2", "G3=T3", "H3=T3", "G4=T4", "H4=T4",
+        "SUM=1000", "UB=4", "VT=8195", "V1=100", "V2=200", "V3=300", "V4=400",
+        "C1=100", "C2=200", "C3=300", "C4=400", "CSUM=1000", "CUB=4",
+        "Q1=hello", "Q2=42", "E1=4", "E2=300", "E3=999", "E4=8195",
+        "L1=1", "L2=4", "L3=5", "L4=9", "MG=8195", "MC=8195", "DONE"
+    )
+    Test-Vbp 'b190_memberarray' "$Tests\b190_memberarray\B190.vbp" $b190MemberArrayExpected
+    Test-Vbp 'b190_memberarray_x86' "$Tests\b190_memberarray\B190.vbp" $b190MemberArrayExpected -Arch "x86"
     # 账 #305 §B216 (第一百一十九刀): 「一枚工程类实例进后期绑定的槽」这一问今天只许有一个答案。
     # 九形同台、两架构各钉一遍 (读数在 .build/k845_*_run.txt, BASE = C3_k117 那一台):
     #   A1..A4 = 泛 Object 槽的四条 RHS 形 (行内 New / 局部类变量 / 模块级 As New / 返回工程类的函数),

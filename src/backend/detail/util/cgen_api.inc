@@ -304,6 +304,13 @@
     void setClassFieldKindMap(const std::unordered_map<std::string, std::unordered_map<std::string, Vb6Type>>* m) {
         classFieldKindMap_ = m;
     }
+    // 账 #476 §B190: 「类 → 动态数组成员 → 声明语法」表 (driver 同一次扫描另运一份)。
+    // ⚠ 与上面那张表的分工: 那张刻意**不收数组字段** (数组元素的赋值是另一格账), 而
+    // `clsreg_` 在无继承的工程里根本不建表 ⇒ 类字段那一腿只有这一份来源。
+    // 本表只运语法 (`As <T>` 的 AST + 秩); 档位到 C 元素类型的映射在那一枚出口里做。
+    void setClassMemberArrayMap(const ClassMemberArrayMap* m) {
+        classMemberArrayMap_ = m;
+    }
     // 「类 <className> 的字段 <memberName> 是哪一档」—— 这一问的**唯一**出口。
     // 交回 Vb6Type::Unknown = 表里没有这个名字 (不是标量数据字段, 或整个类不认识),
     // 调用点因此**不许**把它当成"那就是字段" —— 数组/定长串/对象字段/UDT 都走这里交回 Unknown。

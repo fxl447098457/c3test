@@ -469,6 +469,22 @@ Vb6Type CCodeGen::inferExprTypeImpl(Expr& expr) const {
                     return Vb6Type::Unknown;
                 }
             }
+            // 账 #476 §B190: 类成员的**动态数组**整体读 (`v = o.Items`) —— VB6 语义是
+            // 「Variant 装一只数组」(VarType 8204), 所以本站答 Variant, 让装箱站走
+            // boxToVariant → `vb6_VariantFromValue` → _Generic 的 `struct vb6_SafeArray1D*`
+            // 臂 (vb6_VariantArray)。以前这一形没有答案, 落到底下那张按返回类型的表之外,
+            // 最终被答成 Long ⇒ 发 `vb6_VariantLong(o->Items)` (cl C2440, 实测两处)。
+            // 只做「是不是动态数组成员」的投影; 档位与元素类型问那一枚出口 (与元素访问 /
+            // ReDim 同一处), 本站不另答一份。
+            if (ma.object) {
+                const std::string cls476 = inferClassTypeOfExpr(*ma.object);
+                if (!cls476.empty()) {
+                    MemberArrayDecl mad476;
+                    if (resolveMemberArrayDecl(std::string(), cls476, ma.memberName, mad476)) {
+                        return Vb6Type::Variant;
+                    }
+                }
+            }
             // 类实例成员函数返回类型 (tB 泛型类特化高发的跨类同名碰撞):
             // 按 object 推断出的宿主类查 memberReturnTypes, 内置标量名直接映射.
             // 下面的裸名 lookupModule(memberName) 在多个类同名成员时只命中

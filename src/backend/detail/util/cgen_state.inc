@@ -298,6 +298,10 @@
     // (classFieldIsVariantSlot / classFieldIsBstrSlot / classFieldIsScalarData) 也都问它。
     const std::unordered_map<std::string, std::unordered_map<std::string, Vb6Type>>*
         classFieldKindMap_ = nullptr;
+    // 账 #476 §B190: 「类 → 动态数组成员 → 声明语法」表 (driver 同一次扫描另运一份, 只运
+    // 语法不运档位)。上面那张表刻意不收数组字段, `clsreg_` 在无继承工程里不建表 ⇒ 类字段
+    // 那一腿只有这一份来源; 档位到 C 元素类型的映射在 resolveMemberArrayDecl 里做。
+    const ClassMemberArrayMap* classMemberArrayMap_ = nullptr;
     // Fix 045: 跨模块 Variant 返回值函数 C 名集合 — 由 driver.cpp 预扫描所有模块构建.
     // 包含所有返回 vb6_VARIANT 的项目函数的 C 名称 (如 "vb6_cAsyncSocket_Znl").
     // 在 cExprIsVariant() 中检查 C 表达式是否调用这些函数, 以正确识别 Variant 值.
