@@ -414,7 +414,15 @@ std::string CCodeGen::legacyViewGetterReadExpr(const std::string& objExpr,
                                                ASTNodeKind::PropertyDecl, ProcKind::PropertyGet);
     for (const LegacyIfaceSlot& s : legacyIfaceSlots(ifaceName)) {
         if (s.slotKey != want) continue;
-        if (s.retType == "void" || s.retType == "void*" || !s.params.empty()) return std::string();
+        if (s.retType == "void" || !s.params.empty()) return std::string();
+        // 第一百八十七刀: 对象档 getter (`Property Get Owner() As Object`) —— 槽里那一席的
+        // C 返回就是 `void*`, 晚绑定那一发是 `vb6_ComGetObjectProp(视图, …)` (那条路把值结构体
+        // 塞进首枚 `void*` 槽 ⇒ cl C2172)。判据 = 目标就是那一发；换回读槽后所有权口径与
+        // **普通类**那条路逐字一致 (`o = vb6_H_prop_get_Own(h)` = 纯赋值, 不 AddRef)。
+        if (s.retType == "void*") {
+            if (lateCall.rfind("vb6_ComGetObjectProp(", 0) != 0) return std::string();
+            return legacyViewCallExpr(objExpr, s.field, std::vector<std::string>());
+        }
         if (comGetterExprForRetCType(s.retType, objExpr, memberName) != lateCall) return std::string();
         return legacyViewCallExpr(objExpr, s.field, std::vector<std::string>());
     }

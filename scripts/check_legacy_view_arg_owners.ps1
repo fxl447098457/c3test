@@ -118,15 +118,15 @@ if ((CountWhere "_stricmp(className" "cgen_iface_vtbl.cpp") -ne 1) {
 #   于是体内成员由上面那两路主人接手 —— 所以 V9 的位数一枚都不许因为站D′ 而涨。
 #   第一百七十八刀站F 的读者是**第三位消费者** (属性读的形状也交回这位主人, 站点自己一枚都不拼)。
 $v9 = CountWhere "legacyViewCallExpr(" ""
-if ($v9 -ne 6) { $fail += ("V9 视图调用主人位数: 期望 6 = 定义 + 声明 + 表达式路 + 语句路 + 站F 读侧读者 + 站F 写侧读者, 实际到 " + $v9) }
+if ($v9 -ne 7) { $fail += ("V9 视图调用主人位数: 期望 7 = 定义 + 声明 + 表达式路 + 语句路 + 站F 读侧读者 (值档 + 对象档两发) + 站F 写侧读者, 实际到 " + $v9) }
 if ((CountWhere "legacyViewCallExpr(" "cgen_call.cpp") -ne 1) {
     $fail += "V9 语句路: cgen_call.cpp 只许问一次视图调用主人"
 }
 if ((CountWhere "legacyViewCallExpr(" "cgen_expr_call_com_bind.inc") -ne 1) {
     $fail += "V9 表达式路: com_bind 只许问一次视图调用主人 (别把形状又现场拼一遍)"
 }
-if ((CountWhere "legacyViewCallExpr(" "cgen_util_classtype.cpp") -ne 3) {
-    $fail += "V9 主人自己这一份文件: 只许定义 + 站F 读侧/写侧两位读者各一发, 别处再拼一份形状就是第二位主人"
+if ((CountWhere "legacyViewCallExpr(" "cgen_util_classtype.cpp") -ne 4) {
+    $fail += "V9 主人自己这一份文件: 只许定义 + 站F 读侧 (值档 + 对象档) / 写侧读者各一发, 别处再拼一份形状就是第二位主人"
 }
 # V10 开线 (2026-10-23, 账 #305 新账 #474 写侧): 属性写那一站的读者 = 视图调用主人的第四位消费者;
 # V11 开线 (2026-10-23, 第一百八十一刀): 「VB 型 ↔ 晚绑定打包器」这一张配对表只许住一处。
