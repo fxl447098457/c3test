@@ -43,3 +43,9 @@ End Property
 Public Property Get OwnView() As IK2947
     Set OwnView = Me
 End Property
+
+Public Function ViaMe() As Long
+    With Me
+        ViaMe = .OwnView.Has
+    End With
+End Function

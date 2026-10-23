@@ -48,5 +48,7 @@ Sub Main()
     Debug.Print "K2947-h=" & h.OwnView.Has()
     ' 第一百九十刀: 视图表达式上的**裸**零参属性读 (无括号 = 成员访问路)
     Debug.Print "K2947-j=" & h.OwnView.Has
+    ' 第一百九十一刀: With Me 体内读属性返回的视图 (Me 是 MeExpr, 按本类实例处理)
+    Debug.Print "K2947-k=" & h.ViaMe
     Debug.Print "K2947-DONE"
 End Sub

@@ -20,6 +20,16 @@ void CCodeGen::visit(WithStmt& node) {
 
     // 检测With对象类型: 遍历表达式判断
     if (node.object) {
+        // 账 #305 第一百九十一刀: `With Me` —— Me 是 MeExpr, 不是 IdentifierExpr,
+        // 上面按名查表的整条链都够不着 ⇒ tempType 落 void* ⇒ 体内 `.P` 走
+        // vb6_ComGetObjectProp(me, …) (拿类结构体当 IDispatch). 类模块里
+        // Me 就是本类实例, 直接按 ClassInstance 处理。
+        if (node.object->kind == ASTNodeKind::MeExpr && isClassModule_) {
+            withInfo.kind = WithObjKind::ClassInstance;
+            withInfo.className = cIdent(moduleName_);
+            tempType = "vb6_cls_" + withInfo.className + "*";
+            withInfo.ctrlOrigName = withInfo.className;
+        }
         // --- Fix 086: 方法调用链对象推断 (With .Sql(...) / With obj.Method(...)) ---
         // With 对象是 IndexOrCallExpr/MemberAccessExpr/WithMemberExpr (方法调用链) 时,
         // 用 inferClassTypeOfExpr 推断返回类. 此前 `With .Sql(...)` 解析为
