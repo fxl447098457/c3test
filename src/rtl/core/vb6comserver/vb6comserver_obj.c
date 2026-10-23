@@ -639,8 +639,11 @@ void vb6_RegisterProjectClassInstance(void* inst, const vb6_CoClassDesc* desc) {
         }
         if (hole < 0 && g_vb6_projClass[i].inst == NULL) hole = i;
     }
-    if (hole >= 0) {
-        g_vb6_projClass[hole].inst = inst;
+    if (hole >= 0 &&
+        InterlockedCompareExchangePointer((PVOID volatile*)&g_vb6_projClass[hole].inst, inst, NULL) == NULL) {
+        /* 空洞用 CAS 抢: 两枚并发登记同时看见同一个洞时只有一个占得到, 输的那枚落到下面新增槽
+         * (它一个字都没碰这个洞 ⇒ 不会改坏赢家刚写的 desc)。desc 在 inst 之后写, 与新增槽那一支
+         * 同形 —— 查表只认 inst, 这个窗口与既往「计数先动、字段后写」是同一个。*/
         g_vb6_projClass[hole].desc = desc;
         return;
     }
