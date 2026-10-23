@@ -60,6 +60,7 @@ jobs:
       # 编译器身份已经进了 sccache 自己的键，镜像滚动时自然整批 miss 重编一次（不误用旧对象）。
       - name: Install sccache (best-effort)
         id: sccache
+        if: steps.c3exe.outputs.cache-hit != 'true'
         continue-on-error: true
         shell: pwsh
         run: |
@@ -78,6 +79,7 @@ jobs:
           SCCACHE_CACHE_SIZE: 2G
 
       - name: Cache sccache
+        if: steps.c3exe.outputs.cache-hit != 'true'
         uses: actions/cache@v6
         with:
           path: ${{ runner.temp }}/sccache
