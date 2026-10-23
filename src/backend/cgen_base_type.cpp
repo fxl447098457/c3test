@@ -281,6 +281,13 @@ std::string CCodeGen::legacyIfaceNameOfCType(const std::string& cType) {
     return cType.substr(10);
 }
 
+// 账 #305 第一百八十九刀: 接收者是**表达式**时的按值适配器名 —— 唯一出口。
+// 铸的人 (cgen_iface_vtbl.cpp) 与问的人 (调用点) 都走这里, 别各自拼一遍。
+std::string CCodeGen::legacyIfaceSlotCallFn(const std::string& ifaceName,
+                                          const std::string& field) const {
+    return "vb6_iface_" + cIdent(ifaceName) + "_call_" + field;
+}
+
 // 账 #305 第一百七十二刀 站B: 「这一档形参槽收不收 legacy 接口的**视图值**」(交回声明名,
 // 认不出 = 空串)。上面那位主人刻意只认 vb6_cls_ / vb6_ivref_ 两档 ⇒ legacy 的 `vb6_iface_<I>`
 // 值结构体在它那儿是"不是类槽"，调用点于是把裸实例直交 (实测 Ray.vbp 四枚类各一发 C2440:

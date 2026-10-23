@@ -466,6 +466,30 @@ void CCodeGen::emitLegacyIfaceContractTypedefs() {
         h_.emitLine("void* obj;");
         h_.dedent();
         h_.emitLine("} " + ifaceType + ";");
+        // 账 #305 第一百八十九刀: 按值适配器 —— 接收者是**表达式** (调用/属性链) 时,
+        // 视图值只有两个指针, 交给适配器 = 只求值一次; 槽名与转发实参都问这张表。
+        for (const LegacyIfaceSlot& s : slots) {
+            std::string fwd;
+            for (size_t i = 0; i < s.params.size();) {
+                const size_t j = s.params.find(',', i);
+                std::string one = (j == std::string::npos) ? s.params.substr(i)
+                                                           : s.params.substr(i, j - i);
+                const size_t sp = one.rfind(' ');
+                if (sp != std::string::npos) {
+                    const std::string nm = one.substr(sp + 1);
+                    if (!nm.empty()) fwd += ", " + nm;
+                }
+                if (j == std::string::npos) break;
+                i = j + 1;
+            }
+            h_.emitLine("static inline " + s.retType + " " + legacyIfaceSlotCallFn(writtenName, s.field)
+                        + "(" + ifaceType + " _v" + s.params + ") {");
+            h_.indent();
+            h_.emitLine((s.retType == "void" ? std::string() : std::string("return "))
+                        + "_v.vtbl->" + s.field + "(_v.obj" + fwd + ");");
+            h_.dedent();
+            h_.emitLine("}");
+        }
         h_.emitLine("#endif");
         h_.emitBlank();
     }

@@ -904,6 +904,8 @@
     // 调用方据此把返回槽登进 knownIfaceVars_)。前缀比较只住 cgen_base_type.cpp。
     bool cTypeIsValueAggregate(const std::string& cType);
     std::string legacyIfaceNameOfCType(const std::string& cType);
+    // 账 #305 第一百八十九刀: 表达式接收者的按值适配器名 (铸 + 问同一出口)。
+    std::string legacyIfaceSlotCallFn(const std::string& ifaceName, const std::string& field) const;
     // 账 #305 §B218 第一百四十刀: 「这枚目标表达式是不是可寻址的数组元素槽」= VB6_SA_AT 那一形，
     // 交回元素 C 档 (认不出 = 空串)。与上面那位前缀主人同住 cgen_base_type.cpp。
     std::string classArraySlotElemType(const std::string& target);
