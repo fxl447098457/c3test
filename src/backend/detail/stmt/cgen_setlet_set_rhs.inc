@@ -345,6 +345,13 @@
                         + escapeWideCString(target.substr(std::string("vb6_Extender_").size()))
                         + "\", (void*)(intptr_t)" + value + ");"
                         "  /* Extender.<prop> = v (per-instance, Set stmt) */");
+        } else if (targetIsVariant) {
+            // 账 #305 第一百九十四刀: 本过程声明这一格是 Variant 槽 ⇒ 上面那条 boxToVariant
+            // 已经把它装进去了; 工程类那条腿只认**声明是工程类**的槽。knownClassVars_ 全程
+            // 不清空, 别的过程里同名的类局部会漏进来 (VbEclipse ucPerspective.Refresh:
+            // `Dim l_ucFolder As Variant` 拿到 ClosePerspective 的同名 `As ucFolder` ⇒
+            // `vb6_cls_ucFolder* __clsold = l_ucFolder;` = cl C2440 + AddRef(C2172/C2083))。
+            c_.emitLine(target + " = " + value + ";  /* Set */");
         } else {
             // 账 #305 §B218 (甲) 腿②: 目标是一格 typed 工程类槽 ⇒ 走那位主人。
             // 类名两问按 #408 定的次序排: 先问 AST (作用域感知), 落空才问按名那张表。

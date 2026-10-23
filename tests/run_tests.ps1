@@ -7273,6 +7273,21 @@ if ($Category -in @("all", "run", "vbp")) {
     Test-EmitcAbsent "k177_viewwith_void_temp_gone" @("$Tests\k177_viewwith\K177.vbp") @(
         'void* _vb6_with_0 = (void*)x',
         'vb6_ComCall(_vb6_with_0, L"Ping", NULL, 0)')
+    # 账 #305 第一百九十四刀: knownClassVars_ 跨过程不清空 —— 同名局部在前一过程是工程类、
+    # 后一过程是 Variant 时, Set 会走「工程类槽」那条腿 (__clsold / AddRef) ⇒ cl C2440/C2172
+    # (VbEclipse ucPerspective.Refresh 同形 10 站)。夹具只声明类局部、不 Set, 让腿② 的唯一
+    # 来源就是后一过程那一格。
+    $k3060Expected = @("K3060-vt=9", "K3060-DONE")
+    Test-Vbp 'k3060_set_variant_slot' "$Tests\k3060_setvariant\K3060.vbp" $k3060Expected
+    Test-Vbp 'k3060_set_variant_slot_x86' "$Tests\k3060_setvariant\K3060.vbp" $k3060Expected -Arch "x86"
+    Test-EmitcShape "k3060_set_variant_shape" @("$Tests\k3060_setvariant\K3060.vbp") @(
+        'vb6_VARIANT leak = vb6_VariantEmpty();',
+        'leak = vb6_VariantFromValue(vb6_'
+    )
+    Test-EmitcAbsent "k3060_set_variant_lesion" @("$Tests\k3060_setvariant\K3060.vbp") @(
+        'vb6_cls_C3060* __clsold',
+        'vb6_cls_C3060_AddRef(leak)'
+    )
     # <vbeclipse> 回归夹子 (k178_viewprop, 账 #305 第一百七十八刀 = 新账 #474 站F 的**读侧**那一半):
     # 视图的属性读。修前 With 内外都落晚绑定 helper 的首枚 `void*` 槽 = cl C2172 (两台同红、没有 exe);
     # 修后同一位读者只把**访问路**换成 `.vtbl-><槽>(….obj)` —— 类型那一问不自答, 拿站点本来要发的那一发
