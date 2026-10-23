@@ -9989,7 +9989,7 @@ if ($Category -in @("all", "syntax")) {
         "vb6_Form_Scale((void*)vb6_hwnd_FDForm, 1, 10, 20, 100, 100); /* Form.Scale */",
         "vb6_Form_Scale((void*)vb6_hwnd_FDForm, 0, 0, 0, 0, 0); /* Form.Scale */",
         "vb6_Form_Scale((void*)vb6_hwnd_FDForm, 1, 30, 40, 200, 200); /* Form.Scale */") @(
-        "vb6_ComCall(vb6_hwnd_FDForm, L\"Scale\"")
+        'vb6_ComCall(vb6_hwnd_FDForm, L"Scale"')
 
 
     Test-CodegenNote "alias_type_spelling_same_ctype" @("$Tests\test_alias_spellings.bas") @(
