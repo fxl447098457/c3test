@@ -3550,16 +3550,20 @@ if ($Category -in @("all", "run", "bas")) {
     # 改前两形各一个硬错: `= New O` 发 `vb6_IK_prop_set_Owner(视图, …)` (首形参 vb6_cls_IK*)
     # ⇒ C2440; `= Nothing` 发 `vb6_ComSetRef(视图, …)` ⇒ C2172。夹具用 Holder 的 Has() 方法
     # 回读 (对象属性**读**那一侧是另一站, 本刀不碰)。
-    $setViewNeedles = @("K2947-a=1", "K2947-b=0", "K2947-DONE")
+    $setViewNeedles = @("K2947-a=1", "K2947-b=0", "K2947-i=3:a", "K2947-DONE")
     Add-BasTest "k2947_set_view" "$Tests\k2947_setview\K2947.vbp" $setViewNeedles
     Add-BasTest "k2947_set_view_x86" "$Tests\k2947_setview\K2947.vbp" $setViewNeedles -Arch "x86"
     Test-EmitcShape "k2947_set_view_shape" @("$Tests\k2947_setview\K2947.vbp") @(
         'x.vtbl->Owner_putref(x.obj, (vb6_cls_O2947_New()));',
-        'x.vtbl->Owner_putref(x.obj, NULL);'
+        'x.vtbl->Owner_putref(x.obj, NULL);',
+        'x.vtbl->Item_put(x.obj, 3, vb6_BSTR_FromStr(L"a"));',
+        'vb6_BSTR_Assign(&s, x.vtbl->Item(x.obj, 3));'
     )
     Test-EmitcAbsent "k2947_set_view_lesion" @("$Tests\k2947_setview\K2947.vbp") @(
         'prop_set_Owner(x,',
-        'vb6_ComSetRef(x, L"Owner"'
+        'vb6_ComSetRef(x, L"Owner"',
+        'x.vtbl->Item(x.obj, 3) = ',
+        'prop_let_Item(x,'
     )
     Test-EmitcShape "let_variant_slot_shape" @("$Tests\test_let_variant_slot.bas") @(
         'gv = vb6_VariantString(vb6_BSTR_FromStr(L"abc"));',

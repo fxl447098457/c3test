@@ -557,8 +557,8 @@ if ($legacyTblEmitFiles.Count -ne 4) {
     $fail += ("legacy iface table emit files = " + ($legacyTblEmitFiles -join ', ') + " (want exactly 4 files)")
 }
 $legacySlotRead = CountOf 'legacyIfaceSlots'
-if ($legacySlotRead -ne 7) {
-    $fail += ("legacy iface slot question sites = " + $legacySlotRead + " (want exactly 7: 声明 + 定义 + 两处消费 + 第一百七十四刀 view_from 那道闸 + 第一百七十八刀站F 属性读读者 + 站F 属性写读者)")
+if ($legacySlotRead -ne 8) {
+    $fail += ("legacy iface slot question sites = " + $legacySlotRead + " (want exactly 8: 声明 + 定义 + 两处消费 + 第一百七十四刀 view_from 那道闸 + 第一百七十八刀站F 属性读读者 + 站F 属性写读者 + 第一百八十六刀带参写槽查询)")
 }
 $legacySlotReadFiles = @(FilesOf 'legacyIfaceSlots')
 if ($legacySlotReadFiles.Count -ne 4) {
@@ -610,8 +610,8 @@ if ($viewSlotAskFiles.Count -ne 6) {
 #      且调用只许挂在接口宿主那一站 (body_pass) —— 别处再挂一处就是第二个 mint。
 #      (比名那把尺 _stricmp 只许一处的针在 check_legacy_view_arg_owners.ps1 的 V8, 与 V1 那条同规, 不在这里重复钉)
 $viewNameAsk = CountOf 'slotLegacyIfaceViewName'
-if ($viewNameAsk -ne 8) {
-    $fail += ("iface-view-name question sites = " + $viewNameAsk + " (want exactly 8: 声明 + 定义 + bool 投影 + For Each 那一站 + 视图调用主人自己那一问 + With 那一站 + 站F 读侧读者 + 站F 写侧读者)")
+if ($viewNameAsk -ne 9) {
+    $fail += ("iface-view-name question sites = " + $viewNameAsk + " (want exactly 9: 声明 + 定义 + bool 投影 + For Each 那一站 + 视图调用主人自己那一问 + With 那一站 + 站F 读侧读者 + 站F 写侧读者 + 第一百八十六刀带参写槽查询)")
 }
 $viewNameAskFiles = @(FilesOf 'slotLegacyIfaceViewName')
 if ($viewNameAskFiles.Count -ne 4) {

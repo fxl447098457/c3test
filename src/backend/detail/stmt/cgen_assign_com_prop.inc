@@ -393,6 +393,49 @@
         }
     }
 
+    // 第一百八十六刀 (账 #305 站F 写侧): 多入口参数写在视图上 —— `x.Item(3) = "a"`。
+    // 目标 = IndexOrCallExpr{callee = MemberAccessExpr(视图, 成员), args}; 通用路把它
+    // 按普通左值发成 **Get 槽** (`x.vtbl->Item(x.obj, 3) = …`) ⇒ cl C2106。写席是
+    // `put_` 那一档, 形参数 = 下标实参 + 值。两问都先问出来: ① 槽末形参的 C 类型
+    // (唯一槽表) ② 值那一头同型吗 —— 只有都成立才换路, 否则原样落回 (不掩盖)。
+    if (node.target && node.target->kind == ASTNodeKind::IndexOrCallExpr) {
+        auto& ioc186 = static_cast<IndexOrCallExpr&>(*node.target);
+        if (ioc186.callee && ioc186.callee->kind == ASTNodeKind::MemberAccessExpr) {
+            auto& ma186 = static_cast<MemberAccessExpr&>(*ioc186.callee);
+            if (ma186.object && ma186.object->kind == ASTNodeKind::IdentifierExpr) {
+                // 两问都**先问再发码**: 命中才求值接收者/下标/右值。
+                // 旧写法是「先 emit 接收者再问」—— 落回时那一发已经求过值, 于是 `Dim As New`
+                // 的变量多出一行自实例化 (实测 tests/b190_memberarray 清单 +360 字节)。
+                const std::string recvName186 = Symbol::toLower(
+                    static_cast<IdentifierExpr&>(*ma186.object).name);
+                const std::string wantLast186 = legacyViewSetterLastParamCType(
+                    recvName186, ma186.memberName, ProcKind::PropertyLet, ioc186.positional.size());
+                if (!wantLast186.empty()
+                    && mapType(inferExprType(*node.value)) == wantLast186) {
+                    const bool savedVd186 = suppressVirtDispatch_;
+                    suppressVirtDispatch_ = true;
+                    emitExpr(*ma186.object);
+                    suppressVirtDispatch_ = savedVd186;
+                    const std::string obj186 = std::move(lastExpr_);
+                    std::vector<std::string> argExprs186;
+                    for (auto& a186 : ioc186.positional) {
+                        emitExpr(*a186);
+                        argExprs186.push_back(std::move(lastExpr_));
+                    }
+                    emitExpr(*node.value);
+                    std::string val186 = std::move(lastExpr_);
+                    const std::string call186 = legacyViewSetterCallExpr(
+                        obj186, ma186.memberName, val186, wantLast186,
+                        ProcKind::PropertyLet, argExprs186);
+                    if (!call186.empty()) {
+                        c_.emitLine(call186 + ";  /* Property Let (视图直传参槽) */");
+                        return;
+                    }
+                }
+            }
+        }
+    }
+
     // Fix 170: 目标是 VB6 **整体数组** (`A() = expr`, 空括号) —— emit 期间置
     // wholeArrayLvalue_, 让 IndexOrCallExpr 发数组载体 (vb6_SafeArray1D*) 而不是
     // VB6_SA_AT(elem, A, 0)。值语义侧用 tgtIsWholeArray170 决定右侧是否需要深拷贝。

@@ -25,6 +25,7 @@ Public Function Has() As Long
 
 End Function
 
+' 第一百八十六刀: 多入口参数那形 —— 写在视图上要走 put_ 席 (带下标实参)。
 Public Property Let Item(ByVal i As Long, ByVal v As String)
 
 End Property

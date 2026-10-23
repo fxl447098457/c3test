@@ -95,15 +95,15 @@ if ((CountWhere ").obj == " "") -gt 3) { $fail += "V6 视图比较发码在别�
 #   V8  比名那把尺 `_stricmp(className` 全仓恰好 1 处, 且在 cgen_iface_vtbl.cpp (接口自己铸的那一发 view_from
 #        里) —— 站点自己比名 = 第二条答案; mint 外再比一次名 = 又一位主人。
 $v7 = CountWhere "slotLegacyIfaceViewName(" ""
-if ($v7 -ne 8) { $fail += ("V7 认视图槽那一问位址: 期望 8 = 定义 + 声明 + bool 投影 + For Each 那一站 + 调用主人自己那一问 + With 那一站 + 站F 读侧读者 + 站F 写侧读者, 实际到 " + $v7) }
+if ($v7 -ne 9) { $fail += ("V7 认视图槽那一问位址: 期望 9 = 定义 + 声明 + bool 投影 + For Each 那一站 + 调用主人自己那一问 + With 那一站 + 站F 读侧读者 + 站F 写侧读者 + 带参写槽只读查询 (第186刀), 实际到 " + $v7) }
 if ((CountWhere "slotLegacyIfaceViewName(" "cgen_control.cpp") -ne 1) {
     $fail += "V7 站点: For Each 那一站只许问一次认视图槽那一问"
 }
 if ((CountWhere "slotLegacyIfaceViewName(" "cgen_with.cpp") -ne 1) {
     $fail += "V7 站点: With 那一站 (站D') 只许问一次认视图槽那一问"
 }
-if ((CountWhere "slotLegacyIfaceViewName(" "cgen_util_classtype.cpp") -ne 5) {
-    $fail += "V7 站点: 视图那一族自己这一份文件里, 认视图槽那一问只许五处 (定义 + bool 投影 + 方法主人那一问 + 站F 读侧读者 + 站F 写侧读者)"
+if ((CountWhere "slotLegacyIfaceViewName(" "cgen_util_classtype.cpp") -ne 6) {
+    $fail += "V7 站点: 视图那一族自己这一份文件里, 认视图槽那一问只许六处 (定义 + bool 投影 + 方法主人那一问 + 站F 读侧读者 + 站F 写侧读者 + 带参写槽查询)"
 }
 $v8 = CountWhere "_stricmp(className" ""
 if ($v8 -ne 1) { $fail += ("V8 视图那一族的比名尺: 期望 1 (只许写在接口自己铸的 view_from 里), 实际到 " + $v8) }
@@ -144,8 +144,14 @@ if ((CountWhere "kComPackTiers" "cgen_util_com.cpp") -ne 3) {
     $fail += "V11 配对表住处: 三处全部只许在 cgen_util_com.cpp (别在别处抄第二份)"
 }
 #   站点 (cgen_assign_prop_write.inc) 只许问一次, 形状仍在主人手里 (站点一枚都不拼)。
+# V12 (第一百八十六刀): 「带参写槽的末形参是什么 C 类型」只许住一处查询 —— 定义 + 声明 + 一个站点
+$v12 = CountWhere "legacyViewSetterLastParamCType(" ""
+if ($v12 -ne 3) { $fail += ("V12 带参写槽查询位数: 期望 3 = 定义 + 声明 + 多入口参数站点一问, 实际到 " + $v12) }
+if ((CountWhere "legacyViewSetterCallExpr(" "cgen_assign_com_prop.inc") -ne 1) {
+    $fail += "V10 站点: 多入口参数那一站 (cgen_assign_com_prop.inc) 只许问一次视图写读者"
+}
 $v10 = CountWhere "legacyViewSetterCallExpr(" ""
-if ($v10 -ne 7) { $fail += ("V10 视图属性写读者位数: 期望 7 = 定义 + 声明 + 块外站点一问 + With 体内站点一问 + Set 语句三处 (Nothing / 命名属性 / objRef), 实际到 " + $v10) }
+if ($v10 -ne 8) { $fail += ("V10 视图属性写读者位数: 期望 8 = 定义 + 声明 + 块外站点一问 + With 体内站点一问 + Set 语句三处 + 多入口参数站点一处 (第186刀), 实际到 " + $v10) }
 if ((CountWhere "legacyViewSetterCallExpr(" "cgen_assign_prop_write.inc") -ne 2) {
     $fail += "V10 站点: 属性写只许问两次视图写读者 = 块外一站 + With 体内一站 (别在站点拼 .vtbl-><槽>(….obj, 值))"
 }

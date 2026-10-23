@@ -434,24 +434,63 @@ std::string CCodeGen::legacyViewGetterReadExpr(const std::string& objExpr,
 //   ③ 站点为自己那一发算好的**目标档** (写方向末形参的 C 类型) 与那一席的形参声明同型吗 ——
 //      形参必须恰好一枚 (`params` 里不许再有第二格) 且类型逐字节相同, 不合就交空串。
 // 形状那一头仍交回上一位的 `legacyViewCallExpr` (本函数是它的第四位消费者), 站点一枚都不拼。
+// 第一百八十六刀: 槽形参串 (`", int32_t i, BSTR v"`) 的**唯一**解析口 —— 前缀实参那两问
+// (条数 / 末段类型) 与只读查询共用它, 免得「几枚形参」与「末段是什么档」各抄一遍。
+static std::vector<std::string> ivSetterParamDecls(const std::string& params) {
+    // 串以 ", " 起头 ⇒ 先切出一段空串, 跳过它; 之后每段形如 " int32_t i"。
+    std::vector<std::string> out;
+    size_t i = 0;
+    while (i < params.size()) {
+        const size_t j = params.find(',', i);
+        std::string one = (j == std::string::npos) ? params.substr(i) : params.substr(i, j - i);
+        if (!one.empty()) out.push_back(one);
+        if (j == std::string::npos) break;
+        i = j + 1;
+    }
+    return out;
+}
+static std::string ivSetterLastCTypeOf(const std::string& params, size_t prefixCount) {
+    const std::vector<std::string> decls = ivSetterParamDecls(params);
+    if (decls.size() != prefixCount + 1) return std::string();
+    std::string last = decls.back();
+    if (!last.empty() && last[0] == ' ') last = last.substr(1);
+    const size_t sp = last.find(' ');
+    return (sp == std::string::npos) ? last : last.substr(0, sp);
+}
+
 std::string CCodeGen::legacyViewSetterCallExpr(const std::string& objExpr, const std::string& memberName,
                                                const std::string& valExpr,
                                                const std::string& wantParamCType,
-                                               ProcKind setKind) {
+                                               ProcKind setKind,
+                                               const std::vector<std::string>& prefixArgs) {
     if (objExpr.empty() || valExpr.empty() || wantParamCType.empty()) return std::string();
     const std::string ifaceName = slotLegacyIfaceViewName(Symbol::toLower(objExpr));
     if (ifaceName.empty()) return std::string();
     const std::string want = ifaceSlotKeyNamed(Symbol::toLower(memberName),
                                                ASTNodeKind::PropertyDecl, setKind);
-    const std::string paramDecl = ", " + wantParamCType;
     for (const LegacyIfaceSlot& s : legacyIfaceSlots(ifaceName)) {
         if (s.slotKey != want) continue;
         if (s.retType != "void") return std::string();
-        if (s.params.size() <= paramDecl.size()) return std::string();
-        if (s.params.compare(0, paramDecl.size(), paramDecl) != 0) return std::string();
-        const std::string rest = s.params.substr(paramDecl.size());
-        if (rest[0] != ' ' || rest.find(',') != std::string::npos) return std::string();
-        return legacyViewCallExpr(objExpr, s.field, std::vector<std::string>{valExpr});
+        if (ivSetterLastCTypeOf(s.params, prefixArgs.size()) != wantParamCType) return std::string();
+        std::vector<std::string> callArgs = prefixArgs;
+        callArgs.push_back(valExpr);
+        return legacyViewCallExpr(objExpr, s.field, callArgs);
+    }
+    return std::string();
+}
+
+std::string CCodeGen::legacyViewSetterLastParamCType(const std::string& objExpr,
+                                                     const std::string& memberName,
+                                                     ProcKind setKind,
+                                                     size_t argCount) {
+    const std::string ifaceName = slotLegacyIfaceViewName(Symbol::toLower(objExpr));
+    if (ifaceName.empty()) return std::string();
+    const std::string want = ifaceSlotKeyNamed(Symbol::toLower(memberName),
+                                               ASTNodeKind::PropertyDecl, setKind);
+    for (const LegacyIfaceSlot& s : legacyIfaceSlots(ifaceName)) {
+        if (s.slotKey != want) continue;
+        if (s.retType != "void") return std::string();
+        return ivSetterLastCTypeOf(s.params, argCount);
     }
     return std::string();
 }

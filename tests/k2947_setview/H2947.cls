@@ -4,7 +4,7 @@ BEGIN
   Persistable = 0  'NotPersistable
   DataBindingBehavior = 0  'vbNone
   DataSourceBehavior  = 0  'vbNone
-  MTSTransactionMode = 0  'NotAnMTSObject
+  MTSTransactionMode  = 0  'NotAnMTSObject
 END
 Attribute VB_Name = "H2947"
 Attribute VB_GlobalNameSpace = False
