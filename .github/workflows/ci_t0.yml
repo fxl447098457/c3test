@@ -70,7 +70,13 @@ jobs:
             }
           }
           $buildDir = Join-Path $env:RUNNER_TEMP "c3build"
-          cmake -S . -B $buildDir -G Ninja -DVB6C3_ENABLE_LLVM=OFF -DCMAKE_BUILD_TYPE=Release
+          # 本 workflow 不用 sccache，但上面那个 c3build-<hash> 缓存的 key 命名空间与 ci.yml
+          # 共享：ci.yml 编过一次就把它那枚 "-DCMAKE_CXX_COMPILER_LAUNCHER=<sccache.exe>"
+          # 持久进了 $buildDir/CMakeCache.txt。CMake 的 -D 是**缓存项**，恢复出来后即使不给 -D
+          # 也会沿袭旧值 ⇒ 这里的 128 个 TU 全部去 CreateProcess 一个本 workflow 没装的 exe
+          # （#896 夜间门禁的红）。所以显式传空把残留 launcher 清掉：本 workflow 的构建配置
+          # 必须由本 workflow 说清楚，不能让恢复出来的 CMakeCache 代决定。
+          cmake -S . -B $buildDir -G Ninja -DVB6C3_ENABLE_LLVM=OFF -DCMAKE_BUILD_TYPE=Release "-DCMAKE_CXX_COMPILER_LAUNCHER="
           if ($LASTEXITCODE -ne 0) { throw "cmake configure failed" }
           cmake --build $buildDir
           if ($LASTEXITCODE -ne 0) { throw "cmake build failed" }

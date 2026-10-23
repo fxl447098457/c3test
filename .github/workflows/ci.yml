@@ -104,13 +104,21 @@ jobs:
             }
           }
           $buildDir = Join-Path $env:RUNNER_TEMP "c3build"
-          $launcherArgs = @()
-          if ($env:USE_SCCACHE) { $launcherArgs = @("-DCMAKE_CXX_COMPILER_LAUNCHER=$env:USE_SCCACHE") }
-          cmake -S . -B $buildDir -G Ninja -DVB6C3_ENABLE_LLVM=OFF -DCMAKE_BUILD_TYPE=Release @launcherArgs
+          # 关键（修 #896 ci_t0.yml 红）：launcher 必须**每次显式给值**，没有就给空。
+          # 原因：ci.yml 用过一次 "-DCMAKE_CXX_COMPILER_LAUNCHER=..."，CMake 就把它持久化进
+          # $buildDir/CMakeCache.txt；而这个目录正是 actions/cache 缓存的东西（key = c3build-<hash>，
+          # ci_t0.yml 复用同一套 key）。ci_t0.yml 不装 sccache，它恢复同一个 c3build-<hash> 后
+          # 即使不给 -D，CMake 也会沿袭那枚旧值 ⇒ 128 个 TU 全部
+          # "CreateProcess failed: The system cannot find the file specified"。
+          # 所以这里把「有 / 没有」写死成 configure 行的一部分，不让 CMakeCache 说了算。
+          # 同理：sccache 装不上时（best-effort 失败）USE_SCCACHE 为空，这一次也会把残留值清掉。
+          $launcher = ""
+          if ($env:USE_SCCACHE -and (Test-Path $env:USE_SCCACHE)) { $launcher = $env:USE_SCCACHE }
+          cmake -S . -B $buildDir -G Ninja -DVB6C3_ENABLE_LLVM=OFF -DCMAKE_BUILD_TYPE=Release "-DCMAKE_CXX_COMPILER_LAUNCHER=$launcher"
           if ($LASTEXITCODE -ne 0) { throw "cmake configure failed" }
           cmake --build $buildDir
           if ($LASTEXITCODE -ne 0) { throw "cmake build failed" }
-          if ($env:USE_SCCACHE) { & $env:USE_SCCACHE --show-stats }
+          if ($launcher) { & $launcher --show-stats }
           New-Item -ItemType Directory -Force -Path .build | Out-Null
           Copy-Item (Join-Path $buildDir "C3.exe") .build\C3.exe -Force
           & .build\C3.exe --version
