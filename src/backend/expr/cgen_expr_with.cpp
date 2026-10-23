@@ -200,6 +200,27 @@ void CCodeGen::visit(WithMemberExpr& node) {
                 return;
             }
         }
+        // 账 #305 第一百九十三刀: With 临时量装的是 legacy 接口视图时 (`viewIface177`
+        // 那一档已按名字登记进 knownIfaceVars_), 体内**零参属性读** (`.Has`) 是视图槽的
+        // 读, 不是 IDispatch —— 写侧由站F 写读者接住, 带括号的由调用站接住, 缺的正是
+        // 这一形 (`With <视图>: x = .成员`)。槽表与名字主人与第一百九十刀同一份。
+        if (!asCallCallee_) {
+            const std::string ifaceVW193 = slotLegacyIfaceViewName(Symbol::toLower(tempVar));
+            if (!ifaceVW193.empty()) {
+                const Symbol* ifSym193 = symTab_.lookup(ifaceVW193);
+                if (ifSym193 && ifSym193->kind == SymbolKind::Class && ifSym193->isInterface) {
+                    const std::string resolved193 = resolveClassMemberCall(ifSym193->name, node.memberName);
+                    const std::string want193 = cIdent(node.memberName);
+                    for (const LegacyIfaceSlot& s193 : legacyIfaceSlots(ifSym193->name)) {
+                        if (s193.field != want193 || !s193.params.empty()) continue;
+                        if (resolved193 != "vb6_" + cIdent(ifSym193->name) + "_" + s193.field) break;
+                        lastExpr_ = legacyIfaceSlotCallFn(ifSym193->name, s193.field) + "(" + tempVar + ")";
+                        isComMarker_ = false;
+                        return;
+                    }
+                }
+            }
+        }
         // .Property → 设置COM标记，让下游(IndexOrCallExpr/AssignmentStmt)处理
         comObjExpr_ = tempVar;
         comMemberName_ = node.memberName;

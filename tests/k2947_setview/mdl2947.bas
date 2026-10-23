@@ -54,6 +54,12 @@ Sub Main()
     With MakeI()
         Set o = .Owner
         Debug.Print "K2947-l=" & (o Is Nothing)
+        ' 第一百九十三刀: 同块内的**零参属性读** (视图临时量 → 按值适配器, 不是 IDispatch)
+        Debug.Print "K2947-m=" & .Has
+    End With
+    ' 第一百九十三刀: 接收者是 MemberAccess 视图属性 (h.OwnView) 时的体内零参读
+    With h.OwnView
+        Debug.Print "K2947-n=" & .Has
     End With
     Debug.Print "K2947-DONE"
 End Sub
