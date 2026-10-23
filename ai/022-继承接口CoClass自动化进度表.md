@@ -6,7 +6,13 @@
 
 OPEN_LOCAL_DIVERGENCE: **已收口（2026-09-27 入夜 = C29-MV-d）** —— 本地 `ctrlmonthview` 的 MV24/MV25/MV30 三条红既不是"本地环境/增量缓存"、也不是"OS 版本相关"，而是**挂钟相关**：comctl v6 把当前时间混进 `MCM_GETCURSEL` 的负载里（日没错、零头 0.765），`CLng` 下午进位、上午舍掉 ⇒ 本机下午一直红、CI 跑在上午一直绿。修法与全部读数见 029 §九 C29-MV-d 那一格。留下的一般式：**日期面判据按 `CLng` / `=` 比之前，产品读数必须归成整数日**，否则同一棵树的判据随时段翻脸，而门只会读到"上午那一半"。
 STATUS: IDLE             # NOT_STARTED | DESIGN | BUSY | IDLE | ALL_DONE
-LAST_RUN: 2026-10-23T18:25:00+08:00 **第一百八十二刀已出并收线（新账 #481 = 工程类登记表的注销腿：登记 / 查表 / 注销三圈同一位边界主人，登记复用注销腾出来的洞）**：主笔 `842e5181` + 补丁 `a7369eba`（并发窗口改成 CAS 抢洞）→ 门 **#875 / #876** = run 39934930911 / 39935216020、各 attempt 1、两支都十二格 completed+success（含 `Emit manifest (shape oracle)`）
+LAST_RUN: 2026-10-23T20:10:00+08:00 **第一百八十三刀已出并收线（新账 #481 的运行时证人 = 进程内客户端在真 DLL 里 churn 600 次建/拆、再问最后一枚的身份）**：`d4f61b9a` → 门 **#884** = run 39949129416 / head `d4f61b9a` / attempt 1 / **十六格**逐格 completed+success（片数 12→16 是另一条会话的提速刀）
+—— **一句话范围**：`g_vb6_projClass` 的读者从前只有形状与静态读数；本刀用现成的 B14-2 进程内客户端驱动新夹具 tests/k481_sat（Type=DLL），把「读者在 churn 之后仍答得出」变成运行期证据
+—— **夹具/探针**：`SatWorker.Churn(n)` 同时建 n 枚 SatImpl（地址各不相同）、全部拆掉、再建**另一个类** SatOther、经视图装箱问 TypeName；探针新增 `CHURN=<n>` 臂（没给参数时输出零变化）并把 BSTR 答案按 ASCII 打出来；runner 两架构各一条 DISPATCH 用例
+—— **读数**：两架构 `CHURN_TYPE=SatOther`；`[DISPATCH] k481_projclass_identity_after_churn(_x86) PASS`、`[STATIC] projclass_scan_bound PASS`、shape oracle 515/515 + `manifest-expectation OK`
+—— **订正**：修前那台（wt_base_k174）编同一夹具也答 SatOther（陈旧记录被复用地址上的新登记覆盖）⇒ 本形是正面证人、不是饱和判别针；饱和仍靠结构证（P1/P6 + count 单调 + 洞复用）
+
+# 上一轮（2026-10-23T18:25:00+08:00，原样留档）= LAST_RUN: 2026-10-23T18:25:00+08:00 **第一百八十二刀已出并收线（新账 #481 = 工程类登记表的注销腿：登记 / 查表 / 注销三圈同一位边界主人，登记复用注销腾出来的洞）**：主笔 `842e5181` + 补丁 `a7369eba`（并发窗口改成 CAS 抢洞）→ 门 **#875 / #876** = run 39934930911 / 39935216020、各 attempt 1、两支都十二格 completed+success（含 `Emit manifest (shape oracle)`）
 —— **一句话范围**：`g_vb6_projClass[512]` 是「裸实例地址 → desc」的弱映射，从前只有登记没有注销 ⇒ 地址留在表里（复用后按旧指针查会答旧类）+ 计数只增不减（累计建过 512 枚之后新实例一律登记不进去）；读者自第一百七十一刀起是 1 枚 ⇒ 两条从惰性变活
 —— **修法**：RTL 新增 `vb6_UnregisterProjectClassInstance`（扫到置空、不动计数 = 扫描上界高水位），登记腿先用 `InterlockedCompareExchangePointer` 抢洞、抢不到落新增槽；`_Destroy` 里紧贴 `vb6_Free(me)` 发一行注销、与登记同一道 `isDll_` 闸
 —— **判据**：EXE 产物与改前逐字节相同（该符号 0 处）；9 份 ActiveX 工程 reg/unreg 31/31 成对、注销紧挨 free；B189g 真编 rc=0 出 DLL；清单 505 行相同 / 9 行移动（已登记）；`check_projclass_scan_bound` P1 2→3 + 新开 P6，两条反面验活在沙盒里各红各的，99 条哨兵 red=0
