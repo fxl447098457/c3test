@@ -18,5 +18,14 @@ Sub Main()
     x.Item(3) = "a"
     s = x.Item(3)
     Debug.Print "K2947-i=" & s
+    ' 第一百八十七刀补: With 体内的对象档读 —— 与块外同一位读者 (今天之前没有证人)
+    Set x.Owner = New O2947
+    With x
+        Set o = .Owner
+        Debug.Print "K2947-w=" & (o Is Nothing)
+        Set .Owner = Nothing
+        Set o = .Owner
+        Debug.Print "K2947-w0=" & (o Is Nothing)
+    End With
     Debug.Print "K2947-DONE"
 End Sub
