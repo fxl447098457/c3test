@@ -95,7 +95,7 @@ if ((CountWhere ").obj == " "") -gt 3) { $fail += "V6 视图比较发码在别�
 #   V8  比名那把尺 `_stricmp(className` 全仓恰好 1 处, 且在 cgen_iface_vtbl.cpp (接口自己铸的那一发 view_from
 #        里) —— 站点自己比名 = 第二条答案; mint 外再比一次名 = 又一位主人。
 $v7 = CountWhere "slotLegacyIfaceViewName(" ""
-if ($v7 -ne 10) { $fail += ("V7 认视图槽那一问位址: 期望 9 = 定义 + 声明 + bool 投影 + For Each 那一站 + 调用主人自己那一问 + With 那一站 + 站F 读侧读者 + 站F 写侧读者 + 带参写槽只读查询 (第186刀), 实际到 " + $v7) }
+if ($v7 -ne 11) { $fail += ("V7 认视图槽那一问位址: 期望 9 = 定义 + 声明 + bool 投影 + For Each 那一站 + 调用主人自己那一问 + With 那一站 + 站F 读侧读者 + 站F 写侧读者 + 带参写槽只读查询 (第186刀), 实际到 " + $v7) }
 if ((CountWhere "slotLegacyIfaceViewName(" "cgen_control.cpp") -ne 1) {
     $fail += "V7 站点: For Each 那一站只许问一次认视图槽那一问"
 }
@@ -156,7 +156,7 @@ $v14 = CountWhere "legacyIfaceNameOfCType(" ""
 if ($v14 -ne 4) { $fail += ("V14 视图返回名: 期望 4 = 定义 + 声明 + 两处登记站点, 实际到 " + $v14) }
 # V15 (第一百八十九刀): 表达式接收者的按值适配器名只许住一处 —— 定义 + 声明 + 铸 + 问 = 4。
 $v15 = CountWhere "legacyIfaceSlotCallFn(" ""
-if ($v15 -ne 4) { $fail += ("V15 视图按值适配器名: 期望 4 = 定义 + 声明 + 铸 + 问, 实际到 " + $v15) }
+if ($v15 -ne 5) { $fail += ("V15 视图按值适配器名: 期望 5 = 定义 + 声明 + 铸 + 调用站一问 + 裸零参读一问, 实际到 " + $v15) }
 if ((CountWhere "legacyViewSetterCallExpr(" "cgen_assign_com_prop.inc") -ne 1) {
     $fail += "V10 站点: 多入口参数那一站 (cgen_assign_com_prop.inc) 只许问一次视图写读者"
 }

@@ -46,5 +46,7 @@ Sub Main()
     Debug.Print "K2947-g=" & y.Has()
     ' 第一百八十九刀: 接收者是返回视图的**表达式** (Property Get 调用) —— 按值适配器
     Debug.Print "K2947-h=" & h.OwnView.Has()
+    ' 第一百九十刀: 视图表达式上的**裸**零参属性读 (无括号 = 成员访问路)
+    Debug.Print "K2947-j=" & h.OwnView.Has
     Debug.Print "K2947-DONE"
 End Sub

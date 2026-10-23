@@ -3550,7 +3550,7 @@ if ($Category -in @("all", "run", "bas")) {
     # 改前两形各一个硬错: `= New O` 发 `vb6_IK_prop_set_Owner(视图, …)` (首形参 vb6_cls_IK*)
     # ⇒ C2440; `= Nothing` 发 `vb6_ComSetRef(视图, …)` ⇒ C2172。夹具用 Holder 的 Has() 方法
     # 回读 (对象属性**读**那一侧是另一站, 本刀不碰)。
-    $setViewNeedles = @("K2947-a=1", "K2947-o=False", "K2947-b=0", "K2947-p=True", "K2947-i=3:a", "K2947-w=False", "K2947-w0=True", "K2947-f=1", "K2947-g=1", "K2947-h=1", "K2947-DONE")
+    $setViewNeedles = @("K2947-a=1", "K2947-o=False", "K2947-b=0", "K2947-p=True", "K2947-i=3:a", "K2947-w=False", "K2947-w0=True", "K2947-f=1", "K2947-g=1", "K2947-h=1", "K2947-j=1", "K2947-DONE")
     Add-BasTest "k2947_set_view" "$Tests\k2947_setview\K2947.vbp" $setViewNeedles
     Add-BasTest "k2947_set_view_x86" "$Tests\k2947_setview\K2947.vbp" $setViewNeedles -Arch "x86"
     Test-EmitcShape "k2947_set_view_shape" @("$Tests\k2947_setview\K2947.vbp") @(
@@ -3566,7 +3566,9 @@ if ($Category -in @("all", "run", "bas")) {
         'vb6_ret_OwnView = vb6_iface_IK2947_wrap_H2947(me);',
         'static inline int32_t vb6_iface_IK2947_call_Has(vb6_iface_IK2947 _v)',
         'vb6_iface_IK2947 __vbvrecv',
-        'vb6_iface_IK2947_call_Has(__vbvrecv'
+        'vb6_iface_IK2947_call_Has(__vbvrecv',
+        'vb6_iface_IK2947 __vbvread',
+        'vb6_iface_IK2947_call_Has(__vbvread'
     )
     Test-EmitcAbsent "k2947_set_view_lesion" @("$Tests\k2947_setview\K2947.vbp") @(
         'prop_set_Owner(x,',
