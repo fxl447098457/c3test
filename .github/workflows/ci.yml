@@ -266,20 +266,26 @@ jobs:
           & .build\C3.exe --version
           if ($LASTEXITCODE -ne 0) { throw "downloaded C3.exe broken" }
 
-      # 跨 runner 共享**内容寻址**的增量 obj store（本机实测 2656 个 .obj / 51 MB）。-Incremental 下
-      # 每个 job 的第一例真编那 65 个 RTL .c (~2.3 min)；store 的键只含 {架构, 工具串, RTL 源内容}，
-      # 所以错配的 obj 只会没命中、绝不会被用错（见 ai/030 §六）—— 跨 run 缓存因此是安全的。
-      # x86/x64 的 obj 同处一店（架构本就是键的一部分），无需分成两份缓存。
-      # key 带 src 哈希: RTL 改动即换 key，旧 entry 自然过期；restore-keys 兜住"src 没变只是换了
-      # 工具链"这种 miss（那种情况 obj 仍不命中，只会重编，不会用错）。
+      # 内容寻址的增量 obj store（本机实测 2656 个 .obj / 51 MB，其中 vb6* 那批 RTL 类对象 663 枚/~16 MB）。
+      # -Incremental 下每个 job 的第一例真编那 65 个 RTL .c (~2.3 min)；store 的键只含 {架构, 工具串,
+      # RTL 源内容}，所以错配的 obj 只会没命中、绝不会被用错（见 ai/030 §六）—— 跨 run 缓存是安全的。
+      #
+      # 为什么 key 里带 matrix.category+shard，而不是一个全流水线共用的 key：actions/cache 对**同一个 key**
+      # 只让本 run 里**最先跑完的那个 job**落盘，其余全被 "already exists" 顶掉。实测门 #877（run
+      # 39939573105）：最先结束的是最轻的 Tests (syntax)(40s)，它落下的 store 只有 **581 KiB**（几乎是空的，
+      # RTL 一个都没进去）⇒ 那一轮 cache 等于没存，重引那 2.3 min 白省。分键之后每个 job 各自存/读自己那份
+      # warmed store，冷启动一轮后全体命中，再不会被先跑完的轻活顶掉。x86/x64 的 obj 同处一店（架构本就是
+      # 键的一部分），所以不必按架构拆；这里拆的是 **job**，不是架构。
+      # key 带 src 哈希：RTL 改动即换 key，旧 entry 自然过期；restore-keys 用去哈希的前缀，兜住"src 动了
+      # 但 RTL 没动"那一档（仍能命中原 obj；只有 RTL 真变了才重编）。
       # 路径是 GitHub 托管 Windows runner 的固定用户目录；万一哪天换了用户名，也只是 cache miss（不判红）。
-      - name: Cache C3 incremental obj store (shared across runners)
+      - name: Cache C3 incremental obj store (per-job, content-addressed)
         uses: actions/cache@v6
         with:
           path: C:\Users\runneradmin\AppData\Local\C3\objcache
-          key: c3objcache-${{ runner.os }}-${{ hashFiles('src/**', 'CMakeLists.txt', 'cmake/**') }}
+          key: c3objcache-${{ runner.os }}-${{ matrix.category }}${{ matrix.shard }}-${{ hashFiles('src/**', 'CMakeLists.txt', 'cmake/**') }}
           restore-keys: |
-            c3objcache-${{ runner.os }}-
+            c3objcache-${{ runner.os }}-${{ matrix.category }}${{ matrix.shard }}-
 
       # run_tests.ps1 内: 纯 .bas 用例支持 -Jobs 并行 (每个 worker 独立输出目录) 与
       # -BasShard 分片 (CI 用多 runner 并行跑 bas 用例); VBP/GUI 用例始终**在本 runner 内**串行
