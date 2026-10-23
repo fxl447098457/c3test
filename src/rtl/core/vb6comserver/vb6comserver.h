@@ -167,6 +167,7 @@ const vb6_CoClassDesc* vb6_FindCoClassDesc(const char* classVariable);
 // (症状: `vb6_ComCall(裸实例, …)` 恒返回 VT_EMPTY, 因为首字段 __comObj 是 NULL,
 //  `vb6_ComIsDispatchable` 判否 ⇒ GetIDsOfNames 失败)。未登记 ⇒ 返回 NULL。
 void vb6_RegisterProjectClassInstance(void* inst, const vb6_CoClassDesc* desc);
+void vb6_UnregisterProjectClassInstance(void* inst);  /* 账 #481: 与登记配对, 由 _Destroy 在 free 前调 */
 const vb6_CoClassDesc* vb6_FindProjectClassDesc(const void* inst);
 
 // Fix 099: 从 IDispatch 取回 VB6 实例裸指针; 非本 RTL 产出的对象返回 NULL.

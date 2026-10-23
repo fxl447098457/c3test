@@ -589,9 +589,12 @@ const vb6_CoClassDesc* vb6_FindCoClassDesc(const char* classVariable) {
 // (`__comObj` 是 back-ptr 且为 NULL), 无法反推是哪个类。cgen 在类工厂里登记一次
 // 是唯一可靠办法 —— 而且工厂本来就是每个实例必经之处, 零额外成本。
 //
-// 生命周期: 实例销毁时不注销 (表是"弱"映射, 只按指针查)。工程类实例都是
-// vb6_Alloc 分配的, 指针值不会被复用成别的类实例之前就一直有效; 真正的风险是
-// **同一个堆地址先释放后被别的类复用**; 复用后的新实例会覆盖旧登记, 所以不会指向错误的类。
+// 生命周期 (账 #481 = 第一百八十二刀订正): 实例销毁时**必须**注销 (见 vb6_UnregisterProjectClassInstance,
+// 调用点 = 每个类 _Destroy 里 vb6_Free 前一行, 与登记腿同一道 isDll_ 闸)。从前的说法是
+// 「表是弱映射, 只按指针查, 不注销也没事」—— 两处站不住:
+//   ① 实例释放后地址留在表里, 地址被别的分配复用、而新主人不是工程类实例时, 按旧地址查会答旧类;
+//   ② 计数只增不减 ⇒ 一个进程里累计建过 VB6_PROJCLASS_MAX 枚实例之后, 新实例一个都登记不进去。
+// 注销只把那一格置空、不动计数 (计数 = 扫描上界的高水位), 登记腿优先复用空出来的格。
 //
 // 2026-10-15 (账 #305 §B187) 两条订正, 都按读码/真跑核过:
 //   ① 这里原来写的是「命中后还要用 vb6_ProjClassVerify 复核 (见 vb6com_invoke.c 的分派
@@ -624,19 +627,41 @@ static LONG vb6_ProjClassScanLimit(void) {
 }
 
 void vb6_RegisterProjectClassInstance(void* inst, const vb6_CoClassDesc* desc) {
-    LONG i;
+    LONG i, hole = -1;
     if (!inst || !desc) return;
-    /* 先线性找: 同一实例可能被重复登记 (DllMain + 工厂各一次), 直接覆盖即可。*/
+    /* 先线性找: 同一实例可能被重复登记 (DllMain + 工厂各一次), 直接覆盖即可。
+     * 顺手记下第一枚空位 —— 注销腿腾出来的格必须能复用, 否则计数只增不减, 累计建过
+     * VB6_PROJCLASS_MAX 枚实例之后整张表永久饱和。*/
     for (i = 0; i < vb6_ProjClassScanLimit(); i++) {
         if (g_vb6_projClass[i].inst == inst) {
             g_vb6_projClass[i].desc = desc;
             return;
         }
+        if (hole < 0 && g_vb6_projClass[i].inst == NULL) hole = i;
+    }
+    if (hole >= 0) {
+        g_vb6_projClass[hole].inst = inst;
+        g_vb6_projClass[hole].desc = desc;
+        return;
     }
     i = InterlockedIncrement(&g_vb6_projClassCount) - 1;
     if (i < 0 || i >= VB6_PROJCLASS_MAX) return;      // 表满: 放弃登记 (退化成原行为)
     g_vb6_projClass[i].inst = inst;
     g_vb6_projClass[i].desc = desc;
+}
+
+/* 账 #481 = 第一百八十二刀: 登记腿的配对另一半。实例真被拆掉前撤掉登记, 那一格置空
+ * 留给下一次登记复用; 计数是扫描上界的高水位, 这里不动它。 */
+void vb6_UnregisterProjectClassInstance(void* inst) {
+    LONG i;
+    if (!inst) return;
+    for (i = 0; i < vb6_ProjClassScanLimit(); i++) {
+        if (g_vb6_projClass[i].inst == inst) {
+            g_vb6_projClass[i].inst = NULL;
+            g_vb6_projClass[i].desc = NULL;
+            return;
+        }
+    }
 }
 
 const vb6_CoClassDesc* vb6_FindProjectClassDesc(const void* inst) {

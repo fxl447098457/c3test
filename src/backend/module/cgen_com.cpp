@@ -288,6 +288,13 @@ void CCodeGen::emitClassFactory(Module& module) {
         }
     }
 
+    // 账 #481 = 第一百八十二刀: 登记腿的配对另一半 —— 表是「裸实例 → desc」的弱映射,
+    // 登记了就必须在实例真被拆掉之前撤下来。否则地址留在表里 (地址复用后按旧指针查会答旧类),
+    // 且登记计数只增不减 ⇒ 累计建过 VB6_PROJCLASS_MAX 枚实例之后新实例一个都登记不进去。
+    // 闸与登记腿同一道 isDll_ (非 ActiveX 从来没喂过那张表, 也就不发这一行 ⇒ 产物零移动)。
+    if (isDll_) {
+    c_.emitLine("vb6_UnregisterProjectClassInstance((void*)me);  /* (b) 档注销腿: 与登记同一道闸 */");
+    }
     c_.emitLine("vb6_Free(me);");
     if (destroyHasTerm) {
         // 尾巴拆完了, 号才交出去: COM 出厂那一腿由 ComObj_Release 的帧接住(照旧记一条带号诊断),
