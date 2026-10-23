@@ -157,6 +157,12 @@ void vb6_SetWindowState(void* hwnd, int32_t val) {
 
 int32_t vb6_GetScaleWidth(void* hwnd) {
     if (!hwnd) return 0;
+    double uLeft = 0.0, uTop = 0.0, uW = 0.0, uH = 0.0;
+    /* 账 #305: vbUser 那一档的 ScaleWidth 是**用户设出来的跨度**, 不是从客户区像素
+       倒推的 —— `Scale (0,0)-(100,100)` 之后读数必须是 100。而 vb6_ScalePxToUser 在
+       mode==0 上按 1:1 像素交回客户区像素数, `Line (0,0)-(ScaleWidth, ScaleHeight)`
+       这类写法会因为读数与落笔两头口径不同而画不满整窗。 */
+    if (vb6_UserScaleOf(hwnd, &uLeft, &uTop, &uW, &uH)) return (int32_t)uW;
     RECT rc;
     if (GetClientRect((HWND)hwnd, &rc)) {
         /* VB6 ScaleWidth: 客户区宽度, 单位 = 该窗口自己的 ScaleMode (账 #175)。
@@ -170,12 +176,37 @@ int32_t vb6_GetScaleWidth(void* hwnd) {
 
 int32_t vb6_GetScaleHeight(void* hwnd) {
     if (!hwnd) return 0;
+    double uLeft = 0.0, uTop = 0.0, uW = 0.0, uH = 0.0;
+    /* 同上 (账 #305): vbUser 的 ScaleHeight 是用户设的跨度, 不是客户区像素。 */
+    if (vb6_UserScaleOf(hwnd, &uLeft, &uTop, &uW, &uH)) return (int32_t)uH;
     RECT rc;
     if (GetClientRect((HWND)hwnd, &rc)) {
         /* VB6 ScaleHeight: 客户区高度, 单位同上 (账 #175)。 */
         return (int32_t)vb6_ScalePxToUser((double)(rc.bottom - rc.top),
                                           vb6_WindowScaleModeSelf(hwnd), 1);
     }
+    return 0;
+}
+
+// 账 #305 那一刀的第四/第五格: ScaleLeft / ScaleTop 与 ScaleWidth / ScaleHeight 是**同一套
+// 自定义坐标系的四个数** (`Scale (x1,y1)-(x2,y2)` ⇒ Left=x1 Top=y1 Width=x2-x1 Height=y2-y1),
+// 所以读法必须问同一位主人 vb6_UserScaleOf, 不能各自从客户区像素倒推 —— 倒推出来的原点恒 0,
+// `Scale (10,20)-(100,100)` 之后读到 0 就是"编得过、跑得起、读数恒 0"那一味。
+int32_t vb6_GetScaleLeft(void* hwnd) {
+    if (!hwnd) return 0;
+    double uLeft = 0.0, uTop = 0.0, uW = 0.0, uH = 0.0;
+    /* vbUser 那一档的 ScaleLeft 是**用户设出来的原点**, 与 ScaleWidth 同一条口径。 */
+    if (vb6_UserScaleOf(hwnd, &uLeft, &uTop, &uW, &uH)) return (int32_t)uLeft;
+    /* VB6: 没挂自定义坐标系时原点恒为 0, 与 ScaleMode 取哪一档无关 (缺省坐标系的原点就是
+       客户区左上角)。这里刻意不从客户区倒推 —— 倒推只会再答一个 0, 还把"有没有挂坐标系"
+       这一问的答案糊掉。 */
+    return 0;
+}
+
+int32_t vb6_GetScaleTop(void* hwnd) {
+    if (!hwnd) return 0;
+    double uLeft = 0.0, uTop = 0.0, uW = 0.0, uH = 0.0;
+    if (vb6_UserScaleOf(hwnd, &uLeft, &uTop, &uW, &uH)) return (int32_t)uTop;
     return 0;
 }
 

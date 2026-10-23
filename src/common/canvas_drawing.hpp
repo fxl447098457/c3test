@@ -69,6 +69,11 @@ inline const CanvasVerbRow kCanvasVerbRows[] = {
     {"circle", CR_CANVAS_PRINTER, CANVAS_OWNER_DRAW,   "vb6_Printer_Circle"},
     {"point",  CR_CANVAS_FORM,    CANVAS_OWNER_DRAW,   "vb6_Form_Point"},
     {"point",  CR_CANVAS_PRINTER, CANVAS_OWNER_DRAW,   "vb6_Printer_Point"},
+    // scale = VB6 的自定义坐标系 (Scale (x1,y1)-(x2,y2) ⇒ ScaleMode 转 vbUser,
+    // 原点 ScaleLeft/Top 与跨度 ScaleWidth/Height 都由此设)。VB6 里 PictureBox 与 Printer
+    // 也各有这一枚方法，但本仓今天只给**窗体**那一档出口 —— 其余两档落回 COM 兜底,
+    // 与"表加一档它不会知道"是同一条纪律: 没出口就不许在调用点顺手补一个。
+    {"scale",  CR_CANVAS_FORM,    CANVAS_OWNER_DRAW,   "vb6_Form_Scale"},
 };
 
 // 名字归一：common 不许向上依赖 semantics，所以这里自己拼 ASCII 小写（与 Symbol::toLower 同结果）。
@@ -125,7 +130,10 @@ enum CanvasTailKind {
 
 inline CanvasTailKind canvasVerbTailKind(const std::string& verb) {
     if (verb == "pset" || verb == "circle") return CANVAS_TAIL_COORD;
-    if (verb == "line") return CANVAS_TAIL_TWO_POINT;
+    // Scale 与 Line 同形: `Scale (x1, y1)-(x2, y2)` 的第二点也是紧跟的第二枚坐标,
+    // 不收就会漏到外层表达式, 在 `-(` 里的逗号上当场 `expected ')'` (与 Line 那一族
+    // 同一味, 实测 VB2001/VB2003/VB2002 三条)。
+    if (verb == "line" || verb == "scale") return CANVAS_TAIL_TWO_POINT;
     return CANVAS_TAIL_NONE;
 }
 
