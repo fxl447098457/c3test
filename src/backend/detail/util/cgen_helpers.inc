@@ -315,7 +315,7 @@
     // 实现类只发**自己的实例**与**带自己名字的 wrap**。
     struct LegacyIfaceSlot {
         std::string field;     // 结构体字段名 = cIdent(裸成员名), 唯一的读者按接收者写的名字取它
-        std::string slotKey;   // 裸成员名小写: 实现类拿 `<接口名>_成员` 认领这一席时用
+        std::string slotKey;   // 带档的槽键 (D2: 属性 = get_/put_/putref_ + 裸名; 账 #489 之后 legacy 也用这把)
         std::string retType;   // C 返回类型; "void" = Sub 或 Property Let/Set
         std::string params;    // 不含 me 的形参声明, 带前置 ", "; 无参 = 空串
     };

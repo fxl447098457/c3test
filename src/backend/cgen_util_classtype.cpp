@@ -6,6 +6,7 @@
 #include <cstdlib>
 #include <functional>
 #include <map>
+#include "semantics/interface_sig.hpp"  // 账 #305 新账 #489: ifaceSlotKeyNamed (legacy 槽键与 D2 同源的位主人)
 
 namespace vb6c3 {
 
@@ -397,9 +398,9 @@ std::string CCodeGen::legacyViewCallExpr(const std::string& objExpr, const std::
 // 站点从前只认 IDispatch：视图是值结构体，塞进 helper 首枚 `void*` 槽 = cl C2172 (With 内外同红，
 // 外部真语料 读 25 处)。形状仍交回上一行那位主人 (`legacyViewCallExpr`) —— 零实参的 Property Get
 // 与零实参的方法在本族的表里本来就是同一发；这里只补两问:
-//   ① 这一席槽是不是**读**那一档: legacy 的槽键是裸成员名，同名 Get/Let 在表里只有一份，
-//      且两侧去重各按自己的声明序选档 (实测能把 Get 强转成 Let 的签名填进表 = 新账 #489)
-//      ⇒ `void` / 带实参 / `void*`(对象档的引用计数口径没读数) 一律不接;
+//   ① 这一席槽是不是**读**那一档: 键按 D2 带档 (`get_`/`put_`/`putref_`，新账 #489 之后
+//      legacy 与登记那族同源)，读者只问 `get_` 那一档 ⇒ Let/Set 的席位根本不会被选中;
+//      仍额外挡掉 `void` / 带实参 / `void*`(对象档的引用计数口径没读数) 三种形;
 //   ② 这一档的 C 类型与**站点本来要发的那一发**同型吗: 不同型就换不了访问路
 //      (换算与所有权是站点按目标档已经 baked 进去的)，比的是文本 ⇒ 拿唯一那位 switch 现拼一份来比。
 std::string CCodeGen::legacyViewGetterReadExpr(const std::string& objExpr,
@@ -408,7 +409,9 @@ std::string CCodeGen::legacyViewGetterReadExpr(const std::string& objExpr,
     if (objExpr.empty() || lateCall.empty()) return std::string();
     const std::string ifaceName = slotLegacyIfaceViewName(Symbol::toLower(objExpr));
     if (ifaceName.empty()) return std::string();
-    const std::string want = Symbol::toLower(memberName);
+    // 键带档 (账 #489 之后 legacy 的 Get 席位是 `get_<成员名>`) => 读者问的是读那一档的键。
+    const std::string want = ifaceSlotKeyNamed(Symbol::toLower(memberName),
+                                               ASTNodeKind::PropertyDecl, ProcKind::PropertyGet);
     for (const LegacyIfaceSlot& s : legacyIfaceSlots(ifaceName)) {
         if (s.slotKey != want) continue;
         if (s.retType == "void" || s.retType == "void*" || !s.params.empty()) return std::string();

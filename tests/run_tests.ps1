@@ -1645,6 +1645,19 @@ function Test-LegacyViewArgOwners {
         $out | Select-Object -First 8 | ForEach-Object { Write-Host "  $_" }
     }
 }
+function Test-LegacySlotKeyOwners {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] legacy_slot_key_owners ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\check_legacy_slot_key_owners.ps1" 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        $out | Select-Object -First 8 | ForEach-Object { Write-Host "  $_" }
+    }
+}
 
 # ai/022 §B187 第二腿 (第八十三刀): 泛对象槽的装箱腿只许一站 + coclass 判据只许一处答
 function Test-ObjectSlotBoxing {
@@ -7221,17 +7234,54 @@ if ($Category -in @("all", "run", "vbp")) {
     Test-Vbp 'k178_viewprop_station_f_read' "$Tests\k178_viewprop\K178.vbp" $k178Expected
     Test-Vbp 'k178_viewprop_station_f_read_x86' "$Tests\k178_viewprop\K178.vbp" $k178Expected -Arch "x86"
     Test-EmitcShape "k178_viewprop_shape" @("$Tests\k178_viewprop\K178.vbp") @(
+        '.Label = (BSTR (*)(void*))vb6_K178Alpha_prop_get_IK178_Label,',
+        '.Label_put = (void (*)(void*, BSTR v))vb6_K178Alpha_prop_let_IK178_Label,',
+        '.Label = (BSTR (*)(void*))vb6_K178Beta_prop_get_IK178_Label,',
+        '.Label_put = (void (*)(void*, BSTR v))vb6_K178Beta_prop_let_IK178_Label,',
         'vb6_BSTR_Assign(&s, x.vtbl->Label(x.obj));',
         'n = x.vtbl->Num(x.obj);',
         'wchar_t* _dbg_com_bstr = x.vtbl->Label(x.obj);',
         'vb6_BSTR_Assign(&s, _vb6_with_0.vtbl->Label(_vb6_with_0.obj));',
         'n = _vb6_with_0.vtbl->Num(_vb6_with_0.obj);',
         'w = x.vtbl->Twice(x.obj, 4);')
-    # 两条负针抄自**改前那台的真实产物** (同一批语句, 探针 `.local/k2690_sd3` = `.build/k2691_emit.txt`,
-    # 变量名与成员名与本夹具一字相同): 这一族从此不再走 helper。
+    # 四条负针抄自**改前那台的真实产物** (同一批语句, 探针 `.local/k2690_sd3` = `.build/k2691_emit.txt` 与
+    # Let-first 探针 `.build/k2739_emit2.txt`, 变量名与成员名与本夹具一字相同): 这一族从此不再走 helper,
+    # 而 Get 的函数也从此不再被硬套进 setter 的形状那一格 (新账 #489 的那枚静默错绑)。
     Test-EmitcAbsent "k178_viewprop_helper_gone" @("$Tests\k178_viewprop\K178.vbp") @(
         'vb6_ComGetStringProp(x, L"Label")',
-        'vb6_ComGetIntProp(x, L"Num")')
+        'vb6_ComGetIntProp(x, L"Num")',
+        '.Label = (void (*)(void*, BSTR v))vb6_K178Alpha_prop_get_IK178_Label,',
+        '.Label = (void (*)(void*, BSTR v))vb6_K178Beta_prop_get_IK178_Label,')
+
+    # <vbeclipse> 回归夹子 (k489_slot_dir, 账 #305 新账 #489 = legacy 那两趟的去重键改按档):
+    # 同名属性的 Get 与 Let 从前共用**裸成员名**那一把键, 一席只留一档, 留哪一档由各自的声明序定:
+    # 接口侧按 Let 的形状铸出 `void (*Label)(void* me, BSTR v)`, 实现侧把 **Get 的函数**填进同一格
+    # (硬套 setter 的强转) = **静默调错函数、一条 cl 诊断都不出**; 而 Get 那一档的形状从此在表里消失
+    # ⇒ 第一百七十八刀那位读者问不到 (retType=void 当场拒接), 属性读落回晚绑定 helper 的首枚 void* 槽
+    # = cl C2172。修法 = 两趟的键都改问 D2 那张词汇表 (ifaceSlotKeyNamed, 与 tB 式接口同一位主人);
+    # 字段名只给 Let/Set 加 `_put` / `_putref` (Get/Sub/Function 一字不改 ⇒ 全部存量产物零移动)。
+    # 本夹子钉的是 **Let 先写**那一形, K178 是 Get 先写那一形的证人 —— 同一趟里两形都钉住。
+    # 两台实测读数逐行相同 (.build/k2762_run.txt): s=H/0 = 视图那一发读的是 getter 自己的串
+    # (不是把 setter 的形状套在 getter 上), n=489 = 同表另一档 Num 没漂, DONE = 进程没崩。
+    # 写侧 (x.Label = ...) 仍欠 = 站F 的第二半 (#474), 本夹子只钉表与读, 不冒充钉住跑。
+    $k489Expected = @(
+        "K489-s=H/0",
+        "K489-n=489",
+        "K489-DONE")
+    Test-Vbp 'k489_slot_dir_let_first' "$Tests\k489_slot_dir\K489.vbp" $k489Expected
+    Test-Vbp 'k489_slot_dir_let_first_x86' "$Tests\k489_slot_dir\K489.vbp" $k489Expected -Arch "x86"
+    Test-EmitcShape "k489_slot_dir_shape" @("$Tests\k489_slot_dir\K489.vbp") @(
+        'void (*Label_put)(void* me, BSTR v);',
+        'BSTR (*Label)(void* me);',
+        '.Label_put = (void (*)(void*, BSTR v))vb6_K489Holder_prop_let_IK489_Label,',
+        '.Label = (BSTR (*)(void*))vb6_K489Holder_prop_get_IK489_Label,',
+        'vb6_BSTR_Assign(&s, x.vtbl->Label(x.obj));',
+        'n = x.vtbl->Num(x.obj);')
+    # 两条负针逐字节抄自**改前那台的真实产物** (探针 .build/k2739_emit2.txt: 只把同名属性的
+    # 声明序调头, 接收者名与变量名与本夹具同形): 表里那一席裸名 + 属性读落回 helper。
+    Test-EmitcAbsent "k489_slot_dir_bare_slot_gone" @("$Tests\k489_slot_dir\K489.vbp") @(
+        'void (*Label)(void* me, BSTR v);',
+        'vb6_BSTR_Assign(&s, vb6_ComGetStringProp(x, L"Label"));')
     # <vbeclipse> 回归夹子 (b174_numstrarg, 账 #305 §B174 第六十五刀): 数值实参交进内在函数的
     # BSTR 形参。修前 InStr 那一路把 int32_t / double / int16_t 裸交给 wchar_t* —— cl 只给 C4047
     # (在 -W3 之外) ⇒ **编得过**, 而 BASE 那一台在别处 (Mid$(1.1,...) 那类) 拿的是 C2440, 本机
@@ -9247,6 +9297,7 @@ if ($Category -in @("all", "compile")) {
     Test-ObjectSlotBoxing
     Test-CrossmodUdtMembers
     Test-LegacyViewArgOwners
+    Test-LegacySlotKeyOwners
     Test-BoxTempReclaim
     Test-IfaceViewAuthority
     Test-OwnedTempKeeps

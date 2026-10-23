@@ -416,8 +416,13 @@ std::vector<CCodeGen::LegacyIfaceSlot> CCodeGen::legacyIfaceSlots(const std::str
         if (lower.size() > prefix.size() && lower.compare(0, prefix.size(), prefix) == 0) {
             written = written.substr(prefix.size());
         }
-        s.slotKey = ifaceLower(written);
-        s.field = cIdent(written);
+        // 键带档 = 同一位主人 ifaceSlotKeyNamed (interface_sig.hpp); 字段名只给 Let/Set
+        // 那两档加后缀 => Get/Sub/Function 的产物逐字节不动 (账 #305 新账 #489)。
+        const ProcKind dir = ifaceDeclProcKind(d);
+        s.slotKey = ifaceSlotKeyNamed(ifaceLower(written), d.kind, dir);
+        s.field = dir == ProcKind::PropertyLet  ? cIdent(written) + "_put"
+                : dir == ProcKind::PropertySet ? cIdent(written) + "_putref"
+                                               : cIdent(written);
         s.retType = ivSlotRetType(&d);
         s.params = ivParamDecls(d);   // 带前置 ", "; 无参 = 空串
         out.push_back(std::move(s));

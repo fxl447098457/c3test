@@ -131,5 +131,5 @@ if ($fail.Count -gt 0) {
     foreach ($m in $fail) { Write-Host ("FAIL " + $m) }
     exit 1
 }
-Write-Host ("PASS 前缀名单=1(cgen_base_type.cpp) 形参问句=3 wrap调用=6 装箱调用=3 认槽调用=5 比较发码=1+2 认视图槽那一问=7(含 With 那一站 + 站F 属性读读者) 比名尺=1 视图调用主人=5(两路各一问 + 站F 读者)")
+Write-Host ("PASS 前缀名单=" + $v1all + "(本文件 " + $v1 + ") 形参问句=" + $v2 + " wrap主人=" + $v3 + " 装箱主人=" + $v4 + " 认槽主人=" + $v5 + " 比较发码=" + $v6a + "+" + $v6b + " 认视图槽那一问=" + $v7 + " 比名尺=" + $v8 + " 视图调用主人=" + $v9)
 exit 0

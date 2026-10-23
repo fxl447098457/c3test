@@ -3,6 +3,7 @@
 #include <cctype>
 #include <iostream>
 #include <functional>
+#include "semantics/interface_sig.hpp"  // 账 #305 新账 #489: ifaceSlotKeyNamed (legacy 槽键与 D2 同源的位主人)
 
 namespace vb6c3 {
 
@@ -798,32 +799,38 @@ void CCodeGen::emitInterfaceVtable(Module& module) {
         const std::string vtblInstance = vtblName + "_for_" + cIdent(moduleName_);  // Fix 013: VB_Name
         const std::string wrapFn = legacyIfaceWrapFn(ifaceName, moduleName_);
 
-        // --- 本类认领: 实现成员按 `<接口名>_成员` 命名, 摘掉前缀就是槽键 ---
-        // 同一槽有两把钥匙 (如属性 Get 与 Let 同名) 时取声明序第一把, 与表那边去重同口径。
+        // --- 本类认领: 实现成员按 `<接口名>_成员` 命名, 摘掉前缀 + 带档 = 槽键 ---
+        // 键与铸表那趟同源 (ifaceSlotKeyNamed) => 同名属性的 Get 与 Let 各认各的席位。
+        // 从前这里是裸名 + `emplace` 首见胜出, 于是「形状来自 A 档、函数来自 B 档」是静默的
+        // (账 #305 新账 #489: Let 先声明 => getter 的函数被硬套成 setter 的签名)。
         std::map<std::string, std::string> implOfSlot;
         const std::string ifacePrefix = Symbol::toLower(ifaceName) + "_";
-        auto harvest = [&](const std::string& written, const std::string& fnName) {
+        auto harvest = [&](const std::string& written, const std::string& fnName,
+                           ASTNodeKind kind, ProcKind pk) {
             std::string lower = Symbol::toLower(written);
             if (lower.size() <= ifacePrefix.size() ||
                 lower.compare(0, ifacePrefix.size(), ifacePrefix) != 0) {
                 return;  // 不是本接口那一份成员
             }
-            implOfSlot.emplace(lower.substr(ifacePrefix.size()), fnName);
+            implOfSlot.emplace(ifaceSlotKeyNamed(lower.substr(ifacePrefix.size()), kind, pk), fnName);
         };
         for (auto& decl : module.declarations) {
             if (decl->kind == ASTNodeKind::SubDecl) {
                 auto& sub = static_cast<SubDecl&>(*decl);
-                harvest(sub.name, cProcName(sub.name, sub.access, isClassModule_ ? moduleName_ : ""));
+                harvest(sub.name, cProcName(sub.name, sub.access, isClassModule_ ? moduleName_ : ""),
+                        ASTNodeKind::SubDecl, ProcKind::Sub);
             } else if (decl->kind == ASTNodeKind::FunctionDecl) {
                 auto& func = static_cast<FunctionDecl&>(*decl);
-                harvest(func.name, cProcName(func.name, func.access, isClassModule_ ? moduleName_ : ""));
+                harvest(func.name, cProcName(func.name, func.access, isClassModule_ ? moduleName_ : ""),
+                        ASTNodeKind::FunctionDecl, ProcKind::Function);
             } else if (decl->kind == ASTNodeKind::PropertyDecl) {
                 auto& prop = static_cast<PropertyDecl&>(*decl);
                 std::string prefix = "prop_let_";
                 if (prop.propKind == ProcKind::PropertyGet) prefix = "prop_get_";
                 else if (prop.propKind == ProcKind::PropertySet) prefix = "prop_set_";
                 harvest(prop.name, cProcName(prefix + prop.name, prop.access,
-                                             isClassModule_ ? moduleName_ : ""));
+                                             isClassModule_ ? moduleName_ : ""),
+                        ASTNodeKind::PropertyDecl, prop.propKind);
             }
         }
 

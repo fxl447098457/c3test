@@ -95,9 +95,12 @@
             LegacyIfaceShape& shape = legacyIfaceShapeMap[ifLower];
             std::vector<const Decl*>& slots = shape.slots;
             std::set<std::string> seen;
-            // 同一槽键只认第一份: 属性 Get/Let/Set 在 legacy 形状里共用**同一个**裸字段名
-            // (唯一的读者是 `x.vtbl-><成员>` 那一发, 它按接收者写的名字取字段, 从不问档),
-            // 两份同名结构体成员 = C2086, 所以这里必须去重。
+            // 同一槽键只认第一份 —— 但键现在**带档** (D2: Sub/Function 裸名, 属性按
+            // get_/put_/putref_ 分向; 账 #305 新账 #489)。从前这把键是裸成员名, 于是同名
+            // `Property Get Label` 与 `Property Let Label` 在表里共用一席、由**声明序**决定
+            // 是哪一档 (实测 Let 先写就铸出 setter 的形状 = 本账的病灶)。字段名那边只给
+            // 第二档改口 (`Label` / `Label_put` / `Label_putref`) => 两份同名结构体成员
+            // = C2086 这条仍然躲得开, 而 Get 那一席与所有现有产物逐字节不动。
             auto addSlot = [&](const std::unique_ptr<Decl>& d, bool wantPrefix) {
                 if (!isMemberProc(d)) return;
                 std::string written;
@@ -114,7 +117,8 @@
                 const bool hasPrefix =
                     lower.size() > prefix.size() && lower.compare(0, prefix.size(), prefix) == 0;
                 if (wantPrefix && !hasPrefix) return;  // 实现类里不是本接口那一份成员
-                if (!seen.insert(ifaceSlotKey(ifLower, written)).second) return;
+                if (!seen.insert(ifaceSlotKeyNamed(ifaceSlotKey(ifLower, written),
+                                                   d->kind, ifaceDeclProcKind(*d))).second) return;
                 slots.push_back(d.get());
             };
             auto itMod = modByLowerName.find(ifLower);
