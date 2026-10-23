@@ -6,7 +6,12 @@
 
 OPEN_LOCAL_DIVERGENCE: **已收口（2026-09-27 入夜 = C29-MV-d）** —— 本地 `ctrlmonthview` 的 MV24/MV25/MV30 三条红既不是"本地环境/增量缓存"、也不是"OS 版本相关"，而是**挂钟相关**：comctl v6 把当前时间混进 `MCM_GETCURSEL` 的负载里（日没错、零头 0.765），`CLng` 下午进位、上午舍掉 ⇒ 本机下午一直红、CI 跑在上午一直绿。修法与全部读数见 029 §九 C29-MV-d 那一格。留下的一般式：**日期面判据按 `CLng` / `=` 比之前，产品读数必须归成整数日**，否则同一棵树的判据随时段翻脸，而门只会读到"上午那一半"。
 STATUS: IDLE             # NOT_STARTED | DESIGN | BUSY | IDLE | ALL_DONE
-LAST_RUN: 2026-10-24T05:55:00+08:00 **第一百九十二刀已收线（账 #305 `With <返回视图的调用>`：临时量按视图值拷贝）**：`2a05efaa` → 门 **#897** = run 40026941220 / head `2a05efaa` / attempt 1 / **十六格**逐格 completed+success
+LAST_RUN: 2026-10-24T06:45:00+08:00 **第一百九十三刀已收线（账 #305 With 体内的视图零参属性读）**：`89ddf6df` → 门 **#898** = run 40033008622 / head `89ddf6df` / attempt 1 / **十六格**逐格 completed+success
+—— **一句话范围**：With 接收者是视图时，体内 `.Has` 仍落 `vb6_ComGetStringProp(视图值,…)` ⇒ C2172；缺的是「临时量在视图名册里」这一问。
+—— **修法**：`cgen_expr_with.cpp` 的 COMObject 分支打标记前查 `slotLegacyIfaceViewName`，零参槽走按值适配器；`!asCallCallee_` 收窄到值上下文（语句级 `.Ping` 不动）。
+—— **判据**：K2947-m/n=1 两架构 16 行同；k177 语句级形状零移动；V7/V15/refcount 两问各 +1；99 道全绿；清单只动夹具两行。下一格 = VbEclipse 真编译 34 条 error（四族，量已入账）。
+
+# 上一轮（2026-10-24T06:45:00+08:00，原样留档）= LAST_RUN: 2026-10-24T05:55:00+08:00 **第一百九十二刀已收线（账 #305 `With <返回视图的调用>`：临时量按视图值拷贝）**：`2a05efaa` → 门 **#897** = run 40026941220 / head `2a05efaa` / attempt 1 / **十六格**逐格 completed+success
 —— **一句话范围**：With 的接收者是返回视图的调用/属性时，推断答得出接口名但 With 那一支只认非接口类 ⇒ void* + C2440。
 —— **修法**：`cgen_with.cpp` 补 `isInterface` 分支（值拷贝 + 名册登记），体内成员照 177/189/190 那几位主人。
 —— **判据**：夹具 `K2947-l=False` 两架构 14 行同；99 道全绿；清单只动夹具两行。订正：`inferClassTypeOfExpr` 一直答得对，死码预扫表已撤。下一格 = With 体内零参属性读（193，量已入账）。
