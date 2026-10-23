@@ -6,7 +6,12 @@
 
 OPEN_LOCAL_DIVERGENCE: **已收口（2026-09-27 入夜 = C29-MV-d）** —— 本地 `ctrlmonthview` 的 MV24/MV25/MV30 三条红既不是"本地环境/增量缓存"、也不是"OS 版本相关"，而是**挂钟相关**：comctl v6 把当前时间混进 `MCM_GETCURSEL` 的负载里（日没错、零头 0.765），`CLng` 下午进位、上午舍掉 ⇒ 本机下午一直红、CI 跑在上午一直绿。修法与全部读数见 029 §九 C29-MV-d 那一格。留下的一般式：**日期面判据按 `CLng` / `=` 比之前，产品读数必须归成整数日**，否则同一棵树的判据随时段翻脸，而门只会读到"上午那一半"。
 STATUS: IDLE             # NOT_STARTED | DESIGN | BUSY | IDLE | ALL_DONE
-LAST_RUN: 2026-10-24T02:30:00+08:00 **第一百八十七刀 后半已收线（站F 读侧 With 体内对象档的证人 = 零 src 改，只补永久夹具）**：`a4114d8d` → 门 **#892** = run 40000002509 / head `a4114d8d` / attempt 1 / **十六格**逐格 completed+success
+LAST_RUN: 2026-10-24T03:05:00+08:00 **第一百八十八刀已收线（账 #305 视图作返回类型 = `Function/Property Get … As <legacy 接口>` 的返回槽 `{0}` + 登视名册）**：`73cb5a9f` → 门 **#893** = run 40004011048 / head `73cb5a9f` / attempt 1 / **十六格**逐格 completed+success
+—— **一句话范围**：返回槽零初始化只认 `vb6_type_` ⇒ 视图那一档发 `vb6_iface_<I> ret = 0;`（C2440）；且返回槽没进视名册 ⇒ `Set <名> = New/Me` 落成类槽写法。
+—— **修法**：`cTypeIsValueAggregate`（`vb6_type_` ∪ `vb6_iface_`）两处返回槽同问；`legacyIfaceNameOfCType` 交回接口名并登 `knownIfaceVars_`；前缀比较仍只住 `cgen_base_type.cpp`。
+—— **判据**：夹具 K2947 扩两针（`f=1` / `g=1`）两架构 10 行逐字节同；形状 4 + ABSENT 4；哨兵新开 V13/V14 各 4；清单 518 行只动本夹具两行。下一格 = 视图作接收者的表达式（已量）。
+
+# 上一轮（2026-10-24T03:05:00+08:00，原样留档）= LAST_RUN: 2026-10-24T02:30:00+08:00 **第一百八十七刀 后半已收线（站F 读侧 With 体内对象档的证人 = 零 src 改，只补永久夹具）**：`a4114d8d` → 门 **#892** = run 40000002509 / head `a4114d8d` / attempt 1 / **十六格**逐格 completed+success
 —— **一句话范围**：站F 读侧对象档此前只钉了块外 `Set o = x.Owner`；With 体内 `.Owner` 走同一位读者，但无证人。
 —— **本步**：夹具追加 With 段（有对象读 False / 置空后读 True）+ 形状针 `o = _vb6_with_0.vtbl->Owner(_vb6_with_0.obj);`；本机两台 8 行逐字节相同，清单只动本夹具两行。
 —— **下一格（量已入账）**：`Function / Property Get … As <legacy 接口>` 的返回槽 `= 0` ⇒ cl C2440（语料 37 个过程返接口，VbDoc 24 枚 `As IIterator`）；接收者是表达式那一形另开一刀。
