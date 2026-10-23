@@ -6,7 +6,13 @@
 
 OPEN_LOCAL_DIVERGENCE: **已收口（2026-09-27 入夜 = C29-MV-d）** —— 本地 `ctrlmonthview` 的 MV24/MV25/MV30 三条红既不是"本地环境/增量缓存"、也不是"OS 版本相关"，而是**挂钟相关**：comctl v6 把当前时间混进 `MCM_GETCURSEL` 的负载里（日没错、零头 0.765），`CLng` 下午进位、上午舍掉 ⇒ 本机下午一直红、CI 跑在上午一直绿。修法与全部读数见 029 §九 C29-MV-d 那一格。留下的一般式：**日期面判据按 `CLng` / `=` 比之前，产品读数必须归成整数日**，否则同一棵树的判据随时段翻脸，而门只会读到"上午那一半"。
 STATUS: IDLE             # NOT_STARTED | DESIGN | BUSY | IDLE | ALL_DONE
-LAST_RUN: 2026-10-23T17:30:00+08:00 **第一百八十一刀已出并收线（新账 #474 站F 写侧第二格 = `With <视图>` 体内那一发属性写接进同一位写读者）**：实施+判据+登记同批推 `0ff31f30` → 门 **#874** = run 39923602395 / head `0ff31f30` / attempt 1 / 十二格逐格 completed+success（含 `Emit manifest (shape oracle)`）
+LAST_RUN: 2026-10-23T18:25:00+08:00 **第一百八十二刀已出并收线（新账 #481 = 工程类登记表的注销腿：登记 / 查表 / 注销三圈同一位边界主人，登记复用注销腾出来的洞）**：主笔 `842e5181` + 补丁 `a7369eba`（并发窗口改成 CAS 抢洞）→ 门 **#875 / #876** = run 39934930911 / 39935216020、各 attempt 1、两支都十二格 completed+success（含 `Emit manifest (shape oracle)`）
+—— **一句话范围**：`g_vb6_projClass[512]` 是「裸实例地址 → desc」的弱映射，从前只有登记没有注销 ⇒ 地址留在表里（复用后按旧指针查会答旧类）+ 计数只增不减（累计建过 512 枚之后新实例一律登记不进去）；读者自第一百七十一刀起是 1 枚 ⇒ 两条从惰性变活
+—— **修法**：RTL 新增 `vb6_UnregisterProjectClassInstance`（扫到置空、不动计数 = 扫描上界高水位），登记腿先用 `InterlockedCompareExchangePointer` 抢洞、抢不到落新增槽；`_Destroy` 里紧贴 `vb6_Free(me)` 发一行注销、与登记同一道 `isDll_` 闸
+—— **判据**：EXE 产物与改前逐字节相同（该符号 0 处）；9 份 ActiveX 工程 reg/unreg 31/31 成对、注销紧挨 free；B189g 真编 rc=0 出 DLL；清单 505 行相同 / 9 行移动（已登记）；`check_projclass_scan_bound` P1 2→3 + 新开 P6，两条反面验活在沙盒里各红各的，99 条哨兵 red=0
+—— **欠项**：饱和那一半的运行时证人（建 600 拆 600 之后第 601 枚仍查得到身份）还欠 —— 门禁里 DLL 没有跑出口，要真证得走 B14-2 进程内客户端，另立
+
+# 上一轮（2026-10-23T17:30:00+08:00，原样留档）= LAST_RUN: 2026-10-23T17:30:00+08:00 **第一百八十一刀已出并收线（新账 #474 站F 写侧第二格 = `With <视图>` 体内那一发属性写接进同一位写读者）**：实施+判据+登记同批推 `0ff31f30` → 门 **#874** = run 39923602395 / head `0ff31f30` / attempt 1 / 十二格逐格 completed+success（含 `Emit manifest (shape oracle)`）
 —— **一句话范围**：`With x` 体内的 `.Label = 值` 落 `WithObjKind::COMObject` 那一档、从不问名册，现场发 `vb6_ComSetProp(载体, L"名", 打包值)` = 把整枚视图交给 `void*` 首形 ⇒ cl C2172（改前真产物 `.build/k2815_sdw.txt:389`），而同体内那发读已走 `_vb6_with_0.vtbl->Label(...)`
 —— **修法 = 站点只加一问，配对表补上第二读法**：站点（`cgen_assign_prop_write.inc:516`）在打包器名与值都算好后多问一次第一百八十刀那位写读者 `legacyViewSetterCallExpr`；这一站没有属性符号 ⇒ 目标档由它自己算好的打包器名反推（新反向口 `comVbTypeForPackFn`，与正向 `comPackFnForVbType` 共用一张 `kComPackTiers` = 八行配对，`cgen_util_com.cpp:739/751/758`）；三问不合 ⇒ 交空串、站点保留自己那一发 = 照旧红
 —— **判据 = 同一夹子加 With 体 + 两台真编真跑 + 两头针**：`tests/k489_slot_dir` 两台读数逐行相同 `K489-s=Hwww/3 / K489-n=489 / K489-DONE`；正针 `_vb6_with_0.vtbl->Label_put(_vb6_with_0.obj, vb6_BSTR_FromStr(L"www"));` 抄自改后真产物 `.build/k2852_489.txt:393`，反面针 = 改前那整发 `vb6_ComSetProp(_vb6_with_0, …)` 抄自 `.build/k2815_sdw.txt:389`；十三枚针（9 正 4 负）先在本机对真产物逐枚复核（`.local/k2859_needles.py` bad=0），**四枚判据按用例名在门日志里逐条验过**（`let_first` / `_x86` / `_shape` / `_bare_slot_gone` 全 PASS）
