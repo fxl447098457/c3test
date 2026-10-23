@@ -55,6 +55,36 @@ jobs:
           key: c3build-${{ hashFiles('src/**', 'CMakeLists.txt', 'cmake/**') }}
           restore-keys: c3build-
 
+      # 提速：按天然气原样搬 ci.yml 那套 sccache（它已在那里实测冷 290s / 热 84s vs 基线 253s）。
+      # 本 workflow 是夜间全链，每次都真编 128 个 TU（没有 ci.yml 那个 c3exe 跳过专门设施），
+      # 所以这里的收益比 ci.yml 更大。cache key 故意与 ci.yml 共用同一个 sccache-<os>：
+      # sccache 自己的键已含编译器身份，跨 workflow 共享只会多命中、不会误用旧对象。
+      # 装不上就退回直接编（continue-on-error best-effort），不给门禁添红。
+      - name: Install sccache (best-effort)
+        id: sccache
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          choco install sccache -y --no-progress 2>&1 | Out-Null
+          $exe = (Get-Command sccache -ErrorAction SilentlyContinue).Source
+          if (-not $exe) { $exe = "C:\ProgramData\chocolatey\bin\sccache.exe" }
+          if (Test-Path $exe) {
+            Write-Host "sccache available: $exe"
+            & $exe --version
+            "USE_SCCACHE=$exe" | Out-File -FilePath $env:GITHUB_ENV -Append
+          } else {
+            Write-Host "sccache not available; build will run without it"
+          }
+        env:
+          SCCACHE_DIR: ${{ runner.temp }}/sccache
+          SCCACHE_CACHE_SIZE: 2G
+
+      - name: Cache sccache
+        uses: actions/cache@v6
+        with:
+          path: ${{ runner.temp }}/sccache
+          key: sccache-${{ runner.os }}
+
       - name: 从源码构建 C3.exe（绝不携带预编译二进制）
         shell: pwsh
         run: |
@@ -70,16 +100,18 @@ jobs:
             }
           }
           $buildDir = Join-Path $env:RUNNER_TEMP "c3build"
-          # 本 workflow 不用 sccache，但上面那个 c3build-<hash> 缓存的 key 命名空间与 ci.yml
-          # 共享：ci.yml 编过一次就把它那枚 "-DCMAKE_CXX_COMPILER_LAUNCHER=<sccache.exe>"
-          # 持久进了 $buildDir/CMakeCache.txt。CMake 的 -D 是**缓存项**，恢复出来后即使不给 -D
-          # 也会沿袭旧值 ⇒ 这里的 128 个 TU 全部去 CreateProcess 一个本 workflow 没装的 exe
-          # （#896 夜间门禁的红）。所以显式传空把残留 launcher 清掉：本 workflow 的构建配置
-          # 必须由本 workflow 说清楚，不能让恢复出来的 CMakeCache 代决定。
-          cmake -S . -B $buildDir -G Ninja -DVB6C3_ENABLE_LLVM=OFF -DCMAKE_BUILD_TYPE=Release "-DCMAKE_CXX_COMPILER_LAUNCHER="
+          # 关键（#896 夜间门禁红的原址）：launcher 必须**每次显式给值**，没有就给空。
+          # c3build-<hash> 这个缓存的 key 命名空间是与 ci.yml 共享的，而 CMake 的 -D 是**缓存项** ——
+          # 一旦哪一轮把它持久进 $buildDir/CMakeCache.txt 又被本 workflow 恢复回来，即使这里不给 -D
+          # 也会被沿袭 ⇒ 128 个 TU 全部 CreateProcess 一个本机没有的 exe。所以「有 / 没有」写死在
+          # configure 行里：本 workflow 的构建配置由本 workflow 自己决定，不让恢复的 CMakeCache 代决定。
+          $launcher = ""
+          if ($env:USE_SCCACHE -and (Test-Path $env:USE_SCCACHE)) { $launcher = $env:USE_SCCACHE }
+          cmake -S . -B $buildDir -G Ninja -DVB6C3_ENABLE_LLVM=OFF -DCMAKE_BUILD_TYPE=Release "-DCMAKE_CXX_COMPILER_LAUNCHER=$launcher"
           if ($LASTEXITCODE -ne 0) { throw "cmake configure failed" }
           cmake --build $buildDir
           if ($LASTEXITCODE -ne 0) { throw "cmake build failed" }
+          if ($launcher) { & $launcher --show-stats }
           New-Item -ItemType Directory -Force -Path .build | Out-Null
           Copy-Item (Join-Path $buildDir "C3.exe") .build\C3.exe -Force
           & .build\C3.exe --version
@@ -93,9 +125,23 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
+      # 提速：内容寻址的增量 obj store（照搬 ci.yml 里已实测的那一套；键只含
+      # {架构, 工具串, RTL 源内容} ⇒ 错配的 obj 只会没命中、绝不会被用错）。
+      # 没有它每个 job 的第一枚用例都要自己编那 65 个 RTL .c（约 2.3 分钟固定开销），
+      # 那是 t1 各片 271s / t1 首片 418s 里躲不掉的一块，也是分片切细收益变小的原因。
+      # key 按 job 分开：actions/cache 对同一个 key 只让本 run 里最先跑完的 job 落盘，
+      # 其余会被 "already exists" 顶掉（ci.yml 实测被最轻的 syntax 顶成一个几乎空的 store）。
+      - name: Cache C3 incremental obj store (per-job, content-addressed)
+        uses: actions/cache@v6
+        with:
+          path: C:\Users\runneradmin\AppData\Local\C3\objcache
+          key: c3objcache-${{ runner.os }}-t0-${{ hashFiles('src/**', 'CMakeLists.txt', 'cmake/**') }}
+          restore-keys: |
+            c3objcache-${{ runner.os }}-t0-
+
       - name: 运行 T0 门禁（tests_github/run_t0.ps1）
         shell: pwsh
-        run: pwsh -NoProfile -ExecutionPolicy Bypass -File tests_github/run_t0.ps1 -Verbose
+        run: pwsh -NoProfile -ExecutionPolicy Bypass -File tests_github/run_t0.ps1 -Incremental -Verbose
 
       - name: 上传 T0 日志
         if: always()
@@ -170,11 +216,22 @@ jobs:
           & .build\C3.exe --version
           if ($LASTEXITCODE -ne 0) { throw "downloaded C3.exe broken" }
 
+      # 提速：内容寻址的增量 obj store（与上面 T0 那一步同源同口径）。
+      # 每片键分开：actions/cache 对同一个 key 只让本 run 里最先跑完的 job 落盘，其余会被
+      # "already exists" 顶掉 ⇒ 共享一个 key 的话，先跑完的轻活会把几乎空的 store 存进去。
+      - name: Cache C3 incremental obj store (per-job, content-addressed)
+        uses: actions/cache@v6
+        with:
+          path: C:\Users\runneradmin\AppData\Local\C3\objcache
+          key: c3objcache-${{ runner.os }}-${{ matrix.tier }}${{ matrix.shard }}-${{ hashFiles('src/**', 'CMakeLists.txt', 'cmake/**') }}
+          restore-keys: |
+            c3objcache-${{ runner.os }}-${{ matrix.tier }}${{ matrix.shard }}-
+
       # 每 runner 内 -Jobs 20 并行 (每 worker 独立输出目录 output/vbprun*、output/guicompile*、
       # output/job* — 从不依赖"最新临时目录"), 跨 runner 用 -Shard 切片。
       - name: "Run ${{ matrix.tier }} (shard ${{ matrix.shard }}/${{ matrix.shardTotal }})"
         shell: pwsh
-        run: pwsh -NoProfile -ExecutionPolicy Bypass -File tests_github/run_${{ matrix.tier }}.ps1 -Jobs 20 ${{ matrix.shardArgs }} -Verbose
+        run: pwsh -NoProfile -ExecutionPolicy Bypass -File tests_github/run_${{ matrix.tier }}.ps1 -Jobs 20 -Incremental ${{ matrix.shardArgs }} -Verbose
 
       - name: "上传 ${{ matrix.tier }} shard ${{ matrix.shard }} 日志"
         if: always()
