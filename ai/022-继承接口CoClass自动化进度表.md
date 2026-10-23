@@ -6,7 +6,13 @@
 
 OPEN_LOCAL_DIVERGENCE: **已收口（2026-09-27 入夜 = C29-MV-d）** —— 本地 `ctrlmonthview` 的 MV24/MV25/MV30 三条红既不是"本地环境/增量缓存"、也不是"OS 版本相关"，而是**挂钟相关**：comctl v6 把当前时间混进 `MCM_GETCURSEL` 的负载里（日没错、零头 0.765），`CLng` 下午进位、上午舍掉 ⇒ 本机下午一直红、CI 跑在上午一直绿。修法与全部读数见 029 §九 C29-MV-d 那一格。留下的一般式：**日期面判据按 `CLng` / `=` 比之前，产品读数必须归成整数日**，否则同一棵树的判据随时段翻脸，而门只会读到"上午那一半"。
 STATUS: IDLE             # NOT_STARTED | DESIGN | BUSY | IDLE | ALL_DONE
-LAST_RUN: 2026-10-23T22:05:00+08:00 **第一百八十四刀已出并收线（账 #305 §B164 形⑤ 站③ = 显式 `Let <变体> = …` 的目标也问同一枚「是不是 Variant 槽」的主人；三形 cl C2440 与两形「编得过但不清旧值」一并收口）**：`40cdddf4` → 门 **#888** = run 39964036824 / head `40cdddf4` / attempt 1 / **十六格**逐格 completed+success
+LAST_RUN: 2026-10-23T23:30:00+08:00 **第一百八十五刀已出并收线（账 #305 站F 写侧 Set 档 = `Set <视图>.<属性> = …` 也问同一枚写读者，按 `setKind` 答 `put_` / `putref_` 两档）**：`69f24510` → 门 **#889** = run 39978359313 / head `69f24510` / attempt 1 / **十六格**逐格 completed+success
+—— **一句话范围**：视图是值结构体，Set 的两支出口却按「接收者是类指针」拼 ⇒ `= New O` 发 `vb6_IK_prop_set_Owner(视图,…)` C2440、`= Nothing` 发 `vb6_ComSetRef(视图,…)` C2172。
+—— **修法**：写读者加 `ProcKind setKind`，键仍由唯一主人按档拼；Set 三处出口（Nothing / 命名属性 / 链式 objRef）发原码之前先问它，命中发 `视图.vtbl->Owner_putref(视图.obj, 值)`。
+—— **判据**：新夹具 `tests/k2947_setview` 两台 3 行相同（`K2947-a=1 / K2947-b=0 / K2947-DONE`）+ 两条 EMITC 正针 + 两条 ABSENT 针；哨兵 V10 4→7；清单 518 行（新增 2 行，存量 517 行不动）。
+—— **下一格候选**：① 多入口参数（`x.Item(3)=` 拿 Get 槽当左值 ⇒ C2106）② 对象属性读那一侧（`vb6_ComGetObjectProp(视图,…)` ⇒ C2172，引用计数口径先拍）。
+
+# 上一轮（2026-10-23T22:05:00+08:00，原样留档）= LAST_RUN: 2026-10-23T22:05:00+08:00 **第一百八十四刀已出并收线（账 #305 §B164 形⑤ 站③ = 显式 `Let <变体> = …` 的目标也问同一枚「是不是 Variant 槽」的主人；三形 cl C2440 与两形「编得过但不清旧值」一并收口）**：`40cdddf4` → 门 **#888** = run 39964036824 / head `40cdddf4` / attempt 1 / **十六格**逐格 completed+success
 —— **一句话范围**：`AssignmentStmt` 早有六条判据答「目标是不是变体槽」，而 `LetStmt` 那一站只做文本判断 `VB6_SA_AT(vb6_VARIANT,` ⇒ 非变体右值三形（字面量 / String 变量 / 拼接）发成裸赋值 = cl C2440、无 exe，槽对槽与变体数组元素两形编得过却不清旧值。
 —— **修法**：六条判据**原样**提成 `variantSlotTargetOf`（`cgen_util_ctrl.cpp`），`AssignmentStmt` 与 `LetStmt` 共用；命中就交同一枚 `emitVariantSlotAssign`（装箱 + 所有权 + 清旧值）。零新答案，`AssignmentStmt` 那一站发码 BASE vs NEW 逐字节相同。
 —— **判据**：新夹具 `tests/test_let_variant_slot.bas`（x64/x86 两台 9 行一字相同；s3/s6 是深拷贝证人）+ `let_variant_slot_shape` 三条 EMITC 针；`check_variant_slot_store` R4（`cgen_setlet.cpp 1→0`）与 R5d（`cgen_assign_value_sem.inc 1→0`）各一处重钉；清单 516 行 = 存量 515 行逐哈希未动 + 新增 1 行（门那台独立复算同数）。
