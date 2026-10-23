@@ -34,6 +34,18 @@ jobs:
           cmake --version
           ninja --version
 
+      # 直接缓存**编好的 C3.exe**（不只是 ninja 构建目录）。原因：下面那个 c3build 目录缓存
+      # 其实救不了重编 —— 缓存 tar 保留的是**旧 mtime**，而 checkout 出来的源码是**刚写的 mtime**，
+      # ninja 一比「源比 obj 新」就把 128 个 TU 全重编（实测门 #880 的 Build job = 210s，日志里
+      # [1/128]..[128/128] 一个不少）。key 与 c3build 同源（src/** + cmake），src 没动就直接把这枚
+      # exe 拿来用、整个构建步骤跳过；src 动了 key 变了自然重编（本来就该重编）。
+      - name: Cache built C3.exe (skip rebuild when src/ unchanged)
+        id: c3exe
+        uses: actions/cache@v6
+        with:
+          path: .build/C3.exe
+          key: c3exe-${{ hashFiles('src/**', 'CMakeLists.txt', 'cmake/**') }}
+
       - name: Cache C3.exe build dir (fast path when src/ untouched)
         uses: actions/cache@v6
         with:
@@ -42,6 +54,7 @@ jobs:
           restore-keys: c3build-
 
       - name: Build C3.exe from source (never ship a vendored binary)
+        if: steps.c3exe.outputs.cache-hit != 'true'
         shell: pwsh
         run: |
           # MSVC 官方只保证从 vcvarsall 拿到的环境有效; 这里在子进程里导出后注入当前进程。
@@ -64,6 +77,13 @@ jobs:
           Copy-Item (Join-Path $buildDir "C3.exe") .build\C3.exe -Force
           & .build\C3.exe --version
           if ($LASTEXITCODE -ne 0) { throw "built C3.exe smoke check failed" }
+
+      # 构建步骤在 cache-hit 时被跳过，所以版本自证挪到这里无条件跑一遍（重建 / 缓存取回都验）。
+      - name: Smoke check C3.exe (rebuilt or restored from cache)
+        run: |
+          if (-not (Test-Path .build\C3.exe)) { throw "C3.exe missing (cache restore failed?)" }
+          & .build\C3.exe --version
+          if ($LASTEXITCODE -ne 0) { throw "C3.exe broken (cache-restored?)" }
 
       - name: Upload C3.exe artifact (shared by all test jobs)
         uses: actions/upload-artifact@v7
