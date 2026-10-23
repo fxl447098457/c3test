@@ -259,6 +259,28 @@ bool CCodeGen::clsPtrIsViewSlot(const std::string& clsPtr) {
     return clsPtr.compare(0, 10, "vb6_ivref_") == 0;  // vb6_ivref_ = 10 个字符
 }
 
+// 账 #305 第一百八十八刀: `vb6_iface_` 前缀的**唯一比较点** (上面 V1 那条哨兵钉的就是这一处)。
+// 「这枚 C 类型是不是 legacy 接口视图」这一问从此只有这一个答案；形参槽、返回槽、值聚合判据
+// 三处读者都调它。
+static bool isLegacyIfaceCType(const std::string& cType) {
+    return cType.compare(0, 10, "vb6_iface_") == 0;  // vb6_iface_ = 10 个字符
+}
+
+// 账 #305 第一百八十八刀: 「这一档返回类型是不是值聚合」= 不许 `= 0`、必须 `{0}` 零初始化。
+// 名单两档: UDT (`vb6_type_`) ∪ legacy 接口视图 (`vb6_iface_`)。局部变量那条路早就是 `{0}`
+// (cgen_localdecl.cpp)，此前只有**过程返回槽**漏了视图这一档 ⇒ cl C2440。
+bool CCodeGen::cTypeIsValueAggregate(const std::string& cType) {
+    return cType.compare(0, 9, "vb6_type_") == 0 || isLegacyIfaceCType(cType);
+}
+
+// 账 #305 第一百八十八刀: 返回类型若是 legacy 接口视图，交回接口名 (认不出 = 空串) ——
+// 返回槽要进 knownIfaceVars_ 那张名册，否则 `Set <函数名> = <实例>` 会把视图当类槽发
+// (`vb6_cls_<I>* __clsold = vb6_ret_X;` = C2440)。前缀知识仍只住这份文件。
+std::string CCodeGen::legacyIfaceNameOfCType(const std::string& cType) {
+    if (!isLegacyIfaceCType(cType)) return {};
+    return cType.substr(10);
+}
+
 // 账 #305 第一百七十二刀 站B: 「这一档形参槽收不收 legacy 接口的**视图值**」(交回声明名,
 // 认不出 = 空串)。上面那位主人刻意只认 vb6_cls_ / vb6_ivref_ 两档 ⇒ legacy 的 `vb6_iface_<I>`
 // 值结构体在它那儿是"不是类槽"，调用点于是把裸实例直交 (实测 Ray.vbp 四枚类各一发 C2440:
@@ -268,7 +290,7 @@ bool CCodeGen::clsPtrIsViewSlot(const std::string& clsPtr) {
 std::string CCodeGen::cParamLegacyIfaceSlotName(const ParameterInfo& p) {
     if (p.typeRefName.empty()) return {};
     const std::string t = cTypeForDeclaredTypeName(p.typeRefName);
-    if (t.compare(0, 10, "vb6_iface_") != 0) return {};  // vb6_iface_ = 10 个字符
+    if (!isLegacyIfaceCType(t)) return {};
     std::string nm = p.typeRefName;
     const size_t dot = nm.rfind('.');
     if (dot != std::string::npos) nm = nm.substr(dot + 1);

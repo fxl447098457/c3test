@@ -346,7 +346,8 @@ void CCodeGen::visit(FunctionDecl& node) {
     // 修复: 仅检查 C 类型名前缀即可 (typeSys 可能将 UDT 解析为 Unknown/Variant)
     {
         std::string initVal = defaultValue(funcRetVb6Type);
-        if (retType.rfind("vb6_type_", 0) == 0) {
+        // 账 #305 第一百八十八刀: 值聚合 (UDT / legacy 接口视图) 用 `{0}`, 其余档照旧 `= 0`。
+        if (cTypeIsValueAggregate(retType)) {
             initVal = "{0}";
         }
         c_.emitLine(retType + " " + currentReturnVar_ + " = " + initVal + ";");
@@ -410,6 +411,18 @@ void CCodeGen::visit(FunctionDecl& node) {
         size_t star221 = ivRet221.find('*');
         if (star221 != std::string::npos) ivRet221 = ivRet221.substr(0, star221);
         if (!ivRet221.empty()) knownIvrefVars_[funcRetLower] = ivRet221;
+    }
+    // 账 #305 第一百八十八刀: 返回类型是 legacy 接口视图 (`vb6_iface_<I>`) ⇒ 返回槽自己就是
+    // 一枚视图值。登进 knownIfaceVars_ 之后 `Set <函数名> = New <实现类>` 走 P6.4 的 wrap
+    // 那一臂、`Set <函数名> = <视图>` 维持裸拷贝；不登记时腿② 会把它当类槽，发
+    // `vb6_cls_<I>* __clsold = vb6_ret_X;` ⇒ cl C2440。与前面几档互斥，先擦掉残留同名项。
+    else {
+        const std::string ifaceRet188 = legacyIfaceNameOfCType(retType);
+        if (!ifaceRet188.empty()) {
+            knownIfaceVars_[funcRetLower] = ifaceRet188;
+            knownClassVars_.erase(funcRetLower);
+            knownIvrefVars_.erase(funcRetLower);
+        }
     }
     // Fix 090i: 函数返回 UDT → 注册返回值变量到 knownUdtVars_ (如 pvVfsOpen /
     // pvVfsCreate / pvArrPtr 等 As ZipVfsType 的内部函数). 此前漏注册, 函数体内

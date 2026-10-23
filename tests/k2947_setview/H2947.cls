@@ -40,3 +40,6 @@ End Property
 Private Property Get IK2947_Item(ByVal i As Long) As String
     IK2947_Item = m_item
 End Property
+Public Property Get OwnView() As IK2947
+    Set OwnView = Me
+End Property

@@ -147,6 +147,13 @@ if ((CountWhere "kComPackTiers" "cgen_util_com.cpp") -ne 3) {
 # V12 (第一百八十六刀): 「带参写槽的末形参是什么 C 类型」只许住一处查询 —— 定义 + 声明 + 一个站点
 $v12 = CountWhere "legacyViewSetterLastParamCType(" ""
 if ($v12 -ne 3) { $fail += ("V12 带参写槽查询位数: 期望 3 = 定义 + 声明 + 多入口参数站点一问, 实际到 " + $v12) }
+# V13 (第一百八十八刀): 「这一档返回类型是不是值聚合」只许住一处判据 (`vb6_type_` ∪ `vb6_iface_`) ——
+#   定义 + 声明 + Function / Property Get 两处返回槽 = 4; `vb6_iface_` 前缀比较仍只住 cgen_base_type.cpp (V1 守)。
+$v13 = CountWhere "cTypeIsValueAggregate(" ""
+if ($v13 -ne 4) { $fail += ("V13 值聚合判据: 期望 4 = 定义 + 声明 + 两处返回槽, 实际到 " + $v13) }
+# V14 (第一百八十八刀): 「返回类型若为视图, 交回接口名」只许住一处 —— 定义 + 声明 + 两处登记站点 = 4。
+$v14 = CountWhere "legacyIfaceNameOfCType(" ""
+if ($v14 -ne 4) { $fail += ("V14 视图返回名: 期望 4 = 定义 + 声明 + 两处登记站点, 实际到 " + $v14) }
 if ((CountWhere "legacyViewSetterCallExpr(" "cgen_assign_com_prop.inc") -ne 1) {
     $fail += "V10 站点: 多入口参数那一站 (cgen_assign_com_prop.inc) 只许问一次视图写读者"
 }
@@ -162,5 +169,5 @@ if ($fail.Count -gt 0) {
     foreach ($m in $fail) { Write-Host ("FAIL " + $m) }
     exit 1
 }
-Write-Host ("PASS 前缀名单=" + $v1all + "(本文件 " + $v1 + ") 形参问句=" + $v2 + " wrap主人=" + $v3 + " 装箱主人=" + $v4 + " 认槽主人=" + $v5 + " 比较发码=" + $v6a + "+" + $v6b + " 认视图槽那一问=" + $v7 + " 比名尺=" + $v8 + " 视图调用主人=" + $v9 + " 写读者=" + $v10 + " 打包器配对=" + $v11f + "/" + $v11r + "/" + $v11t)
+Write-Host ("PASS 前缀名单=" + $v1all + "(本文件 " + $v1 + ") 形参问句=" + $v2 + " wrap主人=" + $v3 + " 装箱主人=" + $v4 + " 认槽主人=" + $v5 + " 比较发码=" + $v6a + "+" + $v6b + " 认视图槽那一问=" + $v7 + " 比名尺=" + $v8 + " 视图调用主人=" + $v9 + " 写读者=" + $v10 + " 打包器配对=" + $v11f + "/" + $v11r + "/" + $v11t + " 值聚合=" + $v13 + " 视图返回名=" + $v14)
 exit 0

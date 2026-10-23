@@ -2,6 +2,13 @@ Attribute VB_Name = "mdl2947"
 Option Explicit
 
 ' 账 #305 站F 写侧 (第一百八十五~一百八十七刀): Set / 多入口参数 / 对象属性读 在视图上都走槽表。
+Function MakeI() As IK2947
+    Dim t As IK2947
+    Set t = New H2947
+    Set t.Owner = New O2947
+    Set MakeI = t
+End Function
+
 Sub Main()
     Dim x As IK2947
     Dim s As String
@@ -27,5 +34,15 @@ Sub Main()
         Set o = .Owner
         Debug.Print "K2947-w0=" & (o Is Nothing)
     End With
+    ' 第一百八十八刀: 视图作返回类型 (Function 与 Property Get 两条路)
+    Dim y As IK2947
+    Dim h As H2947
+    Set y = MakeI()
+    Debug.Print "K2947-f=" & y.Has()
+    Set h = New H2947
+    Set x = h
+    Set x.Owner = New O2947
+    Set y = h.OwnView
+    Debug.Print "K2947-g=" & y.Has()
     Debug.Print "K2947-DONE"
 End Sub

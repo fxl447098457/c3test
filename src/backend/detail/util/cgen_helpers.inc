@@ -899,6 +899,11 @@
     // 值结构形参槽 (交回 VB 声明名, 认不出 = 空串)。与 clsPtrIsViewSlot 同住 cgen_base_type.cpp,
     // `vb6_iface_` 这串前缀别处不许再抄 (哨兵 check_legacy_view_arg_owners V1 钉的就是这一处)。
     std::string cParamLegacyIfaceSlotName(const ParameterInfo& p);
+    // 账 #305 第一百八十八刀: 返回槽那两问 —— ① 这一档返回类型是不是值聚合 (`vb6_type_` ∪
+    // `vb6_iface_` ⇒ 零初始化必须 `{0}`, 不许 `= 0`); ② 是视图的话交回接口名 (否则空串,
+    // 调用方据此把返回槽登进 knownIfaceVars_)。前缀比较只住 cgen_base_type.cpp。
+    bool cTypeIsValueAggregate(const std::string& cType);
+    std::string legacyIfaceNameOfCType(const std::string& cType);
     // 账 #305 §B218 第一百四十刀: 「这枚目标表达式是不是可寻址的数组元素槽」= VB6_SA_AT 那一形，
     // 交回元素 C 档 (认不出 = 空串)。与上面那位前缀主人同住 cgen_base_type.cpp。
     std::string classArraySlotElemType(const std::string& target);
