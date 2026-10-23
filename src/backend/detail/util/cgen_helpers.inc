@@ -411,11 +411,13 @@
     std::string legacyViewGetterReadExpr(const std::string& objExpr, const std::string& memberName,
                                          const std::string& lateCall);
     // 账 #305 新账 #474 站F (写侧, 前置 = 新账 #489): 视图接收者的**属性写**那一发。站点把自己那一发
-    // 的**目标档** (写方向形参的 C 类型) 与值实参一起交进来; 那一席是 `put_<裸名>` 且 retType=void
-    // 且形参恰好一枚且类型同型 ⇒ 换成 `.vtbl-><槽>(….obj, 值)` (形状仍由上面那位主人答)。
-    // 任何不合 ⇒ 空串, 站点保留自己那一发 (Set 档 / 多入口参数那形 / 类型不合, 照旧 = 不掩盖)。
+    // 的**目标档** (写方向形参的 C 类型) 与值实参一起交进来; 那一席是 `put_<裸名>`/`putref_<裸名>`
+    // (按 setKind 选档) 且 retType=void 且形参恰好一枚且类型同型 ⇒ 换成 `.vtbl-><槽>(….obj, 值)`
+    // (形状仍由上面那位主人答)。任何不合 ⇒ 空串, 站点保留自己那一发 (多入口参数那形 / 类型不合, 照旧 = 不掩盖)。
+    // 第一百八十五刀把 `Set <视图>.<属性> = …` (putref_ 档) 接进同一枚 —— 值实参那一头交 `void*`。
     std::string legacyViewSetterCallExpr(const std::string& objExpr, const std::string& memberName,
-                                         const std::string& valExpr, const std::string& wantParamCType);
+                                         const std::string& valExpr, const std::string& wantParamCType,
+                                         ProcKind setKind);
     // B04 那条 vtable 发射 (`x->vt-><slot>(x, args)`) 的唯一作者：com_bind 与
     // 「接收者是视图值的调用」那一站都调它 (账 #305 §B221 形②)。槽名解析不出来返回空串。
     std::string ivrefVtableCall(const std::string& ifaceName, const std::string& member,

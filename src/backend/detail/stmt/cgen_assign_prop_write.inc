@@ -304,7 +304,8 @@
                         // Set 档 / 类型不同型) 就保留下面那一发原样 = 仍红，不掩盖。
                         std::string vSet091n = wantLet091n.empty()
                             ? std::string()
-                            : legacyViewSetterCallExpr(objExpr, maExpr.memberName, valExpr, wantLet091n);
+                            : legacyViewSetterCallExpr(objExpr, maExpr.memberName, valExpr, wantLet091n,
+                                                       ProcKind::PropertyLet);
                         if (!vSet091n.empty()) {
                             c_.emitLine(vSet091n + ";  /* Property Let (视图直槽) */");
                         } else {
@@ -514,7 +515,8 @@
             // 下面那一发原样 = 仍红，不掩盖。
             Vb6Type tier181 = Vb6Type::Empty;
             const std::string vWith181 = comVbTypeForPackFn(packFn, tier181)
-                ? legacyViewSetterCallExpr(tempVar, wmExpr.memberName, valExpr, mapType(tier181))
+                ? legacyViewSetterCallExpr(tempVar, wmExpr.memberName, valExpr, mapType(tier181),
+                                                  ProcKind::PropertyLet)
                 : std::string();
             if (!vWith181.empty()) {
                 c_.emitLine(vWith181 + ";  /* Property Let (视图直槽, With) */");

@@ -145,9 +145,12 @@ if ((CountWhere "kComPackTiers" "cgen_util_com.cpp") -ne 3) {
 }
 #   站点 (cgen_assign_prop_write.inc) 只许问一次, 形状仍在主人手里 (站点一枚都不拼)。
 $v10 = CountWhere "legacyViewSetterCallExpr(" ""
-if ($v10 -ne 4) { $fail += ("V10 视图属性写读者位数: 期望 4 = 定义 + 声明 + 块外站点一问 + With 体内站点一问, 实际到 " + $v10) }
+if ($v10 -ne 7) { $fail += ("V10 视图属性写读者位数: 期望 7 = 定义 + 声明 + 块外站点一问 + With 体内站点一问 + Set 语句三处 (Nothing / 命名属性 / objRef), 实际到 " + $v10) }
 if ((CountWhere "legacyViewSetterCallExpr(" "cgen_assign_prop_write.inc") -ne 2) {
     $fail += "V10 站点: 属性写只许问两次视图写读者 = 块外一站 + With 体内一站 (别在站点拼 .vtbl-><槽>(….obj, 值))"
+}
+if ((CountWhere "legacyViewSetterCallExpr(" "cgen_setlet_set_prop.inc") -ne 3) {
+    $fail += "V10 站点: Set 语句只许问三次视图写读者 = Nothing 那支 + 命名属性那支 + objRef 那支 (putref_ 档同一主人)"
 }
 if ($fail.Count -gt 0) {
     foreach ($m in $fail) { Write-Host ("FAIL " + $m) }

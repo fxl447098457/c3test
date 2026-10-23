@@ -428,19 +428,21 @@ std::string CCodeGen::legacyViewGetterReadExpr(const std::string& objExpr,
 // 是 `vb6_cls_<I>*` ⇒ cl **C2440**「无法从 `vb6_iface_<I>` 转换为 `vb6_cls_<I> *`」(两台同红、没有 exe)。
 // 与读侧同规, 三问都不自己长答案:
 //   ① 这枚接收者在名册里是视图吗 (问读侧同一把名册钥匙, 只查一次表);
-//   ② 那一席是**写**那一档吗 (键 = `ifaceSlotKeyNamed(裸名, PropertyDecl, PropertyLet)`，
-//      `retType == "void"`; Set 那一档 `putref_` **刻意不接** = 对象形的引用计数口径与值形不是一件事);
+//   ② 那一席是**写**那一档吗 (键 = `ifaceSlotKeyNamed(裸名, PropertyDecl, setKind)`，
+//      `retType == "void"`; setKind 由站点交进来 —— Let 与 Set 是同一问的两档，
+//      第一百八十五刀起 `Set <视图>.<属性> = …` (putref_) 也走这一枚，不再落 ComSetRef);
 //   ③ 站点为自己那一发算好的**目标档** (写方向末形参的 C 类型) 与那一席的形参声明同型吗 ——
 //      形参必须恰好一枚 (`params` 里不许再有第二格) 且类型逐字节相同, 不合就交空串。
 // 形状那一头仍交回上一位的 `legacyViewCallExpr` (本函数是它的第四位消费者), 站点一枚都不拼。
 std::string CCodeGen::legacyViewSetterCallExpr(const std::string& objExpr, const std::string& memberName,
                                                const std::string& valExpr,
-                                               const std::string& wantParamCType) {
+                                               const std::string& wantParamCType,
+                                               ProcKind setKind) {
     if (objExpr.empty() || valExpr.empty() || wantParamCType.empty()) return std::string();
     const std::string ifaceName = slotLegacyIfaceViewName(Symbol::toLower(objExpr));
     if (ifaceName.empty()) return std::string();
     const std::string want = ifaceSlotKeyNamed(Symbol::toLower(memberName),
-                                               ASTNodeKind::PropertyDecl, ProcKind::PropertyLet);
+                                               ASTNodeKind::PropertyDecl, setKind);
     const std::string paramDecl = ", " + wantParamCType;
     for (const LegacyIfaceSlot& s : legacyIfaceSlots(ifaceName)) {
         if (s.slotKey != want) continue;

@@ -3546,6 +3546,21 @@ if ($Category -in @("all", "run", "bas")) {
     Add-BasTest "test_let_variant_slot_x86" "$Tests\test_let_variant_slot.bas" $letSlotNeedles -Arch "x86"
     # 发码形状针三形: 非变体右值经 vb6_VariantString 装箱 (前一行是先清旧值) / 槽对槽走深拷贝 /
     # 数组元素走 vb6_VariantAssign。缺任何一条 = 那一站又回到裸赋值。
+    # 账 #305 站F 写侧 Set 档 (第一百八十五刀): `Set <视图>.<属性> = …` 也问同一枚写读者。
+    # 改前两形各一个硬错: `= New O` 发 `vb6_IK_prop_set_Owner(视图, …)` (首形参 vb6_cls_IK*)
+    # ⇒ C2440; `= Nothing` 发 `vb6_ComSetRef(视图, …)` ⇒ C2172。夹具用 Holder 的 Has() 方法
+    # 回读 (对象属性**读**那一侧是另一站, 本刀不碰)。
+    $setViewNeedles = @("K2947-a=1", "K2947-b=0", "K2947-DONE")
+    Add-BasTest "k2947_set_view" "$Tests\k2947_setview\K2947.vbp" $setViewNeedles
+    Add-BasTest "k2947_set_view_x86" "$Tests\k2947_setview\K2947.vbp" $setViewNeedles -Arch "x86"
+    Test-EmitcShape "k2947_set_view_shape" @("$Tests\k2947_setview\K2947.vbp") @(
+        'x.vtbl->Owner_putref(x.obj, (vb6_cls_O2947_New()));',
+        'x.vtbl->Owner_putref(x.obj, NULL);'
+    )
+    Test-EmitcAbsent "k2947_set_view_lesion" @("$Tests\k2947_setview\K2947.vbp") @(
+        'prop_set_Owner(x,',
+        'vb6_ComSetRef(x, L"Owner"'
+    )
     Test-EmitcShape "let_variant_slot_shape" @("$Tests\test_let_variant_slot.bas") @(
         'gv = vb6_VariantString(vb6_BSTR_FromStr(L"abc"));',
         'vb6_VariantAssign(&gv, vb6_VariantFromValue(v));',

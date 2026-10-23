@@ -74,6 +74,17 @@
             // COM属性SetRef Nothing: Set obj.Property = Nothing → vb6_ComSetRef(obj, L"Property", NULL)
             if (isComMarker_) {
                 isComMarker_ = false;
+                // 第一百八十五刀 (账 #305 站F 写侧 Set 档): 接收者是 legacy 视图时, Set 与 Let 问
+                // 同一枚写读者 —— 视图是值结构体 `vb6_iface_<I>`, 交给 vb6_ComSetRef 会
+                // C2172 (实参不是指针)。命中的槽是 `putref_<裸名>` 那一席。
+                const std::string vSetNothing = legacyViewSetterCallExpr(
+                    comObjExpr_, comMemberName_, "NULL", "void*", ProcKind::PropertySet);
+                if (!vSetNothing.empty()) {
+                    c_.emitLine(vSetNothing + ";  /* Property Set Nothing (视图直槽) */");
+                    comObjExpr_.clear();
+                    comMemberName_.clear();
+                    return;
+                }
                 c_.emitLine("vb6_ComSetRef(" + comObjExpr_ + ", L\"" + comMemberName_ + "\", NULL);  /* COM SetRef Nothing */");
                 comObjExpr_.clear();
                 comMemberName_.clear();
@@ -490,6 +501,16 @@
                            && !_psValByVal166) {
                     _arg2 = "&(void*){" + _valE + "}";
                 }
+                // 第一百八十五刀: 接收者是 legacy 视图时问同一枚写读者 (putref_ 档) ——
+                // 视图是值结构体 `vb6_iface_<I>`, 拼出来的 `vb6_<I>_prop_set_<m>(视图, …)`
+                // 首形参是 `vb6_cls_<I>*` ⇒ C2440。不合(非视图/没那一席/类型不同型)交空串,
+                // 下面那一发原样 = 不掩盖。
+                const std::string _vSetView185 = legacyViewSetterCallExpr(
+                    _objE, _ma.memberName, _arg2, "void*", ProcKind::PropertySet);
+                if (!_vSetView185.empty()) {
+                    c_.emitLine(_vSetView185 + ";  /* Set Property (视图直槽) */");
+                    return;
+                }
                 c_.emitLine(_fn + "(" + _objE + ", " + _arg2 + ");  /* Set Property */");
                 return;
             }
@@ -543,6 +564,13 @@
             value = "vb6_VariantToObjectVal(" + value + ")";
         }
     }
+        // 第一百八十五刀: 同一枚写读者 (putref_ 档), 与 Let 那条同一口径。
+        const std::string vSetView = legacyViewSetterCallExpr(
+            objExpr, memberName, value, "void*", ProcKind::PropertySet);
+        if (!vSetView.empty()) {
+            c_.emitLine(vSetView + ";  /* Property Set (视图直槽) */");
+            return;
+        }
         c_.emitLine("vb6_ComSetRef(" + objExpr + ", L\"" + memberName + "\", " + value + ");  /* COM SetRef */");
         return;
     }
