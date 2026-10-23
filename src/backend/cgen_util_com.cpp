@@ -727,18 +727,39 @@ std::string CCodeGen::comPackExpr(Expr& expr) {
 // 账 #256: Vb6Type → 打包函数名，comPackExpr 的类型分支与「裸控件名折成默认属性」那条
 // 折叠共用这一张映射（折叠那边只问 String/Integer/Long/Boolean/Single/Double 六档）。
 // 空串 = 这一型在这里答不了，交回调用方兜底 —— 与改前 switch 的 default 分支同一语义。
+namespace {
+// 账 #305 第一百八十一刀：「VB 型 ↔ 晚绑定打包器」这一张配对表**只住这里** —— 正向
+// (comPackFnForVbType) 与反向 (comVbTypeForPackFn) 都从它出，配对与 RTL 那 8 枚原型一致
+// (src/rtl/core/vb6com/vb6com.h:75-98 七枚 + src/rtl/core/vb6rtl/vb6rtl_class_com.h:177 一枚)。
+// 顺序即反向的口径：Integer 与 Long 同答 ComPackInt ⇒ 反向只回排在前面的 Long
+// (Single 与 Double 同理，反向回 Double)。注意：`vb6_ComPackValue` / `vb6_ComPackUdt` 是**宏**
+// (vb6rtl_class_com.h:182/:189，都转交 ComPackVariant)，只读原型会把它们漏成「没有档」
+// —— 与§B146 那张名单同一件坑；这里把 Value 纳进来（它的实际形式就是 Variant）。
+struct ComPackTier { Vb6Type vt; const char* fn; };
+const ComPackTier kComPackTiers[] = {
+    { Vb6Type::Long,    "vb6_ComPackInt" },      // int32_t → VARIANT
+    { Vb6Type::Integer, "vb6_ComPackInt" },
+    { Vb6Type::String,  "vb6_ComPackBSTR" },     // BSTR → VARIANT
+    { Vb6Type::Boolean, "vb6_ComPackBool" },     // VB6 Boolean → VARIANT VT_BOOL
+    { Vb6Type::Double,  "vb6_ComPackDouble" },   // double → VARIANT
+    { Vb6Type::Single,  "vb6_ComPackDouble" },
+    { Vb6Type::Object,  "vb6_ComPackObject" },   // void* → VARIANT
+    { Vb6Type::Variant, "vb6_ComPackValue" },    // Fix 030: _Generic 通用打包宏
+};
+}  // namespace
+
 std::string CCodeGen::comPackFnForVbType(Vb6Type vt) {
-    switch (vt) {
-        case Vb6Type::String:  return "vb6_ComPackBSTR";    // BSTR → VARIANT
-        case Vb6Type::Integer:
-        case Vb6Type::Long:    return "vb6_ComPackInt";     // int32_t → VARIANT
-        case Vb6Type::Boolean: return "vb6_ComPackBool";    // VB6 Boolean → VARIANT VT_BOOL
-        case Vb6Type::Single:
-        case Vb6Type::Double:  return "vb6_ComPackDouble";  // double → VARIANT
-        case Vb6Type::Object:  return "vb6_ComPackObject";  // void* → VARIANT
-        case Vb6Type::Variant: return "vb6_ComPackValue";   // Fix 030: _Generic 通用打包宏
-        default:               return std::string();
+    for (const ComPackTier& e : kComPackTiers) {
+        if (e.vt == vt) return e.fn;
     }
+    return std::string();   // 这一型在这里答不了，交回调用方兜底
+}
+
+bool CCodeGen::comVbTypeForPackFn(const std::string& packFn, Vb6Type& out) {
+    for (const ComPackTier& e : kComPackTiers) {
+        if (packFn == e.fn) { out = e.vt; return true; }
+    }
+    return false;
 }
 
 

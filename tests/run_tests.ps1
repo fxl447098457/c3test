@@ -7267,8 +7267,13 @@ if ($Category -in @("all", "run", "vbp")) {
     # `vb6_IK489_prop_let_Label(x, ...)` = 把整枚视图交给接口模块自己的 `vb6_cls_IK489*` 形参
     # = cl C2440、没有 exe (读数 .build/k2778_emit.txt:389 与 .build/k2780_clerr.txt);
     # 本刀换成 `x.vtbl->Label_put(x.obj, 值)` = 视图调用主人的第四位消费者。
+    # 第一百八十一刀把同一位读者接到 **With 体内那一支** (新账 #474 写侧第二格): 病灶 = 那一档从不问名册,
+    # 现场发 `vb6_ComSetProp(载体, L"名", 打包值)` 把整枚视图交给 `void*` 首形 = cl C2172 (改前真产物
+    # .build/k2815_sdw.txt:389, 已钉成反面针); 改后 = .build/k2852_489.txt 的
+    # `_vb6_with_0.vtbl->Label_put(_vb6_with_0.obj, ...)`, 同体那发读本来就走 `.vtbl->Label`。
+    # 站点那一问的**目标档**由它已经算好的打包器名反推 (comVbTypeForPackFn, 与正向同一张 kComPackTiers)。
     $k489Expected = @(
-        "K489-s=Hzzz/2",
+        "K489-s=Hwww/3",
         "K489-n=489",
         "K489-DONE")
     Test-Vbp 'k489_slot_dir_let_first' "$Tests\k489_slot_dir\K489.vbp" $k489Expected
@@ -7281,14 +7286,16 @@ if ($Category -in @("all", "run", "vbp")) {
         'vb6_BSTR_Assign(&s, x.vtbl->Label(x.obj));',
         'n = x.vtbl->Num(x.obj);',
         'x.vtbl->Label_put(x.obj, vb6_BSTR_FromStr(L"abc"));',
-        'x.vtbl->Label_put(x.obj, vb6_BSTR_FromStr(L"zzz"));')
+        'x.vtbl->Label_put(x.obj, vb6_BSTR_FromStr(L"zzz"));',
+        '_vb6_with_0.vtbl->Label_put(_vb6_with_0.obj, vb6_BSTR_FromStr(L"www"));')
     # 三条负针逐字节抄自**改前那台的真实产物**: 前两条 = Let-first 探针 .build/k2739_emit2.txt
     # (表里那一席裸名 + 属性读落回 helper); 第三条 = 写侧改前那台的真产物 .build/k2778_emit.txt
     # (站点按「接收者的类名」现场拼出口, 把整枚视图交给接口模块自己的 `vb6_cls_IK489*` 形参)。
     Test-EmitcAbsent "k489_slot_dir_bare_slot_gone" @("$Tests\k489_slot_dir\K489.vbp") @(
         'void (*Label)(void* me, BSTR v);',
         'vb6_BSTR_Assign(&s, vb6_ComGetStringProp(x, L"Label"));',
-        'vb6_IK489_prop_let_Label(x, vb6_BSTR_FromStr(L"abc"));  /* Property Let */')
+        'vb6_IK489_prop_let_Label(x, vb6_BSTR_FromStr(L"abc"));  /* Property Let */',
+        'vb6_ComSetProp(_vb6_with_0, L"Label", vb6_ComPackBSTR(vb6_BSTR_FromStr(L"www")));  /* With COM SetProp */')
     # <vbeclipse> 回归夹子 (b174_numstrarg, 账 #305 §B174 第六十五刀): 数值实参交进内在函数的
     # BSTR 形参。修前 InStr 那一路把 int32_t / double / int16_t 裸交给 wchar_t* —— cl 只给 C4047
     # (在 -W3 之外) ⇒ **编得过**, 而 BASE 那一台在别处 (Mid$(1.1,...) 那类) 拿的是 C2440, 本机

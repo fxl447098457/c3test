@@ -1023,6 +1023,10 @@
     // Vb6Type → 打包函数名。comPackExpr 的类型分支与上面那条折叠共用这一张映射；
     // 空串 = 这一型在这里答不了，交回调用方兜底（不擅自换默认档）。
     static std::string comPackFnForVbType(Vb6Type vt);
+    // 反向那一问（账 #305 第一百八十一刀）：**这枚打包器吃哪一型**。与正向同一张表
+    // (kComPackTiers) 扫出来，不在别处抄第二份。false = 这一族没有单一对应，调用方交回原路。
+    // Integer 与 Long 正向同答 ComPackInt ⇒ 反向按表序只回 Long（那枚 RTL 原型收的就是 int32_t）。
+    static bool comVbTypeForPackFn(const std::string& packFn, Vb6Type& out);
 
     // Fix 177b: 创建 coclass 实例的表达式 (New / Dim As New 自动实例化共用).
     // 默认 vb6_NewObject(L"<ProgID>") — 运行期按 ProgID 走 CoCreateInstance.

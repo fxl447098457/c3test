@@ -507,6 +507,19 @@
             // Fix <vbeclipse> 2026-10-12: 右值整枚是 COM 调用结果 ⇒ 先经
             // vb6_VariantFromComResult 拆掉堆 VARIANT* (见 comUnpackForPack)。
             valExpr = comUnpackForPack(packFn, valExpr);
+            // 账 #305 新账 #474 站F 写侧第二格 (第一百八十一刀): 载体是视图时，这一发交给
+            // 那位形状主人（名册 + 接口自己那张槽表）。本站没有属性符号，所以「目标档」只能
+            // 从自己**已经算好的那枚打包器名**反推（comVbTypeForPackFn，与正向同一张表）；
+            // 不合（非视图 / 那一席没有 / Set 档 / 类型不同型 / 打包器无单一对应）就保留
+            // 下面那一发原样 = 仍红，不掩盖。
+            Vb6Type tier181 = Vb6Type::Empty;
+            const std::string vWith181 = comVbTypeForPackFn(packFn, tier181)
+                ? legacyViewSetterCallExpr(tempVar, wmExpr.memberName, valExpr, mapType(tier181))
+                : std::string();
+            if (!vWith181.empty()) {
+                c_.emitLine(vWith181 + ";  /* Property Let (视图直槽, With) */");
+                return;
+            }
             c_.emitLine("vb6_ComSetProp(" + tempVar + ", L\"" + wmExpr.memberName + "\", " +
                          packFn + "(" + valExpr + "));  /* With COM SetProp */");
             return;

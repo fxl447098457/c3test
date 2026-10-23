@@ -129,15 +129,29 @@ if ((CountWhere "legacyViewCallExpr(" "cgen_util_classtype.cpp") -ne 3) {
     $fail += "V9 主人自己这一份文件: 只许定义 + 站F 读侧/写侧两位读者各一发, 别处再拼一份形状就是第二位主人"
 }
 # V10 开线 (2026-10-23, 账 #305 新账 #474 写侧): 属性写那一站的读者 = 视图调用主人的第四位消费者;
+# V11 开线 (2026-10-23, 第一百八十一刀): 「VB 型 ↔ 晚绑定打包器」这一张配对表只许住一处。
+#   正向 comPackFnForVbType = 定义 + 声明 + 两处消费 (comPackExpr 的类型分支 / 裸控件名折默认属性) = 4 处;
+#   反向 comVbTypeForPackFn = 定义 + 声明 + With 体内那一问 = 3 处;
+#   表本体 kComPackTiers = 3 处 (表定义 + 两个循环)、且只住 cgen_util_com.cpp 一份文件。
+#   谁在别处再抄一份 switch / 名单，这两问就会在不同站点给出不同答案。
+$v11r = CountWhere "comVbTypeForPackFn(" ""
+if ($v11r -ne 3) { $fail += ("V11 打包器反向问位数: 期望 3 = 定义 + 声明 + With 站点一问, 实际到 " + $v11r) }
+$v11f = CountWhere "comPackFnForVbType(" ""
+if ($v11f -ne 4) { $fail += ("V11 打包器正向问位数: 期望 4 = 定义 + 声明 + 两处消费, 实际到 " + $v11f) }
+$v11t = CountWhere "kComPackTiers" ""
+if ($v11t -ne 3) { $fail += ("V11 配对表本体位数: 期望 3 = 表定义 + 正向循环 + 反向循环, 实际到 " + $v11t) }
+if ((CountWhere "kComPackTiers" "cgen_util_com.cpp") -ne 3) {
+    $fail += "V11 配对表住处: 三处全部只许在 cgen_util_com.cpp (别在别处抄第二份)"
+}
 #   站点 (cgen_assign_prop_write.inc) 只许问一次, 形状仍在主人手里 (站点一枚都不拼)。
 $v10 = CountWhere "legacyViewSetterCallExpr(" ""
-if ($v10 -ne 3) { $fail += ("V10 视图属性写读者位数: 期望 3 = 定义 + 声明 + 站点一问, 实际到 " + $v10) }
-if ((CountWhere "legacyViewSetterCallExpr(" "cgen_assign_prop_write.inc") -ne 1) {
-    $fail += "V10 站点: 属性写那一站只许问一次视图写读者 (别在站点拼 .vtbl-><槽>(….obj, 值))"
+if ($v10 -ne 4) { $fail += ("V10 视图属性写读者位数: 期望 4 = 定义 + 声明 + 块外站点一问 + With 体内站点一问, 实际到 " + $v10) }
+if ((CountWhere "legacyViewSetterCallExpr(" "cgen_assign_prop_write.inc") -ne 2) {
+    $fail += "V10 站点: 属性写只许问两次视图写读者 = 块外一站 + With 体内一站 (别在站点拼 .vtbl-><槽>(….obj, 值))"
 }
 if ($fail.Count -gt 0) {
     foreach ($m in $fail) { Write-Host ("FAIL " + $m) }
     exit 1
 }
-Write-Host ("PASS 前缀名单=" + $v1all + "(本文件 " + $v1 + ") 形参问句=" + $v2 + " wrap主人=" + $v3 + " 装箱主人=" + $v4 + " 认槽主人=" + $v5 + " 比较发码=" + $v6a + "+" + $v6b + " 认视图槽那一问=" + $v7 + " 比名尺=" + $v8 + " 视图调用主人=" + $v9)
+Write-Host ("PASS 前缀名单=" + $v1all + "(本文件 " + $v1 + ") 形参问句=" + $v2 + " wrap主人=" + $v3 + " 装箱主人=" + $v4 + " 认槽主人=" + $v5 + " 比较发码=" + $v6a + "+" + $v6b + " 认视图槽那一问=" + $v7 + " 比名尺=" + $v8 + " 视图调用主人=" + $v9 + " 写读者=" + $v10 + " 打包器配对=" + $v11f + "/" + $v11r + "/" + $v11t)
 exit 0
