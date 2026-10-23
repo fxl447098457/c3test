@@ -50,5 +50,10 @@ Sub Main()
     Debug.Print "K2947-j=" & h.OwnView.Has
     ' 第一百九十一刀: With Me 体内读属性返回的视图 (Me 是 MeExpr, 按本类实例处理)
     Debug.Print "K2947-k=" & h.ViaMe
+    ' 第一百九十二刀: With <返回视图的调用> —— 临时量按视图值拷贝, 体内读走同一族
+    With MakeI()
+        Set o = .Owner
+        Debug.Print "K2947-l=" & (o Is Nothing)
+    End With
     Debug.Print "K2947-DONE"
 End Sub

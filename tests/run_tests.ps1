@@ -3550,7 +3550,7 @@ if ($Category -in @("all", "run", "bas")) {
     # 改前两形各一个硬错: `= New O` 发 `vb6_IK_prop_set_Owner(视图, …)` (首形参 vb6_cls_IK*)
     # ⇒ C2440; `= Nothing` 发 `vb6_ComSetRef(视图, …)` ⇒ C2172。夹具用 Holder 的 Has() 方法
     # 回读 (对象属性**读**那一侧是另一站, 本刀不碰)。
-    $setViewNeedles = @("K2947-a=1", "K2947-o=False", "K2947-b=0", "K2947-p=True", "K2947-i=3:a", "K2947-w=False", "K2947-w0=True", "K2947-f=1", "K2947-g=1", "K2947-h=1", "K2947-j=1", "K2947-k=1", "K2947-DONE")
+    $setViewNeedles = @("K2947-a=1", "K2947-o=False", "K2947-b=0", "K2947-p=True", "K2947-i=3:a", "K2947-w=False", "K2947-w0=True", "K2947-f=1", "K2947-g=1", "K2947-h=1", "K2947-j=1", "K2947-k=1", "K2947-l=False", "K2947-DONE")
     Add-BasTest "k2947_set_view" "$Tests\k2947_setview\K2947.vbp" $setViewNeedles
     Add-BasTest "k2947_set_view_x86" "$Tests\k2947_setview\K2947.vbp" $setViewNeedles -Arch "x86"
     Test-EmitcShape "k2947_set_view_shape" @("$Tests\k2947_setview\K2947.vbp") @(
@@ -3570,7 +3570,8 @@ if ($Category -in @("all", "run", "bas")) {
         'vb6_iface_IK2947 __vbvread',
         'vb6_iface_IK2947_call_Has(__vbvread',
         'vb6_cls_H2947* _vb6_with_',
-        'vb6_H2947_prop_get_OwnView(_vb6_with_'
+        'vb6_H2947_prop_get_OwnView(_vb6_with_',
+        'vb6_iface_IK2947 _vb6_with_'
     )
     Test-EmitcAbsent "k2947_set_view_lesion" @("$Tests\k2947_setview\K2947.vbp") @(
         'prop_set_Owner(x,',
@@ -3583,7 +3584,8 @@ if ($Category -in @("all", "run", "bas")) {
         'vb6_ret_OwnView = me;',
         'vb6_ret_MakeI = (vb6_cls_H2947_New());',
         'vb6_IK2947_Has((void*)vb6_H2947_prop_get_OwnView(h))',
-        'vb6_ComGetObjectProp(_vb6_with_'
+        'vb6_ComGetObjectProp(_vb6_with_',
+        '(void*)vb6_mdl2947_MakeI()'
     )
     Test-EmitcShape "let_variant_slot_shape" @("$Tests\test_let_variant_slot.bas") @(
         'gv = vb6_VariantString(vb6_BSTR_FromStr(L"abc"));',

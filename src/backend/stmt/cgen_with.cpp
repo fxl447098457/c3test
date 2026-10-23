@@ -48,6 +48,12 @@ void CCodeGen::visit(WithStmt& node) {
                     withInfo.className = cIdent(inferred);
                     tempType = "vb6_cls_" + withInfo.className + "*";
                     withInfo.ctrlOrigName = withInfo.className;
+                } else if (clsSym && clsSym->kind == SymbolKind::Class && clsSym->isInterface) {
+                    // 账 #305 第一百九十二刀: `With <返回视图的表达式>` —— 与裸名视图同一格:
+                    // 临时量是**值拷贝**, 体内成员交给视图那几位主人 (临时量自身登记进名册)。
+                    viewIface177 = clsSym->name;
+                    withInfo.kind = WithObjKind::COMObject;
+                    tempType = "vb6_iface_" + cIdent(clsSym->name);
                 }
             }
         }
