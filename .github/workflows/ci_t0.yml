@@ -55,23 +55,34 @@ jobs:
           key: c3build-${{ hashFiles('src/**', 'CMakeLists.txt', 'cmake/**') }}
           restore-keys: c3build-
 
-      # 提速：按天然气原样搬 ci.yml 那套 sccache（它已在那里实测冷 290s / 热 84s vs 基线 253s）。
-      # 本 workflow 是夜间全链，每次都真编 128 个 TU（没有 ci.yml 那个 c3exe 跳过专门设施），
-      # 所以这里的收益比 ci.yml 更大。cache key 故意与 ci.yml 共用同一个 sccache-<os>：
-      # sccache 自己的键已含编译器身份，跨 workflow 共享只会多命中、不会误用旧对象。
-      # 装不上就退回直接编（continue-on-error best-effort），不给门禁添红。
+      # 实测（#896 之后这一轮的读数）：这一套第一次是**净亏** —— build 报 "Cache hits 0 / 0.00%"，
+      # 却白交了 54s 的 choco 安装费 + 12MB 下载。两个坑：
+      #   ① 固定 key `sccache-<os>` 一旦命中，actions/cache **就不会再存新版本** ⇒ 这一轮刚编出来的
+      #      对象永远回不到 cache 里，下一轮接着 0 命中（runner 镜像滚到 VS18/MSVC 14.51 后尤其明显，
+      #      编译器身份进 sccache 的键，旧对象全批作废）。所以改成 save key 带 run_id（每次必存新的），
+      #      再用 restore-keys 去糊最近那一份 —— 这是 GitHub 给编译器缓存的标准玩法。
+      #   ② `choco install` 是不可复用一次的开销。把落地的 exe 也丢进同一个 cache，下一轮直接取用，
+      #      省掉那 54s。装不上就退回直接编（continue-on-error best-effort），不给门禁添红。
       - name: Install sccache (best-effort)
         id: sccache
         continue-on-error: true
         shell: pwsh
         run: |
-          choco install sccache -y --no-progress 2>&1 | Out-Null
-          $exe = (Get-Command sccache -ErrorAction SilentlyContinue).Source
-          if (-not $exe) { $exe = "C:\ProgramData\chocolatey\bin\sccache.exe" }
-          if (Test-Path $exe) {
-            Write-Host "sccache available: $exe"
-            & $exe --version
-            "USE_SCCACHE=$exe" | Out-File -FilePath $env:GITHUB_ENV -Append
+          $binDir = Join-Path $env:RUNNER_TEMP "sccache-bin"
+          New-Item -ItemType Directory -Force -Path $binDir | Out-Null
+          $cached = Join-Path $binDir "sccache.exe"
+          if (Test-Path $cached) {
+            Write-Host "sccache from cache: $cached"
+          } else {
+            choco install sccache -y --no-progress 2>&1 | Out-Null
+            $exe = (Get-Command sccache -ErrorAction SilentlyContinue).Source
+            if (-not $exe) { $exe = "C:\ProgramData\chocolatey\bin\sccache.exe" }
+            if (Test-Path $exe) { Copy-Item $exe $cached -Force }
+          }
+          if (Test-Path $cached) {
+            Write-Host "sccache available: $cached"
+            & $cached --version
+            "USE_SCCACHE=$cached" | Out-File -FilePath $env:GITHUB_ENV -Append
           } else {
             Write-Host "sccache not available; build will run without it"
           }
@@ -79,11 +90,17 @@ jobs:
           SCCACHE_DIR: ${{ runner.temp }}/sccache
           SCCACHE_CACHE_SIZE: 2G
 
+      # 注意 save key 带 run_id：保证每次都能把本轮新增的对象存起来（固定 key 命中后就再也不会存）。
+      # restore-keys 负责捡最近那一份；旧的自然过期（7 天未访问即淘汰）。
       - name: Cache sccache
         uses: actions/cache@v6
         with:
-          path: ${{ runner.temp }}/sccache
-          key: sccache-${{ runner.os }}
+          path: |
+            ${{ runner.temp }}/sccache
+            ${{ runner.temp }}/sccache-bin
+          key: sccache-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: |
+            sccache-${{ runner.os }}-
 
       - name: 从源码构建 C3.exe（绝不携带预编译二进制）
         shell: pwsh
@@ -174,22 +191,34 @@ jobs:
           #     compile 10 + smoke e2e 在 run_t1.ps1 里已锁 shard 1, 其余片自动跳过 (不减检查)。
           # t2: vbp 8 + GUI 5 = 13 工程编译 → 切 2 片 (每片约 7 例), 再加 -Jobs 并行。
           # 分片数按调用次序连续切片, 加用例不必改这里 (总数写不进代码)。
+          # 2026-10-24 提速（挂上 objcache 之后的读数，见上面那一步的注释）：bas 四片从
+          # 418/271/271/247s 降到 240/207/270/275s ——「每个 runner 自己重编 65 个 RTL .c」
+          # 那块固定开销没了，max 也从 418 掉到 275；因为 compile 10 段本来就只由 shard 1 跑，
+          # 挂上 store 后它不再是短板（270/275 那两片才是）⇒ 再摊薄就得加片数，4 → 6。
           - tier: t1
             shard: 1
-            shardTotal: 4
-            shardArgs: "-Shard 1 -ShardTotal 4"
+            shardTotal: 6
+            shardArgs: "-Shard 1 -ShardTotal 6"
           - tier: t1
             shard: 2
-            shardTotal: 4
-            shardArgs: "-Shard 2 -ShardTotal 4"
+            shardTotal: 6
+            shardArgs: "-Shard 2 -ShardTotal 6"
           - tier: t1
             shard: 3
-            shardTotal: 4
-            shardArgs: "-Shard 3 -ShardTotal 4"
+            shardTotal: 6
+            shardArgs: "-Shard 3 -ShardTotal 6"
           - tier: t1
             shard: 4
-            shardTotal: 4
-            shardArgs: "-Shard 4 -ShardTotal 4"
+            shardTotal: 6
+            shardArgs: "-Shard 4 -ShardTotal 6"
+          - tier: t1
+            shard: 5
+            shardTotal: 6
+            shardArgs: "-Shard 5 -ShardTotal 6"
+          - tier: t1
+            shard: 6
+            shardTotal: 6
+            shardArgs: "-Shard 6 -ShardTotal 6"
           - tier: t2
             shard: 1
             shardTotal: 2

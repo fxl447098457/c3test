@@ -58,19 +58,32 @@ jobs:
       # 跳过本次 cl 调用。实测（probe 分支两支：冷 290s / 热 84s、123/123 命中）⇒ 构建步骤提速约 3×。
       # 装不上就退回直接编（install 是 best-effort），不给门添红风险。cache key 只用 runner.os：
       # 编译器身份已经进了 sccache 自己的键，镜像滚动时自然整批 miss 重编一次（不误用旧对象）。
+      # 与 ci_t0.yml 同一口径（那里实测出两个坑，这里是同一个病）：
+      #   ① save key 必须每次不同（带 run_id），否则一旦命中既有 key，actions/cache 就再也不存新版本
+      #      ⇒ 本轮刚编的对象回不到 cache，下一轮接着 0 命中；runner 镜像滚动（编译器身份进 sccache
+      #      自己的键）之后尤其明显。restore-keys 负责捡最近那一份。
+      #   ② 把落地的 exe 一起缓存，免掉每轮一次不可复用的 `choco install`（ci_t0 上实测 54s）。
       - name: Install sccache (best-effort)
         id: sccache
         if: steps.c3exe.outputs.cache-hit != 'true'
         continue-on-error: true
         shell: pwsh
         run: |
-          choco install sccache -y --no-progress 2>&1 | Out-Null
-          $exe = (Get-Command sccache -ErrorAction SilentlyContinue).Source
-          if (-not $exe) { $exe = "C:\ProgramData\chocolatey\bin\sccache.exe" }
-          if (Test-Path $exe) {
-            Write-Host "sccache available: $exe"
-            & $exe --version
-            "USE_SCCACHE=$exe" | Out-File -FilePath $env:GITHUB_ENV -Append
+          $binDir = Join-Path $env:RUNNER_TEMP "sccache-bin"
+          New-Item -ItemType Directory -Force -Path $binDir | Out-Null
+          $cached = Join-Path $binDir "sccache.exe"
+          if (Test-Path $cached) {
+            Write-Host "sccache from cache: $cached"
+          } else {
+            choco install sccache -y --no-progress 2>&1 | Out-Null
+            $exe = (Get-Command sccache -ErrorAction SilentlyContinue).Source
+            if (-not $exe) { $exe = "C:\ProgramData\chocolatey\bin\sccache.exe" }
+            if (Test-Path $exe) { Copy-Item $exe $cached -Force }
+          }
+          if (Test-Path $cached) {
+            Write-Host "sccache available: $cached"
+            & $cached --version
+            "USE_SCCACHE=$cached" | Out-File -FilePath $env:GITHUB_ENV -Append
           } else {
             Write-Host "sccache not available; build will run without it"
           }
@@ -82,8 +95,12 @@ jobs:
         if: steps.c3exe.outputs.cache-hit != 'true'
         uses: actions/cache@v6
         with:
-          path: ${{ runner.temp }}/sccache
-          key: sccache-${{ runner.os }}
+          path: |
+            ${{ runner.temp }}/sccache
+            ${{ runner.temp }}/sccache-bin
+          key: sccache-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: |
+            sccache-${{ runner.os }}-
 
       - name: Build C3.exe from source (never ship a vendored binary)
         if: steps.c3exe.outputs.cache-hit != 'true'
