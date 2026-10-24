@@ -1541,7 +1541,12 @@
         // Release, StatusBar UC 创建期 100% 复现)。
         if (cTypeIvfix.rfind("vb6_ivref_", 0) == 0 && i < node.positional.size()
             && node.positional[i]
-            && ifaceViewOfExpr(*node.positional[i]).empty()) {
+            && ifaceViewOfExpr(*node.positional[i]).empty()
+            // 账 #305 第一百九十六刀: ByRef ivref 形参 (C 型 `vb6_ivref_I**`) 的实参
+            // 已由腿⑤/类槽站落成 `&vb6_argtmp_vb6_ivref_I_N` —— 临时名由形参 C 型派生,
+            // 见到它即「地址已按形参类型交付」; 再剥一层 `->__iv_I` 是对薄指针取成员
+            // (VbEclipse ucPerspective.SetScheme 实测 C2039 + C2198)。
+            && argVal.rfind("&vb6_argtmp_", 0) != 0) {
             // 账 #305 §B221 (形③): 实参本身已经是视图 (`Take MakeDirect()`) ⇒ 值就是那枚
             // 薄指针，再取一次 `->__iv_<I>` 是剥第二层皮 (实测 C2039 + C2198)，所以这一问
             // 由 ifaceViewOfExpr 在闸上答一次，站点不另写判据。

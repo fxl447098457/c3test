@@ -7319,6 +7319,21 @@ if ($Category -in @("all", "run", "vbp")) {
         'vb6_cls_C3060_AddRef(leak)',
         'vb6_CByte(_own_'
     )
+    # 账 #305 第一百九十六刀: ByRef ivref 形参的实参站 —— 腿⑤ 已按形参 C 型
+    # (`vb6_ivref_I**`) 交出 `&vb6_argtmp_vb6_ivref_I_N`, Fix<vbeclipse> 那一段又按
+    # 「类实例实参」剥一层 `->__iv_I` ⇒ C2039 + C2198。夹具三发: MakeI() (运行的那一发,
+    # 腿⑤ 交回的是拥有型引用)、ByVal 一站 (原 `->__iv_I` 路径必须是正解)、c 类实参那一发
+    # (编译面靶子; 运行期由 g_skip 跳过 —— 类实参 ByRef 的临时量初始化是另一缺陷)。
+    $k3100Expected = @("K3100-h=7", "K3100-v=1", "K3100-DONE")
+    Test-Vbp 'k3100_ivref_arg' "$Tests\k3100_ivref_arg\K3100.vbp" $k3100Expected
+    Test-Vbp 'k3100_ivref_arg_x86' "$Tests\k3100_ivref_arg\K3100.vbp" $k3100Expected -Arch "x86"
+    Test-EmitcShape "k3100_ivref_arg_shape" @("$Tests\k3100_ivref_arg\K3100.vbp") @(
+        'vb6_mdl3100_Take(&vb6_argtmp_vb6_ivref_IK3100_',
+        'vb6_mdl3100_TakeVal((vb6_ivref_IK3100*)&((c)->__iv_IK3100));'
+    )
+    Test-EmitcAbsent "k3100_ivref_arg_lesion" @("$Tests\k3100_ivref_arg\K3100.vbp") @(
+        '(vb6_ivref_IK3100*)&((&vb6_argtmp_'
+    )
     # <vbeclipse> 回归夹子 (k178_viewprop, 账 #305 第一百七十八刀 = 新账 #474 站F 的**读侧**那一半):
     # 视图的属性读。修前 With 内外都落晚绑定 helper 的首枚 `void*` 槽 = cl C2172 (两台同红、没有 exe);
     # 修后同一位读者只把**访问路**换成 `.vtbl-><槽>(….obj)` —— 类型那一问不自答, 拿站点本来要发的那一发
