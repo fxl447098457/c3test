@@ -1237,6 +1237,14 @@
     std::string packLetValueArg(const ParameterInfo& lastP, Expr* valueExpr,
                                 const std::string& val);
 
+    // 账 #305 第一百九十七刀: Pattern C/D2 (prop_get_ 字符串级改写) 那一发**属性写的值实参
+    // 发哪一档**的唯一主人 —— Let 臂 (Fix 090w/156-B) 与 Set 臂 (Fix 268) 都只许调这一条，
+    // 别处不许再抄第二份。判据按**定义侧那份 C 槽型**排三档：类槽原样 / vb6_VARIANT 装箱 /
+    // 具体槽解箱 (那张表只此一份)。定义与逐条实测读数见 cgen_util_comwrite.cpp 注释。
+    // writeDirResolved = 写方向形参表是不是真解析成功 (Fix 156-B 的护栏，失败时解箱臂不许动)。
+    std::string writeValArgForParamSlot(const ParameterInfo& lastP, bool writeDirResolved,
+                                        Expr* valueExpr, const std::string& value);
+
     // Fix 159-B: VB6 隐式 CStr 的实参类型清单 — 日期/数值标量赋给 ByVal String 形参
     // 时按 CStr 转换 (vb6_CStrDate/CStrDbl/CStrLong), 见 wrapToBSTR.
     // String/Variant/Object/未知 返回 false (不介入, 维持既有发射).
