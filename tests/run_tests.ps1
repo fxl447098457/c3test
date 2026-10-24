@@ -3990,7 +3990,9 @@ if ($Category -in @("all", "run", "bas")) {
     # 仍在位 0）—— 两枚同时落地才证明位号不再跟书写个数错位。
     Test-EmitcShape 'b176_var_slot_shape' @(
         "$Tests\b176_var_slot.bas") @(
-        'vb6_MsgBox(vb6_VariantToString(vP), vb6_VariantToLong(vBtn), vb6_VariantToString(vTitle))',
+        # 账 #490 §B178: MsgBox 的 RTL 原型扩到 VB6 五参全签名 ⇒ 三参那一形现在补两位
+        #   (helpfile/context 的 NULL / 0)。转换本身 (三个 vb6_VariantTo*) 一字没变。
+        'vb6_MsgBox(vb6_VariantToString(vP), vb6_VariantToLong(vBtn), vb6_VariantToString(vTitle), NULL, 0)',
         'vb6_SendKeys(vb6_VariantToString(vKeys), vb6_VariantToLong(vWait))',
         'vb6_SetAttr(vb6_VariantToString(vName), vb6_VariantToLong(vAttr))',
         # 账 #464 §B164: 那一格 (SavePicture 的实参) 现在是**一枚具名带权临时量** ——
