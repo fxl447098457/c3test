@@ -458,15 +458,25 @@ std::string CCodeGen::deliverToClassSlot(const std::string& clsPtr,
     // 那两站同一个答案)。
     // 只放开「实参自己交出那一枚引用」的形状 = `New <类>`: 站点那头的交回腿
     // (registerClassArgRefHandback 的视图档 `tmp->vt->Release(tmp)`) 退的正是这一枚，
-    // 计数当场平了。**借来的一枚** (裸类变量 / 返回类的调用) 不铸 —— 视图档的 copy-in
-    // 刻意早退 (registerClassArgRefCopyIn)，铸了就是把调用者还在用的实例退掉 = 过退；
-    // 那一形今天也是坏的 (同样读脏 vt)，维持原样并留在册 (§B187 待拍的那一句口径)。
-    if (!clsPtr.empty() && clsPtrIsViewSlot(clsPtr) && actual
-        && actual->kind == ASTNodeKind::NewExpr) {
+    // 计数当场平了。
+    if (!clsPtr.empty() && clsPtrIsViewSlot(clsPtr) && actual) {
         const std::string ivName204 = ivrefNameOfCType(clsPtr);
-        if (!ivName204.empty()) {
+        if (ivName204.empty()) return argVal;
+        if (actual->kind == ASTNodeKind::NewExpr) {
             return ivrefInstanceViewExpr(ivName204, argVal, false);
         }
+        // 账 #305 第二百零五刀: **借来的实例** (裸类变量) 也铸视图，走主人 nullable 那一档 ——
+        // 它可能就是 Nothing，而 `&NULL->__iv_I` 算出来是一枚**非空**野地址 (D22-10)。
+        // 站点那头由 registerClassArgRefCopyIn 的视图档先付一枚、交回腿再退一枚，净 0。
+        // 只认**裸标识符**：调用/属性读那一形在这里再走主人会把那个过程**调两遍** (三目两侧
+        // 各一次求值)，而且它带的对价归移交那条问句管，不归本刀。
+        if (actual->kind == ASTNodeKind::IdentifierExpr) {
+            const std::string actCls205 = inferClassTypeOfExpr(*actual);
+            if (!actCls205.empty() && !projectClassNameOf(actCls205).empty()) {
+                return ivrefInstanceViewExpr(ivName204, argVal, true);
+            }
+        }
+        return argVal;   // 借来的**视图** (视图变量) 值本来就是那枚薄指针，原样交
     }
     if (!clsPtr.empty() && clsPtr.compare(0, 8, "vb6_cls_") == 0 && cExprIsVariant(argVal)) {
         return "(" + clsPtr + ")vb6_ComObject_GetInstance("

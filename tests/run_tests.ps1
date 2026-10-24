@@ -7350,23 +7350,37 @@ if ($Category -in @("all", "run", "vbp")) {
     )
     # 账 #305 第一百九十六刀: ByRef ivref 形参的实参站 —— 腿⑤ 已按形参 C 型
     # (`vb6_ivref_I**`) 交出 `&vb6_argtmp_vb6_ivref_I_N`, Fix<vbeclipse> 那一段又按
-    # 「类实例实参」剥一层 `->__iv_I` ⇒ C2039 + C2198。夹具三发: MakeI() (运行的那一发,
-    # 腿⑤ 交回的是拥有型引用)、ByVal 一站 (原 `->__iv_I` 路径必须是正解)、c 类实参那一发
-    # (编译面靶子; 运行期由 g_skip 跳过 —— 借来的实参在视图槽上不付 copy-in, 在册)。
-    # 第二百零四刀补第四发 `Take New H3100`: 视图槽收**自己交出引用的实例**必须铸视图
-    # `&(<实例>)->__iv_<I>` —— 改前两架构实测 0xC0000005 (打印到 K3100-v=1 即断),
-    # 改后 v2=2 (那一发照常进被调方) 且 t=2 (MakeI 与 New 各交回一枚, 一台不多不少)。
-    $k3100Expected = @("K3100-h=7", "K3100-v=1", "K3100-v2=2", "K3100-t=2", "K3100-DONE")
+    # 「类实例实参」剥一层 `->__iv_I` ⇒ C2039 + C2198。
+    # 第二百零四刀补「视图写侧那一发形状收成一处出口」的第四发 `Take New H3100`:
+    # 视图槽收**自己交出引用的那枚实例**必须铸视图 `&(<实例>)->__iv_<I>` —— 改前两架构实测 0xC0000005。
+    # 第二百零五刀把剩下「借来」的两形补齐 —— 三条成因各一发，发码形状与计数口径一一钉死：
+    #   移交 `Take MakeI()`   = 原样 + **只交回**（它自带对价，再付就净 +1）；
+    #   借来的实例 `Take c` / `Take n` = 铸视图（NULL 守卫那一档，n 从没 Set 过）+ 先付 + 交回；
+    #   借来的视图 `Take v`     = 原样 + 先付 + 交回（修前境归净 −1：当场不炸，到过程出口
+    #                            拆 v/c 那一格时 0xC0000374 = 过退的双自由）；
+    #   自己交出的 `New` = 铸视图 + **只交回**（移交那句问句翻正后才不会给自己再付一遍）。
+    # 改前实测（BASE = `299ce1a9`，同一份新夹具）：x64 只打出 `K3100-v=1` 即 rc=139（就墙在 `Take c`）；
+    # 发码面那两形是裸的 `= c;` / `= n;` 且全模块 0 条 copy-in。
+    # 读数口径：t=2（MakeI 与 New 各交回一枚，一台不多不少）/ t2=3（c 到 `Set c = Nothing` 才死）
+    # = 既不过退也不泄漏；`New` 那一形若把移交问句遗失（先付一枚不交回）则 t2 停在 2。
+    $k3100Expected = @("K3100-v=1", "K3100-b=2", "K3100-w=3", "K3100-n=4", "K3100-h=7",
+        "K3100-v2=5", "K3100-t=2", "K3100-t2=3", "K3100-DONE")
     Test-Vbp 'k3100_ivref_arg' "$Tests\k3100_ivref_arg\K3100.vbp" $k3100Expected
     Test-Vbp 'k3100_ivref_arg_x86' "$Tests\k3100_ivref_arg\K3100.vbp" $k3100Expected -Arch "x86"
     Test-EmitcShape "k3100_ivref_arg_shape" @("$Tests\k3100_ivref_arg\K3100.vbp") @(
         'vb6_mdl3100_Take(&vb6_argtmp_vb6_ivref_IK3100_',
         'vb6_mdl3100_TakeVal((vb6_ivref_IK3100*)&((c)->__iv_IK3100));',
-        'vb6_argtmp_vb6_ivref_IK3100_2 = &((vb6_cls_H3100_New()))->__iv_IK3100;'
+        'vb6_argtmp_vb6_ivref_IK3100_1 = ((c) ? &(c)->__iv_IK3100 : NULL);',
+        'vb6_argtmp_vb6_ivref_IK3100_3 = ((n) ? &(n)->__iv_IK3100 : NULL);',
+        'if (vb6_argtmp_vb6_ivref_IK3100_2) vb6_argtmp_vb6_ivref_IK3100_2->vt->AddRef(vb6_argtmp_vb6_ivref_IK3100_2);',
+        'vb6_argtmp_vb6_ivref_IK3100_4 = &((vb6_cls_H3100_New()))->__iv_IK3100;'
     )
     Test-EmitcAbsent "k3100_ivref_arg_lesion" @("$Tests\k3100_ivref_arg\K3100.vbp") @(
         '(vb6_ivref_IK3100*)&((&vb6_argtmp_',
-        'vb6_ivref_IK3100* vb6_argtmp_vb6_ivref_IK3100_2 = (vb6_cls_H3100_New());'
+        'vb6_ivref_IK3100* vb6_argtmp_vb6_ivref_IK3100_1 = c;',
+        'vb6_ivref_IK3100* vb6_argtmp_vb6_ivref_IK3100_3 = n;',
+        'vb6_ivref_IK3100* vb6_argtmp_vb6_ivref_IK3100_4 = (vb6_cls_H3100_New());',
+        'if (vb6_argtmp_vb6_ivref_IK3100_4) vb6_argtmp_vb6_ivref_IK3100_4->vt->AddRef'
     )
 
     # 账 #305 第二百零三刀: 槽的**声明档**是新式接口视图 (vb6_ivref_<I>*) 时, Set 那两站

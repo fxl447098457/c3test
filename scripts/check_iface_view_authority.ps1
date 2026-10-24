@@ -1,5 +1,5 @@
 ﻿# check_iface_view_authority.ps1 - 账 #305 §B221/#449（§B222）：「这一枚表达式交出来的是视图还是实例」
-# 这一问只许有一位主人。七条钉：
+# 这一问只许有一位主人。八条钉：
 #   ① 视图的成员调用发射形状 `->vt-><slot>(x, args)` 在全 src/backend 恰好 **1** 处，
 #      且必须住在 module/cgen_iface_vtbl.cpp 的 ivrefVtableCall 里（com_bind 与「接收者是
 #      视图值的调用」那一站都调它）。长出第 2 处 = 同一形状两位作者。
@@ -16,10 +16,16 @@
 #   ⑥ 「一枚工程类实例怎么交进视图槽」那一发形状 (`&(<实例>)->__iv_<I>`, 第二百零四刀) 有**一位**
 #      作者 = ivrefInstanceViewExpr；它的**消费点恰好 3 处**、分居三份文件：
 #      Set 覆写腿② / Set 按名 B04 / 实参交付侧 deliverToClassSlot。少一处 = 那一站回到自己拼；
-#      多一处 = 同一形状第二位作者。
+#      多一处 = 同一形状第二位作者。第二百零五刀给交付侧再接一档（借来的实例走 nullable 那一档）
+#      ⇒ 消费点 3 → **4**，仍分居那三份文件。
 #   ⑦ 字面量 `"__iv_" + cIdent(` 那份拼法只许住在两份文件里 = 主人自己 + ByVal 实参适配器
 #      (那一发带 `(vb6_ivref_I*)` 强转、形状不同，刻意留在册)。第 3 份长出来 = 又一处现拼视图槽字段。
-# 退出码：0 = 七条都过；1 = 任一条红。
+#   ⑧ 视图槽「谁付钱」那一发 AddRef (第二百零五刀给 copy-in 补上视图档) 的**发射点**在全 src/backend
+#      恰好 **5** 处、只居这 3 份文件 = cgen_com.cpp (registerClassArgRefCopyIn 的视图臂，恰 1 处) +
+#      cgen_iface_vtbl.cpp (emitIvrefRefSet) + cgen_setlet_set_prop.inc (仍在册的两处内联形状 + 置空前退旧)。
+#      站点自己再拼一发 = 「谁付钱」长出第二位主人；这一条掉到 4 处 = 视图档又没人付（实测修前全模块 0 条
+#      copy-in ⇒ 交回腿净 −1 ⇒ 过程出口拆槽时 0xC0000374）。
+# 退出码：0 = 八条都过；1 = 任一条红。
 param(
     [string]$Root = ""
 )
@@ -95,8 +101,8 @@ if ($viewDef.Count -ne 1) {
 if ($viewDecl.Count -ne 1) {
     $fail += ("ivrefInstanceViewExpr declarations = " + $viewDecl.Count + " (want exactly 1)")
 }
-if ($viewCalls.Count -ne 3) {
-    $fail += ("ivrefInstanceViewExpr call sites = " + $viewCalls.Count + " (want exactly 3)")
+if ($viewCalls.Count -ne 4) {
+    $fail += ("ivrefInstanceViewExpr call sites = " + $viewCalls.Count + " (want exactly 4)")
 }
 $viewCallFiles = @($viewCalls | ForEach-Object { Split-Path -Leaf $_.Path } | Sort-Object -Unique)
 if (($viewCallFiles -join ',') -ne 'cgen_base_type.cpp,cgen_setlet_set_prop.inc,cgen_setlet_set_rhs.inc') {
@@ -106,9 +112,10 @@ if (($viewCallFiles -join ',') -ne 'cgen_base_type.cpp,cgen_setlet_set_prop.inc,
 # 交付侧那一站必须**经主人**拿这一发 (自己内联拼 = 这一条掉下来)
 $deliverVia = @(Select-String -Path (Join-Path $backend "cgen_base_type.cpp") `
                               -Pattern 'ivrefInstanceViewExpr\(')
-if ($deliverVia.Count -lt 1) {
-    $fail += ("deliverToClassSlot no longer routes the view shape through ivrefInstanceViewExpr" +
-              " (= 实参站回到把实例基址当视图交出去, 实测 rc=0xC0000005)")
+if ($deliverVia.Count -ne 2) {
+    $fail += ("deliverToClassSlot routes the view shape through ivrefInstanceViewExpr " +
+              ("" + $deliverVia.Count) + " times (want exactly 2 = New 那一档 + 借来的实例那一档)" +
+              " (少一档 = 实参站回到把实例基址当视图交出去, 实测 rc=0xC0000005)")
 }
 
 # ⑦ `"__iv_" + cIdent(` 那份拼法的住家名单
@@ -119,10 +126,28 @@ if (($shapeFiles -join ',') -ne 'cgen_expr_call_arg_emit.inc,cgen_iface_vtbl.cpp
               " (want only the owner + the ByVal arg adapter)")
 }
 
+# ⑧ 视图槽「谁付钱」那一发 AddRef 的发射点名单 (第二百零五刀)
+$addRefs = @($files | Select-String -Pattern '"->vt->AddRef\("' -Encoding UTF8)
+if ($addRefs.Count -ne 5) {
+    $fail += ("view AddRef emission sites = " + $addRefs.Count + " (want exactly 5)")
+}
+$addRefFiles = @($addRefs | ForEach-Object { Split-Path -Leaf $_.Path } | Sort-Object -Unique)
+if (($addRefFiles -join ',') -ne 'cgen_com.cpp,cgen_iface_vtbl.cpp,cgen_setlet_set_prop.inc') {
+    $fail += ("view AddRef owners = " + ($addRefFiles -join ', ') +
+              " (want copy-in + emitIvrefRefSet + the two recorded inline Set shapes)")
+}
+$copyInAddRef = @(Select-String -Path (Join-Path $backend "module\cgen_com.cpp") `
+                              -Pattern '"->vt->AddRef\("' -Encoding UTF8)
+if ($copyInAddRef.Count -ne 1) {
+    $fail += ("registerClassArgRefCopyIn view arm = " + $copyInAddRef.Count +
+              " (want exactly 1; 0 = 视图槽又没人付钱, 实测净 −1 → 出口 0xC0000374)")
+}
+
+
 if ($fail.Count -gt 0) {
     Write-Host "IFACE-VIEW-AUTHORITY FAIL"
     foreach ($f in $fail) { Write-Host ("  - " + $f) }
     exit 1
 }
-Write-Host "IFACE-VIEW-AUTHORITY OK (1 formula site / 4 consumers / 6 literal files / 2 Set stations ask / 4 refSet calls / 3 view-shape consumers / 2 inline __iv_ files)"
+Write-Host "IFACE-VIEW-AUTHORITY OK (1 formula site / 4 consumers / 6 literal files / 2 Set stations ask / 4 refSet calls / 4 view-shape consumers / 2 inline __iv_ files / 5 view AddRef sites in 3 files)"
 exit 0

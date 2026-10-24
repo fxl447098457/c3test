@@ -501,12 +501,16 @@ bool CCodeGen::rhsTransfersProjectRef(const ASTNode& expr, bool forViewSlot) {
 
 // 账 #305 §B218 (甲) 腿⑤ 第二格 (第一百三十七刀): 「实参这一站交出去之后欠不欠一次交回」。
 // 问句不新立, 只把上面那条契约问句与 `New` 那一形成因合起来答一次; forViewSlot 取的是**形参槽
-// 自己**那一档 (各站只认自己那一档 = §B221 那条纪律)。`New <类>` 交的是**实例**, 而视图槽收到它时
-// 发出来的是包出来的薄指针 `&(<实例>->__iv_<I>)` (见 cgen_expr_call_arg_emit.inc 那条 2026-10-12
-// 的 ivfix), 那一枚对价归 §B187 待拍的那一句管 ⇒ 这一形刻意答 false: 交回错对象比漏一枚更坏。
+// 自己**那一档 (各站只认自己那一档 = §B221 那条纪律)。
+// 账 #305 第二百零五刀: `New <类>` 那一档视图槽从此也答**移交** —— 交付侧给它的正是包出来的
+// 薄指针 `&(<实例>->__iv_<I>)` (第二百零四刀那位主人, nullable=false 那一档), 而 `New` 的初始
+// 引用就是这一枚的对面价; 视图档的 copy-in 从本刀起不再早退 (它会 AddRef), 这一问不翻正就是
+// 给「自己交出的那一枚」再付一遍 = 每调用净 +1 永不销毁。ByVal 那一站同问同一句, 它的实参在
+// 问之前已被 ivfix 那一段铸成视图 (见 cgen_expr_call_arg_emit.inc 的 Fix <vbeclipse> 2026-10-12),
+// 所以答案一样成立。
 bool CCodeGen::argHandsOverProjectRef(const ASTNode& expr, const std::string& clsPtr) {
     const bool forView = clsPtrIsViewSlot(clsPtr);
-    if (expr.kind == ASTNodeKind::NewExpr) return !forView;
+    if (expr.kind == ASTNodeKind::NewExpr) return true;
     return rhsTransfersProjectRef(expr, forView);
 }
 
@@ -535,9 +539,17 @@ void CCodeGen::registerClassArgRefHandback(const std::string& clsPtr, const std:
 // 为什么还要问一句「槽里是不是包装器」(运行期 vb6_ComObject_IsBoxed, 与 §B187 第五腿那座桥同一把尺):
 // 泛对象槽里躺着的是 `vb6_ComObject` 包装器, 对它跑 `vb6_cls_X_AddRef` = 把包装器当实例拆 = 堆损坏
 // (实测 x64 停在 PassLate 之后)。剥回实例再 claim ⇒ 临时量握的是实例, 调用者槽里那枚包装器原样留着。
-// 视图那一档 (薄指针) 不吃这一形: 它的借/移交仍由第一百三十四刀那条问句一处答。
+// 账 #305 第二百零五刀: 视图档从此**不再早退** —— 借来的那一形 (裸类变量 / 视图变量) 也要在这一格
+// 先落一枚自有引用, 因为被调方 腿② 那一臂当场退旧 (第一百四十四刀的口径对两档槽同形)。修前它一声
+// 不出 ⇒ 交回腿净 −1: 视图变量的实跑读数 `vv=2` 照常打、到过程出口拆槽时报 0xC0000374 = 过退的双自由。
+// 形状与 emitIvrefRefSet 那发 AddRef 同一位 (薄指针自带 vt, 不问本类那对 mint 出入口)。
 void CCodeGen::registerClassArgRefCopyIn(const std::string& clsPtr, const std::string& tmp) {
-    if (clsPtrIsViewSlot(clsPtr) || clsPtr.empty()) return;
+    if (clsPtr.empty()) return;
+    if (clsPtrIsViewSlot(clsPtr)) {
+        c_.addPending("if (" + tmp + ") " + tmp + "->vt->AddRef(" + tmp
+            + ");  /* 账 #305 (甲) 腿⑤: 借来的实参在这一格先落一枚自有引用 */");
+        return;
+    }
     const size_t star = clsPtr.find('*');
     const std::string base = (star != std::string::npos) ? clsPtr.substr(0, star) : clsPtr;
     c_.addPending("{ void* __bx = (void*)" + tmp + "; if (__bx) { if (vb6_ComObject_IsBoxed(__bx))"

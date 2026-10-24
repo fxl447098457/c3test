@@ -955,13 +955,17 @@
                         // = §B187 待拍那一族）压根不进这一臂。
                         {
                             const std::string clsSlot092r = cParamClassPtrType(calleeParams[i]);
+                            // 账 #305 第二百零五刀: 这一站也交 AST —— 视图槽的「借来」那一形 (裸类变量)
+                            // 由交付侧的主人认出实参的声明档是工程类实例，铸成带 NULL 守卫的视图。
+                            const ASTNode* act092r = (i < node.positional.size())
+                                ? node.positional[i].get() : nullptr;
                             if (argHoldsProjectRefInOwnSlot(argVal, clsSlot092r)
-                                && deliverToClassSlot(clsSlot092r, argVal) == argVal) {
+                                && deliverToClassSlot(clsSlot092r, argVal, act092r) == argVal) {
                                 argVal = "&" + argVal;
                             } else {
                                 const std::string tmpCls092r = classSlotTempName(clsSlot092r, tempCounter_++);
                                 c_.addPending(clsSlot092r + " " + tmpCls092r + " = "
-                                              + deliverToClassSlot(clsSlot092r, argVal) + ";");
+                                              + deliverToClassSlot(clsSlot092r, argVal, act092r) + ";");
                                 // 账 #305 §B218 (甲) 形A (第一百四十四刀): 落临时量这一臂交出去的是
                                 // **借来**的一枚 (ByVal 形参 / 泛对象槽 / 按名剥出来的实例)，而被调方
                                 // 那一格从本刀起按 腿② 的形状**当场退旧** ⇒ 这一臂必须自己先付一枚，
