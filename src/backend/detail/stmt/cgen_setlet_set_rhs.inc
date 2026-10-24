@@ -419,6 +419,9 @@
                         : "&(" + value + ")->" + fld231;
                     emitIvrefRefSet(target, clsOfSlot, ptr231, new231);
                 } else if (nil231) {
+                    // 置空那一格由 腿③ 那一站 (cgen_setlet_set_prop.inc) 主持; 这里只兜「同一条
+                    // 语句被别的路走到」的那一档 —— 交给同一位主人, 不许落进下面那条 QI 分支
+                    // (`NULL->vt` 是 cl C2039)。
                     emitIvrefRefSet(target, clsOfSlot, "NULL", false);
                 } else {
                     emitIvrefQiSet(target, clsOfSlot, value,

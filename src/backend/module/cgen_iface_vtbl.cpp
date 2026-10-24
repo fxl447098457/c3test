@@ -1071,7 +1071,9 @@ void CCodeGen::emitIvrefRefSet(const std::string& target, const std::string& ifa
     c_.indent();
     c_.emitLine(ivCType + " " + ivOld + " = " + target + ";");
     c_.emitLine(target + " = " + ivPtr + ";");
-    if (!skipAddRef) {
+    // 置空那一发 (ivPtr == "NULL") 没什么可加引用: 那句 `if (槽) 槽->vt->AddRef(槽)` 紧跟在
+    // `槽 = NULL` 后面, 恒假 = 死码。取走多少 = 只由旧值那一发决定。
+    if (!skipAddRef && ivPtr != "NULL") {
         c_.emitLine("if (" + target + ") " + target + "->vt->AddRef(" + target + ");");
     }
     c_.emitLine("if (" + ivOld + ") " + ivOld + "->vt->Release(" + ivOld + ");");

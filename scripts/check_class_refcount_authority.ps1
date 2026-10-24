@@ -26,7 +26,7 @@
 #      另一处是 myBaseClassOf)、接口视图那道排除  恰好 1 处。
 #   ⑮ Static 那道闸 `!var.isStatic && !inStaticProc_` 全仓恰好 3 处、且全住在一份文件 (cgen_localdecl.cpp)：登记「出口放手」的三条腿 (两条工程类 + 一条接口视图) 共用同一道闸 —— 第一百三十三刀补的就是视图那条腿缺的那半。视图注册口 `trackIvrefLocalForRelease(cIdent(var.name));` 恰好 1 处。
 #   ⑰ 第一百三十七刀: 实参那一站「交回进站那一枚」只许住在 registerClassArgRefHandback 里 (注释串全仓 1 处、文件 = cgen_com.cpp)，两位站点 (ByVal 那一档 + ByRef 092r 那一档) 都只调它，谁也不许自己补一行 Release。问句 `argHandsOverProjectRef` = 契约问句 + New 那一形的合起来答一次: 声明 + 定义 + 两处调用 = 4 处 / 4 份文件。
-#   ⑯ 第一百三十四刀: 视图腿② 的「交回接管来的那一枚」只许住在 emitIvrefQiSet 里 (全仓 1 处、文件 = cgen_iface_vtbl.cpp)，而它两位调用点都住在 cgen_setlet_set_prop.inc —— 移交那一问 (⑬/⑭) 现在是两站三处：工程类站 1 处 (forViewSlot=false) + 视图站 2 处 (true)；再冒出一处自己补 Release 的站点就是第二套判据。
+#   ⑯ 第一百三十四刀: 视图腿② 的「交回接管来的那一枚」只许住在 emitIvrefQiSet 里 (全仓 1 处、文件 = cgen_iface_vtbl.cpp)，而它的**按名**调用点两位都住在 cgen_setlet_set_prop.inc；第二百零三刀起第三位消费者住在 cgen_setlet_set_rhs.inc (字段槽那一臂，转调同一位主人) —— 移交那一问 (⑬/⑭) 现在是两站四处：工程类站 1 处 (forViewSlot=false) + 视图站 3 处 (true)；再冒出一处自己补 Release 的站点就是第二套判据。
 # 退出码：0 = 三十条都过；1 = 任一条红；2 = 找不到 src/backend。
 param(
     [string]$Root = ""
@@ -191,18 +191,21 @@ if ($fieldQ -ne 6) {
 #    `rhsTransfersProjectRef(`)，而且调用点必须住在 Set 的 RHS 那一档 (cgen_setlet_set_rhs.inc)。为什么钉: 这一问与
 #    `New` 共用同一条「不 claim」的臂 —— 谁在别的站点再问一遍，「实参 / 返回值 / 字段」这三条边的口径就分家了。
 #    第一百三十七刀: 实参那一站 (⑰) 也从这里问, 但不**直接**吃 `*node.value` —— 它套在
-#    argHandsOverProjectRef 那一层里, 所以下面 `$xferAsk` (只数站点直接问句) 仍是 3, 本条才 6。
+#    argHandsOverProjectRef 那一层里, 所以下面 `$xferAsk` (只数站点直接问句) 仍是 4, 本条才 7。
+#    第二百零三刀: Set 的 RHS 那一档长出**视图**那一臂 (字段槽的声明档是新式接口视图 ⇒ 转调
+#    主人 emitIvrefQiSet), 同一条语句按槽档分派时问句的 forViewSlot 参数不同 ⇒ 站点直接问句
+#    3→4。这一处依旧不自己补 Release —— 交回那一发只住在主人里 (⑯)。
 $xferQ = CountOf 'rhsTransfersProjectRef('
-if ($xferQ -ne 6) {
-    $fail += ("transfer-question sites = " + $xferQ + " (want exactly 6: decl + def + 3 station calls + 1 ask behind the argument-station wrapper)")
+if ($xferQ -ne 7) {
+    $fail += ("transfer-question sites = " + $xferQ + " (want exactly 7: decl + def + 4 station calls + 1 ask behind the argument-station wrapper)")
 }
 $xferFiles = @(FilesOf 'rhsTransfersProjectRef(*node.value')
 if ($xferFiles.Count -ne 2 -or -not ($xferFiles -contains 'cgen_setlet_set_rhs.inc') -or -not ($xferFiles -contains 'cgen_setlet_set_prop.inc')) {
     $fail += ("transfer-question call files = " + ($xferFiles -join ', ') + " (want exactly cgen_setlet_set_rhs.inc + cgen_setlet_set_prop.inc)")
 }
 $xferAsk = CountOf 'rhsTransfersProjectRef(*node.value'
-if ($xferAsk -ne 3) {
-    $fail += ("transfer-question call sites = " + $xferAsk + " (want exactly 3: 工程类站 1 + 视图站 2)")
+if ($xferAsk -ne 4) {
+    $fail += ("transfer-question call sites = " + $xferAsk + " (want exactly 4: 工程类站 1 + 视图站 3)")
 }
 
 # ⑭ 移交值那一问的**三形**只许住在这一个函数里 (第一百三十二刀 = (甲) 刀4 加了两形: callee 是成员访问
@@ -729,5 +732,5 @@ if ($fail.Count -gt 0) {
     foreach ($f in $fail) { Write-Host ("  - " + $f) }
     exit 1
 }
-Write-Host "CLASS-REFCOUNT-AUTHORITY OK (1 pair mint / 1 header / 2 leg consumers / 3+9 formals / 10 roster files / 6 literal files / 0 stale / 5 registry files + 2 registrants / 1+1 out-slot / 1+1 foreign-write drop / 1 field-teardown shape + file / 6 field-type questions (标量 + 数组两档) / 6 transfer-question sites in 2 files / 1 view-leg hand-back + 2 QiSet calls / 1+2+1 transfer-arm questions / 3 static-gate sites in 1 file + 1 ivref registration / 1 arg-station hand-back + 4+4 helper sites in 4 files / 4+4 index-slot + project-class questions / 1 address-temp mint / 3 element-teardown sites + 4+4 carrier-destroy questions + 4 preserve-with-release sites in 4 files / 4+4 形A questions (out-slot class + owner pass) + 5 copy-in claim sites in 4 files / 3+4 carrier-destroy sites in 3 files / 8 hand-back stations (5 in cgen_redim.cpp + 过程出口) + 4 shape questions + 3 multidim export sites + 4+2 carrier-scope registrar + flag sites / 7+3 carrier-free flag + 5+5 escape pre-pass + 6 roster sites in 4 files + 1 LHS + 1 RHS exemption + 1 dst gate + 7+3 declaration-scope roster / 5 static gates / 4+3 ND Preserve-with-release export sites / 6 legacyViewBoxExpr sites in 4 files + 7 rtl-name sites in 6 files + 9 wrap-name sites in 6 files + 8 view-slot sites in 6 files (㉘㉚，第一百七十二刀三站) + 7 view-name sites in 4 files + 5 view_from-name sites + 3 mint sites + 1 name-ruler (㉛，第一百七十四刀站A)"
+Write-Host "CLASS-REFCOUNT-AUTHORITY OK (1 pair mint / 1 header / 2 leg consumers / 3+9 formals / 10 roster files / 6 literal files / 0 stale / 5 registry files + 2 registrants / 1+1 out-slot / 1+1 foreign-write drop / 1 field-teardown shape + file / 6 field-type questions (标量 + 数组两档) / 7 transfer-question sites in 2 files (第二百零三刀给字段槽那一臂加了第 4 处站点问句) / 1 view-leg hand-back + 2 QiSet calls / 1+2+1 transfer-arm questions / 3 static-gate sites in 1 file + 1 ivref registration / 1 arg-station hand-back + 4+4 helper sites in 4 files / 4+4 index-slot + project-class questions / 1 address-temp mint / 3 element-teardown sites + 4+4 carrier-destroy questions + 4 preserve-with-release sites in 4 files / 4+4 形A questions (out-slot class + owner pass) + 5 copy-in claim sites in 4 files / 3+4 carrier-destroy sites in 3 files / 8 hand-back stations (5 in cgen_redim.cpp + 过程出口) + 4 shape questions + 3 multidim export sites + 4+2 carrier-scope registrar + flag sites / 7+3 carrier-free flag + 5+5 escape pre-pass + 6 roster sites in 4 files + 1 LHS + 1 RHS exemption + 1 dst gate + 7+3 declaration-scope roster / 5 static gates / 4+3 ND Preserve-with-release export sites / 6 legacyViewBoxExpr sites in 4 files + 7 rtl-name sites in 6 files + 9 wrap-name sites in 6 files + 8 view-slot sites in 6 files (㉘㉚，第一百七十二刀三站) + 7 view-name sites in 4 files + 5 view_from-name sites + 3 mint sites + 1 name-ruler (㉛，第一百七十四刀站A)"
 exit 0

@@ -7363,6 +7363,25 @@ if ($Category -in @("all", "run", "vbp")) {
     Test-EmitcAbsent "k3100_ivref_arg_lesion" @("$Tests\k3100_ivref_arg\K3100.vbp") @(
         '(vb6_ivref_IK3100*)&((&vb6_argtmp_'
     )
+
+    # 账 #305 第二百零三刀: 槽的**声明档**是新式接口视图 (vb6_ivref_<I>*) 时, Set 那两站
+    # (覆写腿② / 置空腿③) 都改派给视图那两位主人 —— 工程类主人只会按声明名拼
+    # vb6_cls_<接口名>_AddRef/_Release, 而接口档从不铸这一对 ⇒ VbEclipse 链接期最后两声
+    # (实测 BASE 上这枚夹具两台都停在 LNK2019: vb6_cls_IK3138_Release)。
+    $k3138Expected = @("K3138-1=1/0/110", "K3138-2=1/1/0/210", "K3138-3=1/1/2/110",
+        "K3138-4=1/1/2/210", "K3138-5=1", "K3138-6=2", "K3138-DONE")
+    Test-Vbp 'k3138_iface_field' "$Tests\k3138_iface_field\K3138.vbp" $k3138Expected
+    Test-Vbp 'k3138_iface_field_x86' "$Tests\k3138_iface_field\K3138.vbp" $k3138Expected -Arch "x86"
+    Test-EmitcShape "k3138_iface_field_shape" @("$Tests\k3138_iface_field\K3138.vbp") @(
+        'vb6_ivref_IK3138* __ivold0 = me->m_iv;',
+        'me->m_iv = &((vb6_cls_H3138B_New()))->__iv_IK3138;',
+        'me->m_iv = ((g_impl) ? &(g_impl)->__iv_IK3138 : NULL);',
+        'if (g_iv) g_iv->vt->QueryInterface(g_iv, vb6_iv_iid_IK3138, &__ivgot3);',
+        'if (__ivold4) __ivold4->vt->Release(__ivold4);')
+    Test-EmitcAbsent "k3138_iface_field_lesion" @("$Tests\k3138_iface_field\K3138.vbp") @(
+        'vb6_cls_IK3138* __clsold',
+        'vb6_cls_IK3138_Release(__clsold',
+        'vb6_cls_IK3138_AddRef(me->m_iv)')
     # 账 #305 第一百九十七刀: Pattern C/D2 属性写的**值槽档位**收成一处主人
     # writeValArgForParamSlot。夹具打在泛对象槽 (C 侧 void*) 那一档的两个方向:
     #   · RHS 是整只 vb6_VARIANT (工程内 `Function GetV() As Variant`) ⇒ 必须解箱

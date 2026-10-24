@@ -203,6 +203,11 @@
             // 持有，所以「置空」= 放手调用方那一枚 + 清槽 (与覆写同一位主人、同一个声明档类名)。
             // 判据住在 classOfProjectRefOutSlot 一处，与覆写那一站同问。
             const std::string outClsP144 = classOfProjectRefOutSlot(target);
+            // 账 #305 第二百零三刀 (2): 「这格槽的声明档是不是新式接口视图」那一问, 置空这一站
+            // 也要问 —— 覆写那一站 (cgen_setlet_set_rhs.inc) 第一百六十五刀之后已经有了, 这一站
+            // 落空就照旧铸一枚从没造过的 `vb6_cls_<接口名>_Release` (K3138 夹具实测: 整工程
+            // 唯一一声 LNK2019 就是它)。两站同问 ⇒ 同一个出口 ivrefCType(声明档)。
+            const std::string ivClsP231 = ivrefCType(targetCls101);
             if (!targetCls101.empty() || !outClsP144.empty() || knownClassVars_.count(targetLower)) {
                 // 账 #305 §B218 (甲) 腿③: 置空 = 放手那一枚 + 清槽, 与覆写同一位主人
                 // (接口那一族在上面 :141-142 早就是这个形状, 具体类只是今天才补上计数头)。
@@ -214,7 +219,11 @@
                 // 第一百三十九刀量到它今天发的是 `vb6_ReleaseObject((void**)(&(void*){…}))`，
                 // 而那枚 `&(void*){…}` 是复合字面量临时量、ReleaseObject 对裸结构体只清
                 // `*objPtr` ⇒ 数组元素既不放手也不清空 = 整条语句 no-op (两台实测 S3b-term=0)。
-                if (!outClsP144.empty()) {
+                if (!ivClsP231.empty()
+                    && (target.find('(') == std::string::npos || !elemTyP140.empty())
+                    && !procClassFormals_.count(targetLower)) {
+                    emitIvrefRefSet(target, targetCls101, "NULL", false);
+                } else if (!outClsP144.empty()) {
                     emitClassSlotRefSet(target, outClsP144, std::string(), false, false);
                 } else if (!targetCls101.empty()
                     && (target.find('(') == std::string::npos || !elemTyP140.empty())
