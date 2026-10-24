@@ -6,7 +6,15 @@
 
 OPEN_LOCAL_DIVERGENCE: **已收口（2026-09-27 入夜 = C29-MV-d）** —— 本地 `ctrlmonthview` 的 MV24/MV25/MV30 三条红既不是"本地环境/增量缓存"、也不是"OS 版本相关"，而是**挂钟相关**：comctl v6 把当前时间混进 `MCM_GETCURSEL` 的负载里（日没错、零头 0.765），`CLng` 下午进位、上午舍掉 ⇒ 本机下午一直红、CI 跑在上午一直绿。修法与全部读数见 029 §九 C29-MV-d 那一格。留下的一般式：**日期面判据按 `CLng` / `=` 比之前，产品读数必须归成整数日**，否则同一棵树的判据随时段翻脸，而门只会读到"上午那一半"。
 STATUS: IDLE             # NOT_STARTED | DESIGN | BUSY | IDLE | ALL_DONE
-LAST_RUN: 2026-10-25T05:55:00+08:00 **第二百一十三刀（账 #120 · VB6 口径**闭合**：D1b 运行期四发全 `Err=0`、D1c 无参 `Me.Move` 编译错「必选参数」⇒ 209 刀那格只剩「无参」一半；待实测清单清空；零源码、零判据 ⇒ 不占门、`[skip ci]`）= 212 刀挂着的最后一发（`Me.Move` 无参在**语句**形态下合不合法）由 `D1c` 判掉：**编译错**
+LAST_RUN: 2026-10-25T06:40:00+08:00 **第二百一十六刀（账 #490 = §B178：`MsgBox` 的 RTL 原型只有三参，而 VB6 全签名是五参 ⇒ 四/五参形是静默多递）量 + 实施 + 判据齐：承面 10 处真受害者、RTL 原型扩到五参与 `vb6_InputBox` 同款、缺位由 conv_output 那处 arity 分派补齐**
+—— **承面（先量后动）**：10343 份语料里 `MsgBox` 实参个数分布 = 1参 485 / 2参 651 / 3参 1496 / 4参 4（其中 3 处是用户自己的 `Msgbox` 包装）/ **5参 10** ⇒ 真受害者 **10 处**（`MsgBox(msg, Style, Title, Help, Ctxt)`，落在 mapx GIS / 宾馆桑拿 / E-Type 三个工程）。同一把尺子顺手量了 §B7（`On <expr> GoTo`）：语料 10 处**全是 `On Error` 的拼写错误**（`errror` / `errer` / `err`）⇒ 真受害者 0 ⇒ 纸面缺口，不开刀。
+—— **改前读数**：`vb6_MsgBox(msg, sty, ttl, hlp, ctx)` = **五枚实参递给三参原型**（`vb6rtl_builtin.h:82` 只有 prompt/buttons/title），而**本机 cl 不报**（真编译实测 0 error）；更实的一格是第 4/5 位在 `kNoTableFormalKinds176` 里**没有形参类型** ⇒ Variant 裸进 BSTR 槽。
+—— **修法**：RTL 原型扩到 VB6 全签名（prompt, buttons, title, helpfile, context），helpfile/context 收而不用（MessageBoxW 没有 Help 按钮，F1 也不接）；缺位由 `cgen_expr_call_conv_output.inc` 那处**已有的** arity 分派补齐（1→`vb6_MsgBox1` / 2→+`NULL,NULL,0` / 3→+`NULL,0` / 4→+`0` / 5→原样）。RTL 那侧按纪律 bump `c3rtl.rc`。
+—— **判据**：A/B 逐条翻（BASE = `git stash` 那台）：2/3/4 参三形与 Variant helpfile 那一形全翻，5 参那一行**文本不变**（变的是原型）⇒ 判据不许只钉它。两头针进 runner（正 5 枚 `mb_emitc_full_arity` + 反 4 枚 `mb_emitc_no_overpass`，反针逐枚验过不是新串的子串）；`check_rtl_embedded` OK（125 份资源与 C3.exe 逐字节相同 ⇒ 新原型已进 embed）、`check_rtl_proto_arity` PASS（1317 对签名逐条对上）。
+—— ⚠ **本轮我自己踩的两个坑**：① 两次假红都是 `%TEMP%` 不可写（老坑，跑之前先指到可写目录）；② 上一轮审计里我说的「B32 / B10 两条已过期」**两条都错**：B32 正文里写着**已出**（门 #322，哨兵 `check_scalemode_writers.ps1` 今天在且 PASS），只是标题没写；`vb6_VariantArray` 是 `vb6rtl_variant.h:202` 的 `static inline`，符号一直在树里 ⇒ §B10 没失联。已撤回，B32 标题补上「已出」标记。
+—— **刀号**：213 之后本账 #490 取 216（214 已由账 #305 占、215 是它排好的下一刀；共用计数器不追号，消歧靠**账号 + 站点名**）。
+
+# 上一轮（2026-10-25T06:40:00+08:00，原样留档）= LAST_RUN: 2026-10-25T05:55:00+08:00 **第二百一十三刀（账 #120 · VB6 口径**闭合**：D1b 运行期四发全 `Err=0`、D1c 无参 `Me.Move` 编译错「必选参数」⇒ 209 刀那格只剩「无参」一半；待实测清单清空；零源码、零判据 ⇒ 不占门、`[skip ci]`）= 212 刀挂着的最后一发（`Me.Move` 无参在**语句**形态下合不合法）由 `D1c` 判掉：**编译错**
 —— **D1b 运行期读数（四发全 `Err=0`）**：`Me.Move 100,100` ⇒ `Left=100 Top=100`（缇，与实参逐字相同）；`Me.Show` / `Me.Refresh` / `Me.Hide` 全 `Err=0`；对照行 `Me.Width=7440`。⇒ **带实参的语句形态不但合法，语义还与 C3 发的 `vb6_ControlMove(hwnd,…)` 一致** —— 209 刀说的「C3 侧最重的一格」在这半边彻底消失。
 —— **D1c = 「必选参数」编译错**：`Me.Move`（**无参**）在**语句**形态下也拒收 ⇒ Move 的 **left 是必选实参**，与 D2 值上下文那一声**同因** ⇒ 这条错**与上下文无关，是实参个数那条线**。⇒ VB6 拒收无参 `Me.Move`，而 C3 发 `vb6_ControlMove(hwnd,0,0,0,0,0)` **真把窗体搬到 0,0** ⇒ **209 刀那格只剩这一半**（无参那一形），性质是「静默改状态」。
 —— **承面实测**：10343 份里无参 `Me.Move` / `Me.Move()` **0 处**（212 刀量的 1847 处全是带实参/`Call` 形态）⇒ 与 212 刀新出的那格同档，**纸面缺口，不单开刀**。

@@ -1004,7 +1004,9 @@ std::string CCodeGen::builtinNoParamTableFormalCType(const std::string& callee, 
         {"vb6_SaveSetting",   {"BSTR", "BSTR", "BSTR", "BSTR"}},   // (app, section, key, setting)
         {"vb6_DeleteSetting", {"BSTR", "BSTR", "BSTR"}},           // (app, section[, key])
         {"vb6_GetAllSettings", {"BSTR", "BSTR"}},                  // (app[, section])
-        {"vb6_MsgBox",        {"BSTR", "int32_t", "BSTR"}},        // 1 = buttons; helpfile/context
+        {"vb6_MsgBox",        {"BSTR", "int32_t", "BSTR", "BSTR", "int32_t"}},  // 账 #490 §B178:
+                                                                    //   1 = buttons; 3/4 = helpfile/context
+                                                                    //   (原型已收满五参, 缺位由 conv_output 补)
                                                                     //   两形 C 出口不收 (MsgBox1)
         {"vb6_InputBox",      {"BSTR", "BSTR", "BSTR", "int32_t", "int32_t", "BSTR", "int32_t"}},
         {"vb6_SendKeys",      {"BSTR", "int32_t"}},                // 1 = wait

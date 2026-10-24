@@ -5710,6 +5710,23 @@ if ($Category -in @("all", "run", "vbp")) {
         'vb6_MsgBox1(d)',          # 裸浮点
         'vb6_MsgBox1(b)'           # 裸布尔
     )
+    # 账 #490 §B178: MsgBox 的 RTL 原型此前只有三参 (prompt, buttons, title), 而 VB6 全签名是
+    #   五参 (多 helpfile / context) —— 四/五参形 (语料 10 处真调用) 递进去是**静默多递**
+    #   (本机 cl 不报), 且第 4/5 位没有形参类型 ⇒ Variant 直接进 BSTR 槽。原型扩到五参之后,
+    #   两/三/四参的**缺位要补齐** (NULL/0), 五参原样。判据仍是源码面 (见上面那条注释)。
+    Test-EmitcShape "mb_emitc_full_arity" @("$Tests\msgbox_num.bas") @(
+        'vb6_MsgBox(s, sty, NULL, NULL, 0)',      # 两参 → 补到五参
+        'vb6_MsgBox(s, sty, ttl, NULL, 0)',       # 三参 → 补到五参
+        'vb6_MsgBox(s, sty, ttl, hlp, 0)',        # 四参 → 补到五参
+        'vb6_MsgBox(s, sty, ttl, hlp, ctx)',      # 五参 → 原样
+        'BSTR _own_8 = vb6_VariantToString(v);'   # helpfile 位是 Variant ⇒ 走转换, 不裸进 BSTR 槽
+    )
+    Test-EmitcAbsent "mb_emitc_no_overpass" @("$Tests\msgbox_num.bas") @(
+        'vb6_MsgBox(s, sty, NULL)',        # 改前: 两参只补到三参
+        'vb6_MsgBox(s, sty, ttl)',         # 改前: 三参 (原型刚好三参, 但四/五参就多递)
+        'vb6_MsgBox(s, sty, ttl, hlp)',    # 改前: 四枚实参进三参原型 = 多递
+        'vb6_MsgBox(s, sty, ttl, v, ctx)'  # 改前: Variant 裸进 BSTR 槽
+    )
 
     # 账 #115: `Len(<裸标识符>)` 的"stor-宽度兜底桶"把**模块级 String**也吞了(knownBstrVars_ 每过程入口 clear，
     # 只有局部声明/形参进表) ⇒ 发成 (int32_t)sizeof(gS)。发码面钉两边：模块级 String 必须走 vb6_Len，

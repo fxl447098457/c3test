@@ -79,10 +79,14 @@ BSTR vb6_FormatDateTime(double dateSerial, int32_t namedFormat);
 BSTR vb6_LTrimVar(vb6_VARIANT s);
 
 // 消息框
-int32_t vb6_MsgBox(BSTR prompt, int32_t buttons, BSTR title);
+// 账 #490 §B178: 原型收满 VB6 的五参形 (prompt, buttons, title, helpfile, context),
+//   与 vb6_InputBox 同款 —— 那一位早就是七参全签名。改前是三参, 而发码对
+//   `MsgBox(msg, Style, Title, Help, Ctxt)` (语料 10 处) 递五枚 ⇒ 本机 cl 不报的静默多递。
+//   helpfile/context 今天照收、运行期不用 (MessageBoxW 没有 Help 按钮, F1 也不接)。
+int32_t vb6_MsgBox(BSTR prompt, int32_t buttons, BSTR title, BSTR helpfile, int32_t context);
 // P7.7: single-arg convenience (MsgBox "text" -> vb6_MsgBox1(text))
 static inline int32_t vb6_MsgBox1(BSTR prompt) {
-    return vb6_MsgBox(prompt, 0, NULL);
+    return vb6_MsgBox(prompt, 0, NULL, NULL, 0);
 }
 
 // 数值函数
