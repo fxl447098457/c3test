@@ -1062,6 +1062,23 @@ std::string CCodeGen::ivrefVtableCall(const std::string& ifaceName, const std::s
 // 内联在 cgen_setlet_set_prop.inc 的按名臂里，而 RHS 是「返回工程内接口的调用」那一形
 // (#448 的形①) 也要同一条腿；留在站点里就会长出第二个答案。
 // 计数口径不变: QI 成功即已 AddRef (失败得 NULL = Nothing)，旧值当场 Release。
+// 账 #305 第二百零三刀 (1): 从 cgen_setlet_set_prop.inc 的 B05 那一臂提出来的唯一主人。
+void CCodeGen::emitIvrefRefSet(const std::string& target, const std::string& ifaceName,
+                               const std::string& ivPtr, bool skipAddRef) {
+    const std::string ivCType = "vb6_ivref_" + cIdent(ifaceName) + "*";
+    const std::string ivOld = "__ivold" + std::to_string(ivrefSetSeq_++);
+    c_.emitLine("{  /* tB Interface B05: Set " + target + " (refcounted) */");
+    c_.indent();
+    c_.emitLine(ivCType + " " + ivOld + " = " + target + ";");
+    c_.emitLine(target + " = " + ivPtr + ";");
+    if (!skipAddRef) {
+        c_.emitLine("if (" + target + ") " + target + "->vt->AddRef(" + target + ");");
+    }
+    c_.emitLine("if (" + ivOld + ") " + ivOld + "->vt->Release(" + ivOld + ");");
+    c_.dedent();
+    c_.emitLine("}");
+}
+
 void CCodeGen::emitIvrefQiSet(const std::string& target, const std::string& ifaceName,
                               const std::string& valueExpr, bool rhsTransferred) {
     const std::string ivCType = ivrefCType(ifaceName);

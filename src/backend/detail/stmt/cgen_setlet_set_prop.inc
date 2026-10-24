@@ -698,21 +698,7 @@
                         ? "((" + value + ") ? &(" + value + ")->" + ivField + " : NULL)"
                         : "&(" + value + ")->" + ivField;
                     if (plainIvTarget) {
-                        // COM 口径: 存旧值 → 覆盖 → AddRef 新 → Release 旧.
-                        // RHS 是 New 时那 1 次初始引用直接移交, 故不 AddRef.
-                        const std::string ivCType = "vb6_ivref_" + cIdent(v->name) + "*";
-                        const std::string ivOld = "__ivold" + std::to_string(ivrefSetSeq_++);
-                        c_.emitLine("{  /* tB Interface B05: Set " + target + " (refcounted) */");
-                        c_.indent();
-                        c_.emitLine(ivCType + " " + ivOld + " = " + target + ";");
-                        c_.emitLine(target + " = " + ivPtr + ";");
-                        if (!isNewExpr) {
-                            c_.emitLine("if (" + target + ") " + target + "->vt->AddRef(" +
-                                        target + ");");
-                        }
-                        c_.emitLine("if (" + ivOld + ") " + ivOld + "->vt->Release(" + ivOld + ");");
-                        c_.dedent();
-                        c_.emitLine("}");
+                        emitIvrefRefSet(target, v->name, ivPtr, isNewExpr);
                         return;
                     }
                     value = ivPtr;

@@ -400,7 +400,31 @@
             // ⇒ 覆写不退旧值。改走主人的地址那一臂：元素档非空 = 这一形有可寻址的地址临时量，
             // 下标算术仍只算一次；真调用形态 (`dict(key)`) 元素档为空串 ⇒ 维持裸拷贝。
             const std::string elemTy140 = classArraySlotElemType(target);
-            if (!clsOfSlot.empty() && !procClassFormals_.count(targetLower)
+            // 账 #305 第二百零三刀: 这格槽的**声明档**是新式接口视图 (`vb6_ivref_<I>*`) ⇒ 交给视图那两位
+            // 主人，别让工程类主人接手 —— 它只会按声明名拼 `vb6_cls_<接口名>_AddRef/_Release`(接口档不发
+            // 定义 ⇒ VbEclipse 链接期最后两声)，而且把 `New <实现者>` 的实例指针直接写进视图槽。
+            // 第一百六十五刀那道闸只认 legacy 档; 字段档(普通类字段 `me->x` 与 UC 被 globalize 的裸名)
+            // 从没进 knownIvrefVars_，所以按名查表那条路对两档都失灵 —— 这里改问**声明档**那一问。
+            const std::string ivC231 = clsOfSlot.empty() ? std::string() : ivrefCType(clsOfSlot);
+            if (!ivC231.empty() && !procClassFormals_.count(targetLower)) {
+                std::string vLow231 = value;
+                std::transform(vLow231.begin(), vLow231.end(), vLow231.begin(), ::tolower);
+                const bool nil231 = (value == "NULL");
+                const bool new231 = !nil231 && value.find("_New(") != std::string::npos;
+                const bool cls231 = !nil231 && !new231 && knownClassVars_.count(vLow231) != 0;
+                if (new231 || cls231) {
+                    const std::string fld231 = "__iv_" + cIdent(clsOfSlot);
+                    const std::string ptr231 = cls231
+                        ? "((" + value + ") ? &(" + value + ")->" + fld231 + " : NULL)"
+                        : "&(" + value + ")->" + fld231;
+                    emitIvrefRefSet(target, clsOfSlot, ptr231, new231);
+                } else if (nil231) {
+                    emitIvrefRefSet(target, clsOfSlot, "NULL", false);
+                } else {
+                    emitIvrefQiSet(target, clsOfSlot, value,
+                                   node.value ? rhsTransfersProjectRef(*node.value, true) : false);
+                }
+            } else if (!clsOfSlot.empty() && !procClassFormals_.count(targetLower)
                 && (target.find('(') == std::string::npos || !elemTy140.empty())) {
                 emitClassSlotRefSet(target, clsOfSlot, value, rhsTransferred, false, elemTy140);
             } else if (!outCls144.empty()) {

@@ -435,6 +435,11 @@
     // 由按名那一臂与 §B221 的调用表达式那一臂共用。
     // 账 #305 §B218 第一百三十四刀: 多收一个 rhsTransferred = 「右值那枚临时量自带对价」，
     // 真就当场把接管来的那一枚交回 (只在这一位主人里交, 站点不许自己补一行)。
+    // 账 #305 第二百零三刀 (1): B05「存旧 → 覆盖 → AddRef 新 → Release 旧」那一发的唯一主人。
+    // 站点原先内联这八行；提出来是为了让字段档也能用同一位主人（本件 = 零行为改动，
+    // 判据 = 产物逐字节不动）。skipAddRef = 右值自带移交引用（New 那一形）。
+    void emitIvrefRefSet(const std::string& target, const std::string& ifaceName,
+                         const std::string& ivPtr, bool skipAddRef);
     void emitIvrefQiSet(const std::string& target, const std::string& ifaceName,
                         const std::string& valueExpr, bool rhsTransferred);
     // 账 #305 §B218 (甲): 工程类形参登记的一处出口 (按名表 + 本过程形参名册)。
