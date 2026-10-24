@@ -95,7 +95,7 @@ if ((CountWhere ").obj == " "") -gt 3) { $fail += "V6 视图比较发码在别�
 #   V8  比名那把尺 `_stricmp(className` 全仓恰好 1 处, 且在 cgen_iface_vtbl.cpp (接口自己铸的那一发 view_from
 #        里) —— 站点自己比名 = 第二条答案; mint 外再比一次名 = 又一位主人。
 $v7 = CountWhere "slotLegacyIfaceViewName(" ""
-if ($v7 -ne 12) { $fail += ("V7 认视图槽那一问位址: 期望 12 = 定义 + 声明 + bool 投影 + For Each 那一站 + 调用主人自己那一问 + With 那一站 + 站F 读侧读者 + 站F 写侧读者 + 带参写槽只读查询 (第186刀) + With 体内零参读 (第193刀), 实际到 " + $v7) }
+if ($v7 -ne 13) { $fail += ("V7 认视图槽那一问位址: 期望 13 = 定义 + 声明 + bool 投影 + For Each 那一站 + 调用主人自己那一问 + With 那一站 + 站F 读侧读者 + 站F 写侧读者 + 带参写槽只读查询 (第186刀) + With 体内零参读 (第193刀) + Set 装填那一站 (第215刀), 实际到 " + $v7) }
 if ((CountWhere "slotLegacyIfaceViewName(" "cgen_control.cpp") -ne 1) {
     $fail += "V7 站点: For Each 那一站只许问一次认视图槽那一问"
 }
@@ -149,8 +149,9 @@ $v12 = CountWhere "legacyViewSetterLastParamCType(" ""
 if ($v12 -ne 3) { $fail += ("V12 带参写槽查询位数: 期望 3 = 定义 + 声明 + 多入口参数站点一问, 实际到 " + $v12) }
 # V13 (第一百八十八刀): 「这一档返回类型是不是值聚合」只许住一处判据 (`vb6_type_` ∪ `vb6_iface_`) ——
 #   定义 + 声明 + Function / Property Get 两处返回槽 = 4; `vb6_iface_` 前缀比较仍只住 cgen_base_type.cpp (V1 守)。
+#   第二百一十五刀再添一位读者 = 类工厂的**字段初始化**那一档 (视图字段槽没有 NULL 这一形) ⇒ 5。
 $v13 = CountWhere "cTypeIsValueAggregate(" ""
-if ($v13 -ne 4) { $fail += ("V13 值聚合判据: 期望 4 = 定义 + 声明 + 两处返回槽, 实际到 " + $v13) }
+if ($v13 -ne 5) { $fail += ("V13 值聚合判据: 期望 5 = 定义 + 声明 + 两处返回槽 + 类工厂字段初始化 (第215刀), 实际到 " + $v13) }
 # V14 (第一百八十八刀): 「返回类型若为视图, 交回接口名」只许住一处 —— 定义 + 声明 + 两处登记站点 = 4。
 $v14 = CountWhere "legacyIfaceNameOfCType(" ""
 if ($v14 -ne 4) { $fail += ("V14 视图返回名: 期望 4 = 定义 + 声明 + 两处登记站点, 实际到 " + $v14) }

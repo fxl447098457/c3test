@@ -881,10 +881,9 @@
     {
         std::string targetLower = target;
         std::transform(targetLower.begin(), targetLower.end(), targetLower.begin(), ::tolower);
-        // 账 #305 第二百一十五刀: 这一问改问**那位主人** —— 站点自己查那张名册只认裸名，于是
-        // 「字段槽」那一档 (`me->m_lv`) 在这站落空、裸拷贝实例指针进值结构体槽 = cl C2440；
-        // 改问主人之后 `me->` 那一层由主人一处剥掉，与覆写腿② 那道闸 (slotIsLegacyIfaceView)
-        // 同一次查表、同一个答案。
+        // 账 #305 第二百一十五刀: 这一问改问**那位名册主人** —— 站点自己查那张名册只认裸名，于是
+        // 「字段槽」那一档 (`me->m_lv`) 在这站落空、裸拷贝实例指针进值结构体槽 = cl C2440；改问主人
+        // 之后 `me->` 那一层由主人一处剥掉，与覆写腿② 那道闸同一次查表、同一个答案。
         std::string ifaceName = slotLegacyIfaceViewName(targetLower);
         if (!ifaceName.empty()) {
             // `_New()` 那个形: 类名已经烘在 C 表达式里 (`vb6_cls_<Impl>_New()`), 摘出来就是实现者
