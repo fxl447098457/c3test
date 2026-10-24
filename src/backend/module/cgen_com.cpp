@@ -146,8 +146,13 @@ void CCodeGen::emitClassFactory(Module& module) {
                 std::string fieldCT = mapTypeRef(var.asType.get());
                 if (!fieldCT.empty() && fieldCT.back() == '*') {
                     c_.emitLine("me->" + field + " = NULL;");
-                } else if (fvt == Vb6Type::UserDefinedType) {
+                } else if (fvt == Vb6Type::UserDefinedType || cTypeIsValueAggregate(fieldCT)) {
                     // Fix 038: UDT 字段不能用 = 0 初始化 (C2440), 改用 memset 零化
+                    // 账 #305 第二百一十五刀: 同一档再认**legacy 接口视图** (`vb6_iface_<I>` =
+                    // 值结构体 { vtbl, obj }) —— 它不带星号 ⇒ 过不了上面那道指针闸，落到下面
+                    // `defaultValue(Object)` 交出的 NULL ⇒ cl C2440 (探针 .local/probe_legfield
+                    // 实测 = 类工厂里 `me->m_lv = NULL;`)。问句不新立: 值聚合那一档的主人是
+                    // 第一百八十八刀那位 `cTypeIsValueAggregate` (UDT ∪ vb6_iface_)。
                     c_.emitLine("memset(&me->" + field + ", 0, sizeof(me->" + field + "));");
                 } else {
                     c_.emitLine("me->" + field + " = " + defaultValue(fvt) + ";");

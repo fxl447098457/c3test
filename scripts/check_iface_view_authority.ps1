@@ -1,5 +1,5 @@
 ﻿# check_iface_view_authority.ps1 - 账 #305 §B221/#449（§B222）：「这一枚表达式交出来的是视图还是实例」
-# 这一问只许有一位主人。九条钉：
+# 这一问只许有一位主人。十条钉：
 #   ① 视图的成员调用发射形状 `->vt-><slot>(x, args)` 在全 src/backend 恰好 **1** 处，
 #      且必须住在 module/cgen_iface_vtbl.cpp 的 ivrefVtableCall 里（com_bind 与「接收者是
 #      视图值的调用」那一站都调它）。长出第 2 处 = 同一形状两位作者。
@@ -31,7 +31,13 @@
 #      cgen_util_com.cpp (站S1)。它问名册那一头 slotIvrefViewName 只许主人自己用：带 `(` 的
 #      出现恰 3 处 (定义 + 声明 + 主人内那一次)、文件只许那两份。长出第 4 处 = 有站点绕过主人
 #      直接问名册 = 「是不是视图」有了第二位判据的读者。
-# 退出码：0 = 九条都过；1 = 任一条红。
+#   ⑩ 「字段档」那一层 `me->` 前缀只许**两族名册主人各自剥一次** (第二百一十五刀把旧式那一族补齐):
+#      发射形状 `static const std::string mePre = "me->";` 在全 src/backend 恰好 **2** 处，且只住
+#      cgen_iface_vtbl.cpp (新式 slotIvrefViewName) + cgen_util_classtype.cpp (旧式 slotLegacyIfaceViewName)。
+#      同一趟还钉「Set 那两站不许再自己查那张旧式名册」: cgen_setlet_set_prop.inc 里
+#      `knownIfaceVars_.find(targetLower)` 必须 **0** 处 (第二百一十五刀之前它是 1 处，字段槽
+#      `me->m_lv` 因此在装填那一站落空 = 裸拷贝实例指针进值结构体槽 = cl C2440)。
+# 退出码：0 = 十条都过；1 = 任一条红。
 param(
     [string]$Root = ""
 )
@@ -181,10 +187,33 @@ if (($nameFiles -join ',') -ne 'cgen_helpers.inc,cgen_iface_vtbl.cpp') {
 }
 
 
+#   ⑩ 字段档那一层 `me->` 前缀只许**两族名册主人各自剥一次** (第二百一十五刀补齐旧式那一族):
+#      发射形状 `static const std::string mePre = "me->";` 在全 src/backend 恰好 **2** 处, 且只住
+#      cgen_iface_vtbl.cpp (新式 slotIvrefViewName) + cgen_util_classtype.cpp (旧式 slotLegacyIfaceViewName)。
+#      同一趟钉「Set 那一站不许再自己查那张旧式名册」: prop 站里那条直查必须 **0** 处 —— 第二百一十五刀
+#      之前它是 1 处, 字段槽 `me->m_lv` 因此在装填那一站落空 = 裸拷贝实例指针进值结构体槽 = cl C2440。
+$stripAll = @($files | Select-String -Pattern 'static const std::string mePre = "me->";')
+if ($stripAll.Count -ne 2) {
+    $fail += ("me-> strip sites in the two roster owners = " + $stripAll.Count +
+              " (want exactly 2 = one per family)")
+}
+$stripFiles = @($stripAll | ForEach-Object { Split-Path -Leaf $_.Path } | Sort-Object -Unique)
+if (($stripFiles -join ',') -ne 'cgen_iface_vtbl.cpp,cgen_util_classtype.cpp') {
+    $fail += ("me-> strip lives in " + ($stripFiles -join ', ') +
+              " (want the new-style owner + the legacy owner; a 3rd file = a station strips it itself)")
+}
+$directAsk = @(Select-String -Path (Join-Path $backend "detail\stmt\cgen_setlet_set_prop.inc") `
+                          -Pattern 'knownIfaceVars_\s*\.\s*find\s*\(\s*targetLower')
+if ($directAsk.Count -ne 0) {
+    $fail += ("the Set station asks the legacy roster directly again (" + $directAsk.Count +
+              " sites) = 字段槽 (me->x) 问不中名册, 装填那一站落回裸拷贝 (实测 cl C2440)")
+}
+
+
 if ($fail.Count -gt 0) {
     Write-Host "IFACE-VIEW-AUTHORITY FAIL"
     foreach ($f in $fail) { Write-Host ("  - " + $f) }
     exit 1
 }
-Write-Host "IFACE-VIEW-AUTHORITY OK (1 formula site / 5 consumers / 6 literal files / 2 Set stations ask / 4 refSet calls / 4 view-shape consumers / 2 inline __iv_ files / 5 view AddRef sites in 3 files / 1 view property-read owner in 1 station + 3 roster ask sites in 2 files)"
+Write-Host "IFACE-VIEW-AUTHORITY OK (1 formula site / 5 consumers / 6 literal files / 2 Set stations ask / 4 refSet calls / 4 view-shape consumers / 2 inline __iv_ files / 5 view AddRef sites in 3 files / 1 view property-read owner in 1 station + 3 roster ask sites in 2 files / 2 me- prefix strips in 2 owner files + 0 direct roster asks in the Set station)"
 exit 0

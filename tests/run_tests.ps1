@@ -7291,19 +7291,31 @@ if ($Category -in @("all", "run", "vbp")) {
     # 两台真编真跑读数一字相同 (.build/k2571_k175_run.txt): K175-alpha=2（两发 Ping 各落 Alpha 的 vtbl）、
     # K175-beta=10（换一枚实现类后同一句 Ping 落 Beta 的 vtbl，×10）—— 认错 wrap 就得 0 或当场崩；
     # K175-t=15 = Beta.Twice(5)=3*5，即表达式路那一站在同一枚视图上也没漂。
+    # 第二百一十五刀把同一份产物再吃一档: 视图进**类字段槽** (`Private m_lv As IK175`) —— 改前三张脸
+    # (工厂 `me->m_lv = NULL` C2440 / 装填裸拷贝实例指针 C2440 / 属性读整枚结构体进 helper 首槽 C2172)
+    # 一台都编不过 ⇒ 这一档今天存量 0，但一有人写就报红。两台读数 K175-f=1100（自家实现类）与
+    # K175-fb=1200（同一格字段换装另一枚实现类）成对: 选错 wrap 时两条必有一条不是它自己的数。
     $k175Expected = @(
         "K175-alpha=2",
         "K175-beta=10",
         "K175-t=15",
+        "K175-f=1100",
+        "K175-fb=1200",
         "K175-DONE")
     Test-Vbp 'k175_viewstmt_station_d' "$Tests\k175_viewstmt\K175.vbp" $k175Expected
     Test-Vbp 'k175_viewstmt_station_d_x86' "$Tests\k175_viewstmt\K175.vbp" $k175Expected -Arch "x86"
     Test-EmitcShape "k175_viewstmt_shape" @("$Tests\k175_viewstmt\K175.vbp") @(
         'x.vtbl->Ping(x.obj);',
-        't = x.vtbl->Twice(x.obj, 5);')
+        't = x.vtbl->Twice(x.obj, 5);',
+        'me->m_lv = vb6_iface_IK175_wrap_K175Alpha((vb6_cls_K175Alpha_New()));  /* Set */',
+        'vb6_ret_NumViaField = me->m_lv.vtbl->Num(me->m_lv.obj);',
+        'memset(&me->m_lv, 0, sizeof(me->m_lv));')
     Test-EmitcAbsent "k175_viewstmt_com_fallback_gone" @("$Tests\k175_viewstmt\K175.vbp") @(
         'vb6_ComCall(x, L"Ping", NULL, 0)',
-        'vb6_ComVarFree((void*)vb6_ComCall(x')
+        'vb6_ComVarFree((void*)vb6_ComCall(x',
+        'me->m_lv = (vb6_cls_K175Alpha_New());  /* Set */',
+        'vb6_ComGetIntProp(me->m_lv, L"Num")',
+        'me->m_lv = NULL;')
     # <vbeclipse> 回归夹子 (k177_viewwith, 账 #305 第一百七十七刀 = 新账 #471 站D′): With 的**接收者**是一枚视图。
     # 改前那一格发 "void* _vb6_with_0 = (void*)x" —— 整枚值结构体 vb6_iface_<I> 进 void* 槽 = cl **C2440**，
     # 一发把整块 With 打死（于是体内每一档成员的那条红在错误清单里压根排不上号）。

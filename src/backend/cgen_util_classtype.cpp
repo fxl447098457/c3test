@@ -351,9 +351,21 @@ std::string CCodeGen::ifaceViewOfExpr(const ASTNode& expr) {
 // 账 #305 新账 #471 (第一百七十四刀): 名册那一问从此有**带名字**的那一档 —— For Each 那一站要拿
 // 接口名去拼「按运行期类名选中那一枚 wrap」的发码 (`legacyIfaceViewFromFn`)，而名字与 bool 必须
 // 出自同一次查表：上面那句问句从此是这一句的投影 (count → find，答案同源、名单还是那一张)。
+// 账 #305 第二百一十五刀 (字段档): 与**新式**那一位主人 `slotIvrefViewName` (第二百一十刀) 同一条
+// 补档 —— 类模块里裸写的字段成员读/成员写，站在那儿拿到的是**发射文本** `me-><字段>`，名册那一问
+// 只查裸名就永远问不中 (实测 legacy 那族字段槽四张脸: 读 = 结构体进 helper 首槽 C2172 / 装填 =
+// 裸拷贝实例指针 C2440 / 工厂初始化 = `me->m_lv = NULL` C2440 / 置空落哪一档都问不中同一张表)。
+// 只剥 `me->` **一层**前缀，且尾巴必须在名册里 (名册只由 `As <legacy 接口>` 的声明写入) ⇒ 普通类
+// 字段、局部同名、以及 `me->me->` 那种不可能的形状都不可能被我这条答成视图。
 std::string CCodeGen::slotLegacyIfaceViewName(const std::string& nameLower) const {
     auto it = knownIfaceVars_.find(nameLower);
-    return it == knownIfaceVars_.end() ? std::string() : it->second;
+    if (it != knownIfaceVars_.end()) return it->second;
+    static const std::string mePre = "me->";
+    if (nameLower.size() > mePre.size() && nameLower.compare(0, mePre.size(), mePre) == 0) {
+        auto itF = knownIfaceVars_.find(nameLower.substr(mePre.size()));
+        if (itF != knownIfaceVars_.end()) return itF->second;
+    }
+    return std::string();
 }
 
 bool CCodeGen::slotIsLegacyIfaceView(const std::string& nameLower) const {
