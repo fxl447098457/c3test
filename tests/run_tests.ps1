@@ -17,6 +17,16 @@ param(
     [int]$BasShardTotal = 1, # bas 分片总数 (供 CI 用多 runner 并行跑 bas 用例)
     [int]$VbpShard = 0,      # vbp 分片当前编号 (1..VbpShardTotal); 0=不分片整队跑
     [int]$VbpShardTotal = 1, # vbp 分片总数 (供 CI 用多 runner 并行跑 vbp 用例)
+    # compile 段的「静态对表」(census) 分片。这一段是 ~100 个纯扫源的检查, 不编译不跑程序,
+    # 实测占 Tests(compile) 那格 227s 里的 158s (10 例真编只占 17s) —— 而它们不经过
+    # Enter-VbpShard, 所以 -VbpShard 对这一格完全无效, 必须自成一个开关。
+    # 只给 compile 段用; 别的类别传了也不影响 (计数器根本不会动)。
+    [int]$StaticShard = 0,      # 静态 census 分片当前编号 (1..StaticShardTotal); 0=不分片整队跑
+    [int]$StaticShardTotal = 1, # 静态 census 分片总数
+    # 分片时**只有一片**该做那 10 例真编译 (test_comprehensive ×2 + P7 窗体 ×8)。
+    # 理由不是省 17s, 是 objcache 的键含 job 名 ⇒ 第二片拿不到第一片编出来的 obj, 会从零重编
+    # 那 65 个 RTL .c (~2.3 min), 比省下来的还多。所以非首片显式跳过真编。
+    [switch]$SkipRealCompile,
     # 单条用例「运行」阶段的墙钟预算 (秒)。5s 在 -Jobs 20 的并行编译下会误杀: 4 vCPU runner 上
     # 被 cl/link 压住时, 健康的小 exe 也可能 >5s 才跑完 (实测卡住的进程只有 15ms CPU、线程 Ready)。
     # 真挂 (模态框/死锁) 靠这个上限兜底; 超时时会把 CPU 时间/状态/最后一行输出写进日志, 见下两处。
@@ -214,6 +224,25 @@ if ($VbpShardTotal -gt 1) {
         exit 1
     }
     Write-Host "  (vbp shard ${VbpShard}/${VbpShardTotal})" -ForegroundColor Cyan
+}
+# --- compile 段「静态对表」的分片器 (见 param 里 $StaticShard 的注释) ---
+# 与 Enter-VbpShard 同一套取模口径, 但用**独立计数器**: 静态 census 与 vbp 用例是两条不相交的
+# 序列, 共用一个计数器会让"vbp 片数变了"顺手改掉静态分片的落点 (反过来的耦合同理)。
+# ⚠ 这里只负责"这一条归不归本片"; 判断点必须逐个套在 census 调用外面 —— 漏套的后果是
+#   **两片都跑它**(双跑, 只多花时间), 不会变成没人跑。这个失效方向是刻意选的: 漏一个检查
+#   比让门哑掉严重得多。
+$script:StaticCaseNo = 0
+function Enter-StaticShard {
+    if ($StaticShardTotal -le 1) { return $true }   # 不分片: 计数器都不必动
+    $slot = $script:StaticCaseNo++
+    return (($slot % $StaticShardTotal) -eq ($StaticShard - 1))
+}
+if ($StaticShardTotal -gt 1) {
+    if ($StaticShard -lt 1 -or $StaticShard -gt $StaticShardTotal) {
+        Write-Host "[ERROR] StaticShard 需在 1..StaticShardTotal" -ForegroundColor Red
+        exit 1
+    }
+    Write-Host "  (static census shard ${StaticShard}/${StaticShardTotal})" -ForegroundColor Cyan
 }
 # ai/022 B13c: 类型库 / COM 服务器表 / 接口 vtable ä¸条通道是否同值,
 # 取读数的助手单独一个文件（tests\tlb_identity.ps1）。它只用 $C3/$Tests/$OutDir,
@@ -9337,102 +9366,106 @@ if ($Category -in @("all", "compile")) {
     # 某个工程恰好 Declare 到它时才在链接期以 LNK2019 暴露 —— 那是门里"看运气"才发现的红。
     # 这里改成每次 compile 段都静态对一遍基线 (不编译、不跑程序)。
     Write-Host "--- Static Checks ---" -ForegroundColor Yellow
-    Test-DiStubCensus
-    Test-VbpFixtureCensus
-    Test-UcScaleUnitsCensus
-    Test-HostPseudoTableCensus
-    Test-AddressOfThunkSites
-    Test-FloatLiteralShape
-    Test-IntLiteralShape
-    Test-IntSuffixSites
-    Test-ScaleModeWriters
-    Test-VbpSourceExt
-    Test-ExtenderEmitChannel
-    Test-ExtenderPushPop
-    Test-ExtenderGlobalCensus
-    Test-FormatDateArgArm
-    Test-B433DateFormalAuthority
-    Test-B440SerialSplitAuthority
-    Test-B423IntervalPerBuiltin
-    Test-B436FdtBounds
-    Test-NoLocaleNeedles
-    Test-B438VoidParamCensus
-    Test-B437FormatLeadingGroup
-    Test-B439FormatUseParens
-    Test-B442DateaddInterval
-    Test-B425DateserialDomain
-    Test-B424DatedPartParams
-    Test-ControlDC
-    Test-SaAccess
-    Test-BitwiseAuthority
-    Test-BodyDeclShape
-    Test-CaseIsShape
-    Test-DocHostAuthority
-    Test-RtlNakedNames
-    Test-RtlResourceIds
-    Test-BuiltinSlotReturns
-    Test-BuiltinOptDefaults
-    Test-RtlProtoArity
-    Test-RsRecordsetShape
-    Test-SbPanelHm
-    Test-Ps51JoinPath
-    Test-NoRawTab
-    Test-UcArrayEventSites
-    Test-SubclassSlotSites
-    Test-CtrlArrayMemberSites
-    Test-CtrlPropTypeAuthority
-    Test-FormDrawState
-    Test-ComPropTypeAuthority
-    Test-ComSigCollisionPolicy
-    Test-BuiltinConstAuthority
-    Test-TestHelperIntegrity
-    Test-ModuleOrderAuthority
-    Test-ManifestCoverage
-    Test-RtlEmbedded
-    Test-ComSigFieldDefaults
-    Test-DiagIdExclusivity
-    Test-ProjectConstVisibility
-    Test-BuiltinGlobalObjects
-    Test-FormPseudoTable
-    Test-ProjectFormNames
+    if (Enter-StaticShard) { Test-DiStubCensus }
+    if (Enter-StaticShard) { Test-VbpFixtureCensus }
+    if (Enter-StaticShard) { Test-UcScaleUnitsCensus }
+    if (Enter-StaticShard) { Test-HostPseudoTableCensus }
+    if (Enter-StaticShard) { Test-AddressOfThunkSites }
+    if (Enter-StaticShard) { Test-FloatLiteralShape }
+    if (Enter-StaticShard) { Test-IntLiteralShape }
+    if (Enter-StaticShard) { Test-IntSuffixSites }
+    if (Enter-StaticShard) { Test-ScaleModeWriters }
+    if (Enter-StaticShard) { Test-VbpSourceExt }
+    if (Enter-StaticShard) { Test-ExtenderEmitChannel }
+    if (Enter-StaticShard) { Test-ExtenderPushPop }
+    if (Enter-StaticShard) { Test-ExtenderGlobalCensus }
+    if (Enter-StaticShard) { Test-FormatDateArgArm }
+    if (Enter-StaticShard) { Test-B433DateFormalAuthority }
+    if (Enter-StaticShard) { Test-B440SerialSplitAuthority }
+    if (Enter-StaticShard) { Test-B423IntervalPerBuiltin }
+    if (Enter-StaticShard) { Test-B436FdtBounds }
+    if (Enter-StaticShard) { Test-NoLocaleNeedles }
+    if (Enter-StaticShard) { Test-B438VoidParamCensus }
+    if (Enter-StaticShard) { Test-B437FormatLeadingGroup }
+    if (Enter-StaticShard) { Test-B439FormatUseParens }
+    if (Enter-StaticShard) { Test-B442DateaddInterval }
+    if (Enter-StaticShard) { Test-B425DateserialDomain }
+    if (Enter-StaticShard) { Test-B424DatedPartParams }
+    if (Enter-StaticShard) { Test-ControlDC }
+    if (Enter-StaticShard) { Test-SaAccess }
+    if (Enter-StaticShard) { Test-BitwiseAuthority }
+    if (Enter-StaticShard) { Test-BodyDeclShape }
+    if (Enter-StaticShard) { Test-CaseIsShape }
+    if (Enter-StaticShard) { Test-DocHostAuthority }
+    if (Enter-StaticShard) { Test-RtlNakedNames }
+    if (Enter-StaticShard) { Test-RtlResourceIds }
+    if (Enter-StaticShard) { Test-BuiltinSlotReturns }
+    if (Enter-StaticShard) { Test-BuiltinOptDefaults }
+    if (Enter-StaticShard) { Test-RtlProtoArity }
+    if (Enter-StaticShard) { Test-RsRecordsetShape }
+    if (Enter-StaticShard) { Test-SbPanelHm }
+    if (Enter-StaticShard) { Test-Ps51JoinPath }
+    if (Enter-StaticShard) { Test-NoRawTab }
+    if (Enter-StaticShard) { Test-UcArrayEventSites }
+    if (Enter-StaticShard) { Test-SubclassSlotSites }
+    if (Enter-StaticShard) { Test-CtrlArrayMemberSites }
+    if (Enter-StaticShard) { Test-CtrlPropTypeAuthority }
+    if (Enter-StaticShard) { Test-FormDrawState }
+    if (Enter-StaticShard) { Test-ComPropTypeAuthority }
+    if (Enter-StaticShard) { Test-ComSigCollisionPolicy }
+    if (Enter-StaticShard) { Test-BuiltinConstAuthority }
+    if (Enter-StaticShard) { Test-TestHelperIntegrity }
+    if (Enter-StaticShard) { Test-ModuleOrderAuthority }
+    if (Enter-StaticShard) { Test-ManifestCoverage }
+    if (Enter-StaticShard) { Test-RtlEmbedded }
+    if (Enter-StaticShard) { Test-ComSigFieldDefaults }
+    if (Enter-StaticShard) { Test-DiagIdExclusivity }
+    if (Enter-StaticShard) { Test-ProjectConstVisibility }
+    if (Enter-StaticShard) { Test-BuiltinGlobalObjects }
+    if (Enter-StaticShard) { Test-FormPseudoTable }
+    if (Enter-StaticShard) { Test-ProjectFormNames }
 
-    Test-EmitcArtifactCaliber
-    Test-CtrlGeomCache
-    Test-FloatToIntRound
-    Test-FixtureTimerClose
-    Test-VariantCmpBoxing
-    Test-RunBudget
-    Test-VariantI8Coverage
-    Test-VariantSlotStore
-    Test-ImplicitCstrStation
-    Test-ParamArrayReclaim
-    Test-BstrBorrowSlot
-    Test-EventHandlerNames
-    Test-UcInstanceExit
-    Test-StaticSentinelRegistration
-    Test-QuitPumpInvariant
-    Test-ComMarkerWriteSites
-    Test-SetRhsObjectContext
-    Test-UdtMemberDims
-    Test-ComServerErrorFrame
-    Test-ProjClassScanBound
-    Test-ObjectSlotBoxing
-    Test-CrossmodUdtMembers
-    Test-LegacyViewArgOwners
-    Test-LegacySlotKeyOwners
-    Test-BoxTempReclaim
-    Test-IfaceViewAuthority
-    Test-OwnedTempKeeps
-    Test-OwnedTempSemantics
-    Test-OwnedTempReclaim
-    Test-ClassRefcountAuthority
-    Test-ConvStrictParse
-    Test-DateConv
-    Test-IsPredText
-    Test-TimeSplit
-    Test-DatePartArms
+    if (Enter-StaticShard) { Test-EmitcArtifactCaliber }
+    if (Enter-StaticShard) { Test-CtrlGeomCache }
+    if (Enter-StaticShard) { Test-FloatToIntRound }
+    if (Enter-StaticShard) { Test-FixtureTimerClose }
+    if (Enter-StaticShard) { Test-VariantCmpBoxing }
+    if (Enter-StaticShard) { Test-RunBudget }
+    if (Enter-StaticShard) { Test-VariantI8Coverage }
+    if (Enter-StaticShard) { Test-VariantSlotStore }
+    if (Enter-StaticShard) { Test-ImplicitCstrStation }
+    if (Enter-StaticShard) { Test-ParamArrayReclaim }
+    if (Enter-StaticShard) { Test-BstrBorrowSlot }
+    if (Enter-StaticShard) { Test-EventHandlerNames }
+    if (Enter-StaticShard) { Test-UcInstanceExit }
+    if (Enter-StaticShard) { Test-StaticSentinelRegistration }
+    if (Enter-StaticShard) { Test-QuitPumpInvariant }
+    if (Enter-StaticShard) { Test-ComMarkerWriteSites }
+    if (Enter-StaticShard) { Test-SetRhsObjectContext }
+    if (Enter-StaticShard) { Test-UdtMemberDims }
+    if (Enter-StaticShard) { Test-ComServerErrorFrame }
+    if (Enter-StaticShard) { Test-ProjClassScanBound }
+    if (Enter-StaticShard) { Test-ObjectSlotBoxing }
+    if (Enter-StaticShard) { Test-CrossmodUdtMembers }
+    if (Enter-StaticShard) { Test-LegacyViewArgOwners }
+    if (Enter-StaticShard) { Test-LegacySlotKeyOwners }
+    if (Enter-StaticShard) { Test-BoxTempReclaim }
+    if (Enter-StaticShard) { Test-IfaceViewAuthority }
+    if (Enter-StaticShard) { Test-OwnedTempKeeps }
+    if (Enter-StaticShard) { Test-OwnedTempSemantics }
+    if (Enter-StaticShard) { Test-OwnedTempReclaim }
+    if (Enter-StaticShard) { Test-ClassRefcountAuthority }
+    if (Enter-StaticShard) { Test-ConvStrictParse }
+    if (Enter-StaticShard) { Test-DateConv }
+    if (Enter-StaticShard) { Test-IsPredText }
+    if (Enter-StaticShard) { Test-TimeSplit }
+    if (Enter-StaticShard) { Test-DatePartArms }
     Test-FormatAmPm
-    Test-EmittedDeclared
+    if (Enter-StaticShard) { Test-EmittedDeclared }
+    # 这 4 条**不包**入 Enter-StaticShard: 它们各自的检查脚本里有一条「本哨兵在 runner 里是
+    # 独占一行的裸调用」的规则(R5/R7 sentinel called, 其中两条还把行尾钉成空白类) —— 包进
+    # if 之后行首就不是裸调用了, 判据当场红。代价是这 4 条每片都跑一次(双跑, 各约 2s)。
+    # (注释里刻意不写脚本名: 那些脚本另有一条「自己必须在本文件被登记恰一次」的规则。)
     Test-FormatDateTokens
     Test-GeneralDateOutlets
     Test-DateSerialTag
@@ -9444,34 +9477,40 @@ if ($Category -in @("all", "compile")) {
     # 账 #78: 这两趟以前被同名助手遮成了只发码（见 Test-CodegenOk 上面那段）。本轮把它们接回
     # 构建那枚，并实测这 10 份夹具在今天的编译器上 10/10 都真出 exe（rc=0、零条 error C，
     # 见 ai/C3_FIX_HANDOFF.md §B98）⇒ 恢复构建不会带进假红。
-    Write-Host "--- Compile Tests ---" -ForegroundColor Yellow
+    # 分片时只有首片做这 10 例真编：objcache 的键含 job 名，第二片拿不到第一片编出来的 obj，
+    # 会从零重编那 65 个 RTL .c（~2.3 min），比省下的 17s 还多。理由见 param 里 $SkipRealCompile。
+    if (-not $SkipRealCompile) {
+        Write-Host "--- Compile Tests ---" -ForegroundColor Yellow
     
-    Test-Compile "test_comprehensive" "$Tests\test_comprehensive.bas"
-    Test-Compile "test_comprehensive2" "$Tests\test_comprehensive2.bas"
-    Write-Host ""
+        Test-Compile "test_comprehensive" "$Tests\test_comprehensive.bas"
+        Test-Compile "test_comprehensive2" "$Tests\test_comprehensive2.bas"
+        Write-Host ""
     
-    # --- P7 窗体测试 (GUI 验证: 窗体正常加载即可) ---
-    Write-Host "--- Form Compile Tests (P7) ---" -ForegroundColor Yellow
+        # --- P7 窗体测试 (GUI 验证: 窗体正常加载即可) ---
+        Write-Host "--- Form Compile Tests (P7) ---" -ForegroundColor Yellow
     
-    $formTests = @(
-        "test_form\empty_form.frm",
-        "test_form\form_test_p74.frm",
-        "form_test_p75.frm",
-        "form_test_p76.frm",
-        "form_test_p78.frm",
-        "form_test_p79.frm",
-        "form_test_m8.frm",
-        "form_mdi_parent.frm"
-    )
+        $formTests = @(
+            "test_form\empty_form.frm",
+            "test_form\form_test_p74.frm",
+            "form_test_p75.frm",
+            "form_test_p76.frm",
+            "form_test_p78.frm",
+            "form_test_p79.frm",
+            "form_test_m8.frm",
+            "form_mdi_parent.frm"
+        )
     
-    foreach ($t in $formTests) {
-        $path = Join-Path $Tests $t
-        if (Test-Path $path) {
-            $name = [System.IO.Path]::GetFileNameWithoutExtension($t)
-            Test-Compile $name $path
+        foreach ($t in $formTests) {
+            $path = Join-Path $Tests $t
+            if (Test-Path $path) {
+                $name = [System.IO.Path]::GetFileNameWithoutExtension($t)
+                Test-Compile $name $path
+            }
         }
+        Write-Host ""
+    } else {
+        Write-Host "--- Compile Tests --- (skipped: this shard does not own the real builds)" -ForegroundColor DarkGray
     }
-    Write-Host ""
 }
 
 if ($Category -in @("all", "syntax")) {

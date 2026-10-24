@@ -364,8 +364,21 @@ jobs:
           - category: vbp
             shard: 12
             shardArgs: "-VbpShard 12 -VbpShardTotal 12"
+          # compile 拆两格（2026-10-24 第三刀）。读数依据 run 40046664271（vbp 已到 12 片的
+          # 那一轮）：vbp 最重降到 191s，而 **Tests (compile) 227s 接手成了新瓶颈** —— 这一格
+          # 224s 里的构成是「~100 个静态 census 158s + 10 例真编 17s + 固定开销」，跟名字给人的
+          # 印象正好相反。census 是纯扫源的检查、互不依赖，所以按 $StaticShard 对半切。
+          # ⚠ 真编只归片 1（-SkipRealCompile 反之）：objcache 的键含 job 名，片 2 拿不到片 1
+          #   编出来的 obj，会从零重编 65 个 RTL .c（~2.3min），比省下的 17s 还多。
+          # 代价: job 总数 20 → 21，超出免费公共仓并发 20 一个 —— 但 Build(20s)/smoke(42s)/
+          #   syntax(37s) 都很快让位，第 21 个 job 立刻能被调度，不涨墙钟。
+          # 另注: 片 1 的 objcache 键从 `compile` 变成 `compile1` ⇒ **首轮是冷的**，判据只认第二轮。
           - category: compile
-            shardArgs: ""
+            shard: 1
+            shardArgs: "-StaticShard 1 -StaticShardTotal 2"
+          - category: compile
+            shard: 2
+            shardArgs: "-StaticShard 2 -StaticShardTotal 2 -SkipRealCompile"
           - category: syntax
             shardArgs: ""
           - category: asm
@@ -400,6 +413,9 @@ jobs:
       # 但 RTL 没动"那一档（仍能命中原 obj；只有 RTL 真变了才重编）。
       # 路径是 GitHub 托管 Windows runner 的固定用户目录；万一哪天换了用户名，也只是 cache miss（不判红）。
       - name: Cache C3 incremental obj store (per-job, content-addressed)
+        # compile 片 2 只跑静态 census、一例都不真编 ⇒ 它不需要 obj store，跳过免得白恢复
+        # 一份 15MB 的空 store（也更省 cache 配额）。其余格子照旧。
+        if: ${{ !(matrix.category == 'compile' && matrix.shard == 2) }}
         uses: actions/cache@v6
         with:
           path: C:\Users\runneradmin\AppData\Local\C3\objcache
