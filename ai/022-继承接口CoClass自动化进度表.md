@@ -6,7 +6,17 @@
 
 OPEN_LOCAL_DIVERGENCE: **已收口（2026-09-27 入夜 = C29-MV-d）** —— 本地 `ctrlmonthview` 的 MV24/MV25/MV30 三条红既不是"本地环境/增量缓存"、也不是"OS 版本相关"，而是**挂钟相关**：comctl v6 把当前时间混进 `MCM_GETCURSEL` 的负载里（日没错、零头 0.765），`CLng` 下午进位、上午舍掉 ⇒ 本机下午一直红、CI 跑在上午一直绿。修法与全部读数见 029 §九 C29-MV-d 那一格。留下的一般式：**日期面判据按 `CLng` / `=` 比之前，产品读数必须归成整数日**，否则同一棵树的判据随时段翻脸，而门只会读到"上午那一半"。
 STATUS: IDLE             # NOT_STARTED | DESIGN | BUSY | IDLE | ALL_DONE
-LAST_RUN: 2026-10-24T09:35:00+08:00 **第一百九十五刀已收线（账 #305 `CByte(<现造 BSTR>)` = 补文本解析腿 + 自造串先落 `_own_N` 收回）**：`dac3e48e` → 门 **#904** = run 40044645228 / head `dac3e48e` / attempt 1 / **十九格**逐格 completed+success
+LAST_RUN: 2026-10-24T12:10:00+08:00 **第一百九十七刀已收线（账 #305 属性写的值槽档位收成一处主人 writeValArgForParamSlot）**：`3db148eb` → 门 **#908** = run 40059324584 / head `3db148eb` / attempt 1 / **二十一格**逐格 completed+success
+—— **一句话范围**：Pattern C/D2 属性写的值槽那一问住着两半（Let 臂带解箱表 / Set 臂只有一条「语义 Variant ⇒ 装箱」），两半都不问**槽的 C 型** ⇒ 多装（VbEclipse ucButton `As Picture` 的 void* 槽被喂 vb6_VARIANT）与少装（类体内 `Set Pic = GetV()`）同报 cl C2172「实参不是指针: 参数 2」。
+—— **修法**：三档按定义侧那份 C 槽型排 —— 类槽原样 / 槽真是 vb6_VARIANT 才装箱 / 具体槽按那张只此一份的解箱表提取（泛对象槽由 C 型先答，并在这一档补问 `isDefinitelyVariantExpr`）；rev9 的「ByRef 对象槽交槽地址」搬到两臂之后。
+—— **判据**：新夹具 k3122 两架构三行逐字节相同 + 两头发码针（shape 2 / ABSENT 2）；新哨兵 `check_prop_write_value_slot`（第 100 道）已登记、拿假改动验过能红；**清单 522 存量行零移动**、CI 那台复算与本机登记逐行同；**VbEclipse cl 错 1→0，该工程第一次进链接期**。下一格 = 链接期两族（族A `vb6_lwa_RtlMoveMemory` 落点、族B 接口档类模块从不铸 `vb6_cls_IScheme_AddRef/_Release`，量已入账）。
+
+# 上一轮（2026-10-24T10:25:00+08:00，原样留档）= LAST_RUN: 2026-10-24T10:25:00+08:00 **第一百九十六刀已收线（账 #305 ByRef ivref 实参站不再多剥一层 `->__iv_I`）**：`0f7a6e44` → 门 **#907** = run 40053178047 / head `0f7a6e44` / attempt 1 / **二十一格**逐格 completed+success
+—— **一句话范围**：腿⑤/类槽站已按形参 C 型交出 `&vb6_argtmp_vb6_ivref_I_N`，Fix<vbeclipse> 的 ivref 段又当类实例剥一层 ⇒ C2039+C2198（VbEclipse ucPerspective.SetScheme）。
+—— **修法**：ivref 段条件再加 `argVal.rfind("&vb6_argtmp_", 0) != 0`；ByVal 那一形（`&((c)->__iv_I)`）不动。
+—— **判据**：新夹具 k3100 两架构 3 行逐字节相同（AB-OFF 两架构各 2 条 C2039/C2198）；**VbEclipse 真编译 3→1**（只剩族②）；99 道全绿；清单 522 行（新增 2、移动 0）。另记两个新开放项（类实参 ByRef 临时量/所有权；ByVal ivref 体内成员调用）。下一格 = 族② Picture Set。
+
+# 上一轮（2026-10-24T10:25:00+08:00，原样留档）= LAST_RUN: 2026-10-24T09:35:00+08:00 **第一百九十五刀已收线（账 #305 `CByte(<现造 BSTR>)` = 补文本解析腿 + 自造串先落 `_own_N` 收回）**：`dac3e48e` → 门 **#904** = run 40044645228 / head `dac3e48e` / attempt 1 / **十九格**逐格 completed+success
 —— **一句话范围**：数值换算站「实参是串 ⇒ 先 `vb6_NumVal`」的白名单漏了拼接新出口 `vb6_BSTR_ConcatFree(` ⇒ `CByte("&H" & Mid(…))` 按指针值转 double、现造串无人放（VbEclipse 1 条）。
 —— **修法**：白名单补该前缀；BSTR 分支包 `vb6_NumVal` 之前先 `hoistOwnedTempSlot` 落 `_own_N`（语句末收回）。
 —— **判据**：k3060 `K3060-b=65` 两架构；形状 3 + ABSENT 3；VbEclipse 4→3；99 道全绿；清单 520 行（改写 4）。门次插曲：#902 的 ABSENT 针被夹具自身合法行命中 ⇒ 改成病灶专属 `= leak;`。下一格 = 族② Picture Set / 族④ ivref 薄指针（量已入账）。

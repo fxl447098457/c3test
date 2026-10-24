@@ -1704,6 +1704,21 @@ function Test-ObjectSlotBoxing {
 }
 
 # 账 #305 §B217 (第一百二十一刀): ByRef Variant 实参那枚临时槽的语句末收回只许一处登记 + 顺序必须晚于最后一次引用
+# 账 #305 第一百九十七刀: 属性写的值槽档位只许一处回答 (writeValArgForParamSlot) + 解箱表只许一份
+function Test-PropWriteValueSlot {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] prop_write_value_slot ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\check_prop_write_value_slot.ps1" 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        $out | Select-Object -First 8 | ForEach-Object { Write-Host "  $_" }
+    }
+}
+
 function Test-BoxTempReclaim {
     $script:total++
     Write-Host -NoNewline "  [STATIC] box_temp_reclaim ... "
@@ -7319,6 +7334,40 @@ if ($Category -in @("all", "run", "vbp")) {
         'vb6_cls_C3060_AddRef(leak)',
         'vb6_CByte(_own_'
     )
+    # 账 #305 第一百九十六刀: ByRef ivref 形参的实参站 —— 腿⑤ 已按形参 C 型
+    # (`vb6_ivref_I**`) 交出 `&vb6_argtmp_vb6_ivref_I_N`, Fix<vbeclipse> 那一段又按
+    # 「类实例实参」剥一层 `->__iv_I` ⇒ C2039 + C2198。夹具三发: MakeI() (运行的那一发,
+    # 腿⑤ 交回的是拥有型引用)、ByVal 一站 (原 `->__iv_I` 路径必须是正解)、c 类实参那一发
+    # (编译面靶子; 运行期由 g_skip 跳过 —— 类实参 ByRef 的临时量初始化是另一缺陷)。
+    $k3100Expected = @("K3100-h=7", "K3100-v=1", "K3100-DONE")
+    Test-Vbp 'k3100_ivref_arg' "$Tests\k3100_ivref_arg\K3100.vbp" $k3100Expected
+    Test-Vbp 'k3100_ivref_arg_x86' "$Tests\k3100_ivref_arg\K3100.vbp" $k3100Expected -Arch "x86"
+    Test-EmitcShape "k3100_ivref_arg_shape" @("$Tests\k3100_ivref_arg\K3100.vbp") @(
+        'vb6_mdl3100_Take(&vb6_argtmp_vb6_ivref_IK3100_',
+        'vb6_mdl3100_TakeVal((vb6_ivref_IK3100*)&((c)->__iv_IK3100));'
+    )
+    Test-EmitcAbsent "k3100_ivref_arg_lesion" @("$Tests\k3100_ivref_arg\K3100.vbp") @(
+        '(vb6_ivref_IK3100*)&((&vb6_argtmp_'
+    )
+    # 账 #305 第一百九十七刀: Pattern C/D2 属性写的**值槽档位**收成一处主人
+    # writeValArgForParamSlot。夹具打在泛对象槽 (C 侧 void*) 那一档的两个方向:
+    #   · RHS 是整只 vb6_VARIANT (工程内 `Function GetV() As Variant`) ⇒ 必须解箱
+    #     vb6_VariantToObjectVal —— 修前裸拼 = cl C2172「实参不是指针: 参数 2」(两台同红);
+    #   · RHS 本来就是对象指针 (类实例局部) ⇒ 必须原样, 谁都不许再包一层。
+    # 另一头 (VbEclipse ucButton `Set Picture = PropBag.ReadProperty(...)`) 是这一档的反方向:
+    # 语义档被折成 Variant 而 C 槽是 void* 时**不许装箱** —— 那一发交 vb6_ComCallObject(...)
+    # 原样就对一个 void*, 包成 vb6_VARIANT 才是同一声 C2172。
+    $k3122Expected = @("K3122-p=False", "K3122-r=False", "K3122-DONE")
+    Test-Vbp 'k3122_own_prop_set' "$Tests\k3122_own_prop_set\K3122.vbp" $k3122Expected
+    Test-Vbp 'k3122_own_prop_set_x86' "$Tests\k3122_own_prop_set\K3122.vbp" $k3122Expected -Arch "x86"
+    Test-EmitcShape "k3122_own_prop_set_shape" @("$Tests\k3122_own_prop_set\K3122.vbp") @(
+        'vb6_P3122_prop_set_Pic((void*)me, vb6_VariantToObjectVal(vb6_P3122_GetV((void*)me)));',
+        'vb6_P3122_prop_set_Pic((void*)me, o);'
+    )
+    Test-EmitcAbsent "k3122_own_prop_set_lesion" @("$Tests\k3122_own_prop_set\K3122.vbp") @(
+        'vb6_P3122_prop_set_Pic((void*)me, vb6_P3122_GetV',
+        'vb6_P3122_prop_set_Pic((void*)me, vb6_VariantFromValue'
+    )
     # <vbeclipse> 回归夹子 (k178_viewprop, 账 #305 第一百七十八刀 = 新账 #474 站F 的**读侧**那一半):
     # 视图的属性读。修前 With 内外都落晚绑定 helper 的首枚 `void*` 槽 = cl C2172 (两台同红、没有 exe);
     # 修后同一位读者只把**访问路**换成 `.vtbl-><槽>(….obj)` —— 类型那一问不自答, 拿站点本来要发的那一发
@@ -9446,6 +9495,7 @@ if ($Category -in @("all", "compile")) {
     if (Enter-StaticShard) { Test-ComServerErrorFrame }
     if (Enter-StaticShard) { Test-ProjClassScanBound }
     if (Enter-StaticShard) { Test-ObjectSlotBoxing }
+    if (Enter-StaticShard) { Test-PropWriteValueSlot }
     if (Enter-StaticShard) { Test-CrossmodUdtMembers }
     if (Enter-StaticShard) { Test-LegacyViewArgOwners }
     if (Enter-StaticShard) { Test-LegacySlotKeyOwners }
