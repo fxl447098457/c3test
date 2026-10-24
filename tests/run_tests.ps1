@@ -7286,7 +7286,7 @@ if ($Category -in @("all", "run", "vbp")) {
         'bt = vb6_CByte(vb6_NumVal(_own_'
     )
     Test-EmitcAbsent "k3060_set_variant_lesion" @("$Tests\k3060_setvariant\K3060.vbp") @(
-        'vb6_cls_C3060* __clsold',
+        '= leak;',
         'vb6_cls_C3060_AddRef(leak)',
         'vb6_CByte(_own_'
     )
