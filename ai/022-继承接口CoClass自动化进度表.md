@@ -6,7 +6,12 @@
 
 OPEN_LOCAL_DIVERGENCE: **已收口（2026-09-27 入夜 = C29-MV-d）** —— 本地 `ctrlmonthview` 的 MV24/MV25/MV30 三条红既不是"本地环境/增量缓存"、也不是"OS 版本相关"，而是**挂钟相关**：comctl v6 把当前时间混进 `MCM_GETCURSEL` 的负载里（日没错、零头 0.765），`CLng` 下午进位、上午舍掉 ⇒ 本机下午一直红、CI 跑在上午一直绿。修法与全部读数见 029 §九 C29-MV-d 那一格。留下的一般式：**日期面判据按 `CLng` / `=` 比之前，产品读数必须归成整数日**，否则同一棵树的判据随时段翻脸，而门只会读到"上午那一半"。
 STATUS: IDLE             # NOT_STARTED | DESIGN | BUSY | IDLE | ALL_DONE
-LAST_RUN: 2026-10-24T08:05:00+08:00 **第一百九十四刀已收线（账 #305 `Set <As Variant>` 局部不再被 stale 类表拖进工程类腿）**：`52ae5a10` → 门 **#900** = run 40039435125 / head `52ae5a10` / attempt 1 / **十六格**逐格 completed+success
+LAST_RUN: 2026-10-24T09:35:00+08:00 **第一百九十五刀已收线（账 #305 `CByte(<现造 BSTR>)` = 补文本解析腿 + 自造串先落 `_own_N` 收回）**：`dac3e48e` → 门 **#904** = run 40044645228 / head `dac3e48e` / attempt 1 / **十九格**逐格 completed+success
+—— **一句话范围**：数值换算站「实参是串 ⇒ 先 `vb6_NumVal`」的白名单漏了拼接新出口 `vb6_BSTR_ConcatFree(` ⇒ `CByte("&H" & Mid(…))` 按指针值转 double、现造串无人放（VbEclipse 1 条）。
+—— **修法**：白名单补该前缀；BSTR 分支包 `vb6_NumVal` 之前先 `hoistOwnedTempSlot` 落 `_own_N`（语句末收回）。
+—— **判据**：k3060 `K3060-b=65` 两架构；形状 3 + ABSENT 3；VbEclipse 4→3；99 道全绿；清单 520 行（改写 4）。门次插曲：#902 的 ABSENT 针被夹具自身合法行命中 ⇒ 改成病灶专属 `= leak;`。下一格 = 族② Picture Set / 族④ ivref 薄指针（量已入账）。
+
+# 上一轮（2026-10-24T09:35:00+08:00，原样留档）= LAST_RUN: 2026-10-24T08:05:00+08:00 **第一百九十四刀已收线（账 #305 `Set <As Variant>` 局部不再被 stale 类表拖进工程类腿）**：`52ae5a10` → 门 **#900** = run 40039435125 / head `52ae5a10` / attempt 1 / **十六格**逐格 completed+success
 —— **一句话范围**：knownClassVars_ 全程不清空，别的过程同名的类局部漏进 `As Variant` 局部 ⇒ Set 发 __clsold/AddRef（VbEclipse 30 条）。
 —— **修法**：`cgen_setlet_set_rhs.inc` 腿②链入口加 `targetIsVariant` 闸 —— 只发裸赋值；腿②/②'/下标三臂不动。
 —— **判据**：新夹具 k3060 两架构 `vt=9`（形状 2 + ABSENT 2）；VbEclipse 34→4；99 道全绿；清单 520 行（新增 2）。下一格 = VbEclipse 余下三族（Picture Set / CByte(BSTR) / ivref，量已入账）。
