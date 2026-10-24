@@ -18,5 +18,18 @@ Public Sub Main()
     Dim leak As Variant
     Set leak = LateObj()
     Debug.Print "K3060-vt=" & VarType(leak)
+    ' 第一百九十五刀: Set 进 As Object 属性 —— 形参 C 型是 void*, 只许裸交 ComCallObject
+    Dim c As C3060
+    Dim o As Object
+    Set c = New C3060
+    Set c.Ref = LateObj()
+    Set o = c.Ref
+    Debug.Print "K3060-ref=" & (o Is Nothing)
+    ' 第一百九十五刀: CByte(BSTR) —— 现造串要按文本解析, 且语句末收回
+    Dim hx As String
+    hx = "41"
+    Dim bt As Byte
+    bt = CByte("&H" & Mid(hx, 1, 2))
+    Debug.Print "K3060-b=" & bt
     Debug.Print "K3060-DONE"
 End Sub

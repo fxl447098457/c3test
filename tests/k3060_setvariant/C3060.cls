@@ -14,3 +14,12 @@ Attribute VB_Exposed = False
 Option Explicit
 
 Public Value As Long
+Private m_ref As Object
+
+Public Property Set Ref(ByVal v As Object)
+    Set m_ref = v
+End Property
+
+Public Property Get Ref() As Object
+    Set Ref = m_ref
+End Property
