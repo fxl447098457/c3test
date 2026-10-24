@@ -63,6 +63,19 @@ jobs:
       #      ⇒ 本轮刚编的对象回不到 cache，下一轮接着 0 命中；runner 镜像滚动（编译器身份进 sccache
       #      自己的键）之后尤其明显。restore-keys 负责捡最近那一份。
       #   ② 把落地的 exe 一起缓存，免掉每轮一次不可复用的 `choco install`（ci_t0 上实测 54s）。
+      # ⚠ 顺序：缓存恢复必须排在 Install **之前**。放在其后的话，Install 那一步永远看不到上一轮的
+      #   tools/（还没被恢复出来），于是每轮都白装一次 choco（ci_t0 上实测 54s）。
+      - name: Cache sccache
+        if: steps.c3exe.outputs.cache-hit != 'true'
+        uses: actions/cache@v6
+        with:
+          path: |
+            ${{ runner.temp }}/sccache
+            ${{ runner.temp }}/sccache-bin
+          key: sccache-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: |
+            sccache-${{ runner.os }}-
+
       - name: Install sccache (best-effort)
         id: sccache
         if: steps.c3exe.outputs.cache-hit != 'true'
@@ -99,17 +112,6 @@ jobs:
         env:
           SCCACHE_DIR: ${{ runner.temp }}/sccache
           SCCACHE_CACHE_SIZE: 2G
-
-      - name: Cache sccache
-        if: steps.c3exe.outputs.cache-hit != 'true'
-        uses: actions/cache@v6
-        with:
-          path: |
-            ${{ runner.temp }}/sccache
-            ${{ runner.temp }}/sccache-bin
-          key: sccache-${{ runner.os }}-${{ github.run_id }}
-          restore-keys: |
-            sccache-${{ runner.os }}-
 
       - name: Build C3.exe from source (never ship a vendored binary)
         if: steps.c3exe.outputs.cache-hit != 'true'
@@ -312,30 +314,44 @@ jobs:
           - category: bas
             shard: 2
             shardArgs: "-BasShard 2 -BasShardTotal 2"
+          # 2026-10-24 提速（门 #898 后的读数 40035228642）: 关键路径 = Build 24s（c3exe 命中直接
+          # 跳过构建）+ max(vbp 八片) = 247s。vbp 8 → 11 片: 最慢一片按 247×8/11 ≈ 180s 摊薄。
+          # 上限取 11 而不是更多: 本 job 的 job 总数 = 11(vbp) + bas 2 + smoke/compile/syntax/asm 4
+          # + build + emit-manifest = 19, 顶到免费公共仓并发 20 的边（再多加就会排队, 墙钟反涨）。
+          # 且 emit-manifest 本身就 177s, 把 vbp 压到 180s 以下收益会被它接住 —— 下一刀该切它。
           - category: vbp
             shard: 1
-            shardArgs: "-VbpShard 1 -VbpShardTotal 8"
+            shardArgs: "-VbpShard 1 -VbpShardTotal 11"
           - category: vbp
             shard: 2
-            shardArgs: "-VbpShard 2 -VbpShardTotal 8"
+            shardArgs: "-VbpShard 2 -VbpShardTotal 11"
           - category: vbp
             shard: 3
-            shardArgs: "-VbpShard 3 -VbpShardTotal 8"
+            shardArgs: "-VbpShard 3 -VbpShardTotal 11"
           - category: vbp
             shard: 4
-            shardArgs: "-VbpShard 4 -VbpShardTotal 8"
+            shardArgs: "-VbpShard 4 -VbpShardTotal 11"
           - category: vbp
             shard: 5
-            shardArgs: "-VbpShard 5 -VbpShardTotal 8"
+            shardArgs: "-VbpShard 5 -VbpShardTotal 11"
           - category: vbp
             shard: 6
-            shardArgs: "-VbpShard 6 -VbpShardTotal 8"
+            shardArgs: "-VbpShard 6 -VbpShardTotal 11"
           - category: vbp
             shard: 7
-            shardArgs: "-VbpShard 7 -VbpShardTotal 8"
+            shardArgs: "-VbpShard 7 -VbpShardTotal 11"
           - category: vbp
             shard: 8
-            shardArgs: "-VbpShard 8 -VbpShardTotal 8"
+            shardArgs: "-VbpShard 8 -VbpShardTotal 11"
+          - category: vbp
+            shard: 9
+            shardArgs: "-VbpShard 9 -VbpShardTotal 11"
+          - category: vbp
+            shard: 10
+            shardArgs: "-VbpShard 10 -VbpShardTotal 11"
+          - category: vbp
+            shard: 11
+            shardArgs: "-VbpShard 11 -VbpShardTotal 11"
           - category: compile
             shardArgs: ""
           - category: syntax
