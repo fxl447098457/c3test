@@ -1705,6 +1705,20 @@ function Test-ObjectSlotBoxing {
 
 # 账 #305 §B217 (第一百二十一刀): ByRef Variant 实参那枚临时槽的语句末收回只许一处登记 + 顺序必须晚于最后一次引用
 # 账 #305 第一百九十七刀: 属性写的值槽档位只许一处回答 (writeValArgForParamSlot) + 解箱表只许一份
+function Test-DeclAliasGuard {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] decl_alias_guard ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\check_decl_alias_guard.ps1" 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        $out | Select-Object -First 8 | ForEach-Object { Write-Host "  $_" }
+    }
+}
+
 function Test-PropWriteValueSlot {
     $script:total++
     Write-Host -NoNewline "  [STATIC] prop_write_value_slot ... "
@@ -7368,6 +7382,28 @@ if ($Category -in @("all", "run", "vbp")) {
         'vb6_P3122_prop_set_Pic((void*)me, vb6_P3122_GetV',
         'vb6_P3122_prop_set_Pic((void*)me, vb6_VariantFromValue'
     )
+    # <vbeclipse> 回归夹子 (k3136_lwa_guard, 账 #305 第一百九十八刀 = 链接期族A): 同一个模块里
+    # 两条 Declare 指向同一枚 DLL 导出 —— 非别名路 (`Declare Sub RtlMoveMemory`) 与别名路
+    # (`Declare Sub CopyMemory ... Alias "RtlMoveMemory"`, VB6 的常见写法; 实物 = VbEclipse
+    # MagneticWnd.cls:120/:182)。修前别名路那**整块**被先发那条占下的 diGuard (钥匙 = 导出名)
+    # 吃掉, 于是全工程唯一一份 `static __inline vb6_lwa_RtlMoveMemory` 没了主人, 而调用点按别名
+    # 直发这个名字 —— cl 只报 C4013 (隐式声明是**警告**、不进错误日志), 到链接期才露出 LNK2019。
+    # 两台实测读数 (尺 `.local/k3136_verdict.txt`): AB-OFF = mdl3136.obj 各一声 LNK2019 +
+    # LNK1120 (x86 那台是修饰名 `_vb6_lwa_RtlMoveMemory`), AB-ON = rc=0 且两架构输出 3 行逐字节
+    # 相同 (131 = 65+66 走按名那条, 135 = 67+68 走别名那条 —— 两条路各自真的搬到了字节)。
+    $k3136Expected = @("K3136-a=131", "K3136-b=135", "K3136-DONE")
+    Test-Vbp 'k3136_lwa_guard' "$Tests\k3136_lwa_guard\K3136.vbp" $k3136Expected
+    Test-Vbp 'k3136_lwa_guard_x86' "$Tests\k3136_lwa_guard\K3136.vbp" $k3136Expected -Arch "x86"
+    Test-EmitcShape "k3136_lwa_guard_shape" @("$Tests\k3136_lwa_guard\K3136.vbp") @(
+        '#ifndef VB6_LWA_RtlMoveMemory_DEFINED',
+        '#define VB6_LWA_RtlMoveMemory_DEFINED',
+        'static __inline void __stdcall vb6_lwa_RtlMoveMemory(void* pDest, void* pSrc, intptr_t ByteLen) {'
+    )
+    Test-EmitcAbsent "k3136_lwa_guard_lesion" @("$Tests\k3136_lwa_guard\K3136.vbp") @(
+        '#define CopyMemory vb6_lw_RtlMoveMemory',
+        '#define RtlMoveMemory vb6_lwa_RtlMoveMemory',
+        'vb6_lwa_RtlMoveMemory(void* Destination'
+    )
     # <vbeclipse> 回归夹子 (k178_viewprop, 账 #305 第一百七十八刀 = 新账 #474 站F 的**读侧**那一半):
     # 视图的属性读。修前 With 内外都落晚绑定 helper 的首枚 `void*` 槽 = cl C2172 (两台同红、没有 exe);
     # 修后同一位读者只把**访问路**换成 `.vtbl-><槽>(….obj)` —— 类型那一问不自答, 拿站点本来要发的那一发
@@ -9496,6 +9532,7 @@ if ($Category -in @("all", "compile")) {
     if (Enter-StaticShard) { Test-ProjClassScanBound }
     if (Enter-StaticShard) { Test-ObjectSlotBoxing }
     if (Enter-StaticShard) { Test-PropWriteValueSlot }
+    if (Enter-StaticShard) { Test-DeclAliasGuard }
     if (Enter-StaticShard) { Test-CrossmodUdtMembers }
     if (Enter-StaticShard) { Test-LegacyViewArgOwners }
     if (Enter-StaticShard) { Test-LegacySlotKeyOwners }
