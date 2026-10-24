@@ -20,6 +20,9 @@
 #   ./build.sh --clean        reconfigure + build
 #   ./build.sh --dir <dir>    build a different build dir
 #   ./build.sh --ninja <args> pass extra args straight to ninja
+#
+# On a fresh clone git does not carry the executable bit (core.filemode is off
+# on Windows), so use `bash build.sh` if ./build.sh is not runnable.
 # =============================================================================
 set -euo pipefail
 
