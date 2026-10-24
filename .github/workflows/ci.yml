@@ -319,39 +319,51 @@ jobs:
           # 上限取 11 而不是更多: 本 job 的 job 总数 = 11(vbp) + bas 2 + smoke/compile/syntax/asm 4
           # + build + emit-manifest = 19, 顶到免费公共仓并发 20 的边（再多加就会排队, 墙钟反涨）。
           # 且 emit-manifest 本身就 177s, 把 vbp 压到 180s 以下收益会被它接住 —— 下一刀该切它。
+          #
+          # 2026-10-24 第二刀（真实 push 流 40044645228 的读数）: 11 片的实测是
+          #   226/219/205/186/182/177/164/159/148/143/135s, 合计 2012s、平均 182s、最重 226s。
+          # ⇒ 11 → 12 片: 理论 max 2012/12 ≈ 168s; 12 片正好把 job 总数填到 20（并发上限，不再加）。
+          # 这一步只动片数、不改 Enter-VbpShard 的取模口径 —— 加权切片需要一个"每用例代价表",
+          # 而 run_tests.ps1 里没有这张表（409 个槽靠 $script:VbpCaseNo++ 递增取模），凭空造表
+          # 反而要长期维护 ⇒ 不加片以外的手段只有"把轻格合并腾名额", 那一步等这轮读数再定。
+          # 附带提醒: 12 片意味着 #12 是新 key（objcache 按 job 分键）⇒ 它的**首轮**是冷的,
+          # 判据只认第二轮（见 ci_t0 侧同一条记录）。
           - category: vbp
             shard: 1
-            shardArgs: "-VbpShard 1 -VbpShardTotal 11"
+            shardArgs: "-VbpShard 1 -VbpShardTotal 12"
           - category: vbp
             shard: 2
-            shardArgs: "-VbpShard 2 -VbpShardTotal 11"
+            shardArgs: "-VbpShard 2 -VbpShardTotal 12"
           - category: vbp
             shard: 3
-            shardArgs: "-VbpShard 3 -VbpShardTotal 11"
+            shardArgs: "-VbpShard 3 -VbpShardTotal 12"
           - category: vbp
             shard: 4
-            shardArgs: "-VbpShard 4 -VbpShardTotal 11"
+            shardArgs: "-VbpShard 4 -VbpShardTotal 12"
           - category: vbp
             shard: 5
-            shardArgs: "-VbpShard 5 -VbpShardTotal 11"
+            shardArgs: "-VbpShard 5 -VbpShardTotal 12"
           - category: vbp
             shard: 6
-            shardArgs: "-VbpShard 6 -VbpShardTotal 11"
+            shardArgs: "-VbpShard 6 -VbpShardTotal 12"
           - category: vbp
             shard: 7
-            shardArgs: "-VbpShard 7 -VbpShardTotal 11"
+            shardArgs: "-VbpShard 7 -VbpShardTotal 12"
           - category: vbp
             shard: 8
-            shardArgs: "-VbpShard 8 -VbpShardTotal 11"
+            shardArgs: "-VbpShard 8 -VbpShardTotal 12"
           - category: vbp
             shard: 9
-            shardArgs: "-VbpShard 9 -VbpShardTotal 11"
+            shardArgs: "-VbpShard 9 -VbpShardTotal 12"
           - category: vbp
             shard: 10
-            shardArgs: "-VbpShard 10 -VbpShardTotal 11"
+            shardArgs: "-VbpShard 10 -VbpShardTotal 12"
           - category: vbp
             shard: 11
-            shardArgs: "-VbpShard 11 -VbpShardTotal 11"
+            shardArgs: "-VbpShard 11 -VbpShardTotal 12"
+          - category: vbp
+            shard: 12
+            shardArgs: "-VbpShard 12 -VbpShardTotal 12"
           - category: compile
             shardArgs: ""
           - category: syntax
