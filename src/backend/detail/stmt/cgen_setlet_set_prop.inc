@@ -702,10 +702,9 @@
                     // (NULL + offsetof)，紧接着的 AddRef 就会解引用它。New 的返回值恒非空，
                     // 而且对它做三目会让 _New() 求值两次（凭空多创建一个实例），所以守卫只加在
                     // "裸类变量"这条路上。
-                    const std::string ivField = "__iv_" + cIdent(v->name);
-                    const std::string ivPtr = isClassVar
-                        ? "((" + value + ") ? &(" + value + ")->" + ivField + " : NULL)"
-                        : "&(" + value + ")->" + ivField;
+                    // 账 #305 第二百零四刀: 这一发形状挪给唯一主人 ivrefInstanceViewExpr ——
+                    // 逐字节相同，站点不再自己拼 (`Set` 两站 + ByRef 实参站从此同一个答案)。
+                    const std::string ivPtr = ivrefInstanceViewExpr(v->name, value, isClassVar);
                     if (plainIvTarget) {
                         emitIvrefRefSet(target, v->name, ivPtr, isNewExpr);
                         return;

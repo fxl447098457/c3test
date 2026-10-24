@@ -146,6 +146,19 @@ std::string CCodeGen::ivrefCType(const std::string& typeName) {
     return v ? "vb6_ivref_" + cIdent(v->name) + "*" : std::string();
 }
 
+// 账 #305 第二百零四刀: 「一枚**工程类实例**怎么交进视图槽」那一发形状的唯一主人 ——
+// 视图 = 指向实例内那张接口的槽字段 (`&inst->__iv_<I>`)，把实例基址原样交出去，下一发
+// `->vt->` 读到的就是结构体首字段 (`__refcount`) = 拿整数当 vtable (实测 rc=139 / C4133)。
+// nullable = 右值可能是 Nothing (裸类变量 / 属性读) ⇒ 必须带 NULL 守卫：`&NULL->__iv_I` 算出来
+// 是个**非空**野地址 (D22-10 那条)；`New` 那一形恒非空，而且对它做三目会让 `_New()` 求值两次
+// (凭空多造一枚实例) ⇒ nullable=false。
+std::string CCodeGen::ivrefInstanceViewExpr(const std::string& ifaceName,
+                                           const std::string& instExpr, bool nullable) const {
+    const std::string field = "__iv_" + cIdent(ifaceName);
+    if (!nullable) return "&(" + instExpr + ")->" + field;
+    return "((" + instExpr + ") ? &(" + instExpr + ")->" + field + " : NULL)";
+}
+
 // 本模块（类）实现了哪些新式接口：按 `Implements` 书写序，同名去重
 std::vector<const IfaceView*> CCodeGen::ivImplementedIfaces(Module& module) {
     std::vector<const IfaceView*> out;

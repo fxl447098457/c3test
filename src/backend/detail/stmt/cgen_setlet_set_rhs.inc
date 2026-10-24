@@ -413,11 +413,10 @@
                 const bool new231 = !nil231 && value.find("_New(") != std::string::npos;
                 const bool cls231 = !nil231 && !new231 && knownClassVars_.count(vLow231) != 0;
                 if (new231 || cls231) {
-                    const std::string fld231 = "__iv_" + cIdent(clsOfSlot);
-                    const std::string ptr231 = cls231
-                        ? "((" + value + ") ? &(" + value + ")->" + fld231 + " : NULL)"
-                        : "&(" + value + ")->" + fld231;
-                    emitIvrefRefSet(target, clsOfSlot, ptr231, new231);
+                    // 账 #305 第二百零四刀: 这一发形状挪给唯一主人 ivrefInstanceViewExpr
+                    // (与实参站那一条腿同一个答案) —— 逐字节相同，只是不再在站点里现拼。
+                    emitIvrefRefSet(target, clsOfSlot,
+                                    ivrefInstanceViewExpr(clsOfSlot, value, cls231), new231);
                 } else if (nil231) {
                     // 置空那一格由 腿③ 那一站 (cgen_setlet_set_prop.inc) 主持; 这里只兜「同一条
                     // 语句被别的路走到」的那一档 —— 交给同一位主人, 不许落进下面那条 QI 分支

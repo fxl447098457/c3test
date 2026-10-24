@@ -1358,8 +1358,13 @@
                             // 不能直接 & —— 必须先落一个临时再取址, 否则 &(右值) C2102。
                             // 落临时这一层与 Fix 161d 的 ByRef(As Any/UDT) 复杂右值同源。
                             const std::string tmpCls092r = classSlotTempName(clsSlotP092r, tempCounter_++);
+                            // 账 #305 第二百零四刀: 把实参那棵 AST 交给交付侧 —— 槽是视图档时
+                            // 它才答得出「右值是不是一枚自己交出引用的实例」(见 deliverToClassSlot)。
+                            const ASTNode* actP092r = (i < node.positional.size())
+                                ? node.positional[i].get() : nullptr;
                             c_.addPending(clsSlotP092r + " " + tmpCls092r + " = "
-                                          + deliverToClassSlot(clsSlotP092r, argVal) + ";");
+                                          + deliverToClassSlot(clsSlotP092r, argVal,
+                                                               actP092r) + ";");
                             argVal = "&" + tmpCls092r;
                             // ⚠ argVal 就位后必须让**下面整段** (Fix 120 → M22/090d → 收尾
                             // `&(cType){argVal}`) 全部跳过, 否则它们会再包一层:
@@ -1552,8 +1557,7 @@
             // 由 ifaceViewOfExpr 在闸上答一次，站点不另写判据。
             std::string argCls = inferClassTypeOfExpr(*node.positional[i]);
             if (!argCls.empty()) {
-                const IfaceView* ivFix = ivLookupIface(
-                    cTypeIvfix.substr(10, cTypeIvfix.find('*', 10) - 10));
+                const IfaceView* ivFix = ivLookupIface(ivrefNameOfCType(cTypeIvfix));
                 if (ivFix) {
                     std::string ivField = "__iv_" + cIdent(ivFix->name);
                     argVal = "(vb6_ivref_" + cIdent(ivFix->name) + "*)&((" + argVal

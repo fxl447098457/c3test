@@ -20,6 +20,10 @@ Private Sub Class_Initialize()
     m_hits = 7
 End Sub
 
+Private Sub Class_Terminate()
+    mdl3100.g_term = mdl3100.g_term + 1
+End Sub
+
 Private Sub IK3100_Ping()
     m_hits = m_hits + 1
 End Sub

@@ -381,6 +381,13 @@
     void scanLocalArrayEscapes(const StmtList& body);
     void emitIvrefScopeRelease();                     // B05: 过程出口发 Release
     std::string ivrefCType(const std::string& typeName);   // 空串 = 不是新式接口
+    // 账 #305 第二百零四刀: 「一枚**工程类实例**怎么交进视图槽」那一发形状的唯一主人
+    // (`&(实例)->__iv_<I>`)。今天问同一件事的三站 = Set 覆写那一站 (cgen_setlet_set_rhs.inc)、
+    // Set 按名那一站 (cgen_setlet_set_prop.inc)、ByRef 视图形参的实参站 (deliverToClassSlot)，
+    // 三站都调它 = 同一个答案；谁再自己拼一遍 `->__iv_`，就是同一形状的第二位作者
+    // (哨兵 check_iface_view_authority 钉这一发的作者数)。
+    std::string ivrefInstanceViewExpr(const std::string& ifaceName,
+                                      const std::string& instExpr, bool nullable) const;
     const IfaceView* ivLookupIface(const std::string& written);
     // 账 #305 §B221/#449 (§B222): 「这一枚表达式的值**已经是接口视图薄指针**
     // (vb6_ivref_<I>*)了吗」 —— 这一问只许住在这里。答「是」时给接口名，答「不是」
@@ -899,7 +906,12 @@
     // 账 #305 §B218 (甲) 腿⑤ 第二格 (第一百三十七刀): cParamClassPtrType 交回来的那个 C 类型名
     // 装的是**视图薄指针**还是工程类实例 —— 前缀名单只住在上面那位主人出生的那份文件里,
     // 站点与所有权主人都不许再抄一遍视图那一档的前缀 (check_iface_view_authority ③ 钉的就是这张名单)。
-    bool clsPtrIsViewSlot(const std::string& clsPtr);
+    bool clsPtrIsViewSlot(const std::string& clsPtr) const;
+    // 账 #305 第二百零四刀: 上面那一问的**带名字**那一档 —— 「这一档 C 类型是哪张接口的视图
+    // 薄指针」(交回 `vb6_ivref_<I>` 里那个已 cIdent 过的名, 认不出 = 空串)。与 `legacyIfaceNameOfCType`
+    // 同形；前缀知识照旧只住 cgen_base_type.cpp，站点再写一遍 `substr(10, find('*', 10))`
+    // 就是把「谁认得 vb6_ivref_」这张名单扩大。
+    std::string ivrefNameOfCType(const std::string& cType) const;
     // 账 #305 第一百七十二刀 站B: 上面那位主人**不认**的那一档 —— legacy 接口的 `vb6_iface_<I>`
     // 值结构形参槽 (交回 VB 声明名, 认不出 = 空串)。与 clsPtrIsViewSlot 同住 cgen_base_type.cpp,
     // `vb6_iface_` 这串前缀别处不许再抄 (哨兵 check_legacy_view_arg_owners V1 钉的就是这一处)。
@@ -939,7 +951,11 @@
     // <vbeclipse>: 配套 cParamClassPtrType 的**交付**侧：实参要放进那个类槽时该怎么发。
     // clsPtr 为空 (= 不是类槽) 时原样返回，所以调用点写成 argVal = deliverToClassSlot(...)
     // 是不分支的一句，不必每个站点各写一遍"是类槽就跳过装箱"。
-    std::string deliverToClassSlot(const std::string& clsPtr, const std::string& argVal) const;
+    // 账 #305 第二百零四刀补第三个入参 = **实参那棵 AST**：槽装的是视图薄指针时，交付侧
+    // 必须知道右值是不是一枚自己交出引用的实例 (`New <类>`) 才铸视图。站点没有 AST 可交
+    // (= 缺省 nullptr) 时这一臂压根不成立 ⇒ 发码与今天一字相同，本刀只放开两位有 AST 的读者。
+    std::string deliverToClassSlot(const std::string& clsPtr, const std::string& argVal,
+                                   const ASTNode* actual = nullptr) const;
 
     // 账 #305 §B187 第四腿: 与 cParamClassPtrType 对称的另一档 —— 形参声明的是**泛对象槽**
     // (VB 写 `As Object`, C 侧是 void* 里装 IDispatch*) 时返回 "void*", 其余返回空串。

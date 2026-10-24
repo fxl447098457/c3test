@@ -7352,16 +7352,21 @@ if ($Category -in @("all", "run", "vbp")) {
     # (`vb6_ivref_I**`) 交出 `&vb6_argtmp_vb6_ivref_I_N`, Fix<vbeclipse> 那一段又按
     # 「类实例实参」剥一层 `->__iv_I` ⇒ C2039 + C2198。夹具三发: MakeI() (运行的那一发,
     # 腿⑤ 交回的是拥有型引用)、ByVal 一站 (原 `->__iv_I` 路径必须是正解)、c 类实参那一发
-    # (编译面靶子; 运行期由 g_skip 跳过 —— 类实参 ByRef 的临时量初始化是另一缺陷)。
-    $k3100Expected = @("K3100-h=7", "K3100-v=1", "K3100-DONE")
+    # (编译面靶子; 运行期由 g_skip 跳过 —— 借来的实参在视图槽上不付 copy-in, 在册)。
+    # 第二百零四刀补第四发 `Take New H3100`: 视图槽收**自己交出引用的实例**必须铸视图
+    # `&(<实例>)->__iv_<I>` —— 改前两架构实测 0xC0000005 (打印到 K3100-v=1 即断),
+    # 改后 v2=2 (那一发照常进被调方) 且 t=2 (MakeI 与 New 各交回一枚, 一台不多不少)。
+    $k3100Expected = @("K3100-h=7", "K3100-v=1", "K3100-v2=2", "K3100-t=2", "K3100-DONE")
     Test-Vbp 'k3100_ivref_arg' "$Tests\k3100_ivref_arg\K3100.vbp" $k3100Expected
     Test-Vbp 'k3100_ivref_arg_x86' "$Tests\k3100_ivref_arg\K3100.vbp" $k3100Expected -Arch "x86"
     Test-EmitcShape "k3100_ivref_arg_shape" @("$Tests\k3100_ivref_arg\K3100.vbp") @(
         'vb6_mdl3100_Take(&vb6_argtmp_vb6_ivref_IK3100_',
-        'vb6_mdl3100_TakeVal((vb6_ivref_IK3100*)&((c)->__iv_IK3100));'
+        'vb6_mdl3100_TakeVal((vb6_ivref_IK3100*)&((c)->__iv_IK3100));',
+        'vb6_argtmp_vb6_ivref_IK3100_2 = &((vb6_cls_H3100_New()))->__iv_IK3100;'
     )
     Test-EmitcAbsent "k3100_ivref_arg_lesion" @("$Tests\k3100_ivref_arg\K3100.vbp") @(
-        '(vb6_ivref_IK3100*)&((&vb6_argtmp_'
+        '(vb6_ivref_IK3100*)&((&vb6_argtmp_',
+        'vb6_ivref_IK3100* vb6_argtmp_vb6_ivref_IK3100_2 = (vb6_cls_H3100_New());'
     )
 
     # 账 #305 第二百零三刀: 槽的**声明档**是新式接口视图 (vb6_ivref_<I>*) 时, Set 那两站

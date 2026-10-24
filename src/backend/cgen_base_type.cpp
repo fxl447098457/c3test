@@ -255,8 +255,19 @@ std::string CCodeGen::cParamClassPtrType(const ParameterInfo& p) {
 // 账 #305 §B218 (甲) 腿⑤ 第二格 (第一百三十七刀): 「这一档槽装的是视图薄指针吗」—— 上面那位主人
 // 的两档里读视图那一档的唯一出口。前缀知识刻意留在这份文件 (= cParamClassPtrType 的出生地),
 // 别处再抄一次字面量就是把「谁认得 vb6_ivref_」这张名单扩大。
-bool CCodeGen::clsPtrIsViewSlot(const std::string& clsPtr) {
+bool CCodeGen::clsPtrIsViewSlot(const std::string& clsPtr) const {
     return clsPtr.compare(0, 10, "vb6_ivref_") == 0;  // vb6_ivref_ = 10 个字符
+}
+
+// 账 #305 第二百零四刀: 上面那一问的**带名字**那一档 —— 「这一档 C 类型是哪张接口的视图」
+// (交回 `vb6_ivref_` 后面那一段，即已 cIdent 过的接口名；认不出 = 空串)。与 legacy 那一位
+// 主人 `legacyIfaceNameOfCType` 同形，前缀知识照旧只住这份文件。交付侧 (deliverToClassSlot)
+// 与 ByVal 那个适配器都问它，站点再手写一遍 `substr(10, find('*', 10))` 就是把名单扩大。
+std::string CCodeGen::ivrefNameOfCType(const std::string& cType) const {
+    if (!clsPtrIsViewSlot(cType)) return {};
+    std::string t = cType;
+    if (!t.empty() && t.back() == '*') t.pop_back();   // vb6_ivref_I* → vb6_ivref_I
+    return t.substr(10);
 }
 
 // 账 #305 第一百八十八刀: `vb6_iface_` 前缀的**唯一比较点** (上面 V1 那条哨兵钉的就是这一处)。
@@ -438,7 +449,25 @@ bool CCodeGen::isProjectClassName(const std::string& name) {
 // Nothing 是 NULL，加一层强制转换只会把真正的类型错配 (接口薄指针喂给类槽) 变成
 // 静默的坏指针。不套 boxToVariant：那是"目标槽收 VARIANT"时才有的动作。
 std::string CCodeGen::deliverToClassSlot(const std::string& clsPtr,
-                                         const std::string& argVal) const {
+                                        const std::string& argVal,
+                                        const ASTNode* actual) const {
+    // 账 #305 第二百零四刀: 槽那一档是**接口视图薄指针**时，交进去的必须是视图，不是实例基址。
+    // 裸着交 (= 今天的样子) 让被调方 `s->vt->…` 读到结构体首字段 (那枚计数头) = 拿整数当
+    // vtable (VbEclipse ucPerspective.SetScheme 六发实测 rc=139，而 cl 只报 C4133 警告、
+    // 压根不进 c3-error.log ⇒ 一声不响)。形状只许问一位主人 ivrefInstanceViewExpr (与 Set
+    // 那两站同一个答案)。
+    // 只放开「实参自己交出那一枚引用」的形状 = `New <类>`: 站点那头的交回腿
+    // (registerClassArgRefHandback 的视图档 `tmp->vt->Release(tmp)`) 退的正是这一枚，
+    // 计数当场平了。**借来的一枚** (裸类变量 / 返回类的调用) 不铸 —— 视图档的 copy-in
+    // 刻意早退 (registerClassArgRefCopyIn)，铸了就是把调用者还在用的实例退掉 = 过退；
+    // 那一形今天也是坏的 (同样读脏 vt)，维持原样并留在册 (§B187 待拍的那一句口径)。
+    if (!clsPtr.empty() && clsPtrIsViewSlot(clsPtr) && actual
+        && actual->kind == ASTNodeKind::NewExpr) {
+        const std::string ivName204 = ivrefNameOfCType(clsPtr);
+        if (!ivName204.empty()) {
+            return ivrefInstanceViewExpr(ivName204, argVal, false);
+        }
+    }
     if (!clsPtr.empty() && clsPtr.compare(0, 8, "vb6_cls_") == 0 && cExprIsVariant(argVal)) {
         return "(" + clsPtr + ")vb6_ComObject_GetInstance("
                "vb6_VariantToObjectVal(" + argVal + "))";

@@ -1,5 +1,5 @@
 ﻿# check_iface_view_authority.ps1 - 账 #305 §B221/#449（§B222）：「这一枚表达式交出来的是视图还是实例」
-# 这一问只许有一位主人。三条钉：
+# 这一问只许有一位主人。七条钉：
 #   ① 视图的成员调用发射形状 `->vt-><slot>(x, args)` 在全 src/backend 恰好 **1** 处，
 #      且必须住在 module/cgen_iface_vtbl.cpp 的 ivrefVtableCall 里（com_bind 与「接收者是
 #      视图值的调用」那一站都调它）。长出第 2 处 = 同一形状两位作者。
@@ -13,7 +13,13 @@
 #      = 链接期 LNK2019 (第二百零三刀实测: 只补覆写那一站时, 夹具红在 `Set me->m_iv = Nothing`)。
 #   ⑤ 视图计数主人 emitIvrefRefSet 的**调用点**恰好 **4** 处, 且只在那两份 Set 站点文件里
 #      (按名 B05 / 置空 / 字段覆写 / 字段置空兜底)。长出第 5 处或换文件 = 同一发计数两位作者。
-# 退出码：0 = 五条都过；1 = 任一条红。
+#   ⑥ 「一枚工程类实例怎么交进视图槽」那一发形状 (`&(<实例>)->__iv_<I>`, 第二百零四刀) 有**一位**
+#      作者 = ivrefInstanceViewExpr；它的**消费点恰好 3 处**、分居三份文件：
+#      Set 覆写腿② / Set 按名 B04 / 实参交付侧 deliverToClassSlot。少一处 = 那一站回到自己拼；
+#      多一处 = 同一形状第二位作者。
+#   ⑦ 字面量 `"__iv_" + cIdent(` 那份拼法只许住在两份文件里 = 主人自己 + ByVal 实参适配器
+#      (那一发带 `(vb6_ivref_I*)` 强转、形状不同，刻意留在册)。第 3 份长出来 = 又一处现拼视图槽字段。
+# 退出码：0 = 七条都过；1 = 任一条红。
 param(
     [string]$Root = ""
 )
@@ -78,10 +84,45 @@ if (($refSetFiles -join ',') -ne 'cgen_setlet_set_prop.inc,cgen_setlet_set_rhs.i
               " (want only the two Set station files)")
 }
 
+# ⑥ 视图形状主人 ivrefInstanceViewExpr: 一位作者 + 三处消费 (Set 覆写 / Set 按名 / 实参交付侧)
+$viewAll = @($files | Select-String -Pattern 'ivrefInstanceViewExpr\(')
+$viewDef = @($viewAll | Where-Object { (Split-Path -Leaf $_.Path) -eq 'cgen_iface_vtbl.cpp' })
+$viewDecl = @($viewAll | Where-Object { (Split-Path -Leaf $_.Path) -eq 'cgen_helpers.inc' })
+$viewCalls = @($viewAll | Where-Object { $_ -notin $viewDef -and $_ -notin $viewDecl })
+if ($viewDef.Count -ne 1) {
+    $fail += ("ivrefInstanceViewExpr definition sites = " + $viewDef.Count + " (want exactly 1)")
+}
+if ($viewDecl.Count -ne 1) {
+    $fail += ("ivrefInstanceViewExpr declarations = " + $viewDecl.Count + " (want exactly 1)")
+}
+if ($viewCalls.Count -ne 3) {
+    $fail += ("ivrefInstanceViewExpr call sites = " + $viewCalls.Count + " (want exactly 3)")
+}
+$viewCallFiles = @($viewCalls | ForEach-Object { Split-Path -Leaf $_.Path } | Sort-Object -Unique)
+if (($viewCallFiles -join ',') -ne 'cgen_base_type.cpp,cgen_setlet_set_prop.inc,cgen_setlet_set_rhs.inc') {
+    $fail += ("view-shape consumers = " + ($viewCallFiles -join ', ') +
+              " (want the two Set stations + the arg delivery side)")
+}
+# 交付侧那一站必须**经主人**拿这一发 (自己内联拼 = 这一条掉下来)
+$deliverVia = @(Select-String -Path (Join-Path $backend "cgen_base_type.cpp") `
+                              -Pattern 'ivrefInstanceViewExpr\(')
+if ($deliverVia.Count -lt 1) {
+    $fail += ("deliverToClassSlot no longer routes the view shape through ivrefInstanceViewExpr" +
+              " (= 实参站回到把实例基址当视图交出去, 实测 rc=0xC0000005)")
+}
+
+# ⑦ `"__iv_" + cIdent(` 那份拼法的住家名单
+$shapeFiles = @($files | Select-String -Pattern '"__iv_" \+ cIdent' |
+    ForEach-Object { Split-Path -Leaf $_.Path } | Sort-Object -Unique)
+if (($shapeFiles -join ',') -ne 'cgen_expr_call_arg_emit.inc,cgen_iface_vtbl.cpp') {
+    $fail += ("inline __iv_ spellings live in " + ($shapeFiles -join ', ') +
+              " (want only the owner + the ByVal arg adapter)")
+}
+
 if ($fail.Count -gt 0) {
     Write-Host "IFACE-VIEW-AUTHORITY FAIL"
     foreach ($f in $fail) { Write-Host ("  - " + $f) }
     exit 1
 }
-Write-Host "IFACE-VIEW-AUTHORITY OK (1 formula site / 4 consumers / 6 literal files / 2 Set stations ask / 4 refSet calls)"
+Write-Host "IFACE-VIEW-AUTHORITY OK (1 formula site / 4 consumers / 6 literal files / 2 Set stations ask / 4 refSet calls / 3 view-shape consumers / 2 inline __iv_ files)"
 exit 0
