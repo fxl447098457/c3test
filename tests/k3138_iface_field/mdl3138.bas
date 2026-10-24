@@ -34,6 +34,17 @@ Sub Main()
     c.FromGlobalView
     Debug.Print "K3138-4=" & g_termA & "/" & g_termB & "/" & g_initB & "/" & c.TwiceViaField(5)
 
+    ' 账 #305 第二百一十刀: 视图接收者的**属性读**那一发要交回同一位主人 —— 两档接收者各钉一发:
+    ' 模块级视图变量 (裸名 g_iv, 站S1 那一格) 与类字段 (me->m_iv, 本刀补的第二格)。字段那一格
+    ' 改前实测 K3138-7=1200/0: 接收者交进来的是**发射文本** `me->m_iv`, 名册那一问只认裸名
+    ' ⇒ 答不出视图 ⇒ 落 IDispatch helper 把薄指针当接口去问 ⇒ 恒 0 (静默: 不崩也不报号,
+    ' 只在 stderr 留一声 property "Kind" not found)。
+    Dim k1 As Long
+    k1 = g_iv.Kind
+    Dim k2 As Long
+    k2 = c.KindViaField
+    Debug.Print "K3138-7=" & k1 & "/" & k2
+
     ' 置空只放手**这一格**的那一枚引用; g_iv 那一枚还在 => 对象不死。
     c.ClearIt
     Debug.Print "K3138-5=" & g_termB

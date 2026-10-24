@@ -25,3 +25,7 @@ End Sub
 Private Function IK3138_Twice(ByVal n As Long) As Long
     IK3138_Twice = 2 * n + 200
 End Function
+
+Private Property Get IK3138_Kind() As Long
+    IK3138_Kind = 1200
+End Property

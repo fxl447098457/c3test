@@ -9,6 +9,26 @@
             // P6.4+: 类模块默认实例 (VB_PredeclaredId=True) 的裸类名 (cTT.CreateToolTip
             // / cTT.EnableTooltips(...) 在 frm 里) — 注册为"类实例变量"并按类精确
             // 解析成员 (注入 me 首参与类型化形参), 对象表达式用 vb6_cls_X_Default().
+        // 账 #305 第二百一十刀 S2: 接收者交出来的是**新式接口视图**时，属性读那一发不许走「类实例成员」
+        // 那一路 —— 这一支按类名精确解析成员，于是拼出 vb6_<接口名>_prop_get_<成员>(视图)，
+        // 而宿主那一带 (体内 vb6_iv_thin_of_<实现类>((void*)me)) 的首形参契约是**实例** ⇒ 视图喂进去
+        // 每枚实现者都试不中、属性恒 0 (VbEclipse 实测 70 处读 modPublic 的模块级视图槽 m_Scheme，
+        // 色板整个黑掉)。只接**读**那一档 (槽键带 get_ ⇒ 方法与 Let/Set 席位一律留给原有各站)，
+        // 形状交唯一主人 ivrefVtableCall (哨兵①钉着 `->vt->` 只许一处发射)，站点一枚不拼。
+        // 两侧同 C 返回 (vtable 那一席与宿主 prop_get 都出自 ivSlotRetType) ⇒ 换发不掉类型。
+        if (node.object && !asCallCallee_) {
+            const std::string ivCls210 = ifaceViewOfExpr(*node.object);
+            const IfaceView* ivV210 = ivCls210.empty() ? nullptr : ivLookupIface(ivCls210);
+            const std::string ivSlot210 =
+                ivV210 ? ivSlotKeyForMember(*ivV210, node.memberName) : std::string();
+            if (ivSlot210.compare(0, 4, "get_") == 0) {
+                emitExpr(*node.object);
+                const std::string ivRecv210 = lastExpr_;
+                lastExpr_ = ivrefVtableCall(ivCls210, node.memberName, ivRecv210,
+                                            std::vector<std::string>());
+                return;
+            }
+        }
             std::string defaultInstCls = registerDefaultInstanceClass(objLower);
             auto itClassVar = knownClassVars_.find(objLower);
             if (itClassVar == knownClassVars_.end() && node.object) {

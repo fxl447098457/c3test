@@ -1,10 +1,11 @@
 ﻿# check_iface_view_authority.ps1 - 账 #305 §B221/#449（§B222）：「这一枚表达式交出来的是视图还是实例」
-# 这一问只许有一位主人。八条钉：
+# 这一问只许有一位主人。九条钉：
 #   ① 视图的成员调用发射形状 `->vt-><slot>(x, args)` 在全 src/backend 恰好 **1** 处，
 #      且必须住在 module/cgen_iface_vtbl.cpp 的 ivrefVtableCall 里（com_bind 与「接收者是
 #      视图值的调用」那一站都调它）。长出第 2 处 = 同一形状两位作者。
-#   ② 问句 ifaceViewOfExpr 的**消费文件**恰好 **4** 份：Set 目标侧 / 实参侧 /
-#      成员访问接收者 / 带实参调用的接收者。少一份 = 有一站回到各写一遍；多一份 = 判据被复制。
+#   ② 问句 ifaceViewOfExpr 的**消费文件**恰好 **5** 份：Set 目标侧 / 实参侧 /
+#      成员访问接收者（字段兜底臂）/ 成员访问接收者（类模块臂，第二百一十刀 S2）/
+#      带实参调用的接收者。少一份 = 有一站回到各写一遍；多一份 = 判据被复制。
 #   ③ 直接拿字面量 "vb6_ivref_" 拼类型/问档的文件恰好 **6** 份（今天在册的名单）。
 #      第 7 份长出来就意味着「是不是接口」又有了第二位主人。
 #   ④ 「Set 的槽位交给哪一位主人」那一问 (第二百零三刀) 两站同问:
@@ -25,7 +26,12 @@
 #      cgen_iface_vtbl.cpp (emitIvrefRefSet) + cgen_setlet_set_prop.inc (仍在册的两处内联形状 + 置空前退旧)。
 #      站点自己再拼一发 = 「谁付钱」长出第二位主人；这一条掉到 4 处 = 视图档又没人付（实测修前全模块 0 条
 #      copy-in ⇒ 交回腿净 −1 ⇒ 过程出口拆槽时 0xC0000374）。
-# 退出码：0 = 八条都过；1 = 任一条红。
+#   ⑨ 「接收者是视图 ⇒ 属性读走 vtable 槽」那一臂有一位主人 ivrefViewGetterReadExpr：
+#      定义恰 1 (cgen_iface_vtbl.cpp) / 声明恰 1 (cgen_helpers.inc) / 调用点恰 1 且只住在
+#      cgen_util_com.cpp (站S1)。它问名册那一头 slotIvrefViewName 只许主人自己用：带 `(` 的
+#      出现恰 3 处 (定义 + 声明 + 主人内那一次)、文件只许那两份。长出第 4 处 = 有站点绕过主人
+#      直接问名册 = 「是不是视图」有了第二位判据的读者。
+# 退出码：0 = 九条都过；1 = 任一条红。
 param(
     [string]$Root = ""
 )
@@ -53,9 +59,9 @@ if ($vt.Count -ne 1) {
 $ivAll = @($files | Select-String -Pattern 'ifaceViewOfExpr')
 $ivFiles = @($ivAll | ForEach-Object { Split-Path -Leaf $_.Path } | Sort-Object -Unique |
     Where-Object { $_ -ne 'cgen_util_classtype.cpp' -and $_ -ne 'cgen_helpers.inc' })
-if ($ivFiles.Count -ne 4) {
+if ($ivFiles.Count -ne 5) {
     $fail += ("ifaceViewOfExpr consumer files = " + $ivFiles.Count +
-              " (want exactly 4): " + ($ivFiles -join ', '))
+              " (want exactly 5): " + ($ivFiles -join ', '))
 }
 
 # ③ 字面量 "vb6_ivref_" 的主人名单
@@ -144,10 +150,41 @@ if ($copyInAddRef.Count -ne 1) {
 }
 
 
+# ⑨ 新式视图属性读那一臂的主人 (第二百一十刀 S1)
+$rdAll = @($files | Select-String -Pattern 'ivrefViewGetterReadExpr\(')
+$rdDef = @($rdAll | Where-Object { (Split-Path -Leaf $_.Path) -eq 'cgen_iface_vtbl.cpp' })
+$rdDecl = @($rdAll | Where-Object { (Split-Path -Leaf $_.Path) -eq 'cgen_helpers.inc' })
+$rdCalls = @($rdAll | Where-Object { $_ -notin $rdDef -and $_ -notin $rdDecl })
+if ($rdDef.Count -ne 1) {
+    $fail += ("ivrefViewGetterReadExpr definition sites = " + $rdDef.Count + " (want exactly 1)")
+}
+if ($rdDecl.Count -ne 1) {
+    $fail += ("ivrefViewGetterReadExpr declarations = " + $rdDecl.Count + " (want exactly 1)")
+}
+if ($rdCalls.Count -ne 1) {
+    $fail += ("ivrefViewGetterReadExpr call sites = " + $rdCalls.Count + " (want exactly 1)")
+}
+$rdCallFiles = @($rdCalls | ForEach-Object { Split-Path -Leaf $_.Path } | Sort-Object -Unique)
+if (($rdCallFiles -join ',') -ne 'cgen_util_com.cpp') {
+    $fail += ("view property-read consumer = " + ($rdCallFiles -join ', ') +
+              " (want only station S1 in cgen_util_com.cpp)")
+}
+$nameAll = @($files | Select-String -Pattern 'slotIvrefViewName\(')
+if ($nameAll.Count -ne 3) {
+    $fail += ("slotIvrefViewName sites = " + $nameAll.Count +
+              " (want exactly 3 = definition + declaration + the owner's single ask)")
+}
+$nameFiles = @($nameAll | ForEach-Object { Split-Path -Leaf $_.Path } | Sort-Object -Unique)
+if (($nameFiles -join ',') -ne 'cgen_helpers.inc,cgen_iface_vtbl.cpp') {
+    $fail += ("roster ask lives in " + ($nameFiles -join ', ') +
+              " (want the owner + its declaration; a 3rd file = a station bypasses the owner)")
+}
+
+
 if ($fail.Count -gt 0) {
     Write-Host "IFACE-VIEW-AUTHORITY FAIL"
     foreach ($f in $fail) { Write-Host ("  - " + $f) }
     exit 1
 }
-Write-Host "IFACE-VIEW-AUTHORITY OK (1 formula site / 4 consumers / 6 literal files / 2 Set stations ask / 4 refSet calls / 4 view-shape consumers / 2 inline __iv_ files / 5 view AddRef sites in 3 files)"
+Write-Host "IFACE-VIEW-AUTHORITY OK (1 formula site / 5 consumers / 6 literal files / 2 Set stations ask / 4 refSet calls / 4 view-shape consumers / 2 inline __iv_ files / 5 view AddRef sites in 3 files / 1 view property-read owner in 1 station + 3 roster ask sites in 2 files)"
 exit 0

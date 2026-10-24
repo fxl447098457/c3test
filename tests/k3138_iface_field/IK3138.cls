@@ -18,3 +18,7 @@ Option Explicit
 Public Function Twice(ByVal n As Long) As Long
 
 End Function
+
+Public Property Get Kind() As Long
+
+End Property

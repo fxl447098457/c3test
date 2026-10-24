@@ -560,8 +560,8 @@ sha256=457723da2ea1a27dd8598bdb84de61fbb8c3ba3b224f7a3c3bad9eb63360f79a ascii256
 sha256=59c235621fa7f32c49be65ff57b86b457f47a4e9f7122584745f56f00de3044e ascii256=8a8eff3afce476b108cc24b0dd78a84b46f6222fcaf449c656232af28c520aa0 rc=0 bytes=1995 tests/k3122_own_prop_set/mdl3122.bas
 sha256=05a365d62c930128efbcb1d77928a040fdcdd22ff076f9208ace924480bc1f76 ascii256=fa3a1a2ae3cf625687eade074095d4d4abf038c604a97328cb6d85a9992190c3 rc=0 bytes=4054 tests/k3136_lwa_guard/K3136.vbp
 sha256=05a365d62c930128efbcb1d77928a040fdcdd22ff076f9208ace924480bc1f76 ascii256=fa3a1a2ae3cf625687eade074095d4d4abf038c604a97328cb6d85a9992190c3 rc=0 bytes=4054 tests/k3136_lwa_guard/mdl3136.bas
-sha256=0b1af54d0702d0b71ab12a67bf6e402f73e65bc1b8dbbe0fc0db28a9257c93aa ascii256=fca02561bfea0788d786daa77452fab0585096534c82e1085d82d715de4f33d2 rc=0 bytes=35120 tests/k3138_iface_field/K3138.vbp
-sha256=abca92234ab2b349b601fa596f159ad01cc2069eb215d7f49182caaeea519850 ascii256=411a3f5f435d9711009cfe2fba0a32cfb74c1cba5d4001e3d606bf4ad63c9080 rc=0 bytes=4463 tests/k3138_iface_field/mdl3138.bas
+sha256=a4eb4423ccb239154ee1433b2287dfbf8b0331691e066230e9847427baac05ee ascii256=dbef0095197f2ee3733a17cf7860cd949ada5ab29574db1a297a5e2d651f9a5b rc=0 bytes=37679 tests/k3138_iface_field/K3138.vbp
+sha256=49e618f161a5054359415937649742fe875ad86ea24423fcc743143a0e3340b4 ascii256=bf9863a583e7fbcd411da91f59633b9dc58c5cc52500b4d49229497e02464296 rc=0 bytes=4863 tests/k3138_iface_field/mdl3138.bas
 # 第一百七十四刀 (账 #471 站A, 门 #854 run 39829084507 head e22b24f4): 每枚 legacy 接口自己铸一枚 vb6_iface_<I>_view_from ⇒ 用到 legacy 接口的 6 份存量输入发码字节跟着变 (iface_multi / iface_wrap / k165_iface_slot / k172_viewarg / b189_gate / BalloonTooltips), 新增的两行是本刀夹具自己
 # 登记吃的是 CI 那台自己交回的清单 (artifact emit-manifest), 不是本机复算的数
 # 登记来源：第一百七十五刀（账 #305 新账 #471 站D）= 本机复算登记 —— 存量 503 行逐行哈希全同（换主人不换形状：P6.4 那一臂提成 legacyViewCallExpr，两条消费路同问一位主人），所以本刀**零移动**，只新增下面这两行；判据与登记同批推，验证门 = 台账第一百七十五刀实施那一行回填的那一轮。

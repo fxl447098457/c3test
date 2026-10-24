@@ -40,3 +40,7 @@ End Sub
 Public Function TwiceViaField(ByVal n As Long) As Long
     TwiceViaField = m_iv.Twice(n)
 End Function
+
+Public Function KindViaField() As Long
+    KindViaField = m_iv.Kind
+End Function

@@ -160,10 +160,20 @@ std::string CCodeGen::ivrefInstanceViewExpr(const std::string& ifaceName,
 }
 
 // 账 #305 第二百一十刀 S1: 「这一枚**文本**接收者是不是新式接口视图」—— 第一百二十五刀那位
-// 主人 (ifaceViewOfExpr) 按名那一臂的文本投影，名单同源 (knownIvrefVars_)，不另立第二份判据。
+// 主人按名那一臂的文本投影，名单同源 (knownIvrefVars_)，不另立第二份判据。
 std::string CCodeGen::slotIvrefViewName(const std::string& nameLower) {
     auto it = knownIvrefVars_.find(nameLower);
-    return it == knownIvrefVars_.end() ? std::string() : it->second;
+    if (it != knownIvrefVars_.end()) return it->second;
+    // 账 #305 第二百一十刀 (字段档): 类模块里裸写的字段成员读，接收者交进来的**发射文本**是
+    // `me-><字段>` (站S1 拿到的是文本，AST 那边 IdentifierExpr 只有裸名) ⇒ 名册那一问要认这一形。
+    // 只剥 `me->` 这一层前缀，且尾巴必须在名册里 (名册只由 `As <新式接口>` 的声明写入) ⇒
+    // 普通类字段 / 局部同名都不可能被这条答成视图。
+    static const std::string mePre = "me->";
+    if (nameLower.size() > mePre.size() && nameLower.compare(0, mePre.size(), mePre) == 0) {
+        auto itF = knownIvrefVars_.find(nameLower.substr(mePre.size()));
+        if (itF != knownIvrefVars_.end()) return itF->second;
+    }
+    return std::string();
 }
 
 // 账 #305 第二百一十刀 S1: 接收者是一枚新式接口视图 (`vb6_ivref_<I>*`) 时，属性读那一发不许走

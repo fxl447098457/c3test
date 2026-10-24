@@ -7388,7 +7388,7 @@ if ($Category -in @("all", "run", "vbp")) {
     # vb6_cls_<接口名>_AddRef/_Release, 而接口档从不铸这一对 ⇒ VbEclipse 链接期最后两声
     # (实测 BASE 上这枚夹具两台都停在 LNK2019: vb6_cls_IK3138_Release)。
     $k3138Expected = @("K3138-1=1/0/110", "K3138-2=1/1/0/210", "K3138-3=1/1/2/110",
-        "K3138-4=1/1/2/210", "K3138-5=1", "K3138-6=2", "K3138-DONE")
+        "K3138-4=1/1/2/210", "K3138-7=1200/1200", "K3138-5=1", "K3138-6=2", "K3138-DONE")
     Test-Vbp 'k3138_iface_field' "$Tests\k3138_iface_field\K3138.vbp" $k3138Expected
     Test-Vbp 'k3138_iface_field_x86' "$Tests\k3138_iface_field\K3138.vbp" $k3138Expected -Arch "x86"
     Test-EmitcShape "k3138_iface_field_shape" @("$Tests\k3138_iface_field\K3138.vbp") @(
@@ -7396,11 +7396,21 @@ if ($Category -in @("all", "run", "vbp")) {
         'me->m_iv = &((vb6_cls_H3138B_New()))->__iv_IK3138;',
         'me->m_iv = ((g_impl) ? &(g_impl)->__iv_IK3138 : NULL);',
         'if (g_iv) g_iv->vt->QueryInterface(g_iv, vb6_iv_iid_IK3138, &__ivgot3);',
-        'if (__ivold4) __ivold4->vt->Release(__ivold4);')
+        'if (__ivold4) __ivold4->vt->Release(__ivold4);',
+        # 账 #305 第二百一十刀 (新式视图的属性读): 两档接收者各钉一发。A/B (撤掉字段那一档
+        # 的 `me->` 剥离、其余原样重编一台) 实测: `me->m_iv->vt->get_kind(...)` 在 BASE 上 0 处、
+        # 本刀后 1 处 —— 这一枚是**翻转针**。`k1 = g_iv->...` 两头都在 (站S1 早接管了裸名那一档),
+        # 所以它是**证人**不是翻转针: 别把它当成本刀的成果。
+        'vb6_ret_KindViaField = me->m_iv->vt->get_kind(me->m_iv);',
+        'k1 = g_iv->vt->get_kind(g_iv);')
     Test-EmitcAbsent "k3138_iface_field_lesion" @("$Tests\k3138_iface_field\K3138.vbp") @(
         'vb6_cls_IK3138* __clsold',
         'vb6_cls_IK3138_Release(__clsold',
-        'vb6_cls_IK3138_AddRef(me->m_iv)')
+        'vb6_cls_IK3138_AddRef(me->m_iv)',
+        # 第二百一十刀修前实测那一发 (BASE 上 1 处, 全串取自那份 BASE 发码): 视图是一枚薄指针,
+        # 晚绑定 helper 按 IDispatch 问它 ⇒ 每问必失败 ⇒ **静默 0** (不崩、不报号, 运行期只留
+        # 一声 vb6_ComGetProp: property "Kind" not found 且 K3138-7=1200/0)。
+        'vb6_ComGetIntProp(me->m_iv, L"Kind")')
     # 账 #305 第一百九十七刀: Pattern C/D2 属性写的**值槽档位**收成一处主人
     # writeValArgForParamSlot。夹具打在泛对象槽 (C 侧 void*) 那一档的两个方向:
     #   · RHS 是整只 vb6_VARIANT (工程内 `Function GetV() As Variant`) ⇒ 必须解箱
