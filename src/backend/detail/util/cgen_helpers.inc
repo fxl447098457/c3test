@@ -435,6 +435,10 @@
                                                ProcKind setKind, size_t argCount);
     // B04 那条 vtable 发射 (`x->vt-><slot>(x, args)`) 的唯一作者：com_bind 与
     // 「接收者是视图值的调用」那一站都调它 (账 #305 §B221 形②)。槽名解析不出来返回空串。
+    // 账 #305 第二百一十刀 S1: 视图属性读那一问的文本投影 + 新式臂（定义在 cgen_iface_vtbl.cpp）
+    std::string slotIvrefViewName(const std::string& nameLower);
+    std::string ivrefViewGetterReadExpr(const std::string& objExpr, const std::string& memberName,
+                                         const std::string& lateCall);
     std::string ivrefVtableCall(const std::string& ifaceName, const std::string& member,
                                 const std::string& recv,
                                 const std::vector<std::string>& args);

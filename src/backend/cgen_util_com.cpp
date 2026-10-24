@@ -368,6 +368,11 @@ std::string CCodeGen::resolveComValue(const std::string& unpackType) {
     // 只问一次、形状交回视图那一族的主人；不同型 (含对象档/带实参的属性) 一律保留本处那一发。
     {
         std::string viewRead = legacyViewGetterReadExpr(objExpr, memberName, lastExpr_);
+        if (viewRead.empty()) {
+            // 账 #305 第二百一十刀 S1: 同一个接收者的**新式**那一档（视图 = `vb6_ivref_<I>*` 薄指针）
+            // 从前整条没问 ⇒ VbEclipse 实测 70 处属性读把视图当 IDispatch 交出去，编得过、跑起来恒 0。
+            viewRead = ivrefViewGetterReadExpr(objExpr, memberName, lastExpr_);
+        }
         if (!viewRead.empty()) lastExpr_ = viewRead;
     }
     return lastExpr_;

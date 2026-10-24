@@ -159,6 +159,41 @@ std::string CCodeGen::ivrefInstanceViewExpr(const std::string& ifaceName,
     return "((" + instExpr + ") ? &(" + instExpr + ")->" + field + " : NULL)";
 }
 
+// 账 #305 第二百一十刀 S1: 「这一枚**文本**接收者是不是新式接口视图」—— 第一百二十五刀那位
+// 主人 (ifaceViewOfExpr) 按名那一臂的文本投影，名单同源 (knownIvrefVars_)，不另立第二份判据。
+std::string CCodeGen::slotIvrefViewName(const std::string& nameLower) {
+    auto it = knownIvrefVars_.find(nameLower);
+    return it == knownIvrefVars_.end() ? std::string() : it->second;
+}
+
+// 账 #305 第二百一十刀 S1: 接收者是一枚新式接口视图 (`vb6_ivref_<I>*`) 时，属性读那一发不许走
+// IDispatch 那批 helper —— 视图指针进 helper 首枚 `void*` 槽编得过、跑起来把**薄指针**当
+// IDispatch 去问 ⇒ 恒 0 的静默错（VbEclipse 实测 70 处读 modPublic 的模块级视图槽 m_Scheme）。
+// 与第一百七十八刀 legacy 那一臂同三条问句，一条都不自己长答案:
+//   ① 这一枚接收者在名册里是新式视图吗 (slotIvrefViewName，与主人同一张表);
+//   ② 那一席是**读**那一档吗 (槽键带 `get_` 前缀 ⇒ Let/Set 的席位根本不会被选中);
+//   ③ 那一席的 C 返回与**站点本来要发的那一发**同型吗 —— 不同型就换不了访问路（换算与所有权
+//      是站点按目标档已经 baked 进去的），比的是文本 ⇒ 拿 switch 现拼一份来比。
+// 形状那一头仍交回唯一主人 `ivrefVtableCall`（哨兵①钉着 `->vt->` 只许一处发射），站点一枚不拼。
+std::string CCodeGen::ivrefViewGetterReadExpr(const std::string& objExpr,
+                                              const std::string& memberName,
+                                              const std::string& lateCall) {
+    if (objExpr.empty() || lateCall.empty()) return std::string();
+    const std::string ifaceName = slotIvrefViewName(ifaceLower(objExpr));
+    if (ifaceName.empty()) return std::string();
+    const IfaceView* v = ivLookupIface(ifaceName);
+    if (!v) return std::string();
+    const std::string want = "get_" + ifaceLower(memberName);
+    for (const IfaceSlotView& s : v->slots) {
+        if (s.key != want) continue;
+        if (comGetterExprForRetCType(ivSlotRetType(s.sig), objExpr, memberName) != lateCall) {
+            return std::string();
+        }
+        return ivrefVtableCall(ifaceName, memberName, objExpr, std::vector<std::string>());
+    }
+    return std::string();
+}
+
 // 本模块（类）实现了哪些新式接口：按 `Implements` 书写序，同名去重
 std::vector<const IfaceView*> CCodeGen::ivImplementedIfaces(Module& module) {
     std::vector<const IfaceView*> out;
