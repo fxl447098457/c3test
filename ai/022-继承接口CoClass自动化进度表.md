@@ -6,7 +6,14 @@
 
 OPEN_LOCAL_DIVERGENCE: **已收口（2026-09-27 入夜 = C29-MV-d）** —— 本地 `ctrlmonthview` 的 MV24/MV25/MV30 三条红既不是"本地环境/增量缓存"、也不是"OS 版本相关"，而是**挂钟相关**：comctl v6 把当前时间混进 `MCM_GETCURSEL` 的负载里（日没错、零头 0.765），`CLng` 下午进位、上午舍掉 ⇒ 本机下午一直红、CI 跑在上午一直绿。修法与全部读数见 029 §九 C29-MV-d 那一格。留下的一般式：**日期面判据按 `CLng` / `=` 比之前，产品读数必须归成整数日**，否则同一棵树的判据随时段翻脸，而门只会读到"上午那一半"。
 STATUS: IDLE             # NOT_STARTED | DESIGN | BUSY | IDLE | ALL_DONE
-LAST_RUN: 2026-10-25T18:35:00+08:00 **第二百二十七刀「实施+判据+收线」已发货（门 #927 二十一格全绿）（账 #305 §B220 收线：CLSID 的补齐按名落到**所有**同名 Class 符号 —— View / PopupMenu 的 0x80040111 消失，其余 14 枚身份一字不动）**
+LAST_RUN: 2026-10-25T19:10:00+08:00 **第二百二十八刀「量」已收线（账 #305：「异档进 String」那条口径的机制半边量死 —— OLE 自己的 `VariantChangeType(VT_BOOL→VT_BSTR)` 就给 `-1`，不是我们服务端少做了一步）**
+—— **现读数（今天的编译器，tests\b220_args 实跑）**：`EchoStr ← VT_I4` 答 `<40>`、`← BSTR(12)` 答 `<12>`、`← VT_R8 12.75` 答 `<12.75>`、`← BSTR(abc)` 答 `<abc>` —— 四项都已是 VB6 语言口径（第二百二十刀那条主人顺带修好了 R8 的旧读数 13）；只剩 `← VT_BOOL(True)` 答 `<-1>`。发码侧确认这一格确实在归一化名单里（`vb6_avt_…_EchoStr_invoke[1] = { VT_BSTR }`）。
+—— **机制（10 行 C 探针）**：把 `VT_BOOL/VARIANT_TRUE` 直接交给 OLE 的 `VariantChangeType(..., VT_BSTR)`，答 `hr=0、val=<-1>、len=2` —— **OLE 本人就产出 "-1"**；另一头问本机 VBScript 引擎（`cscript`）：`CStr(True)` 答 `True`、`CStr(False)` 答 `False`、`CStr(12.75)` 答 `12.75`。
+—— **结论 = 口径待拍，不是缺陷证据**：一个 VB6 **服务端**收 `VT_BOOL` 进 `As String` 形参时走哪条（语言的 CStr 还是 Automation 转换），本机没有 VB6 服务端可问，**不猜**。若要向语言口径看齐，落点是 `vb6_ComArgNormalize` 里「目标档 BSTR 且源档 BOOL」那一支（一处、两个常量串），且**必须与整机其余 `VariantChangeType` 站点同批**，否则同进程两种口径；承面 = 任何把布尔交给 String 形参的自动化客户端（本线语料 0 处可证）。
+—— **在册欠项不变，仍是**：① 「同名 Class 符号长成两枚」的触发条件；② 大小写形状不统一；③ 本刀这条 BOOL→String 口径；④ 数组出参 / 按值 Variant 两格 SKIP；⑤ `rgdispidNamedArgs`；⑥ PopupMenu 那条 0xC000041D（227 之后 16/16 已全 DONE，疑似随身份修复消失，待单独复核再销）；⑦ 视图三格纸面缺口；ByRef 写回桥仍归纸面。
+—— **刀号**：本轮 = 第二百二十八刀（量，不动代码），第二百二十七刀的「实施+判据+收线」原样留档在下一节。
+
+# 上一轮（2026-10-25T19:10:00+08:00，原样留档）= LAST_RUN: 2026-10-25T18:35:00+08:00 **第二百二十七刀「实施+判据+收线」已发货（门 #927 二十一格全绿）（账 #305 §B220 收线：CLSID 的补齐按名落到**所有**同名 Class 符号 —— View / PopupMenu 的 0x80040111 消失，其余 14 枚身份一字不动）**
 —— **落点（一处）**：driver_codegen_dll_sync.inc 那条拷贝腿原先住在「默认接口 IID 还是空」的闸里 —— 已经有默认成员的那几枚（靶工程 View 的 `Property Get View` / PopupMenu 的默认方法）整块被跳过，而类型库那一趟写回的是**另一枚同名 Class 符号**（临时打印实测两个地址），于是 dll_entry 只好自己 `generateClsid(progId.类名)`。改成两趟**逐表逐符号**扫描：先收集非空身份、再按名填空值（只填空、绝不覆盖），与同文件里 M29 的 DISPID 同规；值仍只有类型库那一处兜底，不产生第二种 mint。
 —— **判据（靶工程，逐枚对 BASE）**：服务器表 16 枚里**只有 View / PopupMenu 两枚移动**（其余 14 枚逐枚一字不动），16 枚 `tlb == srv`；进程内客户端按 tlb 广告的 CLSID 驱动 16 枚 coclass：**BASE 14/16**（View / PopupMenu `GETFACTORY hr=0x80040111`）→ **NEW 16/16 全 DONE**（`CREATE hr=0` + `DONE`；两枚新值 = tlb 原本就在广告的 {FE46F400-…} 与 {4C721F63-…}）。
 —— **门 #927** = run 40175541096 / head eab63ba2 / attempt 1 / **二十一格全绿**；归因按用例名验：新哨兵的静态格 `[STATIC] clsid_sync_all_copies ... PASS` 落在 Tests (compile #2)；`Emit manifest（shape oracle）` 独立复算 inputs=534 + `manifest-expectation OK`（本刀只动 driver 侧的身份写回，`--emit-c` 零移动）。
