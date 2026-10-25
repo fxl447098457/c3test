@@ -1812,6 +1812,23 @@ function Test-ClassFieldReleaseOrder {
 # 账 #305 SB220 (第二百二十四刀): 通用销毁 vb6_SA_Destroy 必须**按运行期秩**选口径 ——
 # 多维定长字段的载体是 vb6_SafeArrayND*, 它的存储也可能是 1D*(`Dim x()` 再 ReDim 成多维),
 # 所以秩只能问运行期 (vb6_SaIs1D)。x86 上把 ND 当 1D 销毁 = free(totalElements) = AV。
+# 账 #305 SB220 (第二百二十七刀): CLSID 的补齐必须**逐表逐符号**按名做（两趟：收集非空 / 填空值），
+# 而且不许住在「默认接口 IID 还空」那道闸里 —— 住进去时 View / PopupMenu 那种「有默认成员」的类
+# 整块被跳过，dll_entry 会自己 mint 第二枚 CLSID，库里广告的那枚从此答 0x80040111。
+function Test-ClsidSyncAllCopies {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] clsid_sync_all_copies ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\check_clsid_sync_all_copies.ps1" 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        $out | Select-Object -First 8 | ForEach-Object { Write-Host "  $_" }
+    }
+}
+
 function Test-SaDestroyRankAware {
     $script:total++
     Write-Host -NoNewline "  [STATIC] sa_destroy_rank_aware ... "
@@ -9826,6 +9843,7 @@ if ($Category -in @("all", "compile")) {
     if (Enter-StaticShard) { Test-DispInboundArgvtAuthority }
     if (Enter-StaticShard) { Test-ClassFieldReleaseOrder }
     if (Enter-StaticShard) { Test-SaDestroyRankAware }
+    if (Enter-StaticShard) { Test-ClsidSyncAllCopies }
     if (Enter-StaticShard) { Test-OwnedTempKeeps }
     if (Enter-StaticShard) { Test-OwnedTempSemantics }
     if (Enter-StaticShard) { Test-OwnedTempReclaim }
