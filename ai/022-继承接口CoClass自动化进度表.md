@@ -6,7 +6,14 @@
 
 OPEN_LOCAL_DIVERGENCE: **已收口（2026-09-27 入夜 = C29-MV-d）** —— 本地 `ctrlmonthview` 的 MV24/MV25/MV30 三条红既不是"本地环境/增量缓存"、也不是"OS 版本相关"，而是**挂钟相关**：comctl v6 把当前时间混进 `MCM_GETCURSEL` 的负载里（日没错、零头 0.765），`CLng` 下午进位、上午舍掉 ⇒ 本机下午一直红、CI 跑在上午一直绿。修法与全部读数见 029 §九 C29-MV-d 那一格。留下的一般式：**日期面判据按 `CLng` / `=` 比之前，产品读数必须归成整数日**，否则同一棵树的判据随时段翻脸，而门只会读到"上午那一半"。
 STATUS: IDLE             # NOT_STARTED | DESIGN | BUSY | IDLE | ALL_DONE
-LAST_RUN: 2026-10-25T20:55:00+08:00 **第二百三十刀「收线」= 门 **#928** 二十一格全绿（账 #305 §B222：数组形参的出站回写已发货）**
+LAST_RUN: 2026-10-25T21:15:00+08:00 **第二百三十一刀「量」已收线（账 #305 §B223：ByRef 标量那一族的病形与承面 —— 体里读到的是指针，客户变量一字未动）**
+—— **读数**：新夹具 tests/b231_byrefparam（`Bump(ByRef v As Long)` 里一句 `v = v + 1`）+ 探针新臂 `BYREFARG=`：客户端递 `VT_BYREF|VT_I4` 指向自己的 LONG=10 ⇒ `hr=0x0 ret=693303301 retvt=3 client_after=10` —— 返回的是「指针低 32 位 + 1」，客户那个 10 一直没变（不崩、不写回、读的也不是 10）。
+—— **承面**（靶工程产物 dll_entry.c，262 个 disp 适配器）：取址形读臂 9 处 = ByRef 对象 2（View 的 `Property Set View` / Gradient.Draw）+ 数组 1（230 已修）+ 裸 `(&…->lVal)` 6（全在 `MagneticWnd_zSubclass_Proc` 那枚 7 参口，窗口过程桥）；**没量的第二条路** = 自家客户端对 `ByRef Long` 形参打包成什么档（下一刀开工前先补）。
+—— **修法形状（不猜）**：入槽时对 `src->vt & VT_BYREF` 把指向的值拷进槽（体里读对）+ 调用返回后按记下的位置写回 `*src->p<field>`（客户读对）；与 230 同形但不能复用 `vb6_ArraySlotWriteBack`（标量没有 SAFEARRAY 要造）。
+—— **下一刀 = 232 量**：自家客户端对 ByRef 标量/对象的打包档（`vb6_ComCall` 那一侧），以及语料里真正走 IDispatch 的 ByRef 标量格；两条读数都到了才敢定实施优先级。
+—— **刀号**：本轮 = 第二百三十一刀（量，不动代码；探针与夹具留本地未入库），第二百三十刀的「收线」原样留档在下一节。
+
+# 上一轮（2026-10-25T20:55:00+08:00，原样留档）= LAST_RUN: 2026-10-25T20:55:00+08:00 **第二百三十刀「收线」= 门 **#928** 二十一格全绿（账 #305 §B222：数组形参的出站回写已发货）**
 —— **门与归因**：run 40180962950 / head `9038c402` / attempt 1；按用例名验过：`[DISPATCH] b230_arrout_writeback ... PASS`（vbp #8）、`b230_arrout_writeback_x86 ... PASS`（vbp #9）、`[STATIC] array_slot_writeback ... PASS`（compile #2）；`Emit manifest` 自报 `inputs=536` + `manifest-expectation OK`（本机登记的零移动预测兑现）。
 —— **靶工程回归**：同一枚新编译器重建的 VbEclipse.dll 上，16 枚 coclass 的 create→call→Release **16/16 全 DONE**（与第二百二十七刀同数）—— 本刀只动数组槽。
 —— **在册欠项（不变）**：同名 Class 符号的触发条件 / 大小写形状 / `EchoStr ← VT_BOOL` 口径（待拍）/ `rgdispidNamedArgs` / PopupMenu 的 0xC000041D（待复核）/ 视图三格纸面缺口 / **ByRef 标量写回桥**（靶工程产物里现存 4 处取址臂，承面与修法都还没量）。
