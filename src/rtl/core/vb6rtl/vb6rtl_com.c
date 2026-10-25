@@ -741,6 +741,23 @@ void vb6_VariantBorrowIntoSlot(const VARIANT *src, void *slot) {
     memcpy(s, src, sizeof(VARIANT));  /* 其余各档：对端的头 16 字节与我们那一格本来就对齐 */
 }
 
+/* 账 #305 §B219(第二百二十刀): 入站「VARIANT → 声明档」那一问的唯一出口，规则见声明处。
+ * 换算走 oleaut32 的 VariantChangeType(dest, src) —— **不是**就地那一发：src 与 dest 分开，
+ * 对端那份资源一个字节都不动，产物住在调用方给的 scratch 里由调用方回收。
+ * 同档那一发也刻意不调换算：槽里那一份是 §B144 的借用，本来就正确，多走一趟反而会把
+ * 借来的指针换成我们自己的副本(就没人回收了)。 */
+HRESULT vb6_ComArgNormalize(const VARIANT *src, VARTYPE want, void *slot, VARIANT *scratch) {
+    VariantInit(scratch);
+    if (want == VB6_ARGVT_SKIP) return S_OK;   /* 这一格不问，也不许顺手清一下 */
+    if (!src || src->vt == want) return S_OK;  /* 同档：借用就是答案 */
+    if (FAILED(VariantChangeType(scratch, src, 0, want))) {
+        VariantInit(scratch);
+        return DISP_E_TYPEMISMATCH;
+    }
+    vb6_VariantBorrowIntoSlot(scratch, slot);
+    return S_OK;
+}
+
 /* 账 #305 §B145: Variant 参与 + - * / 时的**唯一运行期出口**。
  * 改前发码层替运行期猜了一档整数(Variant 操作数一律发成 vb6_VariantToLong(...))，实测两架构
  * 一致: 盒里是 Double 时 1.5+1 答 **3**、1.5*2 答 **4**；是 Decimal 时 1.25+1 答 **2**、

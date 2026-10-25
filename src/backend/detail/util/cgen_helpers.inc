@@ -911,6 +911,14 @@
     // 只认 vb6_cls_ / vb6_ivref_ 两档：legacy 接口的 vb6_iface_<I>（非指针）和 COM 的
     // vb6_ComIface_X* 一律返回空串 = 维持本改动之前的行为，不在这里顺手扩大。
     std::string cParamClassPtrType(const ParameterInfo& p);
+    // 账 #305 §B219 (第二百二十刀): 这一枚形参的**入站声明档** —— 「服务端该把递进来的 VARIANT
+    // 换算成哪一档，好让上面那条读臂取到的联合体成员就是答案」。交回 VARTYPE 的 C 字面量
+    // (`VT_I4`/`VT_R8`/`VT_BSTR`/`VT_DISPATCH`) 或 `VB6_ARGVT_SKIP`(= 这一格本刀不问)。
+    // 唯一一条规矩：**只认读臂已经证明取的是哪一格的那些档**。ByRef 那一臂交的是格子的**地址**
+    // (换算等于把写回丢掉，要的是另一座桥)、Variant/数组那一臂交的是整槽(§B159/§B160 的主人)、
+    // 兜底那一臂(枚举/UDT/Date/Currency/Decimal/LongPtr/…)的 C 存储还没量过 ⇒ 一律 SKIP，
+    // 猜一档就是再造第二套口径。判据按读臂同一串 if-链抄在**这一处**，别处不许再数一遍。
+    std::string cDispatchArgVt(const ParameterInfo& p);
     // 账 #305 §B218 (甲) 腿⑤ 第二格 (第一百三十七刀): cParamClassPtrType 交回来的那个 C 类型名
     // 装的是**视图薄指针**还是工程类实例 —— 前缀名单只住在上面那位主人出生的那份文件里,
     // 站点与所有权主人都不许再抄一遍视图那一档的前缀 (check_iface_view_authority ③ 钉的就是这张名单)。

@@ -1775,6 +1775,23 @@ function Test-IfaceViewAuthority {
         $out | Select-Object -First 8 | ForEach-Object { Write-Host "  $_" }
     }
 }
+# 账 #305 §B219 (第二百二十刀): 入站「VARIANT → 形参声明档」那一问只许一位主人 ——
+# 服务端不再自己换算(R1)、唯一出口的定义/声明/调用各一枚(R2)、发码读臂不看标签(R3)、
+# 档位答案只住 cDispatchArgVt(R4)、VB6_ARGVT_SKIP 与字段桥那两行(R5)、表的新字段(R6)。
+# 行为面在 tests220_args 那两格真跑; 这道门钉的是「别再长出第二份」。
+function Test-DispInboundArgvtAuthority {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] disp_inbound_argvt_authority ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\check_disp_inbound_argvt_authority.ps1" 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        $out | Select-Object -First 8 | ForEach-Object { Write-Host "  $_" }
+    }
+}
 
 # 账 #454 §B164 形① (第一百三十五刀): 「谁存住了传进去的带权值」那张 KEEPS 表 ——
 # 出口面出自 RTL 的 24 个权威头（不是 grep 名单）· 三分类 0/1/U · unclassified == 0
@@ -8130,6 +8147,99 @@ if ($Category -in @("all", "run", "vbp")) {
         "DONE") @(
         "CALL=PUTRANGE hr=0x00000000") -Arch "x86"
 
+    # 账 #305 §B219 (第二百二十刀): 入站 IDispatch「VARIANT → 形参声明档」那一问的主人。
+    # 改前两处各答一半 —— 服务端只折 I2/I1/UI1/UI2/BOOL/EMPTY→I4 与 R4→R8 那半张名单, 生成的读臂
+    # 按声明档裸取联合体成员、从不看标签。合成夹具**改前**实测(两枚读数同一趟拿的, 绝对路径):
+    #   EchoStr ← VT_I4 ⇒ 把标量当 BSTR 解, 原生 AV 打死客户端(RC=139, 它后面一条读数都打不出来);
+    #   EchoLng ← BSTR("12") 与 BSTR("abc") ⇒ hr=0x00000000 + val=-975707208 (串指针低 32 位, 静默错);
+    #   EchoLng ← VT_R8 12.75 ⇒ val=0。
+    # 改后每一格先过唯一出口 vb6_ComArgNormalize: 同档不动(保持 §B144 的借用语义)、异档把换算产物
+    # 落进服务端自己的 scratch 再借进槽、收尾那一臂回收, 换不动才交回 DISP_E_TYPEMISMATCH ——
+    # 客户端 vb6_ComCheckError 已经把这码折成 VB 13(vb6com.c:256)。
+    # 两条方向各钉一头: 「文本→数值档 = 12」与「数值→文本档 = <40>」钉换算成功, 「abc→Long」与
+    # 「Null→Long」钉报错且客户端活到 DONE; Absent 那一枚钉的是改前的**静默错**(hr=0 交回垃圾) ——
+    # 只比 hr 就等于把「换不动」漏成一格没人看。
+    # EchoLng ← VT_BOOL / VT_EMPTY 那两发是改前**侥幸对**的档位, 原样钉住 = 这刀没把对的答案改坏;
+    # EchoVar 那两发钉 Variant 形参没被换算(VarType 照原标签答 3/8), 就是表里 VB6_ARGVT_SKIP 的证人。
+    # 两台 26 发读数逐字节相同 ⇒ 针面两台各写一份(不提成变量: 这一族既有各格就是各自一份)。
+    Test-DispatchInvoke "b220_inbound_argvt" "$Tests\b220_args\B220a.vbp" "B220a" `
+        "{11112222-3333-4444-5555-6666777788B7}" @(
+        "VTARG=EchoLng:i giving=VT_I4 hr=0x00000000 vt=3 val=40",
+        "VTARG=EchoLng:s giving=BSTR(12) hr=0x00000000 vt=3 val=12",
+        "VTARG=EchoLng:x giving=BSTR(abc) hr=0x80020005 vt=0 scode=0x00000000 argerr=0",
+        "VTARG=EchoLng:r giving=VT_R8 hr=0x00000000 vt=3 val=13",
+        "VTARG=EchoLng:f giving=VT_R4 hr=0x00000000 vt=3 val=13",
+        "VTARG=EchoLng:b giving=VT_BOOL hr=0x00000000 vt=3 val=-1",
+        "VTARG=EchoLng:e giving=VT_EMPTY hr=0x00000000 vt=3 val=0",
+        "VTARG=EchoLng:n giving=VT_NULL hr=0x80020005 vt=0 scode=0x00000000 argerr=0",
+        "VTARG=EchoLng:t giving=VT_I2 hr=0x00000000 vt=3 val=9",
+        "VTARG=EchoLng:u giving=VT_UI1 hr=0x00000000 vt=3 val=7",
+        "VTARG=EchoStr:i giving=VT_I4 hr=0x00000000 vt=8 val=<40> len=2",
+        "VTARG=EchoStr:s giving=BSTR(12) hr=0x00000000 vt=8 val=<12> len=2",
+        "VTARG=EchoStr:x giving=BSTR(abc) hr=0x00000000 vt=8 val=<abc> len=3",
+        "VTARG=EchoStr:r giving=VT_R8 hr=0x00000000 vt=8 val=<12.75> len=5",
+        "VTARG=EchoStr:b giving=VT_BOOL hr=0x00000000 vt=8 val=<-1> len=2",
+        "VTARG=EchoStr:e giving=VT_EMPTY hr=0x00000000 vt=8 val=<> len=0",
+        "VTARG=EchoDbl:i giving=VT_I4 hr=0x00000000 vt=5 val=40.0000",
+        "VTARG=EchoDbl:s giving=BSTR(12) hr=0x00000000 vt=5 val=12.0000",
+        "VTARG=EchoDbl:r giving=VT_R8 hr=0x00000000 vt=5 val=12.7500",
+        "VTARG=EchoBool:b giving=VT_BOOL hr=0x00000000 vt=3 val=-1",
+        "VTARG=EchoBool:i giving=VT_I4 hr=0x00000000 vt=3 val=40",
+        "VTARG=EchoBool:s giving=BSTR(12) hr=0x00000000 vt=3 val=12",
+        "VTARG=EchoVar:i giving=VT_I4 hr=0x00000000 vt=3 val=3",
+        "VTARG=EchoVar:x giving=BSTR(abc) hr=0x00000000 vt=3 val=8",
+        "VTARG=SumTwo:i,s giving=VT_I4+BSTR(12) hr=0x00000000 vt=8 val=<12:40> len=5",
+        "VTARG=SumTwo:s,i giving=BSTR(12)+VT_I4 hr=0x00000000 vt=8 val=<40:12> len=5",
+        "DONE") @(
+        "VTARG=EchoLng:x giving=BSTR(abc) hr=0x00000000") `
+        -Tail @(
+            "VTARG=EchoLng:i", "VTARG=EchoLng:s", "VTARG=EchoLng:x", "VTARG=EchoLng:r",
+            "VTARG=EchoLng:f", "VTARG=EchoLng:b", "VTARG=EchoLng:e", "VTARG=EchoLng:n",
+            "VTARG=EchoLng:t", "VTARG=EchoLng:u", "VTARG=EchoStr:i", "VTARG=EchoStr:s",
+            "VTARG=EchoStr:x", "VTARG=EchoStr:r", "VTARG=EchoStr:b", "VTARG=EchoStr:e",
+            "VTARG=EchoDbl:i", "VTARG=EchoDbl:s", "VTARG=EchoDbl:r", "VTARG=EchoBool:b",
+            "VTARG=EchoBool:i", "VTARG=EchoBool:s", "VTARG=EchoVar:i", "VTARG=EchoVar:x",
+            "VTARG=SumTwo:i,s", "VTARG=SumTwo:s,i")
+    Test-DispatchInvoke "b220_inbound_argvt_x86" "$Tests\b220_args\B220a.vbp" "B220a" `
+        "{11112222-3333-4444-5555-6666777788B7}" @(
+        "VTARG=EchoLng:i giving=VT_I4 hr=0x00000000 vt=3 val=40",
+        "VTARG=EchoLng:s giving=BSTR(12) hr=0x00000000 vt=3 val=12",
+        "VTARG=EchoLng:x giving=BSTR(abc) hr=0x80020005 vt=0 scode=0x00000000 argerr=0",
+        "VTARG=EchoLng:r giving=VT_R8 hr=0x00000000 vt=3 val=13",
+        "VTARG=EchoLng:f giving=VT_R4 hr=0x00000000 vt=3 val=13",
+        "VTARG=EchoLng:b giving=VT_BOOL hr=0x00000000 vt=3 val=-1",
+        "VTARG=EchoLng:e giving=VT_EMPTY hr=0x00000000 vt=3 val=0",
+        "VTARG=EchoLng:n giving=VT_NULL hr=0x80020005 vt=0 scode=0x00000000 argerr=0",
+        "VTARG=EchoLng:t giving=VT_I2 hr=0x00000000 vt=3 val=9",
+        "VTARG=EchoLng:u giving=VT_UI1 hr=0x00000000 vt=3 val=7",
+        "VTARG=EchoStr:i giving=VT_I4 hr=0x00000000 vt=8 val=<40> len=2",
+        "VTARG=EchoStr:s giving=BSTR(12) hr=0x00000000 vt=8 val=<12> len=2",
+        "VTARG=EchoStr:x giving=BSTR(abc) hr=0x00000000 vt=8 val=<abc> len=3",
+        "VTARG=EchoStr:r giving=VT_R8 hr=0x00000000 vt=8 val=<12.75> len=5",
+        "VTARG=EchoStr:b giving=VT_BOOL hr=0x00000000 vt=8 val=<-1> len=2",
+        "VTARG=EchoStr:e giving=VT_EMPTY hr=0x00000000 vt=8 val=<> len=0",
+        "VTARG=EchoDbl:i giving=VT_I4 hr=0x00000000 vt=5 val=40.0000",
+        "VTARG=EchoDbl:s giving=BSTR(12) hr=0x00000000 vt=5 val=12.0000",
+        "VTARG=EchoDbl:r giving=VT_R8 hr=0x00000000 vt=5 val=12.7500",
+        "VTARG=EchoBool:b giving=VT_BOOL hr=0x00000000 vt=3 val=-1",
+        "VTARG=EchoBool:i giving=VT_I4 hr=0x00000000 vt=3 val=40",
+        "VTARG=EchoBool:s giving=BSTR(12) hr=0x00000000 vt=3 val=12",
+        "VTARG=EchoVar:i giving=VT_I4 hr=0x00000000 vt=3 val=3",
+        "VTARG=EchoVar:x giving=BSTR(abc) hr=0x00000000 vt=3 val=8",
+        "VTARG=SumTwo:i,s giving=VT_I4+BSTR(12) hr=0x00000000 vt=8 val=<12:40> len=5",
+        "VTARG=SumTwo:s,i giving=BSTR(12)+VT_I4 hr=0x00000000 vt=8 val=<40:12> len=5",
+        "DONE") @(
+        "VTARG=EchoLng:x giving=BSTR(abc) hr=0x00000000") `
+        -Tail @(
+            "VTARG=EchoLng:i", "VTARG=EchoLng:s", "VTARG=EchoLng:x", "VTARG=EchoLng:r",
+            "VTARG=EchoLng:f", "VTARG=EchoLng:b", "VTARG=EchoLng:e", "VTARG=EchoLng:n",
+            "VTARG=EchoLng:t", "VTARG=EchoLng:u", "VTARG=EchoStr:i", "VTARG=EchoStr:s",
+            "VTARG=EchoStr:x", "VTARG=EchoStr:r", "VTARG=EchoStr:b", "VTARG=EchoStr:e",
+            "VTARG=EchoDbl:i", "VTARG=EchoDbl:s", "VTARG=EchoDbl:r", "VTARG=EchoBool:b",
+            "VTARG=EchoBool:i", "VTARG=EchoBool:s", "VTARG=EchoVar:i", "VTARG=EchoVar:x",
+            "VTARG=SumTwo:i,s", "VTARG=SumTwo:s,i") -Arch "x86"
+
+
     # 账 #305 SB186 (第七十八刀): 服务端进门的**第二站** —— IClassFactory::CreateInstance 走进
     # Class_Initialize 那一步。这条通道连 EXCEPINFO 都没有, 错误号只能编在交回的 HRESULT 里; 这一趟过去同样
     # 没有边界: 体里一条没人接住的 Err.Raise 123 会把客户端进程打死(两台实测 RC=123 + stderr
@@ -9627,6 +9737,7 @@ if ($Category -in @("all", "compile")) {
     if (Enter-StaticShard) { Test-LegacySlotKeyOwners }
     if (Enter-StaticShard) { Test-BoxTempReclaim }
     if (Enter-StaticShard) { Test-IfaceViewAuthority }
+    if (Enter-StaticShard) { Test-DispInboundArgvtAuthority }
     if (Enter-StaticShard) { Test-OwnedTempKeeps }
     if (Enter-StaticShard) { Test-OwnedTempSemantics }
     if (Enter-StaticShard) { Test-OwnedTempReclaim }

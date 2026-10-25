@@ -213,6 +213,121 @@ static void call_churn(IDispatch *disp, LONG n) {
     VariantClear(&arg);
 }
 
+/* 账 #305 §B219 (第二百二十刀): 一发调用, 实参的 vt 由夹具在命令行上点出来。
+ * 既有 call_member 摆的实参档是写死的 VT_I4 —— 那一枚问不出「文本递进数值档 / 数递进文本档」
+ * 这一半，而这一半正是本刀的靶子 (异档进槽 = 读错联合体那一格：串档拿到 AV、数值档拿到指针)。
+ * 臂形: VTARG=<成员名>:<档>[,<档>...]，档按**声明序**给 (第 0 个 = 第一个形参)，
+ *   i=VT_I4(40) t=VT_I2(9) u=VT_UI1(7) f=VT_R4(12.75) r=VT_R8(12.75) b=VT_BOOL(True)
+ *   s=VT_BSTR("12") x=VT_BSTR("abc") e=VT_EMPTY n=VT_NULL
+ * 只在给了 VTARG= 时发，其余夹具的输出一个字节都不动。 */
+static void mk_vtarg(VARIANT *out, char kind) {
+    VariantInit(out);
+    switch (kind) {
+        case 'i': out->vt = VT_I4;   out->lVal = 40; break;
+        case 't': out->vt = VT_I2;   out->iVal = 9; break;
+        case 'u': out->vt = VT_UI1;  out->bVal = 7; break;
+        case 'f': out->vt = VT_R4;   out->fltVal = 12.75f; break;
+        case 'r': out->vt = VT_R8;   out->dblVal = 12.75; break;
+        case 'b': out->vt = VT_BOOL; out->boolVal = VARIANT_TRUE; break;
+        case 's': out->vt = VT_BSTR; out->bstrVal = SysAllocString(L"12"); break;
+        case 'x': out->vt = VT_BSTR; out->bstrVal = SysAllocString(L"abc"); break;
+        case 'n': out->vt = VT_NULL; break;
+        default:  out->vt = VT_EMPTY; break;
+    }
+}
+
+static const char *vtarg_kind_name(char kind) {
+    switch (kind) {
+        case 'i': return "VT_I4";
+        case 't': return "VT_I2";
+        case 'u': return "VT_UI1";
+        case 'f': return "VT_R4";
+        case 'r': return "VT_R8";
+        case 'b': return "VT_BOOL";
+        case 's': return "BSTR(12)";
+        case 'x': return "BSTR(abc)";
+        case 'n': return "VT_NULL";
+        default:  return "VT_EMPTY";
+    }
+}
+
+static void print_vtarg_value(const VARIANT *v) {
+    if (v->vt == VT_BSTR && v->bstrVal) {
+        UINT i, len = SysStringLen(v->bstrVal);
+        printf(" val=<");
+        for (i = 0; i < len; i++) {
+            unsigned short c = v->bstrVal[i];
+            putchar(c < 128 ? (int)c : '?');
+        }
+        printf("> len=%u", (unsigned)len);
+    } else if (v->vt == VT_I4 || v->vt == VT_I2 || v->vt == VT_UI1) {
+        printf(" val=%ld", (long)v->lVal);
+    } else if (v->vt == VT_R8) {
+        printf(" val=%.4f", v->dblVal);
+    } else if (v->vt == VT_BOOL) {
+        printf(" val=%s", v->boolVal == VARIANT_TRUE ? "True" : "False");
+    }
+}
+
+static void call_vtarg(IDispatch *disp, const char *spec) {
+    char member[64];
+    char kinds[8];
+    VARIANT rev[8];
+    VARIANT res;
+    DISPPARAMS dp;
+    EXCEPINFO ei;
+    DISPID id = DISPID_UNKNOWN;
+    UINT err = 0;
+    LPOLESTR names[1];
+    wchar_t wname[64];
+    const char *colon = strchr(spec, ':');
+    const char *p;
+    size_t mlen = colon ? (size_t)(colon - spec) : strlen(spec);
+    int nk = 0, i;
+    HRESULT hr;
+
+    if (mlen == 0 || mlen >= sizeof(member)) { printf("VTARG=BAD %s\n", spec); return; }
+    memcpy(member, spec, mlen);
+    member[mlen] = '\0';
+    if (colon) {
+        for (p = colon + 1; *p && nk < 8; p++)
+            if (*p != ',') kinds[nk++] = *p;
+    }
+    if (MultiByteToWideChar(CP_ACP, 0, member, -1, wname, 64) <= 0) {
+        printf("VTARG=BADNAME %s\n", spec);
+        return;
+    }
+    names[0] = wname;
+    VariantInit(&res);
+    memset(&ei, 0, sizeof(ei));
+    memset(&dp, 0, sizeof(dp));
+    hr = IDispatch_GetIDsOfNames(disp, &IID_NULL, names, 1, LOCALE_USER_DEFAULT, &id);
+    if (FAILED(hr)) {
+        printf("VTARG=%s names hr=0x%08lX\n", spec, (unsigned long)hr);
+        return;
+    }
+    /* DISPPARAMS 是逆序：rgvarg[0] = 最后一个形参。kinds[] 按声明序给，这里翻过来摆。 */
+    for (i = 0; i < nk; i++) mk_vtarg(&rev[nk - 1 - i], kinds[i]);
+    dp.rgvarg = nk ? rev : NULL;
+    dp.cArgs = (UINT)nk;
+    hr = IDispatch_Invoke(disp, id, &IID_NULL, LOCALE_USER_DEFAULT, DISPATCH_METHOD, &dp,
+                          &res, &ei, &err);
+    printf("VTARG=%s giving=", spec);
+    for (i = 0; i < nk; i++) printf("%s%s", i ? "+" : "", vtarg_kind_name(kinds[i]));
+    if (nk == 0) printf("-");
+    printf(" hr=0x%08lX vt=%u", (unsigned long)hr, (unsigned)res.vt);
+    print_vtarg_value(&res);
+    if (FAILED(hr)) {
+        printf(" scode=0x%08lX argerr=%u", (unsigned long)ei.scode, (unsigned)err);
+        if (ei.bstrDescription) printf(" desc=%s",
+            SysStringLen(ei.bstrDescription) >= 1 && ei.bstrDescription[0] >= 0x80 ? "(non-ascii)" : "(ascii)");
+    }
+    printf("\n");
+    if (ei.bstrDescription) SysFreeString(ei.bstrDescription);
+    VariantClear(&res);
+    for (i = 0; i < nk; i++) VariantClear(&rev[i]);
+}
+
 /* Acct #305 SB159 (knife 50): a real one-element-per-slot VT_ARRAY|VT_I4 built the way a
  * real client builds one -- SafeArrayCreate + SafeArrayPutElement, no hand-written layout. */
 static VARIANT mk_sa_i4(const LONG* vals, int n) {
@@ -481,6 +596,11 @@ int main(int argc, char **argv) {
     /* 账 #481: 表饱和的运行时证人 (只在给了 CHURN=<n> 时发, 其余夹具输出不变). */
     for (ai = 3; ai < argc; ai++)
         if (strncmp(argv[ai], "CHURN=", 6) == 0) call_churn(disp, (LONG)strtol(argv[ai] + 6, NULL, 10));
+
+    /* 账 #305 §B219 (第二百二十刀): 异档实参那一族读数 (只在给了 VTARG= 时发). 排在 CREATE= 之前 ——
+     * 它们打的是**同一枚已建好的** disp, 而 CREATE= 那一臂可能打死进程, 读数要先在管子里。 */
+    for (ai = 3; ai < argc; ai++)
+        if (strncmp(argv[ai], "VTARG=", 6) == 0) call_vtarg(disp, argv[ai] + 6);
 
     /* Acct #305 SB186 (knife 78): the factory-side arms, last, so the primary object's readings are
      * already on the pipe before anything here can kill the process. */

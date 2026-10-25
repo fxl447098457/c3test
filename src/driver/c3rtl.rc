@@ -934,3 +934,8 @@
  *   新 RTL 出口 vb6_ComObject_ClassNameA = 兄弟 ClassNameBStr 的不分配那一档: 这一站每迭代一枚都要问一次,
  *   不能每问一次 SysAllocString; 认不出交 NULL 的口径与兄弟一字相同。
  *   touch 本文件 = 让 RCDATA 重包一次 (§B99②)。 */
+/* 账 #305 §B219 第二百二十刀 (2026-10-25): 入站实参「VARIANT → 形参声明档」那一问收成一处主人 ——
+ *   服务端进门那一趟改问新 RTL 出口 vb6_ComArgNormalize (定义在 vb6rtl_com.c, 声明在 vb6rtl_variant.h,
+ *   连同新哨兵常量 VB6_ARGVT_SKIP)，vb6comserver_obj.c 里那半张手抄换算表(只折 I2/I1/UI1/UI2/BOOL/
+ *   EMPTY→I4、R4→R8)撤掉；vb6_DispMethodDesc 从此多带一枚每方法形参声明档数组。
+ *   touch 本文件 = 让 RCDATA 重包一次 (§B99②)。 */

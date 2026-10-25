@@ -300,25 +300,30 @@ static HRESULT STDMETHODCALLTYPE ComObj_Invoke(vb6_ComObject* self, DISPID dispI
          method->name ? method->name : L"?", (int)(pDispParams ? pDispParams->cArgs : 0));
 
     // Collect arguments
-    // Note: Script engines like VBScript may pass VT_I2 etc.,
-    // while bridge functions expect VT_I4 (via lVal). Coerce each param to VT_I4.
+    // Note: 调用方(VBScript/Office/另一枚工程类)递来的 vt 与形参的声明档**不一定相同**，
+    //   而下面生成的读臂是按声明档取联合体成员的 —— 这一趟负责把每一格先换算到那一档，
+    //   见 §B219 那段与 vb6_ComArgNormalize 的声明处。
     // invokeFunc 的实参/返回槽在适配器里按 vb6_VARIANT (x86 24B: vt 4B +
     // pad 4B + union 16B) 布局访问; 前 16 字节与 OLE VARIANT 内容一致。
     typedef struct { uint64_t v[3]; } vb6_VarSlot;
     int argc = pDispParams ? (int)pDispParams->cArgs : 0;
     void** args = NULL;
     void* coercedArgs = NULL;   /* 槽阵列, 每槽 vb6_VarSlot */
+    VARIANT* scratch = NULL;    /* 账 #305 §B219: 换算产物住这里, 服务端在收尾那一臂回收 */
+    int argErrSlot = -1;        /* 账 #305 §B219: 换算不动的那一枚(声明序下标), -1 = 没有 */
 
     if (argc > 0) {
         args = (void**)CoTaskMemAlloc(argc * sizeof(void*));
         coercedArgs = (void*)CoTaskMemAlloc(argc * sizeof(vb6_VarSlot));
-        if (!args || !coercedArgs) {
+        scratch = (VARIANT*)CoTaskMemAlloc(argc * sizeof(VARIANT));
+        if (!args || !coercedArgs || !scratch) {
             if (args) CoTaskMemFree(args);
             if (coercedArgs) CoTaskMemFree(coercedArgs);
+            if (scratch) CoTaskMemFree(scratch);
             return E_OUTOFMEMORY;
         }
         // 适配器按 vb6_VARIANT (24B) 布局访问实参与返回槽, 而 COM 边界的
-        // OLE VARIANT 是 16B。每个实参先整复制进 24B 槽, 再按需数值强转。
+        // OLE VARIANT 是 16B。每个实参先整复制进 24B 槽, 再按声明档换算。
         // (ai/022 B17 那条"未初始化就被 VariantClear"的堆损坏在这里由下面的
         //  `memset(slot, 0, sizeof(*slot))` 一并解决 —— 旧写法按 VARIANT 尺寸清零,
         //  在这套 24B 槽设计下 x86 会算少, 故合并时只保留这一份。)
@@ -332,16 +337,28 @@ static HRESULT STDMETHODCALLTYPE ComObj_Invoke(vb6_ComObject* self, DISPID dispI
             vb6_VariantBorrowIntoSlot(src, slot);
             args[i] = slot;
         }
-        for (int i = 0; i < argc; i++) {
-            VARIANT* src = &pDispParams->rgvarg[argc - 1 - i];
-            VARIANT* dst = (VARIANT*)&((vb6_VarSlot*)coercedArgs)[i];
-            // Coerce numeric types to VT_I4 (bridge functions use lVal)
-            if (src->vt == VT_I2 || src->vt == VT_I1 || src->vt == VT_UI1 ||
-                src->vt == VT_UI2 || src->vt == VT_BOOL || src->vt == VT_EMPTY) {
-                VariantChangeType(dst, src, 0, VT_I4);
-            } else if (src->vt == VT_R4) {
-                // Float -> Double for dblVal access
-                VariantChangeType(dst, src, 0, VT_R8);
+        /* 账 #305 §B219(第二百二十刀): 「往里读」那一族在此多出来的一问 —— 发码那 16 处读臂
+         * 按**形参声明档**取联合体成员、从不看标签，于是异档实参一律读错一格。靶工程与合成
+         * 夹具两台实测(20 发矩阵在 022 第二百二十刀的账里)：
+         *   String 档 ← VT_I4 40 / VT_R8 / VT_BOOL ⇒ 把标量当 BSTR 解 ⇒ 原生 AV，**打死客户端**；
+         *   Long 档 ← VT_BSTR "12" ⇒ 答指针低 32 位(实测 1833297976)、← VT_R8 12.75 ⇒ 答 0，静默错；
+         *   Long 档 ← VT_BOOL / VT_EMPTY ⇒ 侥幸对(靠本处原先那半张手抄表恰好折了这两档)。
+         * 这里原来是那半张表(只折 VT_I2/I1/UI1/UI2/BOOL/EMPTY→I4、R4→R8，异档名单之外的照旧
+         * 裸取)，与发码那一半合起来才是「两半各答一半」。现在两半都并到唯一出口
+         * vb6_ComArgNormalize 上：档位答案由表里的 paramVts 给(cgen 那一处权威 cDispatchArgVt 答)，
+         * 换算与失败那一问住 RTL。换算不动交回 DISP_E_TYPEMISMATCH —— 客户端 vb6_ComCheckError
+         * 已经把它折成 VB 13(vb6com.c:256)，与 VB6 本人的「Type mismatch」同号。
+         * 不许图省事就地换算槽：槽借用了调用方的 BSTR/Dispatch 指针，VariantChangeType 会替
+         * 它们 SysFreeString/Release ⇒ 对端随后 clear 就是双份。 */
+        for (int i = 0; i < argc; i++) VariantInit(&scratch[i]);
+        if (method->paramVts) {
+            for (int i = 0; i < argc && i < (int)method->paramVtCount; i++) {
+                VARIANT* src = &pDispParams->rgvarg[argc - 1 - i];
+                vb6_VarSlot* slot = &((vb6_VarSlot*)coercedArgs)[i];
+                if (FAILED(vb6_ComArgNormalize(src, method->paramVts[i], slot, &scratch[i]))) {
+                    argErrSlot = i;
+                    break;
+                }
             }
         }
     }
@@ -357,9 +374,9 @@ static HRESULT STDMETHODCALLTYPE ComObj_Invoke(vb6_ComObject* self, DISPID dispI
      * 失败时按内置 Collection 早就在用的那一形状交回 (vb6_ComFailExcep), 客户端的
      * vb6_ComCheckError 把它折回成一条 VB 错误 ⇒ 客户的 On Error 拿得到错误号。
      * 注意: 不许在这里 longjmp 之后直接 return —— 下面那条收尾要回收 args/coercedArgs
-     * 与 §B162 那枚数组那一臂, 跳过它就是漏窗。 */
+     * 与 §B162 那枚数组那一臂, 跳过它就是漏窗。 §B219 同规: 换算不动那一发也是先收尾再交回。 */
     int32_t srvErrNum = 0;
-    if (method->invokeFunc) {
+    if (argErrSlot < 0 && method->invokeFunc) {
         vb6_VarSlot tmpRet;
         jmp_buf srvJmp;
         memset(&tmpRet, 0, sizeof(tmpRet));
@@ -386,8 +403,19 @@ static HRESULT STDMETHODCALLTYPE ComObj_Invoke(vb6_ComObject* self, DISPID dispI
         vb6_VariantSlotRelease(&((vb6_VarSlot*)coercedArgs)[i]);
     }
     // 槽内是调用方 VARIANT 的副本, 资源仍归调用方, 不得 VariantClear
+    /* 账 #305 §B219: 换算过的那几格例外 —— 槽里借的是 scratch 里的**我们自己的**副本，
+     * 所以回收顺序是「先让被调方用完，再 clear scratch」；scratch 一定先于槽阵列 free。 */
+    if (scratch) {
+        for (int i = 0; i < argc; i++) VariantClear(&scratch[i]);
+        CoTaskMemFree(scratch);
+    }
     if (coercedArgs) CoTaskMemFree(coercedArgs);
     if (args) CoTaskMemFree(args);
+    /* 账 #305 §B219: 换算不动那一枚 —— pArgErr 交的是 **rgvarg 的下标**(逆序那一头), 不是声明序。 */
+    if (argErrSlot >= 0) {
+        if (puArgErr) *puArgErr = (UINT)(argc - 1 - argErrSlot);
+        return DISP_E_TYPEMISMATCH;
+    }
     /* 账 #305 §B185: 收尾(上面那批回收)之后才交回错误 —— 顺序是硬要求。 */
     if (srvErrNum != 0)
         return vb6_ComFailExcep(pExcepInfo, srvErrNum, vb6_ErrDescription(), L"COM server error");

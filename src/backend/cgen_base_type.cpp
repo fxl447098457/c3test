@@ -252,6 +252,25 @@ std::string CCodeGen::cParamClassPtrType(const ParameterInfo& p) {
     return {};
 }
 
+// 账 #305 §B219 (第二百二十刀): 入站实参的**声明档** —— 服务端进门那一趟照着它把 VARIANT
+// 换算到形参声明的那一档，于是 cgen_util_dllentry_collect.inc 那 16 处读臂可以继续裸取
+// 联合体成员。判据与**那条读臂逐格对齐**(读 lVal 的答 VT_I4、读 dblVal 的答 VT_R8、读
+// bstrVal 的答 VT_BSTR、读 pdispVal 的答 VT_DISPATCH)，读整槽的 Variant、取地址的 ByRef、
+// 以及那条 if-链兜底臂(枚举/UDT/Date/Currency/Decimal/LongPtr/… —— 它们的 C 存储是不是
+// int32_t 还没量过)一律 VB6_ARGVT_SKIP。新增一档之前先量那一档的 C 存储，别在这里猜。
+std::string CCodeGen::cDispatchArgVt(const ParameterInfo& p) {
+    if (!p.isByVal) return "VB6_ARGVT_SKIP";
+    // 工程类/接口槽: 读臂取的是 pdispVal ⇒ VT_DISPATCH (与下面 Object 那一档同一个答案)。
+    if (!cParamClassPtrType(p).empty()) return "VT_DISPATCH";
+    const Vb6Type t = p.type;   // 刻意**不加** Array 位掩码: 与读臂那条 == 比较逐字同形
+    if (t == Vb6Type::Long || t == Vb6Type::Integer || t == Vb6Type::Byte ||
+        t == Vb6Type::Boolean) return "VT_I4";
+    if (t == Vb6Type::Double || t == Vb6Type::Single) return "VT_R8";
+    if (t == Vb6Type::String) return "VT_BSTR";
+    if (t == Vb6Type::Object) return "VT_DISPATCH";
+    return "VB6_ARGVT_SKIP";
+}
+
 // 账 #305 §B218 (甲) 腿⑤ 第二格 (第一百三十七刀): 「这一档槽装的是视图薄指针吗」—— 上面那位主人
 // 的两档里读视图那一档的唯一出口。前缀知识刻意留在这份文件 (= cParamClassPtrType 的出生地),
 // 别处再抄一次字面量就是把「谁认得 vb6_ivref_」这张名单扩大。

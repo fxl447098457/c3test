@@ -562,6 +562,8 @@ sha256=05a365d62c930128efbcb1d77928a040fdcdd22ff076f9208ace924480bc1f76 ascii256
 sha256=05a365d62c930128efbcb1d77928a040fdcdd22ff076f9208ace924480bc1f76 ascii256=fa3a1a2ae3cf625687eade074095d4d4abf038c604a97328cb6d85a9992190c3 rc=0 bytes=4054 tests/k3136_lwa_guard/mdl3136.bas
 sha256=a4eb4423ccb239154ee1433b2287dfbf8b0331691e066230e9847427baac05ee ascii256=dbef0095197f2ee3733a17cf7860cd949ada5ab29574db1a297a5e2d651f9a5b rc=0 bytes=37679 tests/k3138_iface_field/K3138.vbp
 sha256=49e618f161a5054359415937649742fe875ad86ea24423fcc743143a0e3340b4 ascii256=bf9863a583e7fbcd411da91f59633b9dc58c5cc52500b4d49229497e02464296 rc=0 bytes=4863 tests/k3138_iface_field/mdl3138.bas
+sha256=eaa38a24b02f719b1a073521680a10586edf155193a944a763051f59a49934bc ascii256=81412ee3544d0cf2af4ef5b97b587f0dd82f1f0e430184ba7459c6939cea2f16 rc=0 bytes=6251 tests/b220_args/B220a.vbp
+sha256=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 ascii256=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 rc=1 bytes=0 tests/b220_args/DllBlocks.bas
 # 第一百七十四刀 (账 #471 站A, 门 #854 run 39829084507 head e22b24f4): 每枚 legacy 接口自己铸一枚 vb6_iface_<I>_view_from ⇒ 用到 legacy 接口的 6 份存量输入发码字节跟着变 (iface_multi / iface_wrap / k165_iface_slot / k172_viewarg / b189_gate / BalloonTooltips), 新增的两行是本刀夹具自己
 # 登记吃的是 CI 那台自己交回的清单 (artifact emit-manifest), 不是本机复算的数
 # 登记来源：第一百七十五刀（账 #305 新账 #471 站D）= 本机复算登记 —— 存量 503 行逐行哈希全同（换主人不换形状：P6.4 那一臂提成 legacyViewCallExpr，两条消费路同问一位主人），所以本刀**零移动**，只新增下面这两行；判据与登记同批推，验证门 = 台账第一百七十五刀实施那一行回填的那一轮。

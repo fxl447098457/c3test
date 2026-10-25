@@ -376,6 +376,21 @@ void vb6_VariantPackCopyInto(const void *slot, VARIANT *out);    /* 槽 → 对�
 void vb6_VariantBorrowIntoSlot(const VARIANT *src, void *slot);  /* 对端 VARIANT → 槽(借用) */
 void vb6_VariantSlotRelease(void *slot);  /* 账 #305 §B162: 回收上面那臂造出的描述符 */
 
+/* 账 #305 §B219(第二百二十刀): 入站实参「这一槽声明的是什么档」的那一问，值域就两样：
+ * 一个真 VARTYPE(要换算到它)，或 VB6_ARGVT_SKIP(这一格本刀不问，槽里保持纯借用)。
+ * 声明档不明 / ByRef / Variant / 数组 那几形交回 SKIP —— 它们的 C 存储是不是联合体那一格
+ * 还没量过(见 022 第二百二十刀的在册欠项)，猜一档就是造第二套口径。 */
+#define VB6_ARGVT_SKIP ((VARTYPE)0xFFFF)
+
+/* 账 #305 §B219: 「往里读」那一族在此之上多出来的一问 ——「调用方递的 vt 与形参声明档
+ * 不合时怎么办」。发码那 16 处读臂各自按声明档取联合体成员、从不看标签(实测两架构：
+ * VT_BSTR 进 Long 档答指针低 32 位、VT_I4 进 String 档把 40 当 BSTR 解 ⇒ 原生 AV 打死客户端)。
+ * 规则三条：同档不动(槽里就是答案)；异档换算产物**先进自己的临时量**再走上面那枚借用出口
+ * —— 不许就地覆盖槽(槽借用了调用方的 BSTR，VariantChangeType 会把它 SysFreeString 掉)；
+ * 换算不动交回 DISP_E_TYPEMISMATCH(客户端 vb6_ComCheckError 已把它折成 VB 13)。
+ * scratch 由调用方在**被调方返回之后** VariantClear —— 顺序与 §B185 那扇边界同规。 */
+HRESULT vb6_ComArgNormalize(const VARIANT *src, VARTYPE want, void *slot, VARIANT *scratch);
+
 /* 账 #305 §B145: 槽 → 真 VARIANT 的那张 vt 表，**只答「数值住在哪一格」**，一律借用语义
  * (不复制 BSTR、不 AddRef)。需要带权副本的出站那一族自己补下面那一步。 */
 void vb6_VariantPackBorrow(vb6_VARIANT v, VARIANT *out);
