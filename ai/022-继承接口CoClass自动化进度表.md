@@ -6,7 +6,16 @@
 
 OPEN_LOCAL_DIVERGENCE: **已收口（2026-09-27 入夜 = C29-MV-d）** —— 本地 `ctrlmonthview` 的 MV24/MV25/MV30 三条红既不是"本地环境/增量缓存"、也不是"OS 版本相关"，而是**挂钟相关**：comctl v6 把当前时间混进 `MCM_GETCURSEL` 的负载里（日没错、零头 0.765），`CLng` 下午进位、上午舍掉 ⇒ 本机下午一直红、CI 跑在上午一直绿。修法与全部读数见 029 §九 C29-MV-d 那一格。留下的一般式：**日期面判据按 `CLng` / `=` 比之前，产品读数必须归成整数日**，否则同一棵树的判据随时段翻脸，而门只会读到"上午那一半"。
 STATUS: IDLE             # NOT_STARTED | DESIGN | BUSY | IDLE | ALL_DONE
-LAST_RUN: 2026-10-25T19:10:00+08:00 **第二百二十八刀「量」已收线（账 #305：「异档进 String」那条口径的机制半边量死 —— OLE 自己的 `VariantChangeType(VT_BOOL→VT_BSTR)` 就给 `-1`，不是我们服务端少做了一步）**
+LAST_RUN: 2026-10-25T19:40:00+08:00 **第二百二十九刀「量」已收线（账 #305：两格 SKIP 的 C 存储量完 —— 数组那一格缺的是出站回写、按值 Variant 那一格 SKIP 就是口径）**
+—— **读臂（靶工程产物 keep/dll_entry.c）**：`Gradient.BlendColors` 第 4 参 `laRetColors() As Long` 的臂是 `((void*)&((VARIANT*)args[3])->lVal)` —— 交给被调方的是槽里那 8 字节的地址，被调方按 `vb6_SafeArray1D**` 用（现场 `vb6_SafeArrayDestroy1D(*p); *p = vb6_SafeArrayReDim1D(...)`）⇒ 这一格的 C 存储 = `vb6_SafeArray1D*`，已定；`List.Item` 第 1 参 `ByVal Index As Variant` 的臂是 `(*(vb6_VARIANT*)args[0])` —— 读整枚 24B 槽，而 Variant 形参没有更窄的声明档可换算 ⇒ **SKIP 不是「没量」，是口径**。
+—— **两发真跑（新探针 .local/k3690_slots.c，每臂一进程，x64）**：`VT_ARRAY/VT_I4` 与 `VT_BYREF/VT_ARRAY/VT_I4` 各递一枚 4 元素数组（预填 0x11111111…0x44444444）⇒ **两形都是 hr=0x0、返回 4、四个元素一字未动**（`same=1`）⇒ 今天既没崩也没回写。进槽那一趟（§B162 第五十刀 `vb6_VariantArrayIntoSlot`）已把对端 SAFEARRAY **拷**成我们自己的描述符（白名单认 VT_I4）⇒ 「拿 CRT free 去 free OLE 的账」这条雷**不成立**；按值 Variant 那格 `Add("k", VT_I4 42)` 之后 `Item("k")` 答 **vt=3 / 42**（值到得了体里、也回得来）。
+—— **所有权那半用 20000 发循环量出（自带负控）**：`VT_ARRAY` 形 WorkingSet **delta=0**（槽里那枚被 `vb6_VariantSlotRelease` 回收），`VT_BYREF/VT_ARRAY` 形 **+1716224 B / 20000 发 = 85.8 B/发**（按码推：`psa = src->parray` 对 `VT_BYREF` 无分支 ⇒ 拿到 SAFEARRAY** ⇒ 维数那问早退、槽留 Empty ⇒ 被调方 ReDim 出来的那枚没人回收）—— 回写 0 是实测、漏是循环差值实测、机制是推的。
+—— **承面与改判**：语料扫 2107 份 .cls/.ctl/.pag ⇒ 数组形参 1168 处（Public 532 / 216 文件 / 17 工程）、按值 Variant 740 处（Public 664），尺子两枚自证 = `BlendColors` 与 `List.Item` 都命中；靶工程自己被 IDispatch 露出来的数组格**恰好就是 BlendColors（tlb memid=28）**。⇒ 在册欠项第 4 条的两格：**按值 Variant 销（SKIP = 口径），数组出参升为实施项**。
+—— **下一刀 = 出站回写桥**（两半一起补）：`VT_BYREF/VT_ARRAY` 既没拷进也没回写；回写必须造**真 SAFEARRAY**（OLE 分配器）并透 `pparray` 落到客户 VARIANT，同时把槽里那枚的所有权次序定死（`vb6_VariantSlotRelease` 今天在 invokeFunc 之后，BYREF 形下它是空转）；x86/x64 双验。
+—— **在册欠项（更新后）**：① 「同名 Class 符号长成两枚」的触发条件；② 大小写形状不统一；③ `EchoStr ← VT_BOOL` 口径（待拍）；④ **数组出参回写桥（升为下一刀）**（按值 Variant 那格已销）；⑤ `rgdispidNamedArgs`；⑥ PopupMenu 那条 0xC000041D（待单独复核再销）；⑦ 视图三格纸面缺口；ByRef 写回桥仍归纸面。
+—— **刀号**：本轮 = 第二百二十九刀（量，不动代码），第二百二十八刀的「量」原样留档在下一节。
+
+# 上一轮（2026-10-25T19:10:00+08:00，原样留档）= LAST_RUN: 2026-10-25T19:10:00+08:00 **第二百二十八刀「量」已收线（账 #305：「异档进 String」那条口径的机制半边量死 —— OLE 自己的 `VariantChangeType(VT_BOOL→VT_BSTR)` 就给 `-1`，不是我们服务端少做了一步）**
 —— **现读数（今天的编译器，tests\b220_args 实跑）**：`EchoStr ← VT_I4` 答 `<40>`、`← BSTR(12)` 答 `<12>`、`← VT_R8 12.75` 答 `<12.75>`、`← BSTR(abc)` 答 `<abc>` —— 四项都已是 VB6 语言口径（第二百二十刀那条主人顺带修好了 R8 的旧读数 13）；只剩 `← VT_BOOL(True)` 答 `<-1>`。发码侧确认这一格确实在归一化名单里（`vb6_avt_…_EchoStr_invoke[1] = { VT_BSTR }`）。
 —— **机制（10 行 C 探针）**：把 `VT_BOOL/VARIANT_TRUE` 直接交给 OLE 的 `VariantChangeType(..., VT_BSTR)`，答 `hr=0、val=<-1>、len=2` —— **OLE 本人就产出 "-1"**；另一头问本机 VBScript 引擎（`cscript`）：`CStr(True)` 答 `True`、`CStr(False)` 答 `False`、`CStr(12.75)` 答 `12.75`。
 —— **结论 = 口径待拍，不是缺陷证据**：一个 VB6 **服务端**收 `VT_BOOL` 进 `As String` 形参时走哪条（语言的 CStr 还是 Automation 转换），本机没有 VB6 服务端可问，**不猜**。若要向语言口径看齐，落点是 `vb6_ComArgNormalize` 里「目标档 BSTR 且源档 BOOL」那一支（一处、两个常量串），且**必须与整机其余 `VariantChangeType` 站点同批**，否则同进程两种口径；承面 = 任何把布尔交给 String 形参的自动化客户端（本线语料 0 处可证）。
