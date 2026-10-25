@@ -6,7 +6,15 @@
 
 OPEN_LOCAL_DIVERGENCE: **已收口（2026-09-27 入夜 = C29-MV-d）** —— 本地 `ctrlmonthview` 的 MV24/MV25/MV30 三条红既不是"本地环境/增量缓存"、也不是"OS 版本相关"，而是**挂钟相关**：comctl v6 把当前时间混进 `MCM_GETCURSEL` 的负载里（日没错、零头 0.765），`CLng` 下午进位、上午舍掉 ⇒ 本机下午一直红、CI 跑在上午一直绿。修法与全部读数见 029 §九 C29-MV-d 那一格。留下的一般式：**日期面判据按 `CLng` / `=` 比之前，产品读数必须归成整数日**，否则同一棵树的判据随时段翻脸，而门只会读到"上午那一半"。
 STATUS: IDLE             # NOT_STARTED | DESIGN | BUSY | IDLE | ALL_DONE
-LAST_RUN: 2026-10-25T16:20:00+08:00 **第二百二十五刀「量」已收线（账 #305：ByRef 入站写回桥的承面 = 0 处真调用方 ⇒ 纸面缺口；顺手量死 tlb 与服务器表那 2 枚不一致的身份缺陷，并**实测挡下**一个只看形状很对的修法）**
+LAST_RUN: 2026-10-25T17:10:00+08:00 **第二百二十六刀「量」已收线（账 #305：CLSID 三位主人摊开 —— 那 14 枚「VB6 形态」的 GUID 其实是类型库兜底 `generateUuid(类名)` 写回符号表的值；View / PopupMenu 两枚的写回没落到 dll_entry 读的那枚符号上）**
+—— **反推（纯算术）**：把观测到的 List `{BF779AAD-6974-4141-BF77-9AAD69748141}` 代回三条生成式 —— `generateUuid("List")` 逐字符相同，`mintClsid("List")` / `mintClsid("VbEclipse.List")` / `mintGuid(...)` 都不是 ⇒ 14 枚 = tlb 那条兜底，不是语义层 mint、也不是 dll_entry 的 `generateClsid(progId.类名)`。
+—— **顺序（临时打印量死，打印已退回、未提交）**：`DBGTLB` 显示 16 枚在 tlb 那一趟 `comClsidStr` 全为空、都算出值并写回；`DBGCOL` 显示 dll_entry 读到 14 枚已填、**唯独 View / PopupMenu 读到空**，于是掉进 `generateClsid(progId.类名)`；`DBGX` 证明 crossmod 那条无条件拷贝腿跑在 tlb 之前、16 枚空拷空 ⇒ 不是它清的。
+—— **两枚逃逸者的共同特征**：都**有一个与类同名的公有成员**（View 的 `Property Get View`、PopupMenu 的默认方法 `PopupMenu`）⇒ 下一条问句 = 按名解析在这些名字上是不是取到了另一枚符号（同一张表里同名 Symbol 的地址对照）。
+—— **订正第二百二十五刀**：用退回后的同一棵树重编靶工程，服务器表与 BASE **逐枚相同**（mismatch 0、List 仍是 `{BF779AAD-…}`）⇒ 那次「搬 14 枚」确实是试改造成的，不是编译器漂移；也说明**要修这两枚不能动那条兜底**（那正是 14 枚的唯一来源）。附一个形状读数：服务器表里那 14 枚是小写（tlb 写回原样）、View/PopupMenu 是 `generateClsid` 的大写 —— 收口时一并统一输出形状。
+—— **下一刀 = 第二百二十七刀（实施，候选）**：在 tlb 里把「写回」改成写回**dll_entry 真正读的那枚符号**（或让 dll_entry 的唯一出口就是 tlb 写回的值），两枚逃逸者随之归位；判据 = 16 枚 tlb==srv + 服务器表 16 枚逐枚未移动（除 View/PopupMenu 两枚**新增**为 generateUuid 值）+ `DllGetClassObject(广告的 CLSID)` 16/16 + 大小写形状统一。
+—— **刀号**：本轮 = 第二百二十六刀（量，不动代码），第二百二十五刀的「量」原样留档在下一节。
+
+# 上一轮（2026-10-25T17:10:00+08:00，原样留档）= LAST_RUN: 2026-10-25T16:20:00+08:00 **第二百二十五刀「量」已收线（账 #305：ByRef 入站写回桥的承面 = 0 处真调用方 ⇒ 纸面缺口；顺手量死 tlb 与服务器表那 2 枚不一致的身份缺陷，并**实测挡下**一个只看形状很对的修法）**
 —— **ByRef 那一族（9 格）的机制**：读臂交出去的是**服务端自己的 VARIANT 槽** —— `MagneticWnd.zSubclass_Proc` 六个 ByRef Long 收到 `&((VARIANT*)args[i])->lVal`，`List.Add` 的 `ByRef Item As Variant` 收到槽本身；真 VB6 客户端交的是 `VT_BYREF` 叠 `VT_I4`（指针指向它自己的 Long）⇒ 一读就是错值、写也回不到调用方。**承面 0**：靶工程里对这 9 格的调用全是早绑定直调用（`Folder.m_Views` / `Perspective.m_Folders` / `modPublic.m_Placeholders` / `modSubClass.m_SubClassList` 四处声明都是 `As List`，不是 Object/Variant），语料里也不存在任何 C3 产物的 IDispatch 调用方 ⇒ 没有调用方就不为它开一座桥。
 —— **顺手量到的真缺陷**：拿 tlb 广告的 CLSID 去 `DllGetClassObject`，View 与 PopupMenu 两枚答 `0x80040111`（其余 14 枚正常）。逐枚对过（tlbprobe 与同一趟编译的 dll_entry 按类名建 dict）：View tlb={FE46F400-…} vs srv={5E07A395-…}、PopupMenu tlb={4C721F63-…} vs srv={C67752A9-…}；两枚 tlb 值恰好等于 `generateUuid(类名)`（用源码里的 FNV 参数离线复算，逐字符相同），srv 值等于 `generateClsid(progId + "." + 类名)`。承面不小：语料 **48 个 ActiveX DLL 工程、170 条 `Class=` 行全部不带 GUID**（全靠 mint）。
 —— **试改被挡下（本刀唯一的「不要做」）**：把 tlb 那条 fallback 改成问 dll_entry 同一套之后，16 枚**全部**一致（tlb==srv 16/16，View/PopupMenu 也能创建），但 BASE vs NEW 逐枚对比显示**服务器表搬了 14 枚**（List 从 `{BF779AAD-…}` 变成 `{1636FFF4-…}` 等）—— 因为 tlb 那一趟把结果写回 `comClsidStr` 供 dll_entry 读。那是产品身份回归（已注册客户端全断）⇒ 改动**已退回、未提交**，`src/` 与 HEAD 一致、`C3.exe` 已按退回后的树重编。
