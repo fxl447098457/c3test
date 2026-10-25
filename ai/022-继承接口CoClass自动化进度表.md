@@ -6,7 +6,14 @@
 
 OPEN_LOCAL_DIVERGENCE: **已收口（2026-09-27 入夜 = C29-MV-d）** —— 本地 `ctrlmonthview` 的 MV24/MV25/MV30 三条红既不是"本地环境/增量缓存"、也不是"OS 版本相关"，而是**挂钟相关**：comctl v6 把当前时间混进 `MCM_GETCURSEL` 的负载里（日没错、零头 0.765），`CLng` 下午进位、上午舍掉 ⇒ 本机下午一直红、CI 跑在上午一直绿。修法与全部读数见 029 §九 C29-MV-d 那一格。留下的一般式：**日期面判据按 `CLng` / `=` 比之前，产品读数必须归成整数日**，否则同一棵树的判据随时段翻脸，而门只会读到"上午那一半"。
 STATUS: IDLE             # NOT_STARTED | DESIGN | BUSY | IDLE | ALL_DONE
-LAST_RUN: 2026-10-25T21:40:00+08:00 **第二百三十二刀「量」已收线（账 #305 §B223 另一端：自家客户端从不打 VT_BYREF）**
+LAST_RUN: 2026-10-25T22:20:00+08:00 **第二百三十三刀「实施+判据」已发货（账 #305 §B223：ByRef 标量形参的两半 —— 入槽按 pointee 拷值 + 返回后写回；门在跑）**
+—— **落点**：`vb6_VariantBorrowIntoSlot` 多一臂 `if (src->vt & VT_BYREF)`（I4/I2/R8/R4/BOOL/UI1 六档按 pointee 搬值，BSTR/对象/变体/未知档不猜）；新出口 `vb6_ByRefScalarWriteBack` 按同一组六档写回；服务端跟着数组那一臂调，时机不变（invokeFunc 之后、SlotRelease 之前）。
+—— **判据**（x64/x86 逐字相同）：`BYREFARG=Bump:10` 改前 `ret=693303301 client_after=10` → **`ret=11 client_after=11`**；`BYVALARG=Bump:10` 两边都是 `ret=11 client_after=10`（按值本来就没有写回落点）。
+—— **护栏**：新哨兵 `check_byref_scalar_writeback.ps1` 六道，六份负控各点各的红（R1_def 连带 R4 已写进注释）；H5 补两格；**107 道全绿**；清单 536→538（零移动）。
+—— **仍在线上的另一半**：客户端仍按值打包（对**外部**服务器等于把 ByRef 当 ByVal）—— 那是对外契约变更，等口径拍板，不在本刀。
+—— **刀号**：本轮 = 第二百三十三刀（实施 + 判据 + 护栏），第二百三十二刀的「量」原样留档在下一节。
+
+# 上一轮（2026-10-25T21:40:00+08:00，原样留档）= LAST_RUN: 2026-10-25T21:40:00+08:00 **第二百三十二刀「量」已收线（账 #305 §B223 另一端：自家客户端从不打 VT_BYREF）**
 —— **客户端打包表**（vb6com_pack.c 逐枚）：BSTR/I4/BOOL/R8/DISPATCH 全按值，只有对象出参有 `vb6_ComPackObjectRef`（VT_DISPATCH|VT_BYREF）；标量没有任何“按引用”出口。靶工程产物：PackInt 133 / BSTR 234 / Bool 48 / Double 5 / Object 1 / **ObjectRef 0**；晚绑定调用点 210。
 —— **两发真跑（同一夹具、x64）**：`BYREFARG=Bump:10`（VB6 客户端形）⇒ `ret=-486738335 client_after=10`（读到指针）；`BYVALARG=Bump:10`（自家形）⇒ `ret=11 client_after=10`（读对了、写回丢）。**没有一种客户端形是两头都对的**。
 —— **承面**：语料 2107 份类模块里 Public 标量 ByRef 形参 **1828 处**（385 文件 / 19 工程）；靶工程 IDispatch 侧取址臂 9 处（2 对象 + 1 数组已修 + 6 窗口过程桥）。
