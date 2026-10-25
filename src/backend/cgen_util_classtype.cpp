@@ -372,6 +372,20 @@ bool CCodeGen::slotIsLegacyIfaceView(const std::string& nameLower) const {
     return !slotLegacyIfaceViewName(nameLower).empty();
 }
 
+// 账 #305 第二百一十七刀: 「一枚**值结构体槽**怎么清成空」那一发的唯一主人。
+// 为什么要有主人: 这一族的 C 值是 `vb6_iface_<I> { vtbl, obj }` (不是指针)，所以「空」没有 NULL
+// 这一形 —— 站点从前各自发 `= NULL` (cl C2440，类工厂字段初始化实测) 或把结构体的**地址**交给
+// `vb6_ReleaseObject(void**)` (置空那一站实测 = 它读的首字段是一张函数指针表，判据
+// vb6_ComIsDispatchable 要看表后第 5/6 槽，答案取决于那张表后面挨着什么)。两档都归这一处 =
+// 整枚槽零化 (与同一条腿里 UDT 字段那一支同形，第一百八十八刀 `cTypeIsValueAggregate` 认那一档)。
+// 视图是**借来的** (第 166/174 刀定的口径: wrap 不 AddRef) ⇒ 清槽不退旧，也不许顺手 Release。
+void CCodeGen::emitValueStructSlotClear(const std::string& slotExpr,
+                                        const std::string& note) {
+    std::string line = "memset(&" + slotExpr + ", 0, sizeof(" + slotExpr + "));";
+    if (!note.empty()) line += "  /* " + note + " */";
+    c_.emitLine(line);
+}
+
 // 账 #305 新账 #407 / §B190 第一百七十一刀: 「这一枚表达式是不是视图值、装箱该发哪一句」。
 // 名单还是第一百六十五刀那一张 (knownIfaceVars_)，这里只是它在**装箱**这一维的投影；
 // 不是视图就交空串，让站点按它原来的路走 —— 别在这一处发明第二种答案。

@@ -198,7 +198,20 @@
             // 账 #305 §B218 第一百六十五刀: 与覆写那一站同一条问句 —— 槽装的是 legacy 接口视图时
             // 本主人不接手 (置空那一发它会写 `vb6_cls_<接口名>* 旧 = 目标` = cl C2440)。
             // 落空之后走下面那条 vb6_ReleaseObject，与**局部**视图置空今天发的一字相同 (实测)。
-            if (!targetCls101.empty() && slotIsLegacyIfaceView(targetLower)) targetCls101.clear();
+            // 账 #305 第二百一十七刀: 这一问在这一站只问**一次** —— 上面那道闸 (视图那一档不许工程类
+            // 主人接手) 与下面的空形 (置空到底发什么) 必须出自同一个答案。
+            const bool isLegViewP217 = slotIsLegacyIfaceView(targetLower);
+            if (!targetCls101.empty() && isLegViewP217) targetCls101.clear();
+            // 账 #305 第二百一十七刀: 槽装的是 legacy 那一档接口视图 ⇒ 置空 = 整枚值结构体零化，
+            // 不许再把结构体的地址交给下面那条 ReleaseObject —— 它拿到的是一枚**值结构体**的地址，
+            // 读的首字段是那张函数指针表 (判据 vb6_ComIsDispatchable 要看表后第 5/6 槽才判得出
+            // 「不是 IDispatch」= 答案取决于那张表后面挨着什么)。视图是借来的 ⇒ 不退旧 (与第 166/174
+            // 刀同一口径)，所以这一发只清零、不放手；形状交回值结构体空形那一位主人，
+            // 与类工厂字段初始化同一条。
+            if (isLegViewP217) {
+                emitValueStructSlotClear(target, "Set Nothing (接口视图空形)");
+                return;
+            }
             // 账 #305 §B218 (甲) 形A (第一百四十四刀): 出参槽 `(*名)` 的置空 —— 那一格由调用方
             // 持有，所以「置空」= 放手调用方那一枚 + 清槽 (与覆写同一位主人、同一个声明档类名)。
             // 判据住在 classOfProjectRefOutSlot 一处，与覆写那一站同问。

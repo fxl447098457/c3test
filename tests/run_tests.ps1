@@ -7314,12 +7314,15 @@ if ($Category -in @("all", "run", "vbp")) {
     # (工厂 `me->m_lv = NULL` C2440 / 装填裸拷贝实例指针 C2440 / 属性读整枚结构体进 helper 首槽 C2172)
     # 一台都编不过 ⇒ 这一档今天存量 0，但一有人写就报红。两台读数 K175-f=1100（自家实现类）与
     # K175-fb=1200（同一格字段换装另一枚实现类）成对: 选错 wrap 时两条必有一条不是它自己的数。
+    # 第二百一十七刀再吃一档: 同一格字段的**置空** (`Set m_lv = Nothing`) —— 改前发
+    # `vb6_ReleaseObject((void**)&me->m_lv)`，而置空之后立刻重绑再读 = K175-fc=1100（清完装得回去）。
     $k175Expected = @(
         "K175-alpha=2",
         "K175-beta=10",
         "K175-t=15",
         "K175-f=1100",
         "K175-fb=1200",
+        "K175-fc=1100",
         "K175-DONE")
     Test-Vbp 'k175_viewstmt_station_d' "$Tests\k175_viewstmt\K175.vbp" $k175Expected
     Test-Vbp 'k175_viewstmt_station_d_x86' "$Tests\k175_viewstmt\K175.vbp" $k175Expected -Arch "x86"
@@ -7328,13 +7331,15 @@ if ($Category -in @("all", "run", "vbp")) {
         't = x.vtbl->Twice(x.obj, 5);',
         'me->m_lv = vb6_iface_IK175_wrap_K175Alpha((vb6_cls_K175Alpha_New()));  /* Set */',
         'vb6_ret_NumViaField = me->m_lv.vtbl->Num(me->m_lv.obj);',
-        'memset(&me->m_lv, 0, sizeof(me->m_lv));')
+        'memset(&me->m_lv, 0, sizeof(me->m_lv));',
+        'memset(&me->m_lv, 0, sizeof(me->m_lv));  /* Set Nothing (接口视图空形) */')
     Test-EmitcAbsent "k175_viewstmt_com_fallback_gone" @("$Tests\k175_viewstmt\K175.vbp") @(
         'vb6_ComCall(x, L"Ping", NULL, 0)',
         'vb6_ComVarFree((void*)vb6_ComCall(x',
         'me->m_lv = (vb6_cls_K175Alpha_New());  /* Set */',
         'vb6_ComGetIntProp(me->m_lv, L"Num")',
-        'me->m_lv = NULL;')
+        'me->m_lv = NULL;',
+        'vb6_ReleaseObject((void**)&me->m_lv)')
     # <vbeclipse> 回归夹子 (k177_viewwith, 账 #305 第一百七十七刀 = 新账 #471 站D′): With 的**接收者**是一枚视图。
     # 改前那一格发 "void* _vb6_with_0 = (void*)x" —— 整枚值结构体 vb6_iface_<I> 进 void* 槽 = cl **C2440**，
     # 一发把整块 With 打死（于是体内每一档成员的那条红在错误清单里压根排不上号）。
@@ -8905,7 +8910,8 @@ if ($Category -in @("all", "run", "vbp")) {
     # slotIsLegacyIfaceView。腿②/腿③ 那两站从前先问类名 (inferClassTypeOfExpr 把接口名也答出来)，
     # 于是铸出一枚声明侧从没造过的 `vb6_cls_K165Iface*` = cl C2440 (两台同形，基线 = 门 #831 那台
     # CI 二进制编同一份夹具: 九发错，其中 C2440 四发 / C2172 两发 / C2083 两发 / void*→struct 一发)。
-    # 视图那一档的正答案 = 覆写走 wrap、置空走 vb6_ReleaseObject —— 与**局部**声明那一路今天发的一字
+    # 视图那一档的正答案 = 覆写走 wrap、置空走整枚零化 (第二百一十七刀之前发的是 vb6_ReleaseObject，
+    # 那一发把值结构体的地址交给一枚 IUnknown** 槽) —— 与**局部**声明那一路今天发的一字
     # 相同 (P14/P15 实测)；`mi` 那两枚针钉的是**具体类槽照旧归工程类那位主人**，本刀一条没松。
     # 第一百六十六刀 (新账 #464) 之后这三枚 wrap 针都带上了实现者名 (`_wrap_K165Impl`) ——
     # 一枚接口的表是工程级一份, 而包装必须一枚实现类一份, 名字不带实现者就会撞成 N 份同名函数。
@@ -8917,7 +8923,10 @@ if ($Category -in @("all", "run", "vbp")) {
         'mv = vb6_iface_K165Iface_wrap_K165Impl((vb6_cls_K165Impl_New()));  /* Set */',
         'mv = vb6_iface_K165Iface_wrap_K165Impl(mi);  /* Set */',
         'lv = vb6_iface_K165Iface_wrap_K165Impl((vb6_cls_K165Impl_New()));  /* Set */',
-        'vb6_ReleaseObject((void**)&mv);  /* Set Nothing */',
+        # 账 #305 第二百一十七刀: 视图槽的置空从前发 `vb6_ReleaseObject((void**)&mv)` —— 那把整枚
+        # 值结构体的地址交给一枚 IUnknown** 槽 (它读的首字段是那张函数指针表)。现在的正答案 =
+        # 整枚零化；`mv = NULL;` 那枚反面针早在第一百六十五刀就在册 (值结构体没有 NULL 这一形)。
+        'memset(&mv, 0, sizeof(mv));  /* Set Nothing (接口视图空形) */',
         'mv.vtbl->Bar(mv.obj, 3)',
         'vb6_cls_K165Impl* __clsold',
         'mi = (vb6_cls_K165Impl_New());',
@@ -8928,7 +8937,8 @@ if ($Category -in @("all", "run", "vbp")) {
         'vb6_cls_K165Iface* __clsold',
         'vb6_cls_K165Iface_AddRef(mv)',
         'vb6_cls_K165Iface_Release(__clsold',
-        'mv = NULL;')
+        'mv = NULL;',
+        'vb6_ReleaseObject((void**)&mv)')   # 第二百一十七刀的病灶 (结构体地址进 IUnknown** 槽)
     Test-EmitcAbsent 'b165_no_phantom_class_holder_for_a_view_slot' @(
         "$Tests\k165_iface_slot\K165Slot.vbp") $b165Absent
     # 账 #305 §B188 ④ (第九十刀): 出厂那一腿的**尾巴**。`Class_Terminate` 抛错时, `_Destroy` 里体之后

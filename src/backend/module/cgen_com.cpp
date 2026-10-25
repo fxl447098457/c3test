@@ -153,7 +153,9 @@ void CCodeGen::emitClassFactory(Module& module) {
                     // `defaultValue(Object)` 交出的 NULL ⇒ cl C2440 (探针 .local/probe_legfield
                     // 实测 = 类工厂里 `me->m_lv = NULL;`)。问句不新立: 值聚合那一档的主人是
                     // 第一百八十八刀那位 `cTypeIsValueAggregate` (UDT ∪ vb6_iface_)。
-                    c_.emitLine("memset(&me->" + field + ", 0, sizeof(me->" + field + "));");
+                    // 账 #305 第二百一十七刀: 零化那一发本身也不再由站点拼 —— 交回值结构体空形那
+                    // 一位主人 (与 Set 置空那一站同一个形状)，站点只留「这一档要不要零化」那一问。
+                    emitValueStructSlotClear("me->" + field);
                 } else {
                     c_.emitLine("me->" + field + " = " + defaultValue(fvt) + ";");
                 }

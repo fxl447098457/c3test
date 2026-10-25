@@ -1,5 +1,5 @@
 ﻿# check_iface_view_authority.ps1 - 账 #305 §B221/#449（§B222）：「这一枚表达式交出来的是视图还是实例」
-# 这一问只许有一位主人。十条钉：
+# 这一问只许有一位主人。十一条钉：
 #   ① 视图的成员调用发射形状 `->vt-><slot>(x, args)` 在全 src/backend 恰好 **1** 处，
 #      且必须住在 module/cgen_iface_vtbl.cpp 的 ivrefVtableCall 里（com_bind 与「接收者是
 #      视图值的调用」那一站都调它）。长出第 2 处 = 同一形状两位作者。
@@ -37,7 +37,13 @@
 #      同一趟还钉「Set 那两站不许再自己查那张旧式名册」: cgen_setlet_set_prop.inc 里
 #      `knownIfaceVars_.find(targetLower)` 必须 **0** 处 (第二百一十五刀之前它是 1 处，字段槽
 #      `me->m_lv` 因此在装填那一站落空 = 裸拷贝实例指针进值结构体槽 = cl C2440)。
-# 退出码：0 = 十条都过；1 = 任一条红。
+#   ⑪ 「一枚**值结构体槽**怎么清成空」那一发有一位主人 emitValueStructSlotClear (第二百一十七刀):
+#      带 `(` 的出现恰 **4** 处 = 定义 1 (cgen_util_classtype.cpp) + 声明 1 (cgen_helpers.inc) +
+#      调用 2 (类工厂字段初始化 / Set 置空那一站，只许这两份文件)；且发射形状那一串 `"memset(&"` 在
+#      全 src/backend 恰 **1** 处、住在主人自己那份文件。长出第 2 处 = 站点又自己拼清零那一发
+#      (病灶实物 = 置空那一站从前把整枚结构体的地址交给 vb6_ReleaseObject(void**)，读的首字段是
+#      那张函数指针表；字段初始化那一档从前发 `= NULL` = cl C2440)。
+# 退出码：0 = 十一条都过；1 = 任一条红。
 param(
     [string]$Root = ""
 )
@@ -210,10 +216,38 @@ if ($directAsk.Count -ne 0) {
 }
 
 
+# ⑪ 账 #305 第二百一十七刀: 「一枚值结构体槽怎么清成空」那一发的唯一主人。
+$vsAll = @($files | Select-String -Pattern 'emitValueStructSlotClear\(')
+$vsDef = @($vsAll | Where-Object { (Split-Path -Leaf $_.Path) -eq 'cgen_util_classtype.cpp' })
+$vsDecl = @($vsAll | Where-Object { (Split-Path -Leaf $_.Path) -eq 'cgen_helpers.inc' })
+$vsCalls = @($vsAll | Where-Object { $_ -notin $vsDef -and $_ -notin $vsDecl })
+if ($vsDef.Count -ne 1) {
+    $fail += ("value-struct empty-form owner definitions = " + $vsDef.Count + " (want exactly 1)")
+}
+if ($vsDecl.Count -ne 1) {
+    $fail += ("value-struct empty-form owner declarations = " + $vsDecl.Count + " (want exactly 1)")
+}
+if ($vsCalls.Count -ne 2) {
+    $fail += ("value-struct empty-form call sites = " + $vsCalls.Count +
+              " (want exactly 2 = 类工厂字段初始化 + Set 置空那一站)")
+}
+$vsCallFiles = @($vsCalls | ForEach-Object { Split-Path -Leaf $_.Path } | Sort-Object -Unique)
+if (($vsCallFiles -join ',') -ne 'cgen_com.cpp,cgen_setlet_set_prop.inc') {
+    $fail += ("value-struct empty-form consumers = " + ($vsCallFiles -join ', ') +
+              " (want the factory field-init station + the Set clear station)")
+}
+$memsetSites = @($files | Select-String -Pattern '"memset\(&"' -Encoding UTF8)
+if ($memsetSites.Count -ne 1) {
+    $fail += ("value-struct zeroing shape sites = " + $memsetSites.Count +
+              " (want exactly 1 = 主人自己拼那一条; 长出第 2 处 = 站点又自己拼清零那一发)")
+} elseif ((Split-Path -Leaf $memsetSites[0].Path) -ne 'cgen_util_classtype.cpp') {
+    $fail += ("value-struct zeroing shape moved into " + (Split-Path -Leaf $memsetSites[0].Path))
+}
+
 if ($fail.Count -gt 0) {
     Write-Host "IFACE-VIEW-AUTHORITY FAIL"
     foreach ($f in $fail) { Write-Host ("  - " + $f) }
     exit 1
 }
-Write-Host "IFACE-VIEW-AUTHORITY OK (1 formula site / 5 consumers / 6 literal files / 2 Set stations ask / 4 refSet calls / 4 view-shape consumers / 2 inline __iv_ files / 5 view AddRef sites in 3 files / 1 view property-read owner in 1 station + 3 roster ask sites in 2 files / 2 me- prefix strips in 2 owner files + 0 direct roster asks in the Set station)"
+Write-Host "IFACE-VIEW-AUTHORITY OK (1 formula site / 5 consumers / 6 literal files / 2 Set stations ask / 4 refSet calls / 4 view-shape consumers / 2 inline __iv_ files / 5 view AddRef sites in 3 files / 1 view property-read owner in 1 station + 3 roster ask sites in 2 files / 2 me- prefix strips in 2 owner files + 0 direct roster asks in the Set station / 4 empty-form owner sites in 4 files + 1 zeroing shape site)"
 exit 0

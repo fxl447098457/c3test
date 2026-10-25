@@ -30,6 +30,15 @@ Public Sub BindBeta()
     Set m_lv = New K175Beta
 End Sub
 
+' 第二百一十七刀: 字段槽的**置空** —— 那一格装的是值结构体 vb6_iface_IK175，没有 NULL 这一形。
+' 改前发 `vb6_ReleaseObject((void**)&me->m_lv)` = 把整枚结构体的地址交给一枚 IUnknown** 槽；
+' 置空之后立刻重绑再读 (VB6 里读一枚已置空的接口变量报 91，C3 今天对那一形没有任何口径，
+' 1421 份语料里也 0 处可达 ⇒ 本刀不为它发明错误档，只让「清完还能装回去」有读数)。
+Public Sub ClearAndRebind()
+    Set m_lv = Nothing
+    Set m_lv = New K175Alpha
+End Sub
+
 Public Function NumViaField() As Long
     NumViaField = m_lv.Num
 End Function

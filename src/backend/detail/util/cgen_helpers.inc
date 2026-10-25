@@ -402,6 +402,10 @@
     // 账 #305 新账 #471 (第一百七十四刀): 同一次查表的**带名字**那一档 (不是视图 ⇒ 空串)。
     // 上面那句问句是这一句的投影 ⇒ 名册只这一处读。For Each 那一站 (站A) 是唯一要名字的读者。
     std::string slotLegacyIfaceViewName(const std::string& nameLower) const;
+    // 账 #305 第二百一十七刀: 「一枚值结构体槽怎么清成空」那一发的唯一主人 (整枚零化，不退旧)。
+    // 两位消费者 = 类工厂字段初始化 (注: 不写 note，发的是它今天那一条) 与 Set 置空那一站。
+    void emitValueStructSlotClear(const std::string& slotExpr,
+                                  const std::string& note = std::string());
     // 账 #305 新账 #407 第一百七十一刀: 视图值进 Variant 装箱站该发的那一句 (唯一出口)。
     // 不是视图 ⇒ 空串。调用者只有两位 = wrapVariantValue 与 boxToVariant，别添第三位。
     std::string legacyViewBoxExpr(const ASTNode* expr, const std::string& cExpr) const;
