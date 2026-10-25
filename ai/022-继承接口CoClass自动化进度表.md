@@ -6,7 +6,16 @@
 
 OPEN_LOCAL_DIVERGENCE: **已收口（2026-09-27 入夜 = C29-MV-d）** —— 本地 `ctrlmonthview` 的 MV24/MV25/MV30 三条红既不是"本地环境/增量缓存"、也不是"OS 版本相关"，而是**挂钟相关**：comctl v6 把当前时间混进 `MCM_GETCURSEL` 的负载里（日没错、零头 0.765），`CLng` 下午进位、上午舍掉 ⇒ 本机下午一直红、CI 跑在上午一直绿。修法与全部读数见 029 §九 C29-MV-d 那一格。留下的一般式：**日期面判据按 `CLng` / `=` 比之前，产品读数必须归成整数日**，否则同一棵树的判据随时段翻脸，而门只会读到"上午那一半"。
 STATUS: IDLE             # NOT_STARTED | DESIGN | BUSY | IDLE | ALL_DONE
-LAST_RUN: 2026-10-25T17:10:00+08:00 **第二百二十六刀「量」已收线（账 #305：CLSID 三位主人摊开 —— 那 14 枚「VB6 形态」的 GUID 其实是类型库兜底 `generateUuid(类名)` 写回符号表的值；View / PopupMenu 两枚的写回没落到 dll_entry 读的那枚符号上）**
+LAST_RUN: 2026-10-25T18:35:00+08:00 **第二百二十七刀「实施+判据+收线」已发货（门 #927 二十一格全绿）（账 #305 §B220 收线：CLSID 的补齐按名落到**所有**同名 Class 符号 —— View / PopupMenu 的 0x80040111 消失，其余 14 枚身份一字不动）**
+—— **落点（一处）**：driver_codegen_dll_sync.inc 那条拷贝腿原先住在「默认接口 IID 还是空」的闸里 —— 已经有默认成员的那几枚（靶工程 View 的 `Property Get View` / PopupMenu 的默认方法）整块被跳过，而类型库那一趟写回的是**另一枚同名 Class 符号**（临时打印实测两个地址），于是 dll_entry 只好自己 `generateClsid(progId.类名)`。改成两趟**逐表逐符号**扫描：先收集非空身份、再按名填空值（只填空、绝不覆盖），与同文件里 M29 的 DISPID 同规；值仍只有类型库那一处兜底，不产生第二种 mint。
+—— **判据（靶工程，逐枚对 BASE）**：服务器表 16 枚里**只有 View / PopupMenu 两枚移动**（其余 14 枚逐枚一字不动），16 枚 `tlb == srv`；进程内客户端按 tlb 广告的 CLSID 驱动 16 枚 coclass：**BASE 14/16**（View / PopupMenu `GETFACTORY hr=0x80040111`）→ **NEW 16/16 全 DONE**（`CREATE hr=0` + `DONE`；两枚新值 = tlb 原本就在广告的 {FE46F400-…} 与 {4C721F63-…}）。
+—— **门 #927** = run 40175541096 / head eab63ba2 / attempt 1 / **二十一格全绿**；归因按用例名验：新哨兵的静态格 `[STATIC] clsid_sync_all_copies ... PASS` 落在 Tests (compile #2)；`Emit manifest（shape oracle）` 独立复算 inputs=534 + `manifest-expectation OK`（本刀只动 driver 侧的身份写回，`--emit-c` 零移动）。
+—— **没做出来的一枚（诚实记账）**：想把它收成小夹具，三次尝试（无 CoClass 块 + 自名 Property Get / 自名 Function / 别处当类型用）**都复现不出「两枚同名符号」** ⇒ 不硬凑夹具、不新增输入；触发条件（那两枚符号怎么长出来的）仍未知，列入欠项，下一步只量不猜。
+—— **护栏**：新哨兵 `scripts\check_clsid_sync_all_copies.ps1` 六道（R1a 收集趟 / R1b 补齐趟各 1 处 / R2 旧「IID 闸内」那条拷贝=0 / R3a 补齐只接空值 / R3b 收集只收非空 / R4 `generateUuid` 兜底仍 1 处），六份负控**各点各的红**；static 段挂 `Test-ClsidSyncAllCopies`（磁盘 105 道全挂上）；全仓 105 道 check_*.ps1 **RED=0**。
+—— **在册欠项（新笔置顶）**：① 「同名 Class 符号长成两枚」的触发条件仍未知（本刀只是让写回覆盖所有拷贝；靶工程里那两枚符号是谁造的没量到）；② 大小写形状不统一（14 枚是小写、历史 mint 是大写，收口时一并）；③ 之后仍按承面挑：数组出参 / 按值 Variant 两格 SKIP、`rgdispidNamedArgs`、`EchoStr ← VT_BOOL` 口径、PopupMenu 那条 0xC000041D、视图三格纸面缺口。
+—— **刀号**：本轮 = 第二百二十七刀（实施 + 判据 + 护栏），第二百二十六刀的「量」原样留档在下一节。
+
+# 上一轮（2026-10-25T18:35:00+08:00，原样留档）= LAST_RUN: 2026-10-25T17:10:00+08:00 **第二百二十六刀「量」已收线（账 #305：CLSID 三位主人摊开 —— 那 14 枚「VB6 形态」的 GUID 其实是类型库兜底 `generateUuid(类名)` 写回符号表的值；View / PopupMenu 两枚的写回没落到 dll_entry 读的那枚符号上）**
 —— **反推（纯算术）**：把观测到的 List `{BF779AAD-6974-4141-BF77-9AAD69748141}` 代回三条生成式 —— `generateUuid("List")` 逐字符相同，`mintClsid("List")` / `mintClsid("VbEclipse.List")` / `mintGuid(...)` 都不是 ⇒ 14 枚 = tlb 那条兜底，不是语义层 mint、也不是 dll_entry 的 `generateClsid(progId.类名)`。
 —— **顺序（临时打印量死，打印已退回、未提交）**：`DBGTLB` 显示 16 枚在 tlb 那一趟 `comClsidStr` 全为空、都算出值并写回；`DBGCOL` 显示 dll_entry 读到 14 枚已填、**唯独 View / PopupMenu 读到空**，于是掉进 `generateClsid(progId.类名)`；`DBGX` 证明 crossmod 那条无条件拷贝腿跑在 tlb 之前、16 枚空拷空 ⇒ 不是它清的。
 —— **两枚逃逸者的共同特征**：都**有一个与类同名的公有成员**（View 的 `Property Get View`、PopupMenu 的默认方法 `PopupMenu`）⇒ 下一条问句 = 按名解析在这些名字上是不是取到了另一枚符号（同一张表里同名 Symbol 的地址对照）。
