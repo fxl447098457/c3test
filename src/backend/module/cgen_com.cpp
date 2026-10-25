@@ -256,14 +256,15 @@ void CCodeGen::emitClassFactory(Module& module) {
                     ", me);  /* 账 305 B188: 体抛错也要把下面的尾巴走完 */");
     }
 
-    // 释放BSTR字段
+    // 字段出厂: 「是不是数组」必须问在元素档之前 —— 账 #305 §B220 (第二百二十二刀)。
+    // resolveArrayElemType 把数组性剥掉, 所以先问元素档的那一版里 `Dim m_Keys() As String`
+    // 答出 String, 走进标量那一支把 SafeArray 载体整枚交给 SysFreeString = 堆损坏
+    // (靶工程 List/PopupMenu 释放那一趟打死客户端, 读数见 ai/022 第二百二十一刀)。
     for (VariableDecl* var_p : structFieldDecls(module)) {
         if (var_p) {
             auto& var = *var_p;
             Vb6Type varType = var.asType ? resolveArrayElemType(var.asType.get()) : Vb6Type::Variant;
-            if (varType == Vb6Type::String) {
-                c_.emitLine("vb6_BSTR_Free(me->" + cIdent(var.name) + ");");
-            } else if (var.isDynamicArray || !var.dimensions.empty()) {
+            if (var.isDynamicArray || !var.dimensions.empty()) {
                 // 账 #305 §B218 (甲) 腿⑤ 数组档 (第一百四十刀): 元素那一枚引用由**那一格元素**握,
                 // 而载体销毁那一发认不出工程类裸结构体 (`vb6_ReleaseObject` 的 Fix 191 判据) ⇒
                 // 每枚被数组字段持有的实例永不走 Class_Terminate (漏, 不是崩)。逐元素放手交回
@@ -277,6 +278,9 @@ void CCodeGen::emitClassFactory(Module& module) {
                                 "_Release);  /* 账 #305 (甲) 腿⑤ 数组档: 元素出厂逐枚交回 */");
                 }
                 c_.emitLine("if (me->" + cIdent(var.name) + ") vb6_SA_Destroy(me->" + cIdent(var.name) + ");");
+            } else if (varType == Vb6Type::String) {
+                // 标量 String 字段: 这一格自己就是那枚 BSTR
+                c_.emitLine("vb6_BSTR_Free(me->" + cIdent(var.name) + ");");
             } else if (var.asType) {
                 // 账 #305 §B218 (甲) 腿⑤: 字段那一枚引用**由字段自己握** —— 覆写(腿②)与置空(腿③)
                 // 两站从第一刀起就问同一位主人, 只有出厂这一站缺着: 持有者拆掉时字段里那枚没人退,

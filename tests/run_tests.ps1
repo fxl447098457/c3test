@@ -1778,11 +1778,27 @@ function Test-IfaceViewAuthority {
 # 账 #305 §B219 (第二百二十刀): 入站「VARIANT → 形参声明档」那一问只许一位主人 ——
 # 服务端不再自己换算(R1)、唯一出口的定义/声明/调用各一枚(R2)、发码读臂不看标签(R3)、
 # 档位答案只住 cDispatchArgVt(R4)、VB6_ARGVT_SKIP 与字段桥那两行(R5)、表的新字段(R6)。
-# 行为面在 tests220_args 那两格真跑; 这道门钉的是「别再长出第二份」。
+# 行为面在 tests\b220_args 那两格真跑; 这道门钉的是「别再长出第二份」。
 function Test-DispInboundArgvtAuthority {
     $script:total++
     Write-Host -NoNewline "  [STATIC] disp_inbound_argvt_authority ... "
     $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\check_disp_inbound_argvt_authority.ps1" 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        $out | Select-Object -First 8 | ForEach-Object { Write-Host "  $_" }
+    }
+}
+# 账 #305 §B220 (第二百二十二刀): 类字段出厂那一圈「是不是数组」必须问在元素档之前 ——
+# 标量那一支的发码点只许一枚(R1)、问序钉死(R2)、载体交回 vb6_SA_Destroy(R3)、注册腿不动(R4)、
+# 夹具三形都在(R5)、判据已进门禁(R6)。行为面在 tests\b221_strarr 那两格真跑。
+function Test-ClassFieldReleaseOrder {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] class_field_release_order ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\check_class_field_release_order.ps1" 2>&1
     if ($LASTEXITCODE -eq 0) {
         $script:pass++
         Write-Host "PASS" -ForegroundColor Green
@@ -8238,6 +8254,33 @@ if ($Category -in @("all", "run", "vbp")) {
             "VTARG=EchoDbl:i", "VTARG=EchoDbl:s", "VTARG=EchoDbl:r", "VTARG=EchoBool:b",
             "VTARG=EchoBool:i", "VTARG=EchoBool:s", "VTARG=EchoVar:i", "VTARG=EchoVar:x",
             "VTARG=SumTwo:i,s", "VTARG=SumTwo:s,i") -Arch "x86"
+    # 账 #305 §B220 (第二百二十二刀): 类字段出厂那一圈的问序 —— resolveArrayElemType 把数组性剥掉,
+    # 先问元素档的那一版里一枚 `Dim mK() As String` 答出 String, 走进标量那一支把 SafeArray 载体整枚
+    # 交给 SysFreeString。改前实测 (同一枚夹具、同一根探针、两台): x64 与 x86 都死在探针自己那次
+    # IDispatch_Release 里, RC=0xC0000374 (STATUS_HEAP_CORRUPTION), 六行 VTARG 读数全在管道里、就是没有
+    # DONE —— 「读数对」与「出厂坏」这两件同时成立。夹具里三种形状都在: mK() 动态 (第一次 ReDim 才有
+    # 载体)、mF(2) 定长 (载体跟着实例一起建, create+Release 就坏)、mS 标量 (必须继续走 BSTR_Free 那一支)。
+    # 反面证人 = TagAt/EchoS 两行读数改前改后一字未动: 本刀只改出厂那一问, 没碰存与读。
+    Test-DispatchInvoke "b221_strarr_field_release" "$Tests\b221_strarr\B221k.vbp" "B221k" `
+        "{11112222-3333-4444-5555-66667777B221}" @(
+        "VTARG=Count giving=- hr=0x00000000 vt=3 val=1",
+        "VTARG=Add:s giving=BSTR(12) hr=0x00000000 vt=3 val=2",
+        "VTARG=Add:i giving=VT_I4 hr=0x00000000 vt=3 val=3",
+        "VTARG=KeyAt:i giving=VT_I4 hr=0x00000000 vt=8 val=<40> len=2",
+        "VTARG=TagAt:i giving=VT_I4 hr=0x00000000 vt=8 val=<tag1> len=4",
+        "VTARG=EchoS:x giving=BSTR(abc) hr=0x00000000 vt=8 val=<abc> len=3",
+        "DONE") @() `
+        -Tail @("VTARG=Count", "VTARG=Add:s", "VTARG=Add:i", "VTARG=KeyAt:i", "VTARG=TagAt:i", "VTARG=EchoS:x")
+    Test-DispatchInvoke "b221_strarr_field_release_x86" "$Tests\b221_strarr\B221k.vbp" "B221k" `
+        "{11112222-3333-4444-5555-66667777B221}" @(
+        "VTARG=Count giving=- hr=0x00000000 vt=3 val=1",
+        "VTARG=Add:s giving=BSTR(12) hr=0x00000000 vt=3 val=2",
+        "VTARG=Add:i giving=VT_I4 hr=0x00000000 vt=3 val=3",
+        "VTARG=KeyAt:i giving=VT_I4 hr=0x00000000 vt=8 val=<40> len=2",
+        "VTARG=TagAt:i giving=VT_I4 hr=0x00000000 vt=8 val=<tag1> len=4",
+        "VTARG=EchoS:x giving=BSTR(abc) hr=0x00000000 vt=8 val=<abc> len=3",
+        "DONE") @() `
+        -Tail @("VTARG=Count", "VTARG=Add:s", "VTARG=Add:i", "VTARG=KeyAt:i", "VTARG=TagAt:i", "VTARG=EchoS:x") -Arch "x86"
 
 
     # 账 #305 SB186 (第七十八刀): 服务端进门的**第二站** —— IClassFactory::CreateInstance 走进
@@ -9738,6 +9781,7 @@ if ($Category -in @("all", "compile")) {
     if (Enter-StaticShard) { Test-BoxTempReclaim }
     if (Enter-StaticShard) { Test-IfaceViewAuthority }
     if (Enter-StaticShard) { Test-DispInboundArgvtAuthority }
+    if (Enter-StaticShard) { Test-ClassFieldReleaseOrder }
     if (Enter-StaticShard) { Test-OwnedTempKeeps }
     if (Enter-StaticShard) { Test-OwnedTempSemantics }
     if (Enter-StaticShard) { Test-OwnedTempReclaim }

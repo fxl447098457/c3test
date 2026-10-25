@@ -162,6 +162,11 @@ if ($ast5) {
     # Absent 1 枚(改前那一发「换不动也 hr=0 交回垃圾」)。两架构各一条, x86 那格多 -Arch 那一对。
     'b220_inbound_argvt'                        = @(8, 27, 1, 26)
     'b220_inbound_argvt_x86'                   = @(10, 27, 1, 26)
+    # 账 #305 §B220 (第二百二十二刀): 类字段出厂那一圈的运行期证人 —— 六枚 VTARG 臂 + DONE 一枚收尾针,
+    # Absent 0 (标量那一支的读数 KeyAt/TagAt/EchoS 改前改后一字未动, 反面证人在 R5/R2 那两道钉),
+    # -Tail 6 枚臂。两架构各一条。
+    'b221_strarr_field_release'                  = @(8, 7, 0, 6)
+    'b221_strarr_field_release_x86'             = @(10, 7, 0, 6)
 }
 $ds = @($ast5.FindAll({ param($n)
     $n -is [System.Management.Automation.Language.CommandAst] -and
