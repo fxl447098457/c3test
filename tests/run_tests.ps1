@@ -1809,6 +1809,23 @@ function Test-ClassFieldReleaseOrder {
     }
 }
 
+# 账 #305 SB220 (第二百二十四刀): 通用销毁 vb6_SA_Destroy 必须**按运行期秩**选口径 ——
+# 多维定长字段的载体是 vb6_SafeArrayND*, 它的存储也可能是 1D*(`Dim x()` 再 ReDim 成多维),
+# 所以秩只能问运行期 (vb6_SaIs1D)。x86 上把 ND 当 1D 销毁 = free(totalElements) = AV。
+function Test-SaDestroyRankAware {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] sa_destroy_rank_aware ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\check_sa_destroy_rank_aware.ps1" 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        $out | Select-Object -First 8 | ForEach-Object { Write-Host "  $_" }
+    }
+}
+
 # 账 #454 §B164 形① (第一百三十五刀): 「谁存住了传进去的带权值」那张 KEEPS 表 ——
 # 出口面出自 RTL 的 24 个权威头（不是 grep 名单）· 三分类 0/1/U · unclassified == 0
 # · 三锚（正控 = 存进全局那一枚 / 负控 = 只读那一枚 / 灰控 = 用户过程 + 晚绑定 COM 归 U）
@@ -8282,6 +8299,32 @@ if ($Category -in @("all", "run", "vbp")) {
         "DONE") @() `
         -Tail @("VTARG=Count", "VTARG=Add:s", "VTARG=Add:i", "VTARG=KeyAt:i", "VTARG=TagAt:i", "VTARG=EchoS:x") -Arch "x86"
 
+    # 账 #305 SB220 (第二百二十四刀): 通用销毁 vb6_SA_Destroy 之前只对 1D 成立 —— 多维定长字段的载体是
+    # vb6_SafeArrayND*, 硬投成 vb6_SafeArray1D* 之后: x86 上 1D 的 data 槽读到的是 ND.totalElements
+    # (free(0x8) = 0xC0000005), x64 上 data 偏移恰好相同所以"看着没事"(ND String 那一形静默漏元素 BSTR)。
+    # 夹具 tests\b223_nddestroy 三枚类 = ND Long / ND String / 1D String(同 DLL 里的对照形),
+    # 每枚走 create -> 一次 VTARG -> Release; 改前 x86 上两枚 ND 都死在 Release、改后两台六格全 DONE。
+    Test-DispatchInvoke "b223_nddestroy_long" "$Tests\b223_nddestroy\B223k.vbp" "B223k" `
+        "{22223333-4444-5555-6666-77778888B223}" @(
+        "VTARG=Put:i giving=VT_I4 hr=0x00000000 vt=3 val=140",
+        "DONE") @() `
+        -Tail @("VTARG=Put:i")
+    Test-DispatchInvoke "b223_nddestroy_long_x86" "$Tests\b223_nddestroy\B223k.vbp" "B223k" `
+        "{22223333-4444-5555-6666-77778888B223}" @(
+        "VTARG=Put:i giving=VT_I4 hr=0x00000000 vt=3 val=140",
+        "DONE") @() `
+        -Tail @("VTARG=Put:i") -Arch "x86"
+    Test-DispatchInvoke "b223_nddestroy_str" "$Tests\b223_nddestroy\B223k.vbp" "B223k" `
+        "{22223333-4444-5555-6666-77778888B224}" @(
+        "VTARG=Put:x giving=BSTR(abc) hr=0x00000000 vt=8 val=<abc> len=3",
+        "DONE") @() `
+        -Tail @("VTARG=Put:x")
+    Test-DispatchInvoke "b223_nddestroy_str_x86" "$Tests\b223_nddestroy\B223k.vbp" "B223k" `
+        "{22223333-4444-5555-6666-77778888B224}" @(
+        "VTARG=Put:x giving=BSTR(abc) hr=0x00000000 vt=8 val=<abc> len=3",
+        "DONE") @() `
+        -Tail @("VTARG=Put:x") -Arch "x86"
+
 
     # 账 #305 SB186 (第七十八刀): 服务端进门的**第二站** —— IClassFactory::CreateInstance 走进
     # Class_Initialize 那一步。这条通道连 EXCEPINFO 都没有, 错误号只能编在交回的 HRESULT 里; 这一趟过去同样
@@ -9782,6 +9825,7 @@ if ($Category -in @("all", "compile")) {
     if (Enter-StaticShard) { Test-IfaceViewAuthority }
     if (Enter-StaticShard) { Test-DispInboundArgvtAuthority }
     if (Enter-StaticShard) { Test-ClassFieldReleaseOrder }
+    if (Enter-StaticShard) { Test-SaDestroyRankAware }
     if (Enter-StaticShard) { Test-OwnedTempKeeps }
     if (Enter-StaticShard) { Test-OwnedTempSemantics }
     if (Enter-StaticShard) { Test-OwnedTempReclaim }

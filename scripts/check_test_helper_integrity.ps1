@@ -167,6 +167,11 @@ if ($ast5) {
     # -Tail 6 枚臂。两架构各一条。
     'b221_strarr_field_release'                  = @(8, 7, 0, 6)
     'b221_strarr_field_release_x86'             = @(10, 7, 0, 6)
+    # 账 #305 SB220 (第二百二十四刀): 通用销毁按运行期秩选口径, 两台 × 两枚 ND 类。
+    'b223_nddestroy_long'                       = @(8, 2, 0, 1)
+    'b223_nddestroy_long_x86'                   = @(10, 2, 0, 1)
+    'b223_nddestroy_str'                        = @(8, 2, 0, 1)
+    'b223_nddestroy_str_x86'                    = @(10, 2, 0, 1)
 }
 $ds = @($ast5.FindAll({ param($n)
     $n -is [System.Management.Automation.Language.CommandAst] -and
