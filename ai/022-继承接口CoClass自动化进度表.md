@@ -6,7 +6,13 @@
 
 OPEN_LOCAL_DIVERGENCE: **已收口（2026-09-27 入夜 = C29-MV-d）** —— 本地 `ctrlmonthview` 的 MV24/MV25/MV30 三条红既不是"本地环境/增量缓存"、也不是"OS 版本相关"，而是**挂钟相关**：comctl v6 把当前时间混进 `MCM_GETCURSEL` 的负载里（日没错、零头 0.765），`CLng` 下午进位、上午舍掉 ⇒ 本机下午一直红、CI 跑在上午一直绿。修法与全部读数见 029 §九 C29-MV-d 那一格。留下的一般式：**日期面判据按 `CLng` / `=` 比之前，产品读数必须归成整数日**，否则同一棵树的判据随时段翻脸，而门只会读到"上午那一半"。
 STATUS: IDLE             # NOT_STARTED | DESIGN | BUSY | IDLE | ALL_DONE
-LAST_RUN: 2026-10-25T22:20:00+08:00 **第二百三十三刀「实施+判据」已发货（账 #305 §B223：ByRef 标量形参的两半 —— 入槽按 pointee 拷值 + 返回后写回；门在跑）**
+LAST_RUN: 2026-10-25T22:55:00+08:00 **第二百三十三刀「收线」= 门 **#929** 二十一格全绿（账 #305 §B223：ByRef 标量形参的两半已发货）**
+—— **门与归因**：run 40184965397 / head `c6db1542` / attempt 1；按用例名验过：`[DISPATCH] b231_byref_scalar ... PASS`（vbp #10）、`b231_byref_scalar_x86 ... PASS`（vbp #11）、`[STATIC] byref_scalar_writeback ... PASS`（compile #1）；`Emit manifest` 自报 `inputs=538` + `manifest-expectation OK`。
+—— **本刀没动的**：穿工程身份面与数组桥一字未动；BSTR / 对象 / 变体 / 未知档仍走位拷贝（槽留 Empty）—— 这三档的写回还没量。
+—— **在册欠项变化**：「ByRef 标量写回桥」的**服务端半销**；**客户端半保留**（自家客户端仍按值打包，对外部服务器等于把 ByRef 当 ByVal；是对外契约变更，需先拍口径）；其余不变。
+—— **刀号**：本轮 = 第二百三十三刀（收线），第二百三十二刀的「量」原样留档在下一节。
+
+# 上一轮（2026-10-25T22:20:00+08:00，原样留档）= LAST_RUN: 2026-10-25T22:20:00+08:00 **第二百三十三刀「实施+判据」已发货（账 #305 §B223：ByRef 标量形参的两半 —— 入槽按 pointee 拷值 + 返回后写回；门在跑）**
 —— **落点**：`vb6_VariantBorrowIntoSlot` 多一臂 `if (src->vt & VT_BYREF)`（I4/I2/R8/R4/BOOL/UI1 六档按 pointee 搬值，BSTR/对象/变体/未知档不猜）；新出口 `vb6_ByRefScalarWriteBack` 按同一组六档写回；服务端跟着数组那一臂调，时机不变（invokeFunc 之后、SlotRelease 之前）。
 —— **判据**（x64/x86 逐字相同）：`BYREFARG=Bump:10` 改前 `ret=693303301 client_after=10` → **`ret=11 client_after=11`**；`BYVALARG=Bump:10` 两边都是 `ret=11 client_after=10`（按值本来就没有写回落点）。
 —— **护栏**：新哨兵 `check_byref_scalar_writeback.ps1` 六道，六份负控各点各的红（R1_def 连带 R4 已写进注释）；H5 补两格；**107 道全绿**；清单 536→538（零移动）。
