@@ -6,7 +6,14 @@
 
 OPEN_LOCAL_DIVERGENCE: **已收口（2026-09-27 入夜 = C29-MV-d）** —— 本地 `ctrlmonthview` 的 MV24/MV25/MV30 三条红既不是"本地环境/增量缓存"、也不是"OS 版本相关"，而是**挂钟相关**：comctl v6 把当前时间混进 `MCM_GETCURSEL` 的负载里（日没错、零头 0.765），`CLng` 下午进位、上午舍掉 ⇒ 本机下午一直红、CI 跑在上午一直绿。修法与全部读数见 029 §九 C29-MV-d 那一格。留下的一般式：**日期面判据按 `CLng` / `=` 比之前，产品读数必须归成整数日**，否则同一棵树的判据随时段翻脸，而门只会读到"上午那一半"。
 STATUS: IDLE             # NOT_STARTED | DESIGN | BUSY | IDLE | ALL_DONE
-LAST_RUN: 2026-10-25T21:15:00+08:00 **第二百三十一刀「量」已收线（账 #305 §B223：ByRef 标量那一族的病形与承面 —— 体里读到的是指针，客户变量一字未动）**
+LAST_RUN: 2026-10-25T21:40:00+08:00 **第二百三十二刀「量」已收线（账 #305 §B223 另一端：自家客户端从不打 VT_BYREF）**
+—— **客户端打包表**（vb6com_pack.c 逐枚）：BSTR/I4/BOOL/R8/DISPATCH 全按值，只有对象出参有 `vb6_ComPackObjectRef`（VT_DISPATCH|VT_BYREF）；标量没有任何“按引用”出口。靶工程产物：PackInt 133 / BSTR 234 / Bool 48 / Double 5 / Object 1 / **ObjectRef 0**；晚绑定调用点 210。
+—— **两发真跑（同一夹具、x64）**：`BYREFARG=Bump:10`（VB6 客户端形）⇒ `ret=-486738335 client_after=10`（读到指针）；`BYVALARG=Bump:10`（自家形）⇒ `ret=11 client_after=10`（读对了、写回丢）。**没有一种客户端形是两头都对的**。
+—— **承面**：语料 2107 份类模块里 Public 标量 ByRef 形参 **1828 处**（385 文件 / 19 工程）；靶工程 IDispatch 侧取址臂 9 处（2 对象 + 1 数组已修 + 6 窗口过程桥）。
+—— **下一刀要先拍口径**：服务端那半（入槽按 BYREF 拷值 + 返回后写回）能单独做；客户端那半（是否开始打 `VT_BYREF|T`）是**对外契约变更** —— 现在按值发，对外部服务器等于把 ByRef 当 ByVal。两端一起改才算 VB6 语义。
+—— **刀号**：本轮 = 第二百三十二刀（量，不动代码），第二百三十一刀的「量」原样留档在下一节。
+
+# 上一轮（2026-10-25T21:15:00+08:00，原样留档）= LAST_RUN: 2026-10-25T21:15:00+08:00 **第二百三十一刀「量」已收线（账 #305 §B223：ByRef 标量那一族的病形与承面 —— 体里读到的是指针，客户变量一字未动）**
 —— **读数**：新夹具 tests/b231_byrefparam（`Bump(ByRef v As Long)` 里一句 `v = v + 1`）+ 探针新臂 `BYREFARG=`：客户端递 `VT_BYREF|VT_I4` 指向自己的 LONG=10 ⇒ `hr=0x0 ret=693303301 retvt=3 client_after=10` —— 返回的是「指针低 32 位 + 1」，客户那个 10 一直没变（不崩、不写回、读的也不是 10）。
 —— **承面**（靶工程产物 dll_entry.c，262 个 disp 适配器）：取址形读臂 9 处 = ByRef 对象 2（View 的 `Property Set View` / Gradient.Draw）+ 数组 1（230 已修）+ 裸 `(&…->lVal)` 6（全在 `MagneticWnd_zSubclass_Proc` 那枚 7 参口，窗口过程桥）；**没量的第二条路** = 自家客户端对 `ByRef Long` 形参打包成什么档（下一刀开工前先补）。
 —— **修法形状（不猜）**：入槽时对 `src->vt & VT_BYREF` 把指向的值拷进槽（体里读对）+ 调用返回后按记下的位置写回 `*src->p<field>`（客户读对）；与 230 同形但不能复用 `vb6_ArraySlotWriteBack`（标量没有 SAFEARRAY 要造）。
