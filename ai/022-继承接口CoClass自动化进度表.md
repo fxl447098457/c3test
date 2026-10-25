@@ -6,7 +6,13 @@
 
 OPEN_LOCAL_DIVERGENCE: **已收口（2026-09-27 入夜 = C29-MV-d）** —— 本地 `ctrlmonthview` 的 MV24/MV25/MV30 三条红既不是"本地环境/增量缓存"、也不是"OS 版本相关"，而是**挂钟相关**：comctl v6 把当前时间混进 `MCM_GETCURSEL` 的负载里（日没错、零头 0.765），`CLng` 下午进位、上午舍掉 ⇒ 本机下午一直红、CI 跑在上午一直绿。修法与全部读数见 029 §九 C29-MV-d 那一格。留下的一般式：**日期面判据按 `CLng` / `=` 比之前，产品读数必须归成整数日**，否则同一棵树的判据随时段翻脸，而门只会读到"上午那一半"。
 STATUS: IDLE             # NOT_STARTED | DESIGN | BUSY | IDLE | ALL_DONE
-LAST_RUN: 2026-10-25T20:10:00+08:00 **第二百三十刀「实施+判据」已发货（账 #305 §B222：数组形参的出站回写 —— BYREF|ARRAY 两半一起补；门在跑）**
+LAST_RUN: 2026-10-25T20:55:00+08:00 **第二百三十刀「收线」= 门 **#928** 二十一格全绿（账 #305 §B222：数组形参的出站回写已发货）**
+—— **门与归因**：run 40180962950 / head `9038c402` / attempt 1；按用例名验过：`[DISPATCH] b230_arrout_writeback ... PASS`（vbp #8）、`b230_arrout_writeback_x86 ... PASS`（vbp #9）、`[STATIC] array_slot_writeback ... PASS`（compile #2）；`Emit manifest` 自报 `inputs=536` + `manifest-expectation OK`（本机登记的零移动预测兑现）。
+—— **靶工程回归**：同一枚新编译器重建的 VbEclipse.dll 上，16 枚 coclass 的 create→call→Release **16/16 全 DONE**（与第二百二十七刀同数）—— 本刀只动数组槽。
+—— **在册欠项（不变）**：同名 Class 符号的触发条件 / 大小写形状 / `EchoStr ← VT_BOOL` 口径（待拍）/ `rgdispidNamedArgs` / PopupMenu 的 0xC000041D（待复核）/ 视图三格纸面缺口 / **ByRef 标量写回桥**（靶工程产物里现存 4 处取址臂，承面与修法都还没量）。
+—— **刀号**：本轮 = 第二百三十刀（收线），第二百二十九刀的「量」原样留档在下一节。
+
+# 上一轮（2026-10-25T20:10:00+08:00，原样留档）= LAST_RUN: 2026-10-25T20:10:00+08:00 **第二百三十刀「实施+判据」已发货（账 #305 §B222：数组形参的出站回写 —— BYREF|ARRAY 两半一起补；门在跑）**
 —— **落点（三处）**：`vb6_VariantArrayIntoSlot` 认 `VT_BYREF`（`psa = (src->vt & VT_BYREF) ? (src->pparray ? *src->pparray : NULL) : src->parray`）；新出口 `vb6_ArraySlotWriteBack`（槽里那枚 1D 描述符 → `vb6_ComPackArrayOut` 造真 SAFEARRAY → 落 `*client->pparray`，客户旧那枚 `SafeArrayDestroy`，槽 vt 补成数组档让 SlotRelease 照常回收；只认 BYREF|ARRAY）；服务端在 invokeFunc 之后、`vb6_VariantSlotRelease` **之前**逐参调一次。
 —— **判据**：靶工程重建后 BYREF 臂从「客户数组一字未动」变成 `v0=16711680 v1=12533760 v2=8421376 v3=65280 same=0`（BlendColors 的四步渐变）；漏量 20000 发从 +1716224 B 变成 **delta=0**（plain 形两边都是 0，自带负控）；新夹具 tests/b230_arrout + 探针两条臂（ARRARG= / ARRARGV= 对照）x64/x86 都是 `v0=7 v1=14 v2=21 v3=28 same=0` 与 `v0=286331153 … same=1`；改前那台（k3136_base_c3）同一夹具也是 `same=1` —— 两臂互为证人。
 —— **护栏与注册表**：新哨兵 `scripts/check_array_slot_writeback.ps1` 六道，**七份负控各点各的红**（R2 那份实测 call=410 > release=407）；`check_sa_access` A19 的造真数组出口调用数 1→2、`check_test_helper_integrity` H5 补两格 @(8,3,0,2)/@(10,3,0,2)；**106 道全绿（RED=0）**；emit 清单 534→536（新增 2 行、**移动 0 行**），K1..K3 inputs=536 registered=536。
