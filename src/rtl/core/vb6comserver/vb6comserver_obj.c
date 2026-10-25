@@ -399,6 +399,16 @@ static HRESULT STDMETHODCALLTYPE ComObj_Invoke(vb6_ComObject* self, DISPID dispI
 
     /* 账 #305 §B162 (第五十刀): 数组那一臂是个例外 —— 递进来的真 SAFEARRAY 被换成了**我们自己**
      * 那枚描述符, 槽阵列一 free 它就没人管了。其余各档仍是调用方的资源, 一律不动。 */
+    /* 账 #305 §B222 (第二百三十刀): 数组形参的**出站回写** —— 被调方 ReDim 过之后新载体只活在
+     * 这一趟的槽里, 不写回去客户端拿到的还是调用前那枚(§B162「回写刻意不做」的另一半)。
+     * 只认 VT_BYREF|VT_ARRAY 那一形(数组在 VB6 里只能按引用传)。顺序不能挪: 本趟只读槽、
+     * 回写成功后把槽的 vt 补成数组档, 下面那句 SlotRelease 才认得出并回收我们的描述符。 */
+    if (argErrSlot < 0 && method->invokeFunc) {
+        for (int i = 0; i < argc; i++) {
+            vb6_ArraySlotWriteBack(&pDispParams->rgvarg[argc - 1 - i],
+                                   &((vb6_VarSlot*)coercedArgs)[i]);
+        }
+    }
     for (int i = 0; i < argc; i++) {
         vb6_VariantSlotRelease(&((vb6_VarSlot*)coercedArgs)[i]);
     }

@@ -525,7 +525,10 @@ static VARTYPE vb6_ComSaVtBlittable(vb6_safearray_elemtype et) {
  *   m_PF_Colors 走的正是这一格)。
  */
 static void vb6_VariantArrayIntoSlot(const VARIANT *src, vb6_VARIANT *s) {
-    SAFEARRAY* psa = src->parray;
+    /* 账 #305 §B222 (第二百三十刀): 数组在 VB6 里只能**按引用**传 —— 真客户端交来的是
+     * VT_BYREF|VT_ARRAY|T，parray 那一格放的是 `SAFEARRAY**`。改前这里直接拿 `src->parray`
+     * 当 SAFEARRAY* 用 ⇒ 维数那问读的是指针自己的字节、早退，槽留 Empty（实测每发漏 85.8 B）。 */
+    SAFEARRAY* psa = (src->vt & VT_BYREF) ? (src->pparray ? *src->pparray : NULL) : src->parray;
     VARTYPE base = (VARTYPE)(src->vt & VT_TYPEMASK);
     vb6_safearray_elemtype et;
     VARTYPE allow;
@@ -636,6 +639,34 @@ static void vb6_ComPackArrayOut(const void* arrV, VARIANT* out) {
     SafeArrayUnaccessData(psa);
     out->vt = (VARTYPE)(VT_ARRAY | vt);
     out->parray = psa;
+}
+
+/* 账 #305 §B222 (第二百三十刀): 数组形参的**出站回写**。
+ * 被调方 `ReDim a(n)` 现场是 `vb6_SafeArrayDestroy1D(*p); *p = vb6_SafeArrayReDim1D(...)`
+ * —— 新载体只活在**这一趟的槽**里（§B162 那条「回写刻意不做」的另一半）。这里把槽里那枚
+ * 现成的 1D 描述符用 vb6_ComPackArrayOut 造成真 SAFEARRAY，落到客户 VARIANT 的 `pparray`
+ * 所指处；旧的那枚由我们 SafeArrayDestroy（VB6 的 ReDim 语义就是"旧数组没了"）。
+ * 只写 `VT_BYREF|VT_ARRAY` 那一形：数组在 VB6 里只能按引用传，按值那形没有落点。
+ * 调用方必须在 `vb6_VariantSlotRelease` **之前**跑这一趟 —— 本函数只读槽、不动描述符，
+ * 回写成功后把槽的 vt 补成数组档，于是收尾那一步照常把我们的描述符回收（改前 BYREF 形
+ * 槽留 Empty、ReDim 出来那枚没人回收：实测 20000 发 +1716224 字节）。 */
+void vb6_ArraySlotWriteBack(VARIANT *client, void *slot) {
+    vb6_VARIANT* s = (vb6_VARIANT*)slot;
+    vb6_SafeArray1D* arr;
+    VARIANT built;
+    if (!client || !s) return;
+    if ((client->vt & VT_ARRAY) == 0 || (client->vt & VT_BYREF) == 0) return;
+    if (!client->pparray) return;
+    /* 槽被清成 Empty 时被调方只把指针写进了 union 头一格(两架构都在 offset 8) ——
+     * 认载体照旧只问 vb6_SaIs1D 那一位主人，不再自己数偏移。 */
+    arr = (vb6_SafeArray1D*)s->parray;
+    if (!arr || !vb6_SaIs1D(arr)) return;
+    VariantInit(&built);
+    vb6_ComPackArrayOut(arr, &built);
+    if (built.vt == VT_EMPTY) return;   /* 元素档认不出/步长不符: 不搬、也不动客户那枚 */
+    if (*client->pparray) SafeArrayDestroy(*client->pparray);
+    *client->pparray = built.parray;
+    s->vt = (vb6_vartype)(vb6_vtArray | (built.vt & VT_TYPEMASK));
 }
 
 /* 账 #305 §B145: 槽 → 真 VARIANT 那张 vt 表的**唯一一份**(借用语义: 不复制 BSTR、不 AddRef)。

@@ -1829,6 +1829,24 @@ function Test-ClsidSyncAllCopies {
     }
 }
 
+# 账 #305 SB222 (第二百三十刀): 数组形参的出站回写 —— 槽里那枚 1D 描述符必须**变成真 SAFEARRAY**
+# 落到客户 VARIANT 的 pparray 上，而且要在 vb6_VariantSlotRelease **之前**跑（反了就是读已释放的载体）。
+# 六道各点各的红：定义/声明各 1、服务端只调 1 次且行号在收尾之前、入槽认 VT_BYREF、回写只认 BYREF|ARRAY、
+# 夹具三件、判据两格两台 + 探针两条臂。
+function Test-ArraySlotWriteBack {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] array_slot_writeback ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\check_array_slot_writeback.ps1" 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        $out | Select-Object -First 8 | ForEach-Object { Write-Host "  $_" }
+    }
+}
+
 function Test-SaDestroyRankAware {
     $script:total++
     Write-Host -NoNewline "  [STATIC] sa_destroy_rank_aware ... "
@@ -8342,6 +8360,24 @@ if ($Category -in @("all", "run", "vbp")) {
         "DONE") @() `
         -Tail @("VTARG=Put:x") -Arch "x86"
 
+    # 账 #305 SB222 (第二百三十刀): 数组形参的**出站回写**。VB6 里数组只能按引用传, 真客户端递的是
+    # VT_BYREF|VT_ARRAY|VT_I4; 被调方 ReDim 之后新载体只活在服务端这一趟的槽里, 不写回去客户端拿到的
+    # 还是调用前那枚(改前实测: hr=0、返回 4、客户数组四个元素一字未动, 且 BYREF 形每发漏 85.8 B)。
+    # 两条臂同在一趟里, 互为证人: ARRARG=(byref) 必须看到 7/14/21/28 且 same=0(描述符被换成新造的那枚),
+    # ARRARGV=(plain VT_ARRAY) 必须原样 0x11111111…(按值那一形没有落点, 刻意不回写)。
+    Test-DispatchInvoke "b230_arrout_writeback" "$Tests\b230_arrout\B230k.vbp" "B230k" `
+        "{11112222-3333-4444-5555-66667777B230}" @(
+        "ARRARG=Fill:4 mode=byref hr=0x00000000 ret=4 back n=4 v0=7 v1=14 v2=21 v3=28 same=0",
+        "ARRARG=Fill:4 mode=plain hr=0x00000000 ret=4 back n=4 v0=286331153 v1=572662306 v2=858993459 v3=1145324612 same=1",
+        "DONE") @() `
+        -Tail @("ARRARG=Fill:4", "ARRARGV=Fill:4")
+    Test-DispatchInvoke "b230_arrout_writeback_x86" "$Tests\b230_arrout\B230k.vbp" "B230k" `
+        "{11112222-3333-4444-5555-66667777B230}" @(
+        "ARRARG=Fill:4 mode=byref hr=0x00000000 ret=4 back n=4 v0=7 v1=14 v2=21 v3=28 same=0",
+        "ARRARG=Fill:4 mode=plain hr=0x00000000 ret=4 back n=4 v0=286331153 v1=572662306 v2=858993459 v3=1145324612 same=1",
+        "DONE") @() `
+        -Tail @("ARRARG=Fill:4", "ARRARGV=Fill:4") -Arch "x86"
+
 
     # 账 #305 SB186 (第七十八刀): 服务端进门的**第二站** —— IClassFactory::CreateInstance 走进
     # Class_Initialize 那一步。这条通道连 EXCEPINFO 都没有, 错误号只能编在交回的 HRESULT 里; 这一趟过去同样
@@ -9843,6 +9879,7 @@ if ($Category -in @("all", "compile")) {
     if (Enter-StaticShard) { Test-DispInboundArgvtAuthority }
     if (Enter-StaticShard) { Test-ClassFieldReleaseOrder }
     if (Enter-StaticShard) { Test-SaDestroyRankAware }
+    if (Enter-StaticShard) { Test-ArraySlotWriteBack }
     if (Enter-StaticShard) { Test-ClsidSyncAllCopies }
     if (Enter-StaticShard) { Test-OwnedTempKeeps }
     if (Enter-StaticShard) { Test-OwnedTempSemantics }

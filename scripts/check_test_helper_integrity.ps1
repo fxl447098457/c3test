@@ -147,6 +147,10 @@ if ($ast5) {
     'b186_factory_error_frame_x86'    = @(10, 5, 2, 1)
     # 账 #305 §B188 (第八十刀判据): 出厂那一趟的格子, 两枚一类各一台; 位置面 6 (+2 = -Arch),
     # Needles 6 / Absent 1 (「Unhandled error」当反面证人) / -Tail 1 枚 CREATE= 臂
+    # 账 #305 SB222 (第二百三十刀): 数组形参的出站回写, 两台各一条; 位置面 8 (+2 = -Arch),
+    # Needles 3 (byref 读数 + plain 反面读数 + DONE) / Absent 0 / -Tail 2 枚臂 (ARRARG= / ARRARGV=)
+    'b230_arrout_writeback'          = @(8, 3, 0, 2)
+    'b230_arrout_writeback_x86'      = @(10, 3, 0, 2)
     'b188_terminate_error_frame'          = @(8, 6, 1, 1)
     'b188_terminate_error_frame_x86'     = @(10, 6, 1, 1)
     # 账 #305 §B187 第二腿 + 第四腿 + 第五腿 (八十三刀装箱 / 八十四刀实参那一站 / 第八十五刀 ByRef 那座桥 / 八十六刀 TypeName 认包装器): 两架构真跑格。

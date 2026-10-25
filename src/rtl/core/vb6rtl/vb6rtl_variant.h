@@ -375,6 +375,9 @@ DECIMAL *vb6_DecimalPtrFromVariant(const VARIANT *v);
 void vb6_VariantPackCopyInto(const void *slot, VARIANT *out);    /* 槽 → 对端 VARIANT(带权副本) */
 void vb6_VariantBorrowIntoSlot(const VARIANT *src, void *slot);  /* 对端 VARIANT → 槽(借用) */
 void vb6_VariantSlotRelease(void *slot);  /* 账 #305 §B162: 回收上面那臂造出的描述符 */
+/* 账 #305 §B222(第二百三十刀): 数组形参的出站回写(VT_BYREF|VT_ARRAY 那一形)。
+ * 必须在 vb6_VariantSlotRelease **之前**调用；成功后槽的 vt 被补成数组档，收尾照常回收。 */
+void vb6_ArraySlotWriteBack(VARIANT *client, void *slot);
 
 /* 账 #305 §B219(第二百二十刀): 入站实参「这一槽声明的是什么档」的那一问，值域就两样：
  * 一个真 VARTYPE(要换算到它)，或 VB6_ARGVT_SKIP(这一格本刀不问，槽里保持纯借用)。

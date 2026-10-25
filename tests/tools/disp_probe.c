@@ -353,6 +353,103 @@ static VARIANT mk_sa_i4(const LONG* vals, int n) {
     return x;
 }
 
+/* Acct #305 SB222 (knife 230): array argument arms. Spec: ARRARG=<Method>:<n> (BYREF shape,
+ * what a VB6 client sends for `a() As Long`) and ARRARGV=<Method>:<n> (plain VT_ARRAY, the
+ * negative control -- no write-back is expected there).
+ * The pre-filled elements make "the callee overwrote it" readable without trusting the return. */
+static void call_arrarg(IDispatch *disp, const char *spec, int byref) {
+    char name[64];
+    const char *colon;
+    VARIANT a[2];
+    VARIANT res;
+    DISPPARAMS dp;
+    EXCEPINFO ei;
+    DISPID id = DISPID_UNKNOWN;
+    LPOLESTR names[1];
+    UINT err = 0;
+    SAFEARRAY *psa, *keep;
+    long n = 0, i, got = -1, rd[16];
+    long v0 = -1, v1 = -1, v2 = -1, v3 = -1;
+    HRESULT hr;
+
+    colon = strchr(spec, ':');
+    if (!colon || (size_t)(colon - spec) >= sizeof(name)) {
+        printf("ARRARG=%s BADSPEC\n", spec);
+        return;
+    }
+    memcpy(name, spec, (size_t)(colon - spec));
+    name[colon - spec] = '\0';
+    n = strtol(colon + 1, NULL, 10);
+    if (n <= 0 || n > 16) {
+        printf("ARRARG=%s BADN n=%ld\n", name, n);
+        return;
+    }
+    for (i = 0; i < n; i++) rd[i] = 0;
+    psa = NULL;
+    a[0] = mk_sa_i4(rd, (int)n);      /* zeroed first, then the sentinel fill below */
+    psa = a[0].parray;
+    if (!psa) { printf("ARRARG=%s SA=FAIL\n", name); return; }
+    for (i = 0; i < n; i++) {
+        long k = i;
+        LONG v = (LONG)(0x11111111L * (i + 1));
+        SafeArrayPutElement(psa, &k, (void *)&v);
+    }
+    keep = psa;
+    if (byref) {
+        /* a[] is ByRef in VB6: the client hands over the ADDRESS of its SAFEARRAY* . */
+        a[0].vt = (VARTYPE)(VT_ARRAY | VT_BYREF | VT_I4);
+        a[0].pparray = &psa;
+    }
+    a[1] = mk_i4(n);                  /* DISPPARAMS is reversed: rgvarg[1] = first declared arg */
+    VariantInit(&res);
+    memset(&ei, 0, sizeof(ei));
+    memset(&dp, 0, sizeof(dp));
+    dp.rgvarg = a;
+    dp.cArgs = 2;
+    {
+        wchar_t wname[64];
+        if (MultiByteToWideChar(CP_ACP, 0, name, -1, wname, 64) <= 0) {
+            printf("ARRARG=%s BADNAME\n", name);
+            VariantClear(&a[0]);
+            VariantClear(&a[1]);
+            return;
+        }
+        names[0] = wname;
+        hr = IDispatch_GetIDsOfNames(disp, &IID_NULL, names, 1, LOCALE_USER_DEFAULT, &id);
+    }
+    if (SUCCEEDED(hr))
+        hr = IDispatch_Invoke(disp, id, &IID_NULL, LOCALE_USER_DEFAULT, DISPATCH_METHOD,
+                              &dp, &res, &ei, &err);
+    got = (res.vt == VT_I4) ? (long)res.lVal : -1;
+    printf("ARRARG=%s:%ld mode=%s hr=0x%08lX ret=%ld", name, n, byref ? "byref" : "plain",
+           (unsigned long)hr, got);
+    /* Read the client's own array AFTER the call -- the whole point of the arm. */
+    if (psa) {
+        long* q = NULL;
+        if (SUCCEEDED(SafeArrayAccessData(psa, (void **)&q)) && q) {
+            ULONG cnt = psa->rgsabound[0].cElements;
+            v0 = q[0];
+            v1 = (cnt > 1) ? q[1] : -1;
+            v2 = (cnt > 2) ? q[2] : -1;
+            v3 = (cnt > 3) ? q[3] : -1;
+            printf(" back n=%lu v0=%ld v1=%ld v2=%ld v3=%ld same=%d", (unsigned long)cnt,
+                   v0, v1, v2, v3, (int)(psa == keep));
+            SafeArrayUnaccessData(psa);
+        } else {
+            printf(" back=ACCESS_FAIL same=%d", (int)(psa == keep));
+        }
+    } else {
+        printf(" back=NULL");
+    }
+    printf("\n");
+    VariantClear(&res);
+    /* BYREF: a[0]'s VariantClear is a no-op on the byref tag, so the (possibly replaced)
+     * descriptor is ours to free; plain: VariantClear already destroyed it. */
+    VariantClear(&a[1]);
+    if (byref) { VariantClear(&a[0]); if (psa) SafeArrayDestroy(psa); }
+    else { VariantClear(&a[0]); }
+}
+
 /* ai/022 B16: 薄指针的槽表形状 (与生成码 vb6_ivtbl_<I> 逐槽对齐). 薄指针本身是
  * `{ vt }` 一字段结构, 所以要**先解一层**取槽表再按槽调 —— 直接 `((probe_ivtbl*)p)->X`
  * 是拿 p 当槽表, 会读到对象后面的堆内存 (实测就是它把探针打崩的). */
@@ -601,6 +698,13 @@ int main(int argc, char **argv) {
      * 它们打的是**同一枚已建好的** disp, 而 CREATE= 那一臂可能打死进程, 读数要先在管子里。 */
     for (ai = 3; ai < argc; ai++)
         if (strncmp(argv[ai], "VTARG=", 6) == 0) call_vtarg(disp, argv[ai] + 6);
+
+    /* Acct #305 SB222 (knife 230): array arguments (only when asked). ARRARG= is the BYREF
+     * shape a VB6 client uses for `a() As Long`; ARRARGV= is the plain-VT_ARRAY control. */
+    for (ai = 3; ai < argc; ai++) {
+        if (strncmp(argv[ai], "ARRARG=", 7) == 0) call_arrarg(disp, argv[ai] + 7, 1);
+        else if (strncmp(argv[ai], "ARRARGV=", 8) == 0) call_arrarg(disp, argv[ai] + 8, 0);
+    }
 
     /* Acct #305 SB186 (knife 78): the factory-side arms, last, so the primary object's readings are
      * already on the pipe before anything here can kill the process. */

@@ -939,3 +939,5 @@
  *   连同新哨兵常量 VB6_ARGVT_SKIP)，vb6comserver_obj.c 里那半张手抄换算表(只折 I2/I1/UI1/UI2/BOOL/
  *   EMPTY→I4、R4→R8)撤掉；vb6_DispMethodDesc 从此多带一枚每方法形参声明档数组。
  *   touch 本文件 = 让 RCDATA 重包一次 (§B99②)。 */
+
+/* knife 230: RTL changed (array slot write-back) -- force c3rtl.rc re-embed */
