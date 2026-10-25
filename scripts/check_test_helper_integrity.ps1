@@ -150,6 +150,10 @@ if ($ast5) {
     # 账 #305 SB222 (第二百三十刀): 数组形参的出站回写, 两台各一条; 位置面 8 (+2 = -Arch),
     # Needles 3 (byref 读数 + plain 反面读数 + DONE) / Absent 0 / -Tail 2 枚臂 (ARRARG= / ARRARGV=)
     'b230_arrout_writeback'          = @(8, 3, 0, 2)
+    # 账 #305 SB223 (第二百三十三刀): ByRef 标量形参的回写, 两台各一条; 位置面 8 (+2 = -Arch),
+    # Needles 3 / Absent 0 / -Tail 2 枚臂 (BYREFARG= / BYVALARG=)
+    'b231_byref_scalar'              = @(8, 3, 0, 2)
+    'b231_byref_scalar_x86'          = @(10, 3, 0, 2)
     'b230_arrout_writeback_x86'      = @(10, 3, 0, 2)
     'b188_terminate_error_frame'          = @(8, 6, 1, 1)
     'b188_terminate_error_frame_x86'     = @(10, 6, 1, 1)

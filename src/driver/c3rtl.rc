@@ -941,3 +941,5 @@
  *   touch 本文件 = 让 RCDATA 重包一次 (§B99②)。 */
 
 /* knife 230: RTL changed (array slot write-back) -- force c3rtl.rc re-embed */
+
+/* knife 233: RTL changed (byref scalar write-back) -- force c3rtl.rc re-embed */

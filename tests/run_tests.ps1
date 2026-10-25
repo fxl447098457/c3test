@@ -1833,6 +1833,23 @@ function Test-ClsidSyncAllCopies {
 # 落到客户 VARIANT 的 pparray 上，而且要在 vb6_VariantSlotRelease **之前**跑（反了就是读已释放的载体）。
 # 六道各点各的红：定义/声明各 1、服务端只调 1 次且行号在收尾之前、入槽认 VT_BYREF、回写只认 BYREF|ARRAY、
 # 夹具三件、判据两格两台 + 探针两条臂。
+# 账 #305 SB223 (第二百三十三刀): ByRef 标量形参的两半 —— 入槽按 pointee 拷值
+# + 调用后按 pointee 的类型写回。六道：定义/声明各 1、服务端只调 1 次且行号在收尾之前、
+# 入槽与出站吐同一组六档（I4/I2/R8/R4/BOOL/UI1）、夹具三件、判据两格两台 + 探针两条臂。
+function Test-ByRefScalarWriteBack {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] byref_scalar_writeback ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\check_byref_scalar_writeback.ps1" 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        $out | Select-Object -First 8 | ForEach-Object { Write-Host "  $_" }
+    }
+}
+
 function Test-ArraySlotWriteBack {
     $script:total++
     Write-Host -NoNewline "  [STATIC] array_slot_writeback ... "
@@ -8378,6 +8395,23 @@ if ($Category -in @("all", "run", "vbp")) {
         "DONE") @() `
         -Tail @("ARRARG=Fill:4", "ARRARGV=Fill:4") -Arch "x86"
 
+    # 账 #305 SB223 (第二百三十三刀): ByRef **标量**形参的两半 —— 入槽按 pointee 拷值(体里读对) + 调用后
+    # 按 pointee 的类型写回(客户读对)。改前: 客户端递 VT_BYREF|VT_I4 时体里读到的**是指针**(实测 ret 是
+    # 指针低 32 位 + 1), 且客户变量一字未动。两条臂同在一趟里互为证人: BYREFARG 要 11/11(读对+写回),
+    # BYVALARG(自家客户端按值那一形) 要 11/10(读对、本来就没有写回落点)。
+    Test-DispatchInvoke "b231_byref_scalar" "$Tests\b231_byrefparam\B231k.vbp" "B231k" `
+        "{11112222-3333-4444-5555-66667777B231}" @(
+        "BYREFARG=Bump hr=0x00000000 ret=11 retvt=3 client_after=11",
+        "BYVALARG=Bump hr=0x00000000 ret=11 retvt=3 client_after=10",
+        "DONE") @() `
+        -Tail @("BYREFARG=Bump:10", "BYVALARG=Bump:10")
+    Test-DispatchInvoke "b231_byref_scalar_x86" "$Tests\b231_byrefparam\B231k.vbp" "B231k" `
+        "{11112222-3333-4444-5555-66667777B231}" @(
+        "BYREFARG=Bump hr=0x00000000 ret=11 retvt=3 client_after=11",
+        "BYVALARG=Bump hr=0x00000000 ret=11 retvt=3 client_after=10",
+        "DONE") @() `
+        -Tail @("BYREFARG=Bump:10", "BYVALARG=Bump:10") -Arch "x86"
+
 
     # 账 #305 SB186 (第七十八刀): 服务端进门的**第二站** —— IClassFactory::CreateInstance 走进
     # Class_Initialize 那一步。这条通道连 EXCEPINFO 都没有, 错误号只能编在交回的 HRESULT 里; 这一趟过去同样
@@ -9880,6 +9914,7 @@ if ($Category -in @("all", "compile")) {
     if (Enter-StaticShard) { Test-ClassFieldReleaseOrder }
     if (Enter-StaticShard) { Test-SaDestroyRankAware }
     if (Enter-StaticShard) { Test-ArraySlotWriteBack }
+    if (Enter-StaticShard) { Test-ByRefScalarWriteBack }
     if (Enter-StaticShard) { Test-ClsidSyncAllCopies }
     if (Enter-StaticShard) { Test-OwnedTempKeeps }
     if (Enter-StaticShard) { Test-OwnedTempSemantics }

@@ -450,6 +450,66 @@ static void call_arrarg(IDispatch *disp, const char *spec, int byref) {
     else { VariantClear(&a[0]); }
 }
 
+/* Acct #305 SB223 (knife 231): scalar ByRef argument arm. Spec: BYREFARG=<Method>:<n>.
+ * Hands over VT_BYREF|VT_I4 pointing at a client-owned LONG (what a VB6 client sends for
+ * `ByRef v As Long`) and prints both the client's value after the call and the answer. */
+static void call_byrefarg(IDispatch *disp, const char *spec, int byref) {
+    char name[64];
+    const char *colon;
+    VARIANT a[1];
+    VARIANT res;
+    DISPPARAMS dp;
+    EXCEPINFO ei;
+    DISPID id = DISPID_UNKNOWN;
+    LPOLESTR names[1];
+    UINT err = 0;
+    LONG clientVal;
+    HRESULT hr;
+
+    colon = strchr(spec, ':');
+    if (!colon || (size_t)(colon - spec) >= sizeof(name)) {
+        printf("BYREFARG=%s BADSPEC\n", spec);
+        return;
+    }
+    memcpy(name, spec, (size_t)(colon - spec));
+    name[colon - spec] = '\0';
+    clientVal = strtol(colon + 1, NULL, 10);
+    VariantInit(&a[0]);
+    if (byref) {
+        a[0].vt = (VARTYPE)(VT_BYREF | VT_I4);
+        a[0].piVal = &clientVal;
+    } else {
+        /* Our own client packs a Long argument BY VALUE (vb6_ComPackInt -> VT_I4);
+         * this arm is that shape, so the two ends can be compared. */
+        a[0].vt = VT_I4;
+        a[0].lVal = clientVal;
+    }
+    VariantInit(&res);
+    memset(&ei, 0, sizeof(ei));
+    memset(&dp, 0, sizeof(dp));
+    dp.rgvarg = a;
+    dp.cArgs = 1;
+    {
+        wchar_t wname[64];
+        if (MultiByteToWideChar(CP_ACP, 0, name, -1, wname, 64) <= 0) {
+            printf("BYREFARG=%s BADNAME\n", name);
+            return;
+        }
+        names[0] = wname;
+        hr = IDispatch_GetIDsOfNames(disp, &IID_NULL, names, 1, LOCALE_USER_DEFAULT, &id);
+    }
+    if (SUCCEEDED(hr))
+        hr = IDispatch_Invoke(disp, id, &IID_NULL, LOCALE_USER_DEFAULT, DISPATCH_METHOD,
+                              &dp, &res, &ei, &err);
+    printf("%s=%s hr=0x%08lX ret=%ld retvt=%d client_after=%ld\n",
+           byref ? "BYREFARG" : "BYVALARG", name,
+           (unsigned long)hr, (res.vt == VT_I4) ? (long)res.lVal : -1L, (int)res.vt,
+           (long)clientVal);
+    VariantClear(&res);
+    VariantClear(&a[0]);
+}
+
+
 /* ai/022 B16: 薄指针的槽表形状 (与生成码 vb6_ivtbl_<I> 逐槽对齐). 薄指针本身是
  * `{ vt }` 一字段结构, 所以要**先解一层**取槽表再按槽调 —— 直接 `((probe_ivtbl*)p)->X`
  * 是拿 p 当槽表, 会读到对象后面的堆内存 (实测就是它把探针打崩的). */
@@ -704,6 +764,8 @@ int main(int argc, char **argv) {
     for (ai = 3; ai < argc; ai++) {
         if (strncmp(argv[ai], "ARRARG=", 7) == 0) call_arrarg(disp, argv[ai] + 7, 1);
         else if (strncmp(argv[ai], "ARRARGV=", 8) == 0) call_arrarg(disp, argv[ai] + 8, 0);
+        else if (strncmp(argv[ai], "BYREFARG=", 9) == 0) call_byrefarg(disp, argv[ai] + 9, 1);
+        else if (strncmp(argv[ai], "BYVALARG=", 9) == 0) call_byrefarg(disp, argv[ai] + 9, 0);
     }
 
     /* Acct #305 SB186 (knife 78): the factory-side arms, last, so the primary object's readings are

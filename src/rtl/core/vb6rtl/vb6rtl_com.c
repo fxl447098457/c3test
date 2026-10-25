@@ -669,6 +669,25 @@ void vb6_ArraySlotWriteBack(VARIANT *client, void *slot) {
     s->vt = (vb6_vartype)(vb6_vtArray | (built.vt & VT_TYPEMASK));
 }
 
+/* 账 #305 §B223 (第二百三十三刀): ByRef **标量**形参的出站回写 —— 与上面那枚数组桥同一个时机
+ * （被调方返回之后、`vb6_VariantSlotRelease` 之前）。入槽那一臂已经把 pointee 的值搬进槽，
+ * 体里改的也是槽，这里按 pointee 的类型写回对端变量。只认数值/布尔那几档：BSTR 要换分配器、
+ * 对象要动引用计数、Variant 要整枚拷贝 —— 都不在本刀（槽留 Empty 那一形与改前同形）。 */
+void vb6_ByRefScalarWriteBack(VARIANT *client, void *slot) {
+    const vb6_VARIANT* s = (const vb6_VARIANT*)slot;
+    if (!client || !s) return;
+    if ((client->vt & VT_BYREF) == 0 || (client->vt & VT_ARRAY) != 0) return;
+    switch (client->vt & VT_TYPEMASK) {
+        case VT_I4:   if (client->plVal)    *client->plVal    = s->lVal;    break;
+        case VT_I2:   if (client->piVal)    *client->piVal    = s->iVal;    break;
+        case VT_R8:   if (client->pdblVal)  *client->pdblVal  = s->dblVal;  break;
+        case VT_R4:   if (client->pfltVal)  *client->pfltVal  = s->fltVal;  break;
+        case VT_BOOL: if (client->pboolVal) *client->pboolVal = s->boolVal; break;
+        case VT_UI1:  if (client->pbVal)    *client->pbVal    = s->bVal;    break;
+        default: break;
+    }
+}
+
 /* 账 #305 §B145: 槽 → 真 VARIANT 那张 vt 表的**唯一一份**(借用语义: 不复制 BSTR、不 AddRef)。
  * 「住在哪一格」与「谁负责释放」是两个问题，这里只答前一个 —— 出站要带权副本的那一族
  * 在下面 vb6_ComPackVariant 里自己补那一步，于是这张表只有一份，两处不会再各自漏档
@@ -759,6 +778,22 @@ void vb6_VariantBorrowIntoSlot(const VARIANT *src, void *slot) {
     /* 账 #305 §B162 (第五十刀): 数组那一档进不了下面那条 memcpy —— 位拷贝会把对端的
      * SAFEARRAY 头部当成我们的描述符递给被调方。这一问排在最前（标签是 VT_ARRAY|元素码）。 */
     if (src->vt & VT_ARRAY) { vb6_VariantArrayIntoSlot(src, s); return; }
+    /* 账 #305 §B223 (第二百三十三刀): ByRef **标量** —— 对端交来的是「某个 LONG 的地址」，而生成的
+     * 读臂交出去的是 `&槽->lVal`（槽里那一格的地址）。位拷贝会让体里把**指针当值**读（实测
+     * `Bump(ByRef v As Long)` 客户端给 10，体里算出「指针低 32 位 + 1」）。这里按 pointee 的类型把
+     * **值**搬进槽，出站再由 vb6_ByRefScalarWriteBack 写回对端。BSTR / 对象 / 变体 / 未知档一律不猜
+     * （槽留 Empty，读臂拿到 NULL/0 —— 与本刀之前同形）。 */
+    if (src->vt & VT_BYREF) {
+        switch (src->vt & VT_TYPEMASK) {
+            case VT_I4:   s->vt = vb6_vtLong;    s->lVal    = src->plVal    ? *src->plVal    : 0; return;
+            case VT_I2:   s->vt = vb6_vtInteger; s->iVal    = src->piVal    ? *src->piVal    : 0; return;
+            case VT_R8:   s->vt = vb6_vtDouble;  s->dblVal  = src->pdblVal  ? *src->pdblVal  : 0; return;
+            case VT_R4:   s->vt = vb6_vtSingle;  s->fltVal  = src->pfltVal  ? *src->pfltVal  : 0; return;
+            case VT_BOOL: s->vt = vb6_vtBoolean; s->boolVal = src->pboolVal ? *src->pboolVal : 0; return;
+            case VT_UI1:  s->vt = vb6_vtByte;    s->bVal    = src->pbVal    ? *src->pbVal    : 0; return;
+            default:      return;
+        }
+    }
     if (src->vt == VT_DECIMAL) {
         const DECIMAL *d = vb6_DecimalPtrFromVariant(src);
         s->vt = (vb6_vartype)VT_DECIMAL;

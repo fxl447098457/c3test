@@ -407,6 +407,10 @@ static HRESULT STDMETHODCALLTYPE ComObj_Invoke(vb6_ComObject* self, DISPID dispI
         for (int i = 0; i < argc; i++) {
             vb6_ArraySlotWriteBack(&pDispParams->rgvarg[argc - 1 - i],
                                    &((vb6_VarSlot*)coercedArgs)[i]);
+            /* 账 #305 §B223 (第二百三十三刀): ByRef 标量那一族同一时机回写(数值/布尔);
+             * 两枚各认各的形(BYREF|ARRAY vs BYREF|标量), 互不重叠。 */
+            vb6_ByRefScalarWriteBack(&pDispParams->rgvarg[argc - 1 - i],
+                                     &((vb6_VarSlot*)coercedArgs)[i]);
         }
     }
     for (int i = 0; i < argc; i++) {
