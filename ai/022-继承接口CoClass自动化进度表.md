@@ -6,7 +6,18 @@
 
 OPEN_LOCAL_DIVERGENCE: **已收口（2026-09-27 入夜 = C29-MV-d）** —— 本地 `ctrlmonthview` 的 MV24/MV25/MV30 三条红既不是"本地环境/增量缓存"、也不是"OS 版本相关"，而是**挂钟相关**：comctl v6 把当前时间混进 `MCM_GETCURSEL` 的负载里（日没错、零头 0.765），`CLng` 下午进位、上午舍掉 ⇒ 本机下午一直红、CI 跑在上午一直绿。修法与全部读数见 029 §九 C29-MV-d 那一格。留下的一般式：**日期面判据按 `CLng` / `=` 比之前，产品读数必须归成整数日**，否则同一棵树的判据随时段翻脸，而门只会读到"上午那一半"。
 STATUS: IDLE             # NOT_STARTED | DESIGN | BUSY | IDLE | ALL_DONE
-LAST_RUN: 2026-10-27T03:43:26+08:00 **第二百四十四刀「实施+判据」已出（账 #305：条件那一读收成唯一主人 `conditionTruthExpr` + 新 RTL 出口 `vb6_ComResultToBool`，裸晚绑定调用不再被当指针测真）—— 已推 dev、等门 #937**
+LAST_RUN: 2026-10-27T04:05:00+08:00 **第二百四十四刀「收线」+ 第二百四十五刀「量」已出（门 #937 二十一格全绿；分格后翻转优先级 —— `Not` 那一臂才是最大一族 46 处 / 20 份）—— 不动代码**
+—— **收线取证（两头分开钉，没拿一片绿当证据）**：CI 那层包装器滤掉真跑夹具的名字 ⇒ ① 三枚新判据按名命中 = `[EMITC-SHAPE] b244_cond_truth_shape`（vbp #11）、`[EMITC-ABSENT] b244_cond_truth_lesion`（vbp #12）、`[STATIC] condition_truth_authority`（compile #2）全 PASS；② 真跑那一例按**计数**取证 = bas 两格 `Results` 从 #936 的 135+134=269 变 #937 的 135+135=270，恰 +1 且两格 FAIL=0。
+—— **形状门独立复算**：CI 自交清单 `inputs=541` + `expectation-check` PASS ⇒ 本机登记的移动 1 行（`test_getobject.bas` 3058→3079）+ 新增 1 行（`test_late_cond.bas` 6128）逐行对上，其余 539 行逐字节没动 = 本刀只碰「条件里那发裸晚绑定调用」这一形。
+—— **245 的分格读数（尺 `.local/k244_probe/classify244.py`，读数 `shape_244_split.txt`）**：把 243 那 82 处按形状归 = `Not`-fold **46 处 / 20 份**（最大一族、244 修不到）/ 裸 `if (vb6_ComCall(` 32 处 / 5 份（**244 已修**）/ `Or`-fold 1 处 / 1 份 / 其它 3 处 / 2 份（`- (call == NULL)` 那一形，里面还套「指针比 NULL」旧病）。⇒ 结论翻转：优先级要从 (丙) named 挪到 `Not` 那一臂。
+—— **机制**：`Not` 在**表达式层**就折成整数（[cgen_expr.cpp:262-304](file:///D:/c3.vb6.pro/.build/wt_vb/src/backend/expr/cgen_expr.cpp#L262)），六条臂各问各的：布尔那条 `!=0?0:-1`（对）/ `vb6_ComGetStringProp(` 换数值读重来 / `vb6_ComGetObjectProp(` 退化成非空判定 / `cExprIsVariant` 与 `knownVariantVars_` 给 `~vb6_VariantToLong` / 其余落 `~(int32_t)(操作数)`（堆槽指针截成 int32 再取反 = 恒非零）。⚠ 这一支自带一份手抄档位表，与 244 的 `cExprIsBareComResult` 同源不同表，且三枚裸出口名都不在里面 ⇒ 先合表再加读者。
+—— **判据欠一头（重要）**：夹具 `K-NOT` 只钉「键缺席」（VB6 真、我们也真 = 巧对不算证人）；「键在场 + `Not`」VB6 假 / 我们真 ⇒ 现在补进门就红 ⇒ **与修法同批补**。修法要分两语境：真值位 = `!vb6_ComResultToBool(x)`；值位 = 对**解包后**的槽真按位 VarNot ⇒ 缺的那一问是「我在不在真值位」，主人应是 244 那一位。
+—— **承面上界（源文本级，尺自证过两条非零样本）**：门语料 18 份 / 49 行、真语料 1525 份 / 5576 行「`Not` 紧跟成员调用」；**值语境**从没按产物数过 ⇒ 246 实施前先单数这一格。
+—— **在册**：条件三臂（`Not` 优先）→ (丙) 纯晚绑定 named → `obj.Member(…)(i)` 错误 17 → BSTR / Object / Variant 三档 ByRef 写回 → merged 表身份护栏。
+—— **本机负担（承 244 那条教训）**：本地只定点跑本刀改到的几枚，全量数字交给门（见台账 244 那一行）。
+—— **刀号**：本轮 = 244 收线 + 245 量（都不动代码）。
+
+# 上一轮（2026-10-27T03:43:26+08:00，原样留档）= LAST_RUN: 2026-10-27T03:43:26+08:00 **第二百四十四刀「实施+判据」已出（账 #305：条件那一读收成唯一主人 `conditionTruthExpr` + 新 RTL 出口 `vb6_ComResultToBool`，裸晚绑定调用不再被当指针测真）—— 已推 dev、等门 #937**
 —— **改的是哪一问**：`If` 顶层 / `ElseIf` / 循环那五站把「这发交回的 C 是什么档」问的是 `cExprIsVariant`（认「是不是整枚槽」），而裸 `vb6_ComCall` 交回的是**指针** ⇒ 答否 ⇒ 一行不包 ⇒ `if (ptr)` 恒真。收成一处主人 `conditionTruthExpr`（`cgen_util_type.cpp:1143`），先问新 `cExprIsBareComResult`（:1125，四枚裸出口的严格前缀；五枚带型出口禁止进名单，进 = 二次解包）。
 —— **顺带结掉的所有权**：新 RTL 出口 `vb6_ComResultToBool(void*)` 一次收干条件里现造的那枚堆 VARIANT（`FromComResult` 收所有权 → `ToBool` → `Clear`）⇒ 第二百四十三刀记在 §B164 名下的「条件那一发没人收」这一格不用再单独欠。
 —— **七站**：`cgen_stmt.cpp` 两站（`If` 撤掉 Fix 090ag 那截手抄臂 -15 行 / `ElseIf` 此前连包装带 `resolveComValue` 都没调）+ `cgen_loop.cpp` 五站（Do While / Do Until / Loop While / Loop Until / While-Wend）。
