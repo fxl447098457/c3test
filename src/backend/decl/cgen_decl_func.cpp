@@ -60,6 +60,7 @@ void CCodeGen::visit(FunctionDecl& node) {
     knownFixedStringLen_.clear();
     // Fix 010o: 清空局部变量集合
     knownLocalVars_.clear();
+    procNonArrayLocalVars_.clear();
     knownNewVars_.clear();
     knownNewVars_.insert(moduleNewVars_.begin(), moduleNewVars_.end());  // Fix 090v
     // Fix 091m: 回灌模块级 Variant 变量 (knownVariantVars_ 已被 clear)
