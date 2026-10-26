@@ -420,7 +420,7 @@ sha256=d5874a3ce9c25383a0ea8d653ca49d1d78a28d2a274be0364334b54895b27458 ascii256
 sha256=3204247eb044d0b54882f373eb27c2f6aab6634debb1daf05385b39b467f9eec ascii256=f48f9c21da67cbd41dcf1adc1c87d5b78fdcc4d99b91dad456baca3a4a5f1a53 rc=0 bytes=195071 tests/VBFlexGridDemo/Common/Common.bas
 sha256=6f5c897c93fd54e024c3a2b99b0b02afe887258bf969d2d6a533fd4b3e43f5f9 ascii256=6d3a354c3a189a55f119785fc9ece6a550835e387f6b85f7796588fa33488ecb rc=0 bytes=4669 tests/VBFlexGridDemo/Common/Startup.bas
 sha256=bbb262be86392a5f63d945cbacc9d9e21c814b0b7ba6050cbd89137e06789de2 ascii256=85f5277afc488b9d50b404bec3c94926f30ded62b3981b9181fef14268a420cd rc=0 bytes=73391 tests/VBFlexGridDemo/Common/VisualStyles.bas
-sha256=69642428503cdd95672c3fc02233b0a857b0f92045f0273cd05b6e0c45771b48 ascii256=b8928d6077973afeffb382517714e6dff1f12de7e919e12c9ec37846816f8889 rc=0 bytes=5577356 tests/VBFlexGridDemo/VBFlexGridDemo.vbp
+sha256=90447534d2feb20c8700a0a16bab3b1e864a53e643824798c131f7df5d888b9f ascii256=1a2cb5dcca312545de251413cab0e8f3db0c401847ce79a396272acd3fce71d3 rc=0 bytes=5577344 tests/VBFlexGridDemo/VBFlexGridDemo.vbp
 sha256=3e5e02a695e22846566e8f428c66a943bc6e605c703c9387dfcf226dfb2056f1 ascii256=3e9bb850aff21dc3626a165afa21185bab13d3565f5b62b9f5e4c2e52084ba18 rc=0 bytes=3489 tests/vbman_host/run_host.bas
 sha256=3e5e02a695e22846566e8f428c66a943bc6e605c703c9387dfcf226dfb2056f1 ascii256=3e9bb850aff21dc3626a165afa21185bab13d3565f5b62b9f5e4c2e52084ba18 rc=0 bytes=3489 tests/vbman_host/vbman_host.vbp
 sha256=5f6d4159602806680561963237b24008263b38246332b50b3e814a333009d1a5 ascii256=5cd8103e73a1c07e2fece83539770603407213236bbf9822bd9b08ea74e7d778 rc=0 bytes=1763 tests/vbp_project/MainMod.bas
@@ -428,7 +428,7 @@ sha256=46018324568657ade07c72e651cbf393cb76a304fc22b0c8f2cae4ac38710995 ascii256
 sha256=df094b9c762a0eb49f8405f87cf4e090997ef84d048c70c6e2727bbc1eaf1757 ascii256=6bdd597ec6e853c9f6ad9857e494d7b5190f035b2672196ee6747b2a25ad4599 rc=0 bytes=9058 tests/vbp_project/TestVBP.vbp
 sha256=e6808285d5b949dbc18bf7a95bb0faeb0eda896184a67b303cf705ddcfca831c ascii256=b52df01632c1712a801e41f74f7e2979b8b3d72fd56d65cbe5e55965d98cd23a rc=0 bytes=3715 tests/vbp_project/TestVBP2.vbp
 sha256=429d278e88af9cfa5b2c88a20f3da13f14d3b3072ddbb04838f05ec48f29da82 ascii256=dffb399c0dd4d233e5492dcfd0236a8d3676ba73fd9c0f71368b5fa3df7d6f57 rc=0 bytes=260438 tests/VbQRCodegen-master/src/mdQRCodegen.bas
-sha256=3e8e6a4b38346151686b63459218619924460b08969697f090f6e67eb09fa2e6 ascii256=882e20c65033b5d52aa3af16fd65c6d74a4f08957de38b0f08ba345b71742aa7 rc=0 bytes=279831 tests/VbQRCodegen-master/test/Project1.vbp
+sha256=a4ddaa8dcded3f1771c6325f69d783b12bdfcde1503e4109b59b3aec848de216 ascii256=2f29b3a3c2a2b07801167d599e6f7cf35e9fe2da158c4b4978ada197b018444a rc=0 bytes=279825 tests/VbQRCodegen-master/test/Project1.vbp
 sha256=43598c41ce9c8c3f81bb3a0ee59621784555e005614e072932303f6ca51b1fa2 ascii256=cf19be189f0e26e55965f53f53c271ee58c74eebe897993d9679aeb2f8176bab rc=0 bytes=51151 tests/ve_list/VeList.vbp
 sha256=182b24266c6df3008c0d3d9518301752f5b3babe23b2eaffcb444a280a503f6a ascii256=78931f24aff2ed46cadfb83d0dd21424077d88fb633a360d081b961d74642072 rc=0 bytes=14913 tests/ve_list/VeListMain.bas
 sha256=7a41e5c36e2d31832e15983400f13c7181dc63a1bbcbcbbe85c55202de55defa ascii256=32fbac91673dea0ed8f498aaaf0650d8737287cfc31b875165dff9b933672311 rc=0 bytes=52330 tests/ve_units/Units.vbp
@@ -878,3 +878,4 @@ sha256=7625e86790bf345a52e7babc6b12eb0c32fc55b76b4ef3b7f9b3a946d1f251ad ascii256
 #   ⚠ 订正本刀提交说明与台账那一行里的「预期移动两行」：**VBFlexGridDemo 那一行没动**（机制本轮读死，不是猜）。UserEditingForm 里那发 `Not VBFlexGrid1.CommitEdit()` 单独 emit 一份 .frm 时接收者查不到类型 ⇒ 退成晚绑定 `vb6_ComCall` ⇒ 吃到新臂（ToNot=1）；整工程编译下同一个位置解析到工程内 UC 的方法 `vb6_VBFlexGrid_CommitEdit(...)`（返回 int16_t 的 VB 布尔）⇒ 落 `~(int32_t)(…)`，而那一支在 -1/0 编码下**本来就是对的**（与本刀口径同一句话），产物一字不变。本机两份产物并排留档：`.local/k247_probe/uef_standalone.txt`（ToNot=1）与 `.local/k247_probe/vbp.emit.txt`（ToNot=0、5579340 字节未归一）。
 #   ⇒ 记一条一般式：**按单份文件量的发码承面不能当清单承面**（同一行代码在「脱离工程的单份 emit」与「整工程编译」里走的是两条臂）；以后报「会移动几行」只按 .vbp 编译计。
 #   哈希取自 CI 为同一 head 自己交的清单（github/ci/emit-manifest 的 ca5d1cdf，注脚 head=6c11e3d9）；登记后本机用 `compare_emit_manifest.ps1 -Manifest .local/k247_probe/ci_manifest_939.txt` 复算 = 541/541 逐行相同、缺席 0、多出 0。
+# 2026-10-27 登记来源：门 #942（run 942 / head 7fa71648）那台 CI 自交清单（github/ci/emit-manifest 提交 dcd1d877，注脚 head=7fa71648）。移动的 2 行各有各的主人 —— `tests/VBFlexGridDemo/VBFlexGridDemo.vbp` = 本线第二百四十九刀（值语境改问主人 comValueTwinForObjectReadExpr，句柄档属性读不再被错包）；`tests/VbQRCodegen-master/test/Project1.vbp` = 对方会话那笔 b4caa1e5（第二百四十八刀 ComCtlsDemo 三处发码回归）。逐行按路径比对 = 541 行里 539 行未动、哈希不同 2、缺席 0、多出 0。
