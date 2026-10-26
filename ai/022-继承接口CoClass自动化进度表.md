@@ -6,7 +6,16 @@
 
 OPEN_LOCAL_DIVERGENCE: **已收口（2026-09-27 入夜 = C29-MV-d）** —— 本地 `ctrlmonthview` 的 MV24/MV25/MV30 三条红既不是"本地环境/增量缓存"、也不是"OS 版本相关"，而是**挂钟相关**：comctl v6 把当前时间混进 `MCM_GETCURSEL` 的负载里（日没错、零头 0.765），`CLng` 下午进位、上午舍掉 ⇒ 本机下午一直红、CI 跑在上午一直绿。修法与全部读数见 029 §九 C29-MV-d 那一格。留下的一般式：**日期面判据按 `CLng` / `=` 比之前，产品读数必须归成整数日**，否则同一棵树的判据随时段翻脸，而门只会读到"上午那一半"。
 STATUS: IDLE             # NOT_STARTED | DESIGN | BUSY | IDLE | ALL_DONE
-LAST_RUN: 2026-10-26T22:58:00+08:00 **第二百四十二刀「量」已出（账 #305：早绑定那一支的 named 实参）—— 不动代码
+LAST_RUN: 2026-10-26T23:37:44+08:00 **第二百四十三刀「量」已出（账 #305：(丙) 纯晚绑定的 named 落档读死 + 顺带在同一枚探针上撞出「晚绑定调用被当条件用」那一格）—— 不动代码
+—— **(丙) 读数（真跑 x64，`.local/k243_probe/K243w` + `K243y`，尺 = `.build/C3.exe` md5 `D2CC8E97DCCE284D808EAB918094B27D`）**：`d.Add Item:="2", Key:="A"` ⇒ `err=0 count=1 hasA=False has2=True`，再按声明序补 `Key:="A"` ⇒ `err=0 count=2` ⇒ 真进去的键是 "2"、"A" 从没被占过；对照臂「声明序写两遍同一枚键」⇒ `err=457 count=1`。⇒ 名字连载体都没有（`vb6_ComCall` 的 DISPPARAMS 恒 cNamedArgs=0），单枚 named 只有恰好写在第一档才与 VB6 同解。
+—— **撞出的那一格（比 (丙) 更响）**：裸 `If <晚绑定方法调用> Then` 测的是返回的那枚 VARIANT **指针** ⇒ 恒真。`If d.Exists("ZZZ")`（键不存在）答真、同一发先取进 Variant 槽再 `If v` 答假 ⇒ 值本身没错，错在条件那一读；`If Not …` 答真是**巧合对**（指针非零、取反仍非零）；`Do … Loop While <假条件>` 跑满保险丝（n=4 / VB6 该 1）。
+—— **机制**：条件唯一包装站 = `cgen_stmt.cpp:196`，只问 `cExprIsVariant`（认「是不是槽」），裸 `vb6_ComCall(` 是 `void*` 指针不是槽 ⇒ 不包 ⇒ `if (ptr)`。同一问已有唯一权威 = `boxToVariant`（`cgen_util_ctrl.cpp:3018`，注释写明必须先 `vb6_VariantFromComResult`，四条文本前缀 :3037-3041）。站点：`If` :200 / `ElseIf` :219（连 `resolveComValue` 都没调）/ 循环四站 `cgen_loop.cpp:31/50/71/84`；另两条臂 = `And`/`Or` 发成 `(int32_t)(ptr) & (int32_t)(ptr)`（还漏两枚堆槽）、`IIf` 折成 `(ptr) != 0`。按文本问「是不是裸 `vb6_ComCall(`」的站点全仓 19 份文件 / 40 行 ⇒ 动手前先把这一问收成一位主人。
+—— **承面（按产物数，尺 `.local/k243_probe/census.py` + `shape.py`）**：门语料 6 份候选 emit 完只剩 **1 处**（`tests/test_p24_04b/test_getobject.bas` 的 `If dic.Exists("hello") Then`，且它键存在 ⇒ 修前修后都绿 = 假证人）；`test_earlybound*` / `test_not_com` 那 6 处走 `vb6_ComCallInt`（早绑定）逐条对 —— `test_not_com` 的 OK 读数就是这么来的。真语料 43 份候选 / 36 份可单份 emit ⇒ **27 份含 82 处**；成员名 EOF 21 / Item 14 / Exists 6 / ConfirmOK 6 ⇒ 最响的一族是 `Do While Not rs.EOF`（恒真 = 死循环）。
+—— **附带（未归因，下一发量它）**：`s = d.Keys(0)` 与 `d.Keys(1)` 都报错误 17、`s` 空；而 `v = d.Keys` 拿到 `VarType=8204`（VT_ARRAY 并上 VT_VARIANT）、再 `v(0)` 答 "A" 对 ⇒ 病只在「晚绑定调用结果上直接接下标」那一形；落点在 §B150 那一位主人。
+—— **在册顺序**：下一刀 = 条件那一问的实施（五站同归 + §B164 收回那枚堆槽），排在 (丙) 的 named 之前（这条静默、82 处；(丙) 要 `vb6_ComGetIdsOfNames` + 带 `cNamedArgs` 的新出口）。⚠ 「加读者那一轮」：升格后那把 19 份 / 40 行的尺会动，全部 `check_*.ps1` 一起看。
+—— **刀号**：本轮取 243（量，不动代码）；242 已入账（见上一轮那格）。
+
+# 上一轮（2026-10-26T22:58:00+08:00，原样留档）= LAST_RUN: 2026-10-26T22:58:00+08:00 **第二百四十二刀「量」已出（账 #305：早绑定那一支的 named 实参）—— 不动代码
 —— **机制**：`isEarlyBoundCom_` 全站只有一个写者（cgen_expr_member_obj_dispatch.inc:12），条件 = `knownTypedComVars_` 命中 = 接收者声明成**类型库解析出来的** ComClass / ComInterface（本工程同名类模块先被 `projectClassNameOf` 截走，不进这张表）；那一支的 named 循环（com_bind :607-623）手里已握着 `sig.params[i].name`，却只拿来问 ByRef，打包顺序照书写序。
 —— **证人（本机 --emit-c，`.local/k242_probe/k242.bas`）**：`Dim fso As FileSystemObject` 真走到那一支；按声明序写 = `vb6_ComCallInt(fso, L"CopyFile", {S, D}, 2)` 对，反过来写 = `{D2, S2}` ⇒ 目的地交进 Source 槽（病灶可达、已证）。
 —— **承面**：门语料这一支 0 处；真语料（D:\vb_yqt4qPac）成员调用上的 named 语句 934 条（已排 Err.Raise）= 730 条只 1 枚 + 204 条 ≥2 枚，按 (方法, 参数集) 归组 78 组里**同组写出两种顺序的 0 组** ⇒ 没有一处自证乱序；另测 `As Word.Application` / `ADODB.Connection` 在本机不落这一支（发的是 `vb6_ComCall` 纯晚绑定）⇒ 那 50 处 Word 站点是「装了 Office 的机器才可能」的形状，而写的顺序恰是声明顺序。
