@@ -6,7 +6,16 @@
 
 OPEN_LOCAL_DIVERGENCE: **已收口（2026-09-27 入夜 = C29-MV-d）** —— 本地 `ctrlmonthview` 的 MV24/MV25/MV30 三条红既不是"本地环境/增量缓存"、也不是"OS 版本相关"，而是**挂钟相关**：comctl v6 把当前时间混进 `MCM_GETCURSEL` 的负载里（日没错、零头 0.765），`CLng` 下午进位、上午舍掉 ⇒ 本机下午一直红、CI 跑在上午一直绿。修法与全部读数见 029 §九 C29-MV-d 那一格。留下的一般式：**日期面判据按 `CLng` / `=` 比之前，产品读数必须归成整数日**，否则同一棵树的判据随时段翻脸，而门只会读到"上午那一半"。
 STATUS: IDLE              # NOT_STARTED | DESIGN | BUSY | IDLE | ALL_DONE
-LAST_RUN: 2026-10-27T05:20:00+08:00 **第二百四十七刀「收线」（门 #940 二十一格全绿）+ 第二百四十八刀「量」已出 —— 条件里的 `Not` 那一支已发货；20 处前缀长度不合逐处归因，活病在「长度对却列了禁表成员」那一族（真工程产物 2 处）
+LAST_RUN: 2026-10-27T06:15:10+08:00 **第二百四十九刀「实施」已推 dev（head `7fa71648`，门在跑）= 「值语境吃到交回对象的那枚 COM 出口」收成一位主人 comValueTwinForObjectReadExpr，两条实参发射臂各接一站**
+—— **本刀动的三份源码 + runner + 一枚新哨兵**：主人住 src/backend/cgen_util_com.cpp（与反方向的 comObjectRefFromCallExpr 同文件），三对孪生 = ComGetObjectProp↔ComGetProp、ComCallObject↔ComCall、ComGetPropertyObject↔ComGetPropertyVariant（六枚名字逐个在 vb6com.h 有声明、元数与返回类型同一 ⇒ 才许纯文本换头）；消费者两站 = cgen_expr_call_arg_variant.inc 的两条臂，各带自己那道「这一位要的就是对象指针」闸（形参臂问 VB 档 paramBase != Object、内置臂问 C 档 rtParamType != void*）；两站下面那四张手抄名单里的对象出口成员一起撤。
+—— **真产物读数**（VBFlexGridDemo 整工程 --emit-c，5579328 字节）：vb6_VariantFromComResult(vb6_ComGetObjectProp( 从 2 处变 0 处、vb6_ComGetProp( 从 106 变 108 且包法全对、整份产物移动 4 行。**内置臂那一站在同一份产物上承面 0**（vb6_UnloadForm 那三处全是 vb6_hwnd_ 直递），拿一份临时 .bas 探针也复现不出对象出口（`Private m_F As StdFont` 在没有类型库引用的单文件里直接落 `vb6_ComGetProp(`）⇒ 那条腿是结构性改法，今天没有语料证人，别当行为修复记账。
+—— **判据与护栏**：runner 加 Test-EmitcAbsent "b249_value_twin_lesion"（整工程 VBFlexGridDemo.vbp + 两枚反面针 = Font 那处 GetObjectW 与 ButtonFont 那处 SelectObject；两头都数 = BASE 产物各 1、新产物各 0）；刻意不接 Test-EmitcShape（整工程产物里带 vb6_BSTR_FromStr 的奇引号行改前改后各 28，那条守护只对单份文件成立）；新哨兵 scripts/check_com_value_twin_authority.ps1 六道 21 条已挂进 [STATIC] 段 = 全仓 111 道逐道绿；三枚突变在副本树上验（抄回前缀→R3 红 / 撤 paramBase 闸→R4 红 / 改主人名→R1+R2 红）。
+—— **合并归并 + 别人那两道红**：本刀推之前把对方会话 b4caa1e5（第二百四十八刀 ComCtlsDemo 三处发码回归，动 cgen_util_classtype.cpp / cgen_setlet_set_rhs.inc / cgen_expr_binary.cpp）合了进来，与本刀三份文件零重叠；它自带两道红 = check_class_refcount_authority 与 check_legacy_view_arg_owners（V5 与 V7 的钉死站点计数被它顶开），**在 b4caa1e5 单独一份的临时工作树上同样红** ⇒ 与本刀无关，归那一刀收线时补，别当成我这边的回归。
+—— **本机负载面**：一次增量重编（3 个 ninja 步骤）+ 两发整工程 --emit-c（各约 2 秒）+ 三份小探针 --emit-c + 111 道静态哨兵串行（纯 grep）+ 三枚哨兵突变在**副本树**上跑（不动工作树）；没起整类回归，全量交给门。
+—— **下一步（在册）**：丁族剩下五处「长度对却列了禁表成员」的名单先逐处量真产物承面再实施（cgen_expr_call_arg_emit.inc:1409 与 :1479、cgen_expr_call_conv_cstr.inc:164、cgen_expr_call_conv_output.inc:112、cgen_util_ctrl.cpp:2396）；条件族剩 And/Or/IIf 三臂加 §B164 两枚堆槽的收回；(丙) named / obj.Member(…)(i) 错误 17 / BSTR-Object-Variant 三档 ByRef 所有权 / merged 表身份护栏 / 视图三格纸面照旧。
+—— **等门**：门在跑（head 7fa71648），下一轮先按 CI 自交清单登记被这两笔一起顶开的行，再收线。
+
+# 上一轮（2026-10-27T05:20:00+08:00，原样留档）= LAST_RUN: 2026-10-27T05:20:00+08:00 **第二百四十七刀「收线」（门 #940 二十一格全绿）+ 第二百四十八刀「量」已出 —— 条件里的 `Not` 那一支已发货；20 处前缀长度不合逐处归因，活病在「长度对却列了禁表成员」那一族（真工程产物 2 处）
 —— **收线取证（#940，run 40400591762 / head `6b100257` / attempt 1）**：21 格全 completed 且 success、非 success 0 条；按用例名逐格数针（不拿「绿了一片」当结论）= `[EMITC-SHAPE] b247_not_fold_shape ... PASS` 在 vbp #1、`[EMITC-ABSENT] b247_not_fold_lesion ... PASS` 在 vbp #2、`[STATIC] condition_truth_authority ... PASS` 在 compile #2（那一格 57 条 [STATIC] 全 PASS）、第二百四十四刀那两枚照旧在 vbp #11 / #12 命中；bas 两格各 `PASS=135 FAIL=0`、总 270 与 #937 同数 —— 夹具臂数从 12 升到 16 不改变**用例条数**，所以计数不动是预期而不是怀疑；形状门绿 = 登记行对上（541 / 541 逐行相同、`inputs=541` 同数）。
 —— **第二百四十八刀「量」的尺**：`.local/k248_probe/compare_mismatch.txt` = 全仓 `.compare(pos, N, 字面量)` 中 N 与字面量长度不符的 **20 处**；同族另外三写法（`strlen()` / `std::char_traits<char>::length` / 一张 `kXxx` + `.size()`）逐处核过全部自洽，跨行写法 0 处 ⇒ 20 就是全集（先前按行数出的 22 是同一处的重复行号）。
 —— **四桶分法**：**甲** 修长度正确且会变行为 = 3 处（内置函数实参站 builtin_argtype.inc:68 的属性读前缀 12 对 15、拼接幻觉直通臂 cgen_expr_binary_util.cpp:118 的 `VB6_SA_AT(BSTR,` 16 对 15、赋值语义站 cgen_assign_value_sem.inc:261 的 `vb6_ComGetProp` 14 对 15）；**乙** 死得有道理 = 8 处（名单里那些成员本来就是禁表成员：交回对象指针或具体 C 型，长度错了反而挡住二次解包 / 挡住把 COM 指针交给 free ⇒ **「修长度」绝不是安全的机械动作**，救活就是造 246 那一格）；**丙** 死而无害 = 9 处（类型名分类器那枚由 `void*` 那腿已覆盖、装箱站的否决臂单独修不安全、取值内存改写站那枚落空即原样返回、另两枚名字后端**从不发进产物**：全仓只出现在自己的前缀比较和一张认领名单里，没有一处构造它）；**丁** 长度**对**却列了禁表成员 = 7 处，这一族不仅会生效还生效得错 ⇒ 长度审计对它完全隐身。
@@ -15,7 +24,6 @@ LAST_RUN: 2026-10-27T05:20:00+08:00 **第二百四十七刀「收线」（门 #9
 —— **教训（落记忆）**：同一问的名单归一之后，**审计工具只该当 census**：按长度找出的 20 条与真正会出错的 7 条几乎不相交，把 census 当修法会造出 8 处新错；下一刀实施 = 把那两处活性病所接进同一位主人（`comObjectRefFromCallExpr` / `cExprIsBareComResult` 那一路），不再逐臂补长度。
 —— **本机负担照旧**：本轮只跑了一发 `--emit-c` 探针 + API 拉 21 份作业日志 + 白拿旧产物数串，没重编编译器、没跑整类回归；全量数字仍交给门。
 —— **刀号**：本轮 = 247 收线 + 248 量；246 收线 + 247 实施见下面留档那一格。
-
 # 上一轮（2026-10-27T04:40:00+08:00，原样留档）= LAST_RUN: 2026-10-27T04:40:00+08:00 **第二百四十六刀「收线」+ 第二百四十七刀「实施」已出（门 #938 二十一格全绿；第二百四十七刀已推 dev、等门 #939）—— 条件里的 `Not` 那一支改问同一位主人
 —— **收线取证（#938）**：`/commits/a7a0e05c/check-runs` 逐条读 = total_count 21、21 completed 且 success、非 success 0 条；名单收成三条这一格没挪动产物（两头发码针逐字照旧），所以那一轮的绿里形状门那条是「没人走到」，证人只算结构性的两枚（禁表 + 名单计数）。
 —— **本刀修法（第二百四十七刀）**：`Not <晚绑定调用>` 从前落最兜底那条臂 = `~(int32_t)(裸调用)` —— 把堆上一枚 VARIANT 的指针截成 int32 再取反 ⇒ 恒非零，「键在场」那一头全答反。新 RTL 出口 `vb6_ComResultToNot` 一次办完「解引用 + 按档取值 + 收回堆块」；口径由 cscript 的 VBScript 引擎量过（`Not True` = False / `Not 5` = -6 / `Not Empty` = -1 / `Not "abc"` = 错误 13），而 `vb6_VariantToLong` 把 VT_BOOL 归成 -1/0 ⇒ 按位取反与逻辑取反在这套编码下同义 ⇒ 真值位与值位共用一枚出口就够。
