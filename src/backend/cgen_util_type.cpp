@@ -1122,12 +1122,17 @@ bool CCodeGen::cExprIsVariantSlotFieldRead(const std::string& cExpr) const {
 
 // 账 #305 第二百四十四刀: 「这发交回的 C 是不是裸晚绑定调用的结果」—— 唯一主人。
 //   口径 = 位置 0 的严格前缀 (不剥外层括号, 见 cgen_helpers.inc 那两条声明的理由)。
+// 账 #305 第二百四十六刀: 名单从四条缩成三条 —— 撤掉属性读那枚交回**对象指针**的出口。
+//   理由不是新决定的: 「哪个 COM 出口交回的是 calloc 出来的 VARIANT 包装、哪个交回的是对象本身」
+//   这一问在账 #255 就有一位主人 (comObjectRefFromCallExpr, 它的注释直接写着那两个交回对象的
+//   出口「不在清单里, 再套一层就错」)。本名单与它必须同答: 把交回对象指针的那一枚递进
+//   vb6_ComResultToBool = 拿 IDispatch* 当 VARIANT* 解引用, 还顺手 free 一个 COM 指针。
+//   ⚠ 哨兵 R3 钉住这一点: 名单里恰好三条带引号的前缀, 属性读那一枚出现即红。
 bool CCodeGen::cExprIsBareComResult(const std::string& cExpr) const {
     static const char* const kLateCallResults[] = {
         "vb6_ComCall(",
         "vb6_ComCallByDispid(",
         "vb6_ComGetProp(",
-        "vb6_ComGetObjectProp(",
     };
     for (size_t i = 0; i < sizeof(kLateCallResults) / sizeof(kLateCallResults[0]); ++i) {
         std::string lit(kLateCallResults[i]);

@@ -13,8 +13,11 @@
 #   R2  唯一主人 conditionTruthExpr: 定义 1 (cgen_util_type.cpp) + 声明 1 (cgen_helpers.inc)
 #       + 站点 7 (If / ElseIf / Do While / Do Until / Loop While / Loop Until / While Wend)。
 #   R3  「这发是不是裸晚绑定调用的结果」= cExprIsBareComResult: 定义 1 + 声明 1 + 只在主人里问 1 次；
-#       名单恰好四条 (ComCall / ComCallByDispid / ComGetProp / ComGetObjectProp)，且**不许**混进
-#       带类型的出口 (ComCallInt/BSTR/Double/Object、ComGetStringProp) —— 那些交回的已是具体 C 档。
+#       名单恰好三条 (ComCall / ComCallByDispid / ComGetProp) —— 第二百四十六刀撤掉属性读那一枚:
+#       它交回的是**对象指针** (VARIANT 结构体已在出口内释放), 递进 ComResultToBool = 拿
+#       IDispatch* 当 VARIANT* 解引用 + free 一个 COM 指针 (账 #255 那位主人早就这么划)。
+#       名单里出现带引号的它 = 红；也不许混进带类型的出口 (ComCallInt/BSTR/Double/Object、
+#       ComGetStringProp) —— 那些交回的已是具体 C 档, 混进来就是二次解包。
 #   R4  站点不许自己再问「是不是槽」: cgen_stmt.cpp 与 cgen_loop.cpp 里 cExprIsVariant(lastExpr_) 各 0。
 #   R5  判据面: 夹具存在 + runner 里 7 枚正针 (带 ComResultToBool) + 14 枚键位 (正/反各 7) + 登记两枚针。
 #
@@ -72,11 +75,11 @@ Expect 'R2 循环那五站'                   (Count-Pattern $loopC 'conditionTr
 Expect 'R3 cExprIsBareComResult defined'   (Count-Pattern $typeC '(?m)^bool CCodeGen::cExprIsBareComResult\(') 1 '定义只许一枚'
 Expect 'R3 cExprIsBareComResult declared'  (Count-Pattern $helpers 'bool cExprIsBareComResult\(') 1 '声明在 cgen_helpers.inc'
 Expect 'R3 asked only by the owner'        (Count-Pattern $typeC 'cExprIsBareComResult\(cExpr\)') 1 '只许主人在条件那一站问它'
-foreach ($n in @('vb6_ComCall\(', 'vb6_ComCallByDispid\(', 'vb6_ComGetProp\(', 'vb6_ComGetObjectProp\(')) {
+foreach ($n in @('vb6_ComCall\(', 'vb6_ComCallByDispid\(', 'vb6_ComGetProp\(')) {
     Expect ('R3 prefix ' + $n) (Count-Pattern $typeC ('"' + $n + '"')) 1 '名单里恰好一条'
 }
-foreach ($bad in @('vb6_ComCallInt', 'vb6_ComCallBSTR', 'vb6_ComCallDouble', 'vb6_ComCallObject', 'vb6_ComGetStringProp')) {
-    Expect ('R3 forbidden typed exit ' + $bad) (Count-Pattern $typeC $bad) 0 '带类型的出口交回的已是具体 C 档, 混进来就是二次解包'
+foreach ($bad in @('vb6_ComCallInt', 'vb6_ComCallBSTR', 'vb6_ComCallDouble', 'vb6_ComCallObject', 'vb6_ComGetStringProp', 'vb6_ComGetObjectProp')) {
+    Expect ('R3 forbidden exit ' + $bad) (Count-Pattern $typeC $bad) 0 '交回的已是具体 C 档或对象指针, 混进这一问就是二次解包 / 拿对象指针当 VARIANT*'
 }
 
 # R4 —— 站点不许自己再问「是不是槽」
