@@ -6,12 +6,24 @@
 
 OPEN_LOCAL_DIVERGENCE: **已收口（2026-09-27 入夜 = C29-MV-d）** —— 本地 `ctrlmonthview` 的 MV24/MV25/MV30 三条红既不是"本地环境/增量缓存"、也不是"OS 版本相关"，而是**挂钟相关**：comctl v6 把当前时间混进 `MCM_GETCURSEL` 的负载里（日没错、零头 0.765），`CLng` 下午进位、上午舍掉 ⇒ 本机下午一直红、CI 跑在上午一直绿。修法与全部读数见 029 §九 C29-MV-d 那一格。留下的一般式：**日期面判据按 `CLng` / `=` 比之前，产品读数必须归成整数日**，否则同一棵树的判据随时段翻脸，而门只会读到"上午那一半"。
 STATUS: IDLE             # NOT_STARTED | DESIGN | BUSY | IDLE | ALL_DONE
-LAST_RUN: 2026-10-26T16:05:00+08:00 **第二百三十八刀「量+实施」已出（账 #305：布尔转字符串收成一处主人 —— 真 VB6 答 True/False，Automation 答 -1），门 #930 全绿（run 40288912037 / head dee11780 / 二十一格）**
+LAST_RUN: 2026-10-26T18:25:00+08:00 **第二百三十九刀「收线」已出（账 #305 §B224 第二半的门）—— 门 #933 二十一格全绿**
+—— **门与归因**：run 40295286755 / head `947c043a` / attempt 1；按用例名验过 `[EMITC-SHAPE] b239_byref_arg_shape` (vbp #9)、`[EMITC-ABSENT] b239_byref_arg_lesion` (vbp #10)、`[STATIC] byref_arg_pack_authority` (compile #1)、`[DISPATCH] b220_inbound_argvt` 两架构 (vbp #2/#3)、`[STATIC] variant_to_string_authority` (compile #2) ⇒ 第 238 刀那半没被碰
+—— **第一趟的唯一红**：门 #932（run 40293892855 / head `3972bd0b`）唯一红 = `[STATIC] sa_access` A18（「问数组载体那一问」的消费者 3→4，第 4 位就是本刀的 `comByRefArgExpr`）—— 护栏没跟号，不是行为红；`947c043a` 升号后下一趟即绿
+—— **形状门**：CI 独立复算 `lines=544 inputs=540 rc!=0=85` + `manifest-expectation OK`；清单 538→540（新增 b239 夹具 .bas + .vbp）、消失 0 行、移动 15 行（全是含晚绑定调用的真语料）
+—— **在册下一格**：BSTR（靶工程 57 处）/ Object（1）/ Variant（4）三档 ByRef 仍按值（写回要动所有权）/ `rgdispidNamedArgs` / 同名 Class 符号的 merged 表非空护栏 / 视图三格纸面
+—— **刀号**：本轮 = 第二百三十九刀的收线（不动代码）；下一刀从上面在册面里挑，取号前先 fetch 远端防撞号
+
+# 上一轮（2026-10-26T17:35:00+08:00，原样留档）= LAST_RUN: 2026-10-26T17:35:00+08:00 **第二百三十九刀「实施+判据」已出（账 #305 §B224 第二半：晚绑定实参按引用发 —— 五档 Ref 打包器 + 唯一问句 `comByRefArgExpr`），已推 dev、等门**
+—— **口径**：真 VB6 客户端实测 B4（`Dim o As Object` + `o.Bump(x)`，x As Long ⇒ x=11）= 晚绑定对**带型变量**递 `VT_BYREF|<该型>`；改前我们标量一律按值打包，对外部服务器的 ByRef 写回落在虚空。
+—— **实施**：RTL 五枚 `vb6_ComPack{Int,Integer,Bool,Single,Double}Ref`（按 C 存储宽度选标签，Integer/Boolean 2 字节不许按 I4 打）；问句 `comByRefArgExpr` 只认简单 lvalue + 数值/布尔五档，BYREF 形参直交指针；三处消费者（早绑定位置/命名在 `!isByVal` 闸后、纯晚绑定无条件）；BSTR/Object/Variant 与非 lvalue 仍按值（在册）。
+—— **判据**：b239 emit 针（五档 Ref + 字面量/表达式仍按值 + 三条反面针）；靶工程 A/B 只 45 行变化（62 处 IntRef）；`test_com_latebound`/`test_com`/`test_com_optional` 三枚外部 COM 夹具真跑全过；新哨兵 `check_byref_arg_pack_authority` 五道 + 五份负控；清单 540 份按本机复算登记（522 不动 / 9 变 / +2）。
+—— **刀号**：本轮取 239（账 #305 §B224 第二半），提交 `3972bd0b`，等门回填；Integer 的宽度必须问 `knownIntVars_`（`inferExprType` 对它答 Long，这是本刀唯一的坑）。
+
+# 上一轮（2026-10-26T16:05:00+08:00，原样留档）= LAST_RUN: 2026-10-26T16:05:00+08:00 **第二百三十八刀「量+实施」已出（账 #305：布尔转字符串收成一处主人 —— 真 VB6 答 True/False，Automation 答 -1），门 #930 全绿（run 40288912037 / head dee11780 / 二十一格）**
 —— **量**：用户在真 VB6 6.0 上跑 ai/probes/bool_string：A1 `EchoStr(True)`=`[True]`、A2 `EchoStr(False)`=`[False]`、A5 `EchoLng(True)`=`-1`，VB6 客户端（`Dim o As Object` = 晚绑定）B1/B2/B3 逐字复现同三值；A8（VBScript，实参是 Variant）报类型不匹配 = `VT_BYREF|VT_VARIANT` 进 `ByRef Long` 被真 VB6 服务端拒；B4 同一个晚绑定接收者、实参是带型 `x As Long` ⇒ `Bump: x=11 r=11` ⇒ 客户端该递 `VT_BYREF|T`，不是 `VT_BYREF|VT_VARIANT`。顺手修掉探针客户端里两枚 0x08 退格符（源里 `` 被写成控制字符 ⇒ 真 VB6 报错误 52）。
 —— **实施**：新出口 `vb6_ComChangeType(dest, src, want)` —— 只有「目的档 VT_BSTR 且源档 `VT_TYPEMASK == VT_BOOL`（含 BYREF）」那一格按语言答 `True`/`False`，其余全交 oleaut32；五个消费者（`vb6_ComArgNormalize` / `vb6_ComVariantIntoSlot` 两条 default 臂 / `vb6_DecimalToBSTR` / `vb6_ComUnpackBSTR`）全部改问它，发码侧零改动。
 —— **判据**：b220 两架构各补一枚 `EchoStr:B`（False），`EchoStr:b` 从 `<-1>` 改 `<True>`；A/B 用 `.build/C3_k238_base.exe` 真编同一夹具复现 `-1`/`0`，其余 24 臂一字未动；客户端那半本地证人（`s = re.Global`）从 G1=0/G2=-1 变 G1=False/G2=True；新哨兵 `check_variant_to_string_authority` 五道 + 六份负控各点各的红；H5 改成 28 针 / 2 Absent / 27 Tail。
-—— **刀号**：本轮取 238（账 #305 §B224），提交 `dee11780` → 门 #930；B4 把「ByRef 客户端半」的口径拍死，下一刀先量带型 lvalue 实参的站点数与非 lvalue 面。
-
+—— **刀号**：本轮取 238（账 #305 §B224），提交 `dee11780` → 门 #931；B4 把「ByRef 客户端半」的口径拍死，下一刀先量带型 lvalue 实参的站点数与非 lvalue 面。
 # 上一轮（2026-10-26T00:35:00+08:00，原样留档）= LAST_RUN: 2026-10-26T00:35:00+08:00 **第二百三十六刀「量」已收线（账 #305：「GUID 大小写不统一」量死为纯形状，销账）**
 —— **读码**：全仓 23 处 `comClsidStr` 全是「生成进 C」或 `.empty()` 判空，**没有任何一处按字符串比身份**；字串→GUID 一律走 `CLSIDFromString`，运行期服务端走 `vb6_CLSIDFromStrA` 后按 GUID 比。
 —— **实测**：靶工程最新 dll_entry.c 里 GUID 字面量 19 枚 = 小写 18 + 大写 1；唯一大写是 `sourceIfaceIid`（`generateIid` 的 `%08X`），其余 CLSID 全小写（`generateUuid` 的 `%08x`）—— 形状差异 = 每条 mint 各自的格式。
