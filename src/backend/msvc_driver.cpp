@@ -434,6 +434,14 @@ bool MsvcDriver::compileAndLink(const MsvcDriverOptions& options) {
         std::ofstream errLog = ofstreamUtf8(errorLogPath, std::ios::out | std::ios::trunc);
         if (tmpLog && errLog) {
             errLog << "C3: Compilation failed (exit code " << ret << ")" << std::endl;
+            // 失败留档完整命令与响应文件: 只看 tail-N 时, cl 静默退出 (D8050/C1083
+            // 这类竞态) 会把"到底用什么参数编的"一起丢掉, 离线无法重放。rsp 是
+            // UTF-16LE+BOM (Fix 196), 不能按 UTF-8 回读 —— 这里写的是刚交给 cl
+            // 的同一份内容 (writeMsvcResponseFile 的入参), 与磁盘上的 rsp 等价。
+            errLog << "=== Command ===" << std::endl;
+            errLog << fullCmd << std::endl;
+            errLog << "=== Response File (" << rspPath << ") ===" << std::endl;
+            errLog << cmd.str().substr(cl.length()) << std::endl;
             errLog << "=== MSVC Output ===" << std::endl;
             std::string line;
             while (std::getline(tmpLog, line)) {
