@@ -4656,7 +4656,7 @@ if ($Category -in @("all", "run", "bas")) {
     Add-BasTest "test_p24" "$Tests\test_p24.bas" @("P24-01a:OK", "P24-01b:OK", "P24-01c:OK", "P24-03a:OK", "P24-03b:OK", "P24:5/5")
     Add-BasTest "test_earlybound2" "$Tests\test_earlybound2.bas" @("EB2-1:OK", "EB2-7:DriveType=2", "EB2-8:OK", "EB2-10:OK", "EB2:10/10") -Arch "x86"
     Add-BasTest "test_not_com" "$Tests\test_not_com.bas" @("NOT-COM:OK", "NOT-COM2:OK", "NOT-COM:PASS") -Arch "x86"
-    Add-BasTest "test_err_obj" "$Tests\test_err_obj.bas" @("ERR-1:OK", "ERR-6:OK", "ERR:6/6")
+    Add-BasTest "test_err_obj" "$Tests\test_err_obj.bas" @("ERR-1:OK", "ERR-6:OK", "ERR-7:OK", "ERR-8:OK", "ERR-9:OK", "ERR:9/9")
     Add-BasTest "test_variant_cmp" "$Tests\test_variant_cmp.bas" @("VC-1:OK", "VC-4:OK", "VC:4/4")
     Add-BasTest "test_com_default_prop" "$Tests\test_com_default_prop.bas" @("DP-1:OK", "DP-4:OK", "P24-10: 4/4")
     # P24-10b: 后期绑定 COM 默认属性 obj(args) — Dim o As Object (无类型库签名) 走
@@ -5867,6 +5867,19 @@ if ($Category -in @("all", "run", "vbp")) {
     # 真 VB6 对带型变量递 VT_BYREF|T (ai/probes bool_string B4: `Dim o As Object` + `o.Bump(x)` ⇒ x=11);
     # 这里钉五档 Ref 取址 (Long/Integer/Single/Double/Boolean 各按 C 存储宽度选标签)，
     # 同时钉两枚反面: 字面量与表达式不是 lvalue, 仍按值。
+    # 账 #305 第二百四十一刀 (甲): 折叠内置那一族的 named 实参按**名字**落位 (VB6 的命名实参绑形参名)。
+    # 判据取真语料里唯一成规模的那一发 Err.Raise Number:= + Description:= —— 改前文案交进 RTL 的第 2 档
+    # (source)、Err.Description 留空 (第二百四十刀 A1 的真跑证人)；书写序反着写则两档互换 (ERR-9 那一发)。
+    Test-EmitcShape "b241_named_arg_slot" @("$Tests\test_err_obj.bas") @(
+        'vb6_ErrRaise(7001, (BSTR)0, vb6_BSTR_FromStr(L"DESC7"))',   # 跳过 source 那一档 = 补它的缺省档
+        'vb6_ErrRaise(7003, vb6_BSTR_FromStr(L"SRC9"), vb6_BSTR_FromStr(L"DESC9"))',  # 书写序与声明序相反也要归位
+        'vb6_ErrRaise(7002, vb6_BSTR_FromStr(L"SRC8"), vb6_BSTR_FromStr(L"DESC8"))'   # 按声明序写: 不许被这刀改坏
+    )
+    Test-EmitcAbsent "b241_named_arg_lesion" @("$Tests\test_err_obj.bas") @(
+        'vb6_ErrRaise(7001, vb6_BSTR_FromStr(L"DESC7"), (BSTR)0)',   # 改前: 按书写序把文案塞进 source
+        'vb6_ErrRaise(7003, vb6_BSTR_FromStr(L"DESC9"), vb6_BSTR_FromStr(L"SRC9"))'   # 改前: 两档整个互换
+    )
+
     Test-EmitcShape "b239_byref_arg_shape" @("$Tests\b239_byrefarg\B239k.vbp") @(
         'vb6_ComPackIntRef(&n)',
         'vb6_ComPackIntegerRef(&i)',
