@@ -6,12 +6,17 @@
 
 OPEN_LOCAL_DIVERGENCE: **已收口（2026-09-27 入夜 = C29-MV-d）** —— 本地 `ctrlmonthview` 的 MV24/MV25/MV30 三条红既不是"本地环境/增量缓存"、也不是"OS 版本相关"，而是**挂钟相关**：comctl v6 把当前时间混进 `MCM_GETCURSEL` 的负载里（日没错、零头 0.765），`CLng` 下午进位、上午舍掉 ⇒ 本机下午一直红、CI 跑在上午一直绿。修法与全部读数见 029 §九 C29-MV-d 那一格。留下的一般式：**日期面判据按 `CLng` / `=` 比之前，产品读数必须归成整数日**，否则同一棵树的判据随时段翻脸，而门只会读到"上午那一半"。
 STATUS: IDLE             # NOT_STARTED | DESIGN | BUSY | IDLE | ALL_DONE
-LAST_RUN: 2026-10-26T00:35:00+08:00 **第二百三十六刀「量」已收线（账 #305：「GUID 大小写不统一」量死为纯形状，销账）**
+LAST_RUN: 2026-10-26T16:05:00+08:00 **第二百三十八刀「量+实施」已出（账 #305：布尔转字符串收成一处主人 —— 真 VB6 答 True/False，Automation 答 -1），门 #930 全绿（run 40288912037 / head dee11780 / 二十一格）**
+—— **量**：用户在真 VB6 6.0 上跑 ai/probes/bool_string：A1 `EchoStr(True)`=`[True]`、A2 `EchoStr(False)`=`[False]`、A5 `EchoLng(True)`=`-1`，VB6 客户端（`Dim o As Object` = 晚绑定）B1/B2/B3 逐字复现同三值；A8（VBScript，实参是 Variant）报类型不匹配 = `VT_BYREF|VT_VARIANT` 进 `ByRef Long` 被真 VB6 服务端拒；B4 同一个晚绑定接收者、实参是带型 `x As Long` ⇒ `Bump: x=11 r=11` ⇒ 客户端该递 `VT_BYREF|T`，不是 `VT_BYREF|VT_VARIANT`。顺手修掉探针客户端里两枚 0x08 退格符（源里 `` 被写成控制字符 ⇒ 真 VB6 报错误 52）。
+—— **实施**：新出口 `vb6_ComChangeType(dest, src, want)` —— 只有「目的档 VT_BSTR 且源档 `VT_TYPEMASK == VT_BOOL`（含 BYREF）」那一格按语言答 `True`/`False`，其余全交 oleaut32；五个消费者（`vb6_ComArgNormalize` / `vb6_ComVariantIntoSlot` 两条 default 臂 / `vb6_DecimalToBSTR` / `vb6_ComUnpackBSTR`）全部改问它，发码侧零改动。
+—— **判据**：b220 两架构各补一枚 `EchoStr:B`（False），`EchoStr:b` 从 `<-1>` 改 `<True>`；A/B 用 `.build/C3_k238_base.exe` 真编同一夹具复现 `-1`/`0`，其余 24 臂一字未动；客户端那半本地证人（`s = re.Global`）从 G1=0/G2=-1 变 G1=False/G2=True；新哨兵 `check_variant_to_string_authority` 五道 + 六份负控各点各的红；H5 改成 28 针 / 2 Absent / 27 Tail。
+—— **刀号**：本轮取 238（账 #305 §B224），提交 `dee11780` → 门 #930；B4 把「ByRef 客户端半」的口径拍死，下一刀先量带型 lvalue 实参的站点数与非 lvalue 面。
+
+# 上一轮（2026-10-26T00:35:00+08:00，原样留档）= LAST_RUN: 2026-10-26T00:35:00+08:00 **第二百三十六刀「量」已收线（账 #305：「GUID 大小写不统一」量死为纯形状，销账）**
 —— **读码**：全仓 23 处 `comClsidStr` 全是「生成进 C」或 `.empty()` 判空，**没有任何一处按字符串比身份**；字串→GUID 一律走 `CLSIDFromString`，运行期服务端走 `vb6_CLSIDFromStrA` 后按 GUID 比。
 —— **实测**：靶工程最新 dll_entry.c 里 GUID 字面量 19 枚 = 小写 18 + 大写 1；唯一大写是 `sourceIfaceIid`（`generateIid` 的 `%08X`），其余 CLSID 全小写（`generateUuid` 的 `%08x`）—— 形状差异 = 每条 mint 各自的格式。
 —— **结论**：统一它只会让清单成片移动、换不来行为 ⇒ **从在册销**；将来若要拿它比字符串，哨兵应钉在那一处比较，而不是钉字面量大小写。
 —— **刀号**：本轮 = 第二百三十六刀（量，不动代码），第二百三十五刀的「量」原样留档在下一节。
-
 # 上一轮（2026-10-26T00:05:00+08:00，原样留档）= LAST_RUN: 2026-10-26T00:05:00+08:00 **第二百三十五刀「量」已收线（账 #305：PopupMenu 的 0xC000041D 在今天的入口下无法复现 —— 按「入口不一致」销账）**
 —— **读数**：靶工程用 `c6db1542` 重建，k3810_ve_x64；按 tlb CLSID 逐枚激活 16 枚 coclass **16/16 CREATE+DONE**；新探针 `.local/k3811_stress.c` 对 PopupMenu **200 轮 Create→Release** 全清（CYCLE=200 ok + DONE，RC=0，无 0xC000041D）。
 —— **边界**：219 那条读数的入口是日志里铸的 CLSID（与 tlb 广告的不同），那个铸法在 227 之后已不存在 ⇒ 只能说「现在这个入口下清」，**不能说当时那条病被修好了**。

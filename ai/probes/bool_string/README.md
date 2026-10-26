@@ -73,3 +73,31 @@ Public Function Bump(ByRef v As Long) As Long
     Bump = v
 End Function
 ```
+
+
+## 读数（2026-10-26，真 VB6 6.0，已收到）
+
+```
+A1 EchoStr(True)  = [True]
+A2 EchoStr(False) = [False]
+A3 EchoStr(12.75) = [12.75]
+A4 EchoStr(40)    = [40]
+A5 EchoLng(True)  = -1
+A6 EchoVar(True)  = Boolean=True
+A7 EchoVar(12.75) = Double=12.75
+A8  ------------  = 类型不匹配（VBScript 调 o.Bump(x)）
+B1 EchoStr(True)  = [True]
+B2 EchoStr(False) = [False]
+B3 EchoLng(True)  = -1
+B4 Bump: x=11 r=11
+```
+
+结论：
+
+- **Q1 已定**：服务端 `As String` 形参收 `VT_BOOL` 走**语言**口径（`True`/`False`），不是 OLE 的 `-1`/`0`。
+  落点 = `vb6_ComChangeType`（唯一出口），第 238 刀。
+- **Q2 已定**：`B4` 那个客户端是 `Dim o As Object` + `CreateObject`，**晚绑定**，写回仍然发生 ⇒ 客户端该递 `VT_BYREF|T`。
+- A8 的类型不匹配不是矛盾：VBScript 的变量是 `Variant`（递 `VT_BYREF|VT_VARIANT`），真 VB6 服务端拒；
+  VB6 的 `x As Long` 递的是 `VT_BYREF|VT_I4`，服务端接受并写回。差别在**实参带不带型**。
+- 包装坑（已修）：`vbclient/Module1.bas` 里 `"\boolprobe_client.txt"` 的 `\b` 曾被写成退格符 0x08，
+  真 VB6 报「错误的文件名或号码」(错误 52)。往 .bas/.vbs/.ps1 里写反斜杠必须显式拼 `chr(92)`。
