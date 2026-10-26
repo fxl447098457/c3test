@@ -5,8 +5,21 @@
 > 规范输入: `ai/讨论记录/018-接口继承与CoClass设计思路.md`（含 tB 文档要点与分阶段设计思路全文）。
 
 OPEN_LOCAL_DIVERGENCE: **已收口（2026-09-27 入夜 = C29-MV-d）** —— 本地 `ctrlmonthview` 的 MV24/MV25/MV30 三条红既不是"本地环境/增量缓存"、也不是"OS 版本相关"，而是**挂钟相关**：comctl v6 把当前时间混进 `MCM_GETCURSEL` 的负载里（日没错、零头 0.765），`CLng` 下午进位、上午舍掉 ⇒ 本机下午一直红、CI 跑在上午一直绿。修法与全部读数见 029 §九 C29-MV-d 那一格。留下的一般式：**日期面判据按 `CLng` / `=` 比之前，产品读数必须归成整数日**，否则同一棵树的判据随时段翻脸，而门只会读到"上午那一半"。
-STATUS: IDLE             # NOT_STARTED | DESIGN | BUSY | IDLE | ALL_DONE
-LAST_RUN: 2026-10-27T04:25:00+08:00 **第二百四十六刀「实施」已出（账 #305：撤掉条件那一问名单里那一枚交回对象指针的出口，四枚缩成三枚）—— 已推 dev、等门 #938**
+STATUS: IDLE              # NOT_STARTED | DESIGN | BUSY | IDLE | ALL_DONE
+LAST_RUN: 2026-10-27T04:40:00+08:00 **第二百四十六刀「收线」+ 第二百四十七刀「实施」已出（门 #938 二十一格全绿；第二百四十七刀已推 dev、等门 #939）—— 条件里的 `Not` 那一支改问同一位主人
+—— **收线取证（#938）**：`/commits/a7a0e05c/check-runs` 逐条读 = total_count 21、21 completed 且 success、非 success 0 条；名单收成三条这一格没挪动产物（两头发码针逐字照旧），所以那一轮的绿里形状门那条是「没人走到」，证人只算结构性的两枚（禁表 + 名单计数）。
+—— **本刀修法（第二百四十七刀）**：`Not <晚绑定调用>` 从前落最兜底那条臂 = `~(int32_t)(裸调用)` —— 把堆上一枚 VARIANT 的指针截成 int32 再取反 ⇒ 恒非零，「键在场」那一头全答反。新 RTL 出口 `vb6_ComResultToNot` 一次办完「解引用 + 按档取值 + 收回堆块」；口径由 cscript 的 VBScript 引擎量过（`Not True` = False / `Not 5` = -6 / `Not Empty` = -1 / `Not "abc"` = 错误 13），而 `vb6_VariantToLong` 把 VT_BOOL 归成 -1/0 ⇒ 按位取反与逻辑取反在这套编码下同义 ⇒ 真值位与值位共用一枚出口就够。
+—— **第二百四十五刀点名的「第二份手抄表」顺带合掉**：那条臂问的是第二百四十四刀那位主人 `cExprIsBareComResult`，不在表达式站抄前缀名单；哨兵 R3 新增三条「该文件里出现带引号的前缀名即红」+ 一条「Not 那一站也问同一位主人」。
+—— **判据（两头钉）**：夹具补四臂（在场 + `Not` / `x = Not 在场` = 0 / `x = Not 缺席` = -1 / `Do While Not 在场` 带保险丝），期望 12/12 → 16/16。A/B 用**同一台编译器只差这一臂**（临时把臂改成 `if (false && ...)` 重编、取完读数再还原，还原后 --emit-c 逐字节回到 7143 那份）= 12/16 与 16/16；十枚发码针按名两头验（五枚形状针在新产物在场、五枚反面针在旧产物在场且新产物各 0）。
+—— **哨兵能红（两条变异实测）**：R1 改成按函数体内切片（两枚出口共用同一套读法，整文件计数分不开谁是谁）——把「收回」挪到「读数」之前 ⇒ R1 先读后清红；删掉一枚 `K-NOT` 形状针 ⇒ R5 两条红。另八枚相关哨兵全 rc=0（rtl_embedded / rtl_proto_arity / rtl_naked_names / bitwise_authority / emitted_declared / static_sentinel_registration / test_helper_integrity / manifest_coverage）。
+—— **c3rtl.rc 不必 touch（新读数，别再白改一行）**：该 .rc 的 OBJECT_DEPENDS 就是 RTL 源文件清单（CMakeLists.txt:393 起），改 `vb6rtl_com.c` 自动重编资源；本轮工作区里 .rc 一直是干净的而产物照常带上新的出口。
+—— **残留三形不是本刀的**：`test_not_com.bas` 两处走 `vb6_ComCallInt`（交回的已是 int32，`~` 正是 VB 语义）；Charts `Form1.frm` 与 `MainForm.frm` 各一处走 `vb6_ComCallObject`（对象指针，VB6 里 `Not 对象` 本身是类型错）；`MainForm.frm:1186` 走 `vb6_IsEmpty` 的 0/1 档 ⇒ 「内置布尔函数交回 C 的 1 而不是 VB 的 -1」另开一格。
+—— **等门 #939**：预期移动两行 = `tests/test_late_cond.bas`（本刀夹具）与 `tests/VBFlexGridDemo/VBFlexGridDemo.vbp`（UserEditingForm 那一处 `Not`）；形状格 + compile 格那两条 [STATIC] manifest_coverage 同源红是**预期**，按 CI 自交清单登记后走验证轮。
+—— **在册下一刀顺序**：(丙) 纯晚绑定 named 实参 → `obj.Member(…)(i)` 错误 17 → 装箱那一站的手抄表（任务在册，改它会挪产物，先量站点与「剥不剥外层括号」的口径差）→ `And` / `Or` / `IIf` 那几条臂（1 处 / 1 份，最小）。
+—— **本机负担照旧**：只定点跑（一发临时重编取反面读数 + 八枚哨兵 + 两枚 --emit-c + 一枚真跑夹具 × 两台），没跑整类回归；用户那台机器上月被并发扫描打崩过，这类全量一律交给门。
+—— **刀号**：本轮 = 246 收线 + 247 实施；245 量见上一格留档。
+
+# 上一轮（2026-10-27T04:25:00+08:00，原样留档）= LAST_RUN: 2026-10-27T04:25:00+08:00 **第二百四十六刀「实施」已出（账 #305：撤掉条件那一问名单里那一枚交回对象指针的出口，四枚缩成三枚）—— 已推 dev、等门 #938**
 —— **本刀是自己欠的债**：第二百四十四刀把「这发是不是裸晚绑定调用的结果」划成四条前缀，其中属性读那一枚交回的是 **IDispatch 指针* 而不是 calloc 出来的 VARIANT 包装（结构体已在该出口内释放）⇒ `If <对象属性读> Then` 会发成 `vb6_ComResultToBool(对象指针)` = 当 VARIANT* 解引用 + 把 COM 指针交给 free。
 —— **这一问早有主人**：账 #255 的 `comObjectRefFromCallExpr` 注释原话「那两个交回对象的出口不在清单里，再套一层就错」⇒ 244 手抄了一份与它不同答的名单。本刀收成同答：三条（`vb6_ComCall` / `vb6_ComCallByDispid` / `vb6_ComGetProp`）。
 —— **为什么形状门抓不到**：语料里没有「对象属性读落在条件位」这一形（六份相关输入的 --emit-c 数该形 = 0 处，同时 `vb6_ComCall` 那族照旧包着：12 + 1 处）⇒ 只能结构地钉：哨兵 R3 改成「名单恰好三条 + 那一枚名字在该文件出现即红（含注释）」。
@@ -15,7 +28,6 @@ LAST_RUN: 2026-10-27T04:25:00+08:00 **第二百四十六刀「实施」已出（
 —— **下一刀顺序不变**：条件里的三条操作数臂（245 量完：`Not`-fold 46 处 / 20 份是最大一族）→ (丙) 纯晚绑定 named → `obj.Member(…)(i)` 错误 17。
 —— **本机负担照旧**：只定点跑本刀改到的哨兵（本轮 = `check_condition_truth_authority` + 六份输入的 --emit-c + 一发增量重编），全量数字交给门 #938。
 —— **刀号**：本轮取 246（实施）；244 收线与 245 量见下一格留档。
-
 # 上一轮（2026-10-27T04:05:00+08:00，原样留档）= LAST_RUN: 2026-10-27T04:05:00+08:00 **第二百四十四刀「收线」+ 第二百四十五刀「量」已出（门 #937 二十一格全绿；分格后翻转优先级 —— `Not` 那一臂才是最大一族 46 处 / 20 份）—— 不动代码**
 —— **收线取证（两头分开钉，没拿一片绿当证据）**：CI 那层包装器滤掉真跑夹具的名字 ⇒ ① 三枚新判据按名命中 = `[EMITC-SHAPE] b244_cond_truth_shape`（vbp #11）、`[EMITC-ABSENT] b244_cond_truth_lesion`（vbp #12）、`[STATIC] condition_truth_authority`（compile #2）全 PASS；② 真跑那一例按**计数**取证 = bas 两格 `Results` 从 #936 的 135+134=269 变 #937 的 135+135=270，恰 +1 且两格 FAIL=0。
 —— **形状门独立复算**：CI 自交清单 `inputs=541` + `expectation-check` PASS ⇒ 本机登记的移动 1 行（`test_getobject.bas` 3058→3079）+ 新增 1 行（`test_late_cond.bas` 6128）逐行对上，其余 539 行逐字节没动 = 本刀只碰「条件里那发裸晚绑定调用」这一形。
