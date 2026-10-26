@@ -945,3 +945,5 @@
 /* knife 233: RTL changed (byref scalar write-back) -- force c3rtl.rc re-embed */
 
 /* knife 238: RTL changed (variant -> string authority: BOOL answers True/False) -- force c3rtl.rc re-embed */
+
+/* knife 239: RTL changed (byref scalar arg packers for late-bound calls) -- force c3rtl.rc re-embed */

@@ -1062,6 +1062,10 @@
     // 推断COM参数的封装函数: 根据表达式类型选择vb6_ComPackBSTR/Int/Double/Object
     std::string comPackExpr(Expr& expr);
 
+    // 账 #305 §B224 第二半 (第二百三十九刀): 「这枚实参该不该按引用发」(空 = 按值)。
+    // 口径见实现处注释: 简单 lvalue + 数值/布尔五档, 按 C 存储宽度选 VT_BYREF|<型>。
+    std::string comByRefArgExpr(Expr& expr, const std::string& argText);
+
     // 账 #256: 「这枚裸控件名会不会被折成默认属性读数、折出来是什么 VB 型」只此一处回答。
     // 两个消费点共用它：标识符发码那条路拿 readFn/prop/ctrlType 去发 `readFn(句柄)`，
     // 晚绑定实参的打包档只问 valueType。以前打包档只听 inferExprType —— 它对控件名答

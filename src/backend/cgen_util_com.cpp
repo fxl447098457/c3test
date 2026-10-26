@@ -3,6 +3,7 @@
 #include <cctype>
 #include <iostream>
 #include <functional>
+#include <regex>
 #include "common/host_pseudo.hpp"
 
 namespace vb6c3 {
@@ -728,6 +729,47 @@ std::string CCodeGen::comPackExpr(Expr& expr) {
     return "vb6_ComPackInt";  // 默认整数封装
 }
 
+
+// 账 #305 §B224 第二半 (第二百三十九刀): 「这一枚实参该不该按引用发」。
+// 真 VB6 客户端实测 (ai/probes/bool_string B4: `Dim o As Object` + `o.Bump(x)`，x As Long
+// ⇒ x=11)：晚绑定对**带型变量**递的是 VT_BYREF|<该型>，写回直接落到调用方变量上。
+// 这里只认三件同时成立：① 发射文本是简单 lvalue (标识符 / `me->` 字段)；② 类型是数值或
+// 布尔五档 (按 C 存储宽度分标签 —— Integer/Boolean 都是 2 字节，按 I4 打写回会越界写)；
+// ③ 不是数组载体 / Variant / 对象 / 字符串 —— 那几档的写回要动所有权，在册欠项。
+// 返回值 = 完整实参表达式 (空 = 保持改前的按值打包)。
+// 若该标识符是**本过程**的 ByRef 形参，C 侧它已经是 T*，直接交指针，不再取一次地址。
+std::string CCodeGen::comByRefArgExpr(Expr& expr, const std::string& argText) {
+    if (expr.kind != ASTNodeKind::IdentifierExpr) return "";
+    auto& id = static_cast<const IdentifierExpr&>(expr);
+    std::string lower = Symbol::toLower(id.name);
+    if (knownVariantVars_.count(lower) || knownObjectVars_.count(lower)) return "";
+    if (isArrayCarrierArgName(lower, id.name)) return "";
+    std::string fn;
+    // Integer 必须问专属表: inferExprType 对 Integer 局部/形参答 Long (VB6 表达式提升),
+    // 而 C 存储只有 2 字节 —— 按 I4 打写回会越界写 4 字节。
+    Vb6Type refVt = knownIntVars_.count(lower) ? Vb6Type::Integer : inferExprType(expr);
+    switch (refVt) {
+        case Vb6Type::Long:    fn = "vb6_ComPackIntRef"; break;
+        case Vb6Type::Integer: fn = "vb6_ComPackIntegerRef"; break;
+        case Vb6Type::Boolean: fn = "vb6_ComPackBoolRef"; break;
+        case Vb6Type::Single:  fn = "vb6_ComPackSingleRef"; break;
+        case Vb6Type::Double:  fn = "vb6_ComPackDoubleRef"; break;
+        default: return "";
+    }
+    // 文本必须是简单左值: 裸标识符 (局部/模块级/类字段 → me->字段) 才算。
+    static const std::regex lvRe("^(?:[A-Za-z_][A-Za-z0-9_]*|me->[A-Za-z_][A-Za-z0-9_]*)$");
+    if (!std::regex_match(argText, lvRe)) return "";
+    bool isByRefParam = false;
+    if (currentProc_ && argText.find("me->") != 0) {
+        for (auto& p : currentProc_->params) {
+            if (Symbol::toLower(p.name) == lower && !p.isByVal && !p.isParamArray) {
+                isByRefParam = true;
+                break;
+            }
+        }
+    }
+    return fn + "(" + (isByRefParam ? argText : "&" + argText) + ")";
+}
 
 // 账 #256: Vb6Type → 打包函数名，comPackExpr 的类型分支与「裸控件名折成默认属性」那条
 // 折叠共用这一张映射（折叠那边只问 String/Integer/Long/Boolean/Single/Double 六档）。

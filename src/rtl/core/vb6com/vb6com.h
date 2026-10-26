@@ -91,6 +91,15 @@ void* vb6_ComPackObject(void* obj);
 // ppObj 指向调用方的 void* 变量; Invoke 写入新指针后, 调用方变量即持有新对象。
 void* vb6_ComPackObjectRef(void** ppObj);
 
+// 账 #305 §B224 第二半 (第二百三十九刀): 标量实参按引用打包 (VT_BYREF|型)。
+// 真 VB6 晚绑定对带型变量递的就是这一形 (实测 x As Long 被 `Bump(ByRef v As Long)` 写回成 11);
+// 按 C 存储宽度分五档 —— Integer/Boolean 都是 2 字节, 不许按 I4 打。
+void* vb6_ComPackIntRef(int32_t* p);
+void* vb6_ComPackIntegerRef(int16_t* p);
+void* vb6_ComPackBoolRef(int16_t* p);
+void* vb6_ComPackSingleRef(float* p);
+void* vb6_ComPackDoubleRef(double* p);
+
 // Fix 104: 将"省略的实参"封装为 VARIANT (VT_ERROR + DISP_E_PARAMNOTFOUND).
 // VB6 遇到 obj.Method a, , c 这类省略实参时, 对该形参位置传的正是这个值 ——
 // 接收方 (IDispatch 实现) 据此把"未提供"与"显式传 0/空串"区分开.

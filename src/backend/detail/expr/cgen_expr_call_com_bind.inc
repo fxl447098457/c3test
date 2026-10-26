@@ -577,10 +577,25 @@
                             return true;
                     return false;
                 };
+                // 账 #305 §B224 第二半: 命名实参里「声明是 ByRef」的那一问 (不限对象型) ——
+                // 标量按引用发只认这个答案, ByVal 一律不取址。
+                auto byRefParamNamedAny = [&](const std::string& nm) -> bool {
+                    std::string nl = Symbol::toLower(nm);
+                    for (const auto& p : sig.params)
+                        if (Symbol::toLower(p.name) == nl && !p.isByVal && !p.isParamArray)
+                            return true;
+                    return false;
+                };
                 for (size_t i = 0; i < node.positional.size(); i++) {
                     std::string packFn = comPackExpr(*node.positional[i]);
                     emitExpr(*node.positional[i]);
                     { std::string resolved = resolveComMarkerForPack(packFn); if (!resolved.empty()) lastExpr_ = resolved; }
+                    // 账 #305 §B224 第二半 (第二百三十九刀): 早绑定已知签名 —— 声明是 ByRef 的
+                    // 标量形参按引用发 (VT_BYREF|T)，与真 VB6 的写回语义对齐；ByVal 一律不取址。
+                    if (i < sig.params.size() && !sig.params[i].isByVal) {
+                        std::string byRefArg = comByRefArgExpr(*node.positional[i], lastExpr_);
+                        if (!byRefArg.empty()) { packedArgs.push_back(byRefArg); continue; }
+                    }
                     if (byRefObjectParamAt(i)
                         && node.positional[i]->kind == ASTNodeKind::IdentifierExpr
                         && isKnownObjectVarName(lastExpr_)) {
@@ -593,6 +608,10 @@
                     std::string packFn = comPackExpr(*named.value);
                     emitExpr(*named.value);
                     { std::string resolved = resolveComMarkerForPack(packFn); if (!resolved.empty()) lastExpr_ = resolved; }
+                    if (byRefParamNamedAny(named.name)) {
+                        std::string byRefArg = comByRefArgExpr(*named.value, lastExpr_);
+                        if (!byRefArg.empty()) { packedArgs.push_back(byRefArg); continue; }
+                    }
                     if (byRefObjectParamNamed(named.name)
                         && named.value->kind == ASTNodeKind::IdentifierExpr
                         && isKnownObjectVarName(lastExpr_)) {
@@ -630,6 +649,13 @@
                 std::string packFn = comPackExpr(*argExpr);
                 emitExpr(*argExpr);
                 { std::string resolved = resolveComMarkerForPack(packFn); if (!resolved.empty()) lastExpr_ = resolved; }
+                // 账 #305 §B224 第二半 (第二百三十九刀): 纯晚绑定这一支没有签名可问，但真 VB6
+                // 对带型变量照样递 VT_BYREF|T (实测 B4: `o.Bump(x)`，o As Object ⇒ x=11) ——
+                // 简单 lvalue + 数值/布尔五档才取址，其余(字面量/表达式/属性读/串/对象/变体)按值。
+                {
+                    std::string byRefArg = comByRefArgExpr(*argExpr, lastExpr_);
+                    if (!byRefArg.empty()) { packedArgs.push_back(byRefArg); return; }
+                }
                 // Fix 266: 打包器的**型**与 marker 解析的**型**不同源 ——
                 // comPackExpr 按 AST 推的给出 typed 打包器 (ComPackDouble/Int/Bool/BSTR),
                 // 而 marker 解析可能交回**无型** VARIANT 取值

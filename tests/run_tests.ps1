@@ -1853,6 +1853,21 @@ function Test-ByRefScalarWriteBack {
 # 账 #305 SB224 (第二百三十八刀): 「VARIANT -> 目标档」唯一出口 —— 布尔转字符串按 VB 语言答 True/False
 # (真 VB6 服务端实测, ai/probes/bool_string A1/A2), 不是 Automation 的 -1/0。
 # 五道: 目的档 BSTR 不许直调 / 定义 1 + 声明 2 / 消费者四处 / 布尔那一支的形状 / b220 判据两针一台各一份。
+# 账 #305 SB224 第二半 (第二百三十九刀): 晚绑定实参按引用发 —— 五档打包器 + 唯一问句 + 两处闸 + 判据面。
+function Test-ByRefArgPackAuthority {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] byref_arg_pack_authority ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\check_byref_arg_pack_authority.ps1" 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        $out | Select-Object -First 8 | ForEach-Object { Write-Host "  $_" }
+    }
+}
+
 function Test-VariantToStringAuthority {
     $script:total++
     Write-Host -NoNewline "  [STATIC] variant_to_string_authority ... "
@@ -5847,6 +5862,24 @@ if ($Category -in @("all", "run", "vbp")) {
         'vb6_MsgBox(s, sty, ttl)',         # 改前: 三参 (原型刚好三参, 但四/五参就多递)
         'vb6_MsgBox(s, sty, ttl, hlp)',    # 改前: 四枚实参进三参原型 = 多递
         'vb6_MsgBox(s, sty, ttl, v, ctx)'  # 改前: Variant 裸进 BSTR 槽
+    )
+    # 账 #305 §B224 第二半 (第二百三十九刀): 晚绑定实参按引用打包。
+    # 真 VB6 对带型变量递 VT_BYREF|T (ai/probes bool_string B4: `Dim o As Object` + `o.Bump(x)` ⇒ x=11);
+    # 这里钉五档 Ref 取址 (Long/Integer/Single/Double/Boolean 各按 C 存储宽度选标签)，
+    # 同时钉两枚反面: 字面量与表达式不是 lvalue, 仍按值。
+    Test-EmitcShape "b239_byref_arg_shape" @("$Tests\b239_byrefarg\B239k.vbp") @(
+        'vb6_ComPackIntRef(&n)',
+        'vb6_ComPackIntegerRef(&i)',
+        'vb6_ComPackDoubleRef(&d)',
+        'vb6_ComPackSingleRef(&s)',
+        'vb6_ComPackBoolRef(&b)',
+        'vb6_ComPackInt(7)',          # 字面量仍按值 (反面证人)
+        'vb6_ComPackInt((n + 1))'     # 表达式仍按值 (反面证人)
+    )
+    Test-EmitcAbsent "b239_byref_arg_lesion" @("$Tests\b239_byrefarg\B239k.vbp") @(
+        'vb6_ComPackInt(&n)',         # 改前: 带型 Long 变量按值打包
+        'vb6_ComPackIntegerRef(7)',   # 字面量不许取址
+        'vb6_ComPackIntRef(&('        # 表达式不许取址 (只能 lvalue)
     )
 
     # 账 #115: `Len(<裸标识符>)` 的"stor-宽度兜底桶"把**模块级 String**也吞了(knownBstrVars_ 每过程入口 clear，
@@ -9941,6 +9974,7 @@ if ($Category -in @("all", "compile")) {
     if (Enter-StaticShard) { Test-ArraySlotWriteBack }
     if (Enter-StaticShard) { Test-ByRefScalarWriteBack }
     if (Enter-StaticShard) { Test-VariantToStringAuthority }
+    if (Enter-StaticShard) { Test-ByRefArgPackAuthority }
     if (Enter-StaticShard) { Test-ClsidSyncAllCopies }
     if (Enter-StaticShard) { Test-OwnedTempKeeps }
     if (Enter-StaticShard) { Test-OwnedTempSemantics }
