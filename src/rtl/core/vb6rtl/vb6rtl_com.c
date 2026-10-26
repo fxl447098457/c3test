@@ -102,8 +102,8 @@ int vb6_EnumNext(void* penum, vb6_VARIANT* outElem) {
         case VT_DISPATCH: outElem->vt = vb6_vtDispatch; outElem->pdispVal = varElem.pdispVal; break;
         case VT_DATE:   outElem->vt = vb6_vtDate; outElem->dblVal = varElem.date; VariantClear(&varElem); break;
         default: {
-            // Convert to BSTR for unknown types
-            VariantChangeType(&varElem, &varElem, 0, VT_BSTR);
+            // Convert to BSTR for unknown types (目的档 BSTR 走唯一出口; 布尔在上面已有自己的 case)
+            vb6_ComChangeType(&varElem, &varElem, VT_BSTR);
             if (varElem.vt == VT_BSTR) {
                 outElem->vt = vb6_vtBSTR;
                 outElem->bstrVal = varElem.bstrVal;
@@ -449,7 +449,7 @@ static vb6_VARIANT vb6_ComVariantIntoSlot(VARIANT* pv, int steal) {
             {
                 VARIANT vBSTR;
                 VariantInit(&vBSTR);
-                if (SUCCEEDED(VariantChangeType(&vBSTR, pv, 0, VT_BSTR))) {
+                if (SUCCEEDED(vb6_ComChangeType(&vBSTR, pv, VT_BSTR))) {
                     result.vt = vb6_vtBSTR;
                     result.bstrVal = vBSTR.bstrVal;
                     vBSTR.bstrVal = NULL;
@@ -807,6 +807,27 @@ void vb6_VariantBorrowIntoSlot(const VARIANT *src, void *slot) {
     memcpy(s, src, sizeof(VARIANT));  /* 其余各档：对端的头 16 字节与我们那一格本来就对齐 */
 }
 
+/* 账 #305 §B224 (第二百三十八刀): 「VARIANT → 目标档」这一问的唯一出口。除了一档之外全交
+ * oleaut32；那一档是**布尔转字符串** —— Automation 的 VarBstrFromBool 答 "-1"/"0"
+ * (.local/k3684_ole.exe 实测 len=2)，而 VB 语言答 "True"/"False"。用户在真 VB6 6.0 上跑的
+ * 服务端探针给了判决: `EchoStr(ByVal s As String)` 收 VT_BOOL(True) 答 "[True]"、
+ * 收 VT_BOOL(False) 答 "[False]"(ai/probes/bool_string 的 A1/A2)。
+ * 全仓凡以 VT_BSTR 为目的档的换算都问这里 —— 改前服务端答 -1 而 RTL 的 CStr 答 True，
+ * 同一个进程里两种拼法。dest 必须是 VariantInit 过的空 VARIANT；与 VariantChangeType
+ * 一样 dest 可等于 src。 */
+HRESULT vb6_ComChangeType(VARIANT *dest, const VARIANT *src, VARTYPE want) {
+    if (dest && src && want == VT_BSTR && !(src->vt & VT_ARRAY)
+        && (src->vt & VT_TYPEMASK) == VT_BOOL) {
+        BOOL b = (src->vt & VT_BYREF)
+                     ? (src->pboolVal ? (*src->pboolVal != VARIANT_FALSE) : FALSE)
+                     : (src->boolVal != VARIANT_FALSE);
+        dest->vt = VT_BSTR;
+        dest->bstrVal = SysAllocString(b ? L"True" : L"False");
+        return dest->bstrVal ? S_OK : E_OUTOFMEMORY;
+    }
+    return VariantChangeType(dest, src, 0, want);
+}
+
 /* 账 #305 §B219(第二百二十刀): 入站「VARIANT → 声明档」那一问的唯一出口，规则见声明处。
  * 换算走 oleaut32 的 VariantChangeType(dest, src) —— **不是**就地那一发：src 与 dest 分开，
  * 对端那份资源一个字节都不动，产物住在调用方给的 scratch 里由调用方回收。
@@ -816,7 +837,8 @@ HRESULT vb6_ComArgNormalize(const VARIANT *src, VARTYPE want, void *slot, VARIAN
     VariantInit(scratch);
     if (want == VB6_ARGVT_SKIP) return S_OK;   /* 这一格不问，也不许顺手清一下 */
     if (!src || src->vt == want) return S_OK;  /* 同档：借用就是答案 */
-    if (FAILED(VariantChangeType(scratch, src, 0, want))) {
+    /* 账 #305 §B224: 目的档是 BSTR 时口径归 VB 语言(布尔答 True/False)，见 vb6_ComChangeType。 */
+    if (FAILED(vb6_ComChangeType(scratch, src, want))) {
         VariantInit(scratch);
         return DISP_E_TYPEMISMATCH;
     }

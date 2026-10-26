@@ -120,7 +120,7 @@ wchar_t* vb6_ComUnpackBSTR(void* variant) {
     if (pv->vt != VT_EMPTY && pv->vt != VT_NULL) {
         VARIANT vBstr;
         VariantInit(&vBstr);
-        if (SUCCEEDED(VariantChangeType(&vBstr, pv, 0, VT_BSTR))) {
+        if (SUCCEEDED(vb6_ComChangeType(&vBstr, pv, VT_BSTR))) {
             BSTR tmp = SysAllocString(vBstr.bstrVal);
             VariantClear(&vBstr);
             return tmp;

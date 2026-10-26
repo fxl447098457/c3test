@@ -218,7 +218,7 @@ static void call_churn(IDispatch *disp, LONG n) {
  * 这一半，而这一半正是本刀的靶子 (异档进槽 = 读错联合体那一格：串档拿到 AV、数值档拿到指针)。
  * 臂形: VTARG=<成员名>:<档>[,<档>...]，档按**声明序**给 (第 0 个 = 第一个形参)，
  *   i=VT_I4(40) t=VT_I2(9) u=VT_UI1(7) f=VT_R4(12.75) r=VT_R8(12.75) b=VT_BOOL(True)
- *   s=VT_BSTR("12") x=VT_BSTR("abc") e=VT_EMPTY n=VT_NULL
+ *   B=VT_BOOL(False) s=VT_BSTR("12") x=VT_BSTR("abc") e=VT_EMPTY n=VT_NULL
  * 只在给了 VTARG= 时发，其余夹具的输出一个字节都不动。 */
 static void mk_vtarg(VARIANT *out, char kind) {
     VariantInit(out);
@@ -229,6 +229,7 @@ static void mk_vtarg(VARIANT *out, char kind) {
         case 'f': out->vt = VT_R4;   out->fltVal = 12.75f; break;
         case 'r': out->vt = VT_R8;   out->dblVal = 12.75; break;
         case 'b': out->vt = VT_BOOL; out->boolVal = VARIANT_TRUE; break;
+        case 'B': out->vt = VT_BOOL; out->boolVal = VARIANT_FALSE; break;
         case 's': out->vt = VT_BSTR; out->bstrVal = SysAllocString(L"12"); break;
         case 'x': out->vt = VT_BSTR; out->bstrVal = SysAllocString(L"abc"); break;
         case 'n': out->vt = VT_NULL; break;
@@ -244,6 +245,7 @@ static const char *vtarg_kind_name(char kind) {
         case 'f': return "VT_R4";
         case 'r': return "VT_R8";
         case 'b': return "VT_BOOL";
+        case 'B': return "VT_BOOL(False)";
         case 's': return "BSTR(12)";
         case 'x': return "BSTR(abc)";
         case 'n': return "VT_NULL";

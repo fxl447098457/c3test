@@ -166,10 +166,12 @@ if ($ast5) {
     # Needles 4 (CREATE / CHURN_CALL / CHURN_TYPE=SatOther / DONE), Absent 0, -Tail 1 枚 CHURN= 臂。
     'k481_projclass_identity_after_churn'      = @(8, 4, 0, 1)
     'k481_projclass_identity_after_churn_x86'  = @(10, 4, 0, 1)
-    # 账 #305 §B219 (第二百二十刀): 入站实参声明档那一族 —— 26 枚 VTARG 臂 + DONE 一枚收尾针,
-    # Absent 1 枚(改前那一发「换不动也 hr=0 交回垃圾」)。两架构各一条, x86 那格多 -Arch 那一对。
-    'b220_inbound_argvt'                        = @(8, 27, 1, 26)
-    'b220_inbound_argvt_x86'                   = @(10, 27, 1, 26)
+    # 账 #305 §B219 (第二百二十刀): 入站实参声明档那一族 —— 27 枚 VTARG 臂 + DONE 一枚收尾针,
+    # Absent 2 枚(改前那一发「换不动也 hr=0 交回垃圾」+ §B224 改前 EchoStr<-VT_BOOL 的 -1 拼法)。
+    # 两架构各一条, x86 那格多 -Arch 那一对。
+    # §B224 (第二百三十八刀) 加了 EchoStr:B (False) 那一臂: Needles 27->28 / Absent 1->2 / Tail 26->27。
+    'b220_inbound_argvt'                        = @(8, 28, 2, 27)
+    'b220_inbound_argvt_x86'                   = @(10, 28, 2, 27)
     # 账 #305 §B220 (第二百二十二刀): 类字段出厂那一圈的运行期证人 —— 六枚 VTARG 臂 + DONE 一枚收尾针,
     # Absent 0 (标量那一支的读数 KeyAt/TagAt/EchoS 改前改后一字未动, 反面证人在 R5/R2 那两道钉),
     # -Tail 6 枚臂。两架构各一条。

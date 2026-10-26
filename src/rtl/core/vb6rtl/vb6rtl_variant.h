@@ -397,6 +397,15 @@ void vb6_ByRefScalarWriteBack(VARIANT *client, void *slot);
  * scratch 由调用方在**被调方返回之后** VariantClear —— 顺序与 §B185 那扇边界同规。 */
 HRESULT vb6_ComArgNormalize(const VARIANT *src, VARTYPE want, void *slot, VARIANT *scratch);
 
+/* 账 #305 §B224 (第二百三十八刀): 「VARIANT → 目标档」这一问的唯一出口(定义在 vb6rtl_com.c)。
+ * 除了一档之外全交 oleaut32 的 VariantChangeType；那一档是**布尔转字符串**：
+ * Automation 答 "-1"/"0"，VB 语言答 "True"/"False"。真 VB6 6.0 服务端实测
+ * `EchoStr(ByVal s As String)` 收 VT_BOOL 答 "[True]"/"[False]"(ai/probes/bool_string
+ * A1/A2) ⇒ 服务端入站那一格与 VB 语言同口径，不是 Automation 的换算口径。
+ * 全仓凡以 VT_BSTR 为目的档的换算都问这里(服务端入站 / COM 结果解包 / 十进制转串)。
+ * dest 必须是 VariantInit 过的空 VARIANT；与 VariantChangeType 一样 dest 可等于 src。 */
+HRESULT vb6_ComChangeType(VARIANT *dest, const VARIANT *src, VARTYPE want);
+
 /* 账 #305 §B145: 槽 → 真 VARIANT 的那张 vt 表，**只答「数值住在哪一格」**，一律借用语义
  * (不复制 BSTR、不 AddRef)。需要带权副本的出站那一族自己补下面那一步。 */
 void vb6_VariantPackBorrow(vb6_VARIANT v, VARIANT *out);

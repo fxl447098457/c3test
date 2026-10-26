@@ -1850,6 +1850,23 @@ function Test-ByRefScalarWriteBack {
     }
 }
 
+# 账 #305 SB224 (第二百三十八刀): 「VARIANT -> 目标档」唯一出口 —— 布尔转字符串按 VB 语言答 True/False
+# (真 VB6 服务端实测, ai/probes/bool_string A1/A2), 不是 Automation 的 -1/0。
+# 五道: 目的档 BSTR 不许直调 / 定义 1 + 声明 2 / 消费者四处 / 布尔那一支的形状 / b220 判据两针一台各一份。
+function Test-VariantToStringAuthority {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] variant_to_string_authority ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\check_variant_to_string_authority.ps1" 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        $out | Select-Object -First 8 | ForEach-Object { Write-Host "  $_" }
+    }
+}
+
 function Test-ArraySlotWriteBack {
     $script:total++
     Write-Host -NoNewline "  [STATIC] array_slot_writeback ... "
@@ -8246,7 +8263,11 @@ if ($Category -in @("all", "run", "vbp")) {
     # 只比 hr 就等于把「换不动」漏成一格没人看。
     # EchoLng ← VT_BOOL / VT_EMPTY 那两发是改前**侥幸对**的档位, 原样钉住 = 这刀没把对的答案改坏;
     # EchoVar 那两发钉 Variant 形参没被换算(VarType 照原标签答 3/8), 就是表里 VB6_ARGVT_SKIP 的证人。
-    # 两台 26 发读数逐字节相同 ⇒ 针面两台各写一份(不提成变量: 这一族既有各格就是各自一份)。
+    # 账 #305 §B224 (第二百三十八刀): EchoStr ← VT_BOOL 改前答 <-1> (Automation 的 VarBstrFromBool),
+    # 而真 VB6 6.0 服务端实测答 [True]/[False] (ai/probes/bool_string A1/A2, 用户那台跑出来的) ——
+    # 目的档 BSTR 的换算收成唯一出口 vb6_ComChangeType。这里两颗针: True 与 False 各一发,
+    # Absent 里那枚 = 改前的 -1 拼法不许再出现。
+    # 两台 27 发读数逐字节相同 ⇒ 针面两台各写一份(不提成变量: 这一族既有各格就是各自一份)。
     Test-DispatchInvoke "b220_inbound_argvt" "$Tests\b220_args\B220a.vbp" "B220a" `
         "{11112222-3333-4444-5555-6666777788B7}" @(
         "VTARG=EchoLng:i giving=VT_I4 hr=0x00000000 vt=3 val=40",
@@ -8263,7 +8284,8 @@ if ($Category -in @("all", "run", "vbp")) {
         "VTARG=EchoStr:s giving=BSTR(12) hr=0x00000000 vt=8 val=<12> len=2",
         "VTARG=EchoStr:x giving=BSTR(abc) hr=0x00000000 vt=8 val=<abc> len=3",
         "VTARG=EchoStr:r giving=VT_R8 hr=0x00000000 vt=8 val=<12.75> len=5",
-        "VTARG=EchoStr:b giving=VT_BOOL hr=0x00000000 vt=8 val=<-1> len=2",
+        "VTARG=EchoStr:b giving=VT_BOOL hr=0x00000000 vt=8 val=<True> len=4",
+        "VTARG=EchoStr:B giving=VT_BOOL(False) hr=0x00000000 vt=8 val=<False> len=5",
         "VTARG=EchoStr:e giving=VT_EMPTY hr=0x00000000 vt=8 val=<> len=0",
         "VTARG=EchoDbl:i giving=VT_I4 hr=0x00000000 vt=5 val=40.0000",
         "VTARG=EchoDbl:s giving=BSTR(12) hr=0x00000000 vt=5 val=12.0000",
@@ -8276,12 +8298,13 @@ if ($Category -in @("all", "run", "vbp")) {
         "VTARG=SumTwo:i,s giving=VT_I4+BSTR(12) hr=0x00000000 vt=8 val=<12:40> len=5",
         "VTARG=SumTwo:s,i giving=BSTR(12)+VT_I4 hr=0x00000000 vt=8 val=<40:12> len=5",
         "DONE") @(
-        "VTARG=EchoLng:x giving=BSTR(abc) hr=0x00000000") `
+        "VTARG=EchoLng:x giving=BSTR(abc) hr=0x00000000",
+        "VTARG=EchoStr:b giving=VT_BOOL hr=0x00000000 vt=8 val=<-1>") `
         -Tail @(
             "VTARG=EchoLng:i", "VTARG=EchoLng:s", "VTARG=EchoLng:x", "VTARG=EchoLng:r",
             "VTARG=EchoLng:f", "VTARG=EchoLng:b", "VTARG=EchoLng:e", "VTARG=EchoLng:n",
             "VTARG=EchoLng:t", "VTARG=EchoLng:u", "VTARG=EchoStr:i", "VTARG=EchoStr:s",
-            "VTARG=EchoStr:x", "VTARG=EchoStr:r", "VTARG=EchoStr:b", "VTARG=EchoStr:e",
+            "VTARG=EchoStr:x", "VTARG=EchoStr:r", "VTARG=EchoStr:b", "VTARG=EchoStr:B", "VTARG=EchoStr:e",
             "VTARG=EchoDbl:i", "VTARG=EchoDbl:s", "VTARG=EchoDbl:r", "VTARG=EchoBool:b",
             "VTARG=EchoBool:i", "VTARG=EchoBool:s", "VTARG=EchoVar:i", "VTARG=EchoVar:x",
             "VTARG=SumTwo:i,s", "VTARG=SumTwo:s,i")
@@ -8301,7 +8324,8 @@ if ($Category -in @("all", "run", "vbp")) {
         "VTARG=EchoStr:s giving=BSTR(12) hr=0x00000000 vt=8 val=<12> len=2",
         "VTARG=EchoStr:x giving=BSTR(abc) hr=0x00000000 vt=8 val=<abc> len=3",
         "VTARG=EchoStr:r giving=VT_R8 hr=0x00000000 vt=8 val=<12.75> len=5",
-        "VTARG=EchoStr:b giving=VT_BOOL hr=0x00000000 vt=8 val=<-1> len=2",
+        "VTARG=EchoStr:b giving=VT_BOOL hr=0x00000000 vt=8 val=<True> len=4",
+        "VTARG=EchoStr:B giving=VT_BOOL(False) hr=0x00000000 vt=8 val=<False> len=5",
         "VTARG=EchoStr:e giving=VT_EMPTY hr=0x00000000 vt=8 val=<> len=0",
         "VTARG=EchoDbl:i giving=VT_I4 hr=0x00000000 vt=5 val=40.0000",
         "VTARG=EchoDbl:s giving=BSTR(12) hr=0x00000000 vt=5 val=12.0000",
@@ -8314,12 +8338,13 @@ if ($Category -in @("all", "run", "vbp")) {
         "VTARG=SumTwo:i,s giving=VT_I4+BSTR(12) hr=0x00000000 vt=8 val=<12:40> len=5",
         "VTARG=SumTwo:s,i giving=BSTR(12)+VT_I4 hr=0x00000000 vt=8 val=<40:12> len=5",
         "DONE") @(
-        "VTARG=EchoLng:x giving=BSTR(abc) hr=0x00000000") `
+        "VTARG=EchoLng:x giving=BSTR(abc) hr=0x00000000",
+        "VTARG=EchoStr:b giving=VT_BOOL hr=0x00000000 vt=8 val=<-1>") `
         -Tail @(
             "VTARG=EchoLng:i", "VTARG=EchoLng:s", "VTARG=EchoLng:x", "VTARG=EchoLng:r",
             "VTARG=EchoLng:f", "VTARG=EchoLng:b", "VTARG=EchoLng:e", "VTARG=EchoLng:n",
             "VTARG=EchoLng:t", "VTARG=EchoLng:u", "VTARG=EchoStr:i", "VTARG=EchoStr:s",
-            "VTARG=EchoStr:x", "VTARG=EchoStr:r", "VTARG=EchoStr:b", "VTARG=EchoStr:e",
+            "VTARG=EchoStr:x", "VTARG=EchoStr:r", "VTARG=EchoStr:b", "VTARG=EchoStr:B", "VTARG=EchoStr:e",
             "VTARG=EchoDbl:i", "VTARG=EchoDbl:s", "VTARG=EchoDbl:r", "VTARG=EchoBool:b",
             "VTARG=EchoBool:i", "VTARG=EchoBool:s", "VTARG=EchoVar:i", "VTARG=EchoVar:x",
             "VTARG=SumTwo:i,s", "VTARG=SumTwo:s,i") -Arch "x86"
@@ -9915,6 +9940,7 @@ if ($Category -in @("all", "compile")) {
     if (Enter-StaticShard) { Test-SaDestroyRankAware }
     if (Enter-StaticShard) { Test-ArraySlotWriteBack }
     if (Enter-StaticShard) { Test-ByRefScalarWriteBack }
+    if (Enter-StaticShard) { Test-VariantToStringAuthority }
     if (Enter-StaticShard) { Test-ClsidSyncAllCopies }
     if (Enter-StaticShard) { Test-OwnedTempKeeps }
     if (Enter-StaticShard) { Test-OwnedTempSemantics }

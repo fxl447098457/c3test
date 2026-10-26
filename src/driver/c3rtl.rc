@@ -943,3 +943,5 @@
 /* knife 230: RTL changed (array slot write-back) -- force c3rtl.rc re-embed */
 
 /* knife 233: RTL changed (byref scalar write-back) -- force c3rtl.rc re-embed */
+
+/* knife 238: RTL changed (variant -> string authority: BOOL answers True/False) -- force c3rtl.rc re-embed */
