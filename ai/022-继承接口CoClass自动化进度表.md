@@ -6,7 +6,14 @@
 
 OPEN_LOCAL_DIVERGENCE: **已收口（2026-09-27 入夜 = C29-MV-d）** —— 本地 `ctrlmonthview` 的 MV24/MV25/MV30 三条红既不是"本地环境/增量缓存"、也不是"OS 版本相关"，而是**挂钟相关**：comctl v6 把当前时间混进 `MCM_GETCURSEL` 的负载里（日没错、零头 0.765），`CLng` 下午进位、上午舍掉 ⇒ 本机下午一直红、CI 跑在上午一直绿。修法与全部读数见 029 §九 C29-MV-d 那一格。留下的一般式：**日期面判据按 `CLng` / `=` 比之前，产品读数必须归成整数日**，否则同一棵树的判据随时段翻脸，而门只会读到"上午那一半"。
 STATUS: IDLE             # NOT_STARTED | DESIGN | BUSY | IDLE | ALL_DONE
-LAST_RUN: 2026-10-26T19:05:00+08:00 **第二百四十刀「量」已出（账 #305 新的一格：named 实参从不按名归位）—— 不动代码**
+LAST_RUN: 2026-10-26T22:05:00+08:00 **第二百四十一刀「实施+判据」已出（账 #305：折叠内置那一族的 named 实参按名落位）—— 已推 dev、等门**
+—— **机制**：`BuiltinOptDefault` 加一枚 `names`（每档的 VB 名，nullptr = 这一族不吃 named 实参），`vb6_ErrRaise` 那一行挂 `kNames_ErrRaise` = number / source / description（口径 = 仓里的 VB6 手册 `Raise number, source, description, helpfile, helpcontext`，与 RTL 声明 `vb6_ErrRaise(int32_t errNum, BSTR source, BSTR description)` 逐档同序）；落位站点全站只有一处（紧跟 `if (callee != bod.callee) continue;`），认不出名字 / 撞档 / 要跳过必填档 = 退回老路不猜。
+—— **判据**：夹具 tests/test_err_obj.bas 三条真跑（跳过中间档 / 声明序 / 反向书写序）新编译器 9/9 对改前那台 7/9；两台发码针 b241_named_arg_slot + b241_named_arg_lesion（本机按 runner 那条比较路径逐条核过）；哨兵 `check_builtin_opt_defaults.ps1` 加 R9（名字表档数 == slots、`bod.names` 站点恰好一处、有名字表却没站点就红）五枚负控各点各红；全量 109 道 RED=0。
+—— **清单**：本机新编那台（md5 4badc992、pe-lnk=14.29）复算全语料 inputs=540 / lines=544 / rc!=0=85 与 CI 同头读数一致、537 行逐行相同（含两份已知会抖的行）⇒ 哈希不同恰好 3 行、缺席 0 多出 0，其中 Common.bas 与 VBFlexGridDemo.vbp **字节数不变**（306 + 2 处只是两实参换档）= 这一刀只改次序。
+—— **下一刀**：(乙) 早绑定那一支照 `sig.params[i].name` 归位（名字已在手，与第二百三十九刀同一份）→ (丙) 纯晚绑定要么运行期 `vb6_ComGetIdsOfNames` + 一枚带 cNamedArgs 的新出口、要么先出一声诊断；表里另外 30 族要不要也登记 names 待拍，(甲) 的门绿了再定 (乙)(丙) 同不同批。
+—— **刀号**：本轮取 241（实施+判据）；第二百四十刀那格「named 实参 / rgdispidNamedArgs」的第一半 (甲) 已落，(乙)(丙) 仍在同一格，不另开。
+
+# 上一轮（2026-10-26T19:05:00+08:00，原样留档）= LAST_RUN: 2026-10-26T19:05:00+08:00 **第二百四十刀「量」已出（账 #305 新的一格：named 实参从不按名归位）—— 不动代码**
 —— **机制**：只有 P14.3.3 那一支（`calleeParams` 非空）按名落位；另外三支（接口 vtable :490 / legacy 视图 :519 / 早绑定 :607 / 纯晚绑定 :695）加一条「没有形参信息」的 else 兜底（:240）把 `node.named` 按书写序 append；RTL `vb6_ComCall` 的 DISPPARAMS 恒 `cNamedArgs` 为 0、`rgdispidNamedArgs` 为 NULL ⇒ 名字连载体都没有。
 —— **真跑证人（x64，`.local/k240_probe5`）**：A1 `Err.Raise Number:=5, Description:="NAMED-DESC"` ⇒ `DESC=[] SRC=[NAMED-DESC]`（文案落进 Source、Description 空）；A2 同一条按位置写 ⇒ 对；A3 按声明序写 named ⇒ 恰好对。仓里手册记的序是 `number, source, description, helpfile, helpcontext` ⇒ `vb6_ErrRaise` 的位置序没错，错的是 named 从不归位。
 —— **承面**：靶工程 VbEclipse **0 处**；门语料 319 行里 314 = Err.Raise（全中那条病）、3 = 裸名（走正确的解析）、2 = Clipboard；真语料 3131 行 = Err.Raise 1363 / 裸名 1340 / 成员形 428 行（74 份工程，Word 自动化为主 selection.typetext 82…）；语料里 Source / HelpFile 的 named 各 0 处。
