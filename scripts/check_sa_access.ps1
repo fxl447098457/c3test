@@ -109,6 +109,8 @@
 #   A18 谓词 arrArg92y 定义恰好 1 / 使用恰好 1（那条 if）；问数组表 knownArrays_.count(arrLs92y)
 #       恰好 1；临时量前缀 "_vb6_arrarg_" 恰好 1；装箱吃的那枚原样名 arrRaw92y 恰好 2（定义 + 装箱）；
 #       第四十八刀那条住在 switch 里的 argIsArr92y 恰好 0（同一问不许住两处）；
+#       2026-10-26 第二百三十九刀（账 #305 §B224 第二半）加了第四位消费者 comByRefArgExpr：按引用发那一问
+#       也要先问「这是不是数组载体」（数组不许取址，否则 `&arr` 就是描述符指针的地址）。
 #       顺序两条：定义行在 switch (argVbType92y) **之前**，装箱那一条在它**之后**。
 #       站点计数全在 src/backend 里数（只剥行注释；后端 .inc 的字面量里有 /* */，
 #       剥块注释会把真代码整段吃掉 —— 第四十八刀那条假红就是这么来的）。
@@ -588,7 +590,7 @@ if ($a18All - $a18Decl -ne 1) {
 }
 if ($a18Known -ne 1) { $bad += ("A18 出口里问数组表 knownArrays_ 的地方 = " + $a18Known + " 处 (恰好 1，且必须住在 isArrayCarrierArgName 里；0 = 判据换成了别的表，2 = 又抄了一份)") }
 if ($a18AuthDef -ne 1) { $bad += ("A18 那条唯一出口的定义 = " + $a18AuthDef + " (恰好 1)") }
-if ($a18AuthAll - $a18AuthDef - $a18AuthDecl -ne 3) { $bad += ("A18 问那条出口的地方 = " + ($a18AuthAll - $a18AuthDef - $a18AuthDecl) + " 处 (恰好 3：ByRef Variant 实参 + COM 实参打包；少一处 = 有一个消费者又开始自己答)") }
+if ($a18AuthAll - $a18AuthDef - $a18AuthDecl -ne 4) { $bad += ("A18 问那条出口的地方 = " + ($a18AuthAll - $a18AuthDef - $a18AuthDecl) + " 处 (恰好 4：ByRef Variant 实参 + COM 实参打包 + 第二百三十九刀的 comByRefArgExpr（数组载体不许取址）；少一处 = 有一个消费者又开始自己答)") }
 if ($a18ComQ -lt 0 -or $a18ComV -lt 0) { $bad += "A18 COM 打包那一格的锚点找不到（数组那一问或 knownVariantVars_ 那条链被改形了）" }
 if ($a18AsnQ -lt 0 -or $a18AsnT -lt 0) {
     $bad += ("A18 赋值站（wrapVariantValue）那两行锚点找不到 (asn=" + $a18AsnQ + " tbl=" + $a18AsnT + ") —— 第五十一刀那一问或那张类型表被改形了")
