@@ -366,7 +366,7 @@ sha256=4410a4d92b9104e745020fb2474abf4cbbd62b2cc01115e400a41df2a7c1709c ascii256
 sha256=4a7aaac51f234c2b8093ee94bc3018f67a89e82979474de1e2bc568dafd833a0 ascii256=c911f33f27c78c0b19f23738f7c399acf87ebf231672a19fb538ea9dad55b655 rc=0 bytes=8413 tests/test_interp.bas
 sha256=4e89f7ba9513b2cd1bb9367e6e54646e1362ab89c5363bc43f44392ce2a07324 ascii256=7c605730c148c0c3e816cf755817c4291f6edd741bb993b5bbc54417a3752810 rc=0 bytes=5816 tests/test_joinfilter.bas
 sha256=22ccd69a85f1388da2d547eb6169bf7aac0d0f0c7be91aeb9580c58a48e3efbf ascii256=fec71c19c63b5b9470009f5f0014f5e46537b6e657495b5dff9886f750d412fd rc=0 bytes=6524 tests/test_lastdllerror.bas
-sha256=1fafa9019a32714b6ed9a490a37fd9eeb720dbfb444649766ef6311de7bfea8f ascii256=3010cdb14a9c9240d00c5f08e1a721a9edee6f0f38078fb7c68391139ff31034 rc=0 bytes=6128 tests/test_late_cond.bas
+sha256=a52992aaa9622fb45ba69665f0a46b06e7d0dee9c14446fab8cd401db471502e ascii256=cc83fd04f2f67cfb7ee4eb67a94e34f27f13208ae53bd5ffbfe470427fa2bdcd rc=0 bytes=7105 tests/test_late_cond.bas
 sha256=c01403a43bbaa2d9b772e40bb15d4df769aa9db703203fc5f9a07990969d2af2 ascii256=886cda39b60a6fc47d408b6504b864f703e183f779e55de0ae87e8e87cb32001 rc=0 bytes=4217 tests/test_len_width.bas
 sha256=f98ee084e0d71ff89f4f18fcf351551facc151d9d7bd85cd8bac7ad6598b2fbc ascii256=b4ff26e024507de3b5dbcb541edd1623632f5791cae2de90ebd51dcab0e629b7 rc=0 bytes=4334 tests/test_like.bas
 sha256=7471cc1da7231d8fdc8a8e1156c7dcc457b81d0911ba4ff4a7b5b22ea0f88590 ascii256=a363a325fdecee3daf54d11b4fa794a7beab9acccacb4dff741661596e1b7979 rc=0 bytes=4161 tests/test_m5.bas
@@ -874,3 +874,7 @@ sha256=7625e86790bf345a52e7babc6b12eb0c32fc55b76b4ef3b7f9b3a946d1f251ad ascii256
 #   其中 8 行（Charts 2020 六份 + czUI-main + ve_units）与 CI 为 ccaff6a1 交的那份**逐字节相同**（= 本机与 CI 那台对他们那一形也对齐），
 #   第 9 行 tests/VBFlexGridDemo/VBFlexGridDemo.vbp 两台**该当不同**：它同时吃本刀那 306 处按名落位（净字节 0）与他们那一形（+79），CI 那份里没有本刀的改动。
 #   每份 .vbp 的增量是 79 的整数倍（1 枚窗体 +79 / 2 枚 +158 / 6 枚 +474）= 他们那一发的形状，与本刀无关。
+# 第二百四十七刀的登记来源：门 **#939**（run 40396920951、head `6c11e3d9`、attempt 1）= 二十一格里 20 绿 + 唯一红 = 这道形状门（本轮 `Tests (compile)` 里那条 `[STATIC] manifest_coverage` 没报，因为没新增输入：CI 自交清单 inputs=541 与期望同数）。移动的行**只有 1 行** = 本刀夹具 `tests/test_late_cond.bas`（6128 → 7105，+977 = 四臂新文本 + 五枚 `vb6_ComResultToNot` 包装）。
+#   ⚠ 订正本刀提交说明与台账那一行里的「预期移动两行」：**VBFlexGridDemo 那一行没动**（机制本轮读死，不是猜）。UserEditingForm 里那发 `Not VBFlexGrid1.CommitEdit()` 单独 emit 一份 .frm 时接收者查不到类型 ⇒ 退成晚绑定 `vb6_ComCall` ⇒ 吃到新臂（ToNot=1）；整工程编译下同一个位置解析到工程内 UC 的方法 `vb6_VBFlexGrid_CommitEdit(...)`（返回 int16_t 的 VB 布尔）⇒ 落 `~(int32_t)(…)`，而那一支在 -1/0 编码下**本来就是对的**（与本刀口径同一句话），产物一字不变。本机两份产物并排留档：`.local/k247_probe/uef_standalone.txt`（ToNot=1）与 `.local/k247_probe/vbp.emit.txt`（ToNot=0、5579340 字节未归一）。
+#   ⇒ 记一条一般式：**按单份文件量的发码承面不能当清单承面**（同一行代码在「脱离工程的单份 emit」与「整工程编译」里走的是两条臂）；以后报「会移动几行」只按 .vbp 编译计。
+#   哈希取自 CI 为同一 head 自己交的清单（github/ci/emit-manifest 的 ca5d1cdf，注脚 head=6c11e3d9）；登记后本机用 `compare_emit_manifest.ps1 -Manifest .local/k247_probe/ci_manifest_939.txt` 复算 = 541/541 逐行相同、缺席 0、多出 0。

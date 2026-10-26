@@ -14,7 +14,7 @@ LAST_RUN: 2026-10-27T04:40:00+08:00 **第二百四十六刀「收线」+ 第二�
 —— **哨兵能红（两条变异实测）**：R1 改成按函数体内切片（两枚出口共用同一套读法，整文件计数分不开谁是谁）——把「收回」挪到「读数」之前 ⇒ R1 先读后清红；删掉一枚 `K-NOT` 形状针 ⇒ R5 两条红。另八枚相关哨兵全 rc=0（rtl_embedded / rtl_proto_arity / rtl_naked_names / bitwise_authority / emitted_declared / static_sentinel_registration / test_helper_integrity / manifest_coverage）。
 —— **c3rtl.rc 不必 touch（新读数，别再白改一行）**：该 .rc 的 OBJECT_DEPENDS 就是 RTL 源文件清单（CMakeLists.txt:393 起），改 `vb6rtl_com.c` 自动重编资源；本轮工作区里 .rc 一直是干净的而产物照常带上新的出口。
 —— **残留三形不是本刀的**：`test_not_com.bas` 两处走 `vb6_ComCallInt`（交回的已是 int32，`~` 正是 VB 语义）；Charts `Form1.frm` 与 `MainForm.frm` 各一处走 `vb6_ComCallObject`（对象指针，VB6 里 `Not 对象` 本身是类型错）；`MainForm.frm:1186` 走 `vb6_IsEmpty` 的 0/1 档 ⇒ 「内置布尔函数交回 C 的 1 而不是 VB 的 -1」另开一格。
-—— **等门 #939**：预期移动两行 = `tests/test_late_cond.bas`（本刀夹具）与 `tests/VBFlexGridDemo/VBFlexGridDemo.vbp`（UserEditingForm 那一处 `Not`）；形状格 + compile 格那两条 [STATIC] manifest_coverage 同源红是**预期**，按 CI 自交清单登记后走验证轮。
+—— **门 #939 跑完并登记收线**：二十一格 20 绿 + 唯一红 = 形状门（预期），按 CI 自交清单（ca5d1cdf）登记后本机复算 541/541 逐行相同。**订正本刀先前的「预期移动两行」：只有 1 行**（`tests/test_late_cond.bas` 6128→7105）—— VBFlexGridDemo 那一行没动，因为 `Not VBFlexGrid1.CommitEdit()` 在整工程编译下解析到工程内 UC 方法（返回 int16_t 的 VB 布尔，`~(int32_t)(…)` 本来就对），只有**单独 emit 一份 .frm** 才因查不到类型退成晚绑定。⇒ 一般式：清单承面只按 .vbp 编译计，别拿单份文件的 --emit-c 读数当预算。
 —— **在册下一刀顺序**：(丙) 纯晚绑定 named 实参 → `obj.Member(…)(i)` 错误 17 → 装箱那一站的手抄表（任务在册，改它会挪产物，先量站点与「剥不剥外层括号」的口径差）→ `And` / `Or` / `IIf` 那几条臂（1 处 / 1 份，最小）。
 —— **本机负担照旧**：只定点跑（一发临时重编取反面读数 + 八枚哨兵 + 两枚 --emit-c + 一枚真跑夹具 × 两台），没跑整类回归；用户那台机器上月被并发扫描打崩过，这类全量一律交给门。
 —— **刀号**：本轮 = 246 收线 + 247 实施；245 量见上一格留档。
