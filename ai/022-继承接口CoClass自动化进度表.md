@@ -6,7 +6,13 @@
 
 OPEN_LOCAL_DIVERGENCE: **已收口（2026-09-27 入夜 = C29-MV-d）** —— 本地 `ctrlmonthview` 的 MV24/MV25/MV30 三条红既不是"本地环境/增量缓存"、也不是"OS 版本相关"，而是**挂钟相关**：comctl v6 把当前时间混进 `MCM_GETCURSEL` 的负载里（日没错、零头 0.765），`CLng` 下午进位、上午舍掉 ⇒ 本机下午一直红、CI 跑在上午一直绿。修法与全部读数见 029 §九 C29-MV-d 那一格。留下的一般式：**日期面判据按 `CLng` / `=` 比之前，产品读数必须归成整数日**，否则同一棵树的判据随时段翻脸，而门只会读到"上午那一半"。
 STATUS: IDLE             # NOT_STARTED | DESIGN | BUSY | IDLE | ALL_DONE
-LAST_RUN: 2026-10-26T22:05:00+08:00 **第二百四十一刀「实施+判据」已出（账 #305：折叠内置那一族的 named 实参按名落位）—— 已推 dev、等门**
+LAST_RUN: 2026-10-26T22:45:00+08:00 **第二百四十一刀「收线」已出（账 #305）—— 门 #936 二十一格全绿，一趟收线（没有第二轮登记）**
+—— **门与归因**：run 40340676952 / head `a0cd9bbc` / attempt 1；按用例名验过 `[EMITC-SHAPE] b241_named_arg_slot`（vbp #9）、`[EMITC-ABSENT] b241_named_arg_lesion`（vbp #10）、`[STATIC] builtin_opt_defaults`（含新 R9），239/238 那两半的针（`byref_arg_pack_authority` / `variant_to_string_authority`）照旧 PASS；bas / vbp 各分片全部 FAIL=0（真跑夹具 test_err_obj 的针数组含 ERR:9/9）。
+—— **形状门独立复算**：CI 那台自己交的清单 = inputs=540 + expectation-check=PASS + manifest-expectation OK ⇒ 本机登记的 3 行（本刀）+ 9 行（合并带进来那三笔欠的）在 CI 上逐行对上。
+—— **在册下一格**：named 那一族剩 (乙) 早绑定照 `sig.params[i].name` 归位、(丙) 纯晚绑定（运行期 `vb6_ComGetIdsOfNames` + 带 cNamedArgs 的新出口，或先出一声诊断）；表里另外 30 族要不要也登记 names 待拍；BSTR / Object / Variant 三档 ByRef 写回、merged 表 comClsidStr 非空护栏、视图三格纸面缺口照旧。
+—— **刀号**：本轮 = 第二百四十一刀的收线（不动代码）；下一刀从上面在册面里挑，取号前先 fetch 远端防撞号。
+
+# 上一轮（2026-10-26T22:05:00+08:00，原样留档）= LAST_RUN: 2026-10-26T22:05:00+08:00 **第二百四十一刀「实施+判据」已出（账 #305：折叠内置那一族的 named 实参按名落位）—— 已推 dev、等门**
 —— **机制**：`BuiltinOptDefault` 加一枚 `names`（每档的 VB 名，nullptr = 这一族不吃 named 实参），`vb6_ErrRaise` 那一行挂 `kNames_ErrRaise` = number / source / description（口径 = 仓里的 VB6 手册 `Raise number, source, description, helpfile, helpcontext`，与 RTL 声明 `vb6_ErrRaise(int32_t errNum, BSTR source, BSTR description)` 逐档同序）；落位站点全站只有一处（紧跟 `if (callee != bod.callee) continue;`），认不出名字 / 撞档 / 要跳过必填档 = 退回老路不猜。
 —— **判据**：夹具 tests/test_err_obj.bas 三条真跑（跳过中间档 / 声明序 / 反向书写序）新编译器 9/9 对改前那台 7/9；两台发码针 b241_named_arg_slot + b241_named_arg_lesion（本机按 runner 那条比较路径逐条核过）；哨兵 `check_builtin_opt_defaults.ps1` 加 R9（名字表档数 == slots、`bod.names` 站点恰好一处、有名字表却没站点就红）五枚负控各点各红；全量 109 道 RED=0。
 —— **清单**：本机新编那台（md5 4badc992、pe-lnk=14.29）复算全语料 inputs=540 / lines=544 / rc!=0=85 与 CI 同头读数一致、537 行逐行相同（含两份已知会抖的行）⇒ 哈希不同恰好 3 行、缺席 0 多出 0，其中 Common.bas 与 VBFlexGridDemo.vbp **字节数不变**（306 + 2 处只是两实参换档）= 这一刀只改次序。
