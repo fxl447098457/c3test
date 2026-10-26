@@ -1868,6 +1868,24 @@ function Test-ByRefArgPackAuthority {
     }
 }
 
+# 账 #305 第二百四十四刀: 「把一条 C 表达式折成 VB6 的真值」只有一位主人 —— 裸晚绑定调用
+# 交回的是堆上 VARIANT 的指针, 从前条件那一读直接 if (ptr) ⇒ 恒真 (真语料按产物 82 处)。
+# 五道: RTL 出口 (定义/声明/三问顺序) / 主人定义+声明+七站 / 裸调用那一问只许主人问 /
+# 站点不许自问「是不是槽」 / 判据面 7 枚正针 + 14 枚键位 + 登记。
+function Test-ConditionTruthAuthority {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] condition_truth_authority ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\check_condition_truth_authority.ps1" 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        $out | Select-Object -First 8 | ForEach-Object { Write-Host "  $_" }
+    }
+}
+
 function Test-VariantToStringAuthority {
     $script:total++
     Write-Host -NoNewline "  [STATIC] variant_to_string_authority ... "
@@ -4657,6 +4675,7 @@ if ($Category -in @("all", "run", "bas")) {
     Add-BasTest "test_earlybound2" "$Tests\test_earlybound2.bas" @("EB2-1:OK", "EB2-7:DriveType=2", "EB2-8:OK", "EB2-10:OK", "EB2:10/10") -Arch "x86"
     Add-BasTest "test_not_com" "$Tests\test_not_com.bas" @("NOT-COM:OK", "NOT-COM2:OK", "NOT-COM:PASS") -Arch "x86"
     Add-BasTest "test_err_obj" "$Tests\test_err_obj.bas" @("ERR-1:OK", "ERR-6:OK", "ERR-7:OK", "ERR-8:OK", "ERR-9:OK", "ERR:9/9")
+    Add-BasTest "test_late_cond" "$Tests\test_late_cond.bas" @("COND-1:COUNT ok=12/12", "COND:12/12")
     Add-BasTest "test_variant_cmp" "$Tests\test_variant_cmp.bas" @("VC-1:OK", "VC-4:OK", "VC:4/4")
     Add-BasTest "test_com_default_prop" "$Tests\test_com_default_prop.bas" @("DP-1:OK", "DP-4:OK", "P24-10: 4/4")
     # P24-10b: 后期绑定 COM 默认属性 obj(args) — Dim o As Object (无类型库签名) 走
@@ -5878,6 +5897,29 @@ if ($Category -in @("all", "run", "vbp")) {
     Test-EmitcAbsent "b241_named_arg_lesion" @("$Tests\test_err_obj.bas") @(
         'vb6_ErrRaise(7001, vb6_BSTR_FromStr(L"DESC7"), (BSTR)0)',   # 改前: 按书写序把文案塞进 source
         'vb6_ErrRaise(7003, vb6_BSTR_FromStr(L"DESC9"), vb6_BSTR_FromStr(L"SRC9"))'   # 改前: 两档整个互换
+    )
+    # 账 #305 第二百四十四刀: 「把一条 C 表达式折成 VB6 的真值」收成唯一主人 conditionTruthExpr。
+    # 改前裸 `If <晚绑定调用> Then` 发成 if (vb6_ComCall(...)) —— 测的是堆上 VARIANT 的指针 => 恒真
+    # (真语料按产物 82 处 / 27 份文件, 最响的一族是 Do While Not rs.EOF = 死循环; 读数见第二百四十三刀)。
+    # 七站各一枚正针: If / ElseIf / Do While / Do Until / Loop While / Loop Until / While Wend。
+    Test-EmitcShape "b244_cond_truth_shape" @("$Tests\test_late_cond.bas") @(
+        'if (vb6_ComResultToBool(vb6_ComCall(d, L"Exists", (void*[]){vb6_ComPackBSTR(vb6_BSTR_FromStr(L"K-IF"))}, 1))) {',
+        'if (vb6_ComResultToBool(vb6_ComCall(d, L"Exists", (void*[]){vb6_ComPackBSTR(vb6_BSTR_FromStr(L"K-ELSEIF"))}, 1))) {',
+        'if (!(vb6_ComResultToBool(vb6_ComCall(d, L"Exists", (void*[]){vb6_ComPackBSTR(vb6_BSTR_FromStr(L"K-DOWHILE"))}, 1)))) goto vb6_loop_exit_0;',
+        'if (vb6_ComResultToBool(vb6_ComCall(d, L"Exists", (void*[]){vb6_ComPackBSTR(vb6_BSTR_FromStr(L"K-DOUNTIL"))}, 1))) goto vb6_loop_exit_4;',
+        '} while (vb6_ComResultToBool(vb6_ComCall(d, L"Exists", (void*[]){vb6_ComPackBSTR(vb6_BSTR_FromStr(L"K-LOOPWHILE"))}, 1)));',
+        '} while (!(vb6_ComResultToBool(vb6_ComCall(d, L"Exists", (void*[]){vb6_ComPackBSTR(vb6_BSTR_FromStr(L"K-LOOPUNTIL"))}, 1))));',
+        'if (!(vb6_ComResultToBool(vb6_ComCall(d, L"Exists", (void*[]){vb6_ComPackBSTR(vb6_BSTR_FromStr(L"K-WHILE"))}, 1)))) goto vb6_loop_exit_10;'
+    )
+    # 反面针: 改前那七形一形都不许再出现 (同一枚夹具、同一台编译器)。
+    Test-EmitcAbsent "b244_cond_truth_lesion" @("$Tests\test_late_cond.bas") @(
+        'if (vb6_ComCall(d, L"Exists", (void*[]){vb6_ComPackBSTR(vb6_BSTR_FromStr(L"K-IF"))}, 1)) {',
+        'if (vb6_ComCall(d, L"Exists", (void*[]){vb6_ComPackBSTR(vb6_BSTR_FromStr(L"K-ELSEIF"))}, 1)) {',
+        'if (!(vb6_ComCall(d, L"Exists", (void*[]){vb6_ComPackBSTR(vb6_BSTR_FromStr(L"K-DOWHILE"))}, 1))) goto vb6_loop_exit_0;',
+        'if (vb6_ComCall(d, L"Exists", (void*[]){vb6_ComPackBSTR(vb6_BSTR_FromStr(L"K-DOUNTIL"))}, 1)) goto vb6_loop_exit_4;',
+        '} while (vb6_ComCall(d, L"Exists", (void*[]){vb6_ComPackBSTR(vb6_BSTR_FromStr(L"K-LOOPWHILE"))}, 1));',
+        '} while (!(vb6_ComCall(d, L"Exists", (void*[]){vb6_ComPackBSTR(vb6_BSTR_FromStr(L"K-LOOPUNTIL"))}, 1)));',
+        'if (!(vb6_ComCall(d, L"Exists", (void*[]){vb6_ComPackBSTR(vb6_BSTR_FromStr(L"K-WHILE"))}, 1))) goto vb6_loop_exit_10;'
     )
 
     Test-EmitcShape "b239_byref_arg_shape" @("$Tests\b239_byrefarg\B239k.vbp") @(
@@ -9988,6 +10030,7 @@ if ($Category -in @("all", "compile")) {
     if (Enter-StaticShard) { Test-ByRefScalarWriteBack }
     if (Enter-StaticShard) { Test-VariantToStringAuthority }
     if (Enter-StaticShard) { Test-ByRefArgPackAuthority }
+    if (Enter-StaticShard) { Test-ConditionTruthAuthority }
     if (Enter-StaticShard) { Test-ClsidSyncAllCopies }
     if (Enter-StaticShard) { Test-OwnedTempKeeps }
     if (Enter-StaticShard) { Test-OwnedTempSemantics }

@@ -1120,6 +1120,39 @@ bool CCodeGen::cExprIsVariantSlotFieldRead(const std::string& cExpr) const {
         && cExpr.compare(cExpr.size() - tail.size(), tail.size(), tail) == 0;
 }
 
+// 账 #305 第二百四十四刀: 「这发交回的 C 是不是裸晚绑定调用的结果」—— 唯一主人。
+//   口径 = 位置 0 的严格前缀 (不剥外层括号, 见 cgen_helpers.inc 那两条声明的理由)。
+bool CCodeGen::cExprIsBareComResult(const std::string& cExpr) const {
+    static const char* const kLateCallResults[] = {
+        "vb6_ComCall(",
+        "vb6_ComCallByDispid(",
+        "vb6_ComGetProp(",
+        "vb6_ComGetObjectProp(",
+    };
+    for (size_t i = 0; i < sizeof(kLateCallResults) / sizeof(kLateCallResults[0]); ++i) {
+        std::string lit(kLateCallResults[i]);
+        if (cExpr.size() >= lit.size() && cExpr.compare(0, lit.size(), lit) == 0) return true;
+    }
+    return false;
+}
+
+// 账 #305 第二百四十四刀: 「把这条 C 表达式折成 VB6 的真值测试」的唯一主人。
+//   落地前只有装箱那一站 (boxToVariant) 认得「裸晚绑定调用」这一档; 条件那一族问的是
+//   cExprIsVariant (认「是不是槽」), 而那一头发出去的是指针 ⇒ 答否 ⇒ 一行都不包 ⇒
+//   if (ptr) 恒真 (真语料按产物 82 处 / 27 份文件, 读数见账 #305 第二百四十三刀)。
+std::string CCodeGen::conditionTruthExpr(const std::string& cExpr, Expr* cond) const {
+    if (cExprIsBareComResult(cExpr)) return "vb6_ComResultToBool(" + cExpr + ")";
+    bool isVar = cExprIsVariant(cExpr);
+    if (!isVar && cond && cond->kind == ASTNodeKind::IdentifierExpr) {
+        std::string low = Symbol::toLower(static_cast<IdentifierExpr&>(*cond).name);
+        if (knownVariantVars_.count(low)) isVar = true;
+    }
+    if (isVar && cExpr.find("vb6_VariantToBool(") == std::string::npos) {
+        return "vb6_VariantToBool(" + cExpr + ")";
+    }
+    return cExpr;
+}
+
 bool CCodeGen::cExprIsVariant(const std::string& cExpr) const {
     // 去除前导空白和括号
     size_t start = 0;

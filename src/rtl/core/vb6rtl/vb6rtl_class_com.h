@@ -172,6 +172,10 @@ void* vb6_ComGetObjectProp(void* disp, const wchar_t* propName);
 intptr_t vb6_ComGetLongPtrProp(void* disp, const wchar_t* propName);
 // COM调用结果→vb6_VARIANT (后期绑定, 如dic.Item(key))
 vb6_VARIANT vb6_VariantFromComResult(void* variant_ptr);
+// 账 #305 第二百四十四刀: 晚绑定调用的结果当 VB6 的「真值」用 (If / ElseIf / Do While /
+// Do Until / Loop While / Loop Until / While Wend 那七站)。交回来的是堆上一枚 VARIANT 的
+// 指针 —— 按档读回真值, 连那一枚堆块一起收回; 从前发码把指针本身当条件, 恒真。
+int16_t vb6_ComResultToBool(void* variant_ptr);
 vb6_VARIANT vb6_VariantFromStackVARIANT(VARIANT* pv);  /* P24-03: 栈上VARIANT转换(不释放) */
 void* vb6_VariantToObject(vb6_VARIANT* v);  /* P24-04: Extract IDispatch from Variant for COM late-binding */
 void* vb6_ComPackVariant(vb6_VARIANT v);     /* P24-04: Pack vb6_VARIANT (by value) into Windows VARIANT */

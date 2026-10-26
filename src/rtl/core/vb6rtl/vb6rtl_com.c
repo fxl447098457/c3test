@@ -479,6 +479,19 @@ vb6_VARIANT vb6_VariantFromComResult(void* variant_ptr) {
     return result;
 }
 
+// 账 #305 第二百四十四刀: 「这发晚绑定调用的结果当 VB6 的真值」—— 三件事一次办完:
+//   一是走 vb6_VariantToBool 那一位既有的口径主人按档读回真值 (Empty/0/False 为假);
+//   二是消耗参数带来的那一枚堆上 VARIANT —— vb6_VariantFromComResult 的契约就是吃掉所有权
+//      (内部 VariantClear + free, 见上面那枚), 这里绝不能再 free 一次;
+//   三是收回二深拷出来的那枚槽 (BSTR / 对象 / 数组那几档有载荷, 不收就漏)。
+// 从前发码在条件那一读直接 if (vb6_ComCall(...)), 测的是指针, 恒真。
+int16_t vb6_ComResultToBool(void* variant_ptr) {
+    vb6_VARIANT v = vb6_VariantFromComResult(variant_ptr);
+    int16_t r = vb6_VariantToBool(v);
+    vb6_VariantClear(&v);
+    return r;
+}
+
 // P24-03: 栈上 VARIANT → vb6_VARIANT(带权副本, 不动源) —— For Each 那一族用这一枚。
 vb6_VARIANT vb6_VariantFromStackVARIANT(VARIANT* pv) {
     return vb6_ComVariantIntoSlot(pv, 0);

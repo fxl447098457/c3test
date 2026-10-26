@@ -785,6 +785,20 @@
     // 仅检查顶层表达式 (去除前导括号后), 避免对子表达式误判.
     bool cExprIsVariant(const std::string& cExpr) const;
 
+    // 账 #305 第二百四十四刀: 「这发交回的 C 是不是裸晚绑定调用的结果」—— 那四枚 RTL 出口
+    //   (vb6_ComCall / vb6_ComCallByDispid / vb6_ComGetProp / vb6_ComGetObjectProp) 的签名都
+    //   返回 void* 承载一枚堆上 VARIANT*。只认这四枚: vb6_ComCallInt/BSTR/Double/Object 与
+    //   vb6_ComGet*Prop 那些带类型的出口交回的已经是具体 C 档, 算进来就是二次解包。
+    //   按位置 0 的严格前缀认, 不剥外层括号 —— 剥了就分不清「一整发裸调用」和「(裸调用 & 裸调用)」
+    //   那种已经折过的式子, 后者交进真值出口会把整只式子当槽读。
+    bool cExprIsBareComResult(const std::string& cExpr) const;
+
+    // 账 #305 第二百四十四刀: 「把这条 C 表达式折成 VB6 的真值测试」的唯一主人 —— 条件那一族
+    //   七站 (If / ElseIf / Do While / Do Until / Loop While / Loop Until / While Wend) 都问它。
+    //   裸晚绑定调用走 vb6_ComResultToBool; 整只槽走 vb6_VariantToBool (Fix 090ag 那条老答案,
+    //   逐字沿用); 其余原样交回。
+    std::string conditionTruthExpr(const std::string& cExpr, Expr* cond) const;
+
     // 账 #305 §B171 (第六十二刀): 「这一枚 C 文本是不是**类字段里那枚 Variant 槽的读**」——
     // cExprIsVariant 的一条来源, 单独成一枚是因为它是**唯一可寻址**的那一档: 装箱站对
     // 「槽的函数结果」只能复制, 对「槽字段本身」可以直传 &(...)。判据 = 尾注里那个
