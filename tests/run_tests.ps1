@@ -1872,6 +1872,25 @@ function Test-ByRefArgPackAuthority {
 # 交回的是堆上 VARIANT 的指针, 从前条件那一读直接 if (ptr) ⇒ 恒真 (真语料按产物 82 处)。
 # 五道: RTL 出口 (定义/声明/三问顺序) / 主人定义+声明+七站 / 裸调用那一问只许主人问 /
 # 站点不许自问「是不是槽」 / 判据面 7 枚正针 + 14 枚键位 + 登记。
+# 账 #305 第二百四十九刀: 「值语境吃到交回对象的那枚 COM 出口」只有一位主人 —— 对象出口
+# 交回的是 IDispatch 指针 (非对象档压根交回 NULL, VariantChangeType 实测 0x80020005),
+# 从前两条实参臂各自把手抄名单里的它当成「裸晚绑定结果」包进 vb6_VariantFromComResult
+# ⇒ 句柄档属性读恒 0。六道: 主人 + 三对孪生表 / 消费者两站 / 那两站不抄前缀 / 两站各自
+# 那道「要的是对象指针」的闸 / 反向那一半同住一处 / 判据面 (整工程产物只许用反面针)。
+function Test-ComValueTwinAuthority {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] com_value_twin_authority ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\check_com_value_twin_authority.ps1" 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        $out | Select-Object -First 8 | ForEach-Object { Write-Host "  $_" }
+    }
+}
+
 function Test-ConditionTruthAuthority {
     $script:total++
     Write-Host -NoNewline "  [STATIC] condition_truth_authority ... "
@@ -5940,6 +5959,19 @@ if ($Category -in @("all", "run", "vbp")) {
         'x = vb6_ChkLong((~(int32_t)(vb6_ComCall(d, L"Exists", (void*[]){vb6_ComPackBSTR(vb6_BSTR_FromStr(L"A"))}, 1))));',
         'x = vb6_ChkLong((~(int32_t)(vb6_ComCall(d, L"Exists", (void*[]){vb6_ComPackBSTR(vb6_BSTR_FromStr(L"K-VAL"))}, 1))));',
         'if (!((~(int32_t)(vb6_ComCall(d, L"Exists", (void*[]){vb6_ComPackBSTR(vb6_BSTR_FromStr(L"A"))}, 1))))) goto vb6_loop_exit_12;'
+    )
+    # 账 #305 第二百四十九刀: 值语境 (Declare 的数值/LongPtr 形参) 吃到「交回对象的那一枚出口」时,
+    # 从前发的是 vb6_ComGetObjectProp —— 那枚出口对非对象档压根交回 NULL (IFont.hFont 运行期是 VT_I4,
+    # 而 VariantChangeType(VT_I4 -> VT_DISPATCH) 实测 0x80020005, 见 .local/k249_probe/vtprobe.c) ⇒ 句柄恒 0,
+    # 字体度量整条落空。现在由唯一主人 comValueTwinForObjectReadExpr 先换成同元的通用出口 vb6_ComGetProp,
+    # 再由这一站按形参档提取。靶 = 真工程 VBFlexGridDemo (整工程发码实测 2 秒), 两处病灶在 Common.bas:1012
+    # 与 VisualStyles.bas:462。**为什么这里只钉反面**: 整工程产物里有 28 行带 vb6_BSTR_FromStr 的奇引号行
+    # (改前改后同数, 全是注释里的 VB 原文), 而 Test-EmitcShape 那条「奇引号行 = 0」的守护对**单份文件**才成立
+    # ⇒ 正向那一头由哨兵 check_com_value_twin_authority + 台账读数 (对象读 47→45 / 通用读 106→108) 钉。
+    # 反面针: 修复前那两行原样 —— 同一份工程、同一台编译器的其余部分, 只差这一问有没有主人。
+    Test-EmitcAbsent "b249_value_twin_lesion" @("$Tests\VBFlexGridDemo\VBFlexGridDemo.vbp") @(
+        'vb6_lwa_GetObjectW(vb6_VariantToLongPtr(vb6_VariantFromComResult(vb6_ComGetObjectProp(Font, L"hFont"))), (int32_t)sizeof(vb6_type_LOGFONT), (void*)&(LF));',
+        'hFontOld = SelectObject(hDC, vb6_VariantToLongPtr(vb6_VariantFromComResult(vb6_ComGetObjectProp(ButtonFont, L"hFont"))));'
     )
 
     Test-EmitcShape "b239_byref_arg_shape" @("$Tests\b239_byrefarg\B239k.vbp") @(
@@ -10051,6 +10083,7 @@ if ($Category -in @("all", "compile")) {
     if (Enter-StaticShard) { Test-VariantToStringAuthority }
     if (Enter-StaticShard) { Test-ByRefArgPackAuthority }
     if (Enter-StaticShard) { Test-ConditionTruthAuthority }
+    if (Enter-StaticShard) { Test-ComValueTwinAuthority }
     if (Enter-StaticShard) { Test-ClsidSyncAllCopies }
     if (Enter-StaticShard) { Test-OwnedTempKeeps }
     if (Enter-StaticShard) { Test-OwnedTempSemantics }

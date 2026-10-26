@@ -62,6 +62,39 @@ std::string CCodeGen::comObjectRefFromCallExpr(const std::string& expr) {
     return expr;
 }
 
+// 账 #305 第二百四十九刀: 上面那一问的**反向**。comObjectRefFromCallExpr 答「结果要当对象用 ⇒
+// 换到交回对象的那一枚出口」; 本函数答「结果要当**值**用, 可这一发走的是交回对象的出口 ⇒ 换回
+// 按值不丢信息的那一枚」。两条腿同住一处, 因为它们是同一个问题的两个方向, 抄两份必然不同答
+// (第二百四十六刀撤条件站那一枚、第二百四十八刀数出七份手抄名单, 都是这一问没有主人的代价)。
+//
+// 为什么非换不可: 对象出口交回的是 IDispatch 指针, 那枚 VARIANT 结构体**在它内部已经释放**,
+// 值语境再把它当 VARIANT* 解引用 = 按垃圾 vt 抄槽; 更要紧的是它对非对象档压根交回 NULL ——
+// `IFont.hFont` 这类「声明成句柄档、运行期是 VT_I4」的属性读走 else 分支的
+// VariantChangeType(VT_I4 → VT_DISPATCH), 实测 (cscript 同一问句 + .local/k249_probe/vtprobe.c)
+// 全部 0x80020005 DISP_E_TYPEMISMATCH ⇒ 属性值整个丢掉, 句柄恒 0。
+// 通用出口交回堆上 VARIANT* (所有权归调用方, 正好由 VariantFromComResult 收下), 按目标档提取
+// 对 I4/BSTR/R8/DISPATCH 都成立 ⇒ 值语境一律走它。
+//
+// 三对孪生的实参表逐一对过 (src/rtl/core/vb6com/vb6com.h:62-66 / :128-131 / :151 / :163-166):
+//   vb6_ComGetObjectProp(disp, name)              ↔ vb6_ComGetProp(disp, name)
+//   vb6_ComCallObject(disp, name, args, argc)     ↔ vb6_ComCall(disp, name, args, argc)
+//   vb6_ComGetPropertyObject(disp, name, …)      ↔ vb6_ComGetPropertyVariant(disp, name, …)
+// 交回空串 = 这一发不是对象出口, 调用方按原样办。
+std::string CCodeGen::comValueTwinForObjectReadExpr(const std::string& cExpr) const {
+    static const char* const kTwins[][2] = {
+        { "vb6_ComGetObjectProp(", "vb6_ComGetProp(" },
+        { "vb6_ComCallObject(", "vb6_ComCall(" },
+        { "vb6_ComGetPropertyObject(", "vb6_ComGetPropertyVariant(" },
+    };
+    for (size_t i = 0; i < sizeof(kTwins) / sizeof(kTwins[0]); ++i) {
+        const std::string from(kTwins[i][0]);
+        if (cExpr.size() >= from.size() && cExpr.compare(0, from.size(), from) == 0) {
+            return std::string(kTwins[i][1]) + cExpr.substr(from.size());
+        }
+    }
+    return std::string();
+}
+
 // 账 #245/§B94: comMethods 的唯一读出口 + 两条档位出口（声明见 cgen_helpers.inc）。
 CCodeGen::ComSigView CCodeGen::comSigViewOf(const Symbol* comSym,
                                             const std::string& memberName) const {
