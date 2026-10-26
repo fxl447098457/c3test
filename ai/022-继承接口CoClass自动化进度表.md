@@ -6,7 +6,17 @@
 
 OPEN_LOCAL_DIVERGENCE: **已收口（2026-09-27 入夜 = C29-MV-d）** —— 本地 `ctrlmonthview` 的 MV24/MV25/MV30 三条红既不是"本地环境/增量缓存"、也不是"OS 版本相关"，而是**挂钟相关**：comctl v6 把当前时间混进 `MCM_GETCURSEL` 的负载里（日没错、零头 0.765），`CLng` 下午进位、上午舍掉 ⇒ 本机下午一直红、CI 跑在上午一直绿。修法与全部读数见 029 §九 C29-MV-d 那一格。留下的一般式：**日期面判据按 `CLng` / `=` 比之前，产品读数必须归成整数日**，否则同一棵树的判据随时段翻脸，而门只会读到"上午那一半"。
 STATUS: IDLE             # NOT_STARTED | DESIGN | BUSY | IDLE | ALL_DONE
-LAST_RUN: 2026-10-26T23:37:44+08:00 **第二百四十三刀「量」已出（账 #305：(丙) 纯晚绑定的 named 落档读死 + 顺带在同一枚探针上撞出「晚绑定调用被当条件用」那一格）—— 不动代码
+LAST_RUN: 2026-10-27T03:43:26+08:00 **第二百四十四刀「实施+判据」已出（账 #305：条件那一读收成唯一主人 `conditionTruthExpr` + 新 RTL 出口 `vb6_ComResultToBool`，裸晚绑定调用不再被当指针测真）—— 已推 dev、等门 #937**
+—— **改的是哪一问**：`If` 顶层 / `ElseIf` / 循环那五站把「这发交回的 C 是什么档」问的是 `cExprIsVariant`（认「是不是整枚槽」），而裸 `vb6_ComCall` 交回的是**指针** ⇒ 答否 ⇒ 一行不包 ⇒ `if (ptr)` 恒真。收成一处主人 `conditionTruthExpr`（`cgen_util_type.cpp:1143`），先问新 `cExprIsBareComResult`（:1125，四枚裸出口的严格前缀；五枚带型出口禁止进名单，进 = 二次解包）。
+—— **顺带结掉的所有权**：新 RTL 出口 `vb6_ComResultToBool(void*)` 一次收干条件里现造的那枚堆 VARIANT（`FromComResult` 收所有权 → `ToBool` → `Clear`）⇒ 第二百四十三刀记在 §B164 名下的「条件那一发没人收」这一格不用再单独欠。
+—— **七站**：`cgen_stmt.cpp` 两站（`If` 撤掉 Fix 090ag 那截手抄臂 -15 行 / `ElseIf` 此前连包装带 `resolveComValue` 都没调）+ `cgen_loop.cpp` 五站（Do While / Do Until / Loop While / Loop Until / While-Wend）。
+—— **判据**：新夹具 `tests/test_late_cond.bas` 十二臂（八枚假键 + 四枚真键同形对照，假方向单钉会被恒真与恒假同时糊过去），`COND:12/12`；A/B 用改前基线 = `COND:FAIL 5` 且 While-Wend 25s 不退被杀；发码两头发码针各七形（shape / absent）并按 runner 的 `Contains` 路径复算；新哨兵 `check_condition_truth_authority.ps1` 28 条 ok。
+—— **清单**：541 行 = 相同 539 / 移动 1（`tests/test_p24_04b/test_getobject.bas` 3058→3079，唯一打到别份产物那一处）/ 新增 1（`tests/test_late_cond.bas` 6128）/ 缺席 0；本机复算 541/541 相同，门那台独立复算待回填。
+—— **在册（下一刀的量）**：条件里的**操作数臂**三形没碰 —— `And`/`Or` = `(int32_t)(ptr) & (int32_t)(ptr)`、`IIf` = `(ptr) != 0`、`If Not <裸调用>` = `~(int32_t)(ptr)`（答案对但理由错，夹具 `K-NOT` 那一臂不能拿来当这一形的证人）；(丙) 纯晚绑定 named 按名落位；`obj.Member(…)(i)` 错误 17。
+—— **本机负担（教训）**：本轮那次「循环 124 份 `check_*.ps1`」的扫法把用户的机器跑崩 ⇒ 本地只定点跑本刀改到的几枚，全量数字交给门（见台账第二百四十四刀那一行第四格）。
+—— **刀号**：本轮取 244（实施）；243 已入账（见下一格留档）。
+
+# 上一轮（2026-10-26T23:37:44+08:00，原样留档）= LAST_RUN: 2026-10-26T23:37:44+08:00 **第二百四十三刀「量」已出（账 #305：(丙) 纯晚绑定的 named 落档读死 + 顺带在同一枚探针上撞出「晚绑定调用被当条件用」那一格）—— 不动代码
 —— **(丙) 读数（真跑 x64，`.local/k243_probe/K243w` + `K243y`，尺 = `.build/C3.exe` md5 `D2CC8E97DCCE284D808EAB918094B27D`）**：`d.Add Item:="2", Key:="A"` ⇒ `err=0 count=1 hasA=False has2=True`，再按声明序补 `Key:="A"` ⇒ `err=0 count=2` ⇒ 真进去的键是 "2"、"A" 从没被占过；对照臂「声明序写两遍同一枚键」⇒ `err=457 count=1`。⇒ 名字连载体都没有（`vb6_ComCall` 的 DISPPARAMS 恒 cNamedArgs=0），单枚 named 只有恰好写在第一档才与 VB6 同解。
 —— **撞出的那一格（比 (丙) 更响）**：裸 `If <晚绑定方法调用> Then` 测的是返回的那枚 VARIANT **指针** ⇒ 恒真。`If d.Exists("ZZZ")`（键不存在）答真、同一发先取进 Variant 槽再 `If v` 答假 ⇒ 值本身没错，错在条件那一读；`If Not …` 答真是**巧合对**（指针非零、取反仍非零）；`Do … Loop While <假条件>` 跑满保险丝（n=4 / VB6 该 1）。
 —— **机制**：条件唯一包装站 = `cgen_stmt.cpp:196`，只问 `cExprIsVariant`（认「是不是槽」），裸 `vb6_ComCall(` 是 `void*` 指针不是槽 ⇒ 不包 ⇒ `if (ptr)`。同一问已有唯一权威 = `boxToVariant`（`cgen_util_ctrl.cpp:3018`，注释写明必须先 `vb6_VariantFromComResult`，四条文本前缀 :3037-3041）。站点：`If` :200 / `ElseIf` :219（连 `resolveComValue` 都没调）/ 循环四站 `cgen_loop.cpp:31/50/71/84`；另两条臂 = `And`/`Or` 发成 `(int32_t)(ptr) & (int32_t)(ptr)`（还漏两枚堆槽）、`IIf` 折成 `(ptr) != 0`。按文本问「是不是裸 `vb6_ComCall(`」的站点全仓 19 份文件 / 40 行 ⇒ 动手前先把这一问收成一位主人。
