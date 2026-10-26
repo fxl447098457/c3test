@@ -6,7 +6,14 @@
 
 OPEN_LOCAL_DIVERGENCE: **已收口（2026-09-27 入夜 = C29-MV-d）** —— 本地 `ctrlmonthview` 的 MV24/MV25/MV30 三条红既不是"本地环境/增量缓存"、也不是"OS 版本相关"，而是**挂钟相关**：comctl v6 把当前时间混进 `MCM_GETCURSEL` 的负载里（日没错、零头 0.765），`CLng` 下午进位、上午舍掉 ⇒ 本机下午一直红、CI 跑在上午一直绿。修法与全部读数见 029 §九 C29-MV-d 那一格。留下的一般式：**日期面判据按 `CLng` / `=` 比之前，产品读数必须归成整数日**，否则同一棵树的判据随时段翻脸，而门只会读到"上午那一半"。
 STATUS: IDLE             # NOT_STARTED | DESIGN | BUSY | IDLE | ALL_DONE
-LAST_RUN: 2026-10-26T22:45:00+08:00 **第二百四十一刀「收线」已出（账 #305）—— 门 #936 二十一格全绿，一趟收线（没有第二轮登记）**
+LAST_RUN: 2026-10-26T22:58:00+08:00 **第二百四十二刀「量」已出（账 #305：早绑定那一支的 named 实参）—— 不动代码
+—— **机制**：`isEarlyBoundCom_` 全站只有一个写者（cgen_expr_member_obj_dispatch.inc:12），条件 = `knownTypedComVars_` 命中 = 接收者声明成**类型库解析出来的** ComClass / ComInterface（本工程同名类模块先被 `projectClassNameOf` 截走，不进这张表）；那一支的 named 循环（com_bind :607-623）手里已握着 `sig.params[i].name`，却只拿来问 ByRef，打包顺序照书写序。
+—— **证人（本机 --emit-c，`.local/k242_probe/k242.bas`）**：`Dim fso As FileSystemObject` 真走到那一支；按声明序写 = `vb6_ComCallInt(fso, L"CopyFile", {S, D}, 2)` 对，反过来写 = `{D2, S2}` ⇒ 目的地交进 Source 槽（病灶可达、已证）。
+—— **承面**：门语料这一支 0 处；真语料（D:\vb_yqt4qPac）成员调用上的 named 语句 934 条（已排 Err.Raise）= 730 条只 1 枚 + 204 条 ≥2 枚，按 (方法, 参数集) 归组 78 组里**同组写出两种顺序的 0 组** ⇒ 没有一处自证乱序；另测 `As Word.Application` / `ADODB.Connection` 在本机不落这一支（发的是 `vb6_ComCall` 纯晚绑定）⇒ 那 50 处 Word 站点是「装了 Office 的机器才可能」的形状，而写的顺序恰是声明顺序。
+—— **判决**：(乙) 从「实施候选」降级成纸面缺口（照 #404 的处置：病灶真、承面 0，不单开刀）；有活性的是 (丙) 纯晚绑定（`vb6_ComCall` 恒 cNamedArgs=0；先要问清链式/属性读接收者发不发包器 = #412 那一格）。结构性提示：第二百四十一刀之后「按名落位」已有两处名字来源（表里 `names` 与 `sig.params[i].name`），加第三家先收成一位主人。
+—— **刀号**：本轮取 242（量，不动代码）；241 的门 #936 已收线（见上一轮那格）。
+
+# 上一轮（2026-10-26T22:45:00+08:00，原样留档）= LAST_RUN: 2026-10-26T22:45:00+08:00 **第二百四十一刀「收线」已出（账 #305）—— 门 #936 二十一格全绿，一趟收线（没有第二轮登记）**
 —— **门与归因**：run 40340676952 / head `a0cd9bbc` / attempt 1；按用例名验过 `[EMITC-SHAPE] b241_named_arg_slot`（vbp #9）、`[EMITC-ABSENT] b241_named_arg_lesion`（vbp #10）、`[STATIC] builtin_opt_defaults`（含新 R9），239/238 那两半的针（`byref_arg_pack_authority` / `variant_to_string_authority`）照旧 PASS；bas / vbp 各分片全部 FAIL=0（真跑夹具 test_err_obj 的针数组含 ERR:9/9）。
 —— **形状门独立复算**：CI 那台自己交的清单 = inputs=540 + expectation-check=PASS + manifest-expectation OK ⇒ 本机登记的 3 行（本刀）+ 9 行（合并带进来那三笔欠的）在 CI 上逐行对上。
 —— **在册下一格**：named 那一族剩 (乙) 早绑定照 `sig.params[i].name` 归位、(丙) 纯晚绑定（运行期 `vb6_ComGetIdsOfNames` + 带 cNamedArgs 的新出口，或先出一声诊断）；表里另外 30 族要不要也登记 names 待拍；BSTR / Object / Variant 三档 ByRef 写回、merged 表 comClsidStr 非空护栏、视图三格纸面缺口照旧。
