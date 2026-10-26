@@ -1603,6 +1603,16 @@ void vb6_ShowForm(void* hwnd, int modal) {
     ShowWindow((HWND)hwnd, SW_SHOWDEFAULT);
     UpdateWindow((HWND)hwnd);
 
+    // 账 #305: 首次显示时窗体背景从未被擦除过 —— Charts 2020 Form2 (BackColor &H00E5E5E5&)
+    // 的卡片是子控件画的白底, 卡片**之间**的空隙第一次上屏时无人填, 于是留白;
+    // VB6 下这些空隙是窗体底色 229,229,229。这里在首次 Show 之后显式擦一次背景
+    // (含子窗口), 让灰条出现。只做一次: 后续重绘仍由各子控件的 WM_ERASEBKGND 负责,
+    // 不能每帧擦 (会与 AutoRedraw 记忆 DC 打架, 3DMenu 每 50ms 镜像一次)。
+    if (!GetPropW((HWND)hwnd, L"VB6_AutoRedrawDC")) {
+        RedrawWindow((HWND)hwnd, NULL, NULL,
+                     RDW_INVALIDATE | RDW_ERASE | RDW_UPDATENOW | RDW_ALLCHILDREN);
+    }
+
     // Fix 137: VB6 启动的窗体会出现在最前并获得焦点; 我们只 ShowWindow 的话
     // 窗口常落在已有窗口后面 (双击 exe 时尤甚 —— 没有前台权限继承)。
     // 显式提到顶层并请求前台 (SetForegroundWindow 受系统限制时 BringWindowToTop

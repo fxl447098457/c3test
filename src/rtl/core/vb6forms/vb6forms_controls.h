@@ -233,6 +233,16 @@ typedef struct vb6_UserControlDesc {
     // 没有这一槽时 .ctl 里的 UserControl_Click 是死码 —— Charts 六枚 UC 的
     // `RaiseEvent Click` 全写在那里, 于是容器侧的 ucX_Click 一条都收不到。
     void      (*click)(void* me);
+
+    // ---- BackStyle = 0 'Transparent' (只许追加到末尾) ----
+    // VB6 里 `.ctl` 声明 `Windowless = -1` + `BackStyle = 0` 时, 控件没有自己的
+    // 窗口, 画面直接叠在容器上 ⇒ 兄弟控件 (Charts 2020 的白色卡片) 从文字底下
+    // 透出来。C3 的 UC 恒是真子窗口 (WS_CLIPSIBLINGS), 兄弟窗口不会画进本窗
+    // 矩形, 所以宿主得自己在离屏 DIB 里补下层: 先铺 ambient 底色, 再按 z 序把
+    // 位于本窗之下且相交的兄弟窗口用 WM_PRINTCLIENT 画进来, 最后才跑
+    // UserControl_Paint。0 = Opaque (VB6 缺省: 旧 cgen 不发此槽 ⇒ 补 0 ⇒ 行为
+    // 与改动前逐字节一致), 1 = Transparent。
+    int32_t     transparent;
 } vb6_UserControlDesc;
 
 // .ctl module self-registration (type name case-insensitive, duplicate ignored)

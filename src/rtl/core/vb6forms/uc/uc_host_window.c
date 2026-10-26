@@ -14,6 +14,113 @@ extern "C" {
 // 宿主窗口过程
 // ============================================================
 
+// ---------------------------------------------------------------------------
+// 透明 UserControl (`.ctl` 里 `BackStyle = 0 'Transparent'`) 的宿主合成 —— 账 #492
+//
+// VB6 的 Windowless UC 直接画在容器上, 文字底下的兄弟控件内容天然可见。C3 的 UC
+// 一直是真子窗口, 加上 WS_CLIPSIBLINGS 之后兄弟窗口绝不会画进本窗矩形, 于是
+// BackStyle=0 的宿主必须自己把"下面那一层"补进离屏 DIB:
+//   1) 先铺 ambient 底色 (容器 BackColor, 与 VB6 语义一致);
+//   2) 再把 z 序在本窗**之下**、且矩形相交的兄弟窗口用 WM_PRINTCLIENT 画进来。
+//      兄弟按 z 序从最底往上画 (后画者压住先画者), 与本窗的遮挡关系一致。
+// 实测 (tests/Charts 2020): LabelPlus3 的 BackColorOpacity=0 只画文字, 之前宿主
+// 拿 ambient 灰 (Form2.BackColor=E5E5E5) 铺满整块 ⇒ 白色卡片 LabelPlus2 被盖成灰。
+// ---------------------------------------------------------------------------
+static void vb6_uc_fillAmbient(HDC dc, int32_t w, int32_t h) {
+    RECT full = { 0, 0, w, h };
+    COLORREF cref = (vb6_Ambient_BackColor & 0x80000000L)
+                        ? GetSysColor(vb6_Ambient_BackColor & 0xFF)
+                        : (COLORREF)vb6_Ambient_BackColor;
+    HBRUSH b = CreateSolidBrush(cref);
+    FillRect(dc, &full, b);
+    DeleteObject(b);
+}
+
+static void vb6_uc_composeBelow(HWND hwnd, HDC memDC, int32_t cw, int32_t ch) {
+    HWND sibs[64];
+    int sibCount = 0;
+    POINT self = { 0, 0 };
+
+    vb6_uc_fillAmbient(memDC, cw, ch);
+    if (!ClientToScreen(hwnd, &self)) return;
+
+    /* GW_HWNDNEXT 走"本窗之下"的同层兄弟; 收集后**倒序**绘制 (最底下的先画)。*/
+    for (HWND s = GetWindow(hwnd, GW_HWNDNEXT); s && sibCount < 64;
+         s = GetWindow(s, GW_HWNDNEXT)) {
+        sibs[sibCount++] = s;
+    }
+    for (int i = sibCount - 1; i >= 0; --i) {
+        HWND s = sibs[i];
+        POINT sp = { 0, 0 };
+        RECT src;
+        if (!IsWindowVisible(s)) continue;
+        if (!ClientToScreen(s, &sp)) continue;
+        GetClientRect(s, &src);
+        int32_t dx = sp.x - self.x, dy = sp.y - self.y;
+        int32_t sw = src.right - src.left, sh = src.bottom - src.top;
+        if (sw <= 0 || sh <= 0) continue;
+        if (dx >= cw || dy >= ch || dx + sw <= 0 || dy + sh <= 0) continue;
+        int saved = SaveDC(memDC);
+        if (!saved) continue;
+        /* 兄弟的客户区 (0,0) 落到本 DIB 的 (dx,dy); 裁剪也只留它自己那块。*/
+        SetViewportOrgEx(memDC, dx, dy, NULL);
+        HRGN clip = CreateRectRgn(0, 0, sw, sh);
+        if (clip) SelectClipRgn(memDC, clip);
+        SendMessageW(s, WM_PRINTCLIENT, (WPARAM)memDC, PRF_CLIENT | PRF_ERASEBKGND);
+        RestoreDC(memDC, saved);
+        if (clip) DeleteObject(clip);
+    }
+}
+
+// 把本 UC 画进 target。composeBelow=1: target 是本窗自己的窗口 DC (WM_PAINT),
+// 透明 UC 需要先把下层合成进 DIB; composeBelow=0: 正被别的窗口画进它的 DIB
+// (WM_PRINTCLIENT), 下层内容已经在目标 DC 里, 透明 UC 只画自己。
+static void vb6_uc_paintInto(HWND hwnd, vb6_UCRec* r, HDC target,
+                             int32_t cw, int32_t ch, int composeBelow) {
+    if (!r || !r->desc || !r->desc->paint || cw <= 0 || ch <= 0) return;
+    const int transparent = r->desc->transparent != 0;
+
+    vb6_UCDib dib;
+    memset(&dib, 0, sizeof(dib));
+    vb6_uc_dibCreate(&dib, target, cw, ch);
+    const int useDib = (dib.memDC && dib.bits);
+    HDC dc = useDib ? dib.memDC : target;
+
+    if (transparent && composeBelow) {
+        if (useDib) vb6_uc_composeBelow(hwnd, dc, cw, ch);
+    } else if (!transparent) {
+        vb6_uc_fillAmbient(dc, cw, ch);
+    }
+    /* 透明 + 非合成 (被别人 WM_PRINTCLIENT): 一个像素都不填 —— 目标 DC 里已经是
+       合成好的下层, 再填 ambient 会把兄弟内容盖掉。*/
+
+    r->hdc = dc;
+    vb6_UCSaved saved;
+    vb6_uc_push(r, &saved);
+    vb6_uc_trace("paint.begin", r->desc->typeName, r->me);
+    r->desc->paint(r->me);
+    vb6_uc_trace("paint.end", r->desc->typeName, r->me);
+    vb6_uc_pop(&saved);
+
+    if (useDib) {
+        BitBlt(target, 0, 0, dib.w, dib.h, dib.memDC, 0, 0, SRCCOPY);
+        // Fix 113h/123: 调试捕获 (C3_UC_DUMPDIR) —— 只在真实 WM_PAINT 路径做,
+        // WM_PRINTCLIENT 是被兄弟合成调用的, 重复 dump 会淹没序号。
+        const char* dumpDir113h = composeBelow ? getenv("C3_UC_DUMPDIR") : NULL;
+        if (dumpDir113h && *dumpDir113h) {
+            char path113h[1024];
+            _snprintf(path113h, sizeof(path113h), "%s\\%s_%d_%p.bmp", dumpDir113h,
+                      r->desc->typeName, (int)++vb6_ucDumpSeq, hwnd);
+            path113h[sizeof(path113h) - 1] = '\0';
+            vb6_uc_dibSaveBmp(&dib, path113h);
+            // Fix 123: 同步输出整窗合成图 (含 z 序/相对位置)
+            vb6_uc_dumpFormComposite((HWND)GetAncestor(hwnd, GA_ROOT), dumpDir113h);
+        }
+        vb6_uc_dibDestroy(&dib);
+    }
+    r->hdc = NULL;
+}
+
 static LRESULT CALLBACK vb6_uc_wndproc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     vb6_UCRec* r = (vb6_UCRec*)GetWindowLongPtrW(hwnd, GWLP_USERDATA);
     switch (msg) {
@@ -145,66 +252,39 @@ static LRESULT CALLBACK vb6_uc_wndproc(HWND hwnd, UINT msg, WPARAM wParam, LPARA
             if (!r->desc || !r->desc->paint) break;
             PAINTSTRUCT ps;
             HDC hdc = BeginPaint(hwnd, &ps);
-            // Fix 113h: 调试捕获 (见上方 vb6_UCDib 说明) — C3_UC_DUMPDIR 未设置时
-            // 走原路径 (直接绘制到窗口 DC).
-            const char* dumpDir113h = getenv("C3_UC_DUMPDIR");
-            vb6_UCDib dib113h;
-            int useDib113h = 0;
-            if (1) { /* czUI fix: 始终离屏双缓冲, 一次 BitBlt 上屏 (消闪烁) */
-                RECT crc;
-                GetClientRect(hwnd, &crc);
-                int cw113h = (int)(crc.right - crc.left);
-                int ch113h = (int)(crc.bottom - crc.top);
-                if (cw113h > 0 && ch113h > 0) {
-                    vb6_uc_dibCreate(&dib113h, hdc, cw113h, ch113h);
-                    if (dib113h.memDC && dib113h.bits) {
-                        RECT full113h = { 0, 0, cw113h, ch113h };
-                        COLORREF crefFill = (vb6_Ambient_BackColor & 0x80000000L)
-                            ? GetSysColor(vb6_Ambient_BackColor & 0xFF)
-                            : (COLORREF)vb6_Ambient_BackColor;
-                        HBRUSH wb113h = CreateSolidBrush(crefFill);
-                        FillRect(dib113h.memDC, &full113h, wb113h);
-                        DeleteObject(wb113h);
-                        useDib113h = 1;
-                    }
-                }
-            }
-            r->hdc = useDib113h ? dib113h.memDC : hdc;
-            vb6_UCSaved saved;
-            vb6_uc_push(r, &saved);
-            vb6_uc_trace("paint.begin", r->desc->typeName, r->me);
-            r->desc->paint(r->me);
-            vb6_uc_trace("paint.end", r->desc->typeName, r->me);
-            vb6_uc_pop(&saved);
-            if (useDib113h) {
-                BitBlt(hdc, 0, 0, dib113h.w, dib113h.h, dib113h.memDC, 0, 0, SRCCOPY);
-                char path113h[1024];
-                const int doDump = (dumpDir113h && *dumpDir113h);
-                (void)doDump;
-                _snprintf(path113h, sizeof(path113h), "%s\\%s_%d_%p.bmp", dumpDir113h,
-                          r->desc->typeName, (int)++vb6_ucDumpSeq, hwnd);
-                path113h[sizeof(path113h) - 1] = '\0';
-                if (doDump) {
-                    vb6_uc_dibSaveBmp(&dib113h, path113h);
-                    // Fix 123: 同步输出整窗合成图 (含 z 序/相对位置)
-                    vb6_uc_dumpFormComposite((HWND)GetAncestor(hwnd, GA_ROOT), dumpDir113h);
-                }
-                vb6_uc_dibDestroy(&dib113h);
-            }
-            r->hdc = NULL;
+            RECT crc;
+            GetClientRect(hwnd, &crc);
+            vb6_uc_paintInto(hwnd, r, hdc,
+                             (int32_t)(crc.right - crc.left),
+                             (int32_t)(crc.bottom - crc.top), 1);
             EndPaint(hwnd, &ps);
+            return 0;
+        }
+        /* 账 #492: 被父窗口/兄弟窗口的 PRF_CHILDREN 合成时走这里。目标 DC 里
+           (对透明 UC 来说) 已经铺好了下面那一层, 这里只把本控件自己画上去。*/
+        case WM_PRINTCLIENT: {
+            if (!r || !r->ready || !r->desc || !r->desc->paint) break;
+            RECT crc;
+            GetClientRect(hwnd, &crc);
+            vb6_uc_paintInto(hwnd, r, (HDC)wParam,
+                             (int32_t)(crc.right - crc.left),
+                             (int32_t)(crc.bottom - crc.top), 0);
             return 0;
         }
         case WM_ERASEBKGND:
             if (r && r->ready) {
-                // 用容器底色填充, 避免重绘闪烁 (固定白色会在深色 UI 上闪白)
-                RECT rc; GetClientRect(hwnd, &rc);
-                COLORREF cref = (vb6_Ambient_BackColor & 0x80000000L)
-                                    ? GetSysColor(vb6_Ambient_BackColor & 0xFF)
-                                    : (COLORREF)vb6_Ambient_BackColor;
-                HBRUSH b = CreateSolidBrush(cref);
-                FillRect((HDC)wParam, &rc, b);
-                DeleteObject(b);
+                /* 账 #492: 透明 UC 不擦背景 —— 一擦就是一块 ambient 灰, WM_PAINT
+                   里的合成会覆盖它, 中间那一帧在屏幕上就是灰闪。*/
+                if (!r->desc || !r->desc->transparent) {
+                    // 用容器底色填充, 避免重绘闪烁 (固定白色会在深色 UI 上闪白)
+                    RECT rc; GetClientRect(hwnd, &rc);
+                    COLORREF cref = (vb6_Ambient_BackColor & 0x80000000L)
+                                        ? GetSysColor(vb6_Ambient_BackColor & 0xFF)
+                                        : (COLORREF)vb6_Ambient_BackColor;
+                    HBRUSH b = CreateSolidBrush(cref);
+                    FillRect((HDC)wParam, &rc, b);
+                    DeleteObject(b);
+                }
             }
             return 1;
         case WM_CTLCOLOREDIT:

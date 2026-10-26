@@ -181,8 +181,37 @@ void vb6_ho_setVariantDouble(vb6_VARIANT* out, double v) {
     out->dblVal = v;
 }
 
+// 账 #305 §B224: 晚绑定对**带型变量**递 VT_BYREF|<type> (见 vb6_ComPackIntRef 那一族),
+// union 里存的是调用方变量的地址, 不是值。宿主对象模型此前直接按值读 union ⇒
+// `c.Remove j` 读成指针低位/0, Builtin Collection 的 Remove 静默无效 ——
+// Charts 2020 ucTreeMaps.AddLineSeries 的降序排序 (`Remove j : Add v, , i`)
+// 因此只增不删, 标签重复、Count 从 7 涨到 13。这里按 §B224 的标签逐档解引用。
+// 注意: 这些指针**指向标量本身**, 不是指向另一枚 VARIANT (VT_VARIANT 那档除外)。
+static const void* vb6_ho_byrefAddr(const vb6_VARIANT* v) {
+    if (!v || !(v->vt & VT_BYREF)) return NULL;
+    return (const void*)v->pdispVal;
+}
+
 int32_t vb6_ho_variantToLong(const vb6_VARIANT* v) {
     if (!v) return 0;
+    if (v->vt & VT_BYREF) {
+        const void* p = vb6_ho_byrefAddr(v);
+        if (!p) return 0;
+        switch (v->vt & ~VT_BYREF) {
+            case vb6_vtInteger: case vb6_vtBoolean: return (int32_t)*(const int16_t*)p;
+            case vb6_vtLong: return *(const int32_t*)p;
+            case vb6_vtByte: return (int32_t)*(const uint8_t*)p;
+            case vb6_vtSingle: return (int32_t)*(const float*)p;
+            case vb6_vtDouble: return (int32_t)*(const double*)p;
+            case VT_I8: return (int32_t)*(const int64_t*)p;
+            case (vb6_vartype)VT_I1:  return (int32_t)*(const int8_t*)p;
+            case (vb6_vartype)VT_UI2: return (int32_t)*(const uint16_t*)p;
+            case VT_UI4: return (int32_t)*(const uint32_t*)p;
+            case VT_UI8: return (int32_t)*(const uint64_t*)p;
+            case VT_VARIANT: return vb6_ho_variantToLong((const vb6_VARIANT*)p);
+            default: return 0;
+        }
+    }
     switch (v->vt) {
         case vb6_vtInteger: case vb6_vtLong: case vb6_vtBoolean: case vb6_vtByte:
             return v->lVal;
@@ -198,6 +227,24 @@ int32_t vb6_ho_variantToLong(const vb6_VARIANT* v) {
 
 double vb6_ho_variantToDouble(const vb6_VARIANT* v) {
     if (!v) return 0.0;
+    if (v->vt & VT_BYREF) {   /* 账 #305 §B224: 与 ToLong 同一口径 */
+        const void* p = vb6_ho_byrefAddr(v);
+        if (!p) return 0.0;
+        switch (v->vt & ~VT_BYREF) {
+            case vb6_vtSingle: return (double)*(const float*)p;
+            case vb6_vtDouble: return *(const double*)p;
+            case vb6_vtInteger: case vb6_vtBoolean: return (double)*(const int16_t*)p;
+            case vb6_vtLong: return (double)*(const int32_t*)p;
+            case vb6_vtByte: return (double)*(const uint8_t*)p;
+            case VT_I8: return (double)*(const int64_t*)p;
+            case (vb6_vartype)VT_I1:  return (double)*(const int8_t*)p;
+            case (vb6_vartype)VT_UI2: return (double)*(const uint16_t*)p;
+            case VT_UI4: return (double)*(const uint32_t*)p;
+            case VT_UI8: return (double)*(const uint64_t*)p;
+            case VT_VARIANT: return vb6_ho_variantToDouble((const vb6_VARIANT*)p);
+            default: return 0.0;
+        }
+    }
     switch (v->vt) {
         case vb6_vtSingle: case vb6_vtDouble: return v->dblVal;
         case vb6_vtInteger: case vb6_vtLong: case vb6_vtBoolean: return (double)v->lVal;
@@ -211,7 +258,17 @@ double vb6_ho_variantToDouble(const vb6_VARIANT* v) {
 }
 
 BSTR vb6_ho_variantToBstr(const vb6_VARIANT* v) {
-    return (v && v->vt == vb6_vtBSTR) ? v->bstrVal : NULL;
+    if (!v) return NULL;
+    if (v->vt & VT_BYREF) {   /* 账 #305 §B224: ByRef String 递的是 BSTR* */
+        const void* p = vb6_ho_byrefAddr(v);
+        if (!p) return NULL;
+        switch (v->vt & ~VT_BYREF) {
+            case vb6_vtBSTR: return *(BSTR*)p;
+            case VT_VARIANT: return vb6_ho_variantToBstr((const vb6_VARIANT*)p);
+            default: return NULL;
+        }
+    }
+    return (v->vt == vb6_vtBSTR) ? v->bstrVal : NULL;
 }
 
 static void vb6_ho_clientTwips(void* hwnd, int32_t* w, int32_t* h) {
