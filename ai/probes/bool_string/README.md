@@ -17,7 +17,7 @@
 
 用 VB6 打开 `ai/probes/bool_string/BoolProbe.vbp`：
 
-- 若 IDE 报 `stdole2.tlb` 引用失效（机器上没有这个路径），在 `工程 > 引用` 里把 **OLE Automation** 重新勾一次即可，其余不动。
+- 工程里**没有写任何 Reference 行**（不需要 stdole）；若 IDE 自己弹引用对话框，直接确定/取消都行。
 - `文件 > 生成 BoolProbe.dll`，存到本目录（`ai/probes/bool_string/`）。
 
 ### 2. 注册（二选一）

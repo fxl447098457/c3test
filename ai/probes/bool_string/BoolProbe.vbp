@@ -1,11 +1,7 @@
-Type=ActiveX DLL
-
-Reference=*\G{00020430-0000-0000-C000-000000000046}#2.0#0#C:\Windows\System32\stdole2.tlb#OLE Automation
-
+Type=OleDll
 Class=ProbeCls; ProbeCls.cls
-
-
-Startup="(None)"
+ExeName32="BoolProbe.dll"
+Path32=""
 Command32=""
 Name="BoolProbe"
 HelpContextID="0"
@@ -23,3 +19,6 @@ CodeViewDebugInfo=0
 NoAliasing=0
 BoundsCheck=0
 OverflowCheck=0
+Startup="(None)"
+ThreadingModel=1
+MaxNumberOfThreads=1
