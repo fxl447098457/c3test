@@ -1595,6 +1595,20 @@ bool CCodeGen::isWholeArrayRef(const Expr* e) const {
         std::string bareLower = Symbol::toLower(bare.name);
         if (knownVariantVars_.count(bareLower) || knownObjectVars_.count(bareLower))
             return false;
+        // 账 #305 第二百四十九刀: 名册是按**名字**收集的、且跨过程不清空 ⇒ 同一模块里
+        //   另一过程的同名数组会把**本过程这一枚标量**也答成数组。整枚数组那一形问的是
+        //   「这一枚槽的 C 是不是一枚载体指针」, 所以「本过程这一枚声明成什么」排在名册之前。
+        //   实测 ComCtlsDemo Builds/ToolBar/ToolBar.ctl —— 同一文件里两处同名:
+        //     1058 UserControl_WriteProperties 内 `Dim Count(0 To 1) As Long`   (定长数组)
+        //     1185 UserControl_Resize         内 `Dim dwStyle As Long, Count As Long`  (标量)
+        //   ⇒ 1195 `Count = CLng(SendMessage(ToolBarHandle, TB_BUTTONCOUNT, 0, ByVal 0&))`
+        //   发成 `Count = vb6_ArrayAssign1D(NULL, vb6_CLng(...))` —— 一枚 int32_t 收一枚
+        //   载体指针, 而第二实参是**按钮数那个整数** ⇒ RTL 里按 SafeArray1D* 解它
+        //   = `av read target=0x9` 当场崩 (栈: TbrButtons_Add → FButtonsAdd →
+        //   UserControl_Resize → vb6_ArrayAssign1D, 主窗体创建途中, 窗口根本没出来)。
+        //   只否决「本过程明确声明它是非数组」这一种, 不新增第三种答案: 名册那条路一字不变
+        //   (模块级数组 / 形参数组 / 没走 Dim 的循环变量都还从 knownArrays_ 那一问走)。
+        if (procNonArrayLocalVars_.count(bareLower)) return false;
         if (knownArrays_.count(bareLower)) return true;
         Symbol* bsym = symTab_.lookupModule(bare.name);
         return bsym && bsym->kind == SymbolKind::Variable && bsym->isArray;
