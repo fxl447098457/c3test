@@ -133,7 +133,22 @@
     // 现在与泛对象槽问**同一位主人** (唯一发码处 boxIntoLateSlot): 装箱成功交回的是包装器 (void*),
     // 下面那一站的 _Generic 正好走 vb6_VariantObject = 真 IDispatch; 交回原样的形态 (认不出工程类 /
     // 值自己就是槽 / 宿主句柄 / 已剥壳) 一字不变。
-    if (targetIsVariant && node.value) {
+    // 账 #305 第二百四十八刀: 右值**自己就是一枚 Variant 表达式**时不许进装箱那一站。
+    //   格② 这一站问的是「目标是不是 Variant 槽」, 没问右值那一侧; 而唯一发码处
+    //   boxIntoLateSlot 的负条件只按 C **文本**问「是不是槽」(cExprIsVariant) —— 一枚
+    //   `As Variant` 的形参在 C 里的形状就是个裸名, 文本那一问答不出 ⇒ 它把整只
+    //   vb6_VARIANT 结构体当成裸实例指针交给 vb6_ComObject_FromBorrowedInstance
+    //   (而那一位头一件事是 `*(void**)instance` 回填 __comObj = 往结构体首格写)。
+    //   实测 ComCtlsDemo Builds/ListView/LvwListItem.cls:504
+    //   `Set PropShadowListSubItems(SubItemIndex).Tag = Value`
+    //   (Property Set FListSubItemProp(ByVal … ByVal Value As Variant);
+    //    目标字段 Tag As Variant ⇒ 走的就是格② 这一站)
+    //   ⇒ LvwListItem.c:778 C2440「无法从 vb6_VARIANT 转换到 void *」+ C2198。
+    //   VB6 侧语义也支持这道闸: `Set <Variant 槽> = <Variant 变量>` 是**复制那一枚
+    //   Variant** (引用照旧), 不是把右值再包一层包装器。
+    //   判据问 AST 那一侧的主人 isDefinitelyVariantExpr (与 With 那一站同一问句),
+    //   不在这里另抄一份"名字像不像 Variant"的表。
+    if (targetIsVariant && node.value && !isDefinitelyVariantExpr(*node.value)) {
         value = boxIntoLateSlot(value, node.value.get());
     }
 

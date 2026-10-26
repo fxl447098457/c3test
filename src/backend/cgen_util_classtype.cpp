@@ -174,7 +174,31 @@ std::string CCodeGen::inferClassTypeOfExpr(const ASTNode& expr) const {
                 if (withObjectInfoStack_.empty()) return "";
                 const auto& winfo = withObjectInfoStack_.back();
                 if (winfo.kind != WithObjKind::ClassInstance || winfo.className.empty()) return "";
-                return getClassMethodReturnType(winfo.className, wm.memberName);
+                const std::string wmColl242 = getClassMethodReturnType(winfo.className, wm.memberName);
+                if (wmColl242.empty()) return "";
+                // 账 #305 第二百四十八刀: `With .<集合>(i)` 与下面那条路的 `obj.<集合>(i)`
+                //   是同一问 —— `(i)` 不是该属性的实参, 而是**返回的那个集合的默认成员
+                //   Item** 的索引, 表达式的类是**元素类**, 不是集合类本身。
+                //   Fix 242 只把这道闸加在 MemberAccessExpr 那条路上; With 这条路在
+                //   `return getClassMethodReturnType(...)` 就提前交回集合类 ⇒ 同一份 VB6
+                //   源码写成 With 块就退化成集合类, 写成本地变量链则正确。
+                //   实测 ComCtlsDemo Builds/ToolBar/ToolBar.ctl:3518 `With .Buttons(i)`
+                //   (ToolBar Prop Get Buttons() As TbrButtons; TbrButtons.Item As TbrButton)
+                //   ⇒ 发成 `vb6_cls_TbrButtons* _vb6_with_N = (vb6_cls_TbrButtons*)
+                //   vb6_TbrButtons_prop_get_Item(...)`, 块内 .Key/.Tag/.Caption/.Style/
+                //   .Image/.ImageIndex/.ToolTipText/.Description/.Value/… 全按**集合类**找
+                //   成员 ⇒ C2039 × 54 (ToolBar.c 5924-6028); 同形 TabStrip.ctl 的
+                //   `With .Tabs(i)` ⇒ C2039 × 22 (TabStrip.c 3305-3319)。
+                //   两道闸与 Fix 242 逐字同款: (a) 确实带索引; (b) 该成员在宿主类里无参。
+                if (!call.positional.empty()) {
+                    std::vector<ParameterInfo> wmParams242;
+                    if (findClassMemberGetParams(winfo.className, wm.memberName, wmParams242)
+                        && wmParams242.empty()) {
+                        const std::string wmElem242 = getClassMethodReturnType(wmColl242, "Item");
+                        if (!wmElem242.empty()) return wmElem242;
+                    }
+                }
+                return wmColl242;
             }
             auto& ma = static_cast<const MemberAccessExpr&>(*call.callee);
             if (!ma.object) return "";
