@@ -2,7 +2,7 @@ Attribute VB_Name = "Module1"
 Option Explicit
 
 ' VB6 CLIENT side of the probe: late-bound call into the registered BoolProbe.ProbeCls.
-' Writes the readings to %TEMP%oolprobe_client.txt (and shows them in a MsgBox).
+' Writes the readings to %TEMP%\boolprobe_client.txt (and shows them in a MsgBox).
 Sub Main()
     Dim o As Object
     Dim x As Long
@@ -18,7 +18,7 @@ Sub Main()
     r = o.Bump(x)
     p = p & "B4 Bump: x=" & x & " r=" & r & vbCrLf
     f = FreeFile
-    Open Environ$("TEMP") & "oolprobe_client.txt" For Output As #f
+    Open Environ$("TEMP") & "\boolprobe_client.txt" For Output As #f
     Print #f, p
     Close #f
     MsgBox p, vbInformation, "boolprobe client"
