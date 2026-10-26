@@ -590,16 +590,18 @@ if ($cgenComText.Contains('typedef struct " + vtblName')) {
 # ㉘ 第一百六十五刀: 「这一格槽装的是不是 legacy 那一档接口视图」那一问收成一处 = slotIsLegacyIfaceView。
 #    病灶形状 = 腿②/腿③ 那两站先问类名 (inferClassTypeOfExpr 把接口名也答出来)，于是铸出一枚声明侧从没造过的
 #    `vb6_cls_<接口名>*` = cl C2440 (#407 那十二形全撞在这一发上，且门内没有一份输入走到这一形)。
-#    只许一份声明 + 一份定义 + 五处调用 + 第一百七十二刀站C 自己那条注释 (= 8 处 / 6 份文件)：多一处 = 又有站点自己拼名单，少一处 = 有一站还没问它。
+#    只许一份声明 + 一份定义 + 四处调用 (= 6 处 / 5 份文件)：多一处 = 又有站点自己拼名单，少一处 = 有一站还没问它。
+#    (第二百四十八刀: 「Is」 那一站原本问这一位 bool 投影, 但同名接口有两套 (legacy 值视图 / 新式薄指针), 名册分不开
+#     ⇒ 那一站改成先问带名字的 slotLegacyIfaceViewName 再用 ivrefCType 问形状, 这一处搬到下面的 ㉛ 去数。)
 #    ⚠ 这一问不许被并进 ifaceViewOfExpr: 那一问问的是**新式薄指针** (vb6_ivref_<I>*)，两档的主人与形状都不同，
 #    合一起会让 b448 / iface_wrap 那两片真跑夹具当场换形状。
 $viewSlotAsk = CountOf 'slotIsLegacyIfaceView'
-if ($viewSlotAsk -ne 8) {
-    $fail += ("iface-view-slot question sites = " + $viewSlotAsk + " (want exactly 8: 声明 + 定义 + 腿② + 腿③ + 装箱站那一问 + 第一百七十二刀站C 一问与其注释 + 第一百七十五刀表达式路那一问)")
+if ($viewSlotAsk -ne 6) {
+    $fail += ("iface-view-slot question sites = " + $viewSlotAsk + " (want exactly 6: 声明 + 定义 + 腿② + 腿③ + 装箱站那一问 + 第一百七十五刀表达式路那一问)")
 }
 $viewSlotAskFiles = @(FilesOf 'slotIsLegacyIfaceView')
-if ($viewSlotAskFiles.Count -ne 6) {
-    $fail += ("iface-view-slot question files = " + ($viewSlotAskFiles -join ', ') + " (want exactly 6 files)")
+if ($viewSlotAskFiles.Count -ne 5) {
+    $fail += ("iface-view-slot question files = " + ($viewSlotAskFiles -join ', ') + " (want exactly 5 files)")
 }
 # ㉛ 第一百七十四刀 (账 #471 站A): 「集合交回来的那一枚元素是哪一枚实现类」那一问收成一处 ——
 #    每枚 legacy 接口在自己那份 TU 里铸一枚 view_from, 按运行期类名选中在册的那一对 wrap。
@@ -609,18 +611,19 @@ if ($viewSlotAskFiles.Count -ne 6) {
 #      + 第一百七十五刀那位「视图方法调用」主人自己那一问 + 第一百七十七刀 With 那一站
 #      + 第一百七十八刀站F 属性读那一位读者 + 新账 #474 写侧那一位读者 = 8 处 / 4 份文件。
 #      第一百八十九刀表达式接收者那一问 +1; 第二百一十五刀把 Set 装填那一站的直查名册换成问这一位
-#      主人 +1 ⇒ 今天 13 处 / 8 份文件。
+#      主人 +1 ⇒ 13 处 / 8 份文件; 第二百四十八刀把 「Is」 那一站的 bool 投影换成这一位主人 +1
+#      ⇒ 今天 14 处 / 9 份文件。
 #    · legacyIfaceViewFromFn = view_from 那个名字的唯一出口 = 声明 + 定义 + 铸那一发 + 站点 + 一条注释 = 5 处 / 4 份文件。
 #    · emitLegacyIfaceViewFrom = 那一发的发码主人 (.h 交原型 / .c 交定义) = 声明 + 定义 + 调用 = 3 处 / 3 份文件,
 #      且调用只许挂在接口宿主那一站 (body_pass) —— 别处再挂一处就是第二个 mint。
 #      (比名那把尺 _stricmp 只许一处的针在 check_legacy_view_arg_owners.ps1 的 V8, 与 V1 那条同规, 不在这里重复钉)
 $viewNameAsk = CountOf 'slotLegacyIfaceViewName'
-if ($viewNameAsk -ne 13) {
-    $fail += ("iface-view-name question sites = " + $viewNameAsk + " (want exactly 13: 声明 + 定义 + bool 投影 + For Each 那一站 + 视图调用主人自己那一问 + With 那一站 + 站F 读侧读者 + 站F 写侧读者 + 第一百八十六刀带参写槽查询 + 第一百八十九刀表达式接收者一问 + 第二百一十五刀 Set 装填那一站与其定义内两问)")
+if ($viewNameAsk -ne 14) {
+    $fail += ("iface-view-name question sites = " + $viewNameAsk + " (want exactly 14: 声明 + 定义 + bool 投影 + For Each 那一站 + 视图调用主人自己那一问 + With 那一站 + 站F 读侧读者 + 站F 写侧读者 + 第一百八十六刀带参写槽查询 + 第一百八十九刀表达式接收者一问 + 第二百一十五刀 Set 装填那一站与其定义内两问 + 第二百四十八刀 「Is」 那一站)")
 }
 $viewNameAskFiles = @(FilesOf 'slotLegacyIfaceViewName')
-if ($viewNameAskFiles.Count -ne 8) {
-    $fail += ("iface-view-name question files = " + ($viewNameAskFiles -join ', ') + " (want exactly 8 files)")
+if ($viewNameAskFiles.Count -ne 9) {
+    $fail += ("iface-view-name question files = " + ($viewNameAskFiles -join ', ') + " (want exactly 9 files)")
 }
 $viewFromName = CountOf 'legacyIfaceViewFromFn'
 if ($viewFromName -ne 5) {
@@ -734,5 +737,5 @@ if ($fail.Count -gt 0) {
     foreach ($f in $fail) { Write-Host ("  - " + $f) }
     exit 1
 }
-Write-Host "CLASS-REFCOUNT-AUTHORITY OK (1 pair mint / 1 header / 2 leg consumers / 3+9 formals / 10 roster files / 6 literal files / 0 stale / 5 registry files + 2 registrants / 1+1 out-slot / 1+1 foreign-write drop / 1 field-teardown shape + file / 6 field-type questions (标量 + 数组两档) / 7 transfer-question sites in 2 files (第二百零三刀给字段槽那一臂加了第 4 处站点问句) / 1 view-leg hand-back + 2 QiSet calls / 1+2+1 transfer-arm questions / 3 static-gate sites in 1 file + 1 ivref registration / 1 arg-station hand-back + 4+4 helper sites in 4 files / 4+4 index-slot + project-class questions / 1 address-temp mint / 3 element-teardown sites + 4+4 carrier-destroy questions + 4 preserve-with-release sites in 4 files / 4+4 形A questions (out-slot class + owner pass) + 5 copy-in claim sites in 4 files / 3+4 carrier-destroy sites in 3 files / 8 hand-back stations (5 in cgen_redim.cpp + 过程出口) + 4 shape questions + 3 multidim export sites + 4+2 carrier-scope registrar + flag sites / 7+3 carrier-free flag + 5+5 escape pre-pass + 6 roster sites in 4 files + 1 LHS + 1 RHS exemption + 1 dst gate + 7+3 declaration-scope roster / 5 static gates / 4+3 ND Preserve-with-release export sites / 6 legacyViewBoxExpr sites in 4 files + 7 rtl-name sites in 6 files + 9 wrap-name sites in 6 files + 8 view-slot sites in 6 files (㉘㉚，第一百七十二刀三站) + 7 view-name sites in 4 files + 5 view_from-name sites + 3 mint sites + 1 name-ruler (㉛，第一百七十四刀站A)"
+Write-Host "CLASS-REFCOUNT-AUTHORITY OK (1 pair mint / 1 header / 2 leg consumers / 3+9 formals / 10 roster files / 6 literal files / 0 stale / 5 registry files + 2 registrants / 1+1 out-slot / 1+1 foreign-write drop / 1 field-teardown shape + file / 6 field-type questions (标量 + 数组两档) / 7 transfer-question sites in 2 files (第二百零三刀给字段槽那一臂加了第 4 处站点问句) / 1 view-leg hand-back + 2 QiSet calls / 1+2+1 transfer-arm questions / 3 static-gate sites in 1 file + 1 ivref registration / 1 arg-station hand-back + 4+4 helper sites in 4 files / 4+4 index-slot + project-class questions / 1 address-temp mint / 3 element-teardown sites + 4+4 carrier-destroy questions + 4 preserve-with-release sites in 4 files / 4+4 形A questions (out-slot class + owner pass) + 5 copy-in claim sites in 4 files / 3+4 carrier-destroy sites in 3 files / 8 hand-back stations (5 in cgen_redim.cpp + 过程出口) + 4 shape questions + 3 multidim export sites + 4+2 carrier-scope registrar + flag sites / 7+3 carrier-free flag + 5+5 escape pre-pass + 6 roster sites in 4 files + 1 LHS + 1 RHS exemption + 1 dst gate + 7+3 declaration-scope roster / 5 static gates / 4+3 ND Preserve-with-release export sites / 6 legacyViewBoxExpr sites in 4 files + 7 rtl-name sites in 6 files + 9 wrap-name sites in 6 files + 6 view-slot sites in 5 files (㉘㉚，第一百七十二刀三站) + 14 view-name sites in 9 files + 5 view_from-name sites + 3 mint sites + 1 name-ruler (㉛，第一百七十四刀站A)"
 exit 0
