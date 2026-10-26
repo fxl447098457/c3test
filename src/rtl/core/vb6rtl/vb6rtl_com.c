@@ -492,6 +492,22 @@ int16_t vb6_ComResultToBool(void* variant_ptr) {
     return r;
 }
 
+// 账 #305 第二百四十七刀: 晚绑定调用的结果当 `Not` 的操作数用 —— 与上面同一族, 一次办完
+//   「解引用 + 收回那枚堆块 + 按 VB 的档取值」。从前发码把指针本身截成 int32 再取反
+//   (`~(int32_t)(vb6_ComCall(...))`) = 恒非零: `If Not <缺席键>` 答对纯属巧合, 而
+//   `If Not <在场的键>` 与 `x = Not <在场的键>` 全答反 (真语料按产物 46 处 / 20 份文件)。
+// 口径 (本机走 cscript 的 VBScript 引擎量的, 同语言代理): `Not True` = False / `Not False` = True /
+//   `Not 5` = -6 / `Not Empty` = -1 / `Not "abc"` = 错误 13。布尔在 -1/0 这套编码下
+//   **按位取反与逻辑取反是同一件事**, 所以真值位 (if 非零即真) 与值位 (交回 -1/0/按位值)
+//   共用这一枚出口就够。数值档的读法走唯一主人 vb6_VariantToLong (VT_BOOL 归成 -1/0 也在那张表里);
+//   它现在对 VT_BSTR 不换算、对浮点按 round —— 那两档与 VB6 的差别是那张表的既有口径, 不在本刀扩。
+int32_t vb6_ComResultToNot(void* variant_ptr) {
+    vb6_VARIANT v = vb6_VariantFromComResult(variant_ptr);
+    int32_t r = (int32_t)(~vb6_VariantToLong(v));
+    vb6_VariantClear(&v);
+    return r;
+}
+
 // P24-03: 栈上 VARIANT → vb6_VARIANT(带权副本, 不动源) —— For Each 那一族用这一枚。
 vb6_VARIANT vb6_VariantFromStackVARIANT(VARIANT* pv) {
     return vb6_ComVariantIntoSlot(pv, 0);

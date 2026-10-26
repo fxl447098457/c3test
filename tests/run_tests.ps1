@@ -4675,7 +4675,7 @@ if ($Category -in @("all", "run", "bas")) {
     Add-BasTest "test_earlybound2" "$Tests\test_earlybound2.bas" @("EB2-1:OK", "EB2-7:DriveType=2", "EB2-8:OK", "EB2-10:OK", "EB2:10/10") -Arch "x86"
     Add-BasTest "test_not_com" "$Tests\test_not_com.bas" @("NOT-COM:OK", "NOT-COM2:OK", "NOT-COM:PASS") -Arch "x86"
     Add-BasTest "test_err_obj" "$Tests\test_err_obj.bas" @("ERR-1:OK", "ERR-6:OK", "ERR-7:OK", "ERR-8:OK", "ERR-9:OK", "ERR:9/9")
-    Add-BasTest "test_late_cond" "$Tests\test_late_cond.bas" @("COND-1:COUNT ok=12/12", "COND:12/12")
+    Add-BasTest "test_late_cond" "$Tests\test_late_cond.bas" @("COND-1:COUNT ok=16/16", "COND:16/16")
     Add-BasTest "test_variant_cmp" "$Tests\test_variant_cmp.bas" @("VC-1:OK", "VC-4:OK", "VC:4/4")
     Add-BasTest "test_com_default_prop" "$Tests\test_com_default_prop.bas" @("DP-1:OK", "DP-4:OK", "P24-10: 4/4")
     # P24-10b: 后期绑定 COM 默认属性 obj(args) — Dim o As Object (无类型库签名) 走
@@ -5920,6 +5920,26 @@ if ($Category -in @("all", "run", "vbp")) {
         '} while (vb6_ComCall(d, L"Exists", (void*[]){vb6_ComPackBSTR(vb6_BSTR_FromStr(L"K-LOOPWHILE"))}, 1));',
         '} while (!(vb6_ComCall(d, L"Exists", (void*[]){vb6_ComPackBSTR(vb6_BSTR_FromStr(L"K-LOOPUNTIL"))}, 1)));',
         'if (!(vb6_ComCall(d, L"Exists", (void*[]){vb6_ComPackBSTR(vb6_BSTR_FromStr(L"K-WHILE"))}, 1))) goto vb6_loop_exit_10;'
+    )
+
+    # 账 #305 第二百四十七刀: `Not <晚绑定调用>` 那一支从前发成 ~(int32_t)(裸调用) —— 拿堆上一枚
+    # VARIANT 的指针截成 int32 再逐位取反 = 恒非零, 于是「在场的键」那一头全答反 (真语料按产物
+    # 46 处 / 20 份文件, 是 82 处里最大一族; 最响的书写式就是 `Do While Not rs.EOF`)。
+    # 现在真值位与值位同走 vb6_ComResultToNot (解引用 + 按档取值 + 收回那枚堆块)。
+    Test-EmitcShape "b247_not_fold_shape" @("$Tests\test_late_cond.bas") @(
+        'if (vb6_ComResultToNot(vb6_ComCall(d, L"Exists", (void*[]){vb6_ComPackBSTR(vb6_BSTR_FromStr(L"K-NOT"))}, 1))) {',
+        'if (vb6_ComResultToNot(vb6_ComCall(d, L"Exists", (void*[]){vb6_ComPackBSTR(vb6_BSTR_FromStr(L"A"))}, 1))) {',
+        'x = vb6_ChkLong(vb6_ComResultToNot(vb6_ComCall(d, L"Exists", (void*[]){vb6_ComPackBSTR(vb6_BSTR_FromStr(L"A"))}, 1)));',
+        'x = vb6_ChkLong(vb6_ComResultToNot(vb6_ComCall(d, L"Exists", (void*[]){vb6_ComPackBSTR(vb6_BSTR_FromStr(L"K-VAL"))}, 1)));',
+        'if (!(vb6_ComResultToNot(vb6_ComCall(d, L"Exists", (void*[]){vb6_ComPackBSTR(vb6_BSTR_FromStr(L"A"))}, 1)))) goto vb6_loop_exit_12;'
+    )
+    # 反面针: 修复前那五行原样 (同一枚夹具、同一台编译器, 只差这一臂 —— 读数 12/16 也是这一发量的)。
+    Test-EmitcAbsent "b247_not_fold_lesion" @("$Tests\test_late_cond.bas") @(
+        'if ((~(int32_t)(vb6_ComCall(d, L"Exists", (void*[]){vb6_ComPackBSTR(vb6_BSTR_FromStr(L"K-NOT"))}, 1)))) {',
+        'if ((~(int32_t)(vb6_ComCall(d, L"Exists", (void*[]){vb6_ComPackBSTR(vb6_BSTR_FromStr(L"A"))}, 1)))) {',
+        'x = vb6_ChkLong((~(int32_t)(vb6_ComCall(d, L"Exists", (void*[]){vb6_ComPackBSTR(vb6_BSTR_FromStr(L"A"))}, 1))));',
+        'x = vb6_ChkLong((~(int32_t)(vb6_ComCall(d, L"Exists", (void*[]){vb6_ComPackBSTR(vb6_BSTR_FromStr(L"K-VAL"))}, 1))));',
+        'if (!((~(int32_t)(vb6_ComCall(d, L"Exists", (void*[]){vb6_ComPackBSTR(vb6_BSTR_FromStr(L"A"))}, 1))))) goto vb6_loop_exit_12;'
     )
 
     Test-EmitcShape "b239_byref_arg_shape" @("$Tests\b239_byrefarg\B239k.vbp") @(

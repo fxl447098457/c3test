@@ -176,6 +176,9 @@ vb6_VARIANT vb6_VariantFromComResult(void* variant_ptr);
 // Do Until / Loop While / Loop Until / While Wend 那七站)。交回来的是堆上一枚 VARIANT 的
 // 指针 —— 按档读回真值, 连那一枚堆块一起收回; 从前发码把指针本身当条件, 恒真。
 int16_t vb6_ComResultToBool(void* variant_ptr);
+// 账 #305 第二百四十七刀: 晚绑定调用的结果当 `Not` 的操作数用 (真值位与值位共用这一枚)。
+// 从前发码把指针截成 int32 再取反 = 恒非零 ⇒ 「在场的键」那一头全答反。
+int32_t vb6_ComResultToNot(void* variant_ptr);
 vb6_VARIANT vb6_VariantFromStackVARIANT(VARIANT* pv);  /* P24-03: 栈上VARIANT转换(不释放) */
 void* vb6_VariantToObject(vb6_VARIANT* v);  /* P24-04: Extract IDispatch from Variant for COM late-binding */
 void* vb6_ComPackVariant(vb6_VARIANT v);     /* P24-04: Pack vb6_VARIANT (by value) into Windows VARIANT */

@@ -126,9 +126,35 @@ Sub Main()
         ok = ok + 1
     End If
 
-    Debug.Print "COND-1:COUNT ok=" & ok & "/12"
-    If ok = 12 Then
-        Debug.Print "COND:12/12"
+    ' 第二百四十七刀补的四臂: Not 那一支从前发成 ~(int32_t)(裸调用) = 拿堆 VARIANT 指针截成
+    ' int32 再取反 => 恒非零。真值位与值位两头都要钉, 而条件里带 Not 的那一头 244 修不到。
+    If Not d.Exists("A") Then
+        q = 1
+    Else
+        ok = ok + 1
+    End If
+    Dim x As Long
+    x = Not d.Exists("A")
+    If x = 0 Then
+        ok = ok + 1
+    End If
+    x = Not d.Exists("K-VAL")
+    If x = -1 Then
+        ok = ok + 1
+    End If
+    n = 0
+    Do While Not d.Exists("A")
+        n = n + 1
+        If n > 5 Then
+            Exit Do
+        End If
+    Loop
+    If n = 0 Then
+        ok = ok + 1
+    End If
+    Debug.Print "COND-1:COUNT ok=" & ok & "/16"
+    If ok = 16 Then
+        Debug.Print "COND:16/16"
     Else
         Debug.Print "COND:FAIL " & ok
     End If
