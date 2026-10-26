@@ -10,6 +10,7 @@ LAST_RUN: 2026-10-26T22:05:00+08:00 **第二百四十一刀「实施+判据」�
 —— **机制**：`BuiltinOptDefault` 加一枚 `names`（每档的 VB 名，nullptr = 这一族不吃 named 实参），`vb6_ErrRaise` 那一行挂 `kNames_ErrRaise` = number / source / description（口径 = 仓里的 VB6 手册 `Raise number, source, description, helpfile, helpcontext`，与 RTL 声明 `vb6_ErrRaise(int32_t errNum, BSTR source, BSTR description)` 逐档同序）；落位站点全站只有一处（紧跟 `if (callee != bod.callee) continue;`），认不出名字 / 撞档 / 要跳过必填档 = 退回老路不猜。
 —— **判据**：夹具 tests/test_err_obj.bas 三条真跑（跳过中间档 / 声明序 / 反向书写序）新编译器 9/9 对改前那台 7/9；两台发码针 b241_named_arg_slot + b241_named_arg_lesion（本机按 runner 那条比较路径逐条核过）；哨兵 `check_builtin_opt_defaults.ps1` 加 R9（名字表档数 == slots、`bod.names` 站点恰好一处、有名字表却没站点就红）五枚负控各点各红；全量 109 道 RED=0。
 —— **清单**：本机新编那台（md5 4badc992、pe-lnk=14.29）复算全语料 inputs=540 / lines=544 / rc!=0=85 与 CI 同头读数一致、537 行逐行相同（含两份已知会抖的行）⇒ 哈希不同恰好 3 行、缺席 0 多出 0，其中 Common.bas 与 VBFlexGridDemo.vbp **字节数不变**（306 + 2 处只是两实参换档）= 这一刀只改次序。
+—— **合并**：推门前先 `git merge github/dev`（带进 57d240f6 / c584e73f / ccaff6a1 = cgen_form 首显擦底色 + UC 宿主合成 + msvc 日志留档，零冲突、没碰本刀四份文件），它们欠的 9 行一并登记：8 行与 CI 为 head=ccaff6a1 自交的 1333478a 逐字节相同、第 9 行 VBFlexGridDemo.vbp 该当不同（同时吃本刀 306 处按名落位）；每份 .vbp 增量都是 79 的整数倍 = 他们那一发的形状。
 —— **下一刀**：(乙) 早绑定那一支照 `sig.params[i].name` 归位（名字已在手，与第二百三十九刀同一份）→ (丙) 纯晚绑定要么运行期 `vb6_ComGetIdsOfNames` + 一枚带 cNamedArgs 的新出口、要么先出一声诊断；表里另外 30 族要不要也登记 names 待拍，(甲) 的门绿了再定 (乙)(丙) 同不同批。
 —— **刀号**：本轮取 241（实施+判据）；第二百四十刀那格「named 实参 / rgdispidNamedArgs」的第一半 (甲) 已落，(乙)(丙) 仍在同一格，不另开。
 
