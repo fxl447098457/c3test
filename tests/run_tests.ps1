@@ -409,6 +409,12 @@ function Get-RunBudgetSec {
 # 值 = 精确条数 (不是开关: 多一条少一条都红 —— 「负控必须恰好响一次」本身就是判据)。
 $LateBindMissAllow = @{
     'B446' = 1        # tests/b446_latebind —— 负控: Nothing 接收者必须恰好响一次
+    # 下面三行是**已知缺口**的精确条数 (不是「可以随便漏」的白名单) ——
+    # 每一行都要写清是哪个缺口、哪几处、为什么这一刀不修。
+    # 条数一变就红 ⇒ 逼着人回来改数字并说明 (门 #40495973903 四条红的归因)。
+    'B190' = 4        # 账 #412: 工程类实例经 As Object 形参 => 无 IDispatch (kind=notdispatchable)
+    'czFormDemo' = 3 # 控件的 Font 伪对象还没实现 => txtEmbed.Font 为空 (kind=null)
+    'Proyecto1' = 67 # VB6 内建运行时对象没有 IDispatch 包器: 45 x Collection.Add + 22 x StdFont.Size (kind=null)
 }
 
 function Get-LateBindMissExpected {
