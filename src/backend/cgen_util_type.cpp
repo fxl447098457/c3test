@@ -1641,6 +1641,53 @@ bool CCodeGen::isArrayCarrierArgName(const std::string& lowerName,
     return true;
 }
 
+// 账 #305 §B164 (第二百五十三刀): 「这一枚实参文本是不是『形参那一档的确切元素左值』」收成一处。
+// `VB6_SA_AT(<T>, arr, i)` / `VB6_SA_ND_AT2(<T>, arr, i, j)` 展开就是 `(*(T*)元素指针)` ——
+// 元素**自己**是可寻址左值, 该把那一格的地址交出去。在这一问存在之前, 本仓只认「元素后面还挂
+// 字段」那一形 (Fix 113f), 裸元素于是落进复合字面量: 递出去的是元素**当前值的副本指针**, 而被调方
+// 按 ByRef 退旧 (`vb6_BSTR_Assign(&(*p), …)` = 先 free 旧值再存新) 退掉的就是数组元素自己那一枚
+// ⇒ 写回落进没人看的临时量 (VB6 该填进 `StrArr(r,c)`) + 元素指针原地被 free ⇒ 下次读它
+// use-after-free、下次写它双放 = 堆损坏同形。实测靶工程 VBFlexGrid.ctl 那一族 BSTR 档 48 处、
+// int32_t 档 2 处 (五份整工程产物数出来的)。
+// 只许在「元素档逐字等于形参那一档」时答是 —— 否则 & 出来是一枚错型指针。挂字段那一形归 Fix 113f。
+std::string CCodeGen::byRefElementAddressExpr(const std::string& argText,
+                                              const std::string& formalCType) const {
+    if (argText.empty() || formalCType.empty()) return std::string();
+    static const char* const kElemMacros[] = {
+        "VB6_SA_AT(", "VB6_SA_ND_AT2(", "VB6_SA_ND_AT3(", "VB6_SA_ND_AT4("
+    };
+    const size_t nMacros = sizeof(kElemMacros) / sizeof(kElemMacros[0]);
+    for (size_t m = 0; m < nMacros; ++m) {
+        const std::string head(kElemMacros[m]);
+        if (argText.compare(0, head.size(), head) != 0) continue;
+        // 元素档 = 宏头之后到第一个**顶层**逗号; 右括号必须正好收在整枚文本末尾。
+        int depth = 1;                       // head 末尾那枚 '(' 已经吃进去
+        size_t comma = std::string::npos;
+        size_t close = std::string::npos;
+        for (size_t i = head.size(); i < argText.size(); ++i) {
+            const char ch = argText[i];
+            if (ch == '(') {
+                ++depth;
+            } else if (ch == ')') {
+                --depth;
+                if (depth == 0) { close = i; break; }
+            } else if (ch == ',' && depth == 1 && comma == std::string::npos) {
+                comma = i;
+            }
+        }
+        if (comma == std::string::npos || close == std::string::npos) return std::string();
+        if (close + 1 != argText.size()) return std::string();
+        std::string elem = argText.substr(head.size(), comma - head.size());
+        const size_t b = elem.find_first_not_of(" \t");
+        const size_t e = elem.find_last_not_of(" \t");
+        if (b == std::string::npos) return std::string();
+        elem = elem.substr(b, e - b + 1);
+        if (elem != formalCType) return std::string();
+        return "&(" + argText + ")";
+    }
+    return std::string();
+}
+
 // Fix 178: callee 是「UDT 的动态数组成员」(`.Cols` / `Default.Cols`) 时返回 true,
 // 并按需带出元素 UDT 的 C 类型 (元素是标量类型时保持原值)。
 bool CCodeGen::isDynamicArrayMemberCallee(const Expr* callee, std::string* elemUdt) const {

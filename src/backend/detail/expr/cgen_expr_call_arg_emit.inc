@@ -1529,7 +1529,18 @@
                         // Fix <vbeclipse> rev7: 类槽已交付 (&temp, 见上) —— 绝不能再包一层
                         // (&(vb6_cls_View*){&temp}) : 那是"把地址的地址"当类指针传。
                         if (!isClassSlot092r) {
-                            argVal = "(&(" + cType + "){" + argVal + "})";
+                            // 账 #305 §B164 (第二百五十三刀): 先问那位主人 —— 答得出就**直递那一格的地址**
+                            //   (写回落进数组元素本身, 被调方退旧退的也是它自己那一枚), 答不出才落副本。
+                            //   原样落副本 = 递出去的是元素当前值的拷贝, 被调方 `BSTR_Assign(&(*p),…)`
+                            //   退掉的是元素自己那枚串 (实测靶工程 BSTR 档 48 处, 判据见 cgen_util_type.cpp)。
+                            {
+                                const std::string addr253 = byRefElementAddressExpr(argVal, cType);
+                                if (addr253.empty()) {
+                                    argVal = "(&(" + cType + "){" + argVal + "})";
+                                } else {
+                                    argVal = addr253;
+                                }
+                            }
                         }
                     }
                     }

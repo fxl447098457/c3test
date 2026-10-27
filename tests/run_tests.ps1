@@ -1891,6 +1891,20 @@ function Test-ComValueTwinAuthority {
     }
 }
 
+function Test-ByRefElementAddressAuthority {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] byref_element_address_authority ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\check_byref_element_address_authority.ps1" 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        $out | Select-Object -First 8 | ForEach-Object { Write-Host "  $_" }
+    }
+}
+
 function Test-ConditionTruthAuthority {
     $script:total++
     Write-Host -NoNewline "  [STATIC] condition_truth_authority ... "
@@ -4918,6 +4932,15 @@ if ($Category -in @("all", "run", "bas")) {
                       "K483-udt-vt=8204/7,8", "K483-complex-vt=8195/9,10", "K483-DONE")
     Add-BasTest "k483_redim_member_elem" "$Tests\k483_redim_member_elem.bas" $k483Needles
     Add-BasTest "k483_redim_member_elem_x86" "$Tests\k483_redim_member_elem.bas" $k483Needles -Arch "x86"
+    # 账 #305 第二百五十三刀: ByRef 形参吃「数组元素」那一形从前落进复合字面量 (元素当前值的副本),
+    # 被调方那句"先退旧再存新"退掉的就是元素自己那一枚串 ⇒ 写回丢失 + 元素悬空。现在由唯一主人
+    # byRefElementAddressExpr 直递那一格的地址。**行为面只能真跑** (改前 W1=OLD / W3=10 / W5=bad 2000,
+    # 见 .local/k253_probe/base_x64.out.txt), 而且 W5 那 2000 次就是反面证人: 同一格每放一次旧串
+    # 就多悬空一次。两台各钉一头 (x64 默认 + x86)。
+    $b253Needles = @("W1=FILLED", "W2=FILLED", "W3=17", "W4=FILLED",
+                     "W5=bad 0", "W6=AGAIN", "BRW-1:COUNT ok=6/6", "BRW:6/6")
+    Add-BasTest "test_byref_elem" "$Tests\test_byref_elem.bas" $b253Needles
+    Add-BasTest "test_byref_elem_x86" "$Tests\test_byref_elem.bas" $b253Needles -Arch "x86"
 
     # ---- 注册表自检 (2026-09-30, 门 #233 的教训) --------------------------------
     # 为什么单开一道: `test_variant_boxing` 那条注册里 `\t` 被写成了**真 TAB**
@@ -5972,6 +5995,24 @@ if ($Category -in @("all", "run", "vbp")) {
     Test-EmitcAbsent "b249_value_twin_lesion" @("$Tests\VBFlexGridDemo\VBFlexGridDemo.vbp") @(
         'vb6_lwa_GetObjectW(vb6_VariantToLongPtr(vb6_VariantFromComResult(vb6_ComGetObjectProp(Font, L"hFont"))), (int32_t)sizeof(vb6_type_LOGFONT), (void*)&(LF));',
         'hFontOld = SelectObject(hDC, vb6_VariantToLongPtr(vb6_VariantFromComResult(vb6_ComGetObjectProp(ButtonFont, L"hFont"))));'
+    )
+
+    # 账 #305 第二百五十三刀: ByRef 形参吃「数组元素」那一形收成一处主人 byRefElementAddressExpr。
+    # 正针 = 单文件夹具 (test_byref_elem.bas) 里三形都交出**那一格自己的地址**: 一维 String 元素、
+    # 二维 String 元素 (靶工程 VBFlexGrid.ctl 那一形)、以及数值档 (int32_t 元素交给 ByRef Long 形参)
+    # —— 第三枚同时钉住「元素档逐字等于形参那一档才许答是」这条闸 (档不合就还是副本)。
+    Test-EmitcShape "b253_elem_ref_shape" @("$Tests\test_byref_elem.bas") @(
+        'vb6_FillStr(&(VB6_SA_AT(BSTR, arrS, 1)));',
+        'vb6_FillStr(&(VB6_SA_ND_AT2(BSTR, (vb6_SafeArrayND*)arrM, 0, 1)));',
+        'vb6_FillNum(&(VB6_SA_AT(int32_t, arrN, 1)));'
+    )
+    # 反面针 = 真工程 VBFlexGridDemo 整工程产物里那 48 处原样 (BSTR 档 24 + 二维 24, 逐行归因见
+    # .local/k253_probe/diff_stations.txt 与本轮的多重集差)。为什么反面打在工程上而不是夹具上:
+    # 夹具那份产物改前改后只有这几行, 工程那一份才有「同一个被调方收着元素指针去退旧」的真实承面;
+    # 而工程产物带 28 行奇引号 ⇒ Test-EmitcShape 那条守护对它不成立, 只许用反面 (与 b249 同理)。
+    Test-EmitcAbsent "b253_elem_ref_lesion" @("$Tests\VBFlexGridDemo\VBFlexGridDemo.vbp") @(
+        'vb6_VBFlexGrid_GetCellText((void*)me, iRow, iCol, (&(BSTR){VB6_SA_AT(BSTR, StrArr, OneDimIdx)}));',
+        'vb6_VBFlexGrid_GetCellText((void*)me, iRow, iCol, (&(BSTR){VB6_SA_ND_AT2(BSTR, (vb6_SafeArrayND*)StrArr, iColArr, iRowArr)}));'
     )
 
     Test-EmitcShape "b239_byref_arg_shape" @("$Tests\b239_byrefarg\B239k.vbp") @(
@@ -10084,6 +10125,7 @@ if ($Category -in @("all", "compile")) {
     if (Enter-StaticShard) { Test-ByRefArgPackAuthority }
     if (Enter-StaticShard) { Test-ConditionTruthAuthority }
     if (Enter-StaticShard) { Test-ComValueTwinAuthority }
+    if (Enter-StaticShard) { Test-ByRefElementAddressAuthority }
     if (Enter-StaticShard) { Test-ClsidSyncAllCopies }
     if (Enter-StaticShard) { Test-OwnedTempKeeps }
     if (Enter-StaticShard) { Test-OwnedTempSemantics }

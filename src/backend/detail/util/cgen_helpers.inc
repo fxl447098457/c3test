@@ -1629,6 +1629,11 @@
     //   cExprIsVariant       表达式已经是槽
     bool isArrayCarrierArgName(const std::string& lowerName,
                                const std::string& cExpr) const;
+    // 账 #305 §B164 (第二百五十三刀): ByRef 形参 ← 「形参那一档的确切数组元素」时直递那一格的地址
+    // (写成 (&(元素)) 而非复合字面量副本)。答不出 = 空串 = 调用方保持原样。两位消费者 (位置实参站 /
+    // 命名实参站) 问同一位主人, 判据 = 宏名 + 元素档逐字等于 mapType(形参档) + 整枚文本就是那个宏。
+    std::string byRefElementAddressExpr(const std::string& argText,
+                                        const std::string& formalCType) const;
     // Fix 178: callee 是 UDT 的动态数组成员 (`.Cols()`) 时为 true, 顺带取元素 UDT
     bool isDynamicArrayMemberCallee(const Expr* callee, std::string* elemUdt) const;
     // Fix 170: 整体数组赋值右侧收口 —— 新建载体直接赋, 其余深拷贝避免别名

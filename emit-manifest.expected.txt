@@ -575,6 +575,7 @@ sha256=0edb6b89de82270d534e5f24e47c7173f0ef80ee65010658fdca9007f89a6ade ascii256
 sha256=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 ascii256=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 rc=1 bytes=0 tests/b231_byrefparam/DllBlocks.bas
 sha256=7625e86790bf345a52e7babc6b12eb0c32fc55b76b4ef3b7f9b3a946d1f251ad ascii256=0ff45d87fe5264931f229090422df0cd5107d3a077ca1800efeb8f11540a7c6a rc=0 bytes=2932 tests/b239_byrefarg/B239k.bas
 sha256=7625e86790bf345a52e7babc6b12eb0c32fc55b76b4ef3b7f9b3a946d1f251ad ascii256=0ff45d87fe5264931f229090422df0cd5107d3a077ca1800efeb8f11540a7c6a rc=0 bytes=2932 tests/b239_byrefarg/B239k.vbp
+sha256=f899a1463bb4363e50f33a75718bfaaaaeb56f2f85c9be6907f9d2e928c8887b ascii256=a9538fe16f249d6b957fb5486898e2ede3f847fcc201375ba58368ec2b6f7cde rc=0 bytes=6167 tests/test_byref_elem.bas
 # 账 #305 SB222（第二百三十刀）：tests/b230_arrout 是数组形参**出站回写**那两格的夹具（两台各一条真跑）；
 # 新增两份输入的哈希取自本机复算 —— 本刀 534 行逐行零移动（RTL 头不进 --emit-c），所以没等门上的数。
 # 账 #305 SB223（第二百三十三刀）：tests/b231_byrefparam 是 ByRef 标量回写那两格的夹具（两台各一条真跑）；
@@ -879,3 +880,4 @@ sha256=7625e86790bf345a52e7babc6b12eb0c32fc55b76b4ef3b7f9b3a946d1f251ad ascii256
 #   ⇒ 记一条一般式：**按单份文件量的发码承面不能当清单承面**（同一行代码在「脱离工程的单份 emit」与「整工程编译」里走的是两条臂）；以后报「会移动几行」只按 .vbp 编译计。
 #   哈希取自 CI 为同一 head 自己交的清单（github/ci/emit-manifest 的 ca5d1cdf，注脚 head=6c11e3d9）；登记后本机用 `compare_emit_manifest.ps1 -Manifest .local/k247_probe/ci_manifest_939.txt` 复算 = 541/541 逐行相同、缺席 0、多出 0。
 # 2026-10-27 登记来源：门 #942（run 942 / head 7fa71648）那台 CI 自交清单（github/ci/emit-manifest 提交 dcd1d877，注脚 head=7fa71648）。移动的 2 行各有各的主人 —— `tests/VBFlexGridDemo/VBFlexGridDemo.vbp` = 本线第二百四十九刀（值语境改问主人 comValueTwinForObjectReadExpr，句柄档属性读不再被错包）；`tests/VbQRCodegen-master/test/Project1.vbp` = 对方会话那笔 b4caa1e5（第二百四十八刀 ComCtlsDemo 三处发码回归）。逐行按路径比对 = 541 行里 539 行未动、哈希不同 2、缺席 0、多出 0。
+# 第二百五十三刀的登记来源 = 本机那一发 --emit-c 直接算的新行 (tests/test_byref_elem.bas)：全仓 add_compile_options(/utf-8) + 账 #267 那条「产物字节走 writeStdoutRaw」之后，产物里的中文注释字节不再随构建机或控制台代码页变（台账 §B73 实测 395/395 行 sha256 两台相同），所以**新增行**按本机数登记；**存量被这一刀移动的那几行** (VBFlexGridDemo 整工程产物病灶 48 处换成取址形) 仍按 CI 自交的清单登记（github/ci/emit-manifest），两头不混。
