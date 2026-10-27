@@ -286,6 +286,8 @@ void  vb6_UC_SetPendingFont(void* f);
 // UserControl_InitProperties —— 见 uc_host.c 的说明。置位方 = 窗体创建代码;
 // ucHostInit 入口消费(读后清零), 由 cgen 生成的 ucHostInit 读取。
 void  vb6_UC_SetSkipInitProps(int v);
+/* 账 #305 第二百五十八刀: UserControl.InvisibleAtRuntime —— 置 1 时宿主记录照建, 但一个窗口都不建 */
+void  vb6_UC_SetWindowless(int v);
 int   vb6_UC_SkipInitPropsConsume(void);
 // Fix <vbeclipse> 第十二层: 加载路径的 Show/Resize 推迟到 ReadProperties 之后再补齐
 // (VB6 顺序 Initialize → ReadProperties → Show/Resize)。窗体创建代码在 UC_ReadProps

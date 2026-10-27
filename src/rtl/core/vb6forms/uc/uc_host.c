@@ -168,6 +168,7 @@ vb6_HostObjRec* vb6_ho_find(const void* hwnd) {
 }
 
 vb6_UCRec* vb6_uc_findByHwnd(const void* hwnd) {
+    if (!hwnd) return NULL;   // 账 #305 258: 无窗宿主 (InvisibleAtRuntime) 的 hwnd 就是 NULL
     for (int32_t i = 0; i < vb6_ucRecCount; i++) {
         if ((void*)vb6_ucRecs[i].hwnd == hwnd) return &vb6_ucRecs[i];
     }
@@ -494,6 +495,15 @@ void vb6_UC_ActivateHost(void* hwnd) {
     vb6_uc_activate(r);
 }
 
+// 账 #305 第二百五十八刀: `UserControl.InvisibleAtRuntime = -1` 的 UC 在 VB6 里**根本
+// 不建窗口**（隐藏 ≠ 不建窗 —— 参考里 vis=0 的 UC 窗口照样在枚举里）。cgen 按 .ctl 头里
+// 那一行在创建前后置位本标志: 置位时宿主记录照建（实例 / 属性 / 成员调用都要能用），
+// 只跳过 CreateWindowEx / z 序 / Show / Resize 那几件必须有窗口的事。
+// 它**不**由 ucHostInit 消费（与 skipInitProps 不同）—— 无窗 UC 的设计期子控件也都不该建窗，
+// 嵌套的 HostCreate 读到同一个 1 是对的；cgen 在每次创建后清 0。
+static int vb6_uc_windowless = 0;
+void vb6_UC_SetWindowless(int v) { vb6_uc_windowless = v; }
+
 void* vb6_UC_HostCreate(const char* typeName, int32_t left, int32_t top,
                         int32_t width, int32_t height, void* hParent, void* hInstance,
                         const char* ctrlName, int32_t index) {
@@ -503,6 +513,10 @@ void* vb6_UC_HostCreate(const char* typeName, int32_t left, int32_t top,
 
 void* vb6_UC_InstanceOf(void* hwnd) {
     vb6_UCRec* r = vb6_uc_findByHwnd(hwnd);
+    // 账 #305 第二百五十八刀: 无窗宿主 (InvisibleAtRuntime) 交回来的槽里装的是**实例**而不是
+    // 句柄 (见 uc_host_create.inc 末尾), 所以这里按实例再兜一次 —— 否则那三枚 ImageList 的
+    // 成员访问 (ListImages 一族) 全部落空。
+    if (!r && hwnd) r = vb6_uc_findByInstance(hwnd);
     return r ? r->me : NULL;
 }
 
