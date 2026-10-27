@@ -305,6 +305,21 @@
                 if (ucSkipInitProps) c_.emitLine("vb6_UC_SetSkipInitProps(0);");
                 hwndExpr = slot220;
             }
+            // 账 #305 第二百五十四刀: 设计期 Enabled/Visible/Value 此前**三条创建路只打了两条**
+            // (顶层 cgen_form_ctrl_style_apply.inc、容器内 cgen_form_frame_menu.inc), 工程内
+            // UserControl 这一路走 vb6_UC_HostCreate, 一盏都没发 —— 而 `Visible` 在 UC 那两张
+            // 属性跳过名单 (kSkip / kBagSkip) 里, 既不去 prop_let 也不进属性包 ⇒ .frm 里写的
+            // `Visible = 0` 对 UC 是**纯丢**。
+            //   实测 ComCtlsDemo MainForm.frm:368 `Begin ComCtlsDemo.ListBoxW ListBoxW1` 带
+            //   `Visible = 0`(Height 2595 / Width 3855 缇 = 173x257 px): VB6 那台对应窗口
+            //   ThunderRT6UserControl 257x170 vis=False(连它里面那枚 ListBox 一起藏),
+            //   C3 这台 VB6_UserControlHost 257x173 vis=True ⇒ 屏幕上凭空多一块列表区。
+            //   同为 `Visible = 0` 的 VB.PictureBox Picture3 (MainForm.frm:407) 在 C3 里**藏对了**
+            //   (它走顶层那条路) ⇒ 病根就是"这一路没去问那位主人", 不是 Visible 本身没解析。
+            //   修法照搬旧招 = 复用同一出口 emitDesignerStateProps(它按"属性"分出口、只在 .frm
+            //   显式写过反面时才发; ImageList / Timer / Menu 在它自己那道 switch 里早退, 而
+            //   Value 那两条只认 CheckBox / OptionButton ⇒ 对 UC 实际只可能发出 Enabled/Visible)。
+            emitDesignerStateProps(ctrl, hwndExpr);
 
             // Fix 112/114: 设计期持久化的 UserControl 公共属性
             // (Caption=... / Value=30 / PB_Color1=... / Caption2="..." / ChartStyle=1 ...)
