@@ -193,7 +193,10 @@
     std::string makeProcSignature(SubDecl& node);
     // 账 #222: 事件处理器的 ABI 与"这枚处理器的首形参是不是元素号"两处判断的唯一实现。
     void applyEventHandlerAbi(SubDecl& node);
-    bool prepareEventHandlerProc(Module& mod, const std::string& loweredName);
+    // 账 #305 256: evtByAddr = 事件声明里每一位形参要不要保住 ByRef（emitEventSink/thunk/
+    // 处理器三处同问 src/common/event_param_abi.hpp 那一位主人）
+    bool prepareEventHandlerProc(Module& mod, const std::string& loweredName,
+                                 const std::vector<char>& evtByAddr);
     std::string makeProcSignature(FunctionDecl& node);
 
     // ai/vb-asm-extension-spec: 过程体 = 单个 Asm 块时降级为独立 MASM 过程 (v1: x64/ml64)。

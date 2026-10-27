@@ -370,6 +370,9 @@ bool Driver::runCrossModuleResolution() {
                 extSym->implementsNames = srcSym->implementsNames;  // P6.4
                 extSym->interfaceMethodNames = srcSym->interfaceMethodNames;  // P6.4
                 extSym->eventNames = srcSym->eventNames;  // P6.5
+                // 账 #305 256: 与 eventNames 同索引的「哪几位形参按地址」也必须跟着复制 ——
+                // P6.5 包装站按 eventNames 的下标读它，两份名单不同源就等于丢了答案。
+                extSym->eventParamByAddr = srcSym->eventParamByAddr;
                 extSym->comClsidStr = srcSym->comClsidStr;  // P6.8: CLSID
             }
             // Fix 010r-11 / Fix 015: 复制变量/返回类型名
