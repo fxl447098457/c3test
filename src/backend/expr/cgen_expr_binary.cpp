@@ -468,7 +468,7 @@ void CCodeGen::visit(BinaryExpr& node) {
         // 同一性比的是 `.obj` 那一格: 它既是视图持有的裸实例指针，也是第一百七十一刀
         // `vb6_VariantFromProjectInstance` 按指针查身份用的同一格 ⇒ "是不是同一只" 只有一个答案。
         // `Is Nothing` 也就是 `.obj == NULL` (视图出厂就是 `{0}`，接管值时两格一起写)。
-        // 认槽只问第一百六十五刀那位唯一主人 slotIsLegacyIfaceView，本刀给它添第三个读者。
+        // 认槽只问第一百六十五刀那位唯一主人（第二百四十八刀起走带名字那一问，再按形状定档）。
         {
             auto viewOperand172 = [&](const Expr* ast) -> bool {
                 if (!ast || ast->kind != ASTNodeKind::IdentifierExpr) return false;
