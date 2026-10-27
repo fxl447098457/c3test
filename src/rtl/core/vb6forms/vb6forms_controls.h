@@ -356,6 +356,11 @@ void* vb6_UC_ControlsItem(void* coll, int32_t index);
 void* vb6_UC_Controls(void);
 void* vb6_UC_ControlsEnumInit(void* coll);
 int32_t vb6_UC_ControlsEnumNext(void* enumPtr, void* outVariant);
+// 账 #305 第二百六十四刀: 同上一条的病, 在 ParentControls 这一枚上复发过一次 —— 它的声明
+// 只进了内部头 vb6forms_uc_internal.h, 而生成代码经 vb6forms.h 伞头看不见那一份。
+// 实测 = ComCtlsDemo 6 份产物 TU 各报一声 C4013, 交回的单例地址被按 int 折成 32 位再符号
+// 扩展 (崩溃日志 av read target=0xfffffffff8cc8958, 低 32 位落在 .data) ⇒ 野接收者进晚绑定出口。
+void* vb6_UC_ParentControls(void);
 // Windows VARIANT <-> vb6_VARIANT conversion + cleanup (used inside vb6com_* hooks)
 void vb6_Host_ToWinVariant(const void* inV, void* outV);
 void vb6_Host_FromWinVariant(const void* inV, void* outV);
