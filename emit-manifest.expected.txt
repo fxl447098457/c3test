@@ -348,8 +348,8 @@ sha256=d97b60f9fea0e55342d9568a9691c7d78f50137855fbabe5468a480f0820deca ascii256
 sha256=0b78d1c9a8cc72224d3301e30c335bb45b2150bc1fab08e42ad41e3f5399c8dd ascii256=275a2b97419fef112eec38d2c1a5d5f14e8cee2785d23667b1f1cb965f303dea rc=0 bytes=6062 tests/test_err_obj.bas
 sha256=b9c4ccf2f744430b2ae094f81346c021a77ce5fc020a7536010c8d8ce10c371c ascii256=b18b7815db3eed04713d15c2ce588728568f35ec69dce48052cf759a965cf42e rc=0 bytes=1643 tests/test_err.bas
 sha256=8589f723124bbeaf702fda8a8972b06db0d622ecdc8b3060ea292cb4be83af62 ascii256=28c57edbbdbae059675a1996ee7f0a14d4cb1504c6fc66876d8c3a1ca6dc9988 rc=0 bytes=1856 tests/test_error.bas
-sha256=f017ec6ddf92697fbbae26ccf5882cf018455f16e71a00d66be374802ea82739 ascii256=b6ff88c59587207c890295628bb7d29541bd9f8d24e916680ead9ec88a3d2f10 rc=0 bytes=3302 tests/test_events/test_events.bas
-sha256=32dcdf49ca7cdfb97cab0f36807deeeec736fb1749eb44ba3331efb59db75b5c ascii256=75dc798e2dfb6c0404229646f1756b58e8b8ae33a541e0be30384b9614f79043 rc=0 bytes=9139 tests/test_events/test_events.vbp
+sha256=fe984eacb6abaa51cfb1833a661b1484f4c12e99edd631d40fb9275980a43106 ascii256=666ce9600180a08fd0ae8d56c33b7da80a787dfafe70ba8c1acf26a43130cdf6 rc=0 bytes=4067 tests/test_events/test_events.bas
+sha256=dba07613801c7b2320d7c91bb76d38babe4f84c35b33c61a05844f02721768bb ascii256=558fb0b3c07bdeef2a356a48bfbae79dd5f124c32c815ac7e749d9b9495957d9 rc=0 bytes=11462 tests/test_events/test_events.vbp
 sha256=fbc62417cd066b734febfd6b0b1184b32322f8305986960e070e185c3931cce0 ascii256=ae524676b780c75dad011e7ee8a008f2106494123f92b44812702f717458fefd rc=0 bytes=13910 tests/test_f2lng.bas
 sha256=85e9844215ef82e32f3e1c8c97d8e369c026372e230e176b33a09b54110cdcca ascii256=40d486f5b857e5f21e03836af40c9ddd1a4849a487c8cfa7d31f1749402e9bb9 rc=0 bytes=2068 tests/test_fileio.bas
 sha256=7d17692601085da491868d63f119262dfc098685b73fabeb1b3b9542be8440db ascii256=e2827cda75e5cbd1c284b91bd9efb99ec51d346cb2d1a9d5b55c2ec226c7be1a rc=0 bytes=2998 tests/test_fixedstr_decl.bas
@@ -366,7 +366,7 @@ sha256=4410a4d92b9104e745020fb2474abf4cbbd62b2cc01115e400a41df2a7c1709c ascii256
 sha256=4a7aaac51f234c2b8093ee94bc3018f67a89e82979474de1e2bc568dafd833a0 ascii256=c911f33f27c78c0b19f23738f7c399acf87ebf231672a19fb538ea9dad55b655 rc=0 bytes=8413 tests/test_interp.bas
 sha256=4e89f7ba9513b2cd1bb9367e6e54646e1362ab89c5363bc43f44392ce2a07324 ascii256=7c605730c148c0c3e816cf755817c4291f6edd741bb993b5bbc54417a3752810 rc=0 bytes=5816 tests/test_joinfilter.bas
 sha256=22ccd69a85f1388da2d547eb6169bf7aac0d0f0c7be91aeb9580c58a48e3efbf ascii256=fec71c19c63b5b9470009f5f0014f5e46537b6e657495b5dff9886f750d412fd rc=0 bytes=6524 tests/test_lastdllerror.bas
-sha256=a52992aaa9622fb45ba69665f0a46b06e7d0dee9c14446fab8cd401db471502e ascii256=cc83fd04f2f67cfb7ee4eb67a94e34f27f13208ae53bd5ffbfe470427fa2bdcd rc=0 bytes=7105 tests/test_late_cond.bas
+sha256=a52992aaa9622fb45ba69665f0a46b06e7d0dee9c14446fab8cd401db471502e ascii256=cc83fd04f2f67cfb7ee4eb67a94e34f27f13208ae53bd5ffbfe470427fa2bdcd rc=0 bytes=7105 tests/test_late_cond.bas
 sha256=c01403a43bbaa2d9b772e40bb15d4df769aa9db703203fc5f9a07990969d2af2 ascii256=886cda39b60a6fc47d408b6504b864f703e183f779e55de0ae87e8e87cb32001 rc=0 bytes=4217 tests/test_len_width.bas
 sha256=f98ee084e0d71ff89f4f18fcf351551facc151d9d7bd85cd8bac7ad6598b2fbc ascii256=b4ff26e024507de3b5dbcb541edd1623632f5791cae2de90ebd51dcab0e629b7 rc=0 bytes=4334 tests/test_like.bas
 sha256=7471cc1da7231d8fdc8a8e1156c7dcc457b81d0911ba4ff4a7b5b22ea0f88590 ascii256=a363a325fdecee3daf54d11b4fa794a7beab9acccacb4dff741661596e1b7979 rc=0 bytes=4161 tests/test_m5.bas
@@ -420,7 +420,7 @@ sha256=d5874a3ce9c25383a0ea8d653ca49d1d78a28d2a274be0364334b54895b27458 ascii256
 sha256=3204247eb044d0b54882f373eb27c2f6aab6634debb1daf05385b39b467f9eec ascii256=f48f9c21da67cbd41dcf1adc1c87d5b78fdcc4d99b91dad456baca3a4a5f1a53 rc=0 bytes=195071 tests/VBFlexGridDemo/Common/Common.bas
 sha256=6f5c897c93fd54e024c3a2b99b0b02afe887258bf969d2d6a533fd4b3e43f5f9 ascii256=6d3a354c3a189a55f119785fc9ece6a550835e387f6b85f7796588fa33488ecb rc=0 bytes=4669 tests/VBFlexGridDemo/Common/Startup.bas
 sha256=bbb262be86392a5f63d945cbacc9d9e21c814b0b7ba6050cbd89137e06789de2 ascii256=85f5277afc488b9d50b404bec3c94926f30ded62b3981b9181fef14268a420cd rc=0 bytes=73391 tests/VBFlexGridDemo/Common/VisualStyles.bas
-sha256=1687b548405e86493a487ab04ffcb7d6f8c0d5e75b8da1acffd370246b22050d ascii256=b9c5bcbe8f388b191c9c9347c06766b60feab1cb3c12511d460b7d2e8c5a73e8 rc=0 bytes=5576960 tests/VBFlexGridDemo/VBFlexGridDemo.vbp
+sha256=d284ca10f7d369ea26c7f115fac4df629f2e884dbe2c9937f2476fede9f7adf5 ascii256=5f0d2fe490e5e0e70507f957672c42f55f0d255e4086044fe9402e9223ee23e4 rc=0 bytes=5577279 tests/VBFlexGridDemo/VBFlexGridDemo.vbp
 sha256=3e5e02a695e22846566e8f428c66a943bc6e605c703c9387dfcf226dfb2056f1 ascii256=3e9bb850aff21dc3626a165afa21185bab13d3565f5b62b9f5e4c2e52084ba18 rc=0 bytes=3489 tests/vbman_host/run_host.bas
 sha256=3e5e02a695e22846566e8f428c66a943bc6e605c703c9387dfcf226dfb2056f1 ascii256=3e9bb850aff21dc3626a165afa21185bab13d3565f5b62b9f5e4c2e52084ba18 rc=0 bytes=3489 tests/vbman_host/vbman_host.vbp
 sha256=5f6d4159602806680561963237b24008263b38246332b50b3e814a333009d1a5 ascii256=5cd8103e73a1c07e2fece83539770603407213236bbf9822bd9b08ea74e7d778 rc=0 bytes=1763 tests/vbp_project/MainMod.bas
@@ -853,12 +853,10 @@ sha256=f899a1463bb4363e50f33a75718bfaaaaeb56f2f85c9be6907f9d2e928c8887b ascii256
 #   多出的两行就是本刀那枚新夹具 K178.vbp 与 mdlK178.bas ⇒ **零移动** = 这条读者只可能改到「接收者是
 #   legacy 视图且属性读那一发同型」的产物，其余每一行逐字节没动（507 份存量输入逐行哈希全同由本机背书）；
 #   判据与登记同批推一趟门（同规先例 = 第一百六十一刀、第一百七十五刀、第一百七十七刀、第一百七十八刀）。
-
 # 2026-10-26 第二百三十九刀（账 #305 §B224 第二半）登记：晚绑定实参按引用发（五档 Ref 打包器）。
 #   本机同一台 C3.exe 复算 540 份：既有 522 行逐行相同，9 行哈希变化（全部是含「带型 lvalue 标量实参 +
 #   晚绑定调用」的语料：b187_box / b190_memberarray / BalloonTooltips×2 / czUI-main / VBFlexGridDemo×3 /
 #   VbQRCodegen），新增 2 行 = tests/b239_byrefarg 的 .bas/.vbp。CI 的 Emit manifest 作业在门上独立复算。
-
 # 2026-10-26 第二百四十一刀（甲）（账 #305，named 实参按名落位）登记：折叠内置那一族的形参名挂进 kBuiltinOptDefaults 那一行。
 #   本机新编那台 C3.exe（md5 4badc992、pe-lnk=14.29）复算全语料：inputs=540 / lines=544 / rc!=0=85 与 CI 同头读数一致，
 #   期望清单 537 行逐行相同（含两份已知会抖的行 b183_intfield/B183.vbp 与 Charts 2020/Proyecto1.vbp ⇒ 本机与 CI 那台在这一头依旧对齐）、
@@ -867,8 +865,6 @@ sha256=f899a1463bb4363e50f33a75718bfaaaaeb56f2f85c9be6907f9d2e928c8887b ascii256
 #     tests/VBFlexGridDemo/Common/Common.bas 195071 -> 195071 字节（2 处 Number:=/Description:= 换档 = 两实参对调，净字节 0）
 #     tests/VBFlexGridDemo/VBFlexGridDemo.vbp 5577277 -> 5577277 字节（306 处同上：VBFlexGrid.ctl 304 + Common.bas 2，净字节 0）
 #   ⇒ 字节数为 0 增量是这一刀的口径：改的只是实参次序，多一个字符都没有；登记后本机复算 540/540 零差异（compare_emit_manifest）。
-
-
 # 2026-10-26 第二百四十一刀的合并登记（同一趟门之前先并进来的别人那三笔）：`git merge github/dev` 带进 57d240f6 / c584e73f / ccaff6a1（cgen_form.cpp 首次显示擦一次窗体底色 + UC 宿主合成 + msvc 失败日志留档），
 #   本刀不动它们那一形，只欠它们那 9 行的登记（CI 为 head=ccaff6a1 自己交的那份 1333478a 里形状门已经报红，21 job 里 20 绿 + 唯一红 = Emit manifest）。
 #   本机把合并后的树重编一台（size=7003648、pe-lnk=14.29）复算全语料：531 行与登记前逐行相同、哈希不同恰好 9 行、缺席 0 多出 0 ——

@@ -53,7 +53,8 @@ if ($e2def -ne 1)  { $viol += ("E2: applyEventHandlerAbi 的定义应为 1 处�
 if ($e2dec -ne 1)  { $viol += ("E2: applyEventHandlerAbi 的声明应为 1 处，读到 " + $e2dec) }
 if ($e2call -ne 2) { $viol += ("E2: 调用点应为 2 处（声明趟 + 登记趟），读到 " + $e2call) }
 # 登记之后**立刻**翻 —— 翻在 visit 里就赶不上模块级声明那一趟
-if ((Count-Of $prelude 'prepareEventHandlerProc(module, handlerLower)') -ne 1) {
+# 账 #305 256: 调用多带一位「哪几位形参按地址」(ev.pbyaddr) —— 钉的仍是「登记之后立刻翻、且只许一处」
+if ((Count-Of $prelude 'prepareEventHandlerProc(module, handlerLower, ev.pbyaddr)') -ne 1) {
     $viol += 'E2: prelude 必须在登记处理器后立刻调 prepareEventHandlerProc 翻 ABI（一处）'
 }
 if ((Count-Of $decl 'bool CCodeGen::prepareEventHandlerProc(') -ne 1) {
