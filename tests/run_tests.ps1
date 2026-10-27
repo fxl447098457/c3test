@@ -398,6 +398,45 @@ function Get-RunBudgetSec {
     return [int]$RunTimeoutSec
 }
 
+# === 晚绑定出口的「非 IDispatch 接收者」= 0 (账 #305 第二百六十二刀 丙) ================
+# 七个晚绑定出口 (ComCall / ComCallByDispid / ComGetProp / ComGetPropArg /
+# ComSetProp / ComSetPropArg / ComSetRef) 现在都带一道护栏: 接收者既不是真 IDispatch、
+# 也不是宿主伪对象 (字体 / Extender / 宿主对象: HWND / 控件集合 / Collection / UC 实例)
+# 时, 往 stderr 打一行 [C3_LATEBIND_MISS #n] 并计数。**行为不变** (仍按原路返回 NULL /
+# 空), 变的只是「静默」→「响亮」—— 这一族以前漏了没人知道漏在哪一枚。
+# 判据: 每枚夹具跑完, stderr 里那几行必须**恰好**等于期望条数; 期望默认 0。
+# 那张表只装**故意**留的负控 (接收者是 Nothing 的那一枚), 键 = 产物名 (§B140 规矩③),
+# 值 = 精确条数 (不是开关: 多一条少一条都红 —— 「负控必须恰好响一次」本身就是判据)。
+$LateBindMissAllow = @{
+    'B446' = 1        # tests/b446_latebind —— 负控: Nothing 接收者必须恰好响一次
+}
+
+function Get-LateBindMissExpected {
+    param([string]$Name)
+    if ($Name -and $LateBindMissAllow.ContainsKey($Name)) { return [int]$LateBindMissAllow[$Name] }
+    return 0
+}
+
+# 读数只认**标记前缀** (行尾那几列有机器地址, 按内容匹配太脆)。
+function Get-LateBindMissCount {
+    param([string]$StderrFile)
+    if (-not $StderrFile -or -not (Test-Path $StderrFile)) { return 0 }
+    $n = 0
+    foreach ($l in @(Get-Content $StderrFile -ErrorAction SilentlyContinue)) {
+        if ([string]$l -match '\[C3_LATEBIND_MISS #') { $n++ }
+    }
+    return $n
+}
+
+# 返回 $null = 过; 否则返回一句诊断 (调用方把它并进 Detail)。
+function Get-LateBindMissDetail {
+    param([string]$Name, [string]$StderrFile)
+    $got = Get-LateBindMissCount -StderrFile $StderrFile
+    $exp = Get-LateBindMissExpected -Name $Name
+    if ($got -eq $exp) { return $null }
+    return ("latebind-miss: {0} 期望 {1} 条, 实到 {2} 条 (stderr: {3})" -f $Name, $exp, $got, (Split-Path -Leaf $StderrFile))
+}
+
 function Invoke-TestExe {
     param(
         [string]$ExePath,
@@ -470,6 +509,18 @@ function Invoke-TestExe {
         [System.IO.File]::WriteAllText($stdoutFile, [string]$stdout, [System.Text.Encoding]::Default)
         [System.IO.File]::WriteAllText($stderrFile, [string]$stderr, [System.Text.Encoding]::Default)
 
+        # 晚绑定护栏 (账 #305 第二百六十二刀 丙): 非 IDispatch 接收者进晚绑定出口 = 0。
+        # 读 stderr 现场 (stdout 只有程序输出, 标记打在 stderr ⇒ 必须读那一半)。
+        $lbDetail = Get-LateBindMissDetail -Name $Name -StderrFile $stderrFile
+        if ($lbDetail) {
+            return @{
+                Ok       = $false
+                ExitCode = $proc.ExitCode
+                Output   = (Get-Content $stdoutFile -ErrorAction SilentlyContinue)
+                Detail   = "dotnet; " + $lbDetail
+            }
+        }
+
         return @{
             Ok       = $true
             ExitCode = $proc.ExitCode
@@ -487,6 +538,15 @@ function Invoke-TestExe {
             -RedirectStandardOutput $stdoutFile `
             -RedirectStandardError $stderrFile `
             -ErrorAction Stop
+        $lbDetail = Get-LateBindMissDetail -Name $Name -StderrFile $stderrFile
+        if ($lbDetail) {
+            return @{
+                Ok       = $false
+                ExitCode = $proc.ExitCode
+                Output   = (Get-Content $stdoutFile -ErrorAction SilentlyContinue)
+                Detail   = "start-process; " + $lbDetail
+            }
+        }
         return @{
             Ok       = $true
             ExitCode = $proc.ExitCode
@@ -559,6 +619,10 @@ function Test-GuiVbp {
     # 账 #166: 名字走单一权威 `Resolve-VbpExeBase`（读 .vbp 的 ExeName32），不再各算各的。
     $exeBase = Resolve-VbpExeBase -VbpFile $VbpFile -ExeName $ExeName
     $exe = Join-Path $guiOut ($exeBase + ".exe")
+    # 晚绑定护栏 (账 #305 第二百六十二刀 丙) 要读 stderr —— GUI 这一支以前**不重定向**
+    # stderr, 护栏就成了空判据。Start-Process 用了重定向以后 PS 5.1 读不到 ExitCode
+    # (已知坑: 不摸一次 Handle 就只有一个空串) ⇒ 摸一把 Handle 把它留住。
+    $guiErr = Join-Path $guiOut "$Name.err"
     $proc = $null
     try {
         # 账 #175: 子进程继承本进程环境 ⇒ 用前先设、finally 里清, 不漏给后面的用例
@@ -568,7 +632,8 @@ function Test-GuiVbp {
             New-Item -ItemType Directory -Force -Path $dumpDir | Out-Null
             $env:C3_UC_DUMPDIR = $dumpDir
         }
-        $proc = Start-Process -FilePath $exe -WorkingDirectory $guiOut -PassThru -ErrorAction Stop
+        $proc = Start-Process -FilePath $exe -WorkingDirectory $guiOut -PassThru -RedirectStandardError $guiErr -ErrorAction Stop
+        $null = $proc.Handle
         $watch = [Diagnostics.Stopwatch]::StartNew()
         $windowSeen = $false
         while ($watch.ElapsedMilliseconds -lt 5000) {
@@ -578,6 +643,9 @@ function Test-GuiVbp {
             Start-Sleep -Milliseconds 100
         }
         if (-not $windowSeen) { throw "Main window not available within 5s" }
+        # 三条 PASS 文案收成变量, 判定 (含晚绑定护栏) 收成**一处** —— 以前每条 PASS
+        # 各自 pass++ 各自打印, 护栏要塞进来就得在三处各抄一遍。
+        $passMsg = ''
         if ($AutoExitSec -gt 0) {
             # GUI demo with no clean-exit contract: window shown is enough;
             # auto-kill after the timeout so the suite never hangs.
@@ -597,21 +665,25 @@ function Test-GuiVbp {
                 if ($code -ne 0) {
                     throw ("exited on its own at ~{0}s with code 0x{1:X8}" -f $selfSec, $code)
                 }
-                Write-Host "PASS (compile, window, self-exit at ~${selfSec}s, code 0)" -ForegroundColor Green
+                $passMsg = "PASS (compile, window, self-exit at ~${selfSec}s, code 0)"
             } else {
                 $proc.Kill(); $proc.WaitForExit(5000) | Out-Null
                 if ($DumpMinColors -gt 0) { Assert-UcDumpPainted -Dir $dumpDir -MinColors $DumpMinColors }
-                Write-Host "PASS (compile, window, auto-exit after ${AutoExitSec}s)" -ForegroundColor Green
+                $passMsg = "PASS (compile, window, auto-exit after ${AutoExitSec}s)"
             }
-            $script:pass++
         } else {
             if (-not $proc.CloseMainWindow()) { throw "Main window refused close" }
             if (-not $proc.WaitForExit(2000)) { throw "Application did not exit after close" }
             $proc.Refresh()
             if ($proc.ExitCode -ne 0) { throw "Exit code $($proc.ExitCode)" }
-            $script:pass++
-            Write-Host "PASS (compile, window, clean exit)" -ForegroundColor Green
+            $passMsg = "PASS (compile, window, clean exit)"
         }
+        # 晚绑定护栏 (账 #305 第二百六十二刀 丙): 跑完数一遍 stderr 里的漏。
+        # 期望 0 (负控那枚在表里写死条数) —— 漏了必须响亮, 不许静默过去。
+        $lbDetail = Get-LateBindMissDetail -Name $exeBase -StderrFile $guiErr
+        if ($lbDetail) { throw $lbDetail }
+        Write-Host $passMsg -ForegroundColor Green
+        $script:pass++
     } catch {
         $script:fail++
         Write-Host "FAIL ($($_.Exception.Message))" -ForegroundColor Red
@@ -1198,6 +1270,19 @@ function Test-ComMarkerWriteSites {
     $script:total++
     Write-Host -NoNewline "  [STATIC] com_marker_write_sites ... "
     $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\check_com_marker_write_sites.ps1" 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        $out | Select-Object -First 6 | ForEach-Object { Write-Host "  $_" }
+    }
+}
+function Test-ComLatebindGuard {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] com_latebind_guard ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\check_com_latebind_guard.ps1" 2>&1
     if ($LASTEXITCODE -eq 0) {
         $script:pass++
         Write-Host "PASS" -ForegroundColor Green
@@ -2372,6 +2457,20 @@ function Invoke-BasSetParallel {
                 }
                 [IO.File]::WriteAllText($stdoutFile, [string]$soTask.Result, [Text.Encoding]::Default)
                 [IO.File]::WriteAllText($stderrFile, [string]$seTask.Result, [Text.Encoding]::Default)
+                # 晚绑定护栏 (同 Invoke-TestExe 那条): 这段跑在 -Parallel 的 runspace 里,
+                # 调不到脚本函数 ⇒ 判定必须内联; 期望数问 $using 那张表 (键 = 产物名)。
+                $lbAllow = $using:LateBindMissAllow
+                $lbExp = 0
+                if ($lbAllow.ContainsKey($baseName)) { $lbExp = [int]$lbAllow[$baseName] }
+                $lbGot = 0
+                if (Test-Path $stderrFile) {
+                    foreach ($l in @(Get-Content $stderrFile -ErrorAction SilentlyContinue)) {
+                        if ([string]$l -match '\[C3_LATEBIND_MISS #') { $lbGot++ }
+                    }
+                }
+                if ($lbGot -ne $lbExp) {
+                    $f++; $details += ("{0}: latebind-miss 期望 {1} 条, 实到 {2} 条" -f $it.Name, $lbExp, $lbGot); continue
+                }
                 $runOk = $true
             } catch {
                 $f++; $details += "$($it.Name): run error ($($_.Exception.Message))"; continue
@@ -9865,6 +9964,23 @@ if ($Category -in @("all", "run", "vbp")) {
     Test-Vbp 'b433_formatdatetime_args' "$Tests\b433\B433.vbp" $b433Expected
     Test-Vbp 'b433_formatdatetime_args_x86' "$Tests\b433\B433.vbp" $b433Expected -Arch "x86"
 
+    # 账 #305 第二百六十二刀 (丙): 晚绑定出口的**非 IDispatch 接收者**护栏。
+    #   RTL 侧: vb6com_invoke.c 的 7 个晚绑定出口 (ComCall / ComCallByDispid / ComGetProp /
+    #   ComGetPropArg / ComSetProp / ComSetPropArg / ComSetRef) 每个入口都问一次
+    #   「这个接收者可不可以走 IDispatch」; 不可且又不是宿主伪对象 (Font / Extender /
+    #   HostObject) ⇒ 往 stderr 打一行 [C3_LATEBIND_MISS #N] 并把计数器 +1。
+    #   判据 = **非 IDispatch 进入晚绑定出口的次数为 0** (默认期望 0; 名单里写的是**确切的条数**,
+    #   不是开关 ⇒ 一枚故意的负控必须恰好响一次, 多一次少一次都红)。
+    #   本夹具三形 (B446Main.bas):
+    #     甲 (反面证人): RTL 的 Collection 进 As Object 槽 ⇒ 宿主伪对象那一路, **0 响**;
+    #     乙 (反面证人): 工程类实例进 As Object 槽 ⇒ 真 IDispatch, **0 响**;
+    #     丙 (负控): Nothing 接收者 ⇒ 恰好 **1 响** (名单 'B446' = 1)。
+    #   本机读数 (x64): stdout 三行全中 / stderr 恰好 1 条 `[C3_LATEBIND_MISS #1] site=ComCall
+    #   name="Ping" disp=0000000000000000 kind=null`。
+    $b446Expected = @("B446-coll=0", "B446-ping=pong", "B446-DONE")
+    Test-Vbp 'b446_latebind_guard' "$Tests\b446_latebind\B446.vbp" $b446Expected
+    Test-Vbp 'b446_latebind_guard_x86' "$Tests\b446_latebind\B446.vbp" $b446Expected -Arch "x86"
+
 
     # 账 #305 SB186 第二头: VB 客户那一头　「口径」的唯一读数面　—— 探针是 C 客户, 它只能读 hr;
     # 「服务端自己那条错折回原号」还是「一律 429」这一问, 只有真的 VB 客户点得到。
@@ -10111,6 +10227,7 @@ if ($Category -in @("all", "compile")) {
     if (Enter-StaticShard) { Test-BuiltinGlobalObjects }
     if (Enter-StaticShard) { Test-FormPseudoTable }
     if (Enter-StaticShard) { Test-ProjectFormNames }
+    if (Enter-StaticShard) { Test-ComLatebindGuard }
 
     if (Enter-StaticShard) { Test-EmitcArtifactCaliber }
     if (Enter-StaticShard) { Test-CtrlGeomCache }

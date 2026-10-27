@@ -52,6 +52,13 @@ void vb6_ReleaseObject(void** objPtr);
 // "对象不支持此属性或方法" —— 后期绑定与 Release 路径都先用它把这类挡掉。
 int32_t vb6_ComIsDispatchable(const void* disp);
 
+// 账 #305 第二百六十二刀 (丙): 晚绑定出口漏掉的「非 IDispatch 接收者」计数。
+// 七个出口 (ComCall / ComCallByDispid / ComGetProp / ComGetPropArg / ComSetProp /
+// ComSetPropArg / ComSetRef) 现在都会把这种接收者**报一行** (stderr 标记
+// C3_LATEBIND_MISS) 并计数; 行为不变 (仍按原路返回空)。
+// 判据「非 IDispatch 进晚绑定出口 = 0」按 stderr 里那条标记的条数读。
+int32_t vb6_ComLateBindMissCount(void);
+
 // Fix <vbeclipse>: vb6_ReleaseObject 的反向操作 (AddRef), 判据相同 (vb6_ComIsDispatchable)。
 // 供 vb6rtl_variant.h 的 vb6_VariantObject / vb6rtl.c 的 vb6_VariantCopy 使用 ——
 // Variant 既然在 Clear 时 Release, 构造/拷贝时就必须自己持有一份引用。

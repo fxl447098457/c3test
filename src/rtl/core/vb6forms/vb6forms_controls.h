@@ -274,6 +274,8 @@ void vb6_UC_RefreshCurrent(void);
 void vb6_HostObj_Register(void* hwnd, const char* name, const char* vbTypeName,
                           int32_t isForm, int32_t index);
 int32_t vb6_Host_IsHostObject(void* obj);
+// 账 #305 第二百六十二刀 (丙): 宿主模型「不认识的成员」计数 (见 uc_hostmodel.c)。
+int32_t vb6_Host_UnknownMemberCount(void);
 const wchar_t* vb6_Host_TypeNameOf(void* obj);
 int32_t vb6_Host_GetProp(void* obj, const wchar_t* name, void* outVariant);
 int32_t vb6_Host_SetProp(void* obj, const wchar_t* name, const void* inVariant);

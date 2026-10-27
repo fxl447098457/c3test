@@ -130,6 +130,9 @@ void vb6_ComSetProp(void* disp, const wchar_t* propName, void* value);
 void vb6_ComSetPropArg(void* disp, const wchar_t* propName, void** args, int32_t argc, void* value);
 void vb6_ComSetRef(void* disp, const wchar_t* propName, void* objRef);
 
+// 账 #305 第二百六十二刀 (丙): 同 vb6com.h 那份声明 (生成码与 RTL 各 include 一份头)。
+int32_t vb6_ComLateBindMissCount(void);
+
 // COM vb6_VARIANT封装/解封 — cgen生成的C代码使用 (P6.2)
 // 实际实现在vb6com.c, 此处用void*避免vb6_VARIANT类型冲突
 void* vb6_ComPackBSTR(const wchar_t* bstr);

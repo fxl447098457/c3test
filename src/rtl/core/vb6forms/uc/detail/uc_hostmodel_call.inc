@@ -152,4 +152,11 @@
         _wcsicmp(name, L"Print") == 0 || _wcsicmp(name, L"Line") == 0) {
         return 1;
     }
+    /* 账 #305 第二百六十二刀 (丙): 走到这里 = 宿主模型**不认识**这个成员。
+       以前直接 return 1 (静默答「已处理」) ⇒ 调用方拿到 Empty, 看不出漏了谁。
+       现在数出来并报一行 (C3_HOST_MEMBER_MISS); 行为不变 (仍 return 1)。 */
+    g_host_unknown_member++;
+    fwprintf(stderr, L"[C3_HOST_MEMBER_MISS #%ld] site=Call name=\"%ls\" obj=%p\n",
+             (long)g_host_unknown_member, name ? name : L"(null)", obj);
+    fflush(stderr);
     return 1;   // 宿主对象: 未知方法一律空实现

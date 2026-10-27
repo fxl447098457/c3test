@@ -64,6 +64,44 @@ int32_t vb6_ComIsDispatchable(const void* disp) {
         && vb6_ComIsCodePtr(slot[6]);
 }
 
+/* 账 #305 第二百六十二刀 (丙): 晚绑定出口的「非 IDispatch 接收者」护栏。
+ * 七个出口 (ComCall / ComCallByDispid / ComGetProp / ComGetPropArg /
+ * ComSetProp / ComSetPropArg / ComSetRef) 以前对「接收者不是真 IDispatch」
+ * 各行其是: 有的打一行 "not found" 就走人, 有的 (CallByDispid / NULL 接收者)
+ * 一声不吭。静默 = 下回再漏时没人知道漏在哪一枚。
+ * 这里收成一位主人: 计数 + 一行 stderr 标记 (C3_LATEBIND_MISS)。
+ * **行为不变** (仍按原路返回 NULL / 空): 只把「静默」换成「响亮」。
+ * 刻意不在这儿抛错 —— 无处理器的 vb6_RaiseError 会 exit(424) 把进程带走。
+ * 判据「非 IDispatch 进晚绑定出口 = 0」按 stderr 里 C3_LATEBIND_MISS 的条数读。
+ * 伪接收者 (字体 / Extender / 宿主对象: HWND / 控件集合 / Collection /
+ * UC 实例) 由各自的岔口应答, 不算漏 —— 判据是 vb6_ComLateBindIsPseudo。 */
+static int32_t g_com_latebind_miss = 0;
+
+int32_t vb6_ComLateBindMissCount(void) { return g_com_latebind_miss; }
+
+/* 这枚接收者是不是「宿主伪对象」? 不是 IDispatch, 但宿主模型会应答。 */
+static int32_t vb6_ComLateBindIsPseudo(const void* disp) {
+    if (!disp) return 0;
+    if (vb6_UC_IsFont(disp)) return 1;
+    if (vb6_UC_IsExtender(disp)) return 1;
+    if (vb6_Host_IsHostObject(disp)) return 1;
+    return 0;
+}
+
+/* 护栏的唯一判据: 既不是真 IDispatch, 也不是宿主伪对象。 */
+static int32_t vb6_ComLateBindIsMiss(const void* disp) {
+    if (vb6_ComLateBindIsPseudo(disp)) return 0;
+    return !vb6_ComIsDispatchable(disp);
+}
+
+static void vb6_ComLateBindMiss(const wchar_t* site, const wchar_t* name, void* disp) {
+    g_com_latebind_miss++;
+    fwprintf(stderr, L"[C3_LATEBIND_MISS #%ld] site=%ls name=\"%ls\" disp=%p kind=%ls\n",
+             (long)g_com_latebind_miss, site, name ? name : L"(null)", disp,
+             disp ? L"notdispatchable" : L"null");
+    fflush(stderr);
+}
+
 static DISPID vb6_getDispid(IDispatch* pDisp, const wchar_t* name) {
     // 先查缓存
     for (int32_t i = 0; i < vb6_dispid_cache_count; i++) {
@@ -186,6 +224,10 @@ HRESULT vb6_ComInvoke(IDispatch* pDisp, DISPID dispid, WORD wFlags,
 void* vb6_ComCall(void* disp, const wchar_t* methodName,
                   void* args_void, int32_t argc) {
     VARIANT** args = (VARIANT**)args_void;
+    /* 账 #305 第二百六十二刀 (丙): 非 IDispatch 接收者 —— 响亮 + 计数 (行为不变) */
+    if (vb6_ComLateBindIsMiss(disp)) {
+        vb6_ComLateBindMiss(L"ComCall", methodName, disp);
+    }
     if (!disp) return NULL;
     /* Fix 112: 宿主对象 (窗体/控件 HWND, Controls 集合, Font 代理) 不是 IDispatch,
      * 直接解引用 lpVtbl 会 AV. 用 Win32 语义的宿主分派应答. */
@@ -308,6 +350,10 @@ void* vb6_ComCall(void* disp, const wchar_t* methodName,
 void* vb6_ComCallByDispid(void* disp, int32_t dispid,
                           void* args_void, int32_t argc) {
     VARIANT** args = (VARIANT**)args_void;
+    /* 账 #305 第二百六十二刀 (丙): 非 IDispatch 接收者 —— 响亮 + 计数 (行为不变) */
+    if (vb6_ComLateBindIsMiss(disp)) {
+        vb6_ComLateBindMiss(L"ComCallByDispid", L"(byDispid)", disp);
+    }
     if (!disp) return NULL;
     /* Fix 同 vb6_ComCall: 宿主对象分派 */
     if (vb6_Host_IsHostObject(disp)) {
@@ -364,6 +410,10 @@ void* vb6_ComCallByDispid(void* disp, int32_t dispid,
 }
 // COM属性Get (返回VARIANT*)
 void* vb6_ComGetProp(void* disp, const wchar_t* propName) {
+    /* 账 #305 第二百六十二刀 (丙): 非 IDispatch 接收者 —— 响亮 + 计数 (行为不变) */
+    if (vb6_ComLateBindIsMiss(disp)) {
+        vb6_ComLateBindMiss(L"ComGetProp", propName, disp);
+    }
     if (!disp) return NULL;
     /* Fix 164z2-dbg: C3_COM_TRACE 入口日志 */
     if (GetEnvironmentVariableW(L"C3_COM_TRACE", NULL, 0) > 0) {
@@ -466,6 +516,10 @@ void* vb6_ComGetProp(void* disp, const wchar_t* propName) {
 void* vb6_ComGetPropArg(void* disp, const wchar_t* propName,
                         void* args_void, int32_t argc) {
     VARIANT** args = (VARIANT**)args_void;
+    /* 账 #305 第二百六十二刀 (丙): 非 IDispatch 接收者 —— 响亮 + 计数 (行为不变) */
+    if (vb6_ComLateBindIsMiss(disp)) {
+        vb6_ComLateBindMiss(L"ComGetPropArg", propName, disp);
+    }
     if (!disp) return NULL;
     IDispatch* pDisp = (IDispatch*)disp;
 
@@ -516,6 +570,10 @@ void* vb6_ComGetPropArg(void* disp, const wchar_t* propName,
 // COM属性Set (值类型)
 // COM属性Set (值类型)
 void vb6_ComSetProp(void* disp, const wchar_t* propName, void* value_void) {
+    /* 账 #305 第二百六十二刀 (丙): 非 IDispatch 接收者 —— 响亮 + 计数 (行为不变) */
+    if (vb6_ComLateBindIsMiss(disp)) {
+        vb6_ComLateBindMiss(L"ComSetProp", propName, disp);
+    }
     /* Fix 125: 字体结构体 (非 COM 对象) 直接写字段 —— 这是 `Property Set X_Font` 里
        `With m_X_Font: .Name = New_Font.Name ...` 的实现路径; 走 Invoke 必崩。 */
     if (disp && vb6_UC_IsFont(disp)) {
@@ -608,6 +666,10 @@ void vb6_ComSetPropArg(void* disp, const wchar_t* propName, void** args, int32_t
     VARIANT varValue;
     VariantInit(&varValue);
     if (value_void) varValue = *(VARIANT*)value_void;
+    /* 账 #305 第二百六十二刀 (丙): 非 IDispatch 接收者 —— 响亮 + 计数 (行为不变) */
+    if (vb6_ComLateBindIsMiss(disp)) {
+        vb6_ComLateBindMiss(L"ComSetPropArg", propName, disp);
+    }
     if (!disp) { free(value_void); return; }
     IDispatch* pDisp = (IDispatch*)disp;
 
@@ -653,6 +715,10 @@ void vb6_ComSetPropArg(void* disp, const wchar_t* propName, void** args, int32_t
 
 // COM属性SetRef (对象引用 -- PROPERTYPUTREF)
 void vb6_ComSetRef(void* disp, const wchar_t* propName, void* objRef) {
+    /* 账 #305 第二百六十二刀 (丙): 非 IDispatch 接收者 —— 响亮 + 计数 (行为不变) */
+    if (vb6_ComLateBindIsMiss(disp)) {
+        vb6_ComLateBindMiss(L"ComSetRef", propName, disp);
+    }
     if (!disp) return;
     IDispatch* pDisp = (IDispatch*)disp;
 
