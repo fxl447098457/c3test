@@ -187,6 +187,35 @@ void CCodeGen::visit(WithMemberExpr& node) {
         return;
     }
     case WithObjKind::COMObject: {
+        // 账 #305 第二百六十一刀「甲」: With 接收者是宿主伪对象 (With UserControl /
+        // With PropertyPage) 时, 体内成员先问那张宿主伪表 —— 表里登记了答案的两档
+        // 以前**从没被问到**, 一律打了 COM 标记交给晚绑定, 而晚绑定那一头对宿主句柄
+        // 只有「宿主模型认得的成员」才有答。262 刀量到的 25 条宿主缺口
+        // (GetProp "Extender" ×18 / Call "ScaleY" ×5 / Call "ScaleX" ×2) 全在这一格。
+        // 改道判据与「为什么只接这两档」写在 cgen_util_com.cpp 那两条出口上。
+        //   .Extender → (&vb6_UserControl_Extender)：vb6_UC_IsExtender 认的唯一身份,
+        //     晚绑定出口据此把成员读写岔进 vb6_UC_ExtenderField 那条 per-instance 通道
+        //     ⇒ `With UserControl` 里的 `.Extender.Width` 与 `With UserControl.Extender`
+        //     里的 `.Width`、以及写侧 Fix 294 一直在发的那一枚, 从此同一个答复。
+        //   .ScaleX/.ScaleY → 裸名 + 清空 this：换算不吃接收者 (与 #196 控件那半同形)。
+        // 两形都刻意**不打** marker —— 留着 marker 就是让下一跳去 Invoke 一枚假 IDispatch。
+        if (!info.hostPseudoObj.empty() && hostPseudoIsObject(info.hostPseudoObj)) {
+            std::string hpObj261, hpCallee261;
+            const bool isExt261 =
+                hostPseudoExtenderObjExpr(info.hostPseudoObj, node.memberName, hpObj261);
+            const bool isScl261 = !isExt261 && asCallCallee_
+                && hostPseudoScaleCall(info.hostPseudoObj, node.memberName, hpCallee261);
+            if (isExt261 || isScl261) {
+                isComMarker_ = false;
+                isEarlyBoundCom_ = false;
+                earlyBoundSym_ = nullptr;
+                comObjExpr_.clear();
+                comMemberName_.clear();
+                pendingChainObj_.clear();
+                lastExpr_ = isExt261 ? hpObj261 : hpCallee261;
+                return;
+            }
+        }
         // Fix 161f-extlist: With 目标是 ListView 槽 (形参/局部) —— `.View` / `.hWnd`
         // / `.Sorted` 等标量属性走控件读表, 不让它落 COM 晚绑定
         // (vb6_ComGetStringProp(_vb6_with_N, L"hWnd") = 拿 HWND 当 IDispatch →

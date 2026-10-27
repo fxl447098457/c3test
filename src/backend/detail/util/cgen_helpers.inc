@@ -1229,6 +1229,16 @@
                                     const std::string& memberName) const;
     bool hostPseudoIsObject(const std::string& name) const;
 
+    // 账 #305 第二百六十一刀「甲」: With 接收者是宿主伪对象时, 「哪两档成员的答案住在
+    // 宿主伪对象通道、发码侧应当改道」这两问的唯一出口 (消费点只有一处:
+    // visit(WithMemberExpr&))。判据与理由都写在 cgen_util_com.cpp 的定义上。
+    bool hostPseudoExtenderObjExpr(const std::string& pseudoObj,
+                                   const std::string& memberName,
+                                   std::string& outExpr) const;
+    bool hostPseudoScaleCall(const std::string& pseudoObj,
+                             const std::string& memberName,
+                             std::string& outCallee) const;
+
     // 账 #159 = C29-CH-d: 上面那条规范化与下面三个问题, 全部由 cgen_util_com.cpp
     // 里 kHostPseudoRows 这**一张表**回答 (成员名清单只此一处, 别处再抄就是回归):
     //   hostPseudoBareName   — .ctl/.pag 里裸写的成员要不要接、接成哪个 RTL 符号

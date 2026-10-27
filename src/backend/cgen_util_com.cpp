@@ -501,6 +501,56 @@ std::string CCodeGen::hostPseudoRtlSymbol(const std::string& pseudoObj,
     return "vb6_" + objSym + "_" + cIdent(r ? r->rtl : memberName);
 }
 
+// 账 #305 第二百六十一刀「甲」: With 接收者是宿主伪对象时, 体内成员有两档的答案
+// 住在**宿主伪对象通道**而不是晚绑定 —— 但发码侧以前一律打 COM 标记, 那张表压根没被问到。
+// 这两句就是「哪两档该改道」的唯一答案, 由 `visit(WithMemberExpr&)` 消费。
+//
+// ① `.Extender` → Extender 那一档的**对象地址**。运行期认这个地址的是
+//    `vb6_UC_IsExtender` (只比 `&vb6_UserControl_Extender` 一枚), 晚绑定出口据此把成员
+//    读写岔进 `vb6_UC_ExtenderField` 那条 per-instance 通道 ⇒ 折成地址以后,
+//    `With UserControl` 里的 `.Extender.Width` 与 `With UserControl.Extender` 里的
+//    `.Width` 落进**同一个答复** (写侧 Fix 294 一直在发这枚地址, 读侧以前发的是
+//    `vb6_ComGetObjectProp(宿主句柄, L"Extender")` —— 宿主模型答不出 Extender ⇒ NULL,
+//    262 刀量到 18 条 GetProp "Extender" 与 5 条下游的 ComCall "Move" 全在这一格)。
+//    ⚠ 刻意不含 Ambient: `vb6_UserControl_Ambient` 也是结构体值, 但**没有任何出口认它的
+//    地址** ⇒ 折成地址只是把「宿主模型答不出」换成「晚绑定出口答不出」(还会新计一条
+//    LATEBIND_MISS), 换个地方漏而已。那条缺口单独记在台账, 本刀不掩。
+bool CCodeGen::hostPseudoExtenderObjExpr(const std::string& pseudoObj,
+                                         const std::string& memberName,
+                                         std::string& outExpr) const {
+    outExpr.clear();
+    if (pseudoObj.empty()) return false;
+    if (!hostPseudoFind(pseudoObj, memberName)) return false;
+    const std::string sym = hostPseudoRtlSymbol(pseudoObj, memberName);
+    if (sym != "vb6_UserControl_Extender") return false;
+    outExpr = "(&" + sym + ")";
+    return true;
+}
+
+// ② ScaleX / ScaleY → RTL 那两枚**不吃接收者**的换算入口 (`vb6_UserControl_ScaleX/Y`
+//    是 `_Generic` 宏, 转手到 `vb6_ScaleUnitX/Y` —— 账 #196 第三条把它收成四处接收者
+//    共用的唯一实现)。这一档以前发成 `vb6_ComCall(宿主句柄, L"ScaleY", …)`, 而宿主模型
+//    的 Call 表里没有 ScaleX/ScaleY 那两行 ⇒ 262 刀量到 ScaleX ×2 + ScaleY ×5, 全回 0。
+//    与控件那半 (账 #196/#192 的 `controlScaleMethod`) 同一形状: 交**裸名** +
+//    **清空 pendingChainObj_** —— 换算不吃接收者, 只吃那两个显式的 from/to 参数
+//    (留着 this 反而会被调用点前置成第一个实参)。
+//    ⚠ 名单只有这两枚, 不是「凡是 HPF_BARE|HPF_METHOD 都改道」: 同档还有
+//    AsyncRead / PropertyChanged / SelectedControls 三行, 它们没有实测缺口, 而
+//    AsyncRead 的 VB6 实参是 5 格、RTL 声明是 4 格 —— 改道会把一条静默空转换成
+//    cl C2198 硬错误 (不对称的红, 本线踩过)。那三行留给「RTL 形参表 arity」那一账。
+bool CCodeGen::hostPseudoScaleCall(const std::string& pseudoObj,
+                                   const std::string& memberName,
+                                   std::string& outCallee) const {
+    outCallee.clear();
+    if (pseudoObj.empty()) return false;
+    const HostPseudoRow* r = hostPseudoFind(pseudoObj, memberName);
+    if (!r || !(r->flags & HPF_METHOD)) return false;
+    const std::string n = hostPseudoLower(r->name);
+    if (n != "scalex" && n != "scaley") return false;
+    outCallee = hostPseudoRtlSymbol(pseudoObj, memberName);
+    return !outCallee.empty();
+}
+
 // Fix 296 / 4a: `Extender.<成员>` 作**右值**时的实例感知读入口 —— 写侧 (3a) 的镜像。
 //
 // 通道 (vb6_UC_ExtenderField) 已经改指 `vb6_UCRec.ext*`, 而读侧发的一直是裸全局
@@ -946,7 +996,25 @@ std::string CCodeGen::resolveComMarkerForPack(const std::string& packFnHint) {
     // VARIANT* 转成 vb6_VARIANT (即使 isComMarker_ 已被消费, lastExpr_ 仍可能是 COM 调用结果).
     // vb6_ComPackValue(vb6_VariantFromComResult(ComCall)) 经 _Generic VariantIdentity 路径
     // 等价于 vb6_ComPackVariant(vb6_VariantFromComResult(ComCall)).
-    if (packFnHint == "vb6_ComPackVariant" || packFnHint == "vb6_ComPackValue") {
+    //
+    // 账 #305 第二百六十一刀「甲」(读路径): 这一格以前**没有** `!isComMarker_` 那道闸。
+    // 链式成员读 (`With UserControl` 里的 `.Extender.Left`) 在 generic_access 的
+    // 链式 COM 检测里把 lastExpr_ 停在**对象**表达式上 (marker 说「还要读 Left」),
+    // 于是这一格看见 `vb6_ComGetObjectProp(` 前缀就把**成员整格丢掉**, 交出去的是
+    // Extender 对象本体 —— 实测 ComCtlsDemo ComboBoxW/LabelW 那 5 发
+    // `.Extender.Move .Extender.Left, .Extender.Top, …` 的四枚实参全打成对象:
+    //   vb6_ComPackValue(vb6_VariantFromComResult(vb6_ComGetObjectProp(_vb6_with_3, L"Extender")))
+    // 而 `x = .Extender.Left` 那一形 (赋值右值, 不经过这里) 一直是**留着**成员的
+    // ⇒ 同一句写在实数位和写在右值位给出两种答案。加上那道闸: marker 在场就往下走,
+    // 由下面的属性读出口答。
+    // 顺带一句口径: `vb6_ComGetObjectProp(` / `vb6_ComCallObject(` 交回的是 **IDispatch*
+    // 本体** (vb6com_wrap.c:126 只认 VT_DISPATCH/VT_UNKNOWN, 且 vb6_ComVarFree 只 free
+    // 结构体), 而 vb6_VariantFromComResult 的契约是把入参**当堆上 VARIANT 解引用再 free**
+    // —— 拿对象指针喂它是类型混淆 (读 vtable 首字当 vt 标签, 然后把代码地址 free 掉)。
+    // 这两条前缀留在表里只因为 isComMarker_ 为假时它们本来就落 `return ""` 那一路,
+    // 由 packArgValue 原样打包; 本刀不动它们, 只把 marker 在场那一头闸住。
+    if ((packFnHint == "vb6_ComPackVariant" || packFnHint == "vb6_ComPackValue")
+        && !isComMarker_) {
         if (lastExpr_.find("vb6_ComCall(") == 0 ||
             lastExpr_.find("vb6_ComCallByDispid(") == 0 ||
             lastExpr_.find("vb6_ComGetProp(") == 0 ||
@@ -1012,13 +1080,11 @@ std::string CCodeGen::resolveComMarkerForPack(const std::string& packFnHint) {
     }
     // vb6_ComPackVariant / Fix 030 vb6_ComPackValue: 需要把 COM 返回的 VARIANT* 转成 vb6_VARIANT
     if (packFnHint == "vb6_ComPackVariant" || packFnHint == "vb6_ComPackValue") {
-        if (lastExpr_.find("vb6_ComCall(") == 0 ||
-            lastExpr_.find("vb6_ComCallByDispid(") == 0 ||
-            lastExpr_.find("vb6_ComGetProp(") == 0 ||
-            lastExpr_.find("vb6_ComGetObjectProp(") == 0 ||
-            lastExpr_.find("vb6_ComCallObject(") == 0) {
-            return "vb6_VariantFromComResult(" + lastExpr_ + ")";
-        }
+        // 账 #305 第二百六十一刀「甲」(读路径, 第二格): 走到这里 marker **一定**在场上
+        // (上面 `if (!isComMarker_) return "";` 已经把不在场的都挡掉了), 而 lastExpr_ 停在
+        // **对象**表达式上 —— 前面那一格以前在这里也照抄了一遍, 于是链式成员读
+        // (`.Extender.Left` 当实参) 在这里又被丢掉一次。这一格的答案只有一种形状:
+        // 把这枚 marker 读成属性读, 再交给 VariantFromComResult 收所有权。
         // Fix 143: 裸 marker (实参是 obj.Prop 形态, emitExpr 后 lastExpr_ 停在
         // 对象表达式上) — 不能把对象本身当值打包, 否则
         //   cboThemes.AddItem iTheme.Name → AddItem(iTheme)
