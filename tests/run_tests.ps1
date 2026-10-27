@@ -1919,6 +1919,20 @@ function Test-ConditionTruthAuthority {
     }
 }
 
+function Test-EventParamAbiAuthority {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] event_param_abi_authority ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\check_event_param_abi_authority.ps1" 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        $out | Select-Object -First 8 | ForEach-Object { Write-Host "  $_" }
+    }
+}
+
 function Test-VariantToStringAuthority {
     $script:total++
     Write-Host -NoNewline "  [STATIC] variant_to_string_authority ... "
@@ -7243,7 +7257,17 @@ if ($Category -in @("all", "run", "vbp")) {
     Write-Host ""
 
     Test-Vbp "test_implements" "$Tests\test_implements.vbp" @("IMPL1:OK", "IMPL2:OK", "Implements test PASSED")
-    Test-Vbp "test_events" "$Tests\test_events\test_events.vbp" @("Events test PASSED")
+    Test-Vbp "test_events" "$Tests\test_events\test_events.vbp" @("Events test PASSED", "EvtRef test PASSED")
+    # 账 #305 第二百五十六刀: 事件声明里明写 ByRef 的那几位是出参 —— 六处发形参表的地方
+    # (回调 typedef / 窗体 thunk / 处理器 / RaiseEvent 实参位 / 模块级包装的声明与实现) 必须
+    # 同一个形状。正针钉指针形的三处实物, 反面针钉修复前那两行原样 (少一枚 = 没钉住同一发)。
+    Test-EmitcShape "b256_evt_byref_shape" @("$Tests\test_events\Button.cls", "$Tests\test_events\test_events.bas") @(
+        "typedef void (*vb6_evt_Button_GetEmptyMarkup_cb)(void* handler, BSTR* Text, int16_t* Center);",
+        "void vb6_evt_wrap_test_events_btn_GetEmptyMarkup(void* handler, BSTR* Text, int16_t* Center) {",
+        "vb6_test_events_btn_GetEmptyMarkup(Text, Center);")
+    Test-EmitcAbsent "b256_evt_byref_lesion" @("$Tests\test_events\Button.cls", "$Tests\test_events\test_events.bas") @(
+        "typedef void (*vb6_evt_Button_GetEmptyMarkup_cb)(void* handler, BSTR Text, int16_t Center);",
+        "void vb6_evt_wrap_test_events_btn_GetEmptyMarkup(void* handler, BSTR Text, int16_t Center) {")
     Test-Vbp "M7Test" "$Tests\m7_test\M7Test.vbp" @("4/4 PASSED")
     # ai/022 B03: cross-module new-style contract reached through an Interface head-line host
     Test-Vbp "itf_xmod_writer" "$Tests\itf_xmod\XWriter.vbp" @("XMOD1:OK", "XMOD2:OK", "IFV1:OK", "IFV2:OK", "IFV3:OK", "LIFE1:OK", "LIFE2:OK", "LIFE3:OK", "LIFE9:OK", "TERM last=bye", "TERM last=scoped", "QI1:OK", "QI2:OK", "QI3:OK", "QI4:OK", "TOF1:OK", "TOF2:OK", "TOF3:OK", "DN0:OK", "DN1:OK", "DN2:OK", "DN3:OK", "TOC1:OK", "TOC2:OK", "TOC3:OK")
@@ -10124,6 +10148,7 @@ if ($Category -in @("all", "compile")) {
     if (Enter-StaticShard) { Test-VariantToStringAuthority }
     if (Enter-StaticShard) { Test-ByRefArgPackAuthority }
     if (Enter-StaticShard) { Test-ConditionTruthAuthority }
+    if (Enter-StaticShard) { Test-EventParamAbiAuthority }
     if (Enter-StaticShard) { Test-ComValueTwinAuthority }
     if (Enter-StaticShard) { Test-ByRefElementAddressAuthority }
     if (Enter-StaticShard) { Test-ClsidSyncAllCopies }
