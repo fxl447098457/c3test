@@ -116,6 +116,10 @@ void vb6_OcxHost_PaintAll(void* hwndForm, void* hdc);
 // WM_PAINT 镜像可见)。无 ARDC 时不动作 (非 AutoRedraw 窗体走原生直绘)。
 void vb6_FormPaintBlitAutoRedraw(void* hwndForm, void* hdc);
 
+// 账 #305 第二百八十刀: 窗体自己的 WndProc 答「这枚窗口现在用什么字体」那一问。
+// 答案住在 vb6forms_ctrl.c 那位只读主人里（自注册的窗口类答不了；DefWindowProc 也不记，见探针实测）。
+void* vb6_FormAnswerGetFont(void* hwnd);
+
 // ============================================================
 // Fix 112: in-project UserControl (.ctl) instance host + form/control host object model
 // ============================================================

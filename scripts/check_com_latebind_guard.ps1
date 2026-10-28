@@ -68,6 +68,7 @@ $formsC   = Join-Path $Root 'src\rtl\core\vb6forms\vb6forms.c'
 $ctrlC    = Join-Path $Root 'src\rtl\core\vb6forms\vb6forms_ctrl.c'
 $hostWinC = Join-Path $Root 'src\rtl\core\vb6forms\uc\uc_host_window.c'
 $ucCreateC = Join-Path $Root 'src\rtl\core\vb6forms\uc\detail\uc_host_create.inc'
+$formWpInc = Join-Path $Root 'src\backend\detail\module\cgen_form_wndproc_create.inc'
 $fixture  = Join-Path $Root 'tests\b446_latebind\B446.vbp'
 
 $fail = @()
@@ -122,7 +123,7 @@ function Index-Of262([string[]]$body, [string]$needle) {
     return -1
 }
 
-$missing = @($invPath, $comH, $clsH, $hostC, $ctrlH, $incCall, $incGet, $incSet, $rtPath, $ucC, $rtlC, $formsC, $ctrlC, $hostWinC, $ucCreateC) |
+$missing = @($invPath, $comH, $clsH, $hostC, $ctrlH, $incCall, $incGet, $incSet, $rtPath, $ucC, $rtlC, $formsC, $ctrlC, $hostWinC, $ucCreateC, $formWpInc) |
            Where-Object { -not (Test-Path $_) }
 if ($missing) {
     foreach ($m in $missing) { $fail += ("missing file " + $m) }
@@ -396,6 +397,23 @@ if ($nASet -ne 0) {
               " (want 0) - 发信人要抄第二份, 作废那本账就有人对不上")
 }
 
+# ---- R12: 第二百八十刀那一档 (窗体顶层**本人**答字体那一问) 的形状 ----
+# 第二百七十九刀让自注册的 UC 宿主类本人答，这一刀管**发码发出来的**那枚窗体顶层。规矩同一条:
+# 发码那边只许转调一位主人；自己 GetPropW 那一格 = 第二本账（D10 守的就是这个形状）。
+$ctrlHdrCode = Strip-Comments262 ((Read-Lines262 $ctrlH) -join "`n")
+$formWpCode  = Strip-Comments262 ((Read-Lines262 $formWpInc) -join "`n")
+$nFA = ([regex]::Matches($ctrlCode, 'void\*\s+vb6_FormAnswerGetFont\w*\s*\(void\*\s+hwnd\)\s*\{')).Count
+if ($nFA -ne 1) { $fail += ('R12 definition of vb6_FormAnswerGetFont = ' + $nFA + ' (want 1)') }
+$nFAbody = ([regex]::Matches($ctrlCode, 'vb6_FormAnswerGetFont\w*\s*\(void\*\s+hwnd\)\s*\{\s*\r?\n\s*return\s+\(void\*\)\s*vb6_ControlFontStored')).Count
+if ($nFAbody -ne 1) { $fail += ('R12 vb6_FormAnswerGetFont must hand the question to vb6_ControlFontStored = ' + $nFAbody + ' (want 1; 0 = 薄壳自己另找一遍 = 第二本账)') }
+$nFADec = ([regex]::Matches($ctrlHdrCode, '(?m)^void\*\s+vb6_FormAnswerGetFont\s*\(void\*\s+hwnd\);\s*$')).Count
+if ($nFADec -ne 1) { $fail += ('R12 vb6_FormAnswerGetFont declared in the header the generated TU sees = ' + $nFADec + ' (want 1; 0 = 发进用户 TU 的名字没声明 -> cl C2146/C4013)') }
+$nFAEmit = ([regex]::Matches($formWpCode, 'vb6_FormAnswerGetFont\(\(void\*\)hwnd\)')).Count
+$nFACase = ([regex]::Matches($formWpCode, 'case WM_GETFONT:')).Count
+if ($nFAEmit -ne 1 -or $nFACase -ne 1) { $fail += ('R12 emitted form-toplevel arm = emit ' + $nFAEmit + ' + case ' + $nFACase + ' (want 1 + 1; 0 = 顶层又没人答，尺上那 1 枚空)') }
+$nFABypass = ([regex]::Matches($formWpCode, 'VB6_CtrlFont')).Count
+if ($nFABypass -ne 0) { $fail += ('R12 generated code reads the VB6_CtrlFont slot directly = ' + $nFABypass + ' (want 0) - 绕过主人自己读那一格就是第二本账') }
+
 # ---- R8: 这枚哨兵自己不许是死码 ----
 $nSelfReg = ([regex]::Matches($rtCode, 'Test-ComLatebindGuard')).Count
 if ($nSelfReg -ne 2) {
@@ -407,5 +425,5 @@ if ($fail.Count -gt 0) {
     foreach ($f in $fail) { Write-Host ("FAIL " + $f) }
     exit 1
 }
-Write-Host ("PASS check_com_latebind_guard: exits=7 guarded=7 pseudo-exempt=3 order=pseudo-first guard=behavior-preserving counter-outlets=2 host-sibling=3 runner-sites=3 inline-counters=2 negative-control=2 hfont-owner=1 hfont-kind5=2 height-owner=1 height-consumers=3 name-default=ms-sans-serif apply-owner=1 apply-senders=2 self-registered=1")
+Write-Host ("PASS check_com_latebind_guard: exits=7 guarded=7 pseudo-exempt=3 order=pseudo-first guard=behavior-preserving counter-outlets=2 host-sibling=3 runner-sites=3 inline-counters=2 negative-control=2 hfont-owner=1 hfont-kind5=2 height-owner=1 height-consumers=3 name-default=ms-sans-serif apply-owner=1 apply-senders=2 self-registered=1") form-ans-owner=1 form-ans-body=1 form-ans-decl=1 form-ans-emit=1
 exit 0

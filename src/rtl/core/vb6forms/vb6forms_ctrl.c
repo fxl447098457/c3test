@@ -408,6 +408,13 @@ HFONT vb6_ControlFontStored(HWND hw) {
     return (HFONT)GetPropW(hw, L"VB6_CtrlFont");
 }
 
+// 账 #305 第二百八十刀: 生成代码那一头的薄壳 —— 窗体自己的 WndProc 答那一问时问它。
+// 答案仍旧只由上面那一格交：这里不改口径、不再另找一遍，句柄按 void* 进出（照本文件的向例，
+// 生成代码不需要 HFONT 这个类型名）。
+void* vb6_FormAnswerGetFont(void* hwnd) {
+    return (void*)vb6_ControlFontStored((HWND)hwnd);
+}
+
 HFONT vb6_ControlFont(HWND hw) {
     HFONT h = (HFONT)SendMessageW(hw, WM_GETFONT, 0, 0);
     if (!h) h = vb6_ControlFontStored(hw);

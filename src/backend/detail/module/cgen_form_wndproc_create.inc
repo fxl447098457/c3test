@@ -40,6 +40,16 @@
     c_.emitLine("}");
     c_.dedent();
 
+    // 账 #305 第二百八十刀: 窗体顶层本人答字体那一问 —— 参考那台 ThunderRT6FormDC 答
+    // -13/MS Sans Serif，我们这枚从前只有第二百七十八刀存下的那一格、没人答（探针实测
+    // DefWindowProc 不记 WM_SETFONT）。答案走唯一那位只读主人，发码这边不自己读那一格。
+    c_.indent();
+    c_.emitLine("case WM_GETFONT:");
+    c_.indent();
+    c_.emitLine("return (LRESULT)(INT_PTR)vb6_FormAnswerGetFont((void*)hwnd);");
+    c_.dedent();
+    c_.dedent();
+
     // WM_CREATE: 创建控件
     c_.indent();
     c_.emitLine("case WM_CREATE: {");
