@@ -302,7 +302,7 @@ void* vb6_UC_NewFont(void) {
  * 之前它住三处、两套口径: vb6forms.c 的 vb6_Vb6DefaultGuiFont 用 -MulDiv(825,dpiY,7200)
  * (MulDiv **四舍五入**), vb6forms_ctrl.c 的 vb6_SetControlFontSize 用 -(int)(pt*dpi/72f+0.5f)
  * (也是四舍五入), 而第二百七十六刀那位八档主人里再抄了第三份 —— 三处同公式, 于是全都比
- * VB6 大一档。证据 = 同一把时间无关的 WM_GETFONT 尺 (账 #305 第二百七十四刀立的):
+ * VB6 大一档。证据 = 第二百七十四刀立的那把时间无关的尺 (逐枚窗口问它自己的字体再抄回 LOGFONTW 读数):
  *   参考 ComCtlsDemo.exe  69 枚窗口 (-13, 400, "MS Sans Serif")  ← 8.25pt @ 120dpi = 13.75 截断
  *   C3 编出来的同一工程  38 枚窗口 (-14, 400, ...)              ← 同一发四舍五入 = 14
  * 两台都是 system-DPI-aware (探针 .local/k277/aware.py: awareness=1、GetDpiForWindow=120、
