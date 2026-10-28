@@ -11036,6 +11036,29 @@ if ($Category -in @("all", "syntax")) {
         "void vb6_QualColor(void* c)",
         "void vb6_BareFont(int32_t f)")
 
+    # 账 #305 第二百六十七刀: **库前缀不是类型名的一部分**。语义层那条「首两字母 = vb ⇒ 枚举 ⇒ Long」
+    # 的启发式看不见点, 而有些库自己的名字就以 vb 开头 —— `VBRUN.` 是 ComCtls 那套 OCX 的类型库名。
+    # 实测靶工程 D:\vb_yqt4qPac\ComCtlsDemo 写 `Public Property Get ContainedControls() As
+    # VBRUN.ContainedControls`（CoolBar.ctl:2879 与 :1073）⇒ 整串吃这一条 ⇒ Long ⇒ 那 13 枚属性
+    # getter 的 C 返回档成 int32_t, 而它们交回的是 RTL 的 void* 集合地址（= 一枚 singleton 指针）⇒
+    # **x64 把指针折成 32 位** ⇒ 「按指针比身份」那一问认不出 ⇒ 落进 IDispatch 通道, For Each 拿野值
+    # 调 GetIDsOfNames ⇒ 起窗期未处理 AV（0xC000041D, 整条链在子类化窗口过程 = 内核模式回调里）。
+    # 前五条针两头钉: 裸写与限定写必须同一答案（void*）, 改前那一形（int32_t）不许回来;
+    # 后两条钉的是**顺序** —— 按整串的规则（`*Enum` ⇒ Long、`MSDATASRC.*` ⇒ String）必须仍走在
+    # leaf 重问之前: 把那一问提到前头就把 Fix 160-G 的 String 折成 Unknown, VBFlexGrid.ctl:2030
+    # 那格 C2440 会复发。改前/改后同一夹具的发码差 = 5 行（针脚 2 + 返回槽 2 + 定义 1）,
+    # 其余四条针一字未动; 承面与读数见台账行 5024/5025。
+    Test-CodegenNote "alias_lib_prefix_not_scalar" @("$Tests\test_alias_spellings.bas") @(
+        "void* vb6_BareCollEnum(void);",
+        "void* vb6_QualCollEnum(void);",
+        "void vb6_TakeQualColl(void* c);",
+        "int32_t vb6_QualSheetEnum(void);",
+        "BSTR vb6_QualDataMember(void);") @(
+        "int32_t vb6_QualCollEnum(",
+        "void vb6_TakeQualColl(int32_t c)",
+        "void* vb6_QualSheetEnum(",
+        "void* vb6_QualDataMember(")
+
 
     # ai/028 V2 的发码形状: 插值必须** literally ** 发成手写的 & CStr() / Format$ 形状 ——
     # 注意第二枚读数挑的是 vb6_CStrLong (按实参类型改发专用 CStr), 这正是"降级成真 AST"
