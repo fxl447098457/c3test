@@ -36,8 +36,5 @@
     if (vb6_UC_OwnPropSet(obj, name, v)) return 1;
 
     /* 账 #305 第二百六十二刀 (丙): 同 Call 那条 —— 不认识的属性名以前静默忽略。 */
-    g_host_unknown_member++;
-    fwprintf(stderr, L"[C3_HOST_MEMBER_MISS #%ld] site=SetProp name=\"%ls\" obj=%p\n",
-             (long)g_host_unknown_member, name ? name : L"(null)", obj);
-    fflush(stderr);
+    vb6_ho_reportUnknown(L"SetProp", name, obj);
     return 1;   // 宿主对象: 未知属性写入一律忽略

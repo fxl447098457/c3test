@@ -11098,6 +11098,17 @@ if ($Category -in @("all", "syntax")) {
         "vb6_ComPackObjectRef((void**)&g)") @(
         "vb6_ComPackObject(vb6_ret_CloneByReturnSlot)")
 
+    # 第二百七十三刀: 同一站点的**运行期**那一腿 (发码针看不见写回有没有落地)。
+    # Clone 在 stdole2.tlb 里是 method + 一枚 [out] 参, 而发码把这一发当语句发、
+    # 返回值就地丢弃 ⇒ 结果只可能从实参那枚 VT_DISPATCH|VT_BYREF 回到调用方槽。
+    # 改前实测 (门 #963 那台编译器 + 靶工程留的 stderr): 十发全 vt=0、槽恒 0 ⇒ 两枚都 True。
+    # aliased 那一枚钉的是「Clone 交回的不是接收者自己」(VB6 = 独立副本, 调用方随后往副本写 Bold)。
+    Test-Vbp "com_byref_clone_font" "$Tests\combyref271\K271.vbp" @(
+        "K271:no-slot=False",
+        "K271:local-slot=False",
+        "K271:aliased=False",
+        "K271-DONE")
+
 
     # ai/028 V2 的发码形状: 插值必须** literally ** 发成手写的 & CStr() / Format$ 形状 ——
     # 注意第二枚读数挑的是 vb6_CStrLong (按实参类型改发专用 CStr), 这正是"降级成真 AST"

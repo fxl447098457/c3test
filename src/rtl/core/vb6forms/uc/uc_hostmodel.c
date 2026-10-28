@@ -314,6 +314,54 @@ static int32_t vb6_ho_putFontMember(void* fontProxy, const wchar_t* name, const 
     return 0;
 }
 
+/* 账 #305 第二百七十三刀: 「报一行宿主通道认不出的名字」从三条岔口的手抄收成一位主人。
+ * 第二百六十二刀装护栏时, 字体那一臂在 uc_hostmodel_call.inc 的第一行就 return 1 ——
+ * 位置在护栏之前, 于是靶工程那 13 发 Font.Clone 既空转又一声不响 (实测 stderr 里
+ * 既无 C3_HOST_MEMBER_MISS、也无 getDispid("Clone")、也无 method "Clone" not found)。
+ * 行为面一字不改: 认不出仍是「答了但没答」(调用方拿空值), 只是从此响亮。
+ * 站点名由调用方交进来, 打出的字节与改前那三条各自的手抄完全同形。 */
+static void vb6_ho_reportUnknown(const wchar_t* site, const wchar_t* name, void* obj) {
+    g_host_unknown_member++;
+    fwprintf(stderr, L"[C3_HOST_MEMBER_MISS #%ld] site=%ls name=\"%ls\" obj=%p\n",
+             (long)g_host_unknown_member, site, name ? name : L"(null)", obj);
+    fflush(stderr);
+}
+
+/* 宿主字体伪对象的**方法**面 (账 #305 第二百七十三刀)。
+ * stdole2.tlb 里 IFont.Clone 的档位 = invkind=1 (method) + 一枚 [out] 参
+ * (FUNC 17 memid=1610678289 nparams=1) ⇒ 结果**只**走实参, VARIANT 返回值天生是空档
+ * (实测 `CallObject: disp=… method=Clone vt=0`), 而发码把这一发当**语句**发、
+ * 返回值就地丢弃 ⇒ 光答 out 拿不到东西, 必须把新对象写进 argv[0] 那枚
+ * VT_DISPATCH|VT_BYREF 指向的存储 (= vb6_ComPackObjectRef 交出的调用方槽)。
+ * 其余三枚方法 IsEqual / SetRatio / AddRefHfont / ReleaseHfont 在靶工程发码里 0 处
+ * ⇒ 不发明没人走的答案, 认不出就走上面那枚报告。
+ * 返回值那一腿**刻意不碰** out: 岔口进来时已被 `vb6_ho_setVariantEmpty` 清零, 而伪字体
+ * 不许包成 VT_DISPATCH (= 上面 159 行那两条注释说的同一桩事故: VariantClear 会对它调
+ * Release)。写 argv[0] 是唯一出路, 也是一条不发明新档的路。
+ * 所有权: 新建那枚伪字体进 vb6_ucFonts 那张表 (= 与 getprop 的 Font 那一臂同一个工厂),
+ * 回收仍欠 §B164 那一族; 这里刻意不发明第二种生命周期。 */
+static int32_t vb6_ho_fontMethod(void* fontProxy, const wchar_t* name, int32_t argc,
+                                 void** argv) {
+    vb6_ComIface_Font* src = vb6_uc_fontOf(fontProxy);
+    if (!src || !name) return 0;
+    if (_wcsicmp(name, L"Clone") != 0 || argc < 1 || !argv || !argv[0]) return 0;
+    vb6_ComIface_Font* dst = (vb6_ComIface_Font*)vb6_UC_NewFont();
+    if (!dst) return 0;
+    if (dst->Name) SysFreeString(dst->Name);
+    dst->Name = src->Name ? vb6_BSTR_FromStr(src->Name) : NULL;
+    dst->Size = src->Size;
+    dst->Bold = src->Bold;
+    dst->Italic = src->Italic;
+    dst->Underline = src->Underline;
+    dst->Strikethrough = src->Strikethrough;
+    dst->Weight = src->Weight;
+    dst->Charset = src->Charset;
+    /* vb6_VARIANT 与 Windows VARIANT 同布局 (rev11) ⇒ 这一读不是猜型, 是那一刀的成品。 */
+    VARIANT* a = (VARIANT*)argv[0];
+    if ((a->vt & VT_BYREF) && a->ppdispVal) *(void**)(void*)a->ppdispVal = (void*)dst;
+    return 1;
+}
+
 int32_t vb6_Host_GetProp(void* obj, const wchar_t* name, void* outV) {
 #include "uc_hostmodel_getprop.inc"
 

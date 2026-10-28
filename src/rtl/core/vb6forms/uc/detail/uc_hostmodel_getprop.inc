@@ -180,8 +180,5 @@
     if (vb6_UC_OwnPropGet(obj, name, out)) return 1;
 
     /* 账 #305 第二百六十二刀 (丙): 同 Call 那条 —— 不认识的属性名以前静默答 Empty。 */
-    g_host_unknown_member++;
-    fwprintf(stderr, L"[C3_HOST_MEMBER_MISS #%ld] site=GetProp name=\"%ls\" obj=%p\n",
-             (long)g_host_unknown_member, name ? name : L"(null)", obj);
-    fflush(stderr);
+    vb6_ho_reportUnknown(L"GetProp", name, obj);
     return 1;   // 宿主对象: 未知属性一律返回 Empty (不崩)

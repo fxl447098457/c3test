@@ -27,8 +27,10 @@
 #   R4  计数器出口只住一处: 定义在 vb6com_invoke.c 恰好 1 次, 声明在 vb6com.h 与
 #       vb6rtl_class_com.h 各恰好 1 次; 计数变量 g_com_latebind_miss 定义恰好 1 次。
 #   R5  宿主通道的兄弟报告 (同一刀里另半): vb6_Host_UnknownMemberCount 定义 1 次 /
-#       声明 1 次, 且三个宿主模型 .inc (Call / GetProp / SetProp) 各恰好一处
-#       [C3_HOST_MEMBER_MISS # 标记 —— 那一族的静默漏与本刀同源, 两半一起钉。
+#       声明 1 次。⚠ 第二百七十三刀把「报一行」的格式从三份手抄收成一枚出口
+#       (uc_hostmodel.c 里的 vb6_ho_reportUnknown) ⇒ 现在钉的是: 标记全 TU 恰好一枚 +
+#       调用站点 Call=2 (字体那一臂 + 尾巴) / GetProp=1 / SetProp=1 + 字体方法主人
+#       vb6_ho_fontMethod 定义 1 次、被 Call 那一臂用 1 次。那一族的静默漏与本刀同源。
 #   R6  判据在 runner 里落地: run_tests.ps1 的那张期望表 + 三个读数出口
 #       (Invoke-TestExe 的 .NET 路 / Start-Process 路 / Test-GuiVbp 路) + 并行
 #       runspace 里那份**内联**计数 (runspace 调不到脚本函数, 不内联就等于没判)。
@@ -224,12 +226,31 @@ if ($nHostDef -ne 1) { $fail += ("R5 definitions of vb6_Host_UnknownMemberCount 
 $ctrlCode = Strip-Comments262 ((Read-Lines262 $ctrlH) -join "`n")
 $nHostDec = ([regex]::Matches($ctrlCode, 'int32_t\s+vb6_Host_UnknownMemberCount\s*\(\s*void\s*\)')).Count
 if ($nHostDec -ne 1) { $fail += ("R5 declaration of vb6_Host_UnknownMemberCount in vb6forms_controls.h = " + $nHostDec + " (want 1)") }
+# 第二百七十三刀: 报告格式有了一位主人 (vb6_ho_reportUnknown, 住 uc_hostmodel.c)。
+# 于是这里钉三件事: ① 主人定义恰好一次; ② 那枚标记在全 TU (主人 + 三份 .inc) 恰好一次
+# —— 有人手抄回格式就红; ③ 站点数钉死 (Call 两处 = 字体那一臂 + 尾巴, GetProp/SetProp 各一)。
+$nReporter = ([regex]::Matches($hostCode, 'static\s+void\s+vb6_ho_reportUnknown\s*\(')).Count
+if ($nReporter -ne 1) { $fail += ("R5 definitions of vb6_ho_reportUnknown = " + $nReporter + " (want exactly 1)") }
+$markerAll = ([regex]::Matches($hostCode, '\[C3_HOST_MEMBER_MISS #')).Count
+$wantSites = @{ $incCall = 2; $incGet = 1; $incSet = 1 }
 foreach ($inc in @($incCall, $incGet, $incSet)) {
     $ic = Strip-Comments262 ((Read-Lines262 $inc) -join "`n")
-    $n = ([regex]::Matches($ic, '\[C3_HOST_MEMBER_MISS #')).Count
-    if ($n -ne 1) {
-        $fail += ("R5 the [C3_HOST_MEMBER_MISS #] marker in " + (Split-Path -Leaf $inc) + " = " + $n + " (want 1)")
+    $markerAll += ([regex]::Matches($ic, '\[C3_HOST_MEMBER_MISS #')).Count
+    $n = ([regex]::Matches($ic, 'vb6_ho_reportUnknown\s*\(')).Count
+    if ($n -ne $wantSites[$inc]) {
+        $fail += ("R5 calls of vb6_ho_reportUnknown in " + (Split-Path -Leaf $inc) + " = " + $n + " (want " + $wantSites[$inc] + ")")
     }
+}
+if ($markerAll -ne 1) { $fail += ("R5 the [C3_HOST_MEMBER_MISS #] marker across uc_hostmodel.c + the three .inc = " + $markerAll + " (want exactly 1 -- the format has one owner)") }
+# 字体那一臂的主人 (第二百七十三刀新格): 定义一次、被 Call 那臂用一次, 且那条
+# 「对任何方法名一律 return 1」的旧写法不许回来 (它就是把 13 发 Clone 变成静默的那一行)。
+$nFontDef = ([regex]::Matches($hostCode, 'static\s+int32_t\s+vb6_ho_fontMethod\s*\(')).Count
+if ($nFontDef -ne 1) { $fail += ("R5 definitions of vb6_ho_fontMethod = " + $nFontDef + " (want exactly 1)") }
+$callCode = Strip-Comments262 ((Read-Lines262 $incCall) -join "`n")
+$nFontUse = ([regex]::Matches($callCode, 'vb6_ho_fontMethod\s*\(')).Count
+if ($nFontUse -ne 1) { $fail += ("R5 uses of vb6_ho_fontMethod in uc_hostmodel_call.inc = " + $nFontUse + " (want 1)") }
+if ($callCode -match 'vb6_uc_isFont\(obj\)\)\s*return\s*1\s*;') {
+    $fail += "R5 the blanket 'if (vb6_uc_isFont(obj)) return 1;' is back -- it silences every font method (knife 272 reading)"
 }
 
 # ---- R6: 判据在 runner 里落地 ----
