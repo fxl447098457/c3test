@@ -11080,6 +11080,24 @@ if ($Category -in @("all", "syntax")) {
         "vb6_ComCall",
         "void* _vb6_with_0 =")
 
+    # 账 #305 第二百七十一刀: VB6 的 out-param 惯用写法是「把**本过程的返回变量**当实参递出去」——
+    # 实证 = 靶工程 Common/Common.bas:1017 `Public Function CloneOLEFont(ByVal Font As IFont)
+    # As StdFont / If Not Font Is Nothing Then Font.Clone CloneOLEFont`。返回槽在 C 里叫
+    # vb6_ret_<过程名>, 不进 knownObjectVars_/knownTypedComVars_ 那两张按名表 ⇒ 这一形以前退化成
+    # 按值打包 vb6_ComPackObject(vb6_ret_CloneOLEFont): callee 写不进调用者的槽 ⇒ **返回恒 NULL**
+    # ⇒ 下游 13 处 `TempFont.Bold/Underline = True` 全打在虚空里 (ListView 分组表头 / StatusBar
+    # 面板 / LinkLabel 的下划线字体与正文同形)。
+    # 夹具 K271.vbp 带 stdole2.tlb 的 Reference= (类型库那一条 FUNCDESC 签名是这一问的权威来源,
+    # 语料里 tests/asm/*.vbp 早已同款引用), 两枚过程 = 同一句话写在两种槽上:
+    #   ① 返回槽 (CloneByReturnSlot) ② 普通局部 (CloneByLocalVar)。两条 Present 钉「两形同归同一个
+    # 打包器」, 一条 Absent 钉「按值降级那一形不许回来」(它就是改前 BASE 的读数, 两头都数过:
+    # BASE = missing=1 unexpected=1 / 修后 = 0/0)。局部那一臂是**存量证人**: 它在 BASE 上就已经绿,
+    # 所以它不是负控, 只是防本刀把站点改窄。
+    Test-CodegenNote "com_byref_outparam_return_slot" @("$Tests\combyref271\K271.vbp") @(
+        "vb6_ComPackObjectRef((void**)&vb6_ret_CloneByReturnSlot)",
+        "vb6_ComPackObjectRef((void**)&g)") @(
+        "vb6_ComPackObject(vb6_ret_CloneByReturnSlot)")
+
 
     # ai/028 V2 的发码形状: 插值必须** literally ** 发成手写的 & CStr() / Format$ 形状 ——
     # 注意第二枚读数挑的是 vb6_CStrLong (按实参类型改发专用 CStr), 这正是"降级成真 AST"
