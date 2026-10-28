@@ -398,9 +398,19 @@ void* vb6_GetControlHwnd(void* hwnd) {
 // 而 .FontSize 读回来还是设计值（那是另一份自存的属性）—— 两头谁都不报错。
 // 所以 setter 现在把自己创建的那张 HFONT 存进 `VB6_CtrlFont`（新名字，与 #185 那条
 // "一层一个窗口属性名"同纪律），这里优先问窗口、问不到再读这份自存的。
+// 账 #305 第二百七十九刀: 「我们给这枚窗口存过的那张字体」那一问也收成一处。这个槽位今天有了
+// 第二位读者（自注册的窗口类本人答那一问），名字再抄一份就是第二本账。
+// ⚠ 只交**我们自己存进去的那张**，刻意不采纳 WM_SETFONT 递来的句柄：Win32 的规矩是那枚句柄
+// 归送的人所有，而下面那位主人换字体时无条件 DeleteObject(旧的) —— 一格存两种来源之前要先
+// 分开记；分之前沿用改前的态度（DefWindowProc 也不记，见 .local/k278/wmsetfont.c 的实测）。
+HFONT vb6_ControlFontStored(HWND hw) {
+    if (!hw) return NULL;
+    return (HFONT)GetPropW(hw, L"VB6_CtrlFont");
+}
+
 HFONT vb6_ControlFont(HWND hw) {
     HFONT h = (HFONT)SendMessageW(hw, WM_GETFONT, 0, 0);
-    if (!h) h = (HFONT)GetPropW(hw, L"VB6_CtrlFont");
+    if (!h) h = vb6_ControlFontStored(hw);
     return h;
 }
 
@@ -432,7 +442,7 @@ void vb6_SetControlFontFromLogFont(void* hwnd, const LOGFONTW* plf) {
     if (!hNewFont) return;
     // 旧字体先按"我们存过的那张"找，找不到才退回问窗口 —— 顺序反了会双删：
     // 真记字体的那几类控件（EDIT/BUTTON…）WM_GETFONT 回来的就是我们上一轮存进去的那张。
-    HFONT hOldFont = (HFONT)GetPropW((HWND)hwnd, L"VB6_CtrlFont");
+    HFONT hOldFont = vb6_ControlFontStored((HWND)hwnd);
     if (!hOldFont) hOldFont = vb6_ControlFont((HWND)hwnd);
     SendMessageW((HWND)hwnd, WM_SETFONT, (WPARAM)hNewFont, (LPARAM)TRUE);
     vb6_ControlFontStore((HWND)hwnd, hNewFont);

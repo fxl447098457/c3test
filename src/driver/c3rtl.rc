@@ -964,4 +964,5 @@
 
 /* knife 276: RTL changed (Font.hFont -- one eight-fields->LOGFONT owner plus a self-invalidating HFONT cache; the font property/write arms now report unknown names) -- force c3rtl.rc re-embed */
 /* knife 278: RTL changed (a UC host window and a form top-level window now get their font at creation; the create+WM_SETFONT+store residence in vb6forms_ctrl.c is shared, not copied) -- force c3rtl.rc re-embed */
+/* knife 279: RTL changed (the UC host window answers WM_GETFONT itself -- DefWindowProc does not remember WM_SETFONT; plus the VB6_CtrlFont slot gains one read-side owner) -- force re-embed */
 /* knife 277: RTL changed (one pt->pixel authority for lfHeight, truncating like VB6 (8.25pt at 120dpi: -14 -> -13); the shared UserControl font default family is MS Sans Serif, not Segoe UI) -- force c3rtl.rc re-embed */

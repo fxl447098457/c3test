@@ -308,6 +308,13 @@ static LRESULT CALLBACK vb6_uc_wndproc(HWND hwnd, UINT msg, WPARAM wParam, LPARA
             }
             return (LRESULT)br;
         }
+        /* 账 #305 第二百七十九刀: 参考那台 29 枚 UC 宿主每一枚都**本人答**这一问 (-13/MS Sans Serif),
+         * C3 这一户从前答空 —— 不是没发字体 (第二百七十八刀就发了), 是 DefWindowProc 不记 WM_SETFONT
+         * (探针 .local/k278/wmsetfont.c 两架构实测: 发完再问回 0) ⇒ 那一臂 44 枚一字未动。
+         * 答案只从我们自己那一格拿 (所有权口径见 vb6forms_ctrl.c 里那位只读主人上面那段),
+         * 所以这里刻意**不**接 WM_SETFONT。 */
+        case WM_GETFONT:
+            return (LRESULT)(INT_PTR)vb6_ControlFontStored(hwnd);
         case WM_DESTROY:
             // Fix <vbeclipse> rev10 (C3_UC_TRACE): 临时 —— 定位
             // "ShowPerspective 报 No perspective id found" 是否因为本控件的
