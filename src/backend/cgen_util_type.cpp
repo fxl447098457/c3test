@@ -56,6 +56,24 @@ static Vb6Type cgenTypeForShadowedBuiltin(const std::string& idName) {
     return builtinFuncReturnTypeForShadowedProp(n);
 }
 
+// 账 #231: "`对象.成员` 的成员是什么类型" 的唯一出口。控件身份判定 (ctrlTypeOfMemberObject)
+// 与类型表 (controlPropType) 各只被这里问一次 —— 两个调用点 (inferExprTypeImpl 与
+// isDefinitelyVariantExpr) 都走这一格，别再各自问表。
+//
+// 宿主可以是窗体上的内建控件（单枚 / 控件数组元素），也可以是**跨模块窗体的默认实例**
+// (`frmMain.hWnd`)：后者不是控件，但它的属性同样出自 controlPropType 那张表。少了这一腿，
+// `hWnd` 会掉进"按裸成员名查模块符号"的兜底并答 Variant ⇒ 比较面把 HWND 装箱成
+// VariantObject ⇒ vb6_VarCmpLongEq 答 0 ⇒ `focused` 恒为 False ⇒ VBWolf 吞掉所有按键。
+bool CCodeGen::ctrlMemberPropType(const Expr* obj, const std::string& memberName,
+                                  Vb6Type& outType) const {
+    FrmControlType ctlType = FrmControlType::Unknown;
+    if (!ctrlTypeOfMemberObject(obj, ctlType)) return false;
+    Vb6Type pt = controlPropType(ctlType, memberName);
+    if (pt == Vb6Type::Unknown) return false;
+    outType = pt;
+    return true;
+}
+
 // --- cgen_util_type.cpp: 表达式类型推断 + Variant 判定 + 运行时参数 C 类型 ---
 
 
@@ -384,11 +402,8 @@ Vb6Type CCodeGen::inferExprTypeImpl(Expr& expr) const {
             // 以前根本不进这条规则, 掉进同一个坑 (账 #229)。
             // 只认内建控件类型: 工程内 .ctl 宿主同名属性由它自己的符号表说话 (表内那道闸)。
             {
-                FrmControlType ctlType = FrmControlType::Unknown;
-                if (ctrlTypeOfMemberObject(ma.object.get(), ctlType)) {
-                    Vb6Type pt = controlPropType(ctlType, ma.memberName);
-                    if (pt != Vb6Type::Unknown) return pt;
-                }
+                Vb6Type pt = Vb6Type::Unknown;
+                if (ctrlMemberPropType(ma.object.get(), ma.memberName, pt)) return pt;
             }
             // P24-12: Err对象特殊处理
             if (ma.object && ma.object->kind == ASTNodeKind::IdentifierExpr) {
@@ -816,6 +831,16 @@ bool CCodeGen::isDefinitelyVariantExpr(Expr& expr, bool* isArrOut) const {
                 }
             }
             // 符号表查找成员 (Property/Function)
+            // Same table as inferExprType: a built-in control, or a cross-module form
+            // default instance (`frmMain.hWnd`). Without this the bare-member-name
+            // fallback below answers Variant for `hWnd`, the compare boxes the HWND as
+            // VariantObject and vb6_VarCmpLongEq yields 0 -> `focused` is always False
+            // -> every KeyHit is swallowed (VBWolf title screen ignores the keyboard).
+            {
+                Vb6Type pt = Vb6Type::Unknown;
+                if (ctrlMemberPropType(ma.object.get(), ma.memberName, pt))
+                    return pt == Vb6Type::Variant;
+            }
             auto* memSym = symTab_.lookupModule(ma.memberName);
             // 关键差异: memSym==null (UDT 字段访问或外部类成员) 视为非 Variant
             return checkSym(memSym);

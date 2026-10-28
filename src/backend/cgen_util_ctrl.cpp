@@ -2105,9 +2105,22 @@ bool CCodeGen::ctrlTypeOfMemberObject(const Expr* obj, FrmControlType& outType) 
         return false;
     }
     auto it = knownFormControls_.find(name);
-    if (it == knownFormControls_.end()) return false;
-    outType = it->second;
-    return true;
+    if (it != knownFormControls_.end()) {
+        outType = it->second;
+        return true;
+    }
+    // A cross-module form default instance (`frmMain.hWnd`) is not a control, but its
+    // properties answer from the very same controlPropType table. The bare-member-name
+    // fallback does not know the host, so `hWnd` came back Variant -> the comparison
+    // boxed the HWND as VariantObject -> vb6_VarCmpLongEq answered 0 -> `focused`
+    // stayed False and every KeyHit was swallowed (VBWolf ignored the keyboard).
+    // Non-current form only: same guard as cgen_expr_member_form_builtin.inc.
+    if (knownFormModuleNames_.count(name)
+        && (!isFormModule_ || name != knownFormName_)) {
+        outType = FrmControlType::Form;
+        return true;
+    }
+    return false;
 }
 bool CCodeGen::controlClickFromNativeNotify(FrmControlType ctrlType) {
     switch (ctrlType) {

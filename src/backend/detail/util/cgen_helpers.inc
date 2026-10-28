@@ -707,6 +707,10 @@
     // 账 #229: `对象.成员` 的对象位是不是窗体控件（单枚 / 数组元素两形同归），
     // 定义与实测症状在 cgen_util_ctrl.cpp。
     bool ctrlTypeOfMemberObject(const Expr* obj, FrmControlType& outType) const;
+    // 账 #231 的唯一问话口：`对象.成员` 若是窗体控件（或跨模块窗体默认实例）的属性，
+    // 答出 controlPropType 表里的类型。定义在 cgen_util_type.cpp —— 那里是它唯一的调用者，
+    // 表本身（controlPropType）与控件身份判定（ctrlTypeOfMemberObject）各自只留这一处调用。
+    bool ctrlMemberPropType(const Expr* obj, const std::string& memberName, Vb6Type& outType) const;
     // C29-SL-g: 同理，但排除的是**焦点**通知（TextBox/ComboBox/ListBox/命令按钮那六类的
     // GotFocus/LostFocus 由父窗的 WM_COMMAND 码供，见 cgen_form_wndproc_dispatch.inc 开头）。
     // 三处使用点：发 arm（subclass）、装子类化（frame_menu）、拆子类化（dispatch）——
