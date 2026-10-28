@@ -961,3 +961,5 @@
 /* knife 238: RTL changed (variant -> string authority: BOOL answers True/False) -- force c3rtl.rc re-embed */
 
 /* knife 239: RTL changed (byref scalar arg packers for late-bound calls) -- force c3rtl.rc re-embed */
+
+/* knife 276: RTL changed (Font.hFont -- one eight-fields->LOGFONT owner plus a self-invalidating HFONT cache; the font property/write arms now report unknown names) -- force c3rtl.rc re-embed */

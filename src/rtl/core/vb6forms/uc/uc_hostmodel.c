@@ -150,6 +150,17 @@ void vb6_ho_setVariantLong(vb6_VARIANT* out, int32_t v) {
     out->lVal = v;
 }
 
+/* 账 #305 第二百七十六刀: 句柄那一档 —— 与上面那枚差在**宽度**。
+ * VB6 的 IFont.hFont 在类型库里标的是 Long, 而语料一律把它交给 As LongPtr 的形参
+ * (靶工程 Common.bas:231 那份 PtrSafe 声明), x64 上按 int32 交就是把 GDI 句柄砍掉
+ * 高 32 位。标签交 VT_I8: vb6_vartype 那张表里没有这一档, 按 §B142 那格的口径
+ * 由 vb6_VariantPackBorrow 原样递进真 VARIANT 的 llVal (第五十三刀刚把它并表)。 */
+void vb6_ho_setVariantLongPtr(vb6_VARIANT* out, void* p) {
+    memset(out, 0, sizeof(*out));
+    out->vt = (vb6_vartype)VT_I8;
+    out->llVal = (LONG_PTR)p;
+}
+
 void vb6_ho_setVariantBstr(vb6_VARIANT* out, BSTR s) {
     memset(out, 0, sizeof(*out));
     out->vt = vb6_vtBSTR;
@@ -297,6 +308,16 @@ static int32_t vb6_ho_getFontMember(void* fontProxy, const wchar_t* name, vb6_VA
     if (_wcsicmp(name, L"Weight") == 0)    { vb6_ho_setVariantLong(out, f->Weight); return 1; }
     if (_wcsicmp(name, L"Charset") == 0)   { vb6_ho_setVariantLong(out, f->Charset); return 1; }
     if (_wcsicmp(name, L"Name") == 0)      { vb6_ho_setVariantBstr(out, SysAllocString(f->Name)); return 1; }
+    /* 账 #305 第二百七十六刀: `hFont` —— 与 vb6com_invoke.c 那条 kind 5 臂**同一个答案、
+       同一位主人** (vb6_UC_FontHFont → 内部问 vb6_UC_FontLogFont 那唯一一份换算)。
+       造不出句柄就答"认不出"(return 0), 由调用方那一条报数出口说话 —— 与第二百七十三刀
+       给方法臂立的口径一致: 这一臂以前对认不出的名字静默答 Empty, 所以靶工程那 34 发
+       `name=hFont` 在 C3_HOST_MEMBER_MISS 名册里一条也没有 (第二百七十五刀记的那格洞)。 */
+    if (_wcsicmp(name, L"hFont") == 0) {
+        void* h = vb6_UC_FontHFont(f);
+        if (!h) return 0;
+        vb6_ho_setVariantLongPtr(out, h); return 1;
+    }
     return 0;
 }
 

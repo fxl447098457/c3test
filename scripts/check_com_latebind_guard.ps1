@@ -29,13 +29,19 @@
 #   R5  宿主通道的兄弟报告 (同一刀里另半): vb6_Host_UnknownMemberCount 定义 1 次 /
 #       声明 1 次。⚠ 第二百七十三刀把「报一行」的格式从三份手抄收成一枚出口
 #       (uc_hostmodel.c 里的 vb6_ho_reportUnknown) ⇒ 现在钉的是: 标记全 TU 恰好一枚 +
-#       调用站点 Call=2 (字体那一臂 + 尾巴) / GetProp=1 / SetProp=1 + 字体方法主人
+#       调用站点 Call=2 (字体那一臂 + 尾巴) / GetProp=2 / SetProp=2 + 字体方法主人
 #       vb6_ho_fontMethod 定义 1 次、被 Call 那一臂用 1 次。那一族的静默漏与本刀同源。
 #   R6  判据在 runner 里落地: run_tests.ps1 的那张期望表 + 三个读数出口
 #       (Invoke-TestExe 的 .NET 路 / Start-Process 路 / Test-GuiVbp 路) + 并行
 #       runspace 里那份**内联**计数 (runspace 调不到脚本函数, 不内联就等于没判)。
 #   R7  负控在册: tests\b446_latebind\B446.vbp 在, 且在 run_tests.ps1 里登记两行
 #       (x64 + x86) —— 负控必须恰好响一次 (Nothing 接收者), 多一次少一次都红。
+#   R9  第二百七十六刀那一档 (Font.hFont) 的形状: ①「八档 → LOGFONT」只住一位主人
+#       (uc_controls.c 里 CreateFontIndirectW 恰好 1, 而 vb6rtl_com.c 那份就地抄写的 lfWeight 恰好 0 = 负控);
+#       ②缓存自失效那条腿两段都在 (作废旧句柄 + 落新句柄 各 1);
+#       ③kind 5 = 句档在两张 switch 里都有答案 (读那张发 VT_I8, 写那张按只读忽略);
+#       ④宿主通道与 COM 出口同一个答案 (vb6_UC_FontHFont 定义 1 / 在 uc_hostmodel.c 用 1);
+#       ⑤四行 K276: 读数在 runner 的期望表里在册。
 #   R8  这枚哨兵自己不许是死码: 在 run_tests.ps1 里出现恰好两次 (定义 + 静态分片
 #       登记) —— 哨兵写了不登记, 门就永远不跑它, 那一族缺口又静默回去了。
 #
@@ -56,6 +62,8 @@ $incCall  = Join-Path $Root 'src\rtl\core\vb6forms\uc\detail\uc_hostmodel_call.i
 $incGet   = Join-Path $Root 'src\rtl\core\vb6forms\uc\detail\uc_hostmodel_getprop.inc'
 $incSet   = Join-Path $Root 'src\rtl\core\vb6forms\uc\detail\uc_hostmodel_setprop.inc'
 $rtPath   = Join-Path $Root 'tests\run_tests.ps1'
+$ucC      = Join-Path $Root 'src\rtl\core\vb6forms\uc\uc_controls.c'
+$rtlC     = Join-Path $Root 'src\rtl\core\vb6rtl\vb6rtl_com.c'
 $fixture  = Join-Path $Root 'tests\b446_latebind\B446.vbp'
 
 $fail = @()
@@ -110,7 +118,7 @@ function Index-Of262([string[]]$body, [string]$needle) {
     return -1
 }
 
-$missing = @($invPath, $comH, $clsH, $hostC, $ctrlH, $incCall, $incGet, $incSet, $rtPath) |
+$missing = @($invPath, $comH, $clsH, $hostC, $ctrlH, $incCall, $incGet, $incSet, $rtPath, $ucC, $rtlC) |
            Where-Object { -not (Test-Path $_) }
 if ($missing) {
     foreach ($m in $missing) { $fail += ("missing file " + $m) }
@@ -232,7 +240,7 @@ if ($nHostDec -ne 1) { $fail += ("R5 declaration of vb6_Host_UnknownMemberCount 
 $nReporter = ([regex]::Matches($hostCode, 'static\s+void\s+vb6_ho_reportUnknown\s*\(')).Count
 if ($nReporter -ne 1) { $fail += ("R5 definitions of vb6_ho_reportUnknown = " + $nReporter + " (want exactly 1)") }
 $markerAll = ([regex]::Matches($hostCode, '\[C3_HOST_MEMBER_MISS #')).Count
-$wantSites = @{ $incCall = 2; $incGet = 1; $incSet = 1 }
+$wantSites = @{ $incCall = 2; $incGet = 2; $incSet = 2 }
 foreach ($inc in @($incCall, $incGet, $incSet)) {
     $ic = Strip-Comments262 ((Read-Lines262 $inc) -join "`n")
     $markerAll += ([regex]::Matches($ic, '\[C3_HOST_MEMBER_MISS #')).Count
@@ -291,6 +299,47 @@ if ($nAllowEntry -ne 1) {
               " (want 1) - 负控必须**恰好**响一次; 0 等于把这条判据关掉")
 }
 
+# ---- R9: 第二百七十六刀那一档 (Font.hFont) 的形状 ----
+# 针全部取在**剒掉注释之后**的代码上 (与 R1..R8 同一把尺): 注释里再次提到这些名字不会把读数数高。
+$ucCode  = Strip-Comments262 ((Read-Lines262 $ucC) -join "`n")
+$rtlCode = Strip-Comments262 ((Read-Lines262 $rtlC) -join "`n")
+$nCreate = ([regex]::Matches($ucCode, 'CreateFontIndirectW')).Count
+if ($nCreate -ne 1) {
+    $fail += ("R9 CreateFontIndirectW in uc_controls.c = " + $nCreate +
+              " (want 1) - 八档→LOGFONT 这一问只许住一位主人 (vb6_UC_FontLogFont)")
+}
+$nCopied = ([regex]::Matches($rtlCode, 'lfWeight')).Count
+if ($nCopied -ne 0) {
+    $fail += ("R9 the in-place eight-fields->LOGFONT copy is back in vb6rtl_com.c (lfWeight = " + $nCopied +
+              ") (want 0) - 那份抄写回来就是第二套字重/兜底 (negative control)")
+}
+$nInval = ([regex]::Matches($ucCode, 'DeleteObject\(\(HFONT\)f->hFontCache\)')).Count
+if ($nInval -ne 1) {
+    $fail += ("R9 the cache-invalidation leg in uc_controls.c = " + $nInval +
+              " (want 1) - 八档改了不作废缓存 = 把旧字体继续交给新的 Bold")
+}
+$nStore = ([regex]::Matches($ucCode, 'f->hFontCache = \(void\*\)h;')).Count
+if ($nStore -ne 1) { $fail += ("R9 the cache-store leg in uc_controls.c = " + $nStore + " (want 1)") }
+$nKind5 = ([regex]::Matches($invCode, 'case 5:')).Count
+if ($nKind5 -ne 2) {
+    $fail += ("R9 'case 5:' in vb6com_invoke.c = " + $nKind5 +
+              " (want 2: the read arm packs VT_I8, the write arm ignores a propget-only name)")
+}
+$nHArm = ([regex]::Matches($ucCode, '_wcsicmp\(name, L"hFont"\)')).Count
+if ($nHArm -ne 1) { $fail += ("R9 hFont arm in vb6_UC_FontField = " + $nHArm + " (want 1)") }
+$nHDef = ([regex]::Matches($ucCode, 'void\* vb6_UC_FontHFont\s*\(')).Count
+if ($nHDef -ne 1) { $fail += ("R9 definitions of vb6_UC_FontHFont = " + $nHDef + " (want 1)") }
+$nHUse = ([regex]::Matches($hostCode, 'vb6_UC_FontHFont\s*\(')).Count
+if ($nHUse -ne 1) {
+    $fail += ("R9 uses of vb6_UC_FontHFont in uc_hostmodel.c = " + $nHUse +
+              " (want 1) - 宿主通道与 COM 出口必须从同一位主人拿答案")
+}
+$nK276 = ([regex]::Matches($rtCode, 'K276:')).Count
+if ($nK276 -ne 6) {
+    $fail += ("R9 K276 expectation rows in run_tests.ps1 = " + $nK276 +
+              " (want 6) - 判据升格进 runner 才算在册 (R6 同族)")
+}
+
 # ---- R8: 这枚哨兵自己不许是死码 ----
 $nSelfReg = ([regex]::Matches($rtCode, 'Test-ComLatebindGuard')).Count
 if ($nSelfReg -ne 2) {
@@ -302,5 +351,5 @@ if ($fail.Count -gt 0) {
     foreach ($f in $fail) { Write-Host ("FAIL " + $f) }
     exit 1
 }
-Write-Host ("PASS check_com_latebind_guard: exits=7 guarded=7 pseudo-exempt=3 order=pseudo-first guard=behavior-preserving counter-outlets=2 host-sibling=3 runner-sites=3 inline-counters=2 negative-control=2 self-registered=1")
+Write-Host ("PASS check_com_latebind_guard: exits=7 guarded=7 pseudo-exempt=3 order=pseudo-first guard=behavior-preserving counter-outlets=2 host-sibling=3 runner-sites=3 inline-counters=2 negative-control=2 hfont-owner=1 hfont-kind5=2 self-registered=1")
 exit 0

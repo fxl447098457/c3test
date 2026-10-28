@@ -314,7 +314,115 @@ int32_t vb6_UC_IsFont(const void* p) {
     return vb6_uc_fontOf((void*)p) != NULL;
 }
 
-// 返回字段地址; *kind: 0=BSTR, 1=float, 2=int16, 3=int32; 未命中返回 NULL
+/* 账 #305 第二百七十六刀: 「八档 → LOGFONT」这一问的**唯一主人**。
+ * 在此之前它只有一位抄写员: vb6rtl_com.c 的 vb6_uc_measureText 就地一份 (量字用,
+ * DPI 写死 96), 而 VB 层要的 `Font.hFont` 压根没人答 —— 第三百零五刀靶工程那 34 枚
+ * 全零 LOGFONT 就是这么来的 (Common/Common.bas:1012 GetObjectAPI(Font.hFont, …) 拿到
+ * 的是 0, 那次 GetObject 直接失败, 局部 UDT 保持全零, 递给窗口的就是 GDI 默认字体)。
+ * 本刀把 measureText 那一份撤进来当第一位主人 (它那份的算法一字未改: 磅→像素仍是
+ * `-(int)(pt*dpi/72+0.5)`、八档的兜底仍是 8.25 / 400 / DEFAULT_CHARSET / "MS Sans Serif",
+ * 连"其余字段留零"也照抄), 从此第二格答案只在调用方 (递进来的 DPI 与质量档)。
+ * ⚠ 一处**刻意**的口径修正: 字重按 VB6 的读侧派生 —— Bold 为真一律 700, 与 Weight
+ *   存的是哪个数无关 (StdFont 的真实存储只有 Weight, Bold 是它的视图)。旧写法
+ *   `Weight ? Weight : (Bold ? 700 : 400)` 让写进 Bold 的那个 True 永远被默认的
+ *   Weight=400 挡在后面, 也就是第二百七十三刀修好的那 13 处 Bold 到了这里又掉。
+ *   只在 Bold 非零时答案才不同, 而语料里 Bold 非零只有两种来源: 设计期 Weight>=700
+ *   (cgen_form_create_controls.inc:109 同步设过 Bold ⇒ 那档两边都给 700, 读数不变)
+ *   或用户代码写 Bold ⇒ 后者正是本刀要它生效的那一种。
+ * 参数按**void*** 收 (本头不含 wingdi.h 的调用方也能递栈上的 LOGFONTW), dpi/quality
+ *   由调用方决定 —— 与账 #298 §B129 那条「公式只住一枚, DPI 从外面递进来」同口径。 */
+void vb6_UC_FontLogFont(void* fontFields, int32_t dpiY, int32_t quality, void* lfOut) {
+    const vb6_ComIface_Font* f = (const vb6_ComIface_Font*)fontFields;
+    LOGFONTW* lf = (LOGFONTW*)lfOut;
+    double pt;
+    int dpi = (dpiY > 0) ? dpiY : 96;
+    if (!lf) return;
+    memset(lf, 0, sizeof(*lf));
+    pt = (f && f->Size > 0) ? (double)f->Size : 8.25;
+    lf->lfHeight    = -(int)(pt * (double)dpi / 72.0 + 0.5);
+    lf->lfWeight    = (f && f->Bold) ? 700 : ((f && f->Weight) ? f->Weight : 400);
+    lf->lfItalic    = (BYTE)((f && f->Italic) ? 1 : 0);
+    lf->lfUnderline = (BYTE)((f && f->Underline) ? 1 : 0);
+    lf->lfStrikeOut = (BYTE)((f && f->Strikethrough) ? 1 : 0);
+    lf->lfCharSet   = (BYTE)((f && f->Charset) ? f->Charset : DEFAULT_CHARSET);
+    lf->lfQuality   = (BYTE)quality;
+    /* 名字那一档把**零长串**也算"没有名字" (f->Name 非 NULL 但内容空)。
+     * 依据两条: ① VB6 的 StdFont.Name 不允许是空串, 所以这八档里出现空名字只能是
+     *    "没指定", 而"没指定"在 VB6 交出的就是默认字族; ② 探针 (.local/k276/fontprobe.c
+     *    F 行) 实测空名字交出去, GetObject 读回来的 lfFaceName 仍是空 —— GDI 不改写它,
+     *    于是下游谁再拿这枚 LOGFONT 去造字体, 拿到的是 DC 默认字体而不是 VB6 的那一枚,
+     *    而且是**静默**的。这一档宁可退回 "MS Sans Serif", 也不留一条静默路。
+     * ⚠ 这条与本刀靶工程那 34 枚 Segoe UI **无关** (我一开始就是这么记的, 探针把它推翻:
+     *    那 34 枚的名字是真从字段里读出来的 "Segoe UI", 产地在 uc_host_window.c:353)。 */
+    if (f && f->Name && f->Name[0]) {
+        size_t n = wcslen(f->Name);
+        if (n > 31) n = 31;
+        memcpy(lf->lfFaceName, f->Name, n * sizeof(wchar_t));
+    } else {
+        wcscpy(lf->lfFaceName, L"MS Sans Serif");
+    }
+}
+
+/* 快照与当前八档是否一致 (一致 = 缓存里那枚 HFONT 还代表这八档, 不用重造)。
+ * 名字比的是内容副本, 不借 Name 那枚指针: 本 RTL 往 Name 写的时候从不 SysFreeString
+ * 旧串 (见 vb6_UC_FontAssign / vb6com_invoke.c 的 kind 0 那支), 借来比是踩在泄漏上。 */
+static int32_t vb6_uc_fontSigSame(const vb6_ComIface_Font* f) {
+    if (f->Size != f->hFontSigSize) return 0;
+    if (f->Bold != f->hFontSigBold || f->Italic != f->hFontSigItalic) return 0;
+    if (f->Underline != f->hFontSigUnderline || f->Strikethrough != f->hFontSigStrike) return 0;
+    if (f->Weight != f->hFontSigWeight || f->Charset != f->hFontSigCharset) return 0;
+    return wcsncmp(f->Name ? f->Name : L"", f->hFontSigFace, 32) == 0 ? 1 : 0;
+}
+
+static void vb6_uc_fontSigTake(vb6_ComIface_Font* f) {
+    f->hFontSigSize      = f->Size;
+    f->hFontSigBold      = f->Bold;
+    f->hFontSigItalic    = f->Italic;
+    f->hFontSigUnderline = f->Underline;
+    f->hFontSigStrike    = f->Strikethrough;
+    f->hFontSigWeight    = f->Weight;
+    f->hFontSigCharset   = f->Charset;
+    f->hFontSigFace[0] = 0;
+    if (f->Name) {
+        size_t n = wcslen(f->Name);
+        if (n > 31) n = 31;
+        memcpy(f->hFontSigFace, f->Name, n * sizeof(wchar_t));
+        f->hFontSigFace[n] = 0;
+    }
+}
+
+/* 造 / 取这枚伪字体的 HFONT (账 #305 第二百七十六刀, `Font.hFont` 那一条答案)。
+ * 为什么是缓存而不是每次新建: 问的人只要 LOGFONT 的内容 (靶工程拿句柄去 GetObjectAPI,
+ * 再自己 CreateFontIndirect 一份), 而问的频率是每建一枚控件一发 —— 每次一枚的话
+ * 就是每枚控件漏一枚 GDI 对象, 而这里连伪字体本体都还欠 §B164 那一族回收。
+ * 自失效: 八档一改就作废重建 (写侧没钩子, 见 vb6rtl_userctl.h 那八格新字段的注释)。
+ * 所有权照 VB6 的 IFont.hFont: 句柄属于这枚字体, **不属于问它的人** ⇒
+ * ⚠ 不许把它交给 WM_SETFONT —— vb6forms_ctrl.c 的 vb6_SetControlFontFromLogFont
+ *   换字体后无条件 DeleteObject(旧句柄) (vb6forms.c:147 那条注释记的就是这一格),
+ *   递出去就等于把缓存换成悬空句柄。本 RTL 无任何调用点这么做。
+ * 质量档 = NONANTIALIASED_QUALITY, 与 vb6_Vb6DefaultGuiFont 为窗口字体定下的那条
+ * 「VB6 的 MS Sans Serif 是点阵字体, 从不抗锯齿」同口径 (量字那一位调用方维持它
+ * 一直以来的 0, 不跟着动 —— Fix 113k 记过: 给 TextWidth/TextHeight 换字体度量会把
+ * Charts 的图例/轴标签排布推坏)。 */
+static void* vb6_uc_fontEnsureHFont(vb6_ComIface_Font* f) {
+    LOGFONTW lf;
+    HFONT h;
+    if (!f) return NULL;
+    if (f->hFontCache && vb6_uc_fontSigSame(f)) return f->hFontCache;
+    if (f->hFontCache) { DeleteObject((HFONT)f->hFontCache); f->hFontCache = NULL; }
+    vb6_UC_FontLogFont(f, vb6_DpiY(), NONANTIALIASED_QUALITY, &lf);
+    h = CreateFontIndirectW(&lf);
+    if (!h) return NULL;
+    vb6_uc_fontSigTake(f);
+    f->hFontCache = (void*)h;
+    return (void*)h;
+}
+
+void* vb6_UC_FontHFont(void* p) {
+    return vb6_uc_fontEnsureHFont(vb6_uc_fontOf(p));
+}
+
+// 返回字段地址; *kind: 0=BSTR, 1=float, 2=int16, 3=int32, 5=句柄(指针宽度); 未命中返回 NULL
 void* vb6_UC_FontField(void* p, const wchar_t* name, int32_t* kind) {
     vb6_ComIface_Font* f = vb6_uc_fontOf(p);
     if (!f || !name || !kind) return NULL;
@@ -326,6 +434,15 @@ void* vb6_UC_FontField(void* p, const wchar_t* name, int32_t* kind) {
     if (_wcsicmp(name, L"Strikethrough") == 0) { *kind = 2; return &f->Strikethrough; }
     if (_wcsicmp(name, L"Weight") == 0)        { *kind = 3; return &f->Weight; }
     if (_wcsicmp(name, L"Charset") == 0)       { *kind = 3; return &f->Charset; }
+    /* 第二百七十六刀: hFont 不是字段, 是八档的派生量 —— 交的是**缓存那一格**的地址,
+       所以必须先把这格填上再返回 (造不出来就答"认不出", 由调用方去报数)。
+       名字不叫 hFont 的那半句理由在同一条注释里: 用户代码的 `Font.hFont` 只会以
+       vb6_ComGetProp(..., L"hFont") 的形状到达, 不会发成结构体字段直读。 */
+    if (_wcsicmp(name, L"hFont") == 0) {
+        if (!vb6_uc_fontEnsureHFont(f)) return NULL;
+        *kind = 5;
+        return &f->hFontCache;
+    }
     return NULL;
 }
 

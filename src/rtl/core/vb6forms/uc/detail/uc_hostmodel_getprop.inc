@@ -15,7 +15,16 @@
         if (_wcsicmp(name, L"Count") == 0) { vb6_ho_setVariantLong(out, vb6_Collection_Count(obj)); return 1; }
         return 1;
     }
-    if (vb6_uc_isFont(obj)) return vb6_ho_getFontMember(obj, name, out);
+    if (vb6_uc_isFont(obj)) {
+        /* 账 #305 第二百七十六刀: 认得就答、认不出**先报数** —— 第二百七十三刀给方法
+           那一臂装的那位主人, 属性这一臂当时没跟着接 (第二百七十五刀点出的那格洞:
+           靶工程 34 发 `name=hFont` 在 C3_HOST_MEMBER_MISS 名册里一条也没有)。
+           行为一字不改: 认不出仍是「答了但没答」—— 出口那格早被上面的
+           vb6_ho_setVariantEmpty 清零, 调用方拿到的还是同一个空值。 */
+        if (vb6_ho_getFontMember(obj, name, out)) return 1;
+        vb6_ho_reportUnknown(L"GetProp", name, obj);
+        return 1;
+    }
 
     // Fix <vbeclipse> rev18: UC **实例指针**归一成宿主 HWND —— 晚绑定属性读
     // (`Dim x As Variant: Set x = Controls.Item(id)` 之后 `x.LeftPos`) 传进来的是

@@ -433,6 +433,12 @@ void* vb6_ComGetProp(void* disp, const wchar_t* propName) {
                 case 0: res->vt = VT_BSTR; res->bstrVal = SysAllocString(*(BSTR*)fp); break;
                 case 1: res->vt = VT_R4;   res->fltVal = *(float*)fp; break;
                 case 2: res->vt = VT_I2;   res->iVal = *(int16_t*)fp; break;
+                /* 账 #305 第二百七十六刀 kind 5 = 句柄: 按**指针宽度**取, 交 VT_I8。
+                   落进 default 的 int32 那档就是 x64 上把 GDI 句柄砍掉高 32 位
+                   (与 Fix 296 给 Extender 对象成员立的同一条规矩); 而 VB6 的
+                   IFont.hFont 虽在类型库里标 Long, 语料一律把它交给 As LongPtr 的
+                   形参 (Common.bas:231 那份 PtrSafe 声明), 所以交 VT_I8 才是应答。 */
+                case 5: res->vt = VT_I8;   res->llVal = (LONG_PTR)*(void**)fp; break;
                 default: res->vt = VT_I4;  res->lVal = *(int32_t*)fp; break;
             }
         }
@@ -586,6 +592,12 @@ void vb6_ComSetProp(void* disp, const wchar_t* propName, void* value_void) {
                                      ? SysAllocString(v.bstrVal) : NULL; break;
                 case 1: *(float*)fp = (float)vb6_VariantToDouble(v); break;
                 case 2: *(int16_t*)fp = (int16_t)vb6_VariantToDouble(v); break;
+                /* 第二百七十六刀 kind 5 = hFont 那一格: **按只读处理**。
+                   stdole2.tlb 里 hFont 只有 propget (IFont 没有 putref_hFont), VB6 里
+                   `Font.hFont = x` 是编译期错误 ⇒ 语料 0 处; 落进 default 那档会把
+                   一个 int32 写进指针宽度的缓存格、而快照不跟着改 ⇒ 下一发问句
+                   交出半新半旧的句柄。不写它、也不报数 (报数是给"认不出"的, 这一档认得出)。 */
+                case 5: break;
                 default: *(int32_t*)fp = (int32_t)vb6_VariantToDouble(v); break;
             }
         }

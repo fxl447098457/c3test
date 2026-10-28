@@ -1565,23 +1565,16 @@ static int32_t vb6_uc_measureText(BSTR text, int wantWidth) {
     // 标题预留高度(TopHeader)不足 → 图例压在标题上; 轴标签宽度不对 → 文字裁切。
     HFONT hOld = NULL, hNew = NULL;
     if (len) {
-        vb6_ComIface_Font* f = (vb6_ComIface_Font*)vb6_UserControl_Font;
+        /* 账 #305 第二百七十六刀: 这一整块「八档 → LOGFONT」以前就地抄了一份,
+           现在问唯一主人 vb6_UC_FontLogFont (uc_controls.c) —— VB 层那枚 `Font.hFont`
+           也从同一位主人拿答案, 两处不许各有第二套字重/兜底。
+           DPI 与质量档是**调用方**的选择, 量字这一路维持它自己一贯的 96 + 0
+           (Fix 113k 记过: 给 TextWidth/TextHeight 换成真屏 DPI 的字体度量, 反而把
+           Charts 的图例/轴标签排布推坏)。vb6rtl 与 vb6forms 不互 include 头,
+           故就地 extern (与上面 vb6_ScalePxToUser 同款)。 */
+        extern void vb6_UC_FontLogFont(void* fontFields, int32_t dpiY, int32_t quality, void* lfOut);
         LOGFONTW lf;
-        memset(&lf, 0, sizeof(lf));
-        double pt = (f && f->Size > 0) ? (double)f->Size : 8.25;
-        lf.lfHeight = -(int)(pt * 96.0 / 72.0 + 0.5);          // 磅 → 像素 @96dpi
-        lf.lfWeight = (f && f->Weight) ? f->Weight : ((f && f->Bold) ? 700 : 400);
-        lf.lfItalic = (BYTE)((f && f->Italic) ? 1 : 0);
-        lf.lfUnderline = (BYTE)((f && f->Underline) ? 1 : 0);
-        lf.lfStrikeOut = (BYTE)((f && f->Strikethrough) ? 1 : 0);
-        lf.lfCharSet = (BYTE)((f && f->Charset) ? f->Charset : DEFAULT_CHARSET);
-        if (f && f->Name) {
-            size_t n = wcslen(f->Name);
-            if (n > 31) n = 31;
-            memcpy(lf.lfFaceName, f->Name, n * sizeof(wchar_t));
-        } else {
-            wcscpy(lf.lfFaceName, L"MS Sans Serif");
-        }
+        vb6_UC_FontLogFont(vb6_UserControl_Font, 96, 0, &lf);
         hNew = CreateFontIndirectW(&lf);
         if (hNew) hOld = (HFONT)SelectObject(hdc, hNew);
     }

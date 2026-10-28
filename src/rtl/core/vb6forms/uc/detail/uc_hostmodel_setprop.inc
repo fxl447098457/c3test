@@ -5,7 +5,15 @@
     obj = vb6_UC_UnwrapHost(obj);  // czUI fix: 包装器透明解包
     const vb6_VARIANT* v = (const vb6_VARIANT*)inV;
     if (!obj || !name) return 0;
-    if (vb6_uc_isFont(obj)) return vb6_ho_putFontMember(obj, name, v);
+    if (vb6_uc_isFont(obj)) {
+        /* 账 #305 第二百七十六刀: 与读侧同一口径 —— 认得就写、认不出先报数再答
+           (「写入被忽略」这件事本身与改前一字不差, 只是从此响亮)。
+           `Font.hFont = x` 到不了这里: 它在 vb6com_invoke.c 那条 kind 5 臂就被按
+           **只读**处理了 (stdole2.tlb 里 hFont 只有 propget, VB6 里那句是编译错误)。 */
+        if (vb6_ho_putFontMember(obj, name, v)) return 1;
+        vb6_ho_reportUnknown(L"SetProp", name, obj);
+        return 1;
+    }
     if (vb6_uc_isControls(obj)) return 1;
     if (vb6_uc_isColl(obj)) return 1;   // Fix 112c: Collection 只读容器
 

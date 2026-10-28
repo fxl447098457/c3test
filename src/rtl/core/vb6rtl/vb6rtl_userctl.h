@@ -33,6 +33,23 @@ typedef struct vb6_ComIface_Font {
     int16_t Strikethrough;
     int32_t Weight;
     int32_t Charset;
+    /* 账 #305 第二百七十六刀: VB6 的 IFont 还答一枚 `hFont` (= 这八档折算出来的
+       GDI 句柄; 靶工程 Common/Common.bas:1012 的 CreateGDIFontFromOLEFont 就靠它,
+       它 GetObjectAPI(Font.hFont, LenB(LF), LF) 把 LOGFONT 抄出来再自己 CreateFontIndirect)。
+       句柄是**派生量**, 而写侧没有钩子 —— `vb6_UC_FontField` 交的是字段地址、cgen 也
+       直接发 `f->Bold = x`、`vb6_UC_FontAssign` 逐档覆写, 三条写路都不通知任何人 ——
+       所以缓存自带一份八档快照: 每次被问先比快照, 不一致才作废重建。
+       刻意不叫 hFont: 那会让用户代码的 `Font.hFont` 有被发成结构体字段直读的风险
+       (那条路上句柄格还没被填过)。所有权见 vb6_UC_FontHFont 的注释。 */
+    void*   hFontCache;        /* HFONT, NULL = 还没造过 */
+    float   hFontSigSize;      /* 造出 hFontCache 时那八档的快照 (名字存副本, 不借指针) */
+    int16_t hFontSigBold;
+    int16_t hFontSigItalic;
+    int16_t hFontSigUnderline;
+    int16_t hFontSigStrike;
+    int32_t hFontSigWeight;
+    int32_t hFontSigCharset;
+    wchar_t hFontSigFace[32];  /* 32 = LF_FACESIZE; 本头不含 wingdi.h, 故写死这一枚常量 */
 } vb6_ComIface_Font;
 
 // 旧名保留 (Fix 105 引入), 供既有生成代码/注释引用.

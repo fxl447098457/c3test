@@ -11107,7 +11107,14 @@ if ($Category -in @("all", "syntax")) {
         "K271:no-slot=False",
         "K271:local-slot=False",
         "K271:aliased=False",
-        "K271-DONE")
+        "K271-DONE",
+        "K276:normal-weight-400=True",
+        "K276:height-measured=True",
+        "K276:face-M=True",
+        "K276:bold-weight-700=True",
+        "K276:underlined=True",
+        "K276:face-still-M=True",
+        "K276-DONE")
 
 
     # ai/028 V2 的发码形状: 插值必须** literally ** 发成手写的 & CStr() / Format$ 形状 ——

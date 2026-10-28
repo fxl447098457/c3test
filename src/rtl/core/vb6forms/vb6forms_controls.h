@@ -330,6 +330,11 @@ void  vb6_UC_BagPutBin(void* bag, const wchar_t* name, const char* bytes, int32_
 // Fix 125: 字体对象身份判定 + 字段定位 (供 COM 属性读写层直接操作字体字段)
 int32_t vb6_UC_IsFont(const void* p);
 void*   vb6_UC_FontField(void* p, const wchar_t* name, int32_t* kind);
+/* 账 #305 第二百七十六刀: 「八档 → LOGFONT」唯一主人 (fontFields = 那八档结构体本身,
+   不是代理; dpi/quality 由调用方递) + `Font.hFont` 的那枚缓存句柄 (代理或八档皆可问)。
+   vb6rtl_com.c 那位调用方不 include 本头, 就地 extern (与 vb6_ScalePxToUser 同款)。 */
+void    vb6_UC_FontLogFont(void* fontFields, int32_t dpiY, int32_t quality, void* lfOut);
+void*   vb6_UC_FontHFont(void* p);
 // Fix 168: Extender 结构体同上 (With UserControl.Extender 的 Width/Height/Align)
 int32_t vb6_UC_IsExtender(const void* p);
 void*   vb6_UC_ExtenderField(void* p, const wchar_t* name, int32_t* kind);
