@@ -79,6 +79,10 @@
                                 (HWND)hParent, NULL, (HINSTANCE)hInstance, r);
     vb6_uc_trace("window.created", typeName, hwnd);
     if (!hwnd) return NULL;
+    /* 账 #305 第二百七十八刀: VB6 的 UC 宿主窗口自己答字体 (参考那 29 枚每枚都带), C3 这一户
+     * 以前一个都没发过。设计期 BeginProperty Font 走 r->font, 没有就交 NULL = VB6 默认档。
+     * 必须在 desc->init 之前发: 初始化里就画第一帧的 UC 要看见自己那枚字体。 */
+    vb6_UC_ApplyFontToWindow(hwnd, r->font);
     }
     r->hwnd = hwnd;
     vb6_ucRecCount++;

@@ -448,6 +448,10 @@ void* vb6_CreateFormWindowB(const char* className, const char* formName,
     }
 
     free(wtitle);
+    /* 账 #305 第二百七十八刀: 参考的顶层窗体自己答字体 (-13/MS Sans Serif), C3 的 VB6_Form_* 顶层
+     * 从没被发过 => 窗体上 Print/TextWidth 那一族按 DC 默认字体量。交 NULL = VB6 默认档;
+     * 窗体若带设计期字体, 后面那条 setter 会再来发一张 (那一站自带作废)。 */
+    vb6_UC_ApplyFontToWindow(hwnd, NULL);
     return (void*)hwnd;
 }
 

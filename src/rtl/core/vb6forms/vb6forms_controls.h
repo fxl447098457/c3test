@@ -336,6 +336,9 @@ void*   vb6_UC_FontField(void* p, const wchar_t* name, int32_t* kind);
 void    vb6_UC_FontLogFont(void* fontFields, int32_t dpiY, int32_t quality, void* lfOut);
 /* 账 #305 第二百七十七刀: 「磅 → 像素」(lfHeight) 那一问的唯一主人, 三处调用方都问它。 */
 int32_t vb6_UC_FontHeightPx(double pt, int32_t dpiY);
+/* 账 #305 第二百七十八刀: 把一枚字体的答案发到窗口上 (UC 宿主窗口 / 窗体顶层创建期那两站)。
+   fontFields = NULL 就是 VB6 的默认档; 真正的发 / 存 / 删在 vb6forms_ctrl.c 那一位主人里。 */
+void    vb6_UC_ApplyFontToWindow(void* hwnd, const void* fontFields);
 void*   vb6_UC_FontHFont(void* p);
 // Fix 168: Extender 结构体同上 (With UserControl.Extender 的 Width/Height/Align)
 int32_t vb6_UC_IsExtender(const void* p);

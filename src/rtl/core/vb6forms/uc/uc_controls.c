@@ -440,6 +440,23 @@ void* vb6_UC_FontHFont(void* p) {
     return vb6_uc_fontEnsureHFont(vb6_uc_fontOf(p));
 }
 
+/* 账 #305 第二百七十八刀: 把一枚字体的答案**发到窗口上**。
+ * 靶 = 参考 ComCtlsDemo.exe 那 29 枚 ThunderRT6UserControl 每一枚都答字体 (27 枚 -13/MS Sans Serif +
+ * 2 枚 -11/Tahoma)、ThunderRT6FormDC 也答 -13/MS Sans Serif; C3 的对应两户 (27 枚 VB6_UserControlHost
+ * + 顶层 VB6_Form_*) 在同一把时间无关的尺上读回**空** —— 从没发过。发过之后它们的文字量、owner-draw
+ * 与 .FontName 那一族读数才落在 VB6 那枚字体上, 不是 DC 默认字体。
+ * 本站只拼答案: 八档 (fontFields = NULL 即 VB6 的默认档 8.25pt / MS Sans Serif / 400) 问第二百七十六刀
+ * 那位主人, DPI 递真屏、质量档递 NONANTIALIASED (与窗口字体同口径); 发出去 / 自存 / 删旧 交给
+ * vb6forms_ctrl.c 里那一位既有主人 —— 那一站自带「只删我们自己造的那张」的账, 不抄第二份。
+ * ⚠ 也别顺手把第二百七十六刀那枚缓存句柄交出去: WM_SETFONT 的接手方换字体时 DeleteObject 旧句柄。 */
+void vb6_UC_ApplyFontToWindow(void* hwnd, const void* fontFields) {
+    LOGFONTW lf;
+    if (!hwnd) return;
+    vb6_UC_FontLogFont((void*)fontFields, vb6_DpiY(), NONANTIALIASED_QUALITY, &lf);
+    vb6_SetControlFontFromLogFont((HWND)hwnd, &lf);
+}
+
+
 // 返回字段地址; *kind: 0=BSTR, 1=float, 2=int16, 3=int32, 5=句柄(指针宽度); 未命中返回 NULL
 void* vb6_UC_FontField(void* p, const wchar_t* name, int32_t* kind) {
     vb6_ComIface_Font* f = vb6_uc_fontOf(p);

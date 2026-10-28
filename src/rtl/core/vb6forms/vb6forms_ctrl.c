@@ -424,7 +424,9 @@ static int vb6_GetControlLogFont(void* hwnd, LOGFONTW* plf) {
 
 // Helper: create new font from modified LOGFONT and set it on control
 // Also deletes the old font if it was created by us (we track via prop)
-static void vb6_SetControlFontFromLogFont(void* hwnd, const LOGFONTW* plf) {
+// 账 #305 第二百七十八刀: 摘掉 static —— 「造一枚 + WM_SETFONT + 存自存 + 作废旧句柄」这一站今天来了
+// 第二位消费者 (UC 宿主窗口与窗体顶层以前压根没人给它们发字体)。**不抄第二份**, 只在头里露出来。
+void vb6_SetControlFontFromLogFont(void* hwnd, const LOGFONTW* plf) {
     if (!hwnd || !plf) return;
     HFONT hNewFont = CreateFontIndirectW(plf);
     if (!hNewFont) return;
