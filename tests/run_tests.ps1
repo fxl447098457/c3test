@@ -11059,6 +11059,27 @@ if ($Category -in @("all", "syntax")) {
         "void* vb6_QualSheetEnum(",
         "void* vb6_QualDataMember(")
 
+    # 账 #305 第二百六十九刀: `With <本类的一枚 Function>` —— 裸名进不了任何「按名登记」的名册
+    # (那些表记的是变量/形参/字段, 这一格是个**过程**), 于是分类落 Unknown → 行尾兜底 COMObject
+    # → 体内每一发成员调用发成 vb6_ComCall(_vb6_with_N, L"…"), 而 _vb6_with_N 是裸的
+    # vb6_cls_<类>* —— 拿结构体指针当 IDispatch 问 ⇒ 每一档静默不落地。实证 = 靶工程
+    # ComCtlsDemo 的 LvwListSubItem.cls:89/103/125/135/142 那五块 `With ShadowListView`
+    # (:33 `Private Function ShadowListView() As ListView`), x86 运行期名册 7040 次空转
+    # (台账行 5026); 同一条 VB 写在体外 (LvwListItem.cls:133) 发的一直是直调
+    # vb6_ListView_FListItemVerify(...) ⇒ 同一事实两形两答。
+    # 这一枚针钉的就是**两形同归**: 体内 (q1) 与体外 (q2) 都走 vb6_WithMemberHost_ScaleFactor
+    # 那一发直调, With 临时量是类指针而不是 void*, 晚绑定出口一行都不许出现。
+    # 两条 Absent 是反面证人 (BASE 编译器跑同一夹具两头数过: 各 1 在场 / 修后各 0):
+    # 「void* _vb6_with_0 =」就是改前那一形; 「vb6_ComCall」用**裸词干**才咬得住 ——
+    # 改前那一发实际是 vb6_ComCallDouble(...) (按返回档改名的兄弟), 写成
+    # "vb6_ComCall(_vb6_with_0" 在改前也数不到 1, 那一条就成了一条永远不会红的死针。
+    Test-CodegenNote "with_same_class_fn_calls_direct" @("$Tests\test_with_member_call.cls") @(
+        "vb6_cls_WithMemberHost* _vb6_with_0 = (vb6_cls_WithMemberHost*)",
+        "q1 = vb6_WithMemberHost_ScaleFactor((void*)_vb6_with_0, 3.0);",
+        "q2 = vb6_WithMemberHost_ScaleFactor(") @(
+        "vb6_ComCall",
+        "void* _vb6_with_0 =")
+
 
     # ai/028 V2 的发码形状: 插值必须** literally ** 发成手写的 & CStr() / Format$ 形状 ——
     # 注意第二枚读数挑的是 vb6_CStrLong (按实参类型改发专用 CStr), 这正是"降级成真 AST"
