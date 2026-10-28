@@ -550,7 +550,7 @@ void vb6_SetControlFontSize(void* hwnd, float sizePt) {
     ReleaseDC(NULL, hdc);
     if (dpi <= 0) dpi = 96;
     // Convert points to pixel height (negative for character height)
-    lf.lfHeight = -(int)(sizePt * (float)dpi / 72.0f + 0.5f);
+    lf.lfHeight = vb6_UC_FontHeightPx((double)sizePt, dpi);   /* 同一位主人, 不再自己四舍五入 */
     vb6_SetControlFontFromLogFont(hwnd, &lf);
     {
         DWORD bits;

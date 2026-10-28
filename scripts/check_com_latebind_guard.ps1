@@ -64,6 +64,9 @@ $incSet   = Join-Path $Root 'src\rtl\core\vb6forms\uc\detail\uc_hostmodel_setpro
 $rtPath   = Join-Path $Root 'tests\run_tests.ps1'
 $ucC      = Join-Path $Root 'src\rtl\core\vb6forms\uc\uc_controls.c'
 $rtlC     = Join-Path $Root 'src\rtl\core\vb6rtl\vb6rtl_com.c'
+$formsC   = Join-Path $Root 'src\rtl\core\vb6forms\vb6forms.c'
+$ctrlC    = Join-Path $Root 'src\rtl\core\vb6forms\vb6forms_ctrl.c'
+$hostWinC = Join-Path $Root 'src\rtl\core\vb6forms\uc\uc_host_window.c'
 $fixture  = Join-Path $Root 'tests\b446_latebind\B446.vbp'
 
 $fail = @()
@@ -118,7 +121,7 @@ function Index-Of262([string[]]$body, [string]$needle) {
     return -1
 }
 
-$missing = @($invPath, $comH, $clsH, $hostC, $ctrlH, $incCall, $incGet, $incSet, $rtPath, $ucC, $rtlC) |
+$missing = @($invPath, $comH, $clsH, $hostC, $ctrlH, $incCall, $incGet, $incSet, $rtPath, $ucC, $rtlC, $formsC, $ctrlC, $hostWinC) |
            Where-Object { -not (Test-Path $_) }
 if ($missing) {
     foreach ($m in $missing) { $fail += ("missing file " + $m) }
@@ -335,9 +338,36 @@ if ($nHUse -ne 1) {
               " (want 1) - 宿主通道与 COM 出口必须从同一位主人拿答案")
 }
 $nK276 = ([regex]::Matches($rtCode, 'K276:')).Count
-if ($nK276 -ne 6) {
+if ($nK276 -ne 7) {
     $fail += ("R9 K276 expectation rows in run_tests.ps1 = " + $nK276 +
-              " (want 6) - 判据升格进 runner 才算在册 (R6 同族)")
+              " (want 7) - 判据升格进 runner 才算在册 (R6 同族)")
+}
+
+# ---- R10: 第二百七十七刀那一档 (磅 -> 像素 + 默认字族名) 的形状 ----
+# 唯一主人一枚、调用方三处、两条抄写的反面针, 加"兜底名不许再写 Segoe UI"。
+$formsCode = Strip-Comments262 ((Read-Lines262 $formsC) -join "`n")
+$ctrlCode  = Strip-Comments262 ((Read-Lines262 $ctrlC) -join "`n")
+$hwCode    = Strip-Comments262 ((Read-Lines262 $hostWinC) -join "`n")
+$nHDef2 = ([regex]::Matches($ucCode, 'int32_t\s+vb6_UC_FontHeightPx\s*\(')).Count
+if ($nHDef2 -ne 1) { $fail += ("R10 definition of vb6_UC_FontHeightPx = " + $nHDef2 + " (want 1)") }
+$nHUse2 = ([regex]::Matches($ucCode, '=\s*vb6_UC_FontHeightPx\(')).Count +
+         ([regex]::Matches($formsCode, 'vb6_UC_FontHeightPx\(')).Count +
+         ([regex]::Matches($ctrlCode, 'vb6_UC_FontHeightPx\(')).Count
+if ($nHUse2 -ne 3) {
+    $fail += ("R10 consumers of vb6_UC_FontHeightPx = " + $nHUse2 + " (want 3: uc_controls / vb6forms / vb6forms_ctrl)")
+}
+$nMulDiv = ([regex]::Matches($formsCode, 'MulDiv\(825')).Count
+$nHalf  = ([regex]::Matches($ctrlCode, '72\.0f\s*\+\s*0\.5f')).Count
+$nHalf2 = ([regex]::Matches($ucCode, '72\.0\s*\+\s*0\.5')).Count
+if ($nMulDiv + $nHalf + $nHalf2 -ne 0) {
+    $fail += ("R10 the hand-copied conversions are back (muldiv=" + $nMulDiv +
+              " setter=" + $nHalf + " owner=" + $nHalf2 + ") (want 0) - 第二套口径就是第二套答案")
+}
+$nName = ([regex]::Matches($hwCode, 'SysAllocString\(L"MS Sans Serif"\)')).Count
+$nOld  = ([regex]::Matches($hwCode, 'SysAllocString\(L"Segoe UI"\)')).Count
+if ($nName -ne 1 -or $nOld -ne 0) {
+    $fail += ("R10 UC default family: MS Sans Serif = " + $nName + " (want 1), Segoe UI = " + $nOld +
+              " (want 0) - 参考那 69 枚窗口读回来的是前者")
 }
 
 # ---- R8: 这枚哨兵自己不许是死码 ----
@@ -351,5 +381,5 @@ if ($fail.Count -gt 0) {
     foreach ($f in $fail) { Write-Host ("FAIL " + $f) }
     exit 1
 }
-Write-Host ("PASS check_com_latebind_guard: exits=7 guarded=7 pseudo-exempt=3 order=pseudo-first guard=behavior-preserving counter-outlets=2 host-sibling=3 runner-sites=3 inline-counters=2 negative-control=2 hfont-owner=1 hfont-kind5=2 self-registered=1")
+Write-Host ("PASS check_com_latebind_guard: exits=7 guarded=7 pseudo-exempt=3 order=pseudo-first guard=behavior-preserving counter-outlets=2 host-sibling=3 runner-sites=3 inline-counters=2 negative-control=2 hfont-owner=1 hfont-kind5=2 height-owner=1 height-consumers=3 name-default=ms-sans-serif self-registered=1")
 exit 0

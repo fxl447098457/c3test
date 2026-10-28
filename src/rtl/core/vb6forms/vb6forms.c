@@ -155,7 +155,7 @@ static HFONT vb6_Vb6DefaultGuiFont(void) {
     int dpiY = hdc ? GetDeviceCaps(hdc, LOGPIXELSY) : 96;
     HFONT hFont;
     if (hdc) ReleaseDC(NULL, hdc);
-    lf.lfHeight = -MulDiv(825, dpiY, 7200);   /* 8.25pt → 像素 */
+    lf.lfHeight = vb6_UC_FontHeightPx(8.25, dpiY);   /* 8.25pt -> 像素, 截断口径在主人那一处 (账 #305 二百七十七刀) */
     lf.lfWeight = FW_NORMAL;
     // Fix 190: 保持 DEFAULT_CHARSET —— 它让 GDI 按**字符串实际字符**做字体链接,
     // 于是同一控件既能画 CJK 也能画韩文/西里尔/希腊文; 写死某个具体代码页字符集

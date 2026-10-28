@@ -56,6 +56,14 @@ End Type
 
 Private Declare PtrSafe Function GetObjectAPI Lib "gdi32" Alias "GetObjectW" (ByVal hObject As LongPtr, ByVal nCount As Long, ByRef lpObject As Any) As Long
 
+' Knife 277 pins the point->pixel CALIBER, not just the fact that a height came back.
+' The row recomputes the height from the DPI this machine really reports, so it holds at 96
+' and at 120 dpi and still tells the two calibers apart (8.25pt at 120dpi = 13.75: VB6 gives
+' -13, the old C3 rounding gave -14). 90 = LOGPIXELSY.
+Private Declare PtrSafe Function GetDCAPI Lib "user32" Alias "GetDC" (ByVal hWin As LongPtr) As LongPtr
+Private Declare PtrSafe Function ReleaseDCAPI Lib "user32" Alias "ReleaseDC" (ByVal hWin As LongPtr, ByVal hDcIn As LongPtr) As Long
+Private Declare PtrSafe Function GetDeviceCapsAPI Lib "gdi32" Alias "GetDeviceCaps" (ByVal hDcIn As LongPtr, ByVal nIndex As Long) As Long
+
 Public Sub K276ReadFont(ByVal Font As IFont, ByRef outWeight As Long, ByRef outUnderline As Long, ByRef outHeight As Long, ByRef outFaceFirst As Long)
     Dim lf As K276LF
     GetObjectAPI Font.hFont, LenB(lf), lf
@@ -80,6 +88,12 @@ Sub Main()
     Dim z1 As Long
     Dim f0 As Long
     Dim f1 As Long
+    Dim hScr As LongPtr
+    Dim dpiY As Long
+    Dim w2 As Long
+    Dim u2 As Long
+    Dim z2 As Long
+    Dim f2 As Long
     Set g = CloneByReturnSlot(f)
     Set h = CloneViaLocal(f)
     Debug.Print "K271:no-slot="; (g Is Nothing)
@@ -90,11 +104,19 @@ Sub Main()
     f.Bold = True
     f.Underline = True
     K276ReadFont f, w1, u1, z1, f1
+    hScr = GetDCAPI(0)
+    dpiY = GetDeviceCapsAPI(hScr, 90)
+    ReleaseDCAPI 0, hScr
+    ' 8.75pt is NOT an integer number of pixels at 96 or at 120 dpi (11.67 / 14.58), so this
+    ' row is the caliber witness: rounding the conversion would answer -12 (or -15) here.
+    g.Size = 8.75
+    K276ReadFont g, w2, u2, z2, f2
     Debug.Print "K276:normal-weight-400="; (w0 = 400)
     Debug.Print "K276:height-measured="; (z0 <> 0)
     Debug.Print "K276:face-M="; (f0 = 77)
     Debug.Print "K276:bold-weight-700="; (w1 = 700)
     Debug.Print "K276:underlined="; (u1 <> 0)
     Debug.Print "K276:face-still-M="; (f1 = 77)
+    Debug.Print "K276:height-trunc="; (z2 = -Int(8.75 * dpiY / 72))
     Debug.Print "K276-DONE"
 End Sub

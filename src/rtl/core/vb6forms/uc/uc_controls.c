@@ -298,6 +298,24 @@ void* vb6_UC_NewFont(void) {
     return f; // 与 cgen 的 vb6_ComIface_Font* 直接字段访问保持一致
 }
 
+/* 账 #305 第二百七十七刀: 「磅 → 像素」这一问的唯一主人 (lfHeight 那一格)。
+ * 之前它住三处、两套口径: vb6forms.c 的 vb6_Vb6DefaultGuiFont 用 -MulDiv(825,dpiY,7200)
+ * (MulDiv **四舍五入**), vb6forms_ctrl.c 的 vb6_SetControlFontSize 用 -(int)(pt*dpi/72f+0.5f)
+ * (也是四舍五入), 而第二百七十六刀那位八档主人里再抄了第三份 —— 三处同公式, 于是全都比
+ * VB6 大一档。证据 = 同一把时间无关的 WM_GETFONT 尺 (账 #305 第二百七十四刀立的):
+ *   参考 ComCtlsDemo.exe  69 枚窗口 (-13, 400, "MS Sans Serif")  ← 8.25pt @ 120dpi = 13.75 截断
+ *   C3 编出来的同一工程  38 枚窗口 (-14, 400, ...)              ← 同一发四舍五入 = 14
+ * 两台都是 system-DPI-aware (探针 .local/k277/aware.py: awareness=1、GetDpiForWindow=120、
+ * 顶层客户区 844x780 ↔ 844x781 逐家相同) ⇒ 这一档差**不是** DPI 虚拟化造的, 是换算本身的口径。
+ * ⚠ 只有一条读数支撑这个口径 (语料里 8.25pt 是绝对主力): 差只在 frac(pt*dpi/72) >= 0.5 时现形,
+ *   96dpi 下 8.25pt = 11.0 整 ⇒ 本机 CI (96dpi) 上这刀**零可见效果**, 判据只能靠那把尺。
+ * 返回**负的** lfHeight (字符高度, GDI 的 VB6 那一档), 0pt 交 0 (SP3 那枚行为钉要吃这个)。
+ * dpi <= 0 一律按 96 兜底 (调用方拿不到 DC 时的旧口径, 一字未动)。 */
+int32_t vb6_UC_FontHeightPx(double pt, int32_t dpiY) {
+    int dpi = (dpiY > 0) ? dpiY : 96;
+    return -(int)(pt * (double)dpi / 72.0);   /* 截断, 不四舍五入 —— 照 VB6 的读数 */
+}
+
 vb6_ComIface_Font* vb6_uc_fontOf(void* p) {
     if (p == &vb6_UserControl_FontObj) return &vb6_UserControl_FontObj;
     for (vb6_UCFontRec* f = vb6_ucFonts; f; f = f->next)
@@ -320,7 +338,7 @@ int32_t vb6_UC_IsFont(const void* p) {
  * 全零 LOGFONT 就是这么来的 (Common/Common.bas:1012 GetObjectAPI(Font.hFont, …) 拿到
  * 的是 0, 那次 GetObject 直接失败, 局部 UDT 保持全零, 递给窗口的就是 GDI 默认字体)。
  * 本刀把 measureText 那一份撤进来当第一位主人 (它那份的算法一字未改: 磅→像素仍是
- * `-(int)(pt*dpi/72+0.5)`、八档的兜底仍是 8.25 / 400 / DEFAULT_CHARSET / "MS Sans Serif",
+ * `-(int)(pt*dpi/72+0.5)` (第二百七十七刀把这一步交给 vb6_UC_FontHeightPx, 口径改成截断)、八档的兜底仍是 8.25 / 400 / DEFAULT_CHARSET / "MS Sans Serif",
  * 连"其余字段留零"也照抄), 从此第二格答案只在调用方 (递进来的 DPI 与质量档)。
  * ⚠ 一处**刻意**的口径修正: 字重按 VB6 的读侧派生 —— Bold 为真一律 700, 与 Weight
  *   存的是哪个数无关 (StdFont 的真实存储只有 Weight, Bold 是它的视图)。旧写法
@@ -339,7 +357,7 @@ void vb6_UC_FontLogFont(void* fontFields, int32_t dpiY, int32_t quality, void* l
     if (!lf) return;
     memset(lf, 0, sizeof(*lf));
     pt = (f && f->Size > 0) ? (double)f->Size : 8.25;
-    lf->lfHeight    = -(int)(pt * (double)dpi / 72.0 + 0.5);
+    lf->lfHeight    = vb6_UC_FontHeightPx(pt, dpi);
     lf->lfWeight    = (f && f->Bold) ? 700 : ((f && f->Weight) ? f->Weight : 400);
     lf->lfItalic    = (BYTE)((f && f->Italic) ? 1 : 0);
     lf->lfUnderline = (BYTE)((f && f->Underline) ? 1 : 0);

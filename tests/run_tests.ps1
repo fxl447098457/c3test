@@ -11114,6 +11114,7 @@ if ($Category -in @("all", "syntax")) {
         "K276:bold-weight-700=True",
         "K276:underlined=True",
         "K276:face-still-M=True",
+        "K276:height-trunc=True",
         "K276-DONE")
 
 

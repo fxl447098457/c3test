@@ -963,3 +963,4 @@
 /* knife 239: RTL changed (byref scalar arg packers for late-bound calls) -- force c3rtl.rc re-embed */
 
 /* knife 276: RTL changed (Font.hFont -- one eight-fields->LOGFONT owner plus a self-invalidating HFONT cache; the font property/write arms now report unknown names) -- force c3rtl.rc re-embed */
+/* knife 277: RTL changed (one pt->pixel authority for lfHeight, truncating like VB6 (8.25pt at 120dpi: -14 -> -13); the shared UserControl font default family is MS Sans Serif, not Segoe UI) -- force c3rtl.rc re-embed */

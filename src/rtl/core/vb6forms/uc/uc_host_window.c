@@ -349,8 +349,10 @@ void vb6_uc_gdiplusInit(void) {
     done = 1;
     // czUI fix: 环境字体默认名 — Bag 重放 ReadProperty("Font", Ambient.Font)
     // 会把此对象设为控件字体; Name=NULL 时所有 GDI+ 文字静默消失
+    // 第二百七十七刀: 这一档只要求**非空**, 族名交 VB6 自己的默认字族 (旧写法 Segoe UI) ——
+    // 同一把 WM_GETFONT 尺在参考那台读回来的 69 枚就是 MS Sans Serif。
     if (!vb6_UserControl_FontObj.Name)
-        vb6_UserControl_FontObj.Name = SysAllocString(L"Segoe UI");
+        vb6_UserControl_FontObj.Name = SysAllocString(L"MS Sans Serif");
     HMODULE mod = LoadLibraryA("gdiplus.dll");
     if (!mod) return;
     long (__stdcall *pStartup)(ULONG_PTR*, const void*, void*) =

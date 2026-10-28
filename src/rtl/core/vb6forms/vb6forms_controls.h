@@ -334,6 +334,8 @@ void*   vb6_UC_FontField(void* p, const wchar_t* name, int32_t* kind);
    不是代理; dpi/quality 由调用方递) + `Font.hFont` 的那枚缓存句柄 (代理或八档皆可问)。
    vb6rtl_com.c 那位调用方不 include 本头, 就地 extern (与 vb6_ScalePxToUser 同款)。 */
 void    vb6_UC_FontLogFont(void* fontFields, int32_t dpiY, int32_t quality, void* lfOut);
+/* 账 #305 第二百七十七刀: 「磅 → 像素」(lfHeight) 那一问的唯一主人, 三处调用方都问它。 */
+int32_t vb6_UC_FontHeightPx(double pt, int32_t dpiY);
 void*   vb6_UC_FontHFont(void* p);
 // Fix 168: Extender 结构体同上 (With UserControl.Extender 的 Width/Height/Align)
 int32_t vb6_UC_IsExtender(const void* p);
