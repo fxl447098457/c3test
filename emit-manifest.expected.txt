@@ -1,7 +1,7 @@
 ﻿# emit-manifest.expected.txt - 全语料发码形状的期望清单（账 #245 / #267 那一格落成的一句可判红的话）
 #
 # 每行 = 一份输入的哈希行：sha256=<归一化全文> ascii256=<纯 ASCII 行> rc=<退出码> bytes=<归一化字节> <relpath>。
-# 由 CI 的 Emit manifest 作业（门 #418、head 425083b3、pe-lnk=14.51）产出，与本机 14.29 那台**逐行相同**：
+# 由 CI 的 Emit manifest 作业（门 #960、head 5363a956、pe-lnk=14.51）产出，与本机 14.29 那台**逐行相同**：
 # 395 行里 sha256 差 0 行 —— 跨机器能对齐的前提是账 #267 那一刀（--emit-c 的产物走 encoding.hpp::writeStdoutRaw，
 # 不再被 ConsoleUtf8Buf 按控制台代码页折成 GBK），外加把 tests/VBFlexGridDemo 的 OLEGuids 那行 Reference 从
 # 「这台机器恰好注册了什么」改成工程自己带进仓库的那份 .tlb。
@@ -34,6 +34,7 @@
 #   vb6_Form_Scale(hwnd, 0, 0,0,0,0)。其余 509 份输入逐字节没动 ⇒ 语义层那道折叠只碰得到
 #   「窗体上不写括号的画布动词」这一形（METHOD 那族 cls / print 语句码头本就接得住，没折过去）。
 #   按本机这份清单登记（C3.exe = 本 HEAD 本机编的那一台），待 CI 那台独立复算证过才算数。
+# 2026-10-28 第二百六十七刀登记：5 行内容移动 = 库限定名那一格（`As VBRUN.ParentControls` 一族不再被「首两字母 vb ⇒ Long」折成标量、按整串答不出时按 leaf 重问、leaf 也未知交回对象档）。逐行归因：tests/test_alias_spellings.bas 是本刀判据那五枚新过程（2145→3159）；VTableHandle.bas 与 Common.bas 与 VBFlexGridDemo.vbp = `OleGuids.*`/`VBRUN.ParentControlsType` 的档从 Unknown/Long 改到对象档（含 `vb6_ComPackInt(`→`vb6_ComPackObject(` 两处）；mdQRCodegen.bas 260438→259249 = `stdole.IUnknown` 落对象档后，`DispCallByVtbl(pUnk, …)` 那一族不在实参位装箱、直接递指针地址（同批 19 格功能门全绿 = 那些真跑用例仍过）。MSDATASRC 与 `VB.`/`VBA.` 白名单那一族 21 处答案由**规则排序**保住，未出现在差异里。
 sha256=ae7714fafb0d0bf6c5d21168b29a025c64ca767dbaf3ae005eff4055eac7f56b ascii256=edbd5f9e20588a9a9860824c75cf8a589c9c9c11f47ce0a890833a9fe2a75aaa rc=0 bytes=1773 tests/acc/acc_fam_main.bas
 sha256=b0faed950e7edb5a083de861c4bb72824dab2e805b845409eaa25c3e3ecbcd23 ascii256=a0bfab9a3fb0afd2f5ef73e412374303defaceb91e3ade7f492823906d417eb6 rc=0 bytes=9704 tests/acc/acc_fam.vbp
 sha256=64ca3fee78a5a527ff6433d36f32bcc19fd81618d6a16379479007b79c7fc3d6 ascii256=4f779f832dd9588e83d6f6f4458ecf49c443b3d5d9e66d7fac3f2ca02369d801 rc=0 bytes=1785 tests/acc/acc_main.bas
@@ -304,7 +305,7 @@ sha256=b30ee65e6ab687b03c4da250ea24e6297cc5fe4262c2864116cb8796c441c65f ascii256
 sha256=451085507f9d74dee439ac303716f716594aaade2e2e494491291336cdf925e2 ascii256=a02618ee4bbec748e9a2b343fb74e7153fe2b278c0c5b062fcf7ccbff1fe2b50 rc=0 bytes=19232 tests/test_activex_dll/test_activex_dll.vbp
 sha256=bd394bd53f3fd9e8474679f82083f9701ca776bd849492e68fb513bc097ddd49 ascii256=cc8c20f92a59b3288721d8df771dbfd7f85809357b42832950ee6960af97552c rc=0 bytes=24357 tests/test_activex_dll/test_event_dll.vbp
 sha256=f24d12dc3791c166e9d49bfd2b032fb5c8b44c8af685d41249ea99ed1be6354a ascii256=3678e9da96a8b411ac552f8408f1b5c23c61a50553b8f4a5f000c6029d579a41 rc=0 bytes=6164 tests/test_addrof_cb.bas
-sha256=dcc7525acfdcf08129e3689e3fa641c7539c704bcbea23740ab3058374467f99 ascii256=aefda3d038019ce9e4b2fcdcdbad83994ad53aac88625d2f0f0b97a6b14319d9 rc=0 bytes=2145 tests/test_alias_spellings.bas
+sha256=7f4fc2c7edf695dcfa0f497ddb2146799af95bc28946fa363b4cffb28d6dd2fb ascii256=e517642c3d3e1c13924b768f0fd60e372c1c167e7697cd55731c74d447835c31 rc=0 bytes=3159 tests/test_alias_spellings.bas
 sha256=f97858af9442e32c37bfab72682c9901096f3f5406e750f026e15318c4c92a43 ascii256=4861022f0cffed14d656781290dff294607814063aa34741e08e3e4c5123d49d rc=0 bytes=14989 tests/test_arr_empty.bas
 sha256=ea30e4dbc79f46da0025c45b7514b7a5cd6cc6e8a6025e9f0f570af6cbb38e7c ascii256=f554717cf5d1326bb668da7189797a30f5e497606d4806ee0adb3cffe53af99a rc=0 bytes=60346 tests/test_arr_nd.bas
 sha256=9d8267a0ab2801019c480d14408ead559ca99217df598cb09a2447c83fb4e563 ascii256=3b87465c7d31e1b9a71ce375ea85d659e888bbe29cf20e77adae6f9810f9b6a6 rc=0 bytes=5387 tests/test_array.bas
@@ -416,18 +417,18 @@ sha256=52bca52f41e1b80191edef6b7f98239a1bddbfd2e6d6edba2d91f0f742a4ac9f ascii256
 sha256=52d7c4074cd0330a0992a043c611788f74aefe272079e25a6ecf7df967b6ad0d ascii256=76478d1f738e581e2961566ad168a86a11dddd43d3c4e424942c28ee26a4d99d rc=0 bytes=31673 tests/typeof/Tof.vbp
 sha256=984cf9c4ea381c341bd081f02c89ad30c0b7d4838d9a97c451b219da16c3fa0b ascii256=9b4497ccf356046f5a703ed078630e43fe43810444ec5c82bf35724abd324db4 rc=0 bytes=8090 tests/typeof/TofMain.bas
 sha256=64f6d642d11f070acab9a63b9420db096cb3dbbd317391bee15ad2c127b17b33 ascii256=3054f7c442e2cd36a79bd10d5e7447c4cc98b4c709d629369f36886e2db4015b rc=0 bytes=61126 tests/VBFlexGridDemo/Builds/VBFlexGrid/VBFlexGridBase.bas
-sha256=d5874a3ce9c25383a0ea8d653ca49d1d78a28d2a274be0364334b54895b27458 ascii256=7ef7c028057ec9331ed965f85ed73d0b17c4ad672a5a98f6a7a1b791526af836 rc=0 bytes=89345 tests/VBFlexGridDemo/Builds/VTableHandle.bas
-sha256=3204247eb044d0b54882f373eb27c2f6aab6634debb1daf05385b39b467f9eec ascii256=f48f9c21da67cbd41dcf1adc1c87d5b78fdcc4d99b91dad456baca3a4a5f1a53 rc=0 bytes=195071 tests/VBFlexGridDemo/Common/Common.bas
+sha256=21c022a53015d71820a4062258d8cff158036fe473a536bb21143720fb2237db ascii256=8b470e6b3df38ec4b52b8f51fbe3a19a065fc370deaa114ab1b525012c7470e5 rc=0 bytes=89424 tests/VBFlexGridDemo/Builds/VTableHandle.bas
+sha256=07f04f356c6853e57e4a139601eea7f4caf76874523c9d1991b9ab23248a3793 ascii256=4d4186870a7e7828a4842f80bd781be0517ff11415d277e368153da9d7a67174 rc=0 bytes=195062 tests/VBFlexGridDemo/Common/Common.bas
 sha256=6f5c897c93fd54e024c3a2b99b0b02afe887258bf969d2d6a533fd4b3e43f5f9 ascii256=6d3a354c3a189a55f119785fc9ece6a550835e387f6b85f7796588fa33488ecb rc=0 bytes=4669 tests/VBFlexGridDemo/Common/Startup.bas
 sha256=bbb262be86392a5f63d945cbacc9d9e21c814b0b7ba6050cbd89137e06789de2 ascii256=85f5277afc488b9d50b404bec3c94926f30ded62b3981b9181fef14268a420cd rc=0 bytes=73391 tests/VBFlexGridDemo/Common/VisualStyles.bas
-sha256=d284ca10f7d369ea26c7f115fac4df629f2e884dbe2c9937f2476fede9f7adf5 ascii256=5f0d2fe490e5e0e70507f957672c42f55f0d255e4086044fe9402e9223ee23e4 rc=0 bytes=5577279 tests/VBFlexGridDemo/VBFlexGridDemo.vbp
+sha256=9a333e09b06f3329f512c2f4ff7cdaaae83ba01884eb10ef5b8f0261bf642159 ascii256=ebe9c3d6fbc0feaf86fbc30cacb084c96e2b90954a0e67023801036cd1cc05ac rc=0 bytes=5577321 tests/VBFlexGridDemo/VBFlexGridDemo.vbp
 sha256=3e5e02a695e22846566e8f428c66a943bc6e605c703c9387dfcf226dfb2056f1 ascii256=3e9bb850aff21dc3626a165afa21185bab13d3565f5b62b9f5e4c2e52084ba18 rc=0 bytes=3489 tests/vbman_host/run_host.bas
 sha256=3e5e02a695e22846566e8f428c66a943bc6e605c703c9387dfcf226dfb2056f1 ascii256=3e9bb850aff21dc3626a165afa21185bab13d3565f5b62b9f5e4c2e52084ba18 rc=0 bytes=3489 tests/vbman_host/vbman_host.vbp
 sha256=5f6d4159602806680561963237b24008263b38246332b50b3e814a333009d1a5 ascii256=5cd8103e73a1c07e2fece83539770603407213236bbf9822bd9b08ea74e7d778 rc=0 bytes=1763 tests/vbp_project/MainMod.bas
 sha256=46018324568657ade07c72e651cbf393cb76a304fc22b0c8f2cae4ac38710995 ascii256=bba5cddb7e18b64fbe412d3946313751e39ea5665d06d28fa896b4d3efb9464b rc=0 bytes=1484 tests/vbp_project/MathUtils.bas
 sha256=df094b9c762a0eb49f8405f87cf4e090997ef84d048c70c6e2727bbc1eaf1757 ascii256=6bdd597ec6e853c9f6ad9857e494d7b5190f035b2672196ee6747b2a25ad4599 rc=0 bytes=9058 tests/vbp_project/TestVBP.vbp
 sha256=e6808285d5b949dbc18bf7a95bb0faeb0eda896184a67b303cf705ddcfca831c ascii256=b52df01632c1712a801e41f74f7e2979b8b3d72fd56d65cbe5e55965d98cd23a rc=0 bytes=3715 tests/vbp_project/TestVBP2.vbp
-sha256=429d278e88af9cfa5b2c88a20f3da13f14d3b3072ddbb04838f05ec48f29da82 ascii256=dffb399c0dd4d233e5492dcfd0236a8d3676ba73fd9c0f71368b5fa3df7d6f57 rc=0 bytes=260438 tests/VbQRCodegen-master/src/mdQRCodegen.bas
+sha256=59f38a3548a3af950659b875e01e6ae76cf24d04ab6a04597c20ef7755ccfd19 ascii256=5934e4406f3dd845ff509bab4fe93ad5d4530c35ab8ee3f56e47f66e5c48d4b1 rc=0 bytes=259249 tests/VbQRCodegen-master/src/mdQRCodegen.bas
 sha256=a4ddaa8dcded3f1771c6325f69d783b12bdfcde1503e4109b59b3aec848de216 ascii256=2f29b3a3c2a2b07801167d599e6f7cf35e9fe2da158c4b4978ada197b018444a rc=0 bytes=279825 tests/VbQRCodegen-master/test/Project1.vbp
 sha256=43598c41ce9c8c3f81bb3a0ee59621784555e005614e072932303f6ca51b1fa2 ascii256=cf19be189f0e26e55965f53f53c271ee58c74eebe897993d9679aeb2f8176bab rc=0 bytes=51151 tests/ve_list/VeList.vbp
 sha256=182b24266c6df3008c0d3d9518301752f5b3babe23b2eaffcb444a280a503f6a ascii256=78931f24aff2ed46cadfb83d0dd21424077d88fb633a360d081b961d74642072 rc=0 bytes=14913 tests/ve_list/VeListMain.bas
