@@ -540,6 +540,29 @@ $nVG3drop = ([regex]::Matches($vg2Inv, 'vb6_ComDropPackedArgs\(args, argc\);')).
 if ($nVG3drop -ne 2) { $fail += ('R17 stations that drop the packed args before leaving = ' + $nVG3drop + ' (want 2 = ComCall / ComGetPropArg 认不出名字那两支; 少一枚 = §B164 那一形又漏)') }
 $nVG3dropdef = ([regex]::Matches($vg2Inv, 'static void vb6_ComDropPackedArgs\(')).Count
 if ($nVG3dropdef -ne 1) { $fail += ('R17 definition of vb6_ComDropPackedArgs = ' + $nVG3dropdef + ' (want 1)') }
+# ---- R18: 第二百九十刀那一档 (带实参的晚绑定调用: 旗标 + 按形参档收窄) 的形状 ----
+# `With Picture .Render hDC, x, y, cx, cy, 0, .Height, .Width, -.Height, ByVal 0&` 这一发
+# 从前**什么都没画**: C3 把每一发都按 METHOD|PROPERTYGET 递出去, OLE 的 IPictureDisp 对
+# 「方法 + 带实参」直接回 DISP_E_BADPARAMCOUNT (产物级读数: 同一枚对象 cArgs=10 全 VT_I4 +
+# METHOD ⇒ S_OK 且真画出 400 像素; 旗标带上 PROPERTYGET ⇒ 0x8002000E)。旗标改对之后还剩
+# 第二层: himetric 那几个实参是 VT_R8 而形参声明是 `typedef LONG` ⇒ 0x80020005, 得按
+# 被调方 typelib 的 FUNCDESC 收窄。两条都钉住, 另加一条**顺序**判据 —— 收窄必须发生在
+# 实参抄进 DISPPARAMS 之前 (第一版写在抄之后, 三个实参都识别对了却一点效果没有)。
+$nR18flag = ([regex]::Matches($vg2Inv, 'WORD callFlags = \(argc > 0\) \? DISPATCH_METHOD')).Count
+if ($nR18flag -ne 1) { $fail += ('R18 ComCall picks the method-only flag for arg-taking members = ' + $nR18flag + ' (want 1; 0 = 又回到 METHOD|PROPERTYGET ⇒ 带参方法被对端整发拒掉)') }
+$nR18old = ([regex]::Matches($vg2Inv, 'DISPATCH_METHOD \| DISPATCH_PROPERTYGET, &dp, result, &excep, &argErr\);')).Count
+if ($nR18old -ne 2) { $fail += ('R18 remaining blanket-flag call sites = ' + $nR18old + ' (want 2 = ComGetPropArg / 另一条按 dispid 的取属性; ComCall 那一发不许再在册)') }
+$nR18def = ([regex]::Matches($vg2Inv, 'static void vb6_ComNarrowArgs\(')).Count
+if ($nR18def -ne 1) { $fail += ('R18 definition of vb6_ComNarrowArgs = ' + $nR18def + ' (want 1)') }
+$nR18call = ([regex]::Matches($vg2Inv, 'vb6_ComNarrowArgs\(pDisp, dispid, args, argc\);')).Count
+if ($nR18call -ne 1) { $fail += ('R18 narrowing invoked from ComCall = ' + $nR18call + ' (want 1; 0 = VT_R8 进 typedef-LONG 形参又静默不画)') }
+$iR18narrow = $vg2Inv.IndexOf('vb6_ComNarrowArgs(pDisp, dispid, args, argc);')
+$iR18cargs  = $vg2Inv.IndexOf('dp.cArgs = (UINT)argc;')
+if ($iR18narrow -lt 0 -or $iR18cargs -lt 0 -or $iR18narrow -gt $iR18cargs) { $fail += ('R18 narrowing runs BEFORE the args are copied into DISPPARAMS (narrow=' + $iR18narrow + ' cArgs=' + $iR18cargs + ') - 顺序反了等于没接: dp.rgvarg 是值拷贝') }
+$nR18alias = ([regex]::Matches($vg2Inv, 'TKIND_ALIAS')).Count
+if ($nR18alias -ne 1) { $fail += ('R18 integer typedef (OLE_XSIZE_HIMETRIC / typedef LONG) recognised = ' + $nR18alias + ' (want 1)') }
+$nR18ti = ([regex]::Matches($vg2Inv, 'GetTypeInfo\(pDisp, 0, 0, &ti\)')).Count
+if ($nR18ti -ne 1) { $fail += ('R18 typeinfo fetched with lcid 0 (OLE pictures reject LOCALE_USER_DEFAULT) = ' + $nR18ti + ' (want 1)') }
 # ---- R8: 这枚哨兵自己不许是死码 ----
 $nSelfReg = ([regex]::Matches($rtCode, 'Test-ComLatebindGuard')).Count
 if ($nSelfReg -ne 2) {
@@ -551,5 +574,5 @@ if ($fail.Count -gt 0) {
     foreach ($f in $fail) { Write-Host ("FAIL " + $f) }
     exit 1
 }
-Write-Host ("PASS check_com_latebind_guard: exits=7 guarded=7 pseudo-exempt=3 order=pseudo-first guard=behavior-preserving counter-outlets=2 host-sibling=3 runner-sites=3 inline-counters=2 negative-control=2 hfont-owner=1 hfont-kind5=2 height-owner=1 height-consumers=3 name-default=ms-sans-serif apply-owner=1 apply-senders=2 self-registered=1") form-ans-owner=1 form-ans-body=1 form-ans-decl=1 form-ans-emit=1 windowless-owner=1 windowless-outlets=2 windowless-arms=2 mask-owner=1 mask-arms=2 vg-owner=1 vg-decl=1 vg-outlet=1 vg-radio-gate=3 vg-truth-guard=1 vg-sibling-setter=1 vis-owner=1 vis-window=1 vis-decl=1 vis-outlets=2 vis-zero-guard=1 vis-old-drop=0 geom-mask=3 geom-read=1 geom-units=5 geom-route=2 geom-cdecl=1 geom-cdef=1 geom-nowindow=0 geom-writes=3 geom-method=0 latebind-drop=2
+Write-Host ("PASS check_com_latebind_guard: exits=7 guarded=7 pseudo-exempt=3 order=pseudo-first guard=behavior-preserving counter-outlets=2 host-sibling=3 runner-sites=3 inline-counters=2 negative-control=2 hfont-owner=1 hfont-kind5=2 height-owner=1 height-consumers=3 name-default=ms-sans-serif apply-owner=1 apply-senders=2 self-registered=1") form-ans-owner=1 form-ans-body=1 form-ans-decl=1 form-ans-emit=1 windowless-owner=1 windowless-outlets=2 windowless-arms=2 mask-owner=1 mask-arms=2 vg-owner=1 vg-decl=1 vg-outlet=1 vg-radio-gate=3 vg-truth-guard=1 vg-sibling-setter=1 vis-owner=1 vis-window=1 vis-decl=1 vis-outlets=2 vis-zero-guard=1 vis-old-drop=0 geom-mask=3 geom-read=1 geom-units=5 geom-route=2 geom-cdecl=1 geom-cdef=1 geom-nowindow=0 geom-writes=3 geom-method=0 latebind-drop=2 call-flags=1 blanket-flags=2 narrow-def=1 narrow-call=1 narrow-before-copy=1 himetric-typedef=1 ti-lcid0=1
 exit 0

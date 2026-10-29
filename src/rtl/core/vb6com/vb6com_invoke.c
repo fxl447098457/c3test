@@ -234,6 +234,104 @@ HRESULT vb6_ComInvoke(IDispatch* pDisp, DISPID dispid, WORD wFlags,
     return pDisp->lpVtbl->Invoke(pDisp, dispid, &IID_NULL, LOCALE_USER_DEFAULT, wFlags, dp, result, excep, argErr);
 }
 
+/* 账 #305 第二百九十刀: 出站实参按**被调方声明的形参类型**收窄。
+   VB6 的晚绑定是 ITypeInfo 驱动的: 实参先折到形参档再进 Invoke。OLE 自己那套
+   标准实现则在自己的 Invoke 里按 typelib 严格校验 —— 把 `.Height` (VT_R8) 递进
+   一个 `typedef LONG` 的形参, 直接 DISP_E_TYPEMISMATCH, 于是 Common.bas 的
+   `.Render hDC, x, y, cx, cy, 0, .Height, .Width, -.Height, ByVal 0&`
+   一声不响地什么都没画 (ComCtlsDemo 状态条 panel1 那枚图标就是这么丢的)。
+   判据 (RTL 外的产物级读数, .local/k294/render_probe): 同一个 IPictureDisp,
+   cArgs=10 全 VT_I4 + DISPATCH_METHOD ⇒ S_OK 且真画出 20x20; 三个 himetric
+   实参换成 VT_R8 ⇒ 0x80020005; 旗标带上 DISPATCH_PROPERTYGET ⇒ 0x8002000E。
+   只收窄**数值变窄**这一档 (R8/R4 → 整型), 已经是整数档的实参一个都不动 ——
+   这是本刀"零回归"的根据, 也是不碰 ByRef/BSTR/对象三档的理由。*/
+static int vb6_ComIntParamVt(ITypeInfo* ti, const TYPEDESC* td) {
+    if (!ti || !td) return 0;
+    VARTYPE vt = td->vt;
+    if (vt == VT_USERDEFINED) {
+        ITypeInfo* ref = NULL;
+        if (FAILED(ti->lpVtbl->GetRefTypeInfo(ti, td->hreftype, &ref)) || !ref) return 0;
+        int out = 0;
+        TYPEATTR* ta = NULL;
+        if (SUCCEEDED(ref->lpVtbl->GetTypeAttr(ref, &ta)) && ta) {
+            if (ta->typekind == TKIND_ALIAS) {
+                VARTYPE av = ta->tdescAlias.vt;
+                if (av == VT_I4 || av == VT_I2 || av == VT_INT ||
+                    av == VT_UI4 || av == VT_UI2) out = (int)av;
+            }
+            ref->lpVtbl->ReleaseTypeAttr(ref, ta);
+        }
+        ref->lpVtbl->Release(ref);
+        return out;
+    }
+    if (vt == VT_I4 || vt == VT_I2 || vt == VT_INT || vt == VT_UI4 || vt == VT_UI2) return (int)vt;
+    return 0;
+}
+
+/* 每枚对象取一次 GetTypeInfo(0) 并记住 —— 绘制路径一秒能问几十次。 */
+#define VB6_TI_CACHE_SIZE 64
+static struct { IDispatch* disp; ITypeInfo* ti; } vb6_ti_cache[VB6_TI_CACHE_SIZE];
+static int vb6_ti_cache_count = 0;
+
+static ITypeInfo* vb6_ComTypeInfoOf(IDispatch* pDisp) {
+    for (int i = 0; i < vb6_ti_cache_count; i++)
+        if (vb6_ti_cache[i].disp == pDisp) return vb6_ti_cache[i].ti;
+    ITypeInfo* ti = NULL;
+    if (FAILED(pDisp->lpVtbl->GetTypeInfo(pDisp, 0, 0, &ti)) || !ti) {
+        ti = NULL;
+        if (FAILED(pDisp->lpVtbl->GetTypeInfo(pDisp, 0, LOCALE_USER_DEFAULT, &ti)) || !ti) return NULL;
+    }
+    if (vb6_ti_cache_count < VB6_TI_CACHE_SIZE) {
+        vb6_ti_cache[vb6_ti_cache_count].disp = pDisp;
+        vb6_ti_cache[vb6_ti_cache_count].ti = ti;
+        vb6_ti_cache_count++;
+    }
+    return ti;
+}
+
+static void vb6_ComNarrowArgs(IDispatch* pDisp, DISPID dispid, VARIANT** args, int32_t argc) {
+    if (!pDisp || !args || argc <= 0) return;
+    int widen = 0;
+    for (int32_t i = 0; i < argc; i++)
+        if (args[i] && (args[i]->vt == VT_R8 || args[i]->vt == VT_R4)) { widen = 1; break; }
+    if (!widen) return;                       /* 没有浮点实参 ⇒ 这条路径零代价 */
+    ITypeInfo* ti = vb6_ComTypeInfoOf(pDisp);
+    if (!ti) return;
+    TYPEATTR* ta = NULL;
+    if (FAILED(ti->lpVtbl->GetTypeAttr(ti, &ta)) || !ta) return;
+    for (UINT f = 0; f < ta->cFuncs; f++) {
+        FUNCDESC* fd = NULL;
+        if (FAILED(ti->lpVtbl->GetFuncDesc(ti, f, &fd)) || !fd) continue;
+        if (fd->memid != dispid || !fd->lprgelemdescParam) {
+            ti->lpVtbl->ReleaseFuncDesc(ti, fd);
+            continue;
+        }
+        /* rgvarg[j] = 形参 (cParams-1-j); args[i] 落在 rgvarg[argc-1-i]
+           ⇒ args[i] 对的是形参 cParams-argc+i (cParams==argc 时就是 i)。
+           反过来写 (argc-1-i) 会整列错位: 第 7 个实参去对了第 4 个形参, 于是
+           该收窄的三个 himetric 实参一个都没被认出来。 */
+        for (int32_t i = 0; i < argc; i++) {
+            int k = (int)(fd->cParams - argc + i);
+            if (k < 0 || k >= (int)fd->cParams) continue;
+            VARIANT* a = args[i];
+            if (!a || (a->vt != VT_R8 && a->vt != VT_R4)) continue;
+            int want = vb6_ComIntParamVt(ti, &fd->lprgelemdescParam[k].tdesc);
+            if (!want) continue;
+            VARIANT tmp;
+            VariantInit(&tmp);
+            if (SUCCEEDED(VariantChangeType(&tmp, a, 0, (VARTYPE)want))) {
+                VariantClear(a);
+                *a = tmp;
+            } else {
+                VariantClear(&tmp);
+            }
+        }
+        ti->lpVtbl->ReleaseFuncDesc(ti, fd);
+        break;
+    }
+    ti->lpVtbl->ReleaseTypeAttr(ti, ta);
+}
+
 // COM方法调用 (返回VARIANT*, 调用方需vb6_ComVarClear释放)
 // args_void: VARIANT*[] (指向已分配VARIANT的指针数组), 每个元素由vb6_ComPackXxx分配
 void* vb6_ComCall(void* disp, const wchar_t* methodName,
@@ -298,6 +396,11 @@ void* vb6_ComCall(void* disp, const wchar_t* methodName,
         return NULL;
     }
 
+    /* 收窄必须发生在抄进 DISPPARAMS 之前 —— dp.rgvarg 是逐枚 VARIANT 的**值拷贝**,
+       改 args[] 影响不到已经抄好的那一份 (第一版就栽在顺序上: 三个实参都识别成该收窄,
+       Invoke 依旧 0x80020005)。 */
+    vb6_ComNarrowArgs(pDisp, dispid, args, argc);
+
     DISPPARAMS dp;
     memset(&dp, 0, sizeof(dp));
     dp.cArgs = (UINT)argc;
@@ -320,7 +423,13 @@ void* vb6_ComCall(void* disp, const wchar_t* methodName,
     memset(&excep, 0, sizeof(excep));
     UINT argErr = 0;
 
-    HRESULT hr = vb6_ComInvoke(pDisp, dispid, DISPATCH_METHOD | DISPATCH_PROPERTYGET, &dp, result, &excep, &argErr);
+    /* 账 #305 第二百九十刀: 带实参的成员调用只发 DISPATCH_METHOD。
+       从前一律 METHOD|PROPERTYGET, 而 OLE 的 IPictureDisp 对"方法 + 带实参"回
+       DISP_E_BADPARAMCOUNT ⇒ 以语句形调用的带参成员会被对端整发拒掉。
+       VB6 的口径: 带实参就是 Method; 零实参才保留"属性或方法"那种两可。 */
+    WORD callFlags = (argc > 0) ? DISPATCH_METHOD
+                                : (DISPATCH_METHOD | DISPATCH_PROPERTYGET);
+    HRESULT hr = vb6_ComInvoke(pDisp, dispid, callFlags, &dp, result, &excep, &argErr);
 
     if (GetEnvironmentVariableW(L"C3_OCX_TRACE", NULL, 0) > 0)
         fprintf(stderr, "[C3_COM] Call '%ls' hr=0x%08lX vt=%d\n",
