@@ -69,6 +69,11 @@ $ctrlC    = Join-Path $Root 'src\rtl\core\vb6forms\vb6forms_ctrl.c'
 $hostWinC = Join-Path $Root 'src\rtl\core\vb6forms\uc\uc_host_window.c'
 $ucCreateC = Join-Path $Root 'src\rtl\core\vb6forms\uc\detail\uc_host_create.inc'
 $formWpInc = Join-Path $Root 'src\backend\detail\module\cgen_form_wndproc_create.inc'
+$ucHostC      = Join-Path $Root 'src\rtl\core\vb6forms\uc\uc_host.c'
+$ucHostmodelC = Join-Path $Root 'src\rtl\core\vb6forms\uc\uc_hostmodel.c'
+$ucControlsC  = Join-Path $Root 'src\rtl\core\vb6forms\uc\uc_controls.c'
+$gpInc        = Join-Path $Root 'src\rtl\core\vb6forms\uc\detail\uc_hostmodel_getprop.inc'
+$ucInternalH  = Join-Path $Root 'src\rtl\core\vb6forms\vb6forms_uc_internal.h'
 $fixture  = Join-Path $Root 'tests\b446_latebind\B446.vbp'
 
 $fail = @()
@@ -414,6 +419,33 @@ if ($nFAEmit -ne 1 -or $nFACase -ne 1) { $fail += ('R12 emitted form-toplevel ar
 $nFABypass = ([regex]::Matches($formWpCode, 'VB6_CtrlFont')).Count
 if ($nFABypass -ne 0) { $fail += ('R12 generated code reads the VB6_CtrlFont slot directly = ' + $nFABypass + ' (want 0) - 绕过主人自己读那一格就是第二本账') }
 
+
+# ---- R13: 第二百八十二刀那一档 (无窗宿主 InvisibleAtRuntime 进容器枚举) 的形状 ----
+# 第二百五十八刀不建宿主窗口之后, Controls/ParentControls/TypeName/宿主属性读四条路的钥匙全是 hwnd,
+# 那三枚 ImageList 就从集合里消失了 => 靶工程 `For Each ControlEnum In UserControl.ParentControls` +
+# `TypeName(...) = "ImageList"` + `.hImageList` 整条接线断掉, 控件上一个图标都不挂 (台账行 5041 的读数)。
+# 规矩: 按实例查登记记录只许一位主人 (vb6_ho_findInstance, 且只认 hwnd==NULL 那一档 —— 给 ho_find 加
+# 第二条钥匙会把一枚 UC 实例认成别的控件的窗口, uc_host.c 里那段「已经就是 HWND 就别再查表」写的就是它),
+# 四条路各自转调它, 不许再抄一份指针比对。
+$hostCode = Strip-Comments262 ((Read-Lines262 $ucHostC) -join "`n")
+$hmCode   = Strip-Comments262 ((Read-Lines262 $ucHostmodelC) -join "`n")
+$collCode = Strip-Comments262 ((Read-Lines262 $ucControlsC) -join "`n")
+$gpCode   = Strip-Comments262 ((Read-Lines262 $gpInc) -join "`n")
+$ucIntHdr = Strip-Comments262 ((Read-Lines262 $ucInternalH) -join "`n")
+$nWO = ([regex]::Matches($hostCode, 'vb6_HostObjRec\*\s+vb6_ho_findInstance\w*\s*\(')).Count
+if ($nWO -ne 1) { $fail += ('R13 definition of vb6_ho_findInstance = ' + $nWO + ' (want 1)') }
+$nWOdecl = ([regex]::Matches($ucIntHdr, '(?m)^vb6_HostObjRec\*\s+vb6_ho_findInstance\s*\(')).Count
+if ($nWOdecl -ne 1) { $fail += ('R13 vb6_ho_findInstance declared for the uc module = ' + $nWOdecl + ' (want 1; 0 = 三个调用点各自 extern 一份)') }
+$nWOgp = ([regex]::Matches($gpCode, 'vb6_ho_findInstance\(obj\)')).Count
+$nWOtn = ([regex]::Matches($hmCode, 'vb6_ho_findInstance\(obj\)')).Count
+if ($nWOgp -ne 1 -or $nWOtn -ne 1) { $fail += ('R13 instance-lookup outlets: getprop ' + $nWOgp + ' + TypeName ' + $nWOtn + ' (want 1 + 1; 0 = 无窗实例又走不到自有 Property 那一站)') }
+$nWArm = ([regex]::Matches($collCode, 'vb6_uc_findByInstance\(rec->instance\)')).Count
+$nWArm2 = ([regex]::Matches($collCode, 'vb6_uc_findByInstance\(r->instance\)')).Count
+$nWItem = ([regex]::Matches($collCode, 'item = r->instance;')).Count
+$nWRet = ([regex]::Matches($collCode, 'return item;')).Count
+if ($nWArm -ne 1 -or $nWArm2 -ne 1 -or $nWItem -ne 1 -or $nWRet -ne 1) { $fail += ('R13 windowless arms in the collection: collectChildren ' + $nWArm + ' + by-name-lookup ' + $nWArm2 + ' + by-name-delivers-instance ' + $nWItem + ' + returns-it ' + $nWRet + ' (want 1 + 1 + 1 + 1; 0 = 臂在但交不出实例, 等于没有)') }
+$nWBlind = ([regex]::Matches($collCode, 'isForm \|\| !r->hwnd\)\s*continue')).Count
+if ($nWBlind -ne 0) { $fail += ('R13 the old hwnd-only gate is back in uc_controls.c = ' + $nWBlind + ' (want 0) - 那道闸一回来, ImageList 就又不在集合里了') }
 # ---- R8: 这枚哨兵自己不许是死码 ----
 $nSelfReg = ([regex]::Matches($rtCode, 'Test-ComLatebindGuard')).Count
 if ($nSelfReg -ne 2) {
@@ -425,5 +457,5 @@ if ($fail.Count -gt 0) {
     foreach ($f in $fail) { Write-Host ("FAIL " + $f) }
     exit 1
 }
-Write-Host ("PASS check_com_latebind_guard: exits=7 guarded=7 pseudo-exempt=3 order=pseudo-first guard=behavior-preserving counter-outlets=2 host-sibling=3 runner-sites=3 inline-counters=2 negative-control=2 hfont-owner=1 hfont-kind5=2 height-owner=1 height-consumers=3 name-default=ms-sans-serif apply-owner=1 apply-senders=2 self-registered=1") form-ans-owner=1 form-ans-body=1 form-ans-decl=1 form-ans-emit=1
+Write-Host ("PASS check_com_latebind_guard: exits=7 guarded=7 pseudo-exempt=3 order=pseudo-first guard=behavior-preserving counter-outlets=2 host-sibling=3 runner-sites=3 inline-counters=2 negative-control=2 hfont-owner=1 hfont-kind5=2 height-owner=1 height-consumers=3 name-default=ms-sans-serif apply-owner=1 apply-senders=2 self-registered=1") form-ans-owner=1 form-ans-body=1 form-ans-decl=1 form-ans-emit=1 windowless-owner=1 windowless-outlets=2 windowless-arms=2
 exit 0

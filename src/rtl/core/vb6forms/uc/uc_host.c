@@ -167,6 +167,19 @@ vb6_HostObjRec* vb6_ho_find(const void* hwnd) {
     return NULL;
 }
 
+/* 账 #305 第二百八十二刀: 按**实例**找登记记录 —— 第二百五十八刀那种无窗宿主
+   (InvisibleAtRuntime) 的 `hwnd` 就是 NULL, vb6_ho_find 那一把钥匙永远开不了它的门。
+   刻意另开一位主人而**不给 ho_find 加第二条钥匙**: 实例指针与 HWND 住在同一地址空间,
+   一枚 UC 实例的数值完全可能等于另一枚控件的 HWND (uc_host.c::vb6_UC_HwndOf 上面那段
+   「已经就是 HWND 就别再查表」写的就是这个坑), 一把钥匙开两扇门会把真实窗口认成实例。 */
+vb6_HostObjRec* vb6_ho_findInstance(const void* inst) {
+    if (!inst) return NULL;
+    for (int32_t i = 0; i < vb6_ucHoCount; i++) {
+        if (!vb6_ucHo[i].hwnd && vb6_ucHo[i].instance == inst) return &vb6_ucHo[i];
+    }
+    return NULL;
+}
+
 vb6_UCRec* vb6_uc_findByHwnd(const void* hwnd) {
     if (!hwnd) return NULL;   // 账 #305 258: 无窗宿主 (InvisibleAtRuntime) 的 hwnd 就是 NULL
     for (int32_t i = 0; i < vb6_ucRecCount; i++) {

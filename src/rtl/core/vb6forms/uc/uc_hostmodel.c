@@ -131,6 +131,12 @@ const wchar_t* vb6_Host_TypeNameOf(void* obj) {
         buf[i] = 0;
         return buf;
     }
+    /* 账 #305 第二百八十二刀: 无窗宿主 (InvisibleAtRuntime) 递进来的是**实例指针**,
+       上面两问都落空 ⇒ 以前这里答 NULL，晚绑定那头就报 "Object"，而 Krool 那一族全靠
+       `If TypeName(ControlEnum) = "ImageList" Then` 认控件（靶工程 ToolBar/ListView/
+       TreeView/OptionButtonW 四处都这么写）—— 答错一个名，整条 ImageList 接线全断。 */
+    h = vb6_ho_findInstance(obj);
+    if (h && h->typeName[0]) return h->typeName;
     if (IsWindow((HWND)obj)) return L"Control";
     return NULL;
 }

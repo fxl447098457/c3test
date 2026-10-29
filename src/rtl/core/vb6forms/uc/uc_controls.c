@@ -83,9 +83,19 @@ static int32_t vb6_uc_collectChildren(void* formHwnd, void** out, int32_t max) {
     if (!formHwnd) return 0;
     int32_t n = 0;
     for (int32_t i = 0; i < vb6_ucHoCount && n < max; i++) {
-        if (!vb6_ucHo[i].isForm && vb6_ucHo[i].hwnd &&
-            GetParent((HWND)vb6_ucHo[i].hwnd) == (HWND)formHwnd) {
-            out[n++] = vb6_ucHo[i].hwnd;
+        vb6_HostObjRec* rec = &vb6_ucHo[i];
+        if (rec->isForm) continue;
+        if (rec->hwnd) {
+            if (GetParent((HWND)rec->hwnd) == (HWND)formHwnd) out[n++] = rec->hwnd;
+        } else {
+            /* 账 #305 第二百八十二刀: 无窗宿主 (第二百五十八刀那户 InvisibleAtRuntime) ——
+               容器关系问创建时就填好的 `UCRec->parent`(有窗那一支走的是同一条关系:
+               GetParent(自己的窗口))，交回**实例指针**。VB6 本人把这三枚 ImageList 一样摆在
+               容器的 Controls 里（靶工程 ToolBar/ListView/TreeView 全靠
+               `For Each ControlEnum In UserControl.ParentControls` + `TypeName(...) = "ImageList"`
+               找到它们再问 `.hImageList`），少交一枚 ⇒ 图标一个都不挂。 */
+            vb6_UCRec* ur = vb6_uc_findByInstance(rec->instance);
+            if (ur && (void*)ur->parent == formHwnd) out[n++] = rec->instance;
         }
     }
     // 兜底: 枚举真实子窗口 (vb6_CreateControl 创建的标准控件未必逐个登记)
@@ -154,15 +164,23 @@ void* vb6_UC_ControlsItemByName(void* coll, const wchar_t* name, int32_t tabIdx)
     /* 优先在已注册宿主对象表里找 (名字精确, 不受父窗口层级影响) */
     for (int32_t i = 0; i < vb6_ucHoCount; i++) {
         vb6_HostObjRec* r = &vb6_ucHo[i];
-        if (r->isForm || !r->hwnd) continue;
-        if (formHwnd && GetAncestor((HWND)r->hwnd, GA_ROOT) != formHwnd
-            && !IsChild(formHwnd, (HWND)r->hwnd)) {
+        if (r->isForm) continue;
+        void* item = r->hwnd;
+        /* 账 #305 第二百八十二刀: 按名查这一路以前把无窗宿主整个跳过 (`!r->hwnd) continue`)，
+           与上面 collectChildren 那一档同一条病 —— 容器关系改问记录里的 parent，交实例指针。 */
+        if (!item) {
+            vb6_UCRec* ur = vb6_uc_findByInstance(r->instance);
+            if (!ur) continue;
+            if (formHwnd && (void*)ur->parent != formHwnd) continue;
+            item = r->instance;
+        } else if (formHwnd && GetAncestor((HWND)item, GA_ROOT) != formHwnd
+                   && !IsChild(formHwnd, (HWND)item)) {
             /* 不在该窗体下 (可能是别的窗体的同名控件) — 跳过 */
-            if (!IsWindow((HWND)r->hwnd)) continue;
+            if (!IsWindow((HWND)item)) continue;
         }
         if (_wcsicmp(r->name, base) != 0) continue;
         if (wantIdx >= 0 && r->index != wantIdx) continue;
-        return r->hwnd;
+        return item;
     }
     return NULL;
 }

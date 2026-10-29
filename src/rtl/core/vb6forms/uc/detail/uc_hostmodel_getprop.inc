@@ -33,6 +33,16 @@
 
     vb6_UCRec* r = vb6_uc_findByHwnd(obj);
     vb6_HostObjRec* h = vb6_ho_find(obj);
+    /* 账 #305 第二百八十二刀: 无窗宿主 (第二百五十八刀那户 InvisibleAtRuntime) 递进来的
+       接收者**就是实例指针**, 上面那两把按 hwnd 的钥匙都开不了它的门 ⇒ 以前在这一行
+       `return 0` 早退, 连 :189 那位「自有 Property」出口都走不到 (实测靶工程
+       `ControlEnum.hImageList` 一条都不发 —— ImageList1/2/3 全挂在无窗那一档)。
+       这一档只补「认得接收者是谁」, 已有的取值一律不动: 窗口类的伪成员 (Visible/Enabled/
+       Container/Parent 那些按 HWND 问的) 对无效句柄只会答 0/NULL, 与改前「答 Empty」同形。 */
+    if (!r && !h && !IsWindow((HWND)obj)) {
+        h = vb6_ho_findInstance(obj);
+        if (h) r = vb6_uc_findByInstance(h->instance);
+    }
     if (!r && !h && !IsWindow((HWND)obj)) return 0;
 
     int32_t scaleMode = r ? (r->desc ? r->desc->scaleMode : 1) : 1;

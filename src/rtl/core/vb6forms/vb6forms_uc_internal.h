@@ -277,6 +277,7 @@ void vb6_uc_registerClass(HINSTANCE hInst);
 
 // --- uc_hostmodel.c ---
 vb6_HostObjRec* vb6_ho_find(const void* hwnd);
+vb6_HostObjRec* vb6_ho_findInstance(const void* inst);   /* 账 #305 282: 只认无窗宿主那一档 */
 // czUI fix: 宿主对象 IDispatch 包装器（定义在 uc_hostmodel.c；
 // WrapHostObject 由生成代码调用，UnwrapHost 供 GetProp/SetProp/Call 透明解包）
 void* vb6_UC_WrapHostObject(void* obj);
