@@ -466,6 +466,30 @@ if ($nPBRoom -ne 1) { $fail += ('R14 the stream-length authority roomForMask = '
 $nPBOld = ([regex]::Matches($pbCode, 'imgSize == colourHalf\)\s*\{[^}]*halfHeight = 1;\s*\}')).Count
 if ($nPBOld -ne 0) { $fail += ('R14 a colour-only arm that never asks the mask is back = ' + $nPBOld + ' (want 0) - 那一臂一回来, 32x32 大图标就又带一圈黑底') }
 
+# ---- R15: 第二百八十五刀那一档 (单选组的容器侧主人) 的形状 ----
+# 靶工程 OptionButtonW 的互斥既不在 OS 里 (内层钮实测 BS_RADIOBUTTON 而非 AUTORADIO、
+# 两枚 ctrl id 都是 0、父窗还是两个不同宿主) 也不在 .ctl 里，而是它 Let 每一次都发的
+# 那一声 UserControl.PropertyChanged "Value" —— C3 这一声以前是空壳。规矩: 主人只有一个
+# (uc_host.c)，发方 (vb6rtl_com.c) 只许转调；「真不真是被选中」与「像不像单选」两问都要问，
+# 且撤兄弟只许走兄弟自己的 Value setter (OwnPropSet)，不许谁再去裸发 BM_SETCHECK 抄第二本账。
+$vgHost = Strip-Comments262 ((Read-Lines262 $ucHostC) -join "`n")
+$vgComC = Join-Path $Root 'src\rtl\core\vb6rtl\vb6rtl_com.c'
+$vgHdrC = Join-Path $Root 'src\rtl\core\vb6rtl\vb6rtl_userctl.h'
+$vgCom  = Strip-Comments262 ((Read-Lines262 $vgComC) -join "`n")
+$vgHdr  = Strip-Comments262 ((Read-Lines262 $vgHdrC) -join "`n")
+$nVGDef = ([regex]::Matches($vgHost, 'void vb6_UC_ValueGroupNotify\w*\(const wchar_t\* propName\) \{')).Count
+if ($nVGDef -ne 1) { $fail += ('R15 definition of vb6_UC_ValueGroupNotify = ' + $nVGDef + ' (want 1)') }
+$nVGdecl = ([regex]::Matches($vgHdr, '(?m)^void\s+vb6_UC_ValueGroupNotify')).Count
+if ($nVGdecl -ne 1) { $fail += ('R15 vb6_UC_ValueGroupNotify declared for the com module = ' + $nVGdecl + ' (want 1; 0 = 发方各自 extern 一份)') }
+$nVGcall = ([regex]::Matches($vgCom, 'vb6_UC_ValueGroupNotify\(\(const wchar_t\*\)propName\)')).Count
+if ($nVGcall -ne 1) { $fail += ('R15 the PropertyChanged outlet delegates to the owner = ' + $nVGcall + ' (want 1; 0 = 那一发又整个丢掉 ⇒ 单选组又没人撤)') }
+$nVGradio = ([regex]::Matches($vgHost, 'vb6_ucHasRadioStyle\w*\(')).Count
+if ($nVGradio -ne 3) { $fail += ('R15 radio-style gate sites (1 def + self + sibling) = ' + $nVGradio + ' (want 3; 少一枚 = 复选框会被强制互斥 或 兄弟没人筛)') }
+$nVGtrue = ([regex]::Matches($vgHost, 'if \(!isTrue\) return;')).Count
+if ($nVGtrue -ne 1) { $fail += ('R15 the "is self really checked" guard = ' + $nVGtrue + ' (want 1; 0 = 撤勾那一发会互相反咬)') }
+$nVGset = ([regex]::Matches($vgHost, 'vb6_UC_OwnPropSet\(r2->me, L"Value"')).Count
+if ($nVGset -ne 1) { $fail += ('R15 siblings are cleared through their own Value setter = ' + $nVGset + ' (want 1; 0 = 又去裸发 BM_SETCHECK = 第二本账)') }
+
 # ---- R8: 这枚哨兵自己不许是死码 ----
 $nSelfReg = ([regex]::Matches($rtCode, 'Test-ComLatebindGuard')).Count
 if ($nSelfReg -ne 2) {
@@ -477,5 +501,5 @@ if ($fail.Count -gt 0) {
     foreach ($f in $fail) { Write-Host ("FAIL " + $f) }
     exit 1
 }
-Write-Host ("PASS check_com_latebind_guard: exits=7 guarded=7 pseudo-exempt=3 order=pseudo-first guard=behavior-preserving counter-outlets=2 host-sibling=3 runner-sites=3 inline-counters=2 negative-control=2 hfont-owner=1 hfont-kind5=2 height-owner=1 height-consumers=3 name-default=ms-sans-serif apply-owner=1 apply-senders=2 self-registered=1") form-ans-owner=1 form-ans-body=1 form-ans-decl=1 form-ans-emit=1 windowless-owner=1 windowless-outlets=2 windowless-arms=2 mask-owner=1 mask-arms=2
+Write-Host ("PASS check_com_latebind_guard: exits=7 guarded=7 pseudo-exempt=3 order=pseudo-first guard=behavior-preserving counter-outlets=2 host-sibling=3 runner-sites=3 inline-counters=2 negative-control=2 hfont-owner=1 hfont-kind5=2 height-owner=1 height-consumers=3 name-default=ms-sans-serif apply-owner=1 apply-senders=2 self-registered=1") form-ans-owner=1 form-ans-body=1 form-ans-decl=1 form-ans-emit=1 windowless-owner=1 windowless-outlets=2 windowless-arms=2 mask-owner=1 mask-arms=2 vg-owner=1 vg-decl=1 vg-outlet=1 vg-radio-gate=3 vg-truth-guard=1 vg-sibling-setter=1
 exit 0

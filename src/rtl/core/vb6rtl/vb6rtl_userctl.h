@@ -149,6 +149,10 @@ double vb6_ScaleUnitY(double y, int32_t fromScale, int32_t toScale);
 void   vb6_UserControl_AsyncRead(BSTR url, int32_t asyncType, BSTR propertyName,
                                  int32_t flags);
 void   vb6_UserControl_PropertyChanged(BSTR propName);
+/* 账 #305 第二百八十五刀: 容器侧的那一位主人 —— `UserControl.PropertyChanged <名>` 交进来,
+   只有 `Value` 这一发、且**这一枚自己现在答真**时才去撤同容器同型的单选兄弟。
+   声明在本头是因为发方 (vb6rtl_com.c 的薄壳) 与实现 (uc_host.c) 不同 TU、而两头都 include 本头。 */
+void   vb6_UC_ValueGroupNotify(const wchar_t* propName);
 
 // Fix 133u: czUI.ctl 用到的其余 UserControl 宿主成员.
 //   UserControl.hWnd    → extern void*  (控件自身窗口句柄, push 时填充)

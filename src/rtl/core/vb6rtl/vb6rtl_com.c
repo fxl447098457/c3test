@@ -1703,7 +1703,10 @@ void vb6_UserControl_AsyncRead(BSTR url, int32_t asyncType, BSTR propertyName,
 // callback registry in compiled form; no-op, consistent with the built-in
 // Changed (vb6_PropertyPage_Changed / bare Changed).
 void vb6_UserControl_PropertyChanged(BSTR propName) {
-    (void)propName;
+    /* 账 #305 第二百八十五刀: 这一发以前整个丢掉 (把参数当垃圾丢掉) ⇒ 控件通知容器
+       「我的值变了」这条路**从来没有主人**。实测补上主人之前/之后的读数在
+       `ai/C3_FIX_HANDOFF.md` 行 5045 那一格 (靶工程右下角 OptionButtonW 两台能同时勾上)。 */
+    vb6_UC_ValueGroupNotify((const wchar_t*)propName);
 }
 
 // Fix 174: Extender / UserControl host methods referenced by VBFlexGrid.ctl

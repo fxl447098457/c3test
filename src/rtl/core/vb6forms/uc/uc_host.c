@@ -443,6 +443,78 @@ void vb6_UC_ParentMove(int32_t left, int32_t top, int32_t width, int32_t height)
     vb6_ControlMove((void*)fw, (double)left, (double)top, (double)width, (double)height, 15);
 }
 
+/* ================= 账 #305 第二百八十五刀: 单选组的容器侧 =================
+   「同一组里只能选一个」这一条**不在控件代码里，也不在 OS 里**：
+   实测靶工程那两枚 `OptionButtonW` 的内层钮 `style & BS_TYPEMASK = 0x4` =
+   `BS_RADIOBUTTON`（**不是** BS_AUTORADIOBUTTON ⇒ OS 不代管互斥）、两枚 `GetDlgCtrlID`
+   都是 0、而且**父窗是两个不同的宿主窗口**（OS 的单选组要求同父）⇒ 谁来撤别人?
+   答案写在控件自己代码里：`Value` 的 Property Let 每一次改值都发
+   `UserControl.PropertyChanged "Value"`（`OptionButtonW.ctl:1284`；2321 那一发旁边还留着
+   注释「…so that option groups behave correctly」）⇒ 是**容器**收到通知后撤兄弟。
+   而 C3 这一发是空壳（`vb6rtl_com.c` 把 propName 一扔）⇒ 两台能同时勾上。
+   组的口径按「同一容器 + 同一 UC 类型 + 两边都带单选样式」收：
+   样式这一问不可省 —— 同工程里 `CheckBoxW1/2` 的 Let 同样发 `PropertyChanged`，
+   只看「同型 + Value 答真」就会把复选框也强制成互斥（那是把一条修好、把另一条修坏）。
+   ⚠ 只认 `BS_RADIOBUTTON` / `BS_AUTORADIOBUTTON` 两档；`BS_OWNERDRAW` 那档（.ctl 在
+   Graphical/OwnerDraw 下把样式整个换成 OWNERDRAW，1655~1658）今天仍然没有主人 —— 那是
+   收窄不是回归（改之前那档也是谁都不撤）。vb6forms.c 那位 `vb6_tabIsRadio` 只认
+   AUTORADIO（它问的是「OS 会不会自己换勾」，与本刀这一问不同形，故意不合）。 */
+static BOOL CALLBACK vb6_ucRadioEnumProc(HWND h, LPARAM l) {
+    wchar_t cls[16];
+    int* hit = (int*)l;
+    if (GetClassNameW(h, cls, 15) > 0 && wcscmp(cls, L"Button") == 0) {
+        uint32_t kind = (uint32_t)(GetWindowLongW(h, GWL_STYLE) & BS_TYPEMASK);
+        if (kind == BS_RADIOBUTTON || kind == BS_AUTORADIOBUTTON) *hit = 1;
+    }
+    return 1;
+}
+
+static int vb6_ucHasRadioStyle(vb6_UCRec* r) {
+    int hit = 0;
+    if (!r || !r->hwnd || !IsWindow((HWND)r->hwnd)) return 0;
+    EnumChildWindows((HWND)r->hwnd, vb6_ucRadioEnumProc, (LPARAM)&hit);
+    return hit;
+}
+
+/* 值档的「真」只认布尔与数值两族：串/对象/空一律答假 —— 宁可少撤一次，
+   也不要拿 `vb6_VariantToDouble` 去喂一个 BSTR 或 IDISPATCH。 */
+static int vb6_ucValueIsTrue(vb6_VARIANT v) {
+    switch (v.vt) {
+        case VT_BOOL: return v.boolVal != 0;
+        case VT_I1: case VT_I2: case VT_I4: case VT_I8:
+        case VT_UI1: case VT_UI2: case VT_UI4:
+        case VT_R4: case VT_R8: case VT_CY:
+            return vb6_VariantToDouble(v) != 0.0;
+        default: return 0;
+    }
+}
+
+void vb6_UC_ValueGroupNotify(const wchar_t* propName) {
+    vb6_UCRec* self = vb6_ucCurrent;
+    if (!self || !self->me || !self->desc) return;
+    if (!propName || _wcsicmp(propName, L"Value") != 0) return;
+    if (!vb6_ucHasRadioStyle(self)) return;
+    vb6_VARIANT mine;
+    memset(&mine, 0, sizeof(mine));
+    if (!vb6_UC_OwnPropGet(self->me, L"Value", &mine)) return;
+    int isTrue = vb6_ucValueIsTrue(mine);
+    vb6_VariantClear(&mine);
+    /* 撤勾那一发也会走到这里（Let 无条件通知）：自己已经不算真就别再动兄弟,
+       否则兄弟的 Let 又发一声 ⇒ 互相反咬。 */
+    if (!isTrue) return;
+    vb6_VARIANT off;
+    memset(&off, 0, sizeof(off));
+    off.vt = VT_BOOL;
+    off.boolVal = 0;   /* VARIANT_FALSE */
+    for (int32_t i = 0; i < vb6_ucRecCount; i++) {
+        vb6_UCRec* r2 = &vb6_ucRecs[i];
+        if (r2 == self || !r2->me || r2->desc != self->desc) continue;
+        if (r2->parent != self->parent) continue;
+        if (!vb6_ucHasRadioStyle(r2)) continue;
+        vb6_UC_OwnPropSet(r2->me, L"Value", &off);
+    }
+}
+
 void vb6_UC_Register(const vb6_UserControlDesc* desc) {
     if (!desc || !desc->typeName) return;
     for (int32_t i = 0; i < vb6_ucDescCount; i++) {
