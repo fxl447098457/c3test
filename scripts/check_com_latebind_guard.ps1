@@ -74,6 +74,7 @@ $ucHostmodelC = Join-Path $Root 'src\rtl\core\vb6forms\uc\uc_hostmodel.c'
 $ucControlsC  = Join-Path $Root 'src\rtl\core\vb6forms\uc\uc_controls.c'
 $gpInc        = Join-Path $Root 'src\rtl\core\vb6forms\uc\detail\uc_hostmodel_getprop.inc'
 $ucInternalH  = Join-Path $Root 'src\rtl\core\vb6forms\vb6forms_uc_internal.h'
+$propBagC     = Join-Path $Root 'src\rtl\core\vb6forms\uc\uc_propbag.c'
 $fixture  = Join-Path $Root 'tests\b446_latebind\B446.vbp'
 
 $fail = @()
@@ -446,6 +447,25 @@ $nWRet = ([regex]::Matches($collCode, 'return item;')).Count
 if ($nWArm -ne 1 -or $nWArm2 -ne 1 -or $nWItem -ne 1 -or $nWRet -ne 1) { $fail += ('R13 windowless arms in the collection: collectChildren ' + $nWArm + ' + by-name-lookup ' + $nWArm2 + ' + by-name-delivers-instance ' + $nWItem + ' + returns-it ' + $nWRet + ' (want 1 + 1 + 1 + 1; 0 = 臂在但交不出实例, 等于没有)') }
 $nWBlind = ([regex]::Matches($collCode, 'isForm \|\| !r->hwnd\)\s*continue')).Count
 if ($nWBlind -ne 0) { $fail += ('R13 the old hwnd-only gate is back in uc_controls.c = ' + $nWBlind + ' (want 0) - 那道闸一回来, ImageList 就又不在集合里了') }
+# ---- R14: 第二百八十三刀那一档 (StdPicture 的 DDB 掩码由掩码自己作证) 的形状 ----
+# .frx 里 InitListImages 那三枚图 (ImageList1 16x16 / ImageList2 8x7 / ImageList3 32x32) 的
+# biHeight 全是**两倍高** = VB6 的 DDB 档 (色行 + 1bpp AND 掩码), 可 biSizeImage 数不数掩码
+# 三枚各不相同 (192 = 色+掩 / 56 = 色+掩与纯色同值 / 512 = 只数色行) —— 有没有掩码不能问头。
+# 改前问的是「头报的字节数等不等于哪种布局」, ImageList3 那枚就被读成整块纯色,
+# 32x32 的大图标整圈黑底 (靶工程 tile view)。规矩: 让**掩码自己作证**
+# (IlMaskPlausible: 不许擦掉画出来的格, 且必须明显好过整块错位一行), 一处主人、两处调用。
+$pbCode = Strip-Comments262 ((Read-Lines262 $propBagC) -join "`n")
+$nMPDef = ([regex]::Matches($pbCode, 'static\s+int\s+IlMaskPlausible\w*\s*\(')).Count
+if ($nMPDef -ne 1) { $fail += ('R14 definition of IlMaskPlausible = ' + $nMPDef + ' (want 1)') }
+$nMPCall = ([regex]::Matches($pbCode, 'IlMaskPlausible\(')).Count
+if ($nMPCall -ne 3) { $fail += ('R14 IlMaskPlausible sites (1 def + 2 arms) = ' + $nMPCall + ' (want 3; 少一枚 = 有一臂又回去只问 biSizeImage)') }
+$nPBM = ([regex]::Matches($pbCode, 'hasMask = 1')).Count
+if ($nPBM -ne 2) { $fail += ('R14 hasMask assignments in the property bag = ' + $nPBM + ' (want 2: 头数得着那一臂 + 掩码自证那一臂)') }
+$nPBRoom = ([regex]::Matches($pbCode, 'int roomForMask')).Count
+if ($nPBRoom -ne 1) { $fail += ('R14 the stream-length authority roomForMask = ' + $nPBRoom + ' (want 1; 0 = 又不看流里还剩多少字节)') }
+$nPBOld = ([regex]::Matches($pbCode, 'imgSize == colourHalf\)\s*\{[^}]*halfHeight = 1;\s*\}')).Count
+if ($nPBOld -ne 0) { $fail += ('R14 a colour-only arm that never asks the mask is back = ' + $nPBOld + ' (want 0) - 那一臂一回来, 32x32 大图标就又带一圈黑底') }
+
 # ---- R8: 这枚哨兵自己不许是死码 ----
 $nSelfReg = ([regex]::Matches($rtCode, 'Test-ComLatebindGuard')).Count
 if ($nSelfReg -ne 2) {
@@ -457,5 +477,5 @@ if ($fail.Count -gt 0) {
     foreach ($f in $fail) { Write-Host ("FAIL " + $f) }
     exit 1
 }
-Write-Host ("PASS check_com_latebind_guard: exits=7 guarded=7 pseudo-exempt=3 order=pseudo-first guard=behavior-preserving counter-outlets=2 host-sibling=3 runner-sites=3 inline-counters=2 negative-control=2 hfont-owner=1 hfont-kind5=2 height-owner=1 height-consumers=3 name-default=ms-sans-serif apply-owner=1 apply-senders=2 self-registered=1") form-ans-owner=1 form-ans-body=1 form-ans-decl=1 form-ans-emit=1 windowless-owner=1 windowless-outlets=2 windowless-arms=2
+Write-Host ("PASS check_com_latebind_guard: exits=7 guarded=7 pseudo-exempt=3 order=pseudo-first guard=behavior-preserving counter-outlets=2 host-sibling=3 runner-sites=3 inline-counters=2 negative-control=2 hfont-owner=1 hfont-kind5=2 height-owner=1 height-consumers=3 name-default=ms-sans-serif apply-owner=1 apply-senders=2 self-registered=1") form-ans-owner=1 form-ans-body=1 form-ans-decl=1 form-ans-emit=1 windowless-owner=1 windowless-outlets=2 windowless-arms=2 mask-owner=1 mask-arms=2
 exit 0
