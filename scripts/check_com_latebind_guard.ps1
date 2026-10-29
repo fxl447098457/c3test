@@ -509,6 +509,35 @@ $nVG2zero = ([regex]::Matches($collCode, 'if \(!value && kind != 2\) return;')).
 if ($nVG2zero -ne 1) { $fail += ('R16 the zero-value early-out is narrowed to the non-boolean kinds = ' + $nVG2zero + ' (want 1; 0 = 「假」又被整个丢掉)') }
 $nVG2old = ([regex]::Matches($collCode, 'if \(!fp \|\| !value\) return;')).Count
 if ($nVG2old -ne 0) { $fail += ('R16 the blanket "no value" drop is back = ' + $nVG2old + ' (want 0) - 它一回来, Visible=False 这类写又是静默的') }
+# ---- R17: 第二百八十九刀那一档 (Extender 几何的**读**与容器单位 + 晚绑定早退的清点) 的形状 ----
+# VB6 的 Extender 几何不是第二本账: 读 = 这枚宿主窗口当前的矩形按容器 ScaleMode 折出来的数。
+# 从前我方读的是建宿主时填进 rc->ext* 的设计缇值 (之后再没人刷新), 而 vbContainerPosition(9)/
+# vbContainerSize(10) 在 ScaleX/ScaleY 里落进 default 按像素折 (恒等) —— 同一发 `.Extender.Move`
+# 四槽两种单位 (第二百八十八刀读数: CoolBar 交 321 像素而宿主按缇自量)。规矩: 读只许问
+# vb6_GetControl* 那一位既有主人, 单位那一问只在 UC 宿主伪成员的 ScaleX/ScaleY 入口上解。
+# **写仍刻意未接** (第二百九十刀): 一接就把两枚 UC 内部的错数暴露成可见塌缩 (ComboBoxW 宿主
+# 2 像素 / CoolBar 60→37), 那两个输入各自要先量。所以这一块把「写侧名字一个都不许出现」
+# 也钉住 —— 谁想接写, 必须同时把 Below 的 geom-writes 改成 2 并把本条挪走。
+$nVG3mask = ([regex]::Matches($collCode, 'vb6_ucExtGeomMask\(')).Count
+if ($nVG3mask -ne 2) { $fail += ('R17 geometry mask owner (1 def + 1 reader arm) = ' + $nVG3mask + ' (want 2)') }
+$nVG3read = ([regex]::Matches($collCode, 'vb6_ucExtGeomRefresh\(rc\);')).Count
+if ($nVG3read -ne 1) { $fail += ('R17 read side projects the live host rect = ' + $nVG3read + ' (want 1 = 字段读那一问; 0 = 读回还是建宿主时的死值)') }
+$nVG3mode = ([regex]::Matches($vgCom, 'vb6_ucContainerModeOrSelf\(')).Count
+if ($nVG3mode -ne 5) { $fail += ('R17 container-unit resolution sites = ' + $nVG3mode + ' (want 5 = 1 def + 两形各读两档; 少 = 四槽又两种单位)') }
+$nVG3route = ([regex]::Matches($vgCom, 'vb6_ScaleUnit[XY]\([xy], vb6_ucContainerModeOrSelf\(fromScale\), vb6_ucContainerModeOrSelf\(toScale\)\)')).Count
+if ($nVG3route -ne 2) { $fail += ('R17 the UC scale entries actually route through the resolution = ' + $nVG3route + ' (want 2)') }
+$nVG3cdecl = ([regex]::Matches($ctrlHdrCode, '(?m)^int32_t\s+vb6_UC_ContainerScaleModeCurrent')).Count
+if ($nVG3cdecl -ne 1) { $fail += ('R17 vb6_UC_ContainerScaleModeCurrent declared for the com module = ' + $nVG3cdecl + ' (want 1; 0 = 发方各自 extern 一份)') }
+$nVG3cdef = ([regex]::Matches($collCode, 'int32_t vb6_UC_ContainerScaleModeCurrent\w*\(void\) \{')).Count
+if ($nVG3cdef -ne 1) { $fail += ('R17 definition of vb6_UC_ContainerScaleModeCurrent = ' + $nVG3cdef + ' (want 1)') }
+$nVG3win = ([regex]::Matches($collCode, 'MoveWindow\(|SetWindowPos\(')).Count
+if ($nVG3win -ne 0) { $fail += ('R17 hand-written window placement in uc_controls.c = ' + $nVG3win + ' (want 0; vb6_ControlMove 是唯一的摆位收口)') }
+$nVG3writes = ([regex]::Matches($collCode + $vg2Inv, 'vb6_UC_ExtenderGeomApplied|vb6_UC_ExtenderMethod')).Count
+if ($nVG3writes -ne 0) { $fail += ('R17 geometry write side is deliberately NOT wired yet = ' + $nVG3writes + ' (want 0; 接写之前先量 ComboBoxW 的 CB_GETITEMHEIGHT 漂移与 CoolBar 的 RB_GETBARHEIGHT)') }
+$nVG3drop = ([regex]::Matches($vg2Inv, 'vb6_ComDropPackedArgs\(args, argc\);')).Count
+if ($nVG3drop -ne 2) { $fail += ('R17 stations that drop the packed args before leaving = ' + $nVG3drop + ' (want 2 = ComCall / ComGetPropArg 认不出名字那两支; 少一枚 = §B164 那一形又漏)') }
+$nVG3dropdef = ([regex]::Matches($vg2Inv, 'static void vb6_ComDropPackedArgs\(')).Count
+if ($nVG3dropdef -ne 1) { $fail += ('R17 definition of vb6_ComDropPackedArgs = ' + $nVG3dropdef + ' (want 1)') }
 # ---- R8: 这枚哨兵自己不许是死码 ----
 $nSelfReg = ([regex]::Matches($rtCode, 'Test-ComLatebindGuard')).Count
 if ($nSelfReg -ne 2) {
@@ -520,5 +549,5 @@ if ($fail.Count -gt 0) {
     foreach ($f in $fail) { Write-Host ("FAIL " + $f) }
     exit 1
 }
-Write-Host ("PASS check_com_latebind_guard: exits=7 guarded=7 pseudo-exempt=3 order=pseudo-first guard=behavior-preserving counter-outlets=2 host-sibling=3 runner-sites=3 inline-counters=2 negative-control=2 hfont-owner=1 hfont-kind5=2 height-owner=1 height-consumers=3 name-default=ms-sans-serif apply-owner=1 apply-senders=2 self-registered=1") form-ans-owner=1 form-ans-body=1 form-ans-decl=1 form-ans-emit=1 windowless-owner=1 windowless-outlets=2 windowless-arms=2 mask-owner=1 mask-arms=2 vg-owner=1 vg-decl=1 vg-outlet=1 vg-radio-gate=3 vg-truth-guard=1 vg-sibling-setter=1 vis-owner=1 vis-window=1 vis-decl=1 vis-outlets=2 vis-zero-guard=1 vis-old-drop=0
+Write-Host ("PASS check_com_latebind_guard: exits=7 guarded=7 pseudo-exempt=3 order=pseudo-first guard=behavior-preserving counter-outlets=2 host-sibling=3 runner-sites=3 inline-counters=2 negative-control=2 hfont-owner=1 hfont-kind5=2 height-owner=1 height-consumers=3 name-default=ms-sans-serif apply-owner=1 apply-senders=2 self-registered=1") form-ans-owner=1 form-ans-body=1 form-ans-decl=1 form-ans-emit=1 windowless-owner=1 windowless-outlets=2 windowless-arms=2 mask-owner=1 mask-arms=2 vg-owner=1 vg-decl=1 vg-outlet=1 vg-radio-gate=3 vg-truth-guard=1 vg-sibling-setter=1 vis-owner=1 vis-window=1 vis-decl=1 vis-outlets=2 vis-zero-guard=1 vis-old-drop=0 geom-mask=2 geom-read=1 geom-units=5 geom-route=2 geom-cdecl=1 geom-cdef=1 geom-nowindow=0 geom-writes=0 latebind-drop=2
 exit 0

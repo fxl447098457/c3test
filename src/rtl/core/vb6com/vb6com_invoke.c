@@ -102,6 +102,21 @@ static void vb6_ComLateBindMiss(const wchar_t* site, const wchar_t* name, void* 
     fflush(stderr);
 }
 
+/* 账 #305 第二百八十九刀 (§B164 新形): 「认不出这个名字」那一支的统一清点。
+   打包来的实参 (vb6_ComPackVariant 每次一发一枚堆上 VARIANT) 交进这七个出口后就只有本文件
+   那几条 clear 路接手 —— 早退不接, 就是整批发漏。空跑靶工程 8 秒 29 发 `Move`, 每发四枚。
+   VT_BYREF 那一档的内容指向调用方的存储, 与成功路径 rgvarg 那圈同一个规矩: 不清内容。
+   (在册: ComGetPropArg 的**成功**尾巴也从没 free 过结构体, ComSetProp/ComSetPropArg 只 free
+    结构体不清内容 —— 那些路今天没有读数, 且要先证调用方不 reuse 那枚数组, 不在这一格动。 */
+static void vb6_ComDropPackedArgs(VARIANT** a, int32_t argc) {
+    if (!a) return;
+    for (int32_t i = 0; i < argc; i++) {
+        if (!a[i]) continue;
+        if (!(a[i]->vt & VT_BYREF)) VariantClear(a[i]);
+        free(a[i]);
+    }
+}
+
 static DISPID vb6_getDispid(IDispatch* pDisp, const wchar_t* name) {
     // 先查缓存
     for (int32_t i = 0; i < vb6_dispid_cache_count; i++) {
@@ -243,8 +258,8 @@ void* vb6_ComCall(void* disp, const wchar_t* methodName,
         return (void*)hres;
     }
     /* Fix 191: IUnknown 三法在**所有** COM 接口的 vtable 里固定在槽 0/1/2,
-     * 自定义接口 (IOleInPlaceActiveObject / IOleObject 这类无 IDispatch 的) 也一样。
-     * 而按名后期绑定要先 GetIDsOfNames —— 那是 IDispatch 的槽 5。对手写伪 vtable
+
+     * 自定义接口 (IOleInPlaceActiveObject / IOleObject 这类无 IDispatch 的) 也一样。     * 而按名后期绑定要先 GetIDsOfNames —— 那是 IDispatch 的槽 5。对手写伪 vtable
      * (VTableHandle.bas 的 VTableIPAO[] 槽位: QI/AddRef/Release/GetWindow/
      * ContextSensitiveHelp/TranslateAccelerator/…) 就等于把
      * IOleIPAO_TranslateAccelerator 当 GetIDsOfNames 调用, 参数全错位 → AV。
@@ -278,6 +293,7 @@ void* vb6_ComCall(void* disp, const wchar_t* methodName,
     }
     DISPID dispid = vb6_getDispid(pDisp, methodName);
     if (dispid == DISPID_UNKNOWN) {
+        vb6_ComDropPackedArgs(args, argc);   /* 账 #305 第二百八十九刀: 早退之前清点来路 */
         fwprintf(stderr, L"vb6_ComCall: method \"%ls\" not found\n", methodName);
         return NULL;
     }
@@ -531,6 +547,7 @@ void* vb6_ComGetPropArg(void* disp, const wchar_t* propName,
 
     DISPID dispid = vb6_getDispid(pDisp, propName);
     if (dispid == DISPID_UNKNOWN) {
+        vb6_ComDropPackedArgs(args, argc);   /* 账 #305 第二百八十九刀 */
         fwprintf(stderr, L"vb6_ComGetPropArg: property \"%ls\" not found\n", propName);
         return NULL;
     }

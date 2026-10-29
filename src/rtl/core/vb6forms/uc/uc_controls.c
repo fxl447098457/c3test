@@ -573,6 +573,47 @@ void vb6_UC_ExtenderVisibleApplied(void) {
     vb6_SetControlVisible(rc->hwnd, rc->extVisible);
 }
 
+/* 账 #305 第二百八十九刀: `Extender` 的四档几何 (Left/Top/Width/Height) 与那一发 `Move`。
+   VB6 的 Extender 几何不是第二本账: 读 = 这枚宿主窗口当前的矩形按**容器 ScaleMode** 折出来的
+   数; 写 = 向容器请求把这块矩形改成那样。我方从前只把写落进 rc->ext* (建宿主时填的设计缇值,
+   之后再没人刷新), 而 `Move` 那一路连应答都没有 —— 第二百八十八刀的读数: 空跑 8 秒 29 发
+   method "Move" not found, 于是控件自己量出来的尺寸既进不去也读不出。
+   两头都交回**已有**的那两位主人, 这里不抄第二份:
+     读 = vb6_GetControlLeft/Top/Width/Height (自带 #230 的 VB 侧缓存与像素闸, 单位由
+          vb6_ContainerScaleMode 答 —— 即 #175 那一位主人);
+     写 = vb6_ControlMove (所有摆位的唯一收口: 按容器 ScaleMode 换像素、写 #230 缓存、
+          尺寸真的变了才触发 Resize)。
+   刻意不在这里判「交来的值合不合法」: 第二百八十四刀记的「排版只跑一次、跑在属性到齐之前」
+   是上游那一格, 不在这一问里补兜底。 */
+static int32_t vb6_ucExtGeomMask(const wchar_t* name) {
+    if (!name) return 0;
+    if (_wcsicmp(name, L"Left")   == 0) return 1;
+    if (_wcsicmp(name, L"Top")    == 0) return 2;
+    if (_wcsicmp(name, L"Width")  == 0) return 4;
+    if (_wcsicmp(name, L"Height") == 0) return 8;
+    return 0;
+}
+
+/* 读侧: 交出去之前按活宿主窗口把四档问一遍。读写都过 vb6_UC_ExtenderField, 所以这一问同时治
+   掉「读到建宿主时的死值」与「写之前另三档还是死值」两格。没有窗口 (建宿主前 / 无窗宿主) 就
+   保留记录里那个设计值 —— 与今天一致, 不凭空造数。 */
+static void vb6_ucExtGeomRefresh(vb6_UCRec* rc) {
+    if (!rc->hwnd || !IsWindow(rc->hwnd)) return;
+    rc->extLeft   = vb6_GetControlLeft((void*)rc->hwnd);
+    rc->extTop    = vb6_GetControlTop((void*)rc->hwnd);
+    rc->extWidth  = vb6_GetControlWidth((void*)rc->hwnd);
+    rc->extHeight = vb6_GetControlHeight((void*)rc->hwnd);
+}
+
+/* 容器 ScaleMode 的那一问, 给 vb6rtl_com.c 的 vbContainerPosition(9) / vbContainerSize(10)
+   两档用。答 0 = 问不到 (没有当前记录或父窗没了), 调用方保留它今天那档。 */
+int32_t vb6_UC_ContainerScaleModeCurrent(void) {
+    vb6_UCRec* rc = vb6_ucCurrent;
+    if (!rc || !rc->parent || !IsWindow(rc->parent)) return 0;
+    extern int32_t vb6_ContainerScaleMode(void* hwndParent);
+    return vb6_ContainerScaleMode((void*)rc->parent);
+}
+
 void vb6_UC_SetExtenderMember(const wchar_t* name, void* value) {
     extern void* vb6_UC_ExtenderField(void* p, const wchar_t* n, int32_t* k);
     void* p = (void*)&vb6_UserControl_Extender;
@@ -593,8 +634,7 @@ void vb6_UC_SetExtenderMember(const wchar_t* name, void* value) {
         case 4: *(void**)fp = value; break;
         default: *(int32_t*)fp = (int32_t)(intptr_t)value; break;
     }
-    if (kind == 2 && _wcsicmp(name, L"Visible") == 0) vb6_UC_ExtenderVisibleApplied();
-}
+    if (kind == 2 && _wcsicmp(name, L"Visible") == 0) vb6_UC_ExtenderVisibleApplied();}
 void* vb6_UC_ExtenderField(void* p, const wchar_t* name, int32_t* kind) {
     if (!vb6_UC_IsExtender(p) || !name || !kind) return NULL;
     /* Fix 294: 几何四项走**当前实例**的记录, 不再走裸全局。
@@ -607,6 +647,7 @@ void* vb6_UC_ExtenderField(void* p, const wchar_t* name, int32_t* kind) {
     {
         vb6_UCRec* rc = vb6_ucCurrent;
         if (rc) {
+            if (vb6_ucExtGeomMask(name)) vb6_ucExtGeomRefresh(rc);   /* 账 #305 第二百八十九刀: 读侧投影 */
             if (_wcsicmp(name, L"Width")  == 0) { *kind = 3; return &rc->extWidth;  }
             if (_wcsicmp(name, L"Height") == 0) { *kind = 3; return &rc->extHeight; }
             if (_wcsicmp(name, L"Left")   == 0) { *kind = 3; return &rc->extLeft;   }

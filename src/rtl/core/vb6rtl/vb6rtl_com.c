@@ -1682,12 +1682,25 @@ double vb6_ScaleUnitY(double y, int32_t fromScale, int32_t toScale) {
 
 // Fix 224: 这两个名字在 vb6rtl_userctl.h 里已交 `_Generic` 宏按首参类型分派 (VB6 的
 // Variant 隐式数值转换), 故**定义必须挂 _Raw** —— 否则宏会把这里的定义整形成乱语。
+/* 账 #305 第二百八十九刀: vbContainerPosition(9) / vbContainerSize(10) 答的是**容器**的
+   ScaleMode, 不是恒等 —— 从前这两档落进 vb6_ScaleUnitsPerPx 的 default 按 1.0 折 (像素),
+   而同一发 `.Extender.Move` 的另两槽来自 rc->ext* (容器缇), vb6_ControlMove 又一律按容器
+   ScaleMode 收 ⇒ 第二百八十八刀的读数: CoolBar 那一发 width 交 321 (像素) 而宿主在 826 缇
+   那一档自量的宽。只解这一对**宿主伪成员**入口 (Form/Picture 那几形仍原样走 vb6_ScaleUnitX);
+   问不到容器就退回今天那档, 不凭空改一整族。 */
+static int32_t vb6_ucContainerModeOrSelf(int32_t mode) {
+    if (mode != 9 && mode != 10) return mode;
+    extern int32_t vb6_UC_ContainerScaleModeCurrent(void);
+    int32_t m = vb6_UC_ContainerScaleModeCurrent();
+    return m ? m : mode;
+}
+
 double vb6_UserControl_ScaleXRaw(double x, int32_t fromScale, int32_t toScale) {
-    return vb6_ScaleUnitX(x, fromScale, toScale);
+    return vb6_ScaleUnitX(x, vb6_ucContainerModeOrSelf(fromScale), vb6_ucContainerModeOrSelf(toScale));
 }
 
 double vb6_UserControl_ScaleYRaw(double y, int32_t fromScale, int32_t toScale) {
-    return vb6_ScaleUnitY(y, fromScale, toScale);
+    return vb6_ScaleUnitY(y, vb6_ucContainerModeOrSelf(fromScale), vb6_ucContainerModeOrSelf(toScale));
 }
 
 // UserControl.AsyncRead: no container/async message pump in compiled form, so
