@@ -642,6 +642,9 @@ void vb6_ComSetProp(void* disp, const wchar_t* propName, void* value_void) {
             /* 账 #305 第二百八十七刀: `With UserControl.Extender: .Visible = v` 这一路
                与 uc_controls.c 那一条按名的写手同源, 存完字段都交给同一位主人上窗口。 */
             if (ekind == 2 && wcscmp(propName, L"Visible") == 0) vb6_UC_ExtenderVisibleApplied();
+            /* 账 #305 第二百九十二刀: 几何那一档的第二位写手 (第一位是 uc_controls.c 按名那条)。 */
+            else if (ekind == 3) vb6_UC_ExtenderGeomApplied(propName);
+
         }
         free(value_void);
         return;

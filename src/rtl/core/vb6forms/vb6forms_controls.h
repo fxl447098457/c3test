@@ -350,6 +350,9 @@ void*   vb6_UC_ExtenderField(void* p, const wchar_t* name, int32_t* kind);
 /* 账 #305 第二百八十七刀: 存完这一格之后, 「要落到宿主窗口上」由这一位主人答 (两处写手共用一条)。
    它不出现在生成代码里, 所以 §B202 那张按名点名的名单不涉及它。 */
 void    vb6_UC_ExtenderVisibleApplied(void);
+/* 账 #305 第二百九十二刀: Extender 几何的写手 (属性形; 方法形 `.Extender.Move` 仍刻意未接)。 */
+void    vb6_UC_ExtenderGeomApplied(const wchar_t* name);
+
 /* 账 #305 第二百八十九刀: vbContainerPosition(9)/vbContainerSize(10) 那两档要问容器的
    ScaleMode —— 交回这一位 (uc_controls.c), 问不到答 0 由调用方保留原档。
    这个名字不发进用户 TU ⇒ §B202 那张按名点名的名单不涉及它。 */

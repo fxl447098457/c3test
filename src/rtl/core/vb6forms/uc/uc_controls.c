@@ -607,6 +607,21 @@ static void vb6_ucExtGeomRefresh(vb6_UCRec* rc) {
 
 /* 容器 ScaleMode 的那一问, 给 vb6rtl_com.c 的 vbContainerPosition(9) / vbContainerSize(10)
    两档用。答 0 = 问不到 (没有当前记录或父窗没了), 调用方保留它今天那档。 */
+/* 账 #305 第二百九十二刀: Extender 四档几何的**属性形写手**（`.Extender.Height = v`）。
+   289 那批留下读侧投影、把写整块撤回 —— 当时写一落地就有两处塌缩；逐窗口归因后看清：**四格好转全部
+   来自属性形**（ToolBar 32→26 / MonthView 160x161 / ListBoxW 170 / ComboBoxW 19），**两处塌缩全部来自
+   方法形** `.Extender.Move`（CoolBar.ctl:996 与 ComboBoxW.ctl:1791）⇒ 两形可以分开落地：这一刀只接
+   属性形，`Move` 继续没人应答（那 29 发 not found 照旧，等输入量清）。写交唯一收口 vb6_ControlMove。 */
+void vb6_UC_ExtenderGeomApplied(const wchar_t* name) {
+    vb6_UCRec* rc = vb6_ucCurrent;
+    if (!rc || !rc->hwnd || !IsWindow((HWND)rc->hwnd)) return;
+    int32_t which = vb6_ucExtGeomMask(name);
+    if (!which) return;
+    extern void vb6_ControlMove(void* hwnd, double l, double t, double w, double h, int mask);
+    vb6_ControlMove((void*)rc->hwnd, (double)rc->extLeft, (double)rc->extTop,
+                    (double)rc->extWidth, (double)rc->extHeight, (int)which);
+}
+
 int32_t vb6_UC_ContainerScaleModeCurrent(void) {
     vb6_UCRec* rc = vb6_ucCurrent;
     if (!rc || !rc->parent || !IsWindow(rc->parent)) return 0;
@@ -623,9 +638,10 @@ void vb6_UC_SetExtenderMember(const wchar_t* name, void* value) {
     /* 账 #305 第二百八十七刀: 这道早退原本还带一条 `|| !value` ⇒ **凡递来 0 的写全被静默丢掉**,
        而 kind 2 那三档布尔（Visible / vb6_Default / Cancel）递来的「假」正是 0。实测靶工程
        `SpinBox1.Visible = False` 就是这么没的：容器侧那一发走到这里, 字段没存、窗口也没动。
-       只对布尔档放开 —— kind 0/3/4 收的是指针与别的数值, 那里 0 的含义今天没有读数,
-       动它等于凭空改一整族行为（在册：那三档的零值写要不要同样落地, 欠一份产物级 census）。 */
-    if (!value && kind != 2) return;
+       第二百九十二刀把几何接到窗口之后, kind 3 也进「放开」那一档：语料里 `Property Let Left(Value As
+       Long)` 的体就是 `Extender.Left = Value`, 容器侧一句 `Label1.Left = 0` 递来的正是 0。kind 0/4
+       （Tag / ToolTipText / Container / DragIcon）的零值写今天仍没有读数, 刻意不动（在册）。 */
+    if (!value && kind != 2 && kind != 3) return;
     switch (kind) {
         case 0: *(BSTR*)fp  = (BSTR)value; break;                 // BSTR: 搬指针
         case 2: *(int16_t*)fp = (int16_t)(intptr_t)value; break;
@@ -634,7 +650,9 @@ void vb6_UC_SetExtenderMember(const wchar_t* name, void* value) {
         case 4: *(void**)fp = value; break;
         default: *(int32_t*)fp = (int32_t)(intptr_t)value; break;
     }
-    if (kind == 2 && _wcsicmp(name, L"Visible") == 0) vb6_UC_ExtenderVisibleApplied();}
+    if (kind == 2 && _wcsicmp(name, L"Visible") == 0) vb6_UC_ExtenderVisibleApplied();
+    else if (kind == 3) vb6_UC_ExtenderGeomApplied(name);   /* 账 #305 第二百九十二刀: 属性形写手 */
+}
 void* vb6_UC_ExtenderField(void* p, const wchar_t* name, int32_t* kind) {
     if (!vb6_UC_IsExtender(p) || !name || !kind) return NULL;
     /* Fix 294: 几何四项走**当前实例**的记录, 不再走裸全局。
