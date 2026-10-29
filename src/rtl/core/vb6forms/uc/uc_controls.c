@@ -71,7 +71,14 @@ void* vb6_UC_ParentControls(void) {
     void* ucHwnd = NULL;
     if (vb6_ucCurrent) ucHwnd = (void*)vb6_ucCurrent->hwnd;
     if (!ucHwnd) ucHwnd = vb6_UserControl_hWnd;
-    void* parentHwnd = ucHwnd ? (void*)GetParent((HWND)ucHwnd) : NULL;
+    /* 账 #305 第293刀: 口径 = **窗体这一层**的控件，不是「直接父窗口的子控件」。
+       实测 (ComCtlsDemo): ImageCombo1 装在 CoolBar1 里, 它要的 ImageList1/2/3 摆在
+       MainForm 上; 参考版靠 `For Each c In UserControl.ParentControls` +
+       `TypeName(c)="ImageList"` + `c.hImageList` 挂上图标 —— 若只交 CoolBar 的子控件,
+       三枚 ImageList 一枚都进不来, 循环空转, 下拉列表就没有图标 (且全程不报错)。
+       VB6 这一族的容器概念是窗体 (Extender.Container), 嵌套 UC 也一样。 */
+    void* parentHwnd = ucHwnd ? (void*)GetAncestor((HWND)ucHwnd, GA_ROOT) : NULL;
+    if (!parentHwnd && ucHwnd) parentHwnd = (void*)GetParent((HWND)ucHwnd);
     g_uc_parentControlsSingleton.formHwnd = parentHwnd;
     return (void*)&g_uc_parentControlsSingleton;
 }

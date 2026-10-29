@@ -197,6 +197,11 @@
     // vb6_UcPropDesc 表就是为这一档准备的 —— 没有它, ucPerspective.Refresh 的
     // `l_ucFolder.Move .LeftPos, .TopPos, …` 会读到 0, 停靠区就摆不出来。
     if (vb6_UC_OwnPropGet(obj, name, out)) return 1;
+    /* 账 #305 第293刀: 递进来的常常是**宿主包装器** 或句柄, 不是 .ctl 实例本身;
+       自有属性表 (vb6_UcPropDesc) 是按实例查的 ⇒ 再用记录里的实例试一次。
+       实测 (ComCtlsDemo 下拉图标): `ControlEnum.hImageList` 两把钥匙都开不了门,
+       一路答 Empty ⇒ CBEM_SETIMAGELIST 收 0, 条目有字无图。 */
+    if (r && r->me && r->me != obj && vb6_UC_OwnPropGet(r->me, name, out)) return 1;
 
     /* 账 #305 第二百六十二刀 (丙): 同 Call 那条 —— 不认识的属性名以前静默答 Empty。 */
     vb6_ho_reportUnknown(L"GetProp", name, obj);
