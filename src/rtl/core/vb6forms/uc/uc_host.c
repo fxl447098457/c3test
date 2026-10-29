@@ -476,19 +476,9 @@ static int vb6_ucHasRadioStyle(vb6_UCRec* r) {
     return hit;
 }
 
-/* 值档的「真」只认布尔与数值两族：串/对象/空一律答假 —— 宁可少撤一次，
-   也不要拿 `vb6_VariantToDouble` 去喂一个 BSTR 或 IDISPATCH。 */
-static int vb6_ucValueIsTrue(vb6_VARIANT v) {
-    switch (v.vt) {
-        case VT_BOOL: return v.boolVal != 0;
-        case VT_I1: case VT_I2: case VT_I4: case VT_I8:
-        case VT_UI1: case VT_UI2: case VT_UI4:
-        case VT_R4: case VT_R8: case VT_CY:
-            return vb6_VariantToDouble(v) != 0.0;
-        default: return 0;
-    }
-}
-
+/* 「这一枚 Value 现在算不算真」不自己列表回答 —— 走 `vb6_VariantToBool` 那一位既有的
+   口径主人 (Empty/0/False 为假)，与第二百四十四刀 `vb6_ComResultToBool` 同一取舍:
+   手写一张按档的表就等于给「谁答这一档」再开一张家。 */
 void vb6_UC_ValueGroupNotify(const wchar_t* propName) {
     vb6_UCRec* self = vb6_ucCurrent;
     if (!self || !self->me || !self->desc) return;
@@ -497,7 +487,7 @@ void vb6_UC_ValueGroupNotify(const wchar_t* propName) {
     vb6_VARIANT mine;
     memset(&mine, 0, sizeof(mine));
     if (!vb6_UC_OwnPropGet(self->me, L"Value", &mine)) return;
-    int isTrue = vb6_ucValueIsTrue(mine);
+    int isTrue = vb6_VariantToBool(mine) != 0;
     vb6_VariantClear(&mine);
     /* 撤勾那一发也会走到这里（Let 无条件通知）：自己已经不算真就别再动兄弟,
        否则兄弟的 Let 又发一声 ⇒ 互相反咬。 */
