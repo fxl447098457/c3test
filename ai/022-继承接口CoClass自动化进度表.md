@@ -6,7 +6,7 @@
 
 OPEN_LOCAL_DIVERGENCE: **已收口（2026-09-27 入夜 = C29-MV-d）** —— 本地 `ctrlmonthview` 的 MV24/MV25/MV30 三条红既不是"本地环境/增量缓存"、也不是"OS 版本相关"，而是**挂钟相关**：comctl v6 把当前时间混进 `MCM_GETCURSEL` 的负载里（日没错、零头 0.765），`CLng` 下午进位、上午舍掉 ⇒ 本机下午一直红、CI 跑在上午一直绿。修法与全部读数见 029 §九 C29-MV-d 那一格。留下的一般式：**日期面判据按 `CLng` / `=` 比之前，产品读数必须归成整数日**，否则同一棵树的判据随时段翻脸，而门只会读到"上午那一半"。
 STATUS: IDLE              # NOT_STARTED | DESIGN | BUSY | IDLE | ALL_DONE
-LAST_RUN: 2026-10-29T15:12:00+08:00 **第二百八十九刀「实施+判据」（单刀一批，细节在 `ai/C3_FIX_HANDOFF.md` 行 5049）= 按 288 定死的顺序走了前两步（①单位 ②读侧投影）+ 顺手补掉晚绑定早退的实参漏；**第三步「写落地」落地过又被自己判据打回**（CoolBar 60→37、ComboBoxW 宿主 22→2 两处塌缩）⇒ 写侧留给 290，且把「写侧名字一个都不许出现」钉成哨兵**
+LAST_RUN: 2026-10-29T15:12:00+08:00 **第二百八十九刀「实施+判据」（单刀一批，细节在 `ai/C3_FIX_HANDOFF.md` 行 5049）= 按 288 定死的顺序走了前两步（①单位 ②读侧投影）+ 顺手补掉晚绑定早退的实参漏；**门 #984 = 21 job 全绿 attempt 1（head `1f8a8b75`）**；**第三步「写落地」落地过又被自己判据打回**（CoolBar 60→37、ComboBoxW 宿主 22→2 两处塌缩）⇒ 写侧留给 290，且把「写侧名字一个都不许出现」钉成哨兵**
 —— ①单位：`vb6rtl_com.c` 新增 `vb6_ucContainerModeOrSelf(mode)`，只解 9/10 两档、只解 `vb6_UserControl_ScaleXRaw/YRaw` 这一对宿主伪成员入口 ⇒ `vbContainerSize` 从此答**容器**的 ScaleMode（ComCtlsDemo 三份工程都没写 ScaleMode ⇒ 缺省 1=缇 ⇒ 以前按 1.0 恒等折，现在折 15 倍）；问不到容器（无当前记录 / 父窗没了）就保留今天那档，Form/Picture 那几形仍原样走 `vb6_ScaleUnitX/Y`
 —— ②读侧：`uc_controls.c` 新增 `vb6_ucExtGeomMask` + `vb6_ucExtGeomRefresh`，在 `vb6_UC_ExtenderField` 的记录臂入口统一刷一遍（四档一起问活窗口，转调既有 `vb6_GetControlLeft/Top/Width/Height`，自带 #230 的 VB 侧缓存与像素闸）⇒ `Extender.Width` 不再读建宿主时那个死的设计缇值；没有窗口时保留设计值
 —— ④漏：`vb6com_invoke.c` 新增 `vb6_ComDropPackedArgs`，在 `vb6_ComCall` / `vb6_ComGetPropArg` 认不出名字那两支早退前清点（VT_BYREF 不清内容，与成功路径 rgvarg 同一规矩）；**订正 288 那段读数**：24 秒 PagefileUsage 这把尺噪声底比信号大（四次重复 +36864 / +155648 / +77824 / +1724416）⇒ 只能按结构判，不能按读数判
