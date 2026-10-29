@@ -1272,6 +1272,12 @@
     // 单一 void* getter 会把每个调用点都变成强制转换, 比原来更脏。
     std::string extenderMemberReadExpr(const std::string& rtlSymbol) const;
 
+    // 账 #305 第二百九十二刀: `With <宿主伪对象>` 体内那个成员属不属于"表里答得出
+    // 的可写标量" (不含方法/码头/Unknown)。With 体内的属性写据此改道 RTL 全局,
+    // 不再发 vb6_ComSetProp (接收者是 hWnd, 晚绑定必然落空)。
+    bool hostPseudoHasScalarRow(const std::string& pseudoObj,
+                                const std::string& memberName) const;
+
     // 账 #257 第十九层: `With UserControl` 体内 `.成员` 的**内建**判定。
     //
     // VB6 里 `UserControl.Picture` 与控件自己声明的 `Public Property Set Picture`

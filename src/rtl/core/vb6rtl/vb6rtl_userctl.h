@@ -283,6 +283,11 @@ extern struct vb6_UserControl_Extender_Type vb6_UserControl_Extender;
    b6_UC_ExtenderField 的兜底一致。kind 约定 0=BSTR / 2=int16 / 3=int32。 */
 void* vb6_UC_GetExtenderMemberObj(const wchar_t* name);
 void vb6_UC_SetExtenderMember(const wchar_t* name, void* value);
+/* 账 #305 第二百九十二刀: `UserControl.AutoRedraw = v` 的代码生成侧入口 —— 建/拆
+   常驻离屏表面 (VB6 里 AutoRedraw=True 之后 UserControl.hDC 就是那张位图)。 */
+void vb6_UC_SetAutoRedraw(void* value);
+/* 同上: 窗体第一帧之前把 TabStrip 宿主沉到父窗口最底 (VB6 实测 z 序)。 */
+void vb6_UC_SinkTabBackdrops(void* parentHwnd);
 int32_t vb6_UC_GetExtenderMemberNum(const wchar_t* name);
 BSTR    vb6_UC_GetExtenderMemberStr(const wchar_t* name);
 

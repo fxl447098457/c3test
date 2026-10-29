@@ -496,6 +496,24 @@
                     return;
                 }
             }
+            /* 账 #305 第二百九十二刀: `With UserControl : .AutoRedraw = v` 是宿主
+               伪成员写, 不是 COM SetProp (接收者是 hWnd, 晚绑定必然落空)。表里答得出
+               类型的行才改道 —— 答不出 (Unknown/对象成员) 维持原样, 不掩盖。*/
+            if (!info.hostPseudoObj.empty() && hostPseudoIsObject(info.hostPseudoObj)
+                && hostPseudoHasScalarRow(info.hostPseudoObj, wmExpr.memberName)) {
+                emitExpr(*node.value);
+                std::string valHp = std::move(lastExpr_);
+                if (cExprIsVariant(valHp)) valHp = "vb6_VariantToLong(" + valHp + ")";
+                const std::string tgtHp = hostPseudoRtlSymbol(info.hostPseudoObj, wmExpr.memberName);
+                if (tgtHp == "vb6_UserControl_AutoRedraw") {
+                    c_.emitLine("vb6_UC_SetAutoRedraw((void*)(intptr_t)" + valHp +
+                                ");  /* With host pseudo .AutoRedraw = v */");
+                } else {
+                    c_.emitLine(tgtHp + " = " + valHp + ";  /* With host pseudo ." +
+                                wmExpr.memberName + " = v */");
+                }
+                return;
+            }
             emitExpr(*node.value);
             std::string valExpr = std::move(lastExpr_);
             std::string packFn = comPackExpr(*node.value);

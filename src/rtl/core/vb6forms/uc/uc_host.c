@@ -253,7 +253,10 @@ void vb6_uc_push(vb6_UCRec* r, vb6_UCSaved* saved) {
     vb6_UserControl_ScaleWidth = (int32_t)vb6_ScalePxToUser((double)r->scaleWidth, ucMode175, 0);
     vb6_UserControl_ScaleHeight = (int32_t)vb6_ScalePxToUser((double)r->scaleHeight, ucMode175, 1);
     vb6_UserControl_ScaleMode = ucMode175;
-    vb6_UserControl_hDC = r->hdc;
+    /* 账 #305 第二百九十二刀: 非 WM_PAINT 期间的 UserControl.hDC = AutoRedraw 持久表面
+       (VB6 语义). 没写过 .AutoRedraw = True 的控件仍旧是 NULL, 老行为不变。*/
+    vb6_UserControl_hDC = r->hdc ? r->hdc
+                        : (r->adSurf.memDC ? vb6_uc_autoRedrawDC(r) : NULL);
     vb6_UserControl_ContainerHwnd = r->parent;   // 账 #180: 不再折成 int32_t
     vb6_UserControl_Enabled = r->enabled;
     if (r->font) {
@@ -399,6 +402,40 @@ void vb6_UserControl_Cls(void) {
     // "PAINT→Cls→invalidate→PAINT" 无限重绘循环 (czFormDemo ~90fps 闪烁)。
     // RTL 的 WM_PAINT 每次 BeginPaint 后都是全新表面, 且控件随后会完整重绘,
     // 因此 Cls 在本架构下等价于空操作。
+    // 账 #305 第二百九十二刀: 例外是 AutoRedraw 控件 —— 它的表面是常驻的, Cls 必须
+    // 真的把它清成 ambient 底色 (FrameW 的 DrawFrame 就以 Cls 开头)。
+    vb6_UCRec* r = vb6_ucCurrent;
+    if (r && r->adSurf.memDC) vb6_uc_autoRedrawCls(r);
+}
+// 账 #305 第二百九十二刀: 代码生成侧的 `UserControl.AutoRedraw = v` 落到这里
+// (判据同 Extender 那条通道: 写侧出口在 cgen 里只此一处, RTL 只留这一个入口)。
+void vb6_UC_SetAutoRedraw(void* value) {
+    int32_t on = (int32_t)(intptr_t)value;
+    vb6_UserControl_AutoRedraw = (int16_t)on;
+    vb6_UCRec* r = vb6_ucCurrent;
+    if (!r) return;
+    vb6_uc_autoRedrawSet(r, on);
+    vb6_UserControl_hDC = on ? vb6_uc_autoRedrawDC(r) : NULL;
+}
+
+// 账 #305 第二百九十二刀: TabStrip 的页控件是**并列的兄弟窗口** (ComCtlsDemo 的
+// Picture3 装着第二页整个 FrameW), 在 VB6 里 TabStrip 永远沉在它们下面 —— 实测参考
+// 版 z 序: 27 个兄弟里 TabStrip 排第 28 = 最底, Picture3/Animation 都在它上面。
+// C3 按创建顺序排 ⇒ TabStrip 压在 Picture3 上, 一整页控件全被它的白底盖掉。
+// 只在窗体画第一帧前沉一次 (之后用户可以自己改 z 序, 不再抢)。
+void vb6_UC_SinkTabBackdrops(void* parentHwnd) {
+    HWND parent = (HWND)parentHwnd;
+    if (!parent || GetPropW(parent, L"VB6_TabBackdropsSunk")) return;
+    SetPropW(parent, L"VB6_TabBackdropsSunk", (HANDLE)1);
+    for (int32_t i = 0; i < vb6_ucRecCount; i++) {
+        vb6_UCRec* r = &vb6_ucRecs[i];
+        if (!r->hwnd || r->parent != parent || !r->desc || !r->desc->typeName) continue;
+        const char* p = strrchr(r->desc->typeName, '.');
+        if (!p) p = r->desc->typeName; else p++;
+        if (_stricmp(p, "TabStrip") != 0) continue;
+        SetWindowPos(r->hwnd, HWND_BOTTOM, 0, 0, 0, 0,
+                     SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+    }
 }
 
 // Fix 133u: UserControl.Parent (容器窗体对象).

@@ -592,6 +592,12 @@ std::string CCodeGen::extenderMemberReadExpr(const std::string& rtlSymbol) const
 bool CCodeGen::hostPseudoIsObject(const std::string& name) const {
     return hostPseudoObjectKnown(name);
 }
+// 账 #305 第二百九十二刀: With 体内的属性写能否走"直接赋值 RTL 全局"那一档。
+// 判据与理由都写在 host_pseudo.hpp 的 hostPseudoHasScalarRow 上。
+bool CCodeGen::hostPseudoHasScalarRow(const std::string& pseudoObj,
+                                      const std::string& memberName) const {
+    return vb6c3::hostPseudoHasScalarRow(pseudoObj, memberName);
+}
 
 // 裸名能不能解析成宿主伪成员 (.ctl/.pag 里直接写 hDC / ScaleWidth / Changed …)。
 bool CCodeGen::hostPseudoBareName(const std::string& pseudoObj,

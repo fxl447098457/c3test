@@ -216,6 +216,46 @@ void CCodeGen::visit(WithMemberExpr& node) {
                 return;
             }
         }
+        // 账 #305 第二百九十二刀: `With UserControl` 体内**答得出**的成员按宿主伪表发。
+        // 此前只接了 Extender/ScaleX/ScaleY 两档, 其余 (`.Cls` / `.AutoRedraw` …) 全
+        // 落 vb6_ComCall/vb6_ComSetProp —— 接收者是 hWnd, 晚绑定必然落空; FrameW 的
+        // DrawFrame 因此既清不了屏也开不了 AutoRedraw, 第二页整块白板。
+        // 判据 = 那张表 (hostPseudoHasScalarRow / HPF_METHOD), 答不出的成员维持原样。
+        if (!info.hostPseudoObj.empty() && hostPseudoIsObject(info.hostPseudoObj)) {
+            const HostPseudoRow* hpRow292 = hostPseudoFind(info.hostPseudoObj, node.memberName);
+            if (hpRow292) {
+                const bool isMethod292 = (hpRow292->flags & (HPF_METHOD | HPF_CHANNEL)) != 0;
+                if (isMethod292 && asCallCallee_) {
+                    std::string hpChan292;
+                    if (hostPseudoChannel(info.hostPseudoObj, node.memberName, hpChan292)) {
+                        lastExpr_ = hpChan292;
+                    } else {
+                        lastExpr_ = "vb6_" + std::string(hpRow292->obj) + "_" + hpRow292->rtl;
+                    }
+                    isComMarker_ = false;
+                    isEarlyBoundCom_ = false;
+                    earlyBoundSym_ = nullptr;
+                    comObjExpr_.clear();
+                    comMemberName_.clear();
+                    pendingChainObj_.clear();
+                    return;
+                }
+                if (!isMethod292 && hpRow292->type != Vb6Type::Unknown) {
+                    std::string hpRtl292 = hostPseudoRtlSymbol(info.hostPseudoObj, node.memberName);
+                    if (!hpRtl292.empty()) {
+                        isComMarker_ = false;
+                        isEarlyBoundCom_ = false;
+                        earlyBoundSym_ = nullptr;
+                        comObjExpr_.clear();
+                        comMemberName_.clear();
+                        pendingChainObj_.clear();
+                        lastExpr_ = extenderMemberReadExpr(hpRtl292);
+                        return;
+                    }
+                }
+            }
+        }
+
         // Fix 161f-extlist: With 目标是 ListView 槽 (形参/局部) —— `.View` / `.hWnd`
         // / `.Sorted` 等标量属性走控件读表, 不让它落 COM 晚绑定
         // (vb6_ComGetStringProp(_vb6_with_N, L"hWnd") = 拿 HWND 当 IDispatch →

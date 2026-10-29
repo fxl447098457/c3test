@@ -5,6 +5,7 @@
 
 #include "vb6forms_uc_internal.h"
 #include <stdio.h>  /* rev10: C3_UC_TRACE 的 fprintf */
+#include <stdlib.h> /* C3_AD_TRACE 的 getenv */
 
 #ifdef __cplusplus
 extern "C" {
@@ -34,6 +35,51 @@ static void vb6_uc_fillAmbient(HDC dc, int32_t w, int32_t h) {
     HBRUSH b = CreateSolidBrush(cref);
     FillRect(dc, &full, b);
     DeleteObject(b);
+}
+
+// ============================================================
+// 账 #305 第二百九十二刀: AutoRedraw 持久表面
+//
+// VB6: `UserControl.AutoRedraw = True` 之后, UserControl.hDC 就是一张**常驻离屏位图**,
+// 在 Resize/Refresh 里画的像素不会随下一次 WM_PAINT 消失, 重绘时容器再把它贴到屏幕上。
+// C3 此前是立即模式 (hDC 只在 WM_PAINT 期间非空、Cls 空转) ⇒ ComCtlsDemo 的 FrameW
+// 只在 UserControl_Resize 里画边框和标题, 永远不会出现在屏幕上 (第二页整块白板)。
+// 只在 VB 代码**写过** .AutoRedraw = True 时才建表面 (adOn), 其余控件保持原路径。
+// ============================================================
+static void vb6_uc_adEnsure(vb6_UCRec* r) {
+    if (!r || !r->hwnd) return;
+    RECT rc;
+    GetClientRect(r->hwnd, &rc);
+    int32_t w = rc.right - rc.left, h = rc.bottom - rc.top;
+    if (w <= 0 || h <= 0) return;
+    if (r->adSurf.memDC && r->adSurf.w == w && r->adSurf.h == h) return;
+    vb6_uc_dibDestroy(&r->adSurf);
+    vb6_uc_dibCreate(&r->adSurf, NULL, w, h);
+    if (r->adSurf.memDC) vb6_uc_fillAmbient(r->adSurf.memDC, w, h);
+    if (getenv("C3_AD_TRACE")) {
+        fprintf(stderr, "[AD-ensure] type=%s w=%d h=%d\n",
+                r->desc ? r->desc->typeName : "?", (int)w, (int)h);
+        fflush(stderr);
+    }
+}
+
+HDC vb6_uc_autoRedrawDC(vb6_UCRec* r) {
+    vb6_uc_adEnsure(r);
+    return (r && r->adSurf.memDC) ? r->adSurf.memDC : NULL;
+}
+
+void vb6_uc_autoRedrawSet(vb6_UCRec* r, int32_t on) {
+    if (!r) return;
+    r->adOn = on ? 1 : 0;
+    if (on) vb6_uc_adEnsure(r);
+    /* 关掉 AutoRedraw **不销毁**表面: VB6 这边紧接着 `Set .Picture = .Image` 把当前
+       位图交给容器显示 (FrameW DrawFrame 末尾就是这个顺序), 画面必须留下来。表面
+       转成"底图", 下一次 WM_PAINT 先铺背景再把它贴上去, 立即模式语义不变。 */
+}
+
+void vb6_uc_autoRedrawCls(vb6_UCRec* r) {
+    if (!r || !r->adSurf.memDC) return;
+    vb6_uc_fillAmbient(r->adSurf.memDC, r->adSurf.w, r->adSurf.h);
 }
 
 static void vb6_uc_composeBelow(HWND hwnd, HDC memDC, int32_t cw, int32_t ch) {
@@ -77,19 +123,39 @@ static void vb6_uc_composeBelow(HWND hwnd, HDC memDC, int32_t cw, int32_t ch) {
 // (WM_PRINTCLIENT), 下层内容已经在目标 DC 里, 透明 UC 只画自己。
 static void vb6_uc_paintInto(HWND hwnd, vb6_UCRec* r, HDC target,
                              int32_t cw, int32_t ch, int composeBelow) {
+    if (getenv("C3_AD_TRACE")) {
+        fprintf(stderr, "[AD-paint] type=%s cw=%d ch=%d paint=%p rdc=%p\n",
+                r && r->desc ? r->desc->typeName : "?", (int)cw, (int)ch,
+                (void*)(r && r->desc ? (void*)r->desc->paint : NULL), (void*)(r ? (void*)r->hdc : NULL));
+        fflush(stderr);
+    }
     if (!r || !r->desc || !r->desc->paint || cw <= 0 || ch <= 0) return;
     const int transparent = r->desc->transparent != 0;
 
+    /* 账 #305 第二百九十二刀: AutoRedraw 表面已存在 ⇒ 画进它、再整块贴屏 (VB6 语义)。
+       不重铺 ambient: 那张位图上留着上一次 Resize/Refresh 画的像素。*/
+    HDC adc = (r->adOn && !transparent) ? vb6_uc_autoRedrawDC(r) : NULL;
+    if (getenv("C3_AD_TRACE")) {
+        fprintf(stderr, "[AD-use] type=%s adOn=%d adc=%p\n",
+                r->desc->typeName, (int)r->adOn, (void*)adc);
+        fflush(stderr);
+    }
+
     vb6_UCDib dib;
     memset(&dib, 0, sizeof(dib));
-    vb6_uc_dibCreate(&dib, target, cw, ch);
+    if (!adc) vb6_uc_dibCreate(&dib, target, cw, ch);
     const int useDib = (dib.memDC && dib.bits);
-    HDC dc = useDib ? dib.memDC : target;
+    HDC dc = adc ? adc : (useDib ? dib.memDC : target);
 
-    if (transparent && composeBelow) {
-        if (useDib) vb6_uc_composeBelow(hwnd, dc, cw, ch);
-    } else if (!transparent) {
-        vb6_uc_fillAmbient(dc, cw, ch);
+    if (!adc) {
+        if (transparent && composeBelow) {
+            if (useDib) vb6_uc_composeBelow(hwnd, dc, cw, ch);
+        } else if (!transparent) {
+            vb6_uc_fillAmbient(dc, cw, ch);
+        }
+        /* 停写 AutoRedraw 之后那张位图当底图贴回去 (VB6 用 Picture=.Image 达到同一效果)。*/
+        if (r->adSurf.memDC)
+            BitBlt(dc, 0, 0, r->adSurf.w, r->adSurf.h, r->adSurf.memDC, 0, 0, SRCCOPY);
     }
     /* 透明 + 非合成 (被别人 WM_PRINTCLIENT): 一个像素都不填 —— 目标 DC 里已经是
        合成好的下层, 再填 ambient 会把兄弟内容盖掉。*/
@@ -102,7 +168,9 @@ static void vb6_uc_paintInto(HWND hwnd, vb6_UCRec* r, HDC target,
     vb6_uc_trace("paint.end", r->desc->typeName, r->me);
     vb6_uc_pop(&saved);
 
-    if (useDib) {
+    if (adc) {
+        BitBlt(target, 0, 0, cw, ch, adc, 0, 0, SRCCOPY);
+    } else if (useDib) {
         BitBlt(target, 0, 0, dib.w, dib.h, dib.memDC, 0, 0, SRCCOPY);
         // Fix 113h/123: 调试捕获 (C3_UC_DUMPDIR) —— 只在真实 WM_PAINT 路径做,
         // WM_PRINTCLIENT 是被兄弟合成调用的, 重复 dump 会淹没序号。

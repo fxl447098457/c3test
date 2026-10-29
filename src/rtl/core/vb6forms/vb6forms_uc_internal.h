@@ -64,6 +64,14 @@ extern "C" {
 #define VB6_UC_DESIGN_SLOTS 8
 typedef struct Vb6UcDesignSlot { char name[64]; void* value; } Vb6UcDesignSlot;
 
+// Fix 113h: 离屏 DIB（定义在 uc_debug.c，uc_host_window.c 的 WM_PAINT 调试路径也要用）
+typedef struct vb6_UCDib {
+    HDC     memDC;
+    HBITMAP bmp;
+    HBITMAP oldBmp;
+    void*   bits;
+    int32_t w, h, stride;
+} vb6_UCDib;
 typedef struct vb6_UCRec {
     const vb6_UserControlDesc* desc;
     void*  me;
@@ -108,6 +116,11 @@ typedef struct vb6_UCRec {
     // (实测 czUI: m_ControlType 未恢复 = 0 = czTitleBar ⇒ 走错分支 ⇒ AV)。
     // 见 uc_host_create.inc 的 vb6_uc_activate 与 vb6_UC_ActivateHost。
     int32_t pendingActivate;
+    // 账 #305 第二百九十二刀: VB6 `UserControl.AutoRedraw = True` 的持久表面。
+    // 之前 hDC 只在 WM_PAINT 期间有效、Cls 恒空转 ⇒ 只在 Resize/Refresh 里画一次的
+    // 控件 (ComCtlsDemo 的 FrameW) 永远是白板。adOn = VB 代码写过 .AutoRedraw = True。
+    vb6_UCDib adSurf;
+    int32_t   adOn;
 } vb6_UCRec;
 
 // UserControl 宿主状态快照（push/pop 用）
@@ -174,14 +187,6 @@ typedef struct vb6_UCFontRec {
     struct vb6_UCFontRec* next;
 } vb6_UCFontRec;
 
-// Fix 113h: 离屏 DIB（定义在 uc_debug.c，uc_host_window.c 的 WM_PAINT 调试路径也要用）
-typedef struct vb6_UCDib {
-    HDC     memDC;
-    HBITMAP bmp;
-    HBITMAP oldBmp;
-    void*   bits;
-    int32_t w, h, stride;
-} vb6_UCDib;
 
 // ============================================================
 // 跨族共享状态（定义在各族 .c，原为文件级 static）
@@ -328,6 +333,10 @@ void* vb6_HostObj_At(int32_t i);
 
 // --- Fix 113h/Fix 123 调试辅助（uc_debug.c 定义，uc_host_window.c 的 WM_PAINT 依赖）---
 // 离屏 DIB 工具 + 整窗合成 dump；未设环境变量 C3_UC_DUMPDIR 时不会被调用。
+// 账 #305 第二百九十二刀: AutoRedraw 持久表面 (uc_host_window.c 定义)
+HDC  vb6_uc_autoRedrawDC(vb6_UCRec* r);
+void vb6_uc_autoRedrawSet(vb6_UCRec* r, int32_t on);
+void vb6_uc_autoRedrawCls(vb6_UCRec* r);
 void vb6_uc_dibCreate(vb6_UCDib* d, HDC refDC, int32_t w, int32_t h);
 void vb6_uc_dibSaveBmp(const vb6_UCDib* d, const char* path);
 void vb6_uc_dibDestroy(vb6_UCDib* d);
