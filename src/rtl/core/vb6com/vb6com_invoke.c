@@ -289,6 +289,35 @@ static ITypeInfo* vb6_ComTypeInfoOf(IDispatch* pDisp) {
     return ti;
 }
 
+/* 账 #305 第291刀 (b): 旗标按被调方声明的 INVOKEKIND 走, 不按"有没有实参"猜。
+   第一版写成 `argc > 0 ⇒ 只发 METHOD`, 当场打红两只: `test_com_default_prop` 与
+   b433-10 —— Scripting.Dictionary 的默认成员 Item 是**带实参的 propget**,
+   只发 METHOD 它答"找不到成员"。老行为 (METHOD|PROPERTYGET 一发齐递) 对
+   propget 一直是对的, 只有真函数 (INVOKE_FUNC, 例如 IPictureDisp::Render) 才
+   必须单发 METHOD。认不出成员的 (无 typeinfo / 无 FUNCDESC) 一律退回老行为,
+   这样这条规则只碰"能证明是函数"的那一发。 */
+static WORD vb6_ComFlagsFor(IDispatch* pDisp, DISPID dispid, int32_t argc) {
+    WORD dflt = DISPATCH_METHOD | DISPATCH_PROPERTYGET;   /* 猜不出就按老行为两可齐递 */
+    if (argc <= 0) return dflt;
+    ITypeInfo* ti = vb6_ComTypeInfoOf(pDisp);
+    if (!ti) return dflt;
+    TYPEATTR* ta = NULL;
+    if (FAILED(ti->lpVtbl->GetTypeAttr(ti, &ta)) || !ta) return dflt;
+    WORD fl = 0;
+    for (UINT f = 0; f < ta->cFuncs; f++) {
+        FUNCDESC* fd = NULL;
+        if (FAILED(ti->lpVtbl->GetFuncDesc(ti, f, &fd)) || !fd) continue;
+        if (fd->memid == dispid) {
+            if (fd->invkind == INVOKE_FUNC) fl = DISPATCH_METHOD;
+            ti->lpVtbl->ReleaseFuncDesc(ti, fd);
+            break;
+        }
+        ti->lpVtbl->ReleaseFuncDesc(ti, fd);
+    }
+    ti->lpVtbl->ReleaseTypeAttr(ti, ta);
+    return fl ? fl : dflt;
+}
+
 static void vb6_ComNarrowArgs(IDispatch* pDisp, DISPID dispid, VARIANT** args, int32_t argc) {
     if (!pDisp || !args || argc <= 0) return;
     int widen = 0;
@@ -423,12 +452,8 @@ void* vb6_ComCall(void* disp, const wchar_t* methodName,
     memset(&excep, 0, sizeof(excep));
     UINT argErr = 0;
 
-    /* 账 #305 第二百九十刀: 带实参的成员调用只发 DISPATCH_METHOD。
-       从前一律 METHOD|PROPERTYGET, 而 OLE 的 IPictureDisp 对"方法 + 带实参"回
-       DISP_E_BADPARAMCOUNT ⇒ 以语句形调用的带参成员会被对端整发拒掉。
-       VB6 的口径: 带实参就是 Method; 零实参才保留"属性或方法"那种两可。 */
-    WORD callFlags = (argc > 0) ? DISPATCH_METHOD
-                                : (DISPATCH_METHOD | DISPATCH_PROPERTYGET);
+    /* 账 #305 第291刀 (b): 旗标按被调方声明的 INVOKEKIND 走。 */
+    WORD callFlags = vb6_ComFlagsFor(pDisp, dispid, argc);
     HRESULT hr = vb6_ComInvoke(pDisp, dispid, callFlags, &dp, result, &excep, &argErr);
 
     if (GetEnvironmentVariableW(L"C3_OCX_TRACE", NULL, 0) > 0)

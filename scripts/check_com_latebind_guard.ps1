@@ -548,8 +548,14 @@ if ($nVG3dropdef -ne 1) { $fail += ('R17 definition of vb6_ComDropPackedArgs = '
 # 第二层: himetric 那几个实参是 VT_R8 而形参声明是 `typedef LONG` ⇒ 0x80020005, 得按
 # 被调方 typelib 的 FUNCDESC 收窄。两条都钉住, 另加一条**顺序**判据 —— 收窄必须发生在
 # 实参抄进 DISPPARAMS 之前 (第一版写在抄之后, 三个实参都识别对了却一点效果没有)。
-$nR18flag = ([regex]::Matches($vg2Inv, 'WORD callFlags = \(argc > 0\) \? DISPATCH_METHOD')).Count
-if ($nR18flag -ne 1) { $fail += ('R18 ComCall picks the method-only flag for arg-taking members = ' + $nR18flag + ' (want 1; 0 = 又回到 METHOD|PROPERTYGET ⇒ 带参方法被对端整发拒掉)') }
+$nR18flag = ([regex]::Matches($vg2Inv, 'WORD callFlags = vb6_ComFlagsFor\(pDisp, dispid, argc\);')).Count
+if ($nR18flag -ne 1) { $fail += ('R18 ComCall asks the invkind-driven flag owner = ' + $nR18flag + ' (want 1)') }
+$nR18own = ([regex]::Matches($vg2Inv, 'static WORD vb6_ComFlagsFor\(')).Count
+if ($nR18own -ne 1) { $fail += ('R18 definition of vb6_ComFlagsFor = ' + $nR18own + ' (want 1)') }
+$nR18func = ([regex]::Matches($vg2Inv, 'fd->invkind == INVOKE_FUNC')).Count
+if ($nR18func -ne 1) { $fail += ('R18 only a declared INVOKE_FUNC goes METHOD-only = ' + $nR18func + ' (want 1; 0 = 又按「有没有实参」猜 ⇒ Dictionary 的默认成员 Item 是带参 propget, 当场两只用例红)') }
+$nR18hedge = ([regex]::Matches($vg2Inv, 'WORD dflt = DISPATCH_METHOD \| DISPATCH_PROPERTYGET;')).Count
+if ($nR18hedge -ne 1) { $fail += ('R18 the unknown/propget fallback keeps the old two-way hedge = ' + $nR18hedge + ' (want 1)') }
 $nR18old = ([regex]::Matches($vg2Inv, 'DISPATCH_METHOD \| DISPATCH_PROPERTYGET, &dp, result, &excep, &argErr\);')).Count
 if ($nR18old -ne 2) { $fail += ('R18 remaining blanket-flag call sites = ' + $nR18old + ' (want 2 = ComGetPropArg / 另一条按 dispid 的取属性; ComCall 那一发不许再在册)') }
 $nR18def = ([regex]::Matches($vg2Inv, 'static void vb6_ComNarrowArgs\(')).Count
@@ -574,5 +580,5 @@ if ($fail.Count -gt 0) {
     foreach ($f in $fail) { Write-Host ("FAIL " + $f) }
     exit 1
 }
-Write-Host ("PASS check_com_latebind_guard: exits=7 guarded=7 pseudo-exempt=3 order=pseudo-first guard=behavior-preserving counter-outlets=2 host-sibling=3 runner-sites=3 inline-counters=2 negative-control=2 hfont-owner=1 hfont-kind5=2 height-owner=1 height-consumers=3 name-default=ms-sans-serif apply-owner=1 apply-senders=2 self-registered=1") form-ans-owner=1 form-ans-body=1 form-ans-decl=1 form-ans-emit=1 windowless-owner=1 windowless-outlets=2 windowless-arms=2 mask-owner=1 mask-arms=2 vg-owner=1 vg-decl=1 vg-outlet=1 vg-radio-gate=3 vg-truth-guard=1 vg-sibling-setter=1 vis-owner=1 vis-window=1 vis-decl=1 vis-outlets=2 vis-zero-guard=1 vis-old-drop=0 geom-mask=3 geom-read=1 geom-units=5 geom-route=2 geom-cdecl=1 geom-cdef=1 geom-nowindow=0 geom-writes=3 geom-method=0 latebind-drop=2 call-flags=1 blanket-flags=2 narrow-def=1 narrow-call=1 narrow-before-copy=1 himetric-typedef=1 ti-lcid0=1
+Write-Host ("PASS check_com_latebind_guard: exits=7 guarded=7 pseudo-exempt=3 order=pseudo-first guard=behavior-preserving counter-outlets=2 host-sibling=3 runner-sites=3 inline-counters=2 negative-control=2 hfont-owner=1 hfont-kind5=2 height-owner=1 height-consumers=3 name-default=ms-sans-serif apply-owner=1 apply-senders=2 self-registered=1") form-ans-owner=1 form-ans-body=1 form-ans-decl=1 form-ans-emit=1 windowless-owner=1 windowless-outlets=2 windowless-arms=2 mask-owner=1 mask-arms=2 vg-owner=1 vg-decl=1 vg-outlet=1 vg-radio-gate=3 vg-truth-guard=1 vg-sibling-setter=1 vis-owner=1 vis-window=1 vis-decl=1 vis-outlets=2 vis-zero-guard=1 vis-old-drop=0 geom-mask=3 geom-read=1 geom-units=5 geom-route=2 geom-cdecl=1 geom-cdef=1 geom-nowindow=0 geom-writes=3 geom-method=0 latebind-drop=2 call-flags=1 flag-owner=1 invoke-func-only=1 propget-hedge=1 blanket-flags=2 narrow-def=1 narrow-call=1 narrow-before-copy=1 himetric-typedef=1 ti-lcid0=1
 exit 0
