@@ -622,6 +622,9 @@ void vb6_ComSetProp(void* disp, const wchar_t* propName, void* value_void) {
                 case 4: *(void**)efp = (void*)v.punkVal; break;
                 default: *(int32_t*)efp = (int32_t)vb6_VariantToDouble(v); break;
             }
+            /* 账 #305 第二百八十七刀: `With UserControl.Extender: .Visible = v` 这一路
+               与 uc_controls.c 那一条按名的写手同源, 存完字段都交给同一位主人上窗口。 */
+            if (ekind == 2 && wcscmp(propName, L"Visible") == 0) vb6_UC_ExtenderVisibleApplied();
         }
         free(value_void);
         return;

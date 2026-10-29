@@ -347,6 +347,9 @@ void*   vb6_UC_FontHFont(void* p);
 // Fix 168: Extender 结构体同上 (With UserControl.Extender 的 Width/Height/Align)
 int32_t vb6_UC_IsExtender(const void* p);
 void*   vb6_UC_ExtenderField(void* p, const wchar_t* name, int32_t* kind);
+/* 账 #305 第二百八十七刀: 存完这一格之后, 「要落到宿主窗口上」由这一位主人答 (两处写手共用一条)。
+   它不出现在生成代码里, 所以 §B202 那张按名点名的名单不涉及它。 */
+void    vb6_UC_ExtenderVisibleApplied(void);
 // Fix 128: 原地把 src 字体的字段拷进 dst 字体 (用于 Property Set 型字体属性,
 // 避免调用其 Set 实现体里的 Refresh 破坏图表状态)
 void    vb6_UC_FontAssign(void* dst, void* src);

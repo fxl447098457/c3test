@@ -561,12 +561,30 @@ void* vb6_UC_GetExtenderMemberObj(const wchar_t* name) {
     if (!fp || kind != 4) return NULL;
     return *(void**)fp;
 }
+/* 账 #305 第二百八十七刀: 「Extender.Visible 这一发要落到宿主窗口上」收成一位主人。
+   两处写手(本文件按名的那一条 + vb6com_invoke.c 的 IDispatch Extender 臂)存完字段都转调这里。
+   从前只把值存进 rc->extVisible 而**没有任何东西读它**, 于是容器侧 `SpinBox1.Visible = False`
+   (它发成控件自己的 Property Let, Let 体就是 `Extender.Visible = Value`) 静默不隐藏 ——
+   实测靶工程 TabStrip1 切回第一页后, 那一页的 SpinBox / ListView 两台都还留着。
+   窗口那一侧早已有主人 `vb6_SetControlVisible`(原生控件那一路用的就是它), 这里只转调、不抄第二份。 */
+void vb6_UC_ExtenderVisibleApplied(void) {
+    vb6_UCRec* rc = vb6_ucCurrent;
+    if (!rc || !rc->hwnd || !IsWindow((HWND)rc->hwnd)) return;
+    vb6_SetControlVisible(rc->hwnd, rc->extVisible);
+}
+
 void vb6_UC_SetExtenderMember(const wchar_t* name, void* value) {
     extern void* vb6_UC_ExtenderField(void* p, const wchar_t* n, int32_t* k);
     void* p = (void*)&vb6_UserControl_Extender;
     int32_t kind = -1;
     void* fp = vb6_UC_ExtenderField(p, name, &kind);
-    if (!fp || !value) return;
+    if (!fp) return;
+    /* 账 #305 第二百八十七刀: 这道早退原本还带一条 `|| !value` ⇒ **凡递来 0 的写全被静默丢掉**,
+       而 kind 2 那三档布尔（Visible / vb6_Default / Cancel）递来的「假」正是 0。实测靶工程
+       `SpinBox1.Visible = False` 就是这么没的：容器侧那一发走到这里, 字段没存、窗口也没动。
+       只对布尔档放开 —— kind 0/3/4 收的是指针与别的数值, 那里 0 的含义今天没有读数,
+       动它等于凭空改一整族行为（在册：那三档的零值写要不要同样落地, 欠一份产物级 census）。 */
+    if (!value && kind != 2) return;
     switch (kind) {
         case 0: *(BSTR*)fp  = (BSTR)value; break;                 // BSTR: 搬指针
         case 2: *(int16_t*)fp = (int16_t)(intptr_t)value; break;
@@ -575,6 +593,7 @@ void vb6_UC_SetExtenderMember(const wchar_t* name, void* value) {
         case 4: *(void**)fp = value; break;
         default: *(int32_t*)fp = (int32_t)(intptr_t)value; break;
     }
+    if (kind == 2 && _wcsicmp(name, L"Visible") == 0) vb6_UC_ExtenderVisibleApplied();
 }
 void* vb6_UC_ExtenderField(void* p, const wchar_t* name, int32_t* kind) {
     if (!vb6_UC_IsExtender(p) || !name || !kind) return NULL;

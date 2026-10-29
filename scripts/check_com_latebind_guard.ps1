@@ -490,6 +490,25 @@ if ($nVGtrue -ne 1) { $fail += ('R15 the "is self really checked" guard = ' + $n
 $nVGset = ([regex]::Matches($vgHost, 'vb6_UC_OwnPropSet\(r2->me, L"Value"')).Count
 if ($nVGset -ne 1) { $fail += ('R15 siblings are cleared through their own Value setter = ' + $nVGset + ' (want 1; 0 = 又去裸发 BM_SETCHECK = 第二本账)') }
 
+# ---- R16: 第二百八十七刀那一档 (Extender.Visible 上窗口) 的形状 ----
+# 容器侧 `SpinBox1.Visible = False` 发成控件自己的 Property Let，Let 体只递一声
+# `Extender.Visible = v`；从前这一问落到 uc_controls.c 的字段格里就没人再管，且那道
+# 「value 为 0 就早退」把「假」整个丢掉 (布尔档的假正是 0) ⇒ 靶工程 TabStrip1 切页时
+# 该隐的两枚 UC 一台都不隐。规矩: 上窗口只许经那一位既有的主人 vb6_SetControlVisible，
+# 两处写手 (按名的那一条 + IDispatch 的 Extender 臂) 各转调一次，零值早退只对布尔档放开。
+$vg2Inv  = Strip-Comments262 ((Read-Lines262 $invPath) -join "`n")
+$nVG2def = ([regex]::Matches($collCode, 'void vb6_UC_ExtenderVisibleApplied\w*\(void\) \{')).Count
+if ($nVG2def -ne 1) { $fail += ('R16 definition of vb6_UC_ExtenderVisibleApplied = ' + $nVG2def + ' (want 1; 2 = 第二份主人又抄了一张)') }
+$nVG2win = ([regex]::Matches($collCode, 'vb6_SetControlVisible\(rc->hwnd, rc->extVisible\);')).Count
+if ($nVG2win -ne 1) { $fail += ('R16 the owner delegates to the window authority = ' + $nVG2win + ' (want 1; 0 = 又去裸发 ShowWindow = 第二本账)') }
+$nVG2decl = ([regex]::Matches($ctrlHdrCode, '(?m)^void\s+vb6_UC_ExtenderVisibleApplied')).Count
+if ($nVG2decl -ne 1) { $fail += ('R16 vb6_UC_ExtenderVisibleApplied declared for the com module = ' + $nVG2decl + ' (want 1; 0 = 发方各自 extern 一份)') }
+$nVG2out = ([regex]::Matches($collCode, 'vb6_UC_ExtenderVisibleApplied\(\);')).Count + ([regex]::Matches($vg2Inv, 'vb6_UC_ExtenderVisibleApplied\(\);')).Count
+if ($nVG2out -ne 2) { $fail += ('R16 writer outlets that ask the owner = ' + $nVG2out + ' (want 2 = 按名那条 + IDispatch 那条; 少一枚 = 又一户只存字段不上窗口)') }
+$nVG2zero = ([regex]::Matches($collCode, 'if \(!value && kind != 2\) return;')).Count
+if ($nVG2zero -ne 1) { $fail += ('R16 the zero-value early-out is narrowed to the non-boolean kinds = ' + $nVG2zero + ' (want 1; 0 = 「假」又被整个丢掉)') }
+$nVG2old = ([regex]::Matches($collCode, 'if \(!fp \|\| !value\) return;')).Count
+if ($nVG2old -ne 0) { $fail += ('R16 the blanket "no value" drop is back = ' + $nVG2old + ' (want 0) - 它一回来, Visible=False 这类写又是静默的') }
 # ---- R8: 这枚哨兵自己不许是死码 ----
 $nSelfReg = ([regex]::Matches($rtCode, 'Test-ComLatebindGuard')).Count
 if ($nSelfReg -ne 2) {
@@ -501,5 +520,5 @@ if ($fail.Count -gt 0) {
     foreach ($f in $fail) { Write-Host ("FAIL " + $f) }
     exit 1
 }
-Write-Host ("PASS check_com_latebind_guard: exits=7 guarded=7 pseudo-exempt=3 order=pseudo-first guard=behavior-preserving counter-outlets=2 host-sibling=3 runner-sites=3 inline-counters=2 negative-control=2 hfont-owner=1 hfont-kind5=2 height-owner=1 height-consumers=3 name-default=ms-sans-serif apply-owner=1 apply-senders=2 self-registered=1") form-ans-owner=1 form-ans-body=1 form-ans-decl=1 form-ans-emit=1 windowless-owner=1 windowless-outlets=2 windowless-arms=2 mask-owner=1 mask-arms=2 vg-owner=1 vg-decl=1 vg-outlet=1 vg-radio-gate=3 vg-truth-guard=1 vg-sibling-setter=1
+Write-Host ("PASS check_com_latebind_guard: exits=7 guarded=7 pseudo-exempt=3 order=pseudo-first guard=behavior-preserving counter-outlets=2 host-sibling=3 runner-sites=3 inline-counters=2 negative-control=2 hfont-owner=1 hfont-kind5=2 height-owner=1 height-consumers=3 name-default=ms-sans-serif apply-owner=1 apply-senders=2 self-registered=1") form-ans-owner=1 form-ans-body=1 form-ans-decl=1 form-ans-emit=1 windowless-owner=1 windowless-outlets=2 windowless-arms=2 mask-owner=1 mask-arms=2 vg-owner=1 vg-decl=1 vg-outlet=1 vg-radio-gate=3 vg-truth-guard=1 vg-sibling-setter=1 vis-owner=1 vis-window=1 vis-decl=1 vis-outlets=2 vis-zero-guard=1 vis-old-drop=0
 exit 0
