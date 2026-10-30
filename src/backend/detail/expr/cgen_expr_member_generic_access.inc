@@ -97,12 +97,18 @@
         if (objRes.compare(0, 19, "vb6_ComCallObject(") == 0
             || objRes.compare(0, 21, "vb6_ComGetObjectProp(") == 0
             || objRes.compare(0, 12, "vb6_ComCall(") == 0) {
-            comObjExpr_ = objRes;
+            // 接收者必须是**真 IDispatch***: `vb6_ComCall` 交回的是堆上 VARIANT*,
+            // 直接喂给下一站 (`vb6_ComGetStringProp(<VARIANT*>, L"Name")`) 就是
+            // 拿 VARIANT 盒当对象 —— 运行期 C3_LATEBIND_MISS kind=notdispatchable,
+            // 属性读交空 (test_com2 `fso.GetFolder("C:\Users").Name` 实测)。
+            // comObjectRefFromCallExpr 正是「这一发要当对象用 ⇒ 换到交回对象的那一枚
+            // 出口」的唯一主人 (ComCall → ComCallObject, ComGetProp → ComUnpackObject)。
+            comObjExpr_ = comObjectRefFromCallExpr(objRes);
             comMemberName_ = node.memberName;
             isComMarker_ = true;
             isEarlyBoundCom_ = false;
             earlyBoundSym_ = nullptr;
-            lastExpr_ = objRes;
+            lastExpr_ = comObjExpr_;
             return;
         }
     }
