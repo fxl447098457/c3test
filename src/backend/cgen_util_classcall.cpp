@@ -790,4 +790,26 @@ bool CCodeGen::emitUcInstanceMemberExpr(const std::string& ucClass,
     return true;
 }
 
+// 账 #305 第三百零九刀: 「窗体 Show 转发子还欠哪几枚形参」的唯一作者（问句与三个消费者
+// 见 cgen_helpers.inc 声明处）。转发子是发码期合成的，符号表里没有 `Show` 这个人，
+// 所以三条 AST 查表路（IdentifierExpr / MemberAccessExpr / WithMemberExpr 的类实例档）
+// 全都问不到它 —— 那三档各自手补过 `, 0`（com_bind 的 Fix 146、cgen_call 的 Fix 150），
+// 而**多写**的那一发（VB 的 OwnerForm）从没人管：形参表答"查无此人" ⇒ 调用点的截断
+// (named_args 的 Fix 041b) 不触发 ⇒ 实参全数追加。这里把形参表交出去，补与截都归通用流程。
+bool CCodeGen::formShowForwarderParams(const std::string& calleeText,
+                                       std::vector<ParameterInfo>& out) const {
+    static const std::string kPrefix = "vb6_form_show_";
+    if (calleeText.size() <= kPrefix.size()
+        || calleeText.compare(0, kPrefix.size(), kPrefix) != 0) {
+        return false;
+    }
+    ParameterInfo mode;
+    mode.name = "Mode";
+    mode.type = Vb6Type::Long;   // VB6 的 Mode 是 Long (vbModal = 1)；原型那一头是 int
+    mode.isByVal = true;         // 按值 ⇒ 省略时补的是裸 0，不是 &(...){0}
+    out.clear();
+    out.push_back(mode);
+    return true;
+}
+
 } // namespace vb6c3

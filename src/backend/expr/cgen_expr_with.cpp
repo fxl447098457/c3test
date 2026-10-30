@@ -261,7 +261,8 @@ void CCodeGen::visit(WithMemberExpr& node) {
         // vb6_ComCall(HWND, L"Show", …), 运行期 C3_LATEBIND_MISS (disp=0) 静默, 窗体
         // 不弹 (ComCtlsDemo 三枚按钮实测)。两条出口与外部窗体那条
         // (`Frm.Show` → cgen_expr_member_form_builtin.inc) 同一个拼法:
-        //   .Show [modal] → vb6_form_show_<窗体>(NULL)  (modal 由 com_bind 的拆包追加)
+        //   .Show [modal] → vb6_form_show_<窗体>(NULL)  (欠的那一枚 mode 由形参表的
+        //                     唯一作者 formShowForwarderParams 交出：拆包后补/截)
         //   标量属性       → 控件读表 getControlPropReadFn(Form, …)(tempVar)
         if (info.ctrlType == FrmControlType::Form && !info.ctrlOrigName.empty()) {
             if (memLower == "show") {

@@ -273,12 +273,28 @@ void CCodeGen::visit(CallStmt& node) {
         // (parser_stmt_assign 收尾), 不经过 IndexOrCallExpr; 而 form_builtin 的
         // external form show 转发只交付 vb6_form_show_<Form>(NULL) 半成品
         // (modal 实参由 com_bind 拆包路径追加), 语句形态原样 emit → 1 参调用
-        // 对 Fix 146 的 2 参签名 (void* hMDIClient, int modal) → C2198.
-        // 无参 Show 即 modeless, 此处补默认 modal=0.
-        if (callExpr.size() > 6
-            && callExpr.compare(0, 14, "vb6_form_show_") == 0
-            && callExpr.compare(callExpr.size() - 6, 6, "(NULL)") == 0) {
-            callExpr = callExpr.substr(0, callExpr.size() - 1) + ", 0)";
+        // 对 2 参签名 (void* hMDIClient, int modal) → C2198。
+        // 账 #305 第三百零九刀: 这里**补哪几枚**不再手拼 ", 0" —— 形参表问它的唯一作者
+        // formShowForwarderParams，缺省值那一档走 defaultArgForParam（和命名实参补齐同
+        // 一条出口）。无参 Show = modeless 这条 VB6 语义因此只有表里一份。
+        // ⚠ 只补**半成品**那一形（尾巴是 `(NULL)`，即只有 hMDIClient、mode 还欠）：
+        //   带实参的语句 `Frm.Show vbModal` 到这里时 callee 已经发成完整调用，
+        //    arity 归表达式路（callee_params 答形参表 + named_args 截 / opt_pad 补）管，
+        //   这里再补一发就是三个参数打两个槽（实测读数 (NULL, 1, 0)）。
+        {
+            static const std::string kHalfTail = "(NULL)";
+            std::vector<ParameterInfo> fsParams309;
+            if (callExpr.size() >= kHalfTail.size()
+                && callExpr.compare(callExpr.size() - kHalfTail.size(),
+                                    kHalfTail.size(), kHalfTail) == 0
+                && formShowForwarderParams(callExpr, fsParams309)) {
+                for (const auto& p309 : fsParams309) {
+                    const std::string def309 = defaultArgForParam(
+                        p309.type, p309.isByVal,
+                        p309.hasDefaultValue ? p309.defaultValueExpr : std::string());
+                    callExpr = callExpr.substr(0, callExpr.size() - 1) + ", " + def309 + ")";
+                }
+            }
         }
 
         // COM调用检测 (P6.2): isComMarker_标志

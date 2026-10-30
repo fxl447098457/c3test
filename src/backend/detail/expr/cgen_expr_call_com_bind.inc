@@ -777,6 +777,20 @@
         }
     }
 
+    // 账 #305 第三百零九刀: 窗体 Show 转发子**一律**走下面的拆包路 —— 形参表由唯一作者
+    // (formShowForwarderParams) 回答，缺的 mode 由 opt_pad 补 0、多写的 OwnerForm 由
+    // named_args 的 Fix 041b 截掉。以前这里是两条各写各的：无实参那一形由下面那一格
+    // (Fix 146) 手拼 ", 0"，带实参那一形走通用拆包把 VB 的 Show(Mode, OwnerForm) 两发
+    // 全追加进去 —— 转发子只有两个槽 (hMDIClient, modal)，第三发没人管：实测
+    // VBFlexGridDemo MainForm.frm:846/861/1138 `With New InputForm … .Show vbModal, Me`
+    // → vb6_form_show_InputForm(NULL, 1, vb6_hwnd_MainForm) → runner 那台 cl 报
+    // C2197 参数太多（本机 14.29 只给 C4020 警告，所以本地绿、门红 FlexGridX86）。
+    bool needsSplitFormShow = false;
+    if (!needsSplitForOptionalPad && !needsSplitForMissingArgs) {
+        std::vector<ParameterInfo> fsParams309;
+        needsSplitFormShow = formShowForwarderParams(callee, fsParams309);
+    }
+
     // 如果callee已经是func(args)形式(如类方法调用 vb6_Counter_GetCount(c)),
     // 且IndexOrCallExpr没有额外参数, 直接使用callee避免双重括号
     if (callee.size() >= 2 && callee.back() == ')' && node.positional.empty() && node.named.empty()) {
@@ -790,16 +804,8 @@
                 depth--;
             }
         }
-        if (isCompleteCall && !needsSplitForOptionalPad && !needsSplitForMissingArgs) {
-            // Fix 146 回归 (vbman cLogs C2198 / T2 ExtShow): external form show 转发
-            // (cgen_expr_member_form_builtin.inc) 只交付 vb6_form_show_<Form>(NULL),
-            // modal 实参原本只由本文件的"有参拆包"路径追加; 无参调用 (Frm.Show) 走
-            // 这里直接复用 callee, 会缺 modal 形参 -> C2198. 无参即补默认 modal=0
-            // (VB6 语义: 无参 Show = modeless).
-            if (callee.compare(0, 14, "vb6_form_show_") == 0) {
-                lastExpr_ = callee.substr(0, callee.size() - 1) + ", 0)";
-                return;
-            }
+        if (isCompleteCall && !needsSplitForOptionalPad && !needsSplitForMissingArgs
+            && !needsSplitFormShow) {
             lastExpr_ = callee;
             return;
         }
@@ -873,7 +879,8 @@
 
     if (callee.size() >= 2 && callee.back() == ')'
         && ((!node.positional.empty() || !node.named.empty())
-            || needsSplitForOptionalPad || needsSplitForMissingArgs)) {
+            || needsSplitForOptionalPad || needsSplitForMissingArgs
+            || needsSplitFormShow)) {
         // 检查是否是完整的函数调用（以右括号结尾且匹配左括号）
         int depth = 0;
         int openPos = -1;

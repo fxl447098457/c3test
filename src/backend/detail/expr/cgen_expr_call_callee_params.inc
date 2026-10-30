@@ -324,6 +324,15 @@
         }
     }
 
+    // 账 #305 第三百零九刀: 窗体 Show 转发子的形参表 —— 上面三档都按 AST 查符号，
+    // 而转发子是发码期合成的（符号表里没有 `Show` 这个人），只有按 callee 文本才问得到。
+    // 到这里时文本有两种形状：拆包后的裸名 `vb6_form_show_<F>`（NULL 已进 classMethodObjArg）
+    // 与没拆的半成品 `vb6_form_show_<F>(NULL)`；两种都自带 hMDIClient，欠的都只有 mode 一枚，
+    // 所以一个答案够用：省略 ⇒ opt_pad 补 0，多写 ⇒ named_args 的 Fix 041b 截掉 OwnerForm。
+    if (!calleeParamsFound && formShowForwarderParams(callee, calleeParams)) {
+        calleeParamsFound = true;
+    }
+
     // M22: 检测Declare ANSI函数调用 - 需要BSTR->ANSI转换
     bool isDeclareAnsiCall = false;
     if (node.callee && node.callee->kind == ASTNodeKind::IdentifierExpr) {

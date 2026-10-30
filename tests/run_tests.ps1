@@ -7379,7 +7379,11 @@ if ($Category -in @("all", "run", "vbp")) {
     Write-Host ""
 
     Test-Vbp "test_implements" "$Tests\test_implements.vbp" @("IMPL1:OK", "IMPL2:OK", "Implements test PASSED")
-    Test-Vbp "test_events" "$Tests\test_events\test_events.vbp" @("Events test PASSED", "EvtRef test PASSED")
+    Test-Vbp "test_events" "$Tests\test_events\test_events.vbp" @("Events test PASSED", "EvtRef test PASSED", "EvtVar test PASSED")
+    # 账 #305 第三百八刀: 同一格病灶在 x86 上是「把 20B 的槽写进 4B 的标量存储」—— 栈被写穿
+    # 才打死客户端 (ComCtlsDemo VirtualControls Demo 实测 0xC000041D)，x64 那一趟只是写得宽一点。
+    # 两架构都真跑一遍，判据串完全相同。
+    Test-Vbp "test_events_x86" "$Tests\test_events\test_events.vbp" @("Events test PASSED", "EvtRef test PASSED", "EvtVar test PASSED") -Arch "x86"
     # 账 #305 第二百五十六刀: 事件声明里明写 ByRef 的那几位是出参 —— 六处发形参表的地方
     # (回调 typedef / 窗体 thunk / 处理器 / RaiseEvent 实参位 / 模块级包装的声明与实现) 必须
     # 同一个形状。正针钉指针形的三处实物, 反面针钉修复前那两行原样 (少一枚 = 没钉住同一发)。
@@ -7390,6 +7394,22 @@ if ($Category -in @("all", "run", "vbp")) {
     Test-EmitcAbsent "b256_evt_byref_lesion" @("$Tests\test_events\Button.cls", "$Tests\test_events\test_events.bas") @(
         "typedef void (*vb6_evt_Button_GetEmptyMarkup_cb)(void* handler, BSTR Text, int16_t Center);",
         "void vb6_evt_wrap_test_events_btn_GetEmptyMarkup(void* handler, BSTR Text, int16_t Center) {")
+    # 账 #305 第三百八刀: 形参声明是槽 (As Variant) 而实参是一枚标量局部 —— 五针钉同一发:
+    # 盒子的声明 / 装箱 / 递地址 / 按实参档回写 / 清槽。最后一针钉**反面证人** (V 本来就是槽,
+    # 直递 &V, 不许多套一层盒) —— 少了它, 「一律装箱」那种修法在这一格是绿的。
+    Test-EmitcShape "b308_evt_variant_box" @("$Tests\test_events\Button.cls", "$Tests\test_events\test_events.bas") @(
+        "vb6_VARIANT _evt_box_0 = vb6_VariantEmpty();",
+        "vb6_VariantAssign(&_evt_box_0, vb6_VariantFromValue(S));",
+        "me->events->onFillText(me->events->handler, &_evt_box_0);",
+        "vb6_BSTR_AssignMove(&(S), vb6_VariantToString(_evt_box_0));",
+        "(L) = (int32_t)vb6_VariantToLong(_evt_box_0);",
+        "me->events->onFillText(me->events->handler, &(V));")
+    # 修复前那一形: 标量局部的地址直接交给 vb6_VARIANT* 形参 (处理器往 4/8 字节里写一整枚槽)。
+    # 这两针在今天的产物里必须**不在场**；它们同形的 &V 那一发仍在场 (槽的那一路), 所以
+    # 不是死针 —— 「盒子里的名字」出现即说明又退回裸地址。
+    Test-EmitcAbsent "b308_evt_variant_lesion" @("$Tests\test_events\Button.cls", "$Tests\test_events\test_events.bas") @(
+        "me->events->onFillText(me->events->handler, &(S));",
+        "me->events->onFillNum(me->events->handler, &(L));")
     Test-Vbp "M7Test" "$Tests\m7_test\M7Test.vbp" @("4/4 PASSED")
     # ai/022 B03: cross-module new-style contract reached through an Interface head-line host
     Test-Vbp "itf_xmod_writer" "$Tests\itf_xmod\XWriter.vbp" @("XMOD1:OK", "XMOD2:OK", "IFV1:OK", "IFV2:OK", "IFV3:OK", "LIFE1:OK", "LIFE2:OK", "LIFE3:OK", "LIFE9:OK", "TERM last=bye", "TERM last=scoped", "QI1:OK", "QI2:OK", "QI3:OK", "QI4:OK", "TOF1:OK", "TOF2:OK", "TOF3:OK", "DN0:OK", "DN1:OK", "DN2:OK", "DN3:OK", "TOC1:OK", "TOC2:OK", "TOC3:OK")

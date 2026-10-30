@@ -549,6 +549,20 @@
     std::string ctrlArrWriteCalleeArgs(const std::string& writeFn,
                                        const std::string& arrOrigName,
                                        const std::string& idxArg) const;
+    // 账 #305 第三百零九刀: 「这条 callee 是不是窗体 Show 转发子、它还欠哪几枚形参」的
+    //   唯一作者。原型住在 cgen_form_ctrl_registry.inc —— 两参 (void* hMDIClient, int modal)。
+    //   两条发码路交出的 callee 都已自带 hMDIClient: 半成品 `vb6_form_show_<F>(NULL)`
+    //   (cgen_expr_with.cpp 的 With 体内 / cgen_expr_member_form_builtin.inc 的外部窗体),
+    //   以及被 cgen_expr_call_com_bind.inc 拆包后剩下的裸名 `vb6_form_show_<F>` (NULL 进了
+    //   classMethodObjArg)。两种形状都问得到同一个答案, 所以键按前缀认, 不看尾巴。
+    //   交回的表**只列还欠的那一枚** (mode) ⇒ 省略时由 opt_pad 补 0、写多了由 named_args
+    //   的 Fix 041b 截断, 两头都不再有各自的特判。
+    //   VB 的 Form.Show(Mode, OwnerForm) 里 OwnerForm 没有槽 —— 窗体归属从没建模,
+    //   多写那一发按形参表丢掉 (实测 VBFlexGridDemo MainForm.frm:846/861/1138
+    //   `.Show vbModal, Me`; 丢掉之前它被一并追加 ⇒ 三参打二参原型, runner 那台新 cl
+    //   报 C2197 参数太多, 门红 FlexGridX86)。
+    bool formShowForwarderParams(const std::string& calleeText,
+                                 std::vector<ParameterInfo>& out) const;
     // Fix <vbeclipse>: 在其他窗体的设计器描述里找控件 (frmViewViews.tvwViews)。
     // 命中返回该控件描述, 否则 nullptr。designerFiles_ 未设 / 非窗体名都返回 nullptr。
     const FrmControl* findExternalFormControl(const std::string& formName,
