@@ -643,37 +643,37 @@
         // BSTR 指针被截成 int32 存进 PropIndex => 每个列头的 Index 都是垃圾 =>
         // LVM_GET/SETCOLUMN 永远问错列 => 表头的 SortArrow(HDF_SORTDOWN) /
         // CheckBox(HDF_CHECKBOX) 一个都落不下 (ComCtlsDemo 页面 1 的列头缺箭头与复选框)。
-        // 写方向的声明类型由两张既有表回答: 类**属性** = findClassMemberWriteParams 末参
-        // (Property Let 的值槽), 类**数据字段** = classFieldKind。两个方向都只认标量档,
-        // Variant / Unknown 维持原默认 (不猜)。
+        // 写方向的声明类型: 类**属性** = findClassMemberWriteParams 末参 (Property Let 的
+        // 值槽); 类**数据字段** 不改抄一份档表, 交给 Fix 092m 那位既有主人
+        // classFieldComUnpackHint (上面第三轮的注释就点名了它)。两个方向都只接能明确
+        // 映射的那几档, Variant / 认不出维持原默认 (不猜)。
         if (unpackHint.empty() && node.target
             && node.target->kind == ASTNodeKind::MemberAccessExpr) {
             auto& maTgt294 = static_cast<MemberAccessExpr&>(*node.target);
             const std::string tgtCls294 = inferClassTypeOfExpr(*maTgt294.object);
             if (!tgtCls294.empty() && Symbol::toLower(tgtCls294) != "object") {
-                Vb6Type slot294 = Vb6Type::Unknown;
                 std::vector<ParameterInfo> wl294;
                 if (findClassMemberWriteParams(tgtCls294, maTgt294.memberName,
                                                /*isSet=*/false, wl294)
                     && !wl294.empty()) {
-                    slot294 = wl294.back().type;
-                } else {
-                    slot294 = classFieldKind(tgtCls294, maTgt294.memberName);
+                    switch (wl294.back().type) {
+                        case Vb6Type::String:                       unpackHint = "BSTR";    break;
+                        case Vb6Type::Long:
+                        case Vb6Type::Byte:
+                        case Vb6Type::Error:                        unpackHint = "Long";    break;
+                        case Vb6Type::Integer:
+                        case Vb6Type::Boolean:                      unpackHint = "Int";     break;
+                        case Vb6Type::Single:                       unpackHint = "Single";  break;
+                        case Vb6Type::Double:
+                        case Vb6Type::Date:
+                        case Vb6Type::Currency:                     unpackHint = "Double";  break;
+                        case Vb6Type::LongPtr:                      unpackHint = "LongPtr"; break;
+                        case Vb6Type::Object:                       unpackHint = "Object";  break;
+                        default: break;   // Variant / Unknown: 落到下面那一位主人
+                    }
                 }
-                switch (slot294) {
-                    case Vb6Type::String:                       unpackHint = "BSTR";    break;
-                    case Vb6Type::Long:
-                    case Vb6Type::Byte:
-                    case Vb6Type::Error:                        unpackHint = "Long";    break;
-                    case Vb6Type::Integer:
-                    case Vb6Type::Boolean:                      unpackHint = "Int";     break;
-                    case Vb6Type::Single:                       unpackHint = "Single";  break;
-                    case Vb6Type::Double:
-                    case Vb6Type::Date:
-                    case Vb6Type::Currency:                     unpackHint = "Double";  break;
-                    case Vb6Type::LongPtr:                      unpackHint = "LongPtr"; break;
-                    case Vb6Type::Object:                       unpackHint = "Object";  break;
-                    default: break;   // Variant / Unknown: 维持原默认
+                if (unpackHint.empty()) {
+                    unpackHint = classFieldComUnpackHint(tgtCls294, maTgt294.memberName);
                 }
             }
         }
