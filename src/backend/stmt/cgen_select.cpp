@@ -8,11 +8,41 @@ namespace vb6c3 {
 
 // --- cgen_select.cpp: Select Case 语句生成 ---
 
+// 账 #305 第311刀: 「Case 标签是不是全部落在串档」的**唯一**回答处（声明在
+// detail/util/cgen_helpers.inc）。契约：一个标签都不许漏 —— `Case Is > x` 的右操作数、
+// `Case a To b` 的两端都是标签；`Case Else` 不在 node.cases 里，不用管。
+// 拿不到标签（value 为空）或任何一档答不出 String ⇒ false，**宁可退回现行为也不猜**。
+bool CCodeGen::selectCaseLabelsAllString(SelectCaseStmt& node) const {
+    bool sawLabel = false;
+    for (auto& clause : node.cases) {
+        for (auto& cv : clause->values) {
+            if (!cv.value || !TypeSystem::isString(inferExprType(*cv.value))) return false;
+            if (cv.toValue && !TypeSystem::isString(inferExprType(*cv.toValue))) return false;
+            sawLabel = true;
+        }
+    }
+    return sawLabel;
+}
+
 void CCodeGen::visit(SelectCaseStmt& node) {
     // 推断测试表达式的类型
     Vb6Type testType = inferExprType(*node.testExpr);
     bool isStringSelect = TypeSystem::isString(testType);
     bool isFloatSelect = TypeSystem::isFloat(testType);
+
+    // 账 #305 第311刀「实施」= 主语静态答 **Variant** 时，承载档改由 Case 标签回答。
+    // VB6 对 Variant 主语的 Select Case 是按 Case 项的类型逐项做 VarCmp；我方以前只问
+    // inferExprType 一档 ⇒ 答 Variant 就落 int32_t 档 + vb6_VariantToLong 解包，而标签
+    // 是串 ⇒ 发成 `int32_t == vb6_BSTR_FromStr(L"…")`（C 模式只警告不报红），**每一档都
+    // 假** ⇒ 恒落 Case Else。靶子 = ComCtlsDemo 工具栏 `Select Case Button.Tag`
+    // （TbrButton.cls:73 `Property Get Tag() As Variant`）：点 "Show ListBoxW1" 该让
+    // SysListView32 隐身、ListBox 上位，实测只弹了一句 "clicked button 5"、零枚窗口翻转。
+    // 只放开「标签**全部**是串档」这一形；混合标签（同一条里既有 Case "a" 又有 Case 1）
+    // 留在现状 = 需要逐项 VarCmp，本刀不做，已记开口。
+    if (!isStringSelect && !isFloatSelect && testType == Vb6Type::Variant
+        && selectCaseLabelsAllString(node)) {
+        isStringSelect = true;
+    }
 
     emitExpr(*node.testExpr);
     if (isComMarker_) {
@@ -25,8 +55,10 @@ void CCodeGen::visit(SelectCaseStmt& node) {
         // (返回 int32_t), 根本不进这个 marker 分支。
         // 同族的两个先例: Fix 092n (For 的 start/end/step) 与 Fix 092r (UnaryExpr),
         // 口径一致 —— 按目标类型解锁, 不按"默认最通用"解锁。
-        // 注: 未登记属性的 inferExprType 兜底是 Variant ⇒ isString/isFloat 均为假
-        // ⇒ 落 Long 分支, 与 tempType=int32_t 对齐; 读不到值时 getter 给 0。
+        // 注: 未登记属性的 inferExprType 兜底是 Variant ⇒ 上方两档均为假 ⇒ 落 Long 分支,
+        // 与 tempType=int32_t 对齐; 读不到值时 getter 给 0。**第311刀之后**多一条岔口：
+        // 同一条 Select 的 Case 标签若是**全部**串档，承载档已按标签改走 BSTR，这里跟着
+        // 一起答 BSTR —— 两条问句读的是同一个 isStringSelect，不许各抄一份。
         if (isStringSelect)      resolveComValue("BSTR");
         else if (isFloatSelect)  resolveComValue("Double");
         else                     resolveComValue("Long");

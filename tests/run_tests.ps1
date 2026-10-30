@@ -2027,6 +2027,20 @@ function Test-ConditionTruthAuthority {
     }
 }
 
+function Test-SelectCarrierAuthority {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] select_carrier_authority ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\check_select_carrier_authority.ps1" 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        $out | Select-Object -First 8 | ForEach-Object { Write-Host "  $_" }
+    }
+}
+
 function Test-EventParamAbiAuthority {
     $script:total++
     Write-Host -NoNewline "  [STATIC] event_param_abi_authority ... "
@@ -3737,7 +3751,8 @@ if ($Category -in @("all", "run", "bas")) {
     # Is 与普通值混写同一形(CI-mixed，优先级不能把 `, 1` 吃进右操作数)、字符串 Select(CI-word)、
     # Single Select(CI-half，Fix 136 那一档的 Case 侧)、Variant 测试表达式(CI-var)。
     $ciNeedles = @("CI-rel=lt/le/eq/gt/ge/ge", "CI-ne=is4/ne4", "CI-mixed=big/big/two/rest",
-        "CI-word=beq/gtm/rest", "CI-half=hi/lo/mid", "CI-var=hi/lo/hi", "CI-DONE")
+        "CI-word=beq/gtm/rest", "CI-half=hi/lo/mid", "CI-var=hi/lo/hi",
+        "CI-vartag=bbb/bbb/aaa/else", "CI-mixtag=else/num", "CI-DONE")
     Add-BasTest "test_caseis" "$Tests\test_caseis.bas" $ciNeedles
     Add-BasTest "test_caseis_x86" "$Tests\test_caseis.bas" $ciNeedles -Arch "x86"
     # <vbeclipse> Fix 2026-10-06: Err.LastDllError 必须是"Declare 调用那一刻的快照"。
@@ -10324,6 +10339,7 @@ if ($Category -in @("all", "compile")) {
     if (Enter-StaticShard) { Test-VariantToStringAuthority }
     if (Enter-StaticShard) { Test-ByRefArgPackAuthority }
     if (Enter-StaticShard) { Test-ConditionTruthAuthority }
+    if (Enter-StaticShard) { Test-SelectCarrierAuthority }
     if (Enter-StaticShard) { Test-EventParamAbiAuthority }
     if (Enter-StaticShard) { Test-ComValueTwinAuthority }
     if (Enter-StaticShard) { Test-ByRefElementAddressAuthority }

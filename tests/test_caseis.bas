@@ -82,6 +82,38 @@ Private Function VarCase(v As Variant) As String
     End Select
 End Function
 
+' 账 #305 第311刀: 主语静态答 Variant 而 Case 标签**全是**串档 —— 承载档必须跟标签走。
+' 靶子 = ComCtlsDemo 工具栏 `Select Case Button.Tag` (TbrButton.cls:73 `Property Get Tag() As Variant`):
+' 改前发成 `int32_t _vb6_select = vb6_VariantToLong(...)`, 标签却是 `vb6_BSTR_FromStr(L"...")` 的指针,
+' C 模式只警告不报红 ⇒ 每一档都假 ⇒ 恒落 Case Else (点 "Show ListBoxW1" 只弹一句 "clicked button 5",
+' ListView3 / ListBoxW1 一枚都不换)。
+' ⚠ 主语刻意用**Variant 形参/变量**这一档 (发码认得出是槽 ⇒ 补 vb6_VariantToString)。另有一形
+'   `Select Case <用户函数>`, 该函数声明 As Variant: 改前改后都编不过 (cl C2440 "vb6_VARIANT →
+'   int32_t/BSTR", 实测 1 条), 因为 cExprIsVariant 与 knownVariantVars_ 都不认**用户函数的返回值**是槽
+'   —— 独立缺陷、响亮、与本刀不同, 已记为开口，不在这里钉。
+Private Function ByTag(v As Variant) As String
+    Select Case v
+        Case "a"
+            ByTag = "aaa"
+        Case "b", "bb"
+            ByTag = "bbb"
+        Case Else
+            ByTag = "else"
+    End Select
+End Function
+
+' 混合标签（串 + 数）刻意不放开：那一形要逐项 VarCmp，本刀按读数留在现状（不翻承载档）。
+Private Function MixedTag(v As Variant) As String
+    Select Case v
+        Case "s"
+            MixedTag = "str"
+        Case 7
+            MixedTag = "num"
+        Case Else
+            MixedTag = "else"
+    End Select
+End Function
+
 Public Sub Main()
     Debug.Print "CI-rel=" & Rel(3) & "/" & Rel(5) & "/" & Rel(6) & "/" & Rel(9) & "/" & Rel(7) & "/" & Rel(8)
     Debug.Print "CI-ne=" & Ne(4) & "/" & Ne(5)
@@ -89,5 +121,9 @@ Public Sub Main()
     Debug.Print "CI-word=" & Word("b") & "/" & Word("zz") & "/" & Word("a")
     Debug.Print "CI-half=" & Half(0.7) & "/" & Half(0.1) & "/" & Half(0.5)
     Debug.Print "CI-var=" & VarCase(9) & "/" & VarCase(2) & "/" & VarCase(CDbl(7))
+    Debug.Print "CI-vartag=" & ByTag("b") & "/" & ByTag("bb") & "/" & ByTag("a") & "/" & ByTag("z")
+    ' 混合标签那一形: 第一格 **"else" 是已知错的** (VB6 答 "str") —— 钉在这是要「按档逐项 VarCmp」
+    ' 那一刀来把它改成 str/num，不许悄悄当正确读数放过。第二格 (数值主语) 本来就对。
+    Debug.Print "CI-mixtag=" & MixedTag("s") & "/" & MixedTag(7)
     Debug.Print "CI-DONE"
 End Sub
