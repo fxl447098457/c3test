@@ -150,6 +150,16 @@ std::string CCodeGen::resolveComValue(const std::string& unpackType) {
     std::string objExpr = std::move(comObjExpr_);
     std::string memberName = std::move(comMemberName_);
 
+    // 空 memberName = 「对象值已就绪」标记 (自类型过程调用作链中接收者:
+    // frmMain.RibbonBar().FindTab(...) 的内层)。没有成员要解 —— 直接把对象
+    // 表达式交回去, 复位旗标; 外层 (generic_access 的链式分支) 会拿它当接收者
+    // 重新立标记。若不设这道闸, "函数名"会被当成员名再解一层
+    // (GetObjectProp(调用, L"RibbonBar") ⇒ 运行期必错)。
+    if (memberName.empty()) {
+        isComMarker_ = false;
+        return lastExpr_ = objExpr;
+    }
+
     // 账 #299 第二十一刀: 这里原来还有一份 `Toolbar1.Buttons` 的抄本 (C29-5b 当时只
     // 有这一处)。现在由下面 memberCollectionObjectExpr 那一处统一答 —— 那条同样排在
     // P24-07 的 early-bound 决策之前，顺序与原意一致。
@@ -1017,15 +1027,19 @@ std::string CCodeGen::resolveComMarkerForPack(const std::string& packFnHint) {
     // 本体** (vb6com_wrap.c:126 只认 VT_DISPATCH/VT_UNKNOWN, 且 vb6_ComVarFree 只 free
     // 结构体), 而 vb6_VariantFromComResult 的契约是把入参**当堆上 VARIANT 解引用再 free**
     // —— 拿对象指针喂它是类型混淆 (读 vtable 首字当 vt 标签, 然后把代码地址 free 掉)。
-    // 这两条前缀留在表里只因为 isComMarker_ 为假时它们本来就落 `return ""` 那一路,
-    // 由 packArgValue 原样打包; 本刀不动它们, 只把 marker 在场那一头闸住。
+    // 账 (Outlook2013 frmInbox:331): 这里**只许**列交回 VARIANT* 的三个出口。
+    // vb6_ComGetObjectProp / vb6_ComCallObject 交回的是 **IDispatch\* 本体**, 把它喂给
+    // vb6_VariantFromComResult (= 当堆上 VARIANT 解引用再 free) 是类型混淆 —— 读对象
+    // vtable 首字当 vt 标签, 再把代码地址 free 掉。以前这两条前缀也在这张表里, 只因
+    // 默认成员调用一律失败 (返回 NULL) 才没炸; 修好默认成员 (vb6_ComCallObjectDefault)
+    // 之后对象真的回来了, `GroupsOrder.Add <对象>` 当场把进程打死。
+    // 正确形状: 交给 packArgValue 原样打包 —— vb6_ComPackValue 的 _Generic 把 void*
+    // 落到 vb6_VariantObject (VT_DISPATCH + AddRef), 正是这里要的语义。
     if ((packFnHint == "vb6_ComPackVariant" || packFnHint == "vb6_ComPackValue")
         && !isComMarker_) {
         if (lastExpr_.find("vb6_ComCall(") == 0 ||
             lastExpr_.find("vb6_ComCallByDispid(") == 0 ||
-            lastExpr_.find("vb6_ComGetProp(") == 0 ||
-            lastExpr_.find("vb6_ComGetObjectProp(") == 0 ||
-            lastExpr_.find("vb6_ComCallObject(") == 0) {
+            lastExpr_.find("vb6_ComGetProp(") == 0) {
             return "vb6_VariantFromComResult(" + lastExpr_ + ")";
         }
     }

@@ -15,6 +15,12 @@ extern "C" {
 // CreateObject(progId) - 通过ProgID创建COM对象，返回IDispatch*
 void* vb6_CreateObject(const wchar_t* progId);
 
+// typelib appobject 全局单例 (VB6 全局对象): 首次按 ProgID CoCreate 并缓存,
+// 之后每次调用复用同一实例 (VB6 GlobalMultiUse/appobject 的进程级单例语义 ——
+// 同一实例上的状态如 GlobalSettings.Icons 累积的位图在多次访问间保持)。
+// 失败返回 NULL (错误已由 vb6_CreateObject raise)。
+void* vb6_ComGlobalInstance(const wchar_t* progId);
+
 // GetObject(pathName, progId) - 获取运行中的COM对象
 void* vb6_GetObject(const wchar_t* pathName, const wchar_t* progId);
 
@@ -136,6 +142,10 @@ void vb6_ComVarFree(void* variant);
 // COM方法调用→对象 (内部UnpackObject+VarFree)
 void* vb6_ComCallObject(void* disp, const wchar_t* methodName,
                         void* args, int32_t argc);
+// COM**默认成员**调用→对象: `coll(idx)` 的 VB6 语义是 DISPID_VALUE(0), 不是按名
+// "Item"。名字表里没有 "Item" 时 (Codejock 的 ReportColumns/Actions 一族默认成员
+// 叫 Column/Action) 按名找一律 DISP_E_MEMBERNOTFOUND ⇒ 交回 NULL。
+void* vb6_ComCallObjectDefault(void* disp, void* args, int32_t argc);
 // COM方法调用→BSTR (内部UnpackBSTR+VarClear)
 wchar_t* vb6_ComCallBSTR(void* disp, const wchar_t* methodName,
                          void* args, int32_t argc);
@@ -231,6 +241,10 @@ void vb6_ComExit(void);
 void* vb6_ForEach_Init(void* disp);       // Call _NewEnum, return IEnumVARIANT*
 // 账 #257 第十五层: 集合是**工程类实例**时 (不是 IDispatch) 用它的 NewEnum 接口直接建枚举
 void* vb6_ForEach_InitFromEnumIface(void* pEnumRaw);
+
+// For Each Form In Forms: RTL 窗体注册表 (vb6_Forms_Register) 的合成枚举器。
+// 元素 = 窗体 HWND 的宿主包装 (真 IDispatch, .Controls 走宿主 Controls 应答)。
+void* vb6_ForEach_InitForms(void);
 int32_t vb6_ForEach_Next(void* enumPtr, VARIANT* outVar);  // Next element, returns 1=ok 0=done
 void vb6_ForEach_Release(void* enumPtr);  // Release IEnumVARIANT
 

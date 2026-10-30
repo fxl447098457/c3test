@@ -259,6 +259,21 @@ std::string CCodeGen::controlPropValueExpr(const std::string& writeFn,
             return "vb6_VariantToObjectVal(" + valExpr + ")";
         }
     }
+    // 账 (Outlook2013 frmTimeZone:310/381): Boolean 档控件属性写
+    // (`chk.Enabled = IsAutoAdjustDaylight_Exists(tzi)`) 的右值是 **Variant 回值
+    // 过程调用** (VB 未声明返回类型 ⇒ C 侧交回 vb6_VARIANT 结构体) 时按 Bool 折算
+    // —— 裸传 int16_t 形参 = C2440。
+    // ⚠ 判据必须收窄到「**本模块用户过程**的调用」(vb6_<本模块>_<Proc>(...)):
+    // inferExprType 对 IIf/GetCheckValue 这类也答 Variant, 但它们的发码是
+    // vb6_IIfLong/vb6_GetCheckValue (交 int32_t), 折 vb6_VariantToBool 反而
+    // C2440 (frmEditEvent:465 实测)。
+    if (writeFn == "vb6_SetControlEnabled" || writeFn == "vb6_SetControlVisible") {
+        const std::string modProcPrefix = "vb6_" + cIdent(moduleName_) + "_";
+        if (inferExprType(valueNode) == Vb6Type::Variant
+            && valExpr.compare(0, modProcPrefix.size(), modProcPrefix) == 0) {
+            return "vb6_VariantToBool(" + valExpr + ")";
+        }
+    }
     return valExpr;
 
 }

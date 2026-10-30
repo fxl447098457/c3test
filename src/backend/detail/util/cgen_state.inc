@@ -524,6 +524,12 @@
     // 读上下文 (普通表达式里的 `Me.f.Level`) 不受影响, 照旧派发。
     bool suppressVirtDispatch_ = false;
 
+    // 链中对象求值旗标: visit(MemberAccessExpr) 的 generic_access 在 emitExpr(对象)
+    // 期间置 true —— 自类型过程作链中接收者 (frmMain.RibbonBar.FindTab) 的那几处
+    // 发码分支据此把 comMemberName_ 留空 (对象值已就绪, 成员名其实是被调函数名,
+    // 不能再交给 resolveComValue 解一层); 左值/成员读上下文保持原名。
+    bool inMemberObjectEmit_ = false;
+
     // 类模块标志
     bool isClassModule_ = false;
     bool isFormModule_ = false;
@@ -613,6 +619,11 @@
 
     // P7.9: Window control name mapping (lowercase -> original casing for HWND vars)
     std::unordered_map<std::string, std::string> knownFormControlOriginalNames_;
+
+    // 控件名 (小写) → 设计期类型名 (如 "DockingPaneManager" → "XtremeDockingPane.DockingPane")。
+    // 控件变量名与 typelib coclass 名不一定同名 (CommandBars 同名, DockingPaneManager 不同名),
+    // 晚绑定"成员是方法还是属性"的判据必须先按类型名找回 coclass。
+    std::unordered_map<std::string, std::string> knownFormControlTypeNames_;
 
     // P20-36: 菜单项ID映射 (小写菜单名 → menuId, 与emitMenuItem/emitMenuClickDispatch一致)
     std::unordered_map<std::string, int> knownMenuIds_;

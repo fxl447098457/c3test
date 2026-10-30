@@ -216,6 +216,7 @@ void CCodeGen::emitDesignerControlDecls(const FrmFormDesc& frmDesc, DocumentKind
             }
             knownFormControls_[ctrlLower] = ctrl.controlType;
             knownFormControlOriginalNames_[ctrlLower] = ctrl.controlName;
+            knownFormControlTypeNames_[ctrlLower] = ctrl.controlTypeName;
         }
         for (const auto& child : ctrl.children) registerCtrlRec(child);
     };

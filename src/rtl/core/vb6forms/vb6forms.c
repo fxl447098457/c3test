@@ -1088,8 +1088,17 @@ void* vb6_GetAppInstance(void) {
     return (void*)vb6_hInstance;
 }
 
+static void vb6_installCrashTrace(void);
+
 void vb6_SetAppInstance(void* hInstance) {
     vb6_hInstance = (HINSTANCE)hInstance;
+    /* 崩溃跟踪装在这里, 而不是等到 vb6_ShowForm —— WinMain 的顺序是
+     *   vb6_Init → 各模块 init → SetAppInstance → form_show_xxx
+     * 而 form_show_xxx 是「先 Form_Load, 再 vb6_ShowForm」: 装在 ShowForm 里等于
+     * 把**整个 Form_Load 段**漏在保护之外。Outlook2013 那次无声 SIGSEGV 就发生在
+     * frmMain 的 Form_Load (加载各 DockPane 子窗体) 里, c3_crash.txt 一片空白,
+     * 只能靠二分法猜。SetAppInstance 是 Form_Load 之前最后一个稳定落点。 */
+    vb6_installCrashTrace();
 }
 
 // Fix 149 诊断: C3_CRASH_TRACE=1 时安装未处理异常过滤器, 把崩溃栈各帧的

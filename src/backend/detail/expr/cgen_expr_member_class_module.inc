@@ -178,10 +178,39 @@
             // 不在这里另拼函数名 (Fix 083c 那条只认 PropertyGet 的 prop_get 形状)。
             // 排除**当前过程自身**的函数名: 那是"引用函数名 = 引用返回值槽 vb6_ret_X"
             // 的另一条语义 (与 inferClassTypeOfExpr 的同一处排除对称)。
-            if (!isVarName && objSym && objSym->kind == SymbolKind::Function
-                && !objSym->variableTypeName.empty()
+            Symbol* stSymF235 = symTab_.lookupModuleByKind(objIdent.name, SymbolKind::Function);
+            if (!stSymF235) stSymF235 = symTab_.lookupModuleByKind(objIdent.name, SymbolKind::PropertyGet);
+            if (!isVarName && stSymF235
+                && (stSymF235->kind == SymbolKind::Function || stSymF235->kind == SymbolKind::PropertyGet)
+                && !stSymF235->variableTypeName.empty()
+                && !knownLocalVars_.count(objLower)
                 && !(currentProc_ && Symbol::toLower(currentProc_->name) == objLower)) {
+                objSym = stSymF235;
                 const Symbol* fnClsSym = symTab_.lookup(objSym->variableTypeName);
+                if (fnClsSym && fnClsSym->kind == SymbolKind::ComClass) {
+                    // 返回 **typelib 类** 的无参函数作接收者 (frmMain 的
+                    //   `Public Function RibbonBar() As RibbonBar` +
+                    //   `RibbonBar.Minimized = ...` / `RibbonBar.FindTab(...)`,
+                    //   Outlook2013 frmMain:426/434, pageBackstageInfo:374)。
+                    // Fix 235 的工程内 Class 那条路走 Fix 088c <类成员取用>, 而
+                    // ComClass 没有 C 侧成员函数 —— 原状落 M22 发成
+                    // vb6_RibbonBar_Minimized / vb6_frmMain_RibbonBar_FindTab 平铺名
+                    // (C2065)。先调函数得 IDispatch, 成员按 COM 晚绑定续链。
+                    // 接收者形状按宿主类型: 窗体过程无 me (vb6_frmMain_RibbonBar()),
+                    // 类模块过程带 me (vb6_cls_X_Fn((void*)me))。
+                    std::string fnMod235c = objSym->isExternal ? objSym->sourceModule
+                                          : moduleName_;
+                    std::string fnRecv235c = isClassModule_ ? "((void*)me)" : "()";
+                    std::string fnCall235c = cProcName(objSym->name, objSym->access,
+                                                       fnMod235c) + fnRecv235c;
+                    comObjExpr_ = fnCall235c;
+                    comMemberName_ = inMemberObjectEmit_ ? std::string() : node.memberName;
+                    isComMarker_ = true;
+                    isEarlyBoundCom_ = false;
+                    earlyBoundSym_ = nullptr;
+                    lastExpr_ = fnCall235c;
+                    return;
+                }
                 if (fnClsSym && fnClsSym->kind == SymbolKind::Class) {
                     isVarName = true;
                 } else if (Symbol::toLower(objSym->variableTypeName) == "object"
@@ -350,6 +379,9 @@
                 // 结构/联合" (实测 SubClass.c / ucPerspective.c / modSubClass 全线, 200+ 错误)。
                 // 属性访问函数在 C 侧一律叫 `vb6_<Cls>_prop_get_<Name>` (见
                 // cgen_expr_with.cpp ClassInstance 分支同款判定), 少前缀必不匹配。
+                if (std::getenv("C3_DBG_ST") && node.memberName == "CommandBars") {
+                    std::cerr << "[ST-CM3] obj=" << objIdent.name << " srcMod=" << sourceMod << std::endl;
+                }
                 std::string memberProcName = node.memberName;
                 if (memSym->kind == SymbolKind::PropertyGet)      memberProcName = "prop_get_" + node.memberName;
                 else if (memSym->kind == SymbolKind::PropertyLet) memberProcName = "prop_let_" + node.memberName;

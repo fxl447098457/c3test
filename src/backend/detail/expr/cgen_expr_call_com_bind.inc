@@ -148,7 +148,45 @@
         // vb6_ComCall(vb6_hwnd_MainForm, L"ScaleX", …))。ScaleX/ScaleY 不可能是集合。
         const std::string axMemLower = Symbol::toLower(comMemberName_);
         const bool axIsScaleMethod = (axMemLower == "scalex" || axMemLower == "scaley");
-        if (axSlotObj && !node.positional.empty() && !axIsScaleMethod) {
+        // 账 (Outlook2013 frmMain:1204 `CommandBars.DoPropExchange a, b`): 成员是
+        // **方法** (typelib invkind=METHOD) 时不能走"取属性 + Item 下标"档 ——
+        // Codejock 的 DoPropExchange 属性读 0 实参 ⇒ DISP_E_PARAMNOTOPTIONAL
+        // (Run-time error 449)。判据: 控件名与 typelib coclass 同名
+        // (vb6_hwnd_CommandBars → ComClass "CommandBars") 且该成员在
+        // comMethods 里是非 PropertyGet 的条目。
+        bool axMemberIsMethod237 = false;
+        // 前缀 "vb6_hwnd_" 是 9 个字符 (v b 6 _ h w n d _) —— 这里原先写的 10/substr(10)
+        // 多切一位: compare 恒假 ⇒ 整段判据是死代码, AddRibbonBar 照样落进
+        // "取属性 + Item" 那一档, 运行期 DISP_E_PARAMNOTOPTIONAL = Run-time error 449。
+        // 无窗口的 AX 控件槽是 vb6_com_<名> (8 字符前缀), 同样要认。
+        if (axSlotObj) {
+            std::string ctrlAx;
+            if (comObjExpr_.compare(0, 9, "vb6_hwnd_") == 0) {
+                ctrlAx = comObjExpr_.substr(9);
+            } else if (comObjExpr_.compare(0, 8, "vb6_com_") == 0) {
+                ctrlAx = comObjExpr_.substr(8);
+            }
+            size_t parenAx = ctrlAx.find('(');
+            if (parenAx != std::string::npos) ctrlAx = ctrlAx.substr(0, parenAx);
+            Symbol* clsAx = ctrlAx.empty() ? nullptr : symTab_.lookup(ctrlAx);
+            // 控件变量名不一定等于 coclass 名 (DockingPaneManager → DockingPane):
+            // 按设计期类型名再找一次, 找不到才放弃。
+            if ((!clsAx || clsAx->kind != SymbolKind::ComClass) && !ctrlAx.empty()) {
+                auto itTypeAx = knownFormControlTypeNames_.find(Symbol::toLower(ctrlAx));
+                if (itTypeAx != knownFormControlTypeNames_.end()) {
+                    clsAx = lookupDotted(itTypeAx->second);
+                }
+            }
+            if (clsAx && clsAx->kind == SymbolKind::ComClass) {
+                auto itAx = clsAx->comMethods.find(axMemLower);
+                if (itAx != clsAx->comMethods.end() && !itAx->second.isPropertyGet
+                    && !itAx->second.isPropertyPut && !itAx->second.isPropertyPutRef) {
+                    axMemberIsMethod237 = true;
+                }
+            }
+        }
+        if (axSlotObj && !node.positional.empty() && !axIsScaleMethod
+            && !axMemberIsMethod237) {
             std::string axObjExpr = std::move(comObjExpr_);
             std::string axMember = std::move(comMemberName_);
             isComMarker_ = false;
@@ -179,7 +217,14 @@
             }
             argsArray += "}";
             // 返回对象类型 (用于后续 .Picture 等链式访问)
-            lastExpr_ = "vb6_ComCallObject(" + collectionExpr + ", L\"Item\", " + argsArray + ", " + std::to_string(argc) + ")";
+            // 账 (Outlook2013 frmInbox:331): 默认成员名**不许猜 "Item"**。VB6 把
+            // `coll(idx)` 编到 DISPID_VALUE(0), 而 Codejock 的集合默认成员叫
+            // Column / Action 之类 ⇒ 按名 "Item" 一律 DISPID_UNKNOWN ⇒ 交回 NULL
+            // ⇒ `GroupsOrder.Add <NULL>` 报 Run-time error 13。
+            // 方法名交 NULL = "按默认成员调用": vb6_ComCallObject 见 NULL 转
+            // vb6_ComCallObjectDefault (名字优先、名字不在才走 DISPID 0)。名字仍叫
+            // ComCallObject 是有意的 —— 后端有八处按这个前缀认「结果是 IDispatch*」。
+            lastExpr_ = "vb6_ComCallObject(" + collectionExpr + ", NULL, " + argsArray + ", " + std::to_string(argc) + ")";
             return;
         }
         isComMarker_ = false;  // 消费标记

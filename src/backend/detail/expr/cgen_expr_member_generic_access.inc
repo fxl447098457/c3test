@@ -3,12 +3,23 @@
 // 内容 = 原文件第 944~1063 行，逐行未改。
 
     // 通用成员访问 (结构体字段 / 链式COM访问)
-    emitExpr(*node.object);
+    {
+        // 链中对象求值旗标 (见 cgen_state.inc inMemberObjectEmit_): 自类型过程
+        // 作接收者时, 子分支据它把 comMemberName_ 留空。
+        const bool savedInObjEmit = inMemberObjectEmit_;
+        inMemberObjectEmit_ = true;
+        emitExpr(*node.object);
+        inMemberObjectEmit_ = savedInObjEmit;
+    }
 
     // 链式COM调用检测: 如果object求值产生COM标记, 先resolve为对象值
     // (fso.GetFolder("x") → vb6_ComCallObject → 返回IDispatch*)
     // 然后在新对象上访问成员 → 设置新的COM标记
     if (isComMarker_) {
+        if (std::getenv("C3_DBG_ST")) {
+            std::cerr << "[ST-GEN] marker obj=" << comObjExpr_
+                      << " member=" << comMemberName_ << std::endl;
+        }
         // object是COM属性访问, 解析为对象值
         resolveComValue("Object");
         // 检查resolveComValue后的结果是否是对象表达式 (ComCallObject/ComGetObjectProp)
@@ -47,11 +58,53 @@
             comMemberName_ = node.memberName;
             isComMarker_ = true;
             lastExpr_ = objExpr;  // 保持对象表达式
+            if (std::getenv("C3_DBG_ST")) std::cerr << "[ST-GEN2] chain marker " << node.memberName << std::endl;
             return;
+        }
+        if (std::getenv("C3_DBG_ST")) std::cerr << "[ST-GEN-TAIL] struct text " << node.memberName << std::endl;
+        // 账 (Outlook2013 frmShortcutBar:202): 自类型过程调用作链中接收者
+        // (`vb6_frmMain_RibbonBar().FindTab(...)`) — resolveComValue 的空成员守卫
+        // 交回的调用文本以 "()" 收尾。vb6_ 前缀 + "()" 收尾的调用当真 IDispatch
+        // 接收者续链 (晚绑定), 否则落 `obj + "." + member` 结构体文本 (C2224)。
+        {
+            const bool endsParens79 = objExpr.size() > 5
+                && objExpr.compare(0, 4, "vb6_") == 0
+                && objExpr.compare(objExpr.size() - 2, 2, "()") == 0;
+            if (std::getenv("C3_DBG_ST")) {
+                std::string last279 = objExpr.size() >= 2 ? objExpr.substr(objExpr.size() - 2) : objExpr;
+                std::cerr << "[ST-RULE] ends=" << endsParens79 << " sz=" << objExpr.size()
+                          << " last2='" << last279 << "' objExpr='" << objExpr << "'" << std::endl;
+            }
+            if (endsParens79) {
+                comObjExpr_ = objExpr;
+                comMemberName_ = node.memberName;
+                isComMarker_ = true;
+                lastExpr_ = objExpr;
+                return;
+            }
         }
         // 非COM对象值, 按结构体字段处理
         lastExpr_ = objExpr + "." + cIdent(node.memberName);
         return;
+    }
+
+    // 无标记态的链式接收者: 对象表达式整枚是 **COM 调用结果** (vb6_ComCallObject /
+    // ComGetObjectProp / ComCall — 旗标在 IndexOrCallExpr 消费时已复位)。
+    // `...FindTab(12000).Visible = 0` 的 `.Visible` 一站走这里 —— 此前落
+    // `obj + "." + member` 结构体文本 (C2224)。按真 IDispatch 接收者立标记续链。
+    {
+        const std::string objRes = lastExpr_;
+        if (objRes.compare(0, 19, "vb6_ComCallObject(") == 0
+            || objRes.compare(0, 21, "vb6_ComGetObjectProp(") == 0
+            || objRes.compare(0, 12, "vb6_ComCall(") == 0) {
+            comObjExpr_ = objRes;
+            comMemberName_ = node.memberName;
+            isComMarker_ = true;
+            isEarlyBoundCom_ = false;
+            earlyBoundSym_ = nullptr;
+            lastExpr_ = objRes;
+            return;
+        }
     }
 
     std::string obj = std::move(lastExpr_);

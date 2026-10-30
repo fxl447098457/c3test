@@ -52,6 +52,23 @@ std::string CCodeGen::resolveClassMemberCallUncached(const std::string& classNam
     // Fix 011r-1b: VB6 case-insensitive — compare class name ignoring case
     // (用户源代码可能写 "cWinsock", 但struct定义用的是文件名大小写 "cWinSock")
     const std::string classNameLower = Symbol::toLower(className);
+
+    // 账 (Outlook2013 frmInbox:244/732): className 是**跨模块窗体**且成员是其
+    // **控件** (`frmMain.CommandBars`) — 控件句柄变量是另一 .c 的 static,
+    // 按类成员函数解析出 vb6_frmMain_CommandBars = LNK2019 (该窗体没有那个
+    // 过程)。一律改发控件句柄访问器; 返回**裸名** (0 参访问器由调用方补
+    // "()", 控件数组由调用方补 "(idx)" — 访问器带 int32_t idx 形参)。
+    if (knownFormModuleNames_.count(classNameLower)
+        && classNameLower != Symbol::toLower(moduleName_)) {
+        const FrmControl* extCtrlCc = findExternalFormControl(className, memberName);
+        if (extCtrlCc) {
+            std::string accCc = "vb6_form_ctrl_" + cIdent(className)
+                              + "_" + cIdent(memberName);
+            if (extCtrlCc->controlType == FrmControlType::TreeView)
+                externalTreeViewAccs_[accCc] = accCc;
+            return accCc;
+        }
+    }
     // 跟踪规范类名 (取自符号表, 用于C输出大小写一致)
     std::string canonicalClassName;
 

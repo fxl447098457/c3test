@@ -605,6 +605,48 @@ void* vb6_ComCallByDispid(void* disp, int32_t dispid,
 
     return (void*)result;
 }
+
+// ============================================================
+// 账 (Outlook2013 frmInbox:331): **默认成员**调用返回对象 —— `coll(idx)`。
+// VB6 里 `coll(idx)` 编到默认成员 (DISPID_VALUE = 0), 从不按名字 "Item" 找。
+// 生成器此前一律发 `vb6_ComCallObject(recv, L"Item", …)`, 对 VB6 Collection /
+// ADODB.Recordset 恰好命中 (它们的默认成员名字就叫 Item), 但对 Codejock 的集合
+// 一律落空: ReportColumns 的默认成员叫 Column、Actions 的默认成员不叫 Item ——
+// getDispid("Item") = DISPID_UNKNOWN ⇒ Invoke 不发 ⇒ 交回 NULL ⇒
+//   wndReportControl.GroupsOrder.Add <NULL>  →  Run-time error 13 (类型不匹配)。
+// 口径: 名字 "Item" 能解析就仍按名走 (RTL 伪集合 —— ListImages/Panels/Nodes 一族 ——
+// 只登记名字, 没有 0 号成员); 解析不到才按 VB6 语义发 DISPID 0。
+// ============================================================
+void* vb6_ComCallObjectDefault(void* disp, void* args_void, int32_t argc) {
+    if (!disp) return NULL;
+    DISPID d = DISPID_UNKNOWN;
+    /* 宿主对象 (窗体/控件槽/Controls 集合) 不是真 IDispatch: 交给 vb6_ComCallByDispid
+     * 的宿主分派 (它内部转 vb6_ComCall(…, L"Item", …)), 这里不碰 vtable。 */
+    if (!vb6_Host_IsHostObject(disp) && vb6_ComIsDispatchable(disp)) {
+        d = vb6_getDispid((IDispatch*)disp, L"Item");
+    }
+    if (d == DISPID_UNKNOWN) d = DISPID_VALUE;
+
+    VARIANT* pv = (VARIANT*)vb6_ComCallByDispid(disp, (int32_t)d, args_void, argc);
+    if (!pv) return NULL;
+    void* obj = NULL;
+    if (pv->vt == VT_DISPATCH) {
+        /* 与 vb6_ComCallObject 同口径: 解包 RTL 伪对象, 转移引用所有权 */
+        extern void* vb6_UC_UnwrapHost(void* obj);
+        obj = vb6_UC_UnwrapHost((void*)pv->pdispVal);
+    } else if (pv->vt == VT_UNKNOWN) {
+        pv->punkVal->lpVtbl->QueryInterface(pv->punkVal, &IID_IDispatch, &obj);
+    } else if (pv->vt != VT_EMPTY && pv->vt != VT_NULL) {
+        VARIANT vObj;
+        VariantInit(&vObj);
+        if (SUCCEEDED(VariantChangeType(&vObj, pv, 0, VT_DISPATCH))) {
+            obj = (void*)vObj.pdispVal;
+        }
+        VariantClear(&vObj);
+    }
+    vb6_ComVarFree(pv);
+    return obj;
+}
 // COM属性Get (返回VARIANT*)
 void* vb6_ComGetProp(void* disp, const wchar_t* propName) {
     /* 账 #305 第二百六十二刀 (丙): 非 IDispatch 接收者 —— 响亮 + 计数 (行为不变) */
@@ -777,6 +819,17 @@ void vb6_ComSetProp(void* disp, const wchar_t* propName, void* value_void) {
     /* 账 #305 第二百六十二刀 (丙): 非 IDispatch 接收者 —— 响亮 + 计数 (行为不变) */
     if (vb6_ComLateBindIsMiss(disp)) {
         vb6_ComLateBindMiss(L"ComSetProp", propName, disp);
+    }
+    {   /* 临时排查 (Outlook2013 Form_Load Error 13): 失败时打印属性名与值类型 */
+        static int dbgSP = -1;
+        if (dbgSP < 0) dbgSP = GetEnvironmentVariableW(L"C3_DBG_SETPROP", NULL, 0) > 0;
+        if (dbgSP && value_void) {
+            wchar_t msg[160];
+            swprintf(msg, 160, L"[C3_SETPROP] %ls vt=%d\n", propName, (int)((VARIANT*)value_void)->vt);
+            OutputDebugStringW(msg);
+            fwprintf(stderr, L"%ls", msg);
+            fflush(stderr);
+        }
     }
     /* Fix 125: 字体结构体 (非 COM 对象) 直接写字段 —— 这是 `Property Set X_Font` 里
        `With m_X_Font: .Name = New_Font.Name ...` 的实现路径; 走 Invoke 必崩。 */

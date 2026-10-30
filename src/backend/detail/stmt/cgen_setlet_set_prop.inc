@@ -18,6 +18,21 @@
         }
     }
 
+    // Set <跨模块窗体名> = New <窗体名> —— 窗体默认实例是 C3 的全局单例
+    // (vb6_form_hwnd_<F>() 访问器, 非左值)。VB6 语义里 `Set F = New F` 让 F 指向
+    // 新实例; C3 的默认实例模型下等价于继续用单例 (先到先建), 不支持重绑。
+    // 此前发 `vb6_form_hwnd_F() = vb6_NewObject(...)` → C2106 (函数调用做左值)。
+    // (Outlook2013 frmInbox:306 Set frmEditEvent = New frmEditEvent, frmMain:3 处)
+    if (node.target->kind == ASTNodeKind::IdentifierExpr) {
+        auto& tgtFormSi = static_cast<IdentifierExpr&>(*node.target);
+        std::string tgtFormLowerSi = Symbol::toLower(tgtFormSi.name);
+        if (tgtFormLowerSi != knownFormName_ && knownFormModuleNames_.count(tgtFormLowerSi)) {
+            emitSetObjectRhs(node.value);  // 保留 RHS 副作用 (New 无副作用, 仅求值)
+            c_.emitLine("/* Set " + tgtFormSi.name + " = New (form default instance, auto-managed) */");
+            return;
+        }
+    }
+
     // 检测 Set obj = Nothing → vb6_ReleaseObject(&obj)
     if (node.value->kind == ASTNodeKind::LiteralExpr) {
         auto& lit = static_cast<LiteralExpr&>(*node.value);
@@ -569,7 +584,10 @@
         std::string memberName = std::move(comMemberName_);
     emitSetObjectRhs(node.value);
     // COM属性值: 如果右侧是COM属性, 解析为值
-    if (isComMarker_) resolveComValue();
+    // 账 (Outlook2013 frmMain:830): Set 的右值是**对象** —— 默认档 String 会发
+    // vb6_ComGetStringProp (Icons 集合被当 BSTR 取) 再塞进 vb6_ComSetRef ⇒
+    // Codejock 答类型不匹配 (Run-time error 13, 启动即弹)。强制 Object 档。
+    if (isComMarker_) resolveComValue("Object");
     std::string value = std::move(lastExpr_);
     // Fix <vbeclipse>: SetRef 的第3参是 void* (对象指针), 右侧若是 Variant 表达式
     // (如 .Item(i) — vb6_List_Item 返回 vb6_VARIANT 结构体, SubClass.cls:56

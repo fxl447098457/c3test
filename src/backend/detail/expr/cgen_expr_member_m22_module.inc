@@ -56,6 +56,30 @@
         }
 
         if (!isVarName2) {
+            // 账 (Outlook2013 frmInbox:222/244/732): 跨窗体**控件**成员
+            // (`frmMain.CommandBars`) — 控件句柄是另一 .c 的 static, 模块限定
+            // 发 vb6_frmMain_CommandBars 裸名 = LNK2019。form_builtin 的
+            // extCtrl 臂只覆盖部分上下文 (同一表达式不同访问点命中不一, 实测
+            // 4 命中 2 漏), 这里按 findExternalFormControl 兜底发访问器。
+            if (std::getenv("C3_DBG_ST") && node.memberName == "CommandBars") {
+                std::cerr << "[ST-M22CB] obj=" << objIdent2.name << " forms="
+                          << knownFormModuleNames_.count(objLower2) << std::endl;
+            }
+            if (knownFormModuleNames_.count(objLower2)
+                && objLower2 != Symbol::toLower(moduleName_)) {
+                const FrmControl* extCtrlM22 = findExternalFormControl(objIdent2.name, node.memberName);
+                if (extCtrlM22) {
+                    std::string accM22 = "vb6_form_ctrl_" + cIdent(objIdent2.name)
+                                       + "_" + cIdent(node.memberName);
+                    if (extCtrlM22->controlType == FrmControlType::TreeView)
+                        externalTreeViewAccs_[accM22] = accM22;
+                    // 控件数组: 访问器带 (int32_t idx) 形参, 下标由外层
+                    // IndexOrCallExpr 追加; 普通控件 0 参调用。
+                    lastExpr_ = (extCtrlM22->index >= 0)
+                        ? accM22 : (accM22 + "()");
+                    return;
+                }
+            }
             // object不是已知变量 → 假设是模块名限定符
             // 成员是变量: Module1.myName
             // When module is #included, use the unprefixed name directly
@@ -122,6 +146,9 @@
                 return;
             }
             varName2 = cIdent(canonicalHostPseudoMember(modName2, varName2));
+            if (std::getenv("C3_DBG_ST") && modLower2 == "frmmain") {
+                std::cerr << "[ST-M22EMIT] var=" << node.memberName << " incl=" << isIncluded2 << std::endl;
+            }
             lastExpr_ = isIncluded2 ? varName2 : ("vb6_" + cIdent(modName2) + "_" + varName2);
             return;
         }

@@ -285,7 +285,13 @@
         c_.emitLine("vb6_formLoaded_" + cIdent(formName) + " = 1;");
         {
             std::string resizeFnLoad = cProcName("Form_Resize", AccessLevel::Private);
-            if (symTab_.lookup(formName + "_Resize") || symTab_.lookup("Form_Resize")) {
+            // 守卫只认**本模块自有**的处理器 (与 show/dispatch 两处同批) ——
+            // 裸名 lookup 命中跨模块注入的别家 Form_Resize ⇒ LNK2019。
+            auto hasOwnResizeCr = [&](const char* nm) -> bool {
+                Symbol* sCr = symTab_.lookupModule(nm);
+                return sCr && !sCr->isExternal;
+            };
+            if (hasOwnResizeCr((formName + "_Resize").c_str()) || hasOwnResizeCr("Form_Resize")) {
                 c_.emitLine("{ extern void " + resizeFnLoad + "(); " + resizeFnLoad + "(); }");
             }
         }

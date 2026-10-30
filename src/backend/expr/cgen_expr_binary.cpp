@@ -216,6 +216,25 @@ void CCodeGen::visit(BinaryExpr& node) {
             }
         }
     }
+    // Fix (Outlook2013 frmMain:265 / pageBackstageInfo:353): 对称的那一半 —— 左操作数是
+    // **BSTR 回值内建调用** (`App.Path &/+ "\res\x.ico"` 的 App.Path →
+    // vb6_App_Path()) 而右操作数是 String 型 (字面量/变量) 时, inferExprType 对
+    // App.Path 答不出 String ⇒ 整式掉进算术 + ⇒ `vb6_App_Path() + vb6_BSTR_FromStr(...)`
+    // 指针相加 (C2110)。左 BSTR 回值 + 右 String 同样按拼接处理。
+    if (!addIsConcat092i && inferExprType(*node.right) == Vb6Type::String) {
+        static const char* bstrReturnLefts092i[] = {
+            "vb6_App_Path(", "vb6_App_EXEName(", "vb6_App_HelpFile(",
+            "vb6_Chr(", "vb6_ChrW(", "vb6_Mid(", "vb6_Left(", "vb6_Right(",
+            "vb6_Trim(", "vb6_LTrim(", "vb6_RTrim(", "vb6_UCase(", "vb6_LCase(",
+            "vb6_Replace(", "vb6_String(", "vb6_Space(", "vb6_StrConv(",
+            "vb6_Format(", "vb6_VariantToString(", "vb6_BSTR_"};
+        for (auto* bcp092i : bstrReturnLefts092i) {
+            if (left.compare(0, strlen(bcp092i), bcp092i) == 0) {
+                addIsConcat092i = true;
+                break;
+            }
+        }
+    }
     if (node.op == BinaryOp::Add && addIsConcat092i) {
         left = wrapToBSTR(left, *node.left);
         right = wrapToBSTR(right, *node.right);

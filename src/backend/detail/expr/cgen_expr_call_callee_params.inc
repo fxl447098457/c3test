@@ -233,8 +233,31 @@
         // 需要匹配 DeclareSub/DeclareFunc 等) → 用原 class-unaware lookupModule 兜底,
         // 保留旧行为兼容性.
         if (!classAwareResolved && !builtinGlobalObj092z) {
-            Symbol* funcSym = vbaQualifiedCallee216 ? nullptr
-                                                    : symTab_.lookupModule(maExpr.memberName);
+            Symbol* funcSym = nullptr;
+            // 限定接收者是**跨模块窗体**时, 形参表先问模块限定二级键
+            // `<form>_<proc>` (driver_crossmod 为窗体 Public 过程注入) ——
+            // 多个窗体有同名过程时裸键先到先得, lookupModule 命中的不一定是
+            // 限定符指的那家 ⇒ 实参被另一家的形参表截断
+            // (frmInbox.SetColor Id → vb6_frmInbox_SetColor() 丢 Id, Outlook2013)。
+            if (maExpr.object && maExpr.object->kind == ASTNodeKind::IdentifierExpr
+                && symTab_.moduleScope()) {
+                const std::string qFormP = Symbol::toLower(
+                    static_cast<IdentifierExpr&>(*maExpr.object).name);
+                if (qFormP != Symbol::toLower(moduleName_)
+                    && knownFormModuleNames_.count(qFormP)) {
+                    Symbol* qSymP = symTab_.moduleScope()->lookupLocal(
+                        qFormP + "_" + Symbol::toLower(maExpr.memberName));
+                    if (qSymP && qSymP->isExternal
+                        && (qSymP->kind == SymbolKind::Sub
+                            || qSymP->kind == SymbolKind::Function)) {
+                        funcSym = qSymP;
+                    }
+                }
+            }
+            if (!funcSym) {
+                funcSym = vbaQualifiedCallee216 ? nullptr
+                                                : symTab_.lookupModule(maExpr.memberName);
+            }
             // Fix 084y-7: VBA 内置函数 (VBA.Replace / VBA.Mid$ / VBA.Val 等) 注册在
             // 全局内置符号表, 不在模块作用域 — lookupModule 必然失败. 回退全表
             // lookup (去 $ 后缀: Mid$ → Mid), 拿到含 Optional 的完整形参表,

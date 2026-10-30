@@ -27,6 +27,7 @@
                 }
                 knownFormControls_[ctrlNameLower] = ctrl.controlType;
                 knownFormControlOriginalNames_[ctrlNameLower] = ctrl.controlName;
+                knownFormControlTypeNames_[ctrlNameLower] = ctrl.controlTypeName;
                 // Fix 112: 工程内 UserControl 子控件 (Begin Proyecto1.ucChartBar ucChartBar1)
                 // — 记录 控件名 → .ctl 模块名, 使 `ucChartBar1.AddSerie(...)` 走类成员
                 // 直接调用 (vb6_ucChartBar_AddSerie) 而非按 HWND 走 COM 晚绑定.
@@ -103,18 +104,37 @@
     // 非数组、非 Menu 的控件都发跨模块访问器。ImageList 的槽是 vb6_com_<Name>
     // (IDispatch*, 见 emitControlHandleDecls:165), 不是 vb6_hwnd_<Name>, 下方分支处理。
     {
+        // 控件数组只发一枚带下标的访问器 (递归会逐元素 visit, 按名去重) —
+        // 跨窗体 `frmX.btnTab(0).Appearance` 引用 vb6_form_ctrl_<F>_<C>(idx)
+        // (Outlook2013 frmMain:327-330, 数组访问器缺失 = LNK2019)。
+        std::unordered_set<std::string> accEmitted;
         std::function<void(const FrmControl&)> accRec = [&](const FrmControl& ctrl) {
-            if (!ctrl.controlName.empty() && ctrl.index < 0
-                && ctrl.controlType != FrmControlType::Menu) {
+            if (!ctrl.controlName.empty() && ctrl.controlType != FrmControlType::Menu) {
                 std::string acc = "vb6_form_ctrl_" + cIdent(formName) + "_" + cIdent(ctrl.controlName);
-                h_.emitLine("void* " + acc + "(void);");
-                // 族4b: ImageList 槽为 vb6_com_<Name> (IDispatch*); 其余控件回 vb6_hwnd_<Name>。
-                // 旧逻辑把 ImageList 排除, 但 comwrite 侧又发了 vb6_form_ctrl_<Form>_ImageListN()
-                // 的调用 -> 定义缺失 (LNK2019)。这里补上 ImageList 分支。
-                if (ctrl.controlType == FrmControlType::ImageList) {
-                    c_.emitLine("void* " + acc + "(void) { return vb6_com_" + cIdent(ctrl.controlName) + "; }");
-                } else {
-                    c_.emitLine("void* " + acc + "(void) { return vb6_hwnd_" + cIdent(ctrl.controlName) + "; }");
+                // 兼容别名 `vb6_<Form>_<Ctrl>()`: 类成员调用机制 (Fix 015/088c 把
+                // 窗体当类、控件当成员) 与若干回退会按这个形状发码 —— 直接提供
+                // 定义, 不再追每一处发射点 (Outlook2013 frmMain.CommandBars 实测
+                // LNK2019, 发射点在三套链式机制深处)。
+                std::string alias = "vb6_" + cIdent(formName) + "_" + cIdent(ctrl.controlName);
+                if (ctrl.index < 0) {
+                    h_.emitLine("void* " + acc + "(void);");
+                    h_.emitLine("void* " + alias + "(void);");
+                    // 族4b: ImageList 槽为 vb6_com_<Name> (IDispatch*); 其余控件回 vb6_hwnd_<Name>。
+                    // 旧逻辑把 ImageList 排除, 但 comwrite 侧又发了 vb6_form_ctrl_<Form>_ImageListN()
+                    // 的调用 -> 定义缺失 (LNK2019)。这里补上 ImageList 分支。
+                    if (ctrl.controlType == FrmControlType::ImageList) {
+                        c_.emitLine("void* " + acc + "(void) { return vb6_com_" + cIdent(ctrl.controlName) + "; }");
+                    } else {
+                        c_.emitLine("void* " + acc + "(void) { return vb6_hwnd_" + cIdent(ctrl.controlName) + "; }");
+                    }
+                    c_.emitLine("void* " + alias + "(void) { return " + acc + "(); }");
+                } else if (!accEmitted.count(ctrl.controlName)) {
+                    accEmitted.insert(ctrl.controlName);
+                    h_.emitLine("void* " + acc + "(int32_t idx);");
+                    h_.emitLine("void* " + alias + "(int32_t idx);");
+                    c_.emitLine("void* " + acc + "(int32_t idx) { return VB6_SA_AT(void*, vb6_arr_"
+                              + cIdent(ctrl.controlName) + ".hwnds, idx); }");
+                    c_.emitLine("void* " + alias + "(int32_t idx) { return " + acc + "(idx); }");
                 }
             }
             for (const auto& child : ctrl.children) accRec(child);

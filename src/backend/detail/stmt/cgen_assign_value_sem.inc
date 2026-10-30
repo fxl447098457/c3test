@@ -252,6 +252,25 @@
         // C2440 (cZipArchive: pvVfsSeek = uFile.Stream.VfsSetFilePointer(...) →
         // vb6_ret_pvVfsSeek = vb6_ComCall(...) 2630). 按目标 C 类型解封:
         // VariantFromComResult 把 void* 包回 vb6_VARIANT, 再 VariantToXxx 提取.
+        // 账 (Outlook2013 frmProperties DateFromString:289-299): **BSTR 右值 →
+        // Date 目标** (`dtDatePart = DatePart`, DatePart 是 ByRef String 形参) —
+        // VB6 语义 String→Date 隐式折算 (CDate 档, vb6_DateVal)。C 侧 BSTR 裸赋
+        // double = C2440 "无法从 BSTR 转换为 double" ×3。仅认 knownDateVars_ 目标
+        // (普通 double 目标的串右值是 vb6_Val 数值折算, 语义不同)。
+        {
+            std::string tgtDt = target;
+            if (tgtDt.compare(0, 4, "me->") == 0) tgtDt = tgtDt.substr(4);
+            if (tgtDt.size() > 4 && tgtDt[0] == '(' && tgtDt[1] == '*'
+                && tgtDt.back() == ')') {
+                tgtDt = tgtDt.substr(2, tgtDt.size() - 3);
+            }
+            std::transform(tgtDt.begin(), tgtDt.end(), tgtDt.begin(), ::tolower);
+            if (knownDateVars_.count(tgtDt)
+                && inferExprType(*node.value) == Vb6Type::String) {
+                c_.emitLine(target + " = vb6_DateVal(" + value + ");");
+                return;
+            }
+        }
         bool valueIsBareComResult = (value.compare(0, 12, "vb6_ComCall(") == 0
             || value.compare(0, 20, "vb6_ComCallByDispid(") == 0
             || value.compare(0, 17, "vb6_ComCallObject(") == 0
