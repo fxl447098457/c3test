@@ -20,6 +20,16 @@ void CCodeGen::visit(WithStmt& node) {
 
     // 检测With对象类型: 遍历表达式判断
     if (node.object) {
+        // 账 #305 第一百九十一刀: `With Me` —— Me 是 MeExpr, 不是 IdentifierExpr,
+        // 上面按名查表的整条链都够不着 ⇒ tempType 落 void* ⇒ 体内 `.P` 走
+        // vb6_ComGetObjectProp(me, …) (拿类结构体当 IDispatch). 类模块里
+        // Me 就是本类实例, 直接按 ClassInstance 处理。
+        if (node.object->kind == ASTNodeKind::MeExpr && isClassModule_) {
+            withInfo.kind = WithObjKind::ClassInstance;
+            withInfo.className = cIdent(moduleName_);
+            tempType = "vb6_cls_" + withInfo.className + "*";
+            withInfo.ctrlOrigName = withInfo.className;
+        }
         // --- Fix 086: 方法调用链对象推断 (With .Sql(...) / With obj.Method(...)) ---
         // With 对象是 IndexOrCallExpr/MemberAccessExpr/WithMemberExpr (方法调用链) 时,
         // 用 inferClassTypeOfExpr 推断返回类. 此前 `With .Sql(...)` 解析为
@@ -38,6 +48,12 @@ void CCodeGen::visit(WithStmt& node) {
                     withInfo.className = cIdent(inferred);
                     tempType = "vb6_cls_" + withInfo.className + "*";
                     withInfo.ctrlOrigName = withInfo.className;
+                } else if (clsSym && clsSym->kind == SymbolKind::Class && clsSym->isInterface) {
+                    // 账 #305 第一百九十二刀: `With <返回视图的表达式>` —— 与裸名视图同一格:
+                    // 临时量是**值拷贝**, 体内成员交给视图那几位主人 (临时量自身登记进名册)。
+                    viewIface177 = clsSym->name;
+                    withInfo.kind = WithObjKind::COMObject;
+                    tempType = "vb6_iface_" + cIdent(clsSym->name);
                 }
             }
         }
@@ -303,6 +319,33 @@ void CCodeGen::visit(WithStmt& node) {
                         knownUdtVars_[tempVar] = currentReturnCType_;
                         knownLocalVars_.insert(tempVar);
                     }
+                }
+            }
+
+            // 账 #305 第二百六十九刀: `With <本类的一枚成员过程>` —— 裸名既不是变量也不是
+            // 字段, 上面那几张"按名登记"的名册都问不中 ⇒ kind 留 Unknown ⇒ 行尾兜底成
+            // COMObject。但它在 VB 里就是"调本类的 Function/Property Get 拿到的对象",
+            // 返回类型是工程类 ⇒ 它就是类实例, 体内成员该走类成员直调那一条既有路。
+            // 实证靶工程 ComCtlsDemo\Builds\ListView\LvwListSubItem.cls:89/103/125/135/142
+            // (LvwListSubItem.cls:33 `Private Function ShadowListView() As ListView`):
+            // 修复前发
+            //   void* _vb6_with_1 = (void*)vb6_LvwListSubItem_ShadowListView((void*)me);
+            //   vb6_ComCall(_vb6_with_1, L"FListItemVerify", …)   ← 拿裸结构体指针当 IDispatch
+            // 而同一条 VB 写在体外 (LvwListItem.cls:133) 发的是直调
+            //   vb6_ListView_FListItemVerify(vb6_LvwListItem_ShadowListView((void*)me), …)
+            // ⇒ 同一事实两形两答; x86 名册里这一族空转 7040 次 (台账行 5026)。
+            // 与上面"With 本函数返回值变量"那一格同一条判据 (getClassMethodReturnType
+            // 只对真实工程 Class 返回类名, rev7 口径), 区别只是那次查的是**过程自己**、
+            // 这一次查的是**本类的成员**。位置放在所有名册之后、内置对象之前:
+            // 局部/形参/字段在 VB 作用域里都盖过类成员, 先到先得的次序不许倒。
+            // 口径(用户定): 不在通用晚绑定出口加类型特判, 只在分类这一处答。
+            if (withInfo.kind == WithObjKind::Unknown && isClassModule_) {
+                const std::string retCls269 = getClassMethodReturnType(moduleName_, objNameLower);
+                if (!retCls269.empty() && isProjectClassName(retCls269)) {
+                    withInfo.kind = WithObjKind::ClassInstance;
+                    withInfo.className = cIdent(retCls269);
+                    tempType = "vb6_cls_" + withInfo.className + "*";
+                    withInfo.ctrlOrigName = withInfo.className;
                 }
             }
 

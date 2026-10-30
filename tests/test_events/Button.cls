@@ -21,3 +21,21 @@ End Sub
 Public Sub DoResize(ByVal W As Long, ByVal H As Long)
     RaiseEvent Resize(W, H)
 End Sub
+
+' Knife 256: a ByRef event param is an OUT param - the handler's write must
+' reach the raiser after RaiseEvent returns (ComCtlsDemo ListView
+' GetEmptyMarkup / empty-list markup text is exactly this shape).
+Public Event GetEmptyMarkup(ByRef Text As String, ByRef Center As Boolean)
+
+Public Function RenderMarkup() As String
+    Dim T As String
+    Dim C As Boolean
+    T = ""
+    C = False
+    RaiseEvent GetEmptyMarkup(T, C)
+    If C Then
+        RenderMarkup = T & "|CENTERED"
+    Else
+        RenderMarkup = T & "|LEFT"
+    End If
+End Function

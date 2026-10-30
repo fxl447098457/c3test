@@ -25,6 +25,14 @@ Sub Main()
     Else
         Debug.Print "Events test FAILED"
     End If
+    Dim M As String
+    M = btn.RenderMarkup()
+    Debug.Print "Markup="; M
+    If M = "NO ITEMS|CENTERED" Then
+        Debug.Print "EvtRef test PASSED"
+    Else
+        Debug.Print "EvtRef test FAILED"
+    End If
 End Sub
 
 Sub btn_Click(ByVal X As Long, ByVal Y As Long)
@@ -35,4 +43,9 @@ End Sub
 Sub btn_Resize(ByVal Width As Long, ByVal Height As Long)
     g_ResizeW = Width
     g_ResizeH = Height
+End Sub
+' 账 #305 256: 处理器写两个出参 —— 值要回到 Button.RenderMarkup 里那句 RaiseEvent 之后。
+Sub btn_GetEmptyMarkup(ByRef Text As String, ByRef Center As Boolean)
+    Text = "NO ITEMS"
+    Center = True
 End Sub

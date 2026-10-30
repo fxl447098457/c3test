@@ -122,6 +122,9 @@ int vb6_RadioClickCounts(void* hwndFrom) {
 
 // 容器 ScaleMode 的唯一取法: UserControl 宿主窗口 → 它 .ctl 声明的 ScaleMode;
 // 窗体 → 窗体的 VB6_ScaleMode 属性 (缺省 1=缇); 非窗口 (NULL) → 1。
+// 账 #305 第297刀: 「**哪一窗算容器**」不再由调用方拿 GetParent 现答, 改问
+// vb6_UC_ContainerWindowOf (实测漂过: band 里的控件父窗有两种答案 ⇒ 同一发四档数
+// 一会按像素折、一会按缇折; 读数与那条未结的「档」问一起在 uc_host.c 那位主人头上)。
 int32_t vb6_ContainerScaleMode(void* hwndParent) {
     int32_t m = vb6_UC_WindowScaleMode(hwndParent);
     if (m) return m;
@@ -184,7 +187,7 @@ int vb6_GetControlLeft(void* hwnd) {
     GetWindowRect((HWND)hwnd, &rc);
     POINT pt = { rc.left, rc.top };
     ScreenToClient(GetParent((HWND)hwnd), &pt);
-    int32_t cm = vb6_ContainerScaleMode(GetParent((HWND)hwnd));
+    int32_t cm = vb6_ContainerScaleMode(vb6_UC_ContainerWindowOf(hwnd));
     return vb6_GeomCacheRead(hwnd, VB6_GEOM_LEFT, pt.x, cm,
                              (int)vb6_ScalePxToUser((double)pt.x, cm, 0));
 }
@@ -195,7 +198,7 @@ void vb6_SetControlLeft(void* hwnd, int left) {
     GetWindowRect((HWND)hwnd, &rc);
     POINT pt = { rc.left, rc.top };
     ScreenToClient(GetParent((HWND)hwnd), &pt);
-    int32_t cm = vb6_ContainerScaleMode(GetParent((HWND)hwnd));
+    int32_t cm = vb6_ContainerScaleMode(vb6_UC_ContainerWindowOf(hwnd));
     SetWindowPos((HWND)hwnd, NULL, vb6_ScaleUserToPx((double)left, cm, 0),
                  pt.y, 0, 0, SWP_NOSIZE | SWP_NOZORDER);
     vb6_GeomCacheWrite(hwnd, VB6_GEOM_LEFT, left, cm);
@@ -207,7 +210,7 @@ int vb6_GetControlTop(void* hwnd) {
     GetWindowRect((HWND)hwnd, &rc);
     POINT pt = { rc.left, rc.top };
     ScreenToClient(GetParent((HWND)hwnd), &pt);
-    int32_t cm = vb6_ContainerScaleMode(GetParent((HWND)hwnd));
+    int32_t cm = vb6_ContainerScaleMode(vb6_UC_ContainerWindowOf(hwnd));
     return vb6_GeomCacheRead(hwnd, VB6_GEOM_TOP, pt.y, cm,
                              (int)vb6_ScalePxToUser((double)pt.y, cm, 1));
 }
@@ -218,7 +221,7 @@ void vb6_SetControlTop(void* hwnd, int top) {
     GetWindowRect((HWND)hwnd, &rc);
     POINT pt = { rc.left, rc.top };
     ScreenToClient(GetParent((HWND)hwnd), &pt);
-    int32_t cm = vb6_ContainerScaleMode(GetParent((HWND)hwnd));
+    int32_t cm = vb6_ContainerScaleMode(vb6_UC_ContainerWindowOf(hwnd));
     SetWindowPos((HWND)hwnd, NULL, pt.x,
                  vb6_ScaleUserToPx((double)top, cm, 1),
                  0, 0, SWP_NOSIZE | SWP_NOZORDER);
@@ -230,7 +233,7 @@ int vb6_GetControlWidth(void* hwnd) {
     RECT rc;
     GetWindowRect((HWND)hwnd, &rc);
     int px = rc.right - rc.left;
-    int32_t cm = vb6_ContainerScaleMode(GetParent((HWND)hwnd));
+    int32_t cm = vb6_ContainerScaleMode(vb6_UC_ContainerWindowOf(hwnd));
     return vb6_GeomCacheRead(hwnd, VB6_GEOM_WIDTH, px, cm,
                              (int)vb6_ScalePxToUser((double)px, cm, 0));
 }
@@ -239,7 +242,7 @@ void vb6_SetControlWidth(void* hwnd, int width) {
     if (!hwnd) return;
     RECT rc;
     GetWindowRect((HWND)hwnd, &rc);
-    int32_t cm = vb6_ContainerScaleMode(GetParent((HWND)hwnd));
+    int32_t cm = vb6_ContainerScaleMode(vb6_UC_ContainerWindowOf(hwnd));
     SetWindowPos((HWND)hwnd, NULL, 0, 0,
                  vb6_ScaleUserToPx((double)width, cm, 0),
                  rc.bottom - rc.top, SWP_NOMOVE | SWP_NOZORDER);
@@ -257,7 +260,7 @@ int vb6_GetControlHeight(void* hwnd) {
     RECT rc;
     GetWindowRect((HWND)hwnd, &rc);
     int px = rc.bottom - rc.top;
-    int32_t cm = vb6_ContainerScaleMode(GetParent((HWND)hwnd));
+    int32_t cm = vb6_ContainerScaleMode(vb6_UC_ContainerWindowOf(hwnd));
     return vb6_GeomCacheRead(hwnd, VB6_GEOM_HEIGHT, px, cm,
                              (int)vb6_ScalePxToUser((double)px, cm, 1));
 }
@@ -266,7 +269,7 @@ void vb6_SetControlHeight(void* hwnd, int height) {
     if (!hwnd) return;
     RECT rc;
     GetWindowRect((HWND)hwnd, &rc);
-    int32_t cm = vb6_ContainerScaleMode(GetParent((HWND)hwnd));
+    int32_t cm = vb6_ContainerScaleMode(vb6_UC_ContainerWindowOf(hwnd));
     SetWindowPos((HWND)hwnd, NULL, 0, 0, rc.right - rc.left,
                  vb6_ScaleUserToPx((double)height, cm, 1),
                  SWP_NOMOVE | SWP_NOZORDER);
@@ -293,7 +296,7 @@ void vb6_ControlMove(void* hwnd, double L, double T, double W, double H, int mas
         ScreenToClient(GetParent(hW), &p1);
         rc.left = p0.x; rc.top = p0.y; rc.right = p1.x; rc.bottom = p1.y;
     }
-    int32_t cm = vb6_ContainerScaleMode(child ? GetParent(hW) : NULL);
+    int32_t cm = vb6_ContainerScaleMode(child ? vb6_UC_ContainerWindowOf(hW) : NULL);
     int x = (mask & 1) ? vb6_ScaleUserToPx(L, cm, 0) : rc.left;
     int y = (mask & 2) ? vb6_ScaleUserToPx(T, cm, 1) : rc.top;
     int w = (mask & 4) ? vb6_ScaleUserToPx(W, cm, 0) : rc.right - rc.left;
@@ -398,9 +401,26 @@ void* vb6_GetControlHwnd(void* hwnd) {
 // 而 .FontSize 读回来还是设计值（那是另一份自存的属性）—— 两头谁都不报错。
 // 所以 setter 现在把自己创建的那张 HFONT 存进 `VB6_CtrlFont`（新名字，与 #185 那条
 // "一层一个窗口属性名"同纪律），这里优先问窗口、问不到再读这份自存的。
+// 账 #305 第二百七十九刀: 「我们给这枚窗口存过的那张字体」那一问也收成一处。这个槽位今天有了
+// 第二位读者（自注册的窗口类本人答那一问），名字再抄一份就是第二本账。
+// ⚠ 只交**我们自己存进去的那张**，刻意不采纳 WM_SETFONT 递来的句柄：Win32 的规矩是那枚句柄
+// 归送的人所有，而下面那位主人换字体时无条件 DeleteObject(旧的) —— 一格存两种来源之前要先
+// 分开记；分之前沿用改前的态度（DefWindowProc 也不记，见 .local/k278/wmsetfont.c 的实测）。
+HFONT vb6_ControlFontStored(HWND hw) {
+    if (!hw) return NULL;
+    return (HFONT)GetPropW(hw, L"VB6_CtrlFont");
+}
+
+// 账 #305 第二百八十刀: 生成代码那一头的薄壳 —— 窗体自己的 WndProc 答那一问时问它。
+// 答案仍旧只由上面那一格交：这里不改口径、不再另找一遍，句柄按 void* 进出（照本文件的向例，
+// 生成代码不需要 HFONT 这个类型名）。
+void* vb6_FormAnswerGetFont(void* hwnd) {
+    return (void*)vb6_ControlFontStored((HWND)hwnd);
+}
+
 HFONT vb6_ControlFont(HWND hw) {
     HFONT h = (HFONT)SendMessageW(hw, WM_GETFONT, 0, 0);
-    if (!h) h = (HFONT)GetPropW(hw, L"VB6_CtrlFont");
+    if (!h) h = vb6_ControlFontStored(hw);
     return h;
 }
 
@@ -424,13 +444,15 @@ static int vb6_GetControlLogFont(void* hwnd, LOGFONTW* plf) {
 
 // Helper: create new font from modified LOGFONT and set it on control
 // Also deletes the old font if it was created by us (we track via prop)
-static void vb6_SetControlFontFromLogFont(void* hwnd, const LOGFONTW* plf) {
+// 账 #305 第二百七十八刀: 摘掉 static —— 「造一枚 + WM_SETFONT + 存自存 + 作废旧句柄」这一站今天来了
+// 第二位消费者 (UC 宿主窗口与窗体顶层以前压根没人给它们发字体)。**不抄第二份**, 只在头里露出来。
+void vb6_SetControlFontFromLogFont(void* hwnd, const LOGFONTW* plf) {
     if (!hwnd || !plf) return;
     HFONT hNewFont = CreateFontIndirectW(plf);
     if (!hNewFont) return;
     // 旧字体先按"我们存过的那张"找，找不到才退回问窗口 —— 顺序反了会双删：
     // 真记字体的那几类控件（EDIT/BUTTON…）WM_GETFONT 回来的就是我们上一轮存进去的那张。
-    HFONT hOldFont = (HFONT)GetPropW((HWND)hwnd, L"VB6_CtrlFont");
+    HFONT hOldFont = vb6_ControlFontStored((HWND)hwnd);
     if (!hOldFont) hOldFont = vb6_ControlFont((HWND)hwnd);
     SendMessageW((HWND)hwnd, WM_SETFONT, (WPARAM)hNewFont, (LPARAM)TRUE);
     vb6_ControlFontStore((HWND)hwnd, hNewFont);
@@ -550,7 +572,7 @@ void vb6_SetControlFontSize(void* hwnd, float sizePt) {
     ReleaseDC(NULL, hdc);
     if (dpi <= 0) dpi = 96;
     // Convert points to pixel height (negative for character height)
-    lf.lfHeight = -(int)(sizePt * (float)dpi / 72.0f + 0.5f);
+    lf.lfHeight = vb6_UC_FontHeightPx((double)sizePt, dpi);   /* 同一位主人, 不再自己四舍五入 */
     vb6_SetControlFontFromLogFont(hwnd, &lf);
     {
         DWORD bits;

@@ -337,16 +337,26 @@ if ($fntR.Count -lt 1) { $bad += "D10 nobody reads the VB6_CtrlFont slot (证人
 #     少一个就是一个站点又"只发不存"（#204 的根因形状）。
 #     数组那一路今天运行期不可达（`vb6_CtrlArr_Load` 全仓零调用者, 2026-10-05 grep 证），列进来是**口径**。
 $rawAll = @($rtl | Where-Object { $_.Text.Contains("WM_GETFONT") })
-# 账 #202/#204 那轮这里留过一条**具名豁免**（状态条那两处，want 3 = 出口 1 + 豁免 2）。
-# 那两处已改走出口（账 #205），豁免随之删除 ⇒ 现在全 src/rtl 只许有出口那一行裸问。
-# 再出现第二行就是有人又开始"按 DC 的默认字体画/量"（STATIC/BUTTON/自注册类都不答那一问，探针实测）。
-if ($rawAll.Count -ne 1) {
-    $bad += ("D11 全 src/rtl 里带 WM_GETFONT 的代码行 = " + $rawAll.Count +
-             " 处 (want exactly 1 = 出口那一行; 别处再裸问一次就是静默按 DC 默认字体画) -> " +
-             (($rawAll | ForEach-Object { $_.File + ":" + $_.Line }) -join " | "))
+# 账 #202/#204 那轮这里留过一条**具名豁免**（状态条那两处）。那两处已改走出口（账 #205），豁免随之删除。
+# 第二百七十九刀起这一问分成两个角色来数: **问的人** = 拿 SendMessage 去问窗口是谁的字体（只许出口
+# 那一行；STATIC/BUTTON/自注册类都不答，裸问一次就是静默按 DC 默认字体画/量）；**答的人** = 我们自己
+# 注册的窗口类本人答那一问（`case WM_GETFONT:`，恰好一处，住 uc_host_window.c，且只交自己存过的那张）。
+# 以前按"带这个 token 的行 = 1"数，今天会把「多了一个答问的人」误报成「多了一个裸问的人」——两回事。
+$askAll = @($rawAll | Where-Object { $_.Text -notmatch '^\s*case\s+WM_GETFONT\s*:' })
+$ansAll = @($rawAll | Where-Object { $_.Text -match '^\s*case\s+WM_GETFONT\s*:' })
+if ($askAll.Count -ne 1) {
+    $bad += ("D11 全 src/rtl 里裸问 WM_GETFONT 的代码行 = " + $askAll.Count +
+             " 处 (want exactly 1 = 出口 vb6_ControlFont 那一行; 别处再裸问一次就是静默按 DC 默认字体画) -> " +
+             (($askAll | ForEach-Object { $_.File + ":" + $_.Line }) -join " | "))
 } elseif ($accDef.Count -eq 1) {
-    $inside = @($rawAll | Where-Object { $_.File -eq "vb6forms_ctrl.c" })
+    $inside = @($askAll | Where-Object { $_.File -eq "vb6forms_ctrl.c" })
     if ($inside.Count -ne 1) { $bad += "D11 出口所在文件里没有那一行 WM_GETFONT" }
+}
+$ansUse = @($rtl | Where-Object { $_.File -eq "uc_host_window.c" -and $_.Text.Contains("vb6_ControlFontStored") })
+if ($ansAll.Count -ne 1 -or $ansAll[0].File -ne "uc_host_window.c" -or $ansUse.Count -ne 1) {
+    $bad += ("D11 自注册窗口类答 WM_GETFONT = " + $ansAll.Count + " 处 / 问那一位主人的行数 = " + $ansUse.Count +
+             " (want 1 + 1，且那一处在 uc_host_window.c 里、只交 vb6_ControlFontStored 的答案) -> " +
+             (($ansAll | ForEach-Object { $_.File + ":" + $_.Line }) -join " | "))
 }
 $storeDef = @($rtl | Where-Object { $_.File -eq "vb6forms_ctrl.c" -and $_.Text -match '^\s*void\s+vb6_ControlFontStore\s*\(' })
 if ($storeDef.Count -ne 1) { $bad += ("D11 vb6_ControlFontStore defined " + $storeDef.Count + " times in vb6forms_ctrl.c (want exactly 1)") }
