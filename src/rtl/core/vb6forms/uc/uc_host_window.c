@@ -37,6 +37,23 @@ static void vb6_uc_fillAmbient(HDC dc, int32_t w, int32_t h) {
     DeleteObject(b);
 }
 
+/* 账 #305 第三百刀: VB6 交给 VB 代码的那张 hDC 上**选着的字体 = 这枚控件自己的 Font**。
+   我方那两张离屏位图 DC 是 CreateCompatibleDC 造的, 缺省选着的是 GDI 的 SYSTEM_FONT
+   (120 DPI 下 "FrameW1" 墨迹 70x12 像素) —— 于是用户代码里不经我方出口、直接拿 DC 落笔
+   的写法就整块换字: ComCtlsDemo 第二页 FrameW 的题头又粗又大, 而参考那台同一枚
+   = MS Sans Serif -13 常规体 (墨迹 55x12; .local/k306/render2.py 把 SYSTEM_FONT 那一档
+   单独量出来正好 70x12 才定性的)。
+   ⚠ 这里只许读那一格存储 (vb6_ControlFontStored), **不许**换成 vb6_ControlFont:
+   后者要 SendMessage(WM_GETFONT), 而本站是从 vb6_uc_push/paint 里进来的 —— 实发过一发,
+   进程当场 0xC0000409 (fastfail)。那两格答案本来就同源 (宿主窗口的 WM_GETFONT 只答这一格)。
+   没交字体 (答空) 时不动 DC, 老行为不变。 */
+static void vb6_uc_selectOwnFont(HDC dc, HWND hwnd) {
+    HFONT hf;
+    if (!dc || !hwnd) return;
+    hf = vb6_ControlFontStored(hwnd);   /* 只读那一格存储: 宿主窗口 WM_GETFONT 本就走这一格, 不进消息面 */
+    if (hf) SelectObject(dc, hf);
+}
+
 // ============================================================
 // 账 #305 第二百九十二刀: AutoRedraw 持久表面
 //
@@ -65,7 +82,9 @@ static void vb6_uc_adEnsure(vb6_UCRec* r) {
 
 HDC vb6_uc_autoRedrawDC(vb6_UCRec* r) {
     vb6_uc_adEnsure(r);
-    return (r && r->adSurf.memDC) ? r->adSurf.memDC : NULL;
+    if (!r || !r->adSurf.memDC) return NULL;
+    vb6_uc_selectOwnFont(r->adSurf.memDC, r->hwnd);   /* 账 #305 300: 交出去的那张 DC 得带自己的字体 */
+    return r->adSurf.memDC;
 }
 
 void vb6_uc_autoRedrawSet(vb6_UCRec* r, int32_t on) {
@@ -144,6 +163,7 @@ static void vb6_uc_paintInto(HWND hwnd, vb6_UCRec* r, HDC target,
     vb6_UCDib dib;
     memset(&dib, 0, sizeof(dib));
     if (!adc) vb6_uc_dibCreate(&dib, target, cw, ch);
+    if (!adc) vb6_uc_selectOwnFont(dib.memDC, hwnd);  /* 账 #305 300: 同上, 非 AutoRedraw 那一档 */
     const int useDib = (dib.memDC && dib.bits);
     HDC dc = adc ? adc : (useDib ? dib.memDC : target);
 

@@ -985,3 +985,9 @@
  *   声明的像素档 (Charts/Animation 体内摆位不变)。写侧 = vb6_CreateControl (两条创建路
  *   共用) + 四枚 vb6_UC_CreateDesign* + CtrlArr_Load + CreateWebView 共七处。
  *   touch 本文件 = 让 RCDATA 重包一次 (§B99②)。 */
+
+/* 账 #305 第三百刀: UC 交出去的那张 hDC 上要选着**这枚控件自己的字体** (VB6 语义) ——
+   uc_host_window.c 的 AutoRedraw 持久表面与 WM_PAINT 那张离屏 DIB 都是 CreateCompatibleDC
+   造的，缺省选着 GDI 的 SYSTEM_FONT ⇒ 用户代码 `DrawText UserControl.hDC, …` 整块换字
+   (ComCtlsDemo 第二页 FrameW 题头变粗变大)。字体仍只问 vb6_ControlFont (WM_GETFONT)。
+   touch 本文件 = 让 RCDATA 重包一次 (§B99②)。 */
