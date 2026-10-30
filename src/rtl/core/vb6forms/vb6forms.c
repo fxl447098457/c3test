@@ -477,23 +477,14 @@ void* vb6_CreateFormWindowB(const char* className, const char* formName,
 // VB6 观感 = Frame 内部透出窗体 BackColor → 子类化 WM_ERASEBKGND，
 // 用父窗体底色填（vb6_GetControlBackColor 未显式设置时回落 BTNFACE，
 // 与 VB6 默认 &H8000000F 等效）。
-// Fix 163-extlist: 关掉一个控件的 comctl6 视觉样式 (SetWindowTheme(hwnd,L"",L""))。
-// 为什么要关: 带视觉样式的 Button 类 (命令按钮/单选钮) 的**文字**由主题绘制器渲染 ——
-// 它用主题自己的字体并在 ClearType 下描边, 结果明显比窗体标题/MS Sans Serif 点阵糊。
-// ⚠ 复选框在本机实测**没有**被主题化 (原生就清晰), 但单选钮、命令按钮被主题化了
-// (单选钮圆点是蓝色 = 主题标记), 二者视觉不一致。统一关样式后都退回经典 GDI
-// 文本渲染 (走我们下发的 MS Sans Serif 8.25pt + NONANTIALIASED), 与标题/复选框齐平。
-// ⚠ 这也正是经典 Windows 9x/VB6 的观感 —— VB6 运行时本来就禁用该控件的主题。
-// uxtheme 走 LoadLibrary 动态取 (不新增 import lib, 与 Frame 的处理同路子)。
-static void vb6_DisableControlTheme(HWND hwnd) {
-    HMODULE themeDll = LoadLibraryW(L"uxtheme.dll");
-    if (!themeDll) return;
-    typedef HRESULT (WINAPI *pfnSetTheme)(HWND, LPCWSTR, LPCWSTR);
-    pfnSetTheme setTheme = (pfnSetTheme)(void*)GetProcAddress(themeDll, "SetWindowTheme");
-    if (setTheme) setTheme(hwnd, L"", L"");
-    FreeLibrary(themeDll);
-}
-
+// 账 #305 第三百五刀: Fix 163-extlist 那枚"给 BUTTON 族 SetWindowTheme(hwnd,L"",L"")"
+// 已撤 —— 那句的前提("VB6 运行时本来就禁用该控件的主题")是错的。
+// 依据(实测): ComCtlsDemo 参考 exe 与本方产物带**同一份** manifest(comctl32 v6,
+// 逐字节相同), 参考那台命令按钮/复选框的面色 253(主题外观)而本方 240(经典);
+// 一轮客户端像素差 33584 里 11537 来自这一族。VB6 SP6 的固有控件跟随**进程激活上下文**:
+// 有 v6 清单就主题化, C3 给每个 exe 都注入 v6 清单(driver_link.cpp embedManifestViaMt),
+// 所以"关样式"在清单工程里恒为偏差。extlist 当时看到经典外观, 是它那份参考 exe
+// 没有清单(= 进程内无 v6 上下文), 属清单策略问题, 不该由控件层替它承担。
 // Fix 162f-extlist: 取 groupbox 的标题底色 (父窗 BackColor, 未设回落 BTNFACE)。
 static COLORREF vb6_GBoxTitleBg(HWND hwnd) {
     HWND parent = GetParent(hwnd);
@@ -660,18 +651,12 @@ void* vb6_CreateControl(const char* win32Class, const char* controlName,
         // Serif 8.25pt 的那个数）。存了之后 setter 换字体时也才找得到"上一张是我们造的"那张去删。
         vb6_ControlFontStore(hwnd, hFont);
 
-        // Fix 162c-extlist: Frame(BS_GROUPBOX) 关掉 comctl6 主题化 —— 主题版的
-        // groupbox 会用白色填掉整个内部 (子控件的 240 灰底反而成了色块), VB6
-        // 参考图是经典蚀刻边框 + 透出窗体 BTNFACE 底色。classic groupbox
-        // 内部透明, 观感与 VB6 一致。
-        // Fix 163-extlist: **所有 BUTTON 类**都关样式 —— 命令按钮/单选钮的主题文字
-        // 渲染比 MS Sans Serif 点阵糊 (见 vb6_DisableControlTheme 注释)。
-        // 复选框本机未被主题化, 关掉是无害的 no-op; 关样式统一了整族观感。
-        if (_stricmp(win32Class, "BUTTON") == 0) {
-            vb6_DisableControlTheme(hwnd);
-        }
-        // Fix 162d-extlist: Frame 关主题后内部不再白填, 但也没有人涂底色了 ——
-        // 子类化补上"填父窗体底色"(见 vb6_GroupBoxSubclassProc 注释)。
+        // 账 #305 第三百五刀: 这里原本对所有 BUTTON 调 Fix 163-extlist 的
+        // vb6_DisableControlTheme (SetWindowTheme(hwnd,L"",L""))。已撤, 理由见上面那段:
+        // 参考 ComCtlsDemo 带 v6 清单 ⇒ 它的按钮是主题外观, 关样式反而逐像素不同。
+        // 主题与否交给进程激活上下文决定 (= 与 VB6 同一口径), 控件层不替它作决定。
+        // Fix 162d-extlist: groupbox 的子类化 WM_ERASEBKGND 保留 —— 主题版 groupbox
+        // 内部同样要求"透出父窗底色", 这条填充与主题/经典两档都不冲突。
         if (((style & 0x0000000FL) == 0x7L) && _stricmp(win32Class, "BUTTON") == 0) {
             if (!GetPropW(hwnd, L"VB6_GBox_OrigProc")) {
                 WNDPROC gOrig = (WNDPROC)SetWindowLongPtrW(hwnd, GWLP_WNDPROC,

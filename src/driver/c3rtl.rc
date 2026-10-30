@@ -382,9 +382,11 @@
 // 标题的 FillRect 底需要**父窗底色的实心刷** (此前空刷 → 标题后露白块); 复选/单选仍空刷。
 // 窗体 WndProc (cgen_form_wndproc_create.inc) + Frame 子类化 (vb6forms.c) 同口径。
 // vb6forms_ctrl.c + vb6forms_prop.h。
-// Fix 163-extlist: 所有 BUTTON 类控件关 comctl6 视觉样式 (vb6_DisableControlTheme) ——
-// 带样式的命令按钮/单选钮由主题绘制器渲染文字 (主题字体 + ClearType), 比窗体标题/
-// 复选框的 MS Sans Serif 8.25pt 点阵明显模糊; 关样式后统一走经典 GDI 文本渲染。
+// 账 #305 第三百五刀: Fix 163-extlist "所有 BUTTON 类关 comctl6 视觉样式"
+// (vb6_DisableControlTheme / SetWindowTheme(hwnd,L"",L"")) 已撤 —— 前提错了。
+// 依据: 参考 ComCtlsDemo exe 与本方产物带同一份 comctl32 v6 清单(逐字节相同),
+// 参考按钮面色 253(主题) vs 本方 240(经典), 一轮客户端像素差 1/3 落在这族。
+// VB6 固有控件跟随进程激活上下文; C3 给每个 exe 注入 v6 清单 ⇒ 控件层不再自行关样式。
 // vb6forms.c。
 // Fix 162e-extlist: WM_CTLCOLORBTN 统一返回 HOLLOW_BRUSH (VB6 透明语义) ——
 // (1) 生成窗体 WndProc (cgen_form_wndproc_create.inc): CheckBox/OptionButton/
@@ -1006,3 +1008,16 @@
    链接期由 driver 用 UpdateResource 注入进 EXE（src/driver/default_form_icon.hpp 存这四份字节）；
    RTL 侧 vb6forms.c 的 vb6_formApplyDefaultIcon 只负责"有这枚资源就发给窗口"。
    touch 本文件 = 让 RCDATA 重包一次 (§B99②)。 */
+
+/* 账 #305 第三百七刀: UC 宿主窗口把子控件的 WM_COMMAND / WM_NOTIFY 原样上抛给父窗口 ——
+   .frm 里 authored 在 UserControl Begin 块里的控件 (ComCtlsDemo MainForm 的 Command4
+   "Pager Demo" 放在 ComCtlsDemo.CoolBar CoolBar1 里) 把 BN_CLICKED 发给父窗口 = UC 宿主,
+   而事件处理器住在窗体模块; 以前这条落 DefWindowProc ⇒ 点按钮什么也不发生
+   (程序发 WM_COMMAND id=201 能开 PagerForm, 鼠标点不能)。uc_host_window.c。
+   touch 本文件 = 让 RCDATA 重包一次 (§B99②)。 */
+
+/* 账 #305 第三百七刀 (同刀第二处): UC desc 注册表容量 32 → 128 ——
+   ComCtlsDemo 自带 35 个 UserControl 源码（Builds\ 下的 OCX），模块 init 各注册一枚;
+   满了 `vb6_UC_Register` 静默 return ⇒ `vb6_uc_findDesc` 找不到 ⇒ HostCreate 交 NULL ⇒
+   发码侧那发 `((cls*)vb6_UC_InstanceOf(hwnd))->events = …` 写 NULL+0x88 (0xC000041D)。
+   vb6forms_uc_internal.h。touch 本文件 = 让 RCDATA 重包一次 (§B99②)。 */

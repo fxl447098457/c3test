@@ -66,7 +66,34 @@ void CCodeGen::visit(WithStmt& node) {
             // Class 符号 (ComClass/ComInterface 或未注册), 不能按项目类生成
             // vb6_cls_<X>* 临时 (类型未定义 → C2065). 转 COMObject 走后期绑定.
             const Symbol* newClsSym = lookupModuleDotted(newExpr.className);
-            if (!newClsSym || newClsSym->kind == SymbolKind::ComClass
+            // 账 #305 第三百六刀: `With New <窗体>` —— 窗体在符号表里既不是 COM 类也不是
+            // 工程 Class, 于是通用路把 New 发成 vb6_NewObject(L"<窗体>") (运行期查不到
+            // ProgID, 恒 NULL), 体内 `.Show vbModal` 再落晚绑定 (实测
+            // C3_LATEBIND_MISS name="Show" disp=00000000 kind=null ⇒ 窗体不弹;
+            // ComCtlsDemo Command1/CommandButtonW1/Command4 三枚按钮全静默)。
+            // 窗体在 C3 里是**默认实例 + HWND**, 所以这一格按 Form 控件档记:
+            //   New <窗体>      → vb6_form_hwnd_<窗体>()  (首次引用即隐式 Load)
+            //   .Show [modal]   → vb6_form_show_<窗体>(NULL) (modal 实参由 com_bind 追加,
+            //                     与外部窗体那条 `Frm.Show` 同一个拼法)
+            //   标量属性        → getControlPropReadFn(Form, …)(tempVar)
+            // 函数名的拼写取 VB_Name (designerFiles_ 的键), 不取源码大小写 ——
+            // 源码写 `New richtextboxform` 也得落到 vb6_form_hwnd_RichTextBoxForm。
+            std::string formLower306 = Symbol::toLower(newExpr.className);
+            if (knownFormModuleNames_.count(formLower306) && formLower306 != knownFormName_) {
+                std::string formCanon306 = cIdent(newExpr.className);
+                if (designerFiles_) {
+                    for (const auto& kvF306 : *designerFiles_) {
+                        if (Symbol::toLower(kvF306.first) == formLower306) {
+                            formCanon306 = cIdent(kvF306.first);
+                            break;
+                        }
+                    }
+                }
+                withInfo.kind = WithObjKind::COMObject;
+                withInfo.ctrlType = FrmControlType::Form;
+                withInfo.ctrlOrigName = formCanon306;
+                tempType = "HWND";
+            } else if (!newClsSym || newClsSym->kind == SymbolKind::ComClass
                 || newClsSym->kind == SymbolKind::ComInterface) {
                 withInfo.kind = WithObjKind::COMObject;
                 tempType = "void*";
@@ -689,6 +716,15 @@ auto& idExpr = static_cast<IdentifierExpr&>(*callExpr.callee);
             comObjExpr_.clear();
             comMemberName_.clear();
         }
+    }
+
+    // 账 #305 第三百六刀: 窗体那一格的 New 入口 (判定见上方 NewExpr 段)。
+    // emitExpr(NewExpr) 对窗体名只会发 vb6_NewObject(L"<窗体>"), 这里换成窗体
+    // 默认实例访问器 —— 首次引用即隐式 Load, 正是 VB6 `New <窗体>` 的语义。
+    if (withInfo.kind == WithObjKind::COMObject
+        && withInfo.ctrlType == FrmControlType::Form
+        && node.object->kind == ASTNodeKind::NewExpr) {
+        lastExpr_ = "vb6_form_hwnd_" + withInfo.ctrlOrigName + "()";
     }
 
     // Fix <vbeclipse>: 工程内 UserControl 实例作 With 目标时, 目标表达式要取**宿主窗口

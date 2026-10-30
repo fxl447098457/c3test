@@ -39,6 +39,41 @@ bool evtArgIsLvalue(const std::string& s) {
     }
     return true;
 }
+
+// 账 #305 第三百八刀: 「处理器写回的那枚槽怎么搬回实参自己的存储」—— 只有声明档搬得回去的
+// 那几形有答案，出口一律问 src/rtl/core/vb6rtl/vb6rtl_variant.h 那一族 To{String,Bool,Long,
+// LongPtr,Double}。串那一发用 AssignMove: vb6_VariantToString 交的是**新分配**的一枚
+// (vb6_Format 的每个 return 都是 vb6_BSTR_FromStr)，搬进目标后所有权归目标，槽随后 clear
+// 不会双 Free。数组载体 / 对象 / 64 位那几档交回空串 = 不回写 —— 装箱那一发照做，
+// 「往标量存储里写整枚槽」的崩已经修掉，写回欠的是另一座桥（跟 ByRef As Object 同一族）。
+std::string evtVariantWriteBack(const Vb6Type ty, const std::string& dst, const std::string& box,
+                                const std::string& dstCType) {
+    const uint16_t raw = static_cast<uint16_t>(ty);
+    if ((raw & static_cast<uint16_t>(Vb6Type::Array)) != 0) return std::string();
+    switch (static_cast<Vb6Type>(raw & ~static_cast<uint16_t>(Vb6Type::ByRef))) {
+        case Vb6Type::String:
+            return "vb6_BSTR_AssignMove(&(" + dst + "), vb6_VariantToString(" + box + "));";
+        case Vb6Type::Boolean:
+            return "(" + dst + ") = vb6_VariantToBool(" + box + ");";
+        case Vb6Type::LongPtr:
+            return "(" + dst + ") = vb6_VariantToLongPtr(" + box + ");";
+        case Vb6Type::Single:
+        case Vb6Type::Double:
+        case Vb6Type::Date:
+        case Vb6Type::Currency:
+            return "(" + dst + ") = (" + dstCType + ")vb6_VariantToDouble(" + box + ");";
+        case Vb6Type::Integer:
+        case Vb6Type::Long:
+        case Vb6Type::ULong:
+        case Vb6Type::Byte:
+        case Vb6Type::SByte:
+        case Vb6Type::UInteger:
+        case Vb6Type::Error:
+            return "(" + dst + ") = (" + dstCType + ")vb6_VariantToLong(" + box + ");";
+        default:
+            return std::string();
+    }
+}
 }  // namespace
 
 // --- cgen_com_events.cpp: RaiseEvent 分发 + 事件接收器表 + 外部 COM vtable sink ---
@@ -76,6 +111,7 @@ void CCodeGen::visit(RaiseEventStmt& node) {
     // 生成回调调用
     std::string call = "me->events->" + callbackName + "(me->events->handler";
     std::vector<std::string> evtRefTemps256;   // 不可取址的按地址实参：先落一枚临时量
+    std::vector<std::string> evtPostCall308;   // 账 #305 第三百八刀：装箱槽的出站回写 + 清槽
     for (size_t i = 0; i < node.args.size(); i++) {
         emitExpr(*node.args[i]);
         std::string argVal = lastExpr_;
@@ -88,6 +124,34 @@ void CCodeGen::visit(RaiseEventStmt& node) {
             prm256->isByRef,
             prm256->asType && prm256->asType->kind == ASTNodeKind::ArrayTypeRef);
         if (byAddr256) {
+            /* 账 #305 第三百八刀: 形参声明的是**槽** (As Variant / 无型) 而实参在 C 侧不是槽 ——
+               直递 `&(<标量>)` 把「标量的地址」交给了一枚 `vb6_VARIANT*` 形参，处理器一发赋值
+               就往 4/8 字节的标量存储里写整枚槽 (x86 24B) ⇒ 栈被写穿。实测 ComCtlsDemo
+               VirtualControls Demo 起窗后 0xC000041D，现场 ListView.c:13721
+               `onGetVirtualItem(…, &(CallbackText))`（CallbackText = `Dim Text As String`），
+               紧接着 13724 读它 ⇒ AV read 0x8 in wcscmp。VB6 在这一格交的就是一枚临时 Variant
+               （装箱进去 + 调用后按声明档回写），照做。
+               「是不是槽」两条判据**都要点头才留在直递**（inferExprType ∧ cExprIsVariant）：
+               少装箱只是少一层保护，错装箱会把本来就是槽的那份复制再回写，改坏已正确的组合。 */
+            const std::string prmBase256 =
+                prm256->asType ? mapTypeRef(prm256->asType.get()) : std::string("vb6_VARIANT");
+            const Vb6Type argTy308 = inferExprType(*node.args[i]);
+            if (prmBase256 == "vb6_VARIANT" && argTy308 != Vb6Type::Variant &&
+                !cExprIsVariant(argVal)) {
+                const std::string src308 = argVal;
+                const std::string box308 = "_evt_box_" + std::to_string(i);
+                evtRefTemps256.push_back("vb6_VARIANT " + box308 + " = vb6_VariantEmpty();");
+                evtRefTemps256.push_back("vb6_VariantAssign(&" + box308 + ", vb6_VariantFromValue(" +
+                                         src308 + "));");
+                if (evtArgIsLvalue(src308)) {
+                    const std::string back308 =
+                        evtVariantWriteBack(argTy308, src308, box308, mapType(argTy308));
+                    if (!back308.empty()) evtPostCall308.push_back(back308);
+                }
+                evtPostCall308.push_back("vb6_VariantClear(&" + box308 + ");");
+                call += ", &" + box308;
+                continue;
+            }
             if (evtArgIsLvalue(argVal)) {
                 argVal = "&(" + argVal + ")";
             } else {
@@ -155,6 +219,7 @@ void CCodeGen::visit(RaiseEventStmt& node) {
     call += ");";
     for (const auto& d256 : evtRefTemps256) c_.emitLine(d256);
     c_.emitLine(call);
+    for (const auto& p308 : evtPostCall308) c_.emitLine(p308);
     c_.dedent();
     c_.emitLine("}");
 

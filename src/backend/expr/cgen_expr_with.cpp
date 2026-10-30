@@ -256,6 +256,26 @@ void CCodeGen::visit(WithMemberExpr& node) {
             }
         }
 
+        // 账 #305 第三百六刀: `With New <窗体>` 的接收者是窗体默认实例的 HWND, 不是
+        // IDispatch。必须排在通用 COM 标记之前 —— 否则 `.Show` 发成
+        // vb6_ComCall(HWND, L"Show", …), 运行期 C3_LATEBIND_MISS (disp=0) 静默, 窗体
+        // 不弹 (ComCtlsDemo 三枚按钮实测)。两条出口与外部窗体那条
+        // (`Frm.Show` → cgen_expr_member_form_builtin.inc) 同一个拼法:
+        //   .Show [modal] → vb6_form_show_<窗体>(NULL)  (modal 由 com_bind 的拆包追加)
+        //   标量属性       → 控件读表 getControlPropReadFn(Form, …)(tempVar)
+        if (info.ctrlType == FrmControlType::Form && !info.ctrlOrigName.empty()) {
+            if (memLower == "show") {
+                // 不可带尾注释: 上层 com_bind 靠 callee 以 ')' 结尾拆包追加 modal。
+                lastExpr_ = "vb6_form_show_" + info.ctrlOrigName + "(NULL)";
+                return;
+            }
+            std::string readFnF306 = getControlPropReadFn(FrmControlType::Form, node.memberName);
+            if (!readFnF306.empty()) {
+                lastExpr_ = readFnF306 + "(" + tempVar + ")  /* With form .Property */";
+                return;
+            }
+        }
+
         // Fix 161f-extlist: With 目标是 ListView 槽 (形参/局部) —— `.View` / `.hWnd`
         // / `.Sorted` 等标量属性走控件读表, 不让它落 COM 晚绑定
         // (vb6_ComGetStringProp(_vb6_with_N, L"hWnd") = 拿 HWND 当 IDispatch →

@@ -335,6 +335,21 @@ static LRESULT CALLBACK vb6_uc_wndproc(HWND hwnd, UINT msg, WPARAM wParam, LPARA
 
         case WM_CAPTURECHANGED:
             break;
+        /* 账 #305 第三百七刀: 宿主窗口里那批**属于容器窗体**的设计期子控件, 通知发给
+           直接父窗口 = 本 UC 宿主。ComCtlsDemo 的 MainForm 就把 `Command4`("Pager Demo")
+           authored 在 `ComCtlsDemo.CoolBar CoolBar1` 的 Begin 块里 —— 它的事件处理器
+           (Command4_Click) 住在**窗体模块**, 而 BN_CLICKED 只送到宿主窗口; 以前这条
+           走 DefWindowProc 被静默丢掉 (实测: 鼠标点与程序发 WM_COMMAND 都到过宿主,
+           窗体那张 id 派发表从没看见 201)。
+           VB6 的 UserControl 宿主对"不属于自己"的子控件通知就是原样上抛, 这里照做。
+           不会误伤 UC 自己的设计期子控件: 那些由 CreateDesign* 建, 控件 id 恒 0
+           (hMenu 传 NULL), 窗体派发表里没有 0 这一格。 */
+        case WM_COMMAND:
+        case WM_NOTIFY: {
+            HWND parent = GetParent(hwnd);
+            if (parent) return SendMessageW(parent, msg, wParam, lParam);
+            break;
+        }
         case WM_PAINT: {
             if (!r || !r->ready) break;
             if (!r->desc || !r->desc->paint) break;

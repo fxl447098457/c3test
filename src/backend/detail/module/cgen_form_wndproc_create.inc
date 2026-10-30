@@ -540,22 +540,40 @@
     }
     // Fix 142: 容器(Frame/PictureBox)内子控件 — ID 从 200 起, DFS 顺序与
     // cgen_form_frame_menu.inc 的创建循环完全一致 (跳过 Menu 与无 Win32 类控件).
+    //
+    // 账 #305 第三百六刀 (第二格): 这一趟的「谁算容器 / 谁占一个号」必须与创建那一趟
+    // **逐格对齐**, 否则 id 会错位、UC 容器里的按钮干脆没有派发。实测 ComCtlsDemo
+    // MainForm 的 CoolBar1 是**工程内 UserControl 容器**, 里面的原生按钮 Command4
+    // ("Pager Demo") 由创建侧照常给了 id=201, 而这里原来只认 Frame/PictureBox/SSTab
+    // ⇒ 既不进 CoolBar1, 也不给 UC 子控件占号 ⇒ Command4_Click 定义了却无人调用,
+    // 点下去什么也不发生 (参考那台弹 "Pager Demo")。
+    // 口径与创建侧同源 (账 #167 那条): 容器 = controlIsContainerType || findUserControlSpec;
+    // 占号 = UC 子控件也占 (创建侧同样 childCtrlId++)。
     {
+        auto isContainerLike306 = [&](const FrmControl& c) {
+            return controlIsContainerType(c) || findUserControlSpec(c.controlTypeName) != nullptr;
+        };
         int childCmdId142 = 200;
         auto walkCmdChildren142 = [&](auto&& self, const FrmControl& container) -> void {
             for (const auto& child : container.children) {
                 if (child.controlType == FrmControlType::Menu) continue;
+                // 工程内 UserControl 子控件: 创建侧占号, 事件走 UC 自己那条 sink。
+                if (findUserControlSpec(child.controlTypeName)) {
+                    childCmdId142++;
+                    if (!child.children.empty()) self(self, child);
+                    continue;
+                }
                 const char* childClass142 = FrmParser::controlTypeToWin32Class(child.controlType);
                 if (!childClass142) continue;
                 emitCommandDispatch142(child, childCmdId142);
                 childCmdId142++;
-                if (!child.children.empty() && controlIsContainerType(child)) {   // 账 #167: 原来少认 SSTab
+                if (!child.children.empty() && isContainerLike306(child)) {   // 账 #167: 原来少认 SSTab
                     self(self, child);
                 }
             }
         };
         for (const auto& ctrl : frmDesc.formControl.children) {
-            if (!ctrl.children.empty() && controlIsContainerType(ctrl)) {   // 账 #167: 原来少认 SSTab
+            if (!ctrl.children.empty() && isContainerLike306(ctrl)) {   // 账 #167/#305-306: 含 UC 容器
                 walkCmdChildren142(walkCmdChildren142, ctrl);
             }
         }
