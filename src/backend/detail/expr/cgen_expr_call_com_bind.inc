@@ -555,10 +555,37 @@
                 // 才能接住方法写入的新对象指针 (VT_DISPATCH|VT_BYREF)。仅当实参是简单对象变量
                 // (已知 ComClass/Object 变量) 时才取址 —— 表达式出参需临时量, 超出本修复范围,
                 // 退化为按值打包以维持既有行为, 不引入编译错误。
+                // 账 #305 第二百七十一刀: 「这一格 C 存储是不是一个对象槽(可以按 void** 交出去)」。
+                // 与 isKnownObjectVarName 那两张**按名**表同一问, 只是问的是类型档 —— 必须是
+                // **指针**型对象档: vb6_VARIANT 是值结构体, 把它的地址交出去 callee 会把
+                // IDispatch* 写进标签区 (§B190 那格 C2172 的同一个坑); legacy 接口视图
+                // (vb6_iface_X) 也是**值**结构体, 所以这一族**刻意不放进来** —— 视图那一路
+                // 有自己的适配器 (§B215 写侧视图适配器), 不在这里混档。
+                auto ctypeIsObjectSlot271 = [](const std::string& t) -> bool {
+                    if (t.empty() || t.back() != '*') return false;
+                    return t == "void*"                              // As Object
+                        || t.rfind("vb6_cls_", 0) == 0               // 工程类实例指针
+                        || t.rfind("vb6_ComIface_", 0) == 0;         // 前期绑定接口指针 (IFont/StdFont)
+                };
                 auto isKnownObjectVarName = [&](const std::string& e) -> bool {
                     std::string l = e;
                     std::transform(l.begin(), l.end(), l.begin(), ::tolower);
-                    return knownObjectVars_.count(l) || knownTypedComVars_.count(l);
+                    if (knownObjectVars_.count(l) || knownTypedComVars_.count(l)) return true;
+                    // 账 #305 第二百七十一刀: VB6 的 out-param 惯用写法是「把**本过程的返回变量**
+                    // 当实参递出去」—— 靶工程 `Common/Common.bas:1017 CloneOLEFont`:
+                    //     Public Function CloneOLEFont(ByVal Font As IFont) As StdFont
+                    //         If Not Font Is Nothing Then Font.Clone CloneOLEFont
+                    // 返回槽在 C 里叫 `vb6_ret_<过程名>`, 从不进上面两张按名表 ⇒ 这一形以前退化成
+                    // 按值打包 `vb6_ComPackObject(vb6_ret_CloneOLEFont)`, callee 写不进调用者的槽 ⇒
+                    // **返回恒 NULL** ⇒ 下游 13 处 `TempFont.Bold/Underline = True` 全打在虚空里
+                    // (ListView 分组表头 / StatusBar 面板 / LinkLabel 的下划线字体与正文同形)。
+                    // 本刀只补「认槽」这一问, 打包器/调用/所有权形状一字未动 —— 同一站点上
+                    // VTableHandle.c 已有四枚按这一臂正常工作的 ByRef 对象出参 (GetWindowContext
+                    // 的 Frame/UIWindow 各两枚), 那四枚的槽就是 `vb6_ComIface_*` 指针, 与返回槽同档。
+                    if (currentReturnVar_.empty()) return false;
+                    std::string rv = currentReturnVar_;
+                    std::transform(rv.begin(), rv.end(), rv.begin(), ::tolower);
+                    return l == rv && ctypeIsObjectSlot271(currentReturnCType_);
                 };
                 auto byRefObjectParamAt = [&](size_t pos) -> bool {
                     if (pos < sig.params.size()) {
@@ -577,10 +604,25 @@
                             return true;
                     return false;
                 };
+                // 账 #305 §B224 第二半: 命名实参里「声明是 ByRef」的那一问 (不限对象型) ——
+                // 标量按引用发只认这个答案, ByVal 一律不取址。
+                auto byRefParamNamedAny = [&](const std::string& nm) -> bool {
+                    std::string nl = Symbol::toLower(nm);
+                    for (const auto& p : sig.params)
+                        if (Symbol::toLower(p.name) == nl && !p.isByVal && !p.isParamArray)
+                            return true;
+                    return false;
+                };
                 for (size_t i = 0; i < node.positional.size(); i++) {
                     std::string packFn = comPackExpr(*node.positional[i]);
                     emitExpr(*node.positional[i]);
                     { std::string resolved = resolveComMarkerForPack(packFn); if (!resolved.empty()) lastExpr_ = resolved; }
+                    // 账 #305 §B224 第二半 (第二百三十九刀): 早绑定已知签名 —— 声明是 ByRef 的
+                    // 标量形参按引用发 (VT_BYREF|T)，与真 VB6 的写回语义对齐；ByVal 一律不取址。
+                    if (i < sig.params.size() && !sig.params[i].isByVal) {
+                        std::string byRefArg = comByRefArgExpr(*node.positional[i], lastExpr_);
+                        if (!byRefArg.empty()) { packedArgs.push_back(byRefArg); continue; }
+                    }
                     if (byRefObjectParamAt(i)
                         && node.positional[i]->kind == ASTNodeKind::IdentifierExpr
                         && isKnownObjectVarName(lastExpr_)) {
@@ -593,6 +635,10 @@
                     std::string packFn = comPackExpr(*named.value);
                     emitExpr(*named.value);
                     { std::string resolved = resolveComMarkerForPack(packFn); if (!resolved.empty()) lastExpr_ = resolved; }
+                    if (byRefParamNamedAny(named.name)) {
+                        std::string byRefArg = comByRefArgExpr(*named.value, lastExpr_);
+                        if (!byRefArg.empty()) { packedArgs.push_back(byRefArg); continue; }
+                    }
                     if (byRefObjectParamNamed(named.name)
                         && named.value->kind == ASTNodeKind::IdentifierExpr
                         && isKnownObjectVarName(lastExpr_)) {
@@ -630,6 +676,13 @@
                 std::string packFn = comPackExpr(*argExpr);
                 emitExpr(*argExpr);
                 { std::string resolved = resolveComMarkerForPack(packFn); if (!resolved.empty()) lastExpr_ = resolved; }
+                // 账 #305 §B224 第二半 (第二百三十九刀): 纯晚绑定这一支没有签名可问，但真 VB6
+                // 对带型变量照样递 VT_BYREF|T (实测 B4: `o.Bump(x)`，o As Object ⇒ x=11) ——
+                // 简单 lvalue + 数值/布尔五档才取址，其余(字面量/表达式/属性读/串/对象/变体)按值。
+                {
+                    std::string byRefArg = comByRefArgExpr(*argExpr, lastExpr_);
+                    if (!byRefArg.empty()) { packedArgs.push_back(byRefArg); return; }
+                }
                 // Fix 266: 打包器的**型**与 marker 解析的**型**不同源 ——
                 // comPackExpr 按 AST 推的给出 typed 打包器 (ComPackDouble/Int/Bool/BSTR),
                 // 而 marker 解析可能交回**无型** VARIANT 取值

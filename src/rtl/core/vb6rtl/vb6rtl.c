@@ -438,7 +438,8 @@ BSTR vb6_DecimalToBSTR(vb6_VARIANT v) {
     VARIANT src;
     VariantInit(&src);
     if (!vb6_DecimalAsVariant(v, &src)) return vb6_BSTR_FromStr(L"");
-    if (SUCCEEDED(VariantChangeType(&src, &src, 0, VT_BSTR))
+    /* 账 #305 §B224: 目的档 VT_BSTR 的换算走唯一出口(布尔答 True/False，不是 Automation 的 -1)。 */
+    if (SUCCEEDED(vb6_ComChangeType(&src, &src, VT_BSTR))
             && src.vt == VT_BSTR && src.bstrVal) {
         BSTR r = src.bstrVal;   /* 把权抄给调用方(与其它 CStr 出口同口径), 所以不能 VariantClear */
         src.bstrVal = NULL;

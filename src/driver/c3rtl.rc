@@ -1,4 +1,28 @@
 // c3rtl.rc - RTL runtime library embedded as resources
+// 2026-10-27 (ledger #305, knife 262): vb6com_invoke.c gained the late-binding exit
+//   guard -- a receiver that is neither a real IDispatch nor a host pseudo-object
+//   (Font / Extender / host table entry) used to fall through the exits silently and
+//   answer Empty/0. Now each of the seven exits (vb6_ComCall / vb6_ComCallByDispid /
+//   vb6_ComGetProp / vb6_ComGetPropArg / vb6_ComSetProp / vb6_ComSetPropArg /
+//   vb6_ComSetRef) prints one [C3_LATEBIND_MISS #N] line to stderr and bumps the
+//   counter exported as vb6_ComLateBindMissCount(). Behaviour is unchanged (no raise):
+//   vb6_RaiseError with no handler would exit(424) and turn the gate red.
+//   uc_hostmodel*.inc gained the sibling report -- the host pseudo channel answers
+//   "handled / Empty" for member names it does not know (ScaleX / ScaleY / Size),
+//   which is how the With-UserControl half (knife 261 item A) was leaking silently;
+//   each miss prints [C3_HOST_MEMBER_MISS #N] and bumps vb6_Host_UnknownMemberCount().
+//   This touch exists only so rc.exe re-embeds src/rtl/** into C3.exe --
+//   check_rtl_embedded R1 catches the stale embed.
+// 2026-10-25 (account #490, knife 216, §B178): vb6rtl_conv.c / vb6rtl_builtin.h --
+//   vb6_MsgBox grew from the 3-arg prototype to VB6's full 5-arg signature
+//   (prompt, buttons, title, helpfile, context), matching vb6_InputBox which already
+//   carries all seven. Before this, `MsgBox(msg, Style, Title, Help, Ctxt)` (10 real
+//   call sites in the corpus) emitted five actuals into a 3-param prototype = silent
+//   over-pass that the local cl never diagnoses. This touch exists only so rc.exe
+//   re-embeds src/rtl/** into C3.exe -- check_rtl_embedded R1 caught the stale embed.
+// 2026-10-23 (account #481, knife 182): vb6comserver_obj.c gained vb6_UnregisterProjectClassInstance
+//   (the registration table's other leg) and the register leg now reuses freed slots; this touch exists
+//   only so rc.exe re-embeds src/rtl/** into C3.exe -- check_rtl_embedded R1 caught the stale embed.
 // 2026-10-23 (ledger #305, ScaleLeft / ScaleTop): the form's custom coordinate
 //   system has four numbers (ScaleLeft / ScaleTop / ScaleWidth / ScaleHeight); only the
 //   last two were wired. `Me.ScaleLeft` / `Me.ScaleTop` had no row in kFormPseudoRows
@@ -923,4 +947,33 @@
  *   比名 (尺与 vb6_FindCoClassDesc 同一把) 选中第一百六十六刀那批 wrap; 认不出交 {0} (在册欠项 = 这一形 VB6 报 13)。
  *   新 RTL 出口 vb6_ComObject_ClassNameA = 兄弟 ClassNameBStr 的不分配那一档: 这一站每迭代一枚都要问一次,
  *   不能每问一次 SysAllocString; 认不出交 NULL 的口径与兄弟一字相同。
+ *   touch 本文件 = 让 RCDATA 重包一次 (§B99②)。 */
+/* 账 #305 §B219 第二百二十刀 (2026-10-25): 入站实参「VARIANT → 形参声明档」那一问收成一处主人 ——
+ *   服务端进门那一趟改问新 RTL 出口 vb6_ComArgNormalize (定义在 vb6rtl_com.c, 声明在 vb6rtl_variant.h,
+ *   连同新哨兵常量 VB6_ARGVT_SKIP)，vb6comserver_obj.c 里那半张手抄换算表(只折 I2/I1/UI1/UI2/BOOL/
+ *   EMPTY→I4、R4→R8)撤掉；vb6_DispMethodDesc 从此多带一枚每方法形参声明档数组。
+ *   touch 本文件 = 让 RCDATA 重包一次 (§B99②)。 */
+
+/* knife 230: RTL changed (array slot write-back) -- force c3rtl.rc re-embed */
+
+/* knife 233: RTL changed (byref scalar write-back) -- force c3rtl.rc re-embed */
+
+/* knife 238: RTL changed (variant -> string authority: BOOL answers True/False) -- force c3rtl.rc re-embed */
+
+/* knife 239: RTL changed (byref scalar arg packers for late-bound calls) -- force c3rtl.rc re-embed */
+
+/* knife 276: RTL changed (Font.hFont -- one eight-fields->LOGFONT owner plus a self-invalidating HFONT cache; the font property/write arms now report unknown names) -- force c3rtl.rc re-embed */
+/* knife 278: RTL changed (a UC host window and a form top-level window now get their font at creation; the create+WM_SETFONT+store residence in vb6forms_ctrl.c is shared, not copied) -- force c3rtl.rc re-embed */
+/* knife 279: RTL changed (the UC host window answers WM_GETFONT itself -- DefWindowProc does not remember WM_SETFONT; plus the VB6_CtrlFont slot gains one read-side owner) -- force re-embed */
+/* knife 280: RTL changed (generated-code-facing thin shell vb6_FormAnswerGetFont -- the form top-level window now answers the font question through that one read-side owner) -- force re-embed */
+/* knife 277: RTL changed (one pt->pixel authority for lfHeight, truncating like VB6 (8.25pt at 120dpi: -14 -> -13); the shared UserControl font default family is MS Sans Serif, not Segoe UI) -- force c3rtl.rc re-embed */
+
+/* 账 #305 第二百九十五刀: Extender 伪对象的方法形 `.Extender.Move` 接进属性形那同一位主人
+ *   (新 RTL 出口 vb6_UC_ExtenderMoveGeom)；除 Move 以外的 Extender 方法名改走 vb6_ComLateBindMiss
+ *   报数 (行为不变，仍返回 NULL)。touch 本文件 = 让 RCDATA 重包一次 (§B99②)。 */
+
+/* 账 #305 第二百九十七刀: 「这枚窗口的几何按谁的 ScaleMode 折」收成一位主人
+ *   vb6_UC_ContainerWindowOf (uc_host.c) —— vb6forms_ctrl.c 那九站不再拿 GetParent 现答
+ *   (band 里的控件被 SetParent 进 CoolBar 宿主、又被 rebar 搬进 ReBarWindow32 ⇒ 同一发
+ *   四档数拿到过两种单位), uc_controls.c 的 vb6_UC_ContainerScaleModeCurrent 并进同一位。
  *   touch 本文件 = 让 RCDATA 重包一次 (§B99②)。 */

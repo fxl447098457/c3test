@@ -155,7 +155,7 @@ static HFONT vb6_Vb6DefaultGuiFont(void) {
     int dpiY = hdc ? GetDeviceCaps(hdc, LOGPIXELSY) : 96;
     HFONT hFont;
     if (hdc) ReleaseDC(NULL, hdc);
-    lf.lfHeight = -MulDiv(825, dpiY, 7200);   /* 8.25pt → 像素 */
+    lf.lfHeight = vb6_UC_FontHeightPx(8.25, dpiY);   /* 8.25pt -> 像素, 截断口径在主人那一处 (账 #305 二百七十七刀) */
     lf.lfWeight = FW_NORMAL;
     // Fix 190: 保持 DEFAULT_CHARSET —— 它让 GDI 按**字符串实际字符**做字体链接,
     // 于是同一控件既能画 CJK 也能画韩文/西里尔/希腊文; 写死某个具体代码页字符集
@@ -448,6 +448,10 @@ void* vb6_CreateFormWindowB(const char* className, const char* formName,
     }
 
     free(wtitle);
+    /* 账 #305 第二百七十八刀: 参考的顶层窗体自己答字体 (-13/MS Sans Serif), C3 的 VB6_Form_* 顶层
+     * 从没被发过 => 窗体上 Print/TextWidth 那一族按 DC 默认字体量。交 NULL = VB6 默认档;
+     * 窗体若带设计期字体, 后面那条 setter 会再来发一张 (那一站自带作废)。 */
+    vb6_UC_ApplyFontToWindow(hwnd, NULL);
     return (void*)hwnd;
 }
 
@@ -1602,6 +1606,16 @@ void vb6_ShowForm(void* hwnd, int modal) {
 
     ShowWindow((HWND)hwnd, SW_SHOWDEFAULT);
     UpdateWindow((HWND)hwnd);
+
+    // 账 #305: 首次显示时窗体背景从未被擦除过 —— Charts 2020 Form2 (BackColor &H00E5E5E5&)
+    // 的卡片是子控件画的白底, 卡片**之间**的空隙第一次上屏时无人填, 于是留白;
+    // VB6 下这些空隙是窗体底色 229,229,229。这里在首次 Show 之后显式擦一次背景
+    // (含子窗口), 让灰条出现。只做一次: 后续重绘仍由各子控件的 WM_ERASEBKGND 负责,
+    // 不能每帧擦 (会与 AutoRedraw 记忆 DC 打架, 3DMenu 每 50ms 镜像一次)。
+    if (!GetPropW((HWND)hwnd, L"VB6_AutoRedrawDC")) {
+        RedrawWindow((HWND)hwnd, NULL, NULL,
+                     RDW_INVALIDATE | RDW_ERASE | RDW_UPDATENOW | RDW_ALLCHILDREN);
+    }
 
     // Fix 137: VB6 启动的窗体会出现在最前并获得焦点; 我们只 ShowWindow 的话
     // 窗口常落在已有窗口后面 (双击 exe 时尤甚 —— 没有前台权限继承)。

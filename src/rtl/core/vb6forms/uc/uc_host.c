@@ -167,7 +167,21 @@ vb6_HostObjRec* vb6_ho_find(const void* hwnd) {
     return NULL;
 }
 
+/* 账 #305 第二百八十二刀: 按**实例**找登记记录 —— 第二百五十八刀那种无窗宿主
+   (InvisibleAtRuntime) 的 `hwnd` 就是 NULL, vb6_ho_find 那一把钥匙永远开不了它的门。
+   刻意另开一位主人而**不给 ho_find 加第二条钥匙**: 实例指针与 HWND 住在同一地址空间,
+   一枚 UC 实例的数值完全可能等于另一枚控件的 HWND (uc_host.c::vb6_UC_HwndOf 上面那段
+   「已经就是 HWND 就别再查表」写的就是这个坑), 一把钥匙开两扇门会把真实窗口认成实例。 */
+vb6_HostObjRec* vb6_ho_findInstance(const void* inst) {
+    if (!inst) return NULL;
+    for (int32_t i = 0; i < vb6_ucHoCount; i++) {
+        if (!vb6_ucHo[i].hwnd && vb6_ucHo[i].instance == inst) return &vb6_ucHo[i];
+    }
+    return NULL;
+}
+
 vb6_UCRec* vb6_uc_findByHwnd(const void* hwnd) {
+    if (!hwnd) return NULL;   // 账 #305 258: 无窗宿主 (InvisibleAtRuntime) 的 hwnd 就是 NULL
     for (int32_t i = 0; i < vb6_ucRecCount; i++) {
         if ((void*)vb6_ucRecs[i].hwnd == hwnd) return &vb6_ucRecs[i];
     }
@@ -239,7 +253,10 @@ void vb6_uc_push(vb6_UCRec* r, vb6_UCSaved* saved) {
     vb6_UserControl_ScaleWidth = (int32_t)vb6_ScalePxToUser((double)r->scaleWidth, ucMode175, 0);
     vb6_UserControl_ScaleHeight = (int32_t)vb6_ScalePxToUser((double)r->scaleHeight, ucMode175, 1);
     vb6_UserControl_ScaleMode = ucMode175;
-    vb6_UserControl_hDC = r->hdc;
+    /* 账 #305 第二百九十二刀: 非 WM_PAINT 期间的 UserControl.hDC = AutoRedraw 持久表面
+       (VB6 语义). 没写过 .AutoRedraw = True 的控件仍旧是 NULL, 老行为不变。*/
+    vb6_UserControl_hDC = r->hdc ? r->hdc
+                        : (r->adSurf.memDC ? vb6_uc_autoRedrawDC(r) : NULL);
     vb6_UserControl_ContainerHwnd = r->parent;   // 账 #180: 不再折成 int32_t
     vb6_UserControl_Enabled = r->enabled;
     if (r->font) {
@@ -385,6 +402,40 @@ void vb6_UserControl_Cls(void) {
     // "PAINT→Cls→invalidate→PAINT" 无限重绘循环 (czFormDemo ~90fps 闪烁)。
     // RTL 的 WM_PAINT 每次 BeginPaint 后都是全新表面, 且控件随后会完整重绘,
     // 因此 Cls 在本架构下等价于空操作。
+    // 账 #305 第二百九十二刀: 例外是 AutoRedraw 控件 —— 它的表面是常驻的, Cls 必须
+    // 真的把它清成 ambient 底色 (FrameW 的 DrawFrame 就以 Cls 开头)。
+    vb6_UCRec* r = vb6_ucCurrent;
+    if (r && r->adSurf.memDC) vb6_uc_autoRedrawCls(r);
+}
+// 账 #305 第二百九十二刀: 代码生成侧的 `UserControl.AutoRedraw = v` 落到这里
+// (判据同 Extender 那条通道: 写侧出口在 cgen 里只此一处, RTL 只留这一个入口)。
+void vb6_UC_SetAutoRedraw(void* value) {
+    int32_t on = (int32_t)(intptr_t)value;
+    vb6_UserControl_AutoRedraw = (int16_t)on;
+    vb6_UCRec* r = vb6_ucCurrent;
+    if (!r) return;
+    vb6_uc_autoRedrawSet(r, on);
+    vb6_UserControl_hDC = on ? vb6_uc_autoRedrawDC(r) : NULL;
+}
+
+// 账 #305 第二百九十二刀: TabStrip 的页控件是**并列的兄弟窗口** (ComCtlsDemo 的
+// Picture3 装着第二页整个 FrameW), 在 VB6 里 TabStrip 永远沉在它们下面 —— 实测参考
+// 版 z 序: 27 个兄弟里 TabStrip 排第 28 = 最底, Picture3/Animation 都在它上面。
+// C3 按创建顺序排 ⇒ TabStrip 压在 Picture3 上, 一整页控件全被它的白底盖掉。
+// 只在窗体画第一帧前沉一次 (之后用户可以自己改 z 序, 不再抢)。
+void vb6_UC_SinkTabBackdrops(void* parentHwnd) {
+    HWND parent = (HWND)parentHwnd;
+    if (!parent || GetPropW(parent, L"VB6_TabBackdropsSunk")) return;
+    SetPropW(parent, L"VB6_TabBackdropsSunk", (HANDLE)1);
+    for (int32_t i = 0; i < vb6_ucRecCount; i++) {
+        vb6_UCRec* r = &vb6_ucRecs[i];
+        if (!r->hwnd || r->parent != parent || !r->desc || !r->desc->typeName) continue;
+        const char* p = strrchr(r->desc->typeName, '.');
+        if (!p) p = r->desc->typeName; else p++;
+        if (_stricmp(p, "TabStrip") != 0) continue;
+        SetWindowPos(r->hwnd, HWND_BOTTOM, 0, 0, 0, 0,
+                     SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+    }
 }
 
 // Fix 133u: UserControl.Parent (容器窗体对象).
@@ -427,6 +478,68 @@ void vb6_UC_ParentMove(int32_t left, int32_t top, int32_t width, int32_t height)
        vb6_ControlMove 自己 extern vb6_InvokeFormResize 同一条纪律 (三头混一个 TU 会撞)。*/
     extern void vb6_ControlMove(void* hwnd, double l, double t, double w, double h, int mask);
     vb6_ControlMove((void*)fw, (double)left, (double)top, (double)width, (double)height, 15);
+}
+
+/* ================= 账 #305 第二百八十五刀: 单选组的容器侧 =================
+   「同一组里只能选一个」这一条**不在控件代码里，也不在 OS 里**：
+   实测靶工程那两枚 `OptionButtonW` 的内层钮 `style & BS_TYPEMASK = 0x4` =
+   `BS_RADIOBUTTON`（**不是** BS_AUTORADIOBUTTON ⇒ OS 不代管互斥）、两枚 `GetDlgCtrlID`
+   都是 0、而且**父窗是两个不同的宿主窗口**（OS 的单选组要求同父）⇒ 谁来撤别人?
+   答案写在控件自己代码里：`Value` 的 Property Let 每一次改值都发
+   `UserControl.PropertyChanged "Value"`（`OptionButtonW.ctl:1284`；2321 那一发旁边还留着
+   注释「…so that option groups behave correctly」）⇒ 是**容器**收到通知后撤兄弟。
+   而 C3 这一发是空壳（`vb6rtl_com.c` 把 propName 一扔）⇒ 两台能同时勾上。
+   组的口径按「同一容器 + 同一 UC 类型 + 两边都带单选样式」收：
+   样式这一问不可省 —— 同工程里 `CheckBoxW1/2` 的 Let 同样发 `PropertyChanged`，
+   只看「同型 + Value 答真」就会把复选框也强制成互斥（那是把一条修好、把另一条修坏）。
+   ⚠ 只认 `BS_RADIOBUTTON` / `BS_AUTORADIOBUTTON` 两档；`BS_OWNERDRAW` 那档（.ctl 在
+   Graphical/OwnerDraw 下把样式整个换成 OWNERDRAW，1655~1658）今天仍然没有主人 —— 那是
+   收窄不是回归（改之前那档也是谁都不撤）。vb6forms.c 那位 `vb6_tabIsRadio` 只认
+   AUTORADIO（它问的是「OS 会不会自己换勾」，与本刀这一问不同形，故意不合）。 */
+static BOOL CALLBACK vb6_ucRadioEnumProc(HWND h, LPARAM l) {
+    wchar_t cls[16];
+    int* hit = (int*)l;
+    if (GetClassNameW(h, cls, 15) > 0 && wcscmp(cls, L"Button") == 0) {
+        uint32_t kind = (uint32_t)(GetWindowLongW(h, GWL_STYLE) & BS_TYPEMASK);
+        if (kind == BS_RADIOBUTTON || kind == BS_AUTORADIOBUTTON) *hit = 1;
+    }
+    return 1;
+}
+
+static int vb6_ucHasRadioStyle(vb6_UCRec* r) {
+    int hit = 0;
+    if (!r || !r->hwnd || !IsWindow((HWND)r->hwnd)) return 0;
+    EnumChildWindows((HWND)r->hwnd, vb6_ucRadioEnumProc, (LPARAM)&hit);
+    return hit;
+}
+
+/* 「这一枚 Value 现在算不算真」不自己列表回答 —— 走 `vb6_VariantToBool` 那一位既有的
+   口径主人 (Empty/0/False 为假)，与第二百四十四刀 `vb6_ComResultToBool` 同一取舍:
+   手写一张按档的表就等于给「谁答这一档」再开一张家。 */
+void vb6_UC_ValueGroupNotify(const wchar_t* propName) {
+    vb6_UCRec* self = vb6_ucCurrent;
+    if (!self || !self->me || !self->desc) return;
+    if (!propName || _wcsicmp(propName, L"Value") != 0) return;
+    if (!vb6_ucHasRadioStyle(self)) return;
+    vb6_VARIANT mine;
+    memset(&mine, 0, sizeof(mine));
+    if (!vb6_UC_OwnPropGet(self->me, L"Value", &mine)) return;
+    int isTrue = vb6_VariantToBool(mine) != 0;
+    vb6_VariantClear(&mine);
+    /* 撤勾那一发也会走到这里（Let 无条件通知）：自己已经不算真就别再动兄弟,
+       否则兄弟的 Let 又发一声 ⇒ 互相反咬。 */
+    if (!isTrue) return;
+    vb6_VARIANT off;
+    memset(&off, 0, sizeof(off));
+    off.vt = VT_BOOL;
+    off.boolVal = 0;   /* VARIANT_FALSE */
+    for (int32_t i = 0; i < vb6_ucRecCount; i++) {
+        vb6_UCRec* r2 = &vb6_ucRecs[i];
+        if (r2 == self || !r2->me || r2->desc != self->desc) continue;
+        if (r2->parent != self->parent) continue;
+        if (!vb6_ucHasRadioStyle(r2)) continue;
+        vb6_UC_OwnPropSet(r2->me, L"Value", &off);
+    }
 }
 
 void vb6_UC_Register(const vb6_UserControlDesc* desc) {
@@ -494,6 +607,15 @@ void vb6_UC_ActivateHost(void* hwnd) {
     vb6_uc_activate(r);
 }
 
+// 账 #305 第二百五十八刀: `UserControl.InvisibleAtRuntime = -1` 的 UC 在 VB6 里**根本
+// 不建窗口**（隐藏 ≠ 不建窗 —— 参考里 vis=0 的 UC 窗口照样在枚举里）。cgen 按 .ctl 头里
+// 那一行在创建前后置位本标志: 置位时宿主记录照建（实例 / 属性 / 成员调用都要能用），
+// 只跳过 CreateWindowEx / z 序 / Show / Resize 那几件必须有窗口的事。
+// 它**不**由 ucHostInit 消费（与 skipInitProps 不同）—— 无窗 UC 的设计期子控件也都不该建窗，
+// 嵌套的 HostCreate 读到同一个 1 是对的；cgen 在每次创建后清 0。
+static int vb6_uc_windowless = 0;
+void vb6_UC_SetWindowless(int v) { vb6_uc_windowless = v; }
+
 void* vb6_UC_HostCreate(const char* typeName, int32_t left, int32_t top,
                         int32_t width, int32_t height, void* hParent, void* hInstance,
                         const char* ctrlName, int32_t index) {
@@ -503,6 +625,10 @@ void* vb6_UC_HostCreate(const char* typeName, int32_t left, int32_t top,
 
 void* vb6_UC_InstanceOf(void* hwnd) {
     vb6_UCRec* r = vb6_uc_findByHwnd(hwnd);
+    // 账 #305 第二百五十八刀: 无窗宿主 (InvisibleAtRuntime) 交回来的槽里装的是**实例**而不是
+    // 句柄 (见 uc_host_create.inc 末尾), 所以这里按实例再兜一次 —— 否则那三枚 ImageList 的
+    // 成员访问 (ListImages 一族) 全部落空。
+    if (!r && hwnd) r = vb6_uc_findByInstance(hwnd);
     return r ? r->me : NULL;
 }
 
@@ -809,6 +935,45 @@ int32_t vb6_UC_DesignCtrlOwner(const void* hwnd, void** outInst, const char** ou
         }
     }
     return 0;
+}
+
+/* 账 #305 第二百九十七刀: 「这枚窗口的几何该按谁的 ScaleMode 折」收成一位主人。
+   第296刀的读数 (C3_K296 埋点, 台账那一行有全表): 靶工程 15 秒 38 发摆位里,
+   **同一枚窗口、同一发四档数**拿到过两种单位答案 —— ImageCombo1 的宿主一发 `cm=3`
+   (父窗=CoolBar 的宿主, 它 .ctl 声明 ScaleMode=3 像素) 摆成 **3672x324**, 另一发 `cm=1`
+   (父窗已是 ReBarWindow32 ⇒ 落回窗体档) 摆成 306x27。漂的不是换算, 是**父窗本身**:
+   `CoolBar.ctl:3632` 自己就 `SetParent .hWndChild, UserControl.hWnd`, 而 band 落位后 OS 的
+   rebar 又把它塞进 ReBarWindow32 ⇒ 同一份代码问「我是谁的容器」得到两扇窗。
+   这一问收成一位主人, 三条档:
+     · UC 实例的宿主窗口 ⇒ 交创建时记录的 `r->parent` (不随 SetParent 漂);
+     · UC 的设计期子控件 ⇒ 交那位 UC 自己的宿主窗口 (`vb6_UC_DesignCtrlOwner` 那一张名册);
+     · 剩下的 (窗体上的普通控件 / 顶层) ⇒ 维持 GetParent, 与改前逐字节等价。
+   ⚠ 本刀只改「哪一窗」, 没改「哪种档」: 改前那发答 3 的照旧答 3 ⇒ 靶工程终态 69 行窗口
+   没动 (改前/改后两台跑出的结构 CSV 逐字节同一份)。那条"同一份"经不起换编译器二进制:
+   本刀之后只改注释重编一台, 就多出 6 格 ±1 像素的抖 (§B97 那一族) ⇒ 结构尺这一问的
+   稳定读数是**筛掉 1 像素后那 10 格**, 改前/改后同一批同值。变化全在瞬态 —— band 里的
+   控件多了一段 3672x324 的摆位, 收得住是因为 OS 的 rebar 自己按 band 矩形搬 hWndChild。
+   瞬态行数 8→16 记在册。
+   ⚠ 一条**没结案**的读数记下: 同一份 .ctl 那两发 Move 先把像素**显式折到缇**
+   (`ScaleX(NMRBCS.RCChild.Left, vbPixels, vbTwips)`, CoolBar.ctl:3606 与 3749) 才交给 `.Move`,
+   而 CoolBar 声明的是像素档 ⇒ 「Object/Extender 那一族的几何跟容器声明档走、还是恒缇」
+   今天没有实测答案。这一问问的是「档」, 不在这一刀里改。
+   ⚠ 这一位只答**单位**; 摆位的坐标空间 (ScreenToClient 那一头) 仍是现父窗, 不在这一问里。 */
+void* vb6_UC_ContainerWindowOf(const void* hwnd) {
+    if (!hwnd) return NULL;
+    vb6_UCRec* r = vb6_uc_findByHwnd(hwnd);
+    if (r) {
+        if (r->parent && IsWindow(r->parent)) return (void*)r->parent;
+        return (void*)GetParent((HWND)hwnd);
+    }
+    {
+        void* inst = NULL;
+        if (vb6_UC_DesignCtrlOwner(hwnd, &inst, NULL) && inst) {
+            vb6_UCRec* o = vb6_uc_findByInstance(inst);
+            if (o && o->hwnd && IsWindow(o->hwnd)) return (void*)o->hwnd;
+        }
+    }
+    return (void*)GetParent((HWND)hwnd);
 }
 
 // Fix <vbeclipse> rev22: 在**正确**的宿主上下文里跑一次设计期子控件的 Resize 事件。

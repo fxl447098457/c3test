@@ -133,7 +133,22 @@
     // 现在与泛对象槽问**同一位主人** (唯一发码处 boxIntoLateSlot): 装箱成功交回的是包装器 (void*),
     // 下面那一站的 _Generic 正好走 vb6_VariantObject = 真 IDispatch; 交回原样的形态 (认不出工程类 /
     // 值自己就是槽 / 宿主句柄 / 已剥壳) 一字不变。
-    if (targetIsVariant && node.value) {
+    // 账 #305 第二百四十八刀: 右值**自己就是一枚 Variant 表达式**时不许进装箱那一站。
+    //   格② 这一站问的是「目标是不是 Variant 槽」, 没问右值那一侧; 而唯一发码处
+    //   boxIntoLateSlot 的负条件只按 C **文本**问「是不是槽」(cExprIsVariant) —— 一枚
+    //   `As Variant` 的形参在 C 里的形状就是个裸名, 文本那一问答不出 ⇒ 它把整只
+    //   vb6_VARIANT 结构体当成裸实例指针交给 vb6_ComObject_FromBorrowedInstance
+    //   (而那一位头一件事是 `*(void**)instance` 回填 __comObj = 往结构体首格写)。
+    //   实测 ComCtlsDemo Builds/ListView/LvwListItem.cls:504
+    //   `Set PropShadowListSubItems(SubItemIndex).Tag = Value`
+    //   (Property Set FListSubItemProp(ByVal … ByVal Value As Variant);
+    //    目标字段 Tag As Variant ⇒ 走的就是格② 这一站)
+    //   ⇒ LvwListItem.c:778 C2440「无法从 vb6_VARIANT 转换到 void *」+ C2198。
+    //   VB6 侧语义也支持这道闸: `Set <Variant 槽> = <Variant 变量>` 是**复制那一枚
+    //   Variant** (引用照旧), 不是把右值再包一层包装器。
+    //   判据问 AST 那一侧的主人 isDefinitelyVariantExpr (与 With 那一站同一问句),
+    //   不在这里另抄一份"名字像不像 Variant"的表。
+    if (targetIsVariant && node.value && !isDefinitelyVariantExpr(*node.value)) {
         value = boxIntoLateSlot(value, node.value.get());
     }
 
@@ -345,6 +360,13 @@
                         + escapeWideCString(target.substr(std::string("vb6_Extender_").size()))
                         + "\", (void*)(intptr_t)" + value + ");"
                         "  /* Extender.<prop> = v (per-instance, Set stmt) */");
+        } else if (targetIsVariant) {
+            // 账 #305 第一百九十四刀: 本过程声明这一格是 Variant 槽 ⇒ 上面那条 boxToVariant
+            // 已经把它装进去了; 工程类那条腿只认**声明是工程类**的槽。knownClassVars_ 全程
+            // 不清空, 别的过程里同名的类局部会漏进来 (VbEclipse ucPerspective.Refresh:
+            // `Dim l_ucFolder As Variant` 拿到 ClosePerspective 的同名 `As ucFolder` ⇒
+            // `vb6_cls_ucFolder* __clsold = l_ucFolder;` = cl C2440 + AddRef(C2172/C2083))。
+            c_.emitLine(target + " = " + value + ";  /* Set */");
         } else {
             // 账 #305 §B218 (甲) 腿②: 目标是一格 typed 工程类槽 ⇒ 走那位主人。
             // 类名两问按 #408 定的次序排: 先问 AST (作用域感知), 落空才问按名那张表。
@@ -393,7 +415,33 @@
             // ⇒ 覆写不退旧值。改走主人的地址那一臂：元素档非空 = 这一形有可寻址的地址临时量，
             // 下标算术仍只算一次；真调用形态 (`dict(key)`) 元素档为空串 ⇒ 维持裸拷贝。
             const std::string elemTy140 = classArraySlotElemType(target);
-            if (!clsOfSlot.empty() && !procClassFormals_.count(targetLower)
+            // 账 #305 第二百零三刀: 这格槽的**声明档**是新式接口视图 (`vb6_ivref_<I>*`) ⇒ 交给视图那两位
+            // 主人，别让工程类主人接手 —— 它只会按声明名拼 `vb6_cls_<接口名>_AddRef/_Release`(接口档不发
+            // 定义 ⇒ VbEclipse 链接期最后两声)，而且把 `New <实现者>` 的实例指针直接写进视图槽。
+            // 第一百六十五刀那道闸只认 legacy 档; 字段档(普通类字段 `me->x` 与 UC 被 globalize 的裸名)
+            // 从没进 knownIvrefVars_，所以按名查表那条路对两档都失灵 —— 这里改问**声明档**那一问。
+            const std::string ivC231 = clsOfSlot.empty() ? std::string() : ivrefCType(clsOfSlot);
+            if (!ivC231.empty() && !procClassFormals_.count(targetLower)) {
+                std::string vLow231 = value;
+                std::transform(vLow231.begin(), vLow231.end(), vLow231.begin(), ::tolower);
+                const bool nil231 = (value == "NULL");
+                const bool new231 = !nil231 && value.find("_New(") != std::string::npos;
+                const bool cls231 = !nil231 && !new231 && knownClassVars_.count(vLow231) != 0;
+                if (new231 || cls231) {
+                    // 账 #305 第二百零四刀: 这一发形状挪给唯一主人 ivrefInstanceViewExpr
+                    // (与实参站那一条腿同一个答案) —— 逐字节相同，只是不再在站点里现拼。
+                    emitIvrefRefSet(target, clsOfSlot,
+                                    ivrefInstanceViewExpr(clsOfSlot, value, cls231), new231);
+                } else if (nil231) {
+                    // 置空那一格由 腿③ 那一站 (cgen_setlet_set_prop.inc) 主持; 这里只兜「同一条
+                    // 语句被别的路走到」的那一档 —— 交给同一位主人, 不许落进下面那条 QI 分支
+                    // (`NULL->vt` 是 cl C2039)。
+                    emitIvrefRefSet(target, clsOfSlot, "NULL", false);
+                } else {
+                    emitIvrefQiSet(target, clsOfSlot, value,
+                                   node.value ? rhsTransfersProjectRef(*node.value, true) : false);
+                }
+            } else if (!clsOfSlot.empty() && !procClassFormals_.count(targetLower)
                 && (target.find('(') == std::string::npos || !elemTy140.empty())) {
                 emitClassSlotRefSet(target, clsOfSlot, value, rhsTransferred, false, elemTy140);
             } else if (!outCls144.empty()) {

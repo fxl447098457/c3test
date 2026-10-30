@@ -149,7 +149,13 @@
         // (这里两处 + cgen_state.inc 的 isControlCollectionExpr)，漏一处就拼出
         // `vb6_StatusBar_Panels(…).Count` → cl C2224。哨兵 check_statusbar_panels_authority 钉三处同值。
         obj.find("vb6_StatusBar_Panels(") == 0 ||
-        obj.find("vb6_PropertyPage_SelectedControls(") == 0) {
+        obj.find("vb6_PropertyPage_SelectedControls(") == 0 ||
+        // 账 #305 第二百六十一刀「甲」: With UserControl 体内 `.Extender` 折出来的那枚
+        // Extender **对象地址**。它不是 IDispatch, 但晚绑定出口的 `vb6_UC_IsExtender`
+        // 认这个身份并把成员读写岔进 `vb6_UC_ExtenderField` 那条 per-instance 通道
+        // (Fix 168 读 / Fix 294 写) ⇒ 这一枚是可以继续链式访问成员的对象表达式;
+        // 不认它就拼出 `(&vb6_UserControl_Extender).Left` = C2039。
+        obj.find("(&vb6_UserControl_Extender)") == 0) {
         // 对于vb6_ComCall/vb6_ComGetProp, 需要先解封为对象
         // 链式调用: ComCall返回VARIANT*, 需ComCallObject才能拿到IDispatch*
         std::string resolvedObj = obj;

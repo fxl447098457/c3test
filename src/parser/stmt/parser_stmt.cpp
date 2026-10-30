@@ -186,7 +186,16 @@ return parseLineInputStmt();
             return std::make_unique<ResetStmt>(loc);
         }
         case TokenKind::FileCopy: return parseFileCopyStmt();
-        case TokenKind::Kill:     return parseKillStmt();
+        case TokenKind::Kill: {
+            // VB6 projects use `kill` as a variable name; `kill = expr` is an
+            // assignment, not the Kill statement.
+            if (next_.kind == TokenKind::Equals ||
+                next_.kind == TokenKind::LeftParen ||
+                next_.kind == TokenKind::Dot) {
+                return parseLabelOrAssignmentOrCall();
+            }
+            return parseKillStmt();
+        }
         case TokenKind::MkDir:    return parseMkDirStmt();
         case TokenKind::RmDir:    return parseRmDirStmt();
         case TokenKind::ChDir:    return parseChDirStmt();

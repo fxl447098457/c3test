@@ -84,6 +84,7 @@ void CCodeGen::visit(SubDecl& node) {
     knownFixedStringLen_.clear();
     // Fix 010o: 清空局部变量集合
     knownLocalVars_.clear();
+    procNonArrayLocalVars_.clear();
     knownNewVars_.clear();
     knownNewVars_.insert(moduleNewVars_.begin(), moduleNewVars_.end());  // Fix 090v
     // Fix 091m: 回灌模块级 Variant 变量 (knownVariantVars_ 已被 clear)
@@ -466,31 +467,53 @@ void CCodeGen::visit(SubDecl& node) {
 }
 
 
-// 事件处理器的 ABI: 形参一律 ByVal (跨对象边界的回调)。AST 与 proc 符号两处都要翻 ——
-// 只翻 AST 会得到"签名 void* Editor + 体里 (*Editor)" (cgen_expr_ident_dispatch.inc 读的是
-// 符号表里的 isByVal), 实测 frmMain.c 三条 C2100。声明侧与定义侧共用这一处 (账 #222)。
+// 事件处理器的 ABI: **默认**形参按事件 ABI = ByVal 发（跨对象边界的回调）。AST 与 proc 符号两处
+// 都要翻 —— 只翻 AST 会得到"签名 void* Editor + 体里 (*Editor)" (cgen_expr_ident_dispatch.inc 读的是
+// 符号表里的 isByVal), 实测 frmMain.c 三条 C2100。声明侧与定义侧共用这一处（账 #222）。
+// 账 #305 256 唯一的例外: 事件声明里明写 ByRef 的那几位是**出参**（登记表由 prepareEventHandlerProc
+// 填，那里才看得见事件的形参表），它们保住 ByRef ⇒ 处理器体里写 `Text = "…"` 才落回递出方那格。
 void CCodeGen::applyEventHandlerAbi(SubDecl& node) {
-    for (auto& prm : node.params) {
-        if (prm && !prm->isParamArray) prm->isByVal = true;
+    static const std::vector<char> kNoSlots256;
+    auto it256 = ucEventHandlerByAddr_.find(Symbol::toLower(node.name));
+    const std::vector<char>& slots256 =
+        (it256 != ucEventHandlerByAddr_.end()) ? it256->second : kNoSlots256;
+    for (size_t j = 0; j < node.params.size(); ++j) {
+        auto& prm = node.params[j];
+        if (!prm || prm->isParamArray) continue;
+        if (j < slots256.size() && slots256[j]) continue;   // 出参那一档不翻
+        prm->isByVal = true;
     }
     if (auto* evtSym = symTab_.lookupModuleOverloadByLoc(node.name, node.loc)) {
-        for (auto& pi : evtSym->params) {
-            if (!pi.isParamArray) pi.isByVal = true;
+        for (size_t j = 0; j < evtSym->params.size(); ++j) {
+            auto& pi = evtSym->params[j];
+            if (pi.isParamArray) continue;
+            if (j < slots256.size() && slots256[j]) continue;
+            pi.isByVal = true;
         }
     }
 }
 
-// 按名字在本模块里找那枚 <控件>_<事件> 处理器: 翻 ABI, 并回答"它的第一形参是不是元素号 Index"
-// (VB6 的控件数组处理器就是这么写的, 与非数组的差别只在这一枚形参)。找不到 = false。
-bool CCodeGen::prepareEventHandlerProc(Module& mod, const std::string& loweredName) {
+// 按名字在本模块里找那枚 <控件>_<事件> 处理器: 登记「哪几位是出参」+ 翻 ABI, 并回答"它的第一形参
+// 是不是元素号 Index" (VB6 的控件数组处理器就是这么写的, 与非数组的差别只在这一枚形参)。
+// 找不到 = false。
+bool CCodeGen::prepareEventHandlerProc(Module& mod, const std::string& loweredName,
+                                       const std::vector<char>& evtByAddr) {
     for (auto& d : mod.declarations) {
         if (!d || d->kind != ASTNodeKind::SubDecl) continue;
         auto& sub = static_cast<SubDecl&>(*d);
         if (!sub.typeParams.empty()) continue;          // 泛型模板本体不发码
         if (Symbol::toLower(sub.name) != loweredName) continue;
+        const bool hasIndex256 = !sub.params.empty() && sub.params[0] &&
+            Symbol::toLower(sub.params[0]->name) == "index";
+        // 控件数组的处理器第一形参是元素号 ⇒ 事件形参整体后移一位再对上
+        std::vector<char> slots256(sub.params.size(), 0);
+        for (size_t j = hasIndex256 ? 1u : 0u; j < slots256.size(); ++j) {
+            const size_t e = j - (hasIndex256 ? 1u : 0u);
+            if (e < evtByAddr.size()) slots256[j] = evtByAddr[e];
+        }
+        ucEventHandlerByAddr_[Symbol::toLower(sub.name)] = std::move(slots256);
         applyEventHandlerAbi(sub);
-        return !sub.params.empty() && sub.params[0] &&
-               Symbol::toLower(sub.params[0]->name) == "index";
+        return hasIndex256;
     }
     return false;
 }

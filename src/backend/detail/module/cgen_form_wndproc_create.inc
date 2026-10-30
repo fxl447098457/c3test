@@ -19,7 +19,10 @@
     // Fix <vbeclipse> 2026-10-07: AutoRedraw=True 的窗体, GDI 合成 (Form.hdc) 全部落进
     // 记忆 DC, WM_PAINT 必须先把记忆位图刷上屏 (VB6 语义; 3DMenu 每 10ms 旋转合成一次
     // Me.hdc, 缺这步画面恒为零)。非 AutoRedraw 窗体无 ARDC, helper 直接 no-op。
-    c_.emitLine("vb6_FormPaintBlitAutoRedraw((void*)hwnd, (void*)_vb6_hdc);  /* Fix <vbeclipse>: AutoRedraw 记忆 DC 上屏 */");
+    c_.emitLine("vb6_FormPaintBlitAutoRedraw((void*)hwnd, (void*)_vb6_hdc);  /* Fix <vbeclipse>: AutoRedraw 记忆 DC 上屏 */");    // 账 #305 第二百九十二刀: VB6 实测 z 序 —— TabStrip 永远在页控件 (Picture3 那一层)
+    // 下面。C3 按创建顺序排, TabStrip 的宿主窗口压在 Picture3 上, 整页控件被白底盖掉
+    // (ComCtlsDemo 第二页整块空白)。helper 每个窗体只沉一次。
+    c_.emitLine("vb6_UC_SinkTabBackdrops((void*)hwnd);  /* TabStrip 沉底 (VB6 z 序) */");
     if (std::getenv("C3_OCX_NO_PAINT") == nullptr) {
         c_.emitLine("vb6_OcxHost_PaintAll((void*)hwnd, (void*)_vb6_hdc);  /* Fix 143d: 无窗口/窗口化 OCX 绘制 */");
     }
@@ -38,6 +41,16 @@
     c_.emitLine("break;");
     c_.dedent();
     c_.emitLine("}");
+    c_.dedent();
+
+    // 账 #305 第二百八十刀: 窗体顶层本人答字体那一问 —— 参考那台 ThunderRT6FormDC 答
+    // -13/MS Sans Serif，我们这枚从前只有第二百七十八刀存下的那一格、没人答（探针实测
+    // DefWindowProc 不记 WM_SETFONT）。答案走唯一那位只读主人，发码这边不自己读那一格。
+    c_.indent();
+    c_.emitLine("case WM_GETFONT:");
+    c_.indent();
+    c_.emitLine("return (LRESULT)(INT_PTR)vb6_FormAnswerGetFont((void*)hwnd);");
+    c_.dedent();
     c_.dedent();
 
     // WM_CREATE: 创建控件

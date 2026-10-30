@@ -52,6 +52,13 @@ void vb6_ReleaseObject(void** objPtr);
 // "对象不支持此属性或方法" —— 后期绑定与 Release 路径都先用它把这类挡掉。
 int32_t vb6_ComIsDispatchable(const void* disp);
 
+// 账 #305 第二百六十二刀 (丙): 晚绑定出口漏掉的「非 IDispatch 接收者」计数。
+// 七个出口 (ComCall / ComCallByDispid / ComGetProp / ComGetPropArg / ComSetProp /
+// ComSetPropArg / ComSetRef) 现在都会把这种接收者**报一行** (stderr 标记
+// C3_LATEBIND_MISS) 并计数; 行为不变 (仍按原路返回空)。
+// 判据「非 IDispatch 进晚绑定出口 = 0」按 stderr 里那条标记的条数读。
+int32_t vb6_ComLateBindMissCount(void);
+
 // Fix <vbeclipse>: vb6_ReleaseObject 的反向操作 (AddRef), 判据相同 (vb6_ComIsDispatchable)。
 // 供 vb6rtl_variant.h 的 vb6_VariantObject / vb6rtl.c 的 vb6_VariantCopy 使用 ——
 // Variant 既然在 Clear 时 Release, 构造/拷贝时就必须自己持有一份引用。
@@ -90,6 +97,15 @@ void* vb6_ComPackObject(void* obj);
 // 用于 COM 方法的 ByRef 对象出参 (如 Chilkat ObjectOf2/ArrayOf2 的 obj/array 形参)。
 // ppObj 指向调用方的 void* 变量; Invoke 写入新指针后, 调用方变量即持有新对象。
 void* vb6_ComPackObjectRef(void** ppObj);
+
+// 账 #305 §B224 第二半 (第二百三十九刀): 标量实参按引用打包 (VT_BYREF|型)。
+// 真 VB6 晚绑定对带型变量递的就是这一形 (实测 x As Long 被 `Bump(ByRef v As Long)` 写回成 11);
+// 按 C 存储宽度分五档 —— Integer/Boolean 都是 2 字节, 不许按 I4 打。
+void* vb6_ComPackIntRef(int32_t* p);
+void* vb6_ComPackIntegerRef(int16_t* p);
+void* vb6_ComPackBoolRef(int16_t* p);
+void* vb6_ComPackSingleRef(float* p);
+void* vb6_ComPackDoubleRef(double* p);
 
 // Fix 104: 将"省略的实参"封装为 VARIANT (VT_ERROR + DISP_E_PARAMNOTFOUND).
 // VB6 遇到 obj.Method a, , c 这类省略实参时, 对该形参位置传的正是这个值 ——

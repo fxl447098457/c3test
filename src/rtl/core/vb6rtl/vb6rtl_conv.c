@@ -52,8 +52,14 @@ extern void vb6_ComExit(void);
 // MsgBox
 // ============================================================
 
-int32_t vb6_MsgBox(BSTR prompt, int32_t buttons, BSTR title) {
+// 账 #490 §B178: 五参全签名 (见 vb6rtl_builtin.h 的注释)。helpfile/context 收进来但
+//   运行期不用 —— MessageBoxW 既没有 VB6 那个 Help 按钮也不接 F1; 真要接那天要换
+//   MessageBoxIndirect + 自绘对话框, 与本格无关。形参在下面显式 (void) 掉, 免得
+//   MSVC 的未用形参警告把这一格又变成噪声。
+int32_t vb6_MsgBox(BSTR prompt, int32_t buttons, BSTR title, BSTR helpfile, int32_t context) {
     /* Win32 MessageBox */
+    (void)helpfile;
+    (void)context;
     return (int32_t)MessageBoxW(NULL, prompt ? prompt : L"", title ? title : L"", (UINT)buttons);
 }
 

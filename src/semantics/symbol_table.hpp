@@ -250,6 +250,12 @@ struct Symbol {
     // --- P6.5 事件相关 ---
     bool isWithEvents = false;                         // 变量是否声明为WithEvents
     std::vector<std::string> eventNames;               // 类声明的事件名列表(仅Class)
+    // 账 #305 第二百五十六刀: 与 eventNames **同序同长** —— 每一位事件形参要不要按地址递。
+    // 答案由 src/common/event_param_abi.hpp 那一位主人在这里算一次 (声明里显式 ByRef 且不是
+    // 数组形参 ⇒ 是出参)。消费方 = 回调 typedef / 窗体 thunk / 模块级包装器的声明与实现 /
+    // 处理器形参的 ABI / RaiseEvent 实参位 —— 六处必须同一个答案, 否则 cast 会把它藏成
+    // 运行期的野指针 (typedef 是 T*、包装器却是 T)。
+    std::vector<std::vector<char>> eventParamByAddr;
     std::string withEventsSourceClass;                 // WithEvents变量的源类名
 
     // --- COM前期绑定相关 (P6.3, SymbolKind::ComClass/ComInterface) ---

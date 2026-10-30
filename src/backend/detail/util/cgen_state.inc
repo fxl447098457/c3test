@@ -344,6 +344,12 @@
     // Fix 010o: 过程局部变量名集合 (小写) — Dim声明的局部变量 + For/ForEach循环变量
     // 用于在IdentifierExpr中避免对局部变量错误添加 me-> 前缀
     std::unordered_set<std::string> knownLocalVars_;
+    // 账 #305 第二百四十九刀: 「**本过程**里这一枚名字声明成**非数组**的局部」—— 与
+    // knownLocalVars_ 同一条生命周期 (每过程开头清一次, 见 cgen_decl_proc/func/prop 三处)。
+    // 为什么需要单列一张: knownArrays_ **从不 clear** (cgen_decl.cpp 那条注释: 清了会丢模块级
+    // UDT 数组的元素类型注册) ⇒ 它是跨过程累积的, 于是「同一模块另一过程里 `Dim Count(0 To 1)
+    // As Long`」会把本过程那枚 `Dim Count As Long` 也答成数组。多一个读者就多一处 AV。
+    std::unordered_set<std::string> procNonArrayLocalVars_;
     std::unordered_set<std::string> knownByRefParams_;  // Fix 081g: ByRef params (lowercase)
 
     // UDT变量名集合 (小写var名 → UDT类型C标识符, 如 "p" → "vb6_type_Point")
@@ -1142,6 +1148,13 @@
     // 发送侧是 `onOpenEditor(handler, (*Editor))` ⇒ Editor.Caption 取到 NULL
     // ⇒ av read 0x0 (_vb6_frmMain_ucPerspective1_OpenEditor+0x19)。
     std::set<std::string> ucEventHandlers_;
+
+    // 账 #305 第二百五十六刀: 处理器名(小写) -> **每一位形参**要不要保住 ByRef。
+    // 上面那条"一律 ByVal"对**没写 ByRef** 的形参是对的 (play78 那条实证就在这一档)，
+    // 但事件声明里明写 `ByRef Text As String` 的那几位是**出参**，翻成 ByVal 就把写回丢了。
+    // 由 cgen_form_prelude 经 prepareEventHandlerProc 登记 (那里才看得见事件的形参表)，
+    // applyEventHandlerAbi 读 —— 声明侧与定义侧同读这一张表，与上面那条同源。
+    std::map<std::string, std::vector<char>> ucEventHandlerByAddr_;
 
     // Fix <vbeclipse> rev18: 本模块发出去的 UserControl 自有属性桥条数。
     // emitFormFramework 末尾 (cgen_form_uc_props.inc) 算表时写入, emitDesignerControlDecls
