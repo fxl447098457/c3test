@@ -72,7 +72,13 @@
             const std::string ctrlLowerMe = Symbol::toLower(node.memberName);
             auto itCtrlMe = knownFormControls_.find(ctrlLowerMe);
             if (itCtrlMe != knownFormControls_.end()
-                && !knownControlArrays_.count(ctrlLowerMe)) {
+                && !knownControlArrays_.count(ctrlLowerMe)
+                // **只答「整枚当值/当对象」那一形**。`Me.<控件>.<成员>` 里内层这一问
+                // 也在场 (generic_access 把它当接收者求值, inMemberObjectEmit_ 为真),
+                // 而外层要的是「控件属性」——发裸槽会让外层拼成
+                // `vb6_hwnd_cboLabelsPositions.ListIndex = 0` (对 void* 取成员, C2224,
+                // Charts 2020/ucPieChart Form1:247 实测)。那一形留给原来的路。
+                && !inMemberObjectEmit_) {
                 lastExpr_ = makeCtrlHwndArg(ctrlLowerMe, itCtrlMe->second);
                 return;
             }

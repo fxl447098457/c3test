@@ -89,11 +89,23 @@
                     }
                 }
                 // (C) 局部 COM 对象变量 (Dim rb As <typelib 类> 类型解析失败成 void*)
-                if (!haveSt0 && knownLocalVars_.count(oLowerSt0)
+                // **只接多级链** (chainSt.size() >= 2)。单级 `d.Exists("K")` 不归这一支管:
+                // 它落到本文件末尾那条通用晚绑定出口, 发的是交回 VARIANT 的 `vb6_ComCall`,
+                // 值语境/条件语境才能接 `vb6_ComResultToBool` / `vb6_VariantTo*`。
+                // 这一支只交对象出口 (`vb6_ComCallObject`) —— 单级也走它的话, 条件里的
+                // `If d.Exists(k)` 就成了 `if (指针)` 恒真 (test_late_cond / test_com_* 实测)。
+                if (!haveSt0 && chainSt.size() >= 2 && knownLocalVars_.count(oLowerSt0)
                     && (knownObjectVars_.count(oLowerSt0)
                         || knownTypedComVars_.count(oLowerSt0)
                         || knownVariantVars_.count(oLowerSt0))) {
-                    recvSt = cIdent(oidSt0.name);
+                    // 账 (Outlook2013 / b216_slot_arm_answers): **Variant 槽不是指针**。
+                    // C 侧 v1 是 `vb6_VARIANT` 结构体, 直接当接收者交出去就是
+                    // `vb6_ComCallObject(v1, L"Twice", …)` ⇒ C2172 (实参不是指针) ×2。
+                    // 与 comObjectRefFromCallExpr 的兜底同一句口径: 从 Variant 取对象指针
+                    // 只走 vb6_VariantToObjectVal 这一位主人。
+                    recvSt = knownVariantVars_.count(oLowerSt0)
+                           ? ("vb6_VariantToObjectVal(" + cIdent(oidSt0.name) + ")")
+                           : cIdent(oidSt0.name);
                     haveSt0 = true;
                     stArmSt = 1;
                 }

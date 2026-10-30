@@ -178,9 +178,11 @@
                 }
             }
             if (clsAx && clsAx->kind == SymbolKind::ComClass) {
-                auto itAx = clsAx->comMethods.find(axMemLower);
-                if (itAx != clsAx->comMethods.end() && !itAx->second.isPropertyGet
-                    && !itAx->second.isPropertyPut && !itAx->second.isPropertyPutRef) {
+                // 账 #245/§B94: `Symbol::comMethods` 只许 cgen_util_com.cpp 里读 ——
+                // 这里问唯一那位主人 (comSigViewOf), 别自己 find 一遍 (静态普查 C4 钉着)。
+                const ComSigView svAx = comSigViewOf(clsAx, axMemLower);
+                if (svAx.found && !svAx.isGet
+                    && !svAx.sig->isPropertyPut && !svAx.sig->isPropertyPutRef) {
                     axMemberIsMethod237 = true;
                 }
             }
@@ -199,7 +201,8 @@
             // `With SB.Panels(1)` 的头一直发成拿 HWND 当 IDispatch。现在问唯一那一处，
             // 认不出来才兜底。
             std::string collectionExpr = memberCollectionObjectExpr(axObjExpr, axMember);
-            if (collectionExpr.empty())
+            const bool collectionIsGenericFallback = collectionExpr.empty();
+            if (collectionIsGenericFallback)
                 collectionExpr = "vb6_ComGetObjectProp(" + axObjExpr + ", L\"" + axMember + "\")";
             // Step 2: 调用 Item(idx) 获取集合中的元素
             std::vector<std::string> packedArgs;
@@ -224,12 +227,32 @@
             // 方法名交 NULL = "按默认成员调用": vb6_ComCallObject 见 NULL 转
             // vb6_ComCallObjectDefault (名字优先、名字不在才走 DISPID 0)。名字仍叫
             // ComCallObject 是有意的 —— 后端有八处按这个前缀认「结果是 IDispatch*」。
-            lastExpr_ = "vb6_ComCallObject(" + collectionExpr + ", NULL, " + argsArray + ", " + std::to_string(argc) + ")";
+            //
+            // 只对**兜底那一支**发 NULL: 上面 memberCollectionObjectExpr 认得出来的
+            // 那几族 (Nodes / Buttons / ListImages / Panels / ListItems) 是 RTL 原生
+            // 复刻的伪集合, 名字表里就只有 "Item" (没有 0 号成员), 发 NULL 等于让
+            // vb6_ComCallObjectDefault 多绕一圈去问名 —— 形状也别动, 一批哨兵钉着
+            // `L"Item"` 这一行 (tv_emitc_shape / tb_emitc_shape)。
+            if (collectionIsGenericFallback) {
+                lastExpr_ = "vb6_ComCallObject(" + collectionExpr + ", NULL, " + argsArray + ", " + std::to_string(argc) + ")";
+            } else {
+                lastExpr_ = "vb6_ComCallObject(" + collectionExpr + ", L\"Item\", " + argsArray + ", " + std::to_string(argc) + ")";
+            }
             return;
         }
         isComMarker_ = false;  // 消费标记
         std::string objExpr = std::move(comObjExpr_);
         std::string memberName = std::move(comMemberName_);
+        // 接收者是**已知 Variant 变量**时先取对象指针: C 侧那枚槽是 `vb6_VARIANT`
+        // 结构体, 直接当 IDispatch* 交出去是 C2172 (实参不是指针) —— b216_slot 的
+        // `v1.Twice(21)` 实测两发。与 arm (C) / comObjectRefFromCallExpr 同一句口径。
+        {
+            const std::string recvLow = Symbol::toLower(objExpr);
+            if (knownVariantVars_.count(recvLow) && !knownObjectVars_.count(recvLow)
+                && !knownTypedComVars_.count(recvLow)) {
+                objExpr = "vb6_VariantToObjectVal(" + objExpr + ")";
+            }
+        }
 
         // 账 #278 §B124: 这一格 (`vb6_Data_Self(` 透传形态的直译) 与 §B124 列的那几格同代、
         // 同样恒假，撤掉；顺带带走里面那台把日志路径写死在本机用户目录上的 getenv 探针。
