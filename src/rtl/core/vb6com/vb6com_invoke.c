@@ -384,6 +384,32 @@ void* vb6_ComCall(void* disp, const wchar_t* methodName,
         vb6_Host_ClearVariant(&hout);
         return (void*)hres;
     }
+    /* 账 #305 第二百九十五刀: Extender 伪对象的**方法形** —— 把「静默丢且护栏数不到」改成
+       「响亮地丢」。
+       GetProp / SetProp 两站从 Fix 168 起各有 Extender 岔口, 唯独 ComCall 一个都没有 ⇒
+       `.Extender.Move l, t, w, h` (UC 自己量完尺寸来请求摆位的那一发) 一路掉到 vb6_getDispid
+       那扇 IDispatch 门上, 打一行 method "Move" not found 就丢。而 vb6_ComLateBindIsPseudo
+       的豁免句「伪接收者由各自的岔口应答」对 Extender 是**无条件**成立的 ⇒ 这 26 发在护栏的
+       计数里一条都不见 (实测靶工程 18 秒: C3_LATEBIND_MISS 只有 5 条, 全是另一族
+       OnControlInfoChanged; 295 刀埋点量到 Move 落在 CoolBar1 x10 / ComboBoxW1 x5 /
+       ImageCombo1 x4 / StatusBar1 x3 / MonthView1 x3 / Slider1 x1)。
+       **写侧这一刀刻意不接** —— 本刀先接过一次 (四档交 vb6_ControlMove), 逐窗口归因后是三条
+       不同的塌法: CoolBar1 宿主 900→552 缇 (原生 rebar 60→37, VB6 是 55; 它量的是 band 行高,
+       那一路输入仍欠在第二百九十刀); ComboBoxW1 宿主 288↔504 缇来回摆 5 发都不收敛;
+       ImageCombo1 交来的四档是**缇**而它容器 (CoolBar, 声明 ScaleMode=3 像素) 要的是像素,
+       于是 3672 缇被当 3672 像素落回去, 宿主一度长成 3672x324。
+       ⇒ 顺序仍按第二百八十八刀定的那一串: 先定「几何的父窗口该问谁」(今天走 GetParent,
+       交不出 UC 自己声明的 ScaleMode), 再谈落地写。这一刀只把看不见改成看得见。 */
+    if (vb6_UC_IsExtender(disp)) {
+        vb6_ComLateBindMiss(L"ExtenderCall", methodName, disp);
+        if (GetEnvironmentVariableW(L"C3_OCX_TRACE", NULL, 0) > 0) {
+            fwprintf(stderr, L"[C3_EXT] Call name=\"%ls\" argc=%ld dropped=1\n",
+                     methodName ? methodName : L"(null)", (long)argc);
+            fflush(stderr);
+        }
+        vb6_ComDropPackedArgs(args, argc);
+        return NULL;
+    }
     /* Fix 191: IUnknown 三法在**所有** COM 接口的 vtable 里固定在槽 0/1/2,
 
      * 自定义接口 (IOleInPlaceActiveObject / IOleObject 这类无 IDispatch 的) 也一样。     * 而按名后期绑定要先 GetIDsOfNames —— 那是 IDispatch 的槽 5。对手写伪 vtable

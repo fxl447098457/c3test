@@ -967,3 +967,7 @@
 /* knife 279: RTL changed (the UC host window answers WM_GETFONT itself -- DefWindowProc does not remember WM_SETFONT; plus the VB6_CtrlFont slot gains one read-side owner) -- force re-embed */
 /* knife 280: RTL changed (generated-code-facing thin shell vb6_FormAnswerGetFont -- the form top-level window now answers the font question through that one read-side owner) -- force re-embed */
 /* knife 277: RTL changed (one pt->pixel authority for lfHeight, truncating like VB6 (8.25pt at 120dpi: -14 -> -13); the shared UserControl font default family is MS Sans Serif, not Segoe UI) -- force c3rtl.rc re-embed */
+
+/* 账 #305 第二百九十五刀: Extender 伪对象的方法形 `.Extender.Move` 接进属性形那同一位主人
+ *   (新 RTL 出口 vb6_UC_ExtenderMoveGeom)；除 Move 以外的 Extender 方法名改走 vb6_ComLateBindMiss
+ *   报数 (行为不变，仍返回 NULL)。touch 本文件 = 让 RCDATA 重包一次 (§B99②)。 */

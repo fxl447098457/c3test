@@ -18,6 +18,10 @@
 #       它必须紧跟在 the IsMiss if-line 那一行下面, 且排在体内
 #       第一条 return 之前 (护栏要赶在早退之前, 否则 NULL 接收者永远静默)。
 #       加第八个出口 / 撤掉一处调用 ⇒ 这条立刻红。
+#       第二百九十五刀给 vb6_ComCall 加了第二处 (Extender 伪接收者的**方法形**): 那一支不走
+#       IsMiss 那道门 (伪对象被 IsPseudo 豁免了), 所以「豁免句名副其实」这件事只能由这一处
+#       报告兜住 ⇒ ComCall 的期望从 1 改成 2, 且第二处必须紧跟
+#       `if (vb6_UC_IsExtender(disp)) {` 那一行。
 #   R2  伪接收者豁免三族 (字体 / Extender / 宿主对象) 都在 vb6_ComLateBindIsPseudo
 #       体内各恰好一次; 且 vb6_ComLateBindIsMiss 必须**先问 pseudo 再问
 #       vb6_ComIsDispatchable** —— 顺序反了会把合法宿主对象判成漏 (判据就永远红)。
@@ -156,11 +160,22 @@ foreach ($e in $exits) {
     $name = 'vb6_Com' + $e[0]
     $body = Get-Body262 $invLines ('^(?:void\*|void|HRESULT|int32_t)\s+' + [regex]::Escape($name) + '\s*\(')
     if ($body.Count -lt 5) { $fail += ("R1 cannot locate the body of " + $name); continue }
+    $wantGuard = 1
+    if ($name -eq 'vb6_ComCall') { $wantGuard = 2 }
     $nGuard = Count-In262 $body 'vb6_ComLateBindMiss('
-    if ($nGuard -ne 1) {
+    if ($nGuard -ne $wantGuard) {
         $fail += ("R1 guard calls inside " + $name + " = " + $nGuard +
-                  " (want exactly 1) - 接收者不是真 IDispatch 时这一族必须响亮")
+                  " (want exactly " + $wantGuard + ") - 接收者不是真 IDispatch 时这一族必须响亮")
         continue
+    }
+    if ($name -eq 'vb6_ComCall') {
+        $iExtArm = Index-Of262 $body 'if (vb6_UC_IsExtender(disp)) {'
+        $iExtRep = Index-Of262 $body 'vb6_ComLateBindMiss(L"ExtenderCall", methodName, disp);'
+        if ($iExtArm -lt 0 -or $iExtRep -ne ($iExtArm + 1)) {
+            $fail += ("R1 vb6_ComCall must answer the Extender pseudo-receiver with a counted drop " +
+                      "(arm at " + $iExtArm + ", report at " + $iExtRep + ") - 撤掉这一处, 靶工程实测那 26 发 " +
+                      "Extender 方法调用就又回到「护栏数不到」(第二百九十五刀读数)")
+        }
     }
     $iGuard = Index-Of262 $body 'vb6_ComLateBindMiss('
     $iIf    = Index-Of262 $body 'if (vb6_ComLateBindIsMiss(disp)) {'
@@ -515,9 +530,14 @@ if ($nVG2old -ne 0) { $fail += ('R16 the blanket "no value" drop is back = ' + $
 # vbContainerSize(10) 在 ScaleX/ScaleY 里落进 default 按像素折 (恒等) —— 同一发 `.Extender.Move`
 # 四槽两种单位 (第二百八十八刀读数: CoolBar 交 321 像素而宿主按缇自量)。规矩: 读只许问
 # vb6_GetControl* 那一位既有主人, 单位那一问只在 UC 宿主伪成员的 ScaleX/ScaleY 入口上解。
-# **写仍刻意未接** (第二百九十刀): 一接就把两枚 UC 内部的错数暴露成可见塌缩 (ComboBoxW 宿主
-# 2 像素 / CoolBar 60→37), 那两个输入各自要先量。所以这一块把「写侧名字一个都不许出现」
-# 也钉住 —— 谁想接写, 必须同时把 Below 的 geom-writes 改成 2 并把本条挪走。
+# **写仍刻意未接** (第二百九十五刀接过一次, 逐窗口归因后撤回): 靶工程三种塌法各自欠一位输入 ——
+#   CoolBar1  宿主 900→552 缇 ⇒ 原生 rebar 60→37 (VB6 是 55) —— 欠 band 行高 (第二百九十刀);
+#   ComboBoxW1 宿主 288↔504 缇来回摆, 5 发都不收敛 —— 欠起窗瞬的 itemHeight (同上);
+#   ImageCombo1 交来 3672 **缇**而它容器 (CoolBar, .ctl 声明 ScaleMode=3 像素) 要像素 ⇒
+#     宿主一度长成 3672x324 —— 欠「几何的父窗口该问谁」: 今天走 GetParent, 那条窗口的
+#     ScaleMode 答不出 UC 自己声明的那一档 (第二百八十八刀顺序里的第一格)。
+# 所以这一块把「写侧名字一个都不许出现」也钉住 —— 谁想接写, 必须同时把下面的 geom-writes 改成
+# 2、geom-methods 那一条改成非 0, 并带上「单位那一问已按**容器**而不是 GetParent 答」的读数。
 $nVG3mask = ([regex]::Matches($collCode, 'vb6_ucExtGeomMask\(')).Count
 if ($nVG3mask -ne 3) { $fail += ('R17 geometry mask owner (1 def + reader arm + write outlet) = ' + $nVG3mask + ' (want 3)') }
 $nVG3read = ([regex]::Matches($collCode, 'vb6_ucExtGeomRefresh\(rc\);')).Count
@@ -534,10 +554,10 @@ $nVG3win = ([regex]::Matches($collCode, 'MoveWindow\(|SetWindowPos\(')).Count
 if ($nVG3win -ne 0) { $fail += ('R17 hand-written window placement in uc_controls.c = ' + $nVG3win + ' (want 0; vb6_ControlMove 是唯一的摆位收口)') }
 $nVG3writes = ([regex]::Matches($collCode + $vg2Inv, 'vb6_UC_ExtenderGeomApplied')).Count
 if ($nVG3writes -ne 3) { $fail += ('R17 geometry write side (属性形) = ' + $nVG3writes + ' (want 3 = 1 def + 2 outlets; 少一枚 = 又一户只存字段不摆窗)') }
-$nVG3meth = ([regex]::Matches($collCode + $vg2Inv, 'vb6_UC_ExtenderMethod')).Count
-if ($nVG3meth -ne 0) { $fail += ('R17 the Move method side is still deliberately NOT wired = ' + $nVG3meth + ' (want 0; 先量 CoolBar 的 band 行高与 ComboBoxW 起窗瞬的 itemHeight)') }
+$nVG3meth = ([regex]::Matches($collCode + $vg2Inv, 'vb6_UC_ExtenderMethod|vb6_UC_ExtenderMoveGeom')).Count
+if ($nVG3meth -ne 0) { $fail += ('R17 the Move method side is still deliberately NOT wired = ' + $nVG3meth + ' (want 0; 第二百九十五刀读数: 三种塌法, 各欠 band 行高 / itemHeight / 容器单位)') }
 $nVG3drop = ([regex]::Matches($vg2Inv, 'vb6_ComDropPackedArgs\(args, argc\);')).Count
-if ($nVG3drop -ne 2) { $fail += ('R17 stations that drop the packed args before leaving = ' + $nVG3drop + ' (want 2 = ComCall / ComGetPropArg 认不出名字那两支; 少一枚 = §B164 那一形又漏)') }
+if ($nVG3drop -ne 3) { $fail += ('R17 stations that drop the packed args before leaving = ' + $nVG3drop + ' (want 3 = ComCall 认不出名字那一支 + ComGetPropArg + 第二百九十五刀的 Extender 臂; 少一枚 = §B164 那一形又漏)') }
 $nVG3dropdef = ([regex]::Matches($vg2Inv, 'static void vb6_ComDropPackedArgs\(')).Count
 if ($nVG3dropdef -ne 1) { $fail += ('R17 definition of vb6_ComDropPackedArgs = ' + $nVG3dropdef + ' (want 1)') }
 # ---- R18: 第二百九十刀那一档 (带实参的晚绑定调用: 旗标 + 按形参档收窄) 的形状 ----
@@ -580,5 +600,5 @@ if ($fail.Count -gt 0) {
     foreach ($f in $fail) { Write-Host ("FAIL " + $f) }
     exit 1
 }
-Write-Host ("PASS check_com_latebind_guard: exits=7 guarded=7 pseudo-exempt=3 order=pseudo-first guard=behavior-preserving counter-outlets=2 host-sibling=3 runner-sites=3 inline-counters=2 negative-control=2 hfont-owner=1 hfont-kind5=2 height-owner=1 height-consumers=3 name-default=ms-sans-serif apply-owner=1 apply-senders=2 self-registered=1") form-ans-owner=1 form-ans-body=1 form-ans-decl=1 form-ans-emit=1 windowless-owner=1 windowless-outlets=2 windowless-arms=2 mask-owner=1 mask-arms=2 vg-owner=1 vg-decl=1 vg-outlet=1 vg-radio-gate=3 vg-truth-guard=1 vg-sibling-setter=1 vis-owner=1 vis-window=1 vis-decl=1 vis-outlets=2 vis-zero-guard=1 vis-old-drop=0 geom-mask=3 geom-read=1 geom-units=5 geom-route=2 geom-cdecl=1 geom-cdef=1 geom-nowindow=0 geom-writes=3 geom-method=0 latebind-drop=2 call-flags=1 flag-owner=1 invoke-func-only=1 propget-hedge=1 blanket-flags=2 narrow-def=1 narrow-call=1 narrow-before-copy=1 himetric-typedef=1 ti-lcid0=1
+Write-Host ("PASS check_com_latebind_guard: exits=7 guarded=7 pseudo-exempt=3 order=pseudo-first guard=behavior-preserving counter-outlets=2 host-sibling=3 runner-sites=3 inline-counters=2 negative-control=2 hfont-owner=1 hfont-kind5=2 height-owner=1 height-consumers=3 name-default=ms-sans-serif apply-owner=1 apply-senders=2 self-registered=1") form-ans-owner=1 form-ans-body=1 form-ans-decl=1 form-ans-emit=1 windowless-owner=1 windowless-outlets=2 windowless-arms=2 mask-owner=1 mask-arms=2 vg-owner=1 vg-decl=1 vg-outlet=1 vg-radio-gate=3 vg-truth-guard=1 vg-sibling-setter=1 vis-owner=1 vis-window=1 vis-decl=1 vis-outlets=2 vis-zero-guard=1 vis-old-drop=0 geom-mask=3 geom-read=1 geom-units=5 geom-route=2 geom-cdecl=1 geom-cdef=1 geom-nowindow=0 geom-writes=3 geom-method=0 latebind-drop=3 call-flags=1 flag-owner=1 invoke-func-only=1 propget-hedge=1 blanket-flags=2 narrow-def=1 narrow-call=1 narrow-before-copy=1 himetric-typedef=1 ti-lcid0=1
 exit 0
