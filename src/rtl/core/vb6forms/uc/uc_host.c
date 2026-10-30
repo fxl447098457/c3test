@@ -937,6 +937,45 @@ int32_t vb6_UC_DesignCtrlOwner(const void* hwnd, void** outInst, const char** ou
     return 0;
 }
 
+/* 账 #305 第二百九十七刀: 「这枚窗口的几何该按谁的 ScaleMode 折」收成一位主人。
+   第296刀的读数 (C3_K296 埋点, 台账那一行有全表): 靶工程 15 秒 38 发摆位里,
+   **同一枚窗口、同一发四档数**拿到过两种单位答案 —— ImageCombo1 的宿主一发 `cm=3`
+   (父窗=CoolBar 的宿主, 它 .ctl 声明 ScaleMode=3 像素) 摆成 **3672x324**, 另一发 `cm=1`
+   (父窗已是 ReBarWindow32 ⇒ 落回窗体档) 摆成 306x27。漂的不是换算, 是**父窗本身**:
+   `CoolBar.ctl:3632` 自己就 `SetParent .hWndChild, UserControl.hWnd`, 而 band 落位后 OS 的
+   rebar 又把它塞进 ReBarWindow32 ⇒ 同一份代码问「我是谁的容器」得到两扇窗。
+   这一问收成一位主人, 三条档:
+     · UC 实例的宿主窗口 ⇒ 交创建时记录的 `r->parent` (不随 SetParent 漂);
+     · UC 的设计期子控件 ⇒ 交那位 UC 自己的宿主窗口 (`vb6_UC_DesignCtrlOwner` 那一张名册);
+     · 剩下的 (窗体上的普通控件 / 顶层) ⇒ 维持 GetParent, 与改前逐字节等价。
+   ⚠ 本刀只改「哪一窗」, 没改「哪种档」: 改前那发答 3 的照旧答 3 ⇒ 靶工程终态 69 行窗口
+   没动 (改前/改后两台跑出的结构 CSV 逐字节同一份)。那条"同一份"经不起换编译器二进制:
+   本刀之后只改注释重编一台, 就多出 6 格 ±1 像素的抖 (§B97 那一族) ⇒ 结构尺这一问的
+   稳定读数是**筛掉 1 像素后那 10 格**, 改前/改后同一批同值。变化全在瞬态 —— band 里的
+   控件多了一段 3672x324 的摆位, 收得住是因为 OS 的 rebar 自己按 band 矩形搬 hWndChild。
+   瞬态行数 8→16 记在册。
+   ⚠ 一条**没结案**的读数记下: 同一份 .ctl 那两发 Move 先把像素**显式折到缇**
+   (`ScaleX(NMRBCS.RCChild.Left, vbPixels, vbTwips)`, CoolBar.ctl:3606 与 3749) 才交给 `.Move`,
+   而 CoolBar 声明的是像素档 ⇒ 「Object/Extender 那一族的几何跟容器声明档走、还是恒缇」
+   今天没有实测答案。这一问问的是「档」, 不在这一刀里改。
+   ⚠ 这一位只答**单位**; 摆位的坐标空间 (ScreenToClient 那一头) 仍是现父窗, 不在这一问里。 */
+void* vb6_UC_ContainerWindowOf(const void* hwnd) {
+    if (!hwnd) return NULL;
+    vb6_UCRec* r = vb6_uc_findByHwnd(hwnd);
+    if (r) {
+        if (r->parent && IsWindow(r->parent)) return (void*)r->parent;
+        return (void*)GetParent((HWND)hwnd);
+    }
+    {
+        void* inst = NULL;
+        if (vb6_UC_DesignCtrlOwner(hwnd, &inst, NULL) && inst) {
+            vb6_UCRec* o = vb6_uc_findByInstance(inst);
+            if (o && o->hwnd && IsWindow(o->hwnd)) return (void*)o->hwnd;
+        }
+    }
+    return (void*)GetParent((HWND)hwnd);
+}
+
 // Fix <vbeclipse> rev22: 在**正确**的宿主上下文里跑一次设计期子控件的 Resize 事件。
 // 单独开这个口 (而不是让 vb6_forms_ctrl.c 自己 push/pop) 的原因: push/pop 要
 // vb6_UCSaved 完整类型, 而把 vb6forms_uc_internal.h include 进 vb6forms_ctrl.c

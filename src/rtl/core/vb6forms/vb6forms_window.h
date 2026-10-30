@@ -75,6 +75,10 @@ int32_t vb6_ContainerScaleMode(void* hwndParent);
 int32_t vb6_WindowScaleModeSelf(void* hwnd);
 // 该 HWND 是 UserControl 宿主时返回它 .ctl 声明的 ScaleMode, 否则 0。
 int32_t vb6_UC_WindowScaleMode(const void* hwnd);
+// 账 #305 第297刀: 这枚窗口在 **VB 里**的容器是哪一窗 (几何单位的唯一答案)。
+// UC 实例宿主答它创建时记录的容器、UC 的设计期子控件答那位 UC 的宿主窗口,
+// 两者都不随 SetParent 漂; 问不到才落回 GetParent (普通控件那一路本来同值)。
+void* vb6_UC_ContainerWindowOf(const void* hwnd);
 
 // ============================================================
 // 控件创建

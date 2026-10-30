@@ -631,9 +631,13 @@ void vb6_UC_ExtenderGeomApplied(const wchar_t* name) {
 
 int32_t vb6_UC_ContainerScaleModeCurrent(void) {
     vb6_UCRec* rc = vb6_ucCurrent;
-    if (!rc || !rc->parent || !IsWindow(rc->parent)) return 0;
+    if (!rc) return 0;
+    /* 账 #305 第297刀: 容器那一问只有一位主人 —— 有宿主窗口就问它 (答创建时记录的容器,
+       不随 SetParent 漂); 没有窗口 (无窗宿主 / 建宿主前) 才落回记录里那个父。 */
+    void* cw = rc->hwnd ? vb6_UC_ContainerWindowOf((void*)rc->hwnd) : (void*)rc->parent;
+    if (!cw || !IsWindow((HWND)cw)) return 0;
     extern int32_t vb6_ContainerScaleMode(void* hwndParent);
-    return vb6_ContainerScaleMode((void*)rc->parent);
+    return vb6_ContainerScaleMode(cw);
 }
 
 void vb6_UC_SetExtenderMember(const wchar_t* name, void* value) {

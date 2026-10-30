@@ -971,3 +971,9 @@
 /* 账 #305 第二百九十五刀: Extender 伪对象的方法形 `.Extender.Move` 接进属性形那同一位主人
  *   (新 RTL 出口 vb6_UC_ExtenderMoveGeom)；除 Move 以外的 Extender 方法名改走 vb6_ComLateBindMiss
  *   报数 (行为不变，仍返回 NULL)。touch 本文件 = 让 RCDATA 重包一次 (§B99②)。 */
+
+/* 账 #305 第二百九十七刀: 「这枚窗口的几何按谁的 ScaleMode 折」收成一位主人
+ *   vb6_UC_ContainerWindowOf (uc_host.c) —— vb6forms_ctrl.c 那九站不再拿 GetParent 现答
+ *   (band 里的控件被 SetParent 进 CoolBar 宿主、又被 rebar 搬进 ReBarWindow32 ⇒ 同一发
+ *   四档数拿到过两种单位), uc_controls.c 的 vb6_UC_ContainerScaleModeCurrent 并进同一位。
+ *   touch 本文件 = 让 RCDATA 重包一次 (§B99②)。 */

@@ -122,6 +122,9 @@ int vb6_RadioClickCounts(void* hwndFrom) {
 
 // 容器 ScaleMode 的唯一取法: UserControl 宿主窗口 → 它 .ctl 声明的 ScaleMode;
 // 窗体 → 窗体的 VB6_ScaleMode 属性 (缺省 1=缇); 非窗口 (NULL) → 1。
+// 账 #305 第297刀: 「**哪一窗算容器**」不再由调用方拿 GetParent 现答, 改问
+// vb6_UC_ContainerWindowOf (实测漂过: band 里的控件父窗有两种答案 ⇒ 同一发四档数
+// 一会按像素折、一会按缇折; 读数与那条未结的「档」问一起在 uc_host.c 那位主人头上)。
 int32_t vb6_ContainerScaleMode(void* hwndParent) {
     int32_t m = vb6_UC_WindowScaleMode(hwndParent);
     if (m) return m;
@@ -184,7 +187,7 @@ int vb6_GetControlLeft(void* hwnd) {
     GetWindowRect((HWND)hwnd, &rc);
     POINT pt = { rc.left, rc.top };
     ScreenToClient(GetParent((HWND)hwnd), &pt);
-    int32_t cm = vb6_ContainerScaleMode(GetParent((HWND)hwnd));
+    int32_t cm = vb6_ContainerScaleMode(vb6_UC_ContainerWindowOf(hwnd));
     return vb6_GeomCacheRead(hwnd, VB6_GEOM_LEFT, pt.x, cm,
                              (int)vb6_ScalePxToUser((double)pt.x, cm, 0));
 }
@@ -195,7 +198,7 @@ void vb6_SetControlLeft(void* hwnd, int left) {
     GetWindowRect((HWND)hwnd, &rc);
     POINT pt = { rc.left, rc.top };
     ScreenToClient(GetParent((HWND)hwnd), &pt);
-    int32_t cm = vb6_ContainerScaleMode(GetParent((HWND)hwnd));
+    int32_t cm = vb6_ContainerScaleMode(vb6_UC_ContainerWindowOf(hwnd));
     SetWindowPos((HWND)hwnd, NULL, vb6_ScaleUserToPx((double)left, cm, 0),
                  pt.y, 0, 0, SWP_NOSIZE | SWP_NOZORDER);
     vb6_GeomCacheWrite(hwnd, VB6_GEOM_LEFT, left, cm);
@@ -207,7 +210,7 @@ int vb6_GetControlTop(void* hwnd) {
     GetWindowRect((HWND)hwnd, &rc);
     POINT pt = { rc.left, rc.top };
     ScreenToClient(GetParent((HWND)hwnd), &pt);
-    int32_t cm = vb6_ContainerScaleMode(GetParent((HWND)hwnd));
+    int32_t cm = vb6_ContainerScaleMode(vb6_UC_ContainerWindowOf(hwnd));
     return vb6_GeomCacheRead(hwnd, VB6_GEOM_TOP, pt.y, cm,
                              (int)vb6_ScalePxToUser((double)pt.y, cm, 1));
 }
@@ -218,7 +221,7 @@ void vb6_SetControlTop(void* hwnd, int top) {
     GetWindowRect((HWND)hwnd, &rc);
     POINT pt = { rc.left, rc.top };
     ScreenToClient(GetParent((HWND)hwnd), &pt);
-    int32_t cm = vb6_ContainerScaleMode(GetParent((HWND)hwnd));
+    int32_t cm = vb6_ContainerScaleMode(vb6_UC_ContainerWindowOf(hwnd));
     SetWindowPos((HWND)hwnd, NULL, pt.x,
                  vb6_ScaleUserToPx((double)top, cm, 1),
                  0, 0, SWP_NOSIZE | SWP_NOZORDER);
@@ -230,7 +233,7 @@ int vb6_GetControlWidth(void* hwnd) {
     RECT rc;
     GetWindowRect((HWND)hwnd, &rc);
     int px = rc.right - rc.left;
-    int32_t cm = vb6_ContainerScaleMode(GetParent((HWND)hwnd));
+    int32_t cm = vb6_ContainerScaleMode(vb6_UC_ContainerWindowOf(hwnd));
     return vb6_GeomCacheRead(hwnd, VB6_GEOM_WIDTH, px, cm,
                              (int)vb6_ScalePxToUser((double)px, cm, 0));
 }
@@ -239,7 +242,7 @@ void vb6_SetControlWidth(void* hwnd, int width) {
     if (!hwnd) return;
     RECT rc;
     GetWindowRect((HWND)hwnd, &rc);
-    int32_t cm = vb6_ContainerScaleMode(GetParent((HWND)hwnd));
+    int32_t cm = vb6_ContainerScaleMode(vb6_UC_ContainerWindowOf(hwnd));
     SetWindowPos((HWND)hwnd, NULL, 0, 0,
                  vb6_ScaleUserToPx((double)width, cm, 0),
                  rc.bottom - rc.top, SWP_NOMOVE | SWP_NOZORDER);
@@ -257,7 +260,7 @@ int vb6_GetControlHeight(void* hwnd) {
     RECT rc;
     GetWindowRect((HWND)hwnd, &rc);
     int px = rc.bottom - rc.top;
-    int32_t cm = vb6_ContainerScaleMode(GetParent((HWND)hwnd));
+    int32_t cm = vb6_ContainerScaleMode(vb6_UC_ContainerWindowOf(hwnd));
     return vb6_GeomCacheRead(hwnd, VB6_GEOM_HEIGHT, px, cm,
                              (int)vb6_ScalePxToUser((double)px, cm, 1));
 }
@@ -266,7 +269,7 @@ void vb6_SetControlHeight(void* hwnd, int height) {
     if (!hwnd) return;
     RECT rc;
     GetWindowRect((HWND)hwnd, &rc);
-    int32_t cm = vb6_ContainerScaleMode(GetParent((HWND)hwnd));
+    int32_t cm = vb6_ContainerScaleMode(vb6_UC_ContainerWindowOf(hwnd));
     SetWindowPos((HWND)hwnd, NULL, 0, 0, rc.right - rc.left,
                  vb6_ScaleUserToPx((double)height, cm, 1),
                  SWP_NOMOVE | SWP_NOZORDER);
@@ -293,7 +296,7 @@ void vb6_ControlMove(void* hwnd, double L, double T, double W, double H, int mas
         ScreenToClient(GetParent(hW), &p1);
         rc.left = p0.x; rc.top = p0.y; rc.right = p1.x; rc.bottom = p1.y;
     }
-    int32_t cm = vb6_ContainerScaleMode(child ? GetParent(hW) : NULL);
+    int32_t cm = vb6_ContainerScaleMode(child ? vb6_UC_ContainerWindowOf(hW) : NULL);
     int x = (mask & 1) ? vb6_ScaleUserToPx(L, cm, 0) : rc.left;
     int y = (mask & 2) ? vb6_ScaleUserToPx(T, cm, 1) : rc.top;
     int w = (mask & 4) ? vb6_ScaleUserToPx(W, cm, 0) : rc.right - rc.left;
