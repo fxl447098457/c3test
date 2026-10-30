@@ -991,3 +991,11 @@
    造的，缺省选着 GDI 的 SYSTEM_FONT ⇒ 用户代码 `DrawText UserControl.hDC, …` 整块换字
    (ComCtlsDemo 第二页 FrameW 题头变粗变大)。字体仍只问 vb6_ControlFont (WM_GETFONT)。
    touch 本文件 = 让 RCDATA 重包一次 (§B99②)。 */
+
+/* 账 #305 第三百零一刀: Extender 的**方法形** `.Extender.Move` 接回写侧 ——
+   vb6com_invoke.c 的 Extender 岔口 → uc_controls.c vb6_UC_ExtenderMoveApply → vb6_ControlMove。
+   第二百九十五刀撤它时欠的两个前置 (单位问容器 / authored 容器戳 + ReBar band 行高输入)
+   已由二百九十七 / 二百九十九 / 二百九十刀补齐。
+   (订正上一格末句: 那两处 DC 选字读的是 vb6_ControlFontStored —— 从 push/paint 进
+    vb6_ControlFont 会 SendMessage(WM_GETFONT), 实发过一次 0xC0000409。)
+   touch 本文件 = 让 RCDATA 重包一次 (§B99②)。 */

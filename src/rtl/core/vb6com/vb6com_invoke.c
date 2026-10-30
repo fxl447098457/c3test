@@ -399,8 +399,29 @@ void* vb6_ComCall(void* disp, const wchar_t* methodName,
        ImageCombo1 交来的四档是**缇**而它容器 (CoolBar, 声明 ScaleMode=3 像素) 要的是像素,
        于是 3672 缇被当 3672 像素落回去, 宿主一度长成 3672x324。
        ⇒ 顺序仍按第二百八十八刀定的那一串: 先定「几何的父窗口该问谁」(今天走 GetParent,
-       交不出 UC 自己声明的 ScaleMode), 再谈落地写。这一刀只把看不见改成看得见。 */
+       交不出 UC 自己声明的 ScaleMode), 再谈落地写。这一刀只把看不见改成看得见。
+       **账 #305 第三百零一刀: 那两条前置都落地了, `Move` 接回** —— 第二百九十七刀把单位那一问
+       收到容器主人 (不再问 GetParent), 第二百九十九刀把 authored 容器戳到窗口上, 第二百九十刀
+       补了 ReBar band 行高那一路输入。本条只补通道, 兜底一概不抄: 四档原样交 vb6_ControlMove。 */
     if (vb6_UC_IsExtender(disp)) {
+        if (methodName && wcscmp(methodName, L"Move") == 0) {
+            extern int32_t vb6_UC_ExtenderMoveApply(double l, double t, double w, double h, int32_t mask);
+            double v4[4] = { 0, 0, 0, 0 };
+            int32_t mask = 0;
+            for (int32_t i = 0; i < argc && i < 4; i++) {
+                VARIANT scratch;
+                if (!args || !args[i]) continue;
+                VariantInit(&scratch);
+                if (SUCCEEDED(VariantChangeType(&scratch, args[i], 0, VT_R8))) {
+                    v4[i] = scratch.dblVal;
+                    mask |= (1 << i);
+                }
+                VariantClear(&scratch);
+            }
+            vb6_UC_ExtenderMoveApply(v4[0], v4[1], v4[2], v4[3], mask);
+            vb6_ComDropPackedArgs(args, argc);
+            return NULL;
+        }
         vb6_ComLateBindMiss(L"ExtenderCall", methodName, disp);
         if (GetEnvironmentVariableW(L"C3_OCX_TRACE", NULL, 0) > 0) {
             fwprintf(stderr, L"[C3_EXT] Call name=\"%ls\" argc=%ld dropped=1\n",

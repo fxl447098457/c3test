@@ -629,6 +629,25 @@ void vb6_UC_ExtenderGeomApplied(const wchar_t* name) {
                     (double)rc->extWidth, (double)rc->extHeight, (int)which);
 }
 
+/* 账 #305 第三百零一刀: Extender 四档几何的**方法形写手**（`.Extender.Move l, t, w, h`）——
+   控件自己量完尺寸、来请求摆位的那一发。第二百九十五刀把它改成「响亮地丢」；当时第一次落地
+   的三个塌法（CoolBar 60→37 / ComboBoxW 288↔504 来回 / ImageCombo 3672 像素）的前置都变了：
+   第二百九十七刀把「几何按谁的 ScaleMode 折」收到容器主人（不再问 GetParent），第二百九十九刀
+   把 authored 容器戳到窗口上，第二百九十刀补了 ReBar band 行高那一路输入。
+   本条只补通道、兜底一概不抄 —— 四档原样交给 vb6_ControlMove（所有摆位的唯一收口：按容器
+   ScaleMode 换像素、写 #230 缓存、尺寸真变了才排队 Resize）。VB6 的 Move 允许多种实参个数：
+   给几档就只动几档（mask），一档都没有就什么也不做。
+   实测靶工程：MonthView.ctl 的 `UserControl_Resize` 靠它把宿主缩到自己量出的 160x161（参考那台
+   同形）；我方从前停在设计期 172x156，内层 SysMonthCal32 跟着大一圈。 */
+int32_t vb6_UC_ExtenderMoveApply(double L, double T, double W, double H, int32_t mask) {
+    vb6_UCRec* rc = vb6_ucCurrent;
+    if (!rc || !rc->hwnd || !IsWindow((HWND)rc->hwnd)) return 0;
+    if (!mask) return 0;
+    extern void vb6_ControlMove(void* hwnd, double l, double t, double w, double h, int mask);
+    vb6_ControlMove((void*)rc->hwnd, L, T, W, H, (int)mask);
+    return 1;
+}
+
 int32_t vb6_UC_ContainerScaleModeCurrent(void) {
     vb6_UCRec* rc = vb6_ucCurrent;
     if (!rc) return 0;
