@@ -743,6 +743,23 @@ function Test-UcScaleUnitsCensus {
     }
 }
 
+# 账 #305 第303刀: 窗体默认图标 (VB6 默认 = RT_GROUP_ICON 1 / RT_ICON 30001..30003)。
+# 产物里一枚图标资源都没有时, 标题栏画的是 shell 兜底图; 而只注入资源不设窗口图标, 标题栏
+# 还是兜底图 —— 两半缺一不可。形状细节见 scripts/check_form_icon.ps1 头注释。
+function Test-FormIconCensus {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] form_icon_census ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\check_form_icon.ps1" 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        $out | Select-Object -Last 14 | ForEach-Object { Write-Host "  $_" }
+    }
+}
+
 # 账 #159: 宿主伪成员只有一张表 (名字 / 类型 / 可否裸写 / 赋值拆数值)。哨兵逐行把
 # 表与 src/rtl/core/vb6rtl/vb6rtl_userctl.h 的 extern 声明对照, 并禁止那五份旧清单
 # 回潮 (成员名字面量再出现在消费点 = 抄了第二份)。
@@ -10193,6 +10210,7 @@ if ($Category -in @("all", "compile")) {
     if (Enter-StaticShard) { Test-DiStubCensus }
     if (Enter-StaticShard) { Test-VbpFixtureCensus }
     if (Enter-StaticShard) { Test-UcScaleUnitsCensus }
+    if (Enter-StaticShard) { Test-FormIconCensus }
     if (Enter-StaticShard) { Test-HostPseudoTableCensus }
     if (Enter-StaticShard) { Test-AddressOfThunkSites }
     if (Enter-StaticShard) { Test-FloatLiteralShape }

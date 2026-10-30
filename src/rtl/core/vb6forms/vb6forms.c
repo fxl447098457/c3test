@@ -286,6 +286,21 @@ int vb6_ScaleUserToPx(double user, int32_t mode, int vert) {
 
 static void vb6_formClassBg_set(const char* className, int bg);
 
+/* 账 #305 第303刀: VB6 给"没有 Icon 属性的窗体"画的是**默认窗体图标** —— 参考那台把它
+ * 交给窗口 (WM_GETICON(ICON_BIG) 非 0) 而类图标仍为 0, 所以这里也走 WM_SETICON, 不改类。
+ * 资源由链接期注入 (RT_GROUP_ICON 1, 见 src/driver/default_form_icon.hpp); 没有这枚资源
+ * (旧产物 / DLL 宿主) 就什么都不做。类图标已指定时(Icon 属性那一路)不覆盖。 */
+#define VB6_DEFAULT_FORM_ICON_ID 1
+static void vb6_formApplyDefaultIcon(HWND hwnd, void* hInstance) {
+    if (GetClassLongPtrW(hwnd, GCLP_HICON) != 0) return;
+    /* BAS 的 Sub Main 入口不调 vb6_SetAppInstance ⇒ 这里拿到的是 NULL;
+     * LoadIconW(NULL, id) 会去系统图标里找 id=1 而失败。资源始终住在 exe 里。 */
+    HINSTANCE hi = (HINSTANCE)hInstance;
+    if (!hi) hi = GetModuleHandleW(NULL);
+    HICON hIcon = LoadIconW(hi, MAKEINTRESOURCEW(VB6_DEFAULT_FORM_ICON_ID));
+    if (hIcon) SendMessageW(hwnd, WM_SETICON, ICON_BIG, (LPARAM)hIcon);
+}
+
 int vb6_RegisterFormClassBg(const char* className, void* wndProc, void* hInstance,
                             int iconResId, int backColor) {
     // Fix 190: 用 W 版注册窗口类。RegisterClassExA 注册出来的类即使之后用
@@ -452,6 +467,7 @@ void* vb6_CreateFormWindowB(const char* className, const char* formName,
      * 从没被发过 => 窗体上 Print/TextWidth 那一族按 DC 默认字体量。交 NULL = VB6 默认档;
      * 窗体若带设计期字体, 后面那条 setter 会再来发一张 (那一站自带作废)。 */
     vb6_UC_ApplyFontToWindow(hwnd, NULL);
+    vb6_formApplyDefaultIcon(hwnd, hInstance);
     return (void*)hwnd;
 }
 

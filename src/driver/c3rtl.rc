@@ -999,3 +999,10 @@
    (订正上一格末句: 那两处 DC 选字读的是 vb6_ControlFontStored —— 从 push/paint 进
     vb6_ControlFont 会 SendMessage(WM_GETFONT), 实发过一次 0xC0000409。)
    touch 本文件 = 让 RCDATA 重包一次 (§B99②)。 */
+
+/* 账 #305 第303刀: VB6 的**默认窗体图标** —— 工程里没有 Icon 属性时 VB6 塞的是
+   RT_GROUP_ICON 1 + RT_ICON 30001..30003（32x32 1bpp / 32x32 4bpp / 16x16 4bpp，语言档 0），
+   运行时由框架 WM_SETICON(ICON_BIG) 交给窗体窗口（参考那台 GCLP_HICON 仍为 0）。
+   链接期由 driver 用 UpdateResource 注入进 EXE（src/driver/default_form_icon.hpp 存这四份字节）；
+   RTL 侧 vb6forms.c 的 vb6_formApplyDefaultIcon 只负责"有这枚资源就发给窗口"。
+   touch 本文件 = 让 RCDATA 重包一次 (§B99②)。 */
