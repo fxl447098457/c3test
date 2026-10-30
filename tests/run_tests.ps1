@@ -7895,6 +7895,21 @@ if ($Category -in @("all", "run", "vbp")) {
         'vb6_P3122_prop_set_Pic((void*)me, vb6_P3122_GetV',
         'vb6_P3122_prop_set_Pic((void*)me, vb6_VariantFromValue'
     )
+    # 账 #305 第294刀: 赋值目标是**成员** (`Obj.Prop`) 且 RHS 是集合/COM 读时, 解包档必须问
+    # **写方向的声明类型** (Property Let 的值槽)。修前只认裸标识符 / UDT 字段, 成员目标一律退到
+    # 默认 BSTR: `o.Index = c.Count` 发成 vb6_ComGetStringProp ⇒ Collection.Count 的 BSTR 指针
+    # 被截成 int32 存进 PropIndex。实物 = ComCtlsDemo 每个列头的 Index 都是垃圾 ⇒
+    # LVM_GET/SETCOLUMN 永远问错列 ⇒ 表头的 SortArrow(HDF_SORTDOWN) / CheckBox(HDF_CHECKBOX)
+    # 一个都不落地 (两架构实测 header fmt 全是 0x4000)。
+    $k294Expected = @("K294-idx=3", "K294-DONE")
+    Test-Vbp 'k294_idx_from_count' "$Tests\k294_idx_from_count\K294.vbp" $k294Expected
+    Test-Vbp 'k294_idx_from_count_x86' "$Tests\k294_idx_from_count\K294.vbp" $k294Expected -Arch "x86"
+    Test-EmitcShape "k294_idx_from_count_shape" @("$Tests\k294_idx_from_count\K294.vbp") @(
+        'vb6_P294_prop_let_Index(o, vb6_ComGetIntProp(c, L"Count"));'
+    )
+    Test-EmitcAbsent "k294_idx_from_count_lesion" @("$Tests\k294_idx_from_count\K294.vbp") @(
+        'vb6_P294_prop_let_Index(o, vb6_ComGetStringProp('
+    )
     # <vbeclipse> 回归夹子 (k3136_lwa_guard, 账 #305 第一百九十八刀 = 链接期族A): 同一个模块里
     # 两条 Declare 指向同一枚 DLL 导出 —— 非别名路 (`Declare Sub RtlMoveMemory`) 与别名路
     # (`Declare Sub CopyMemory ... Alias "RtlMoveMemory"`, VB6 的常见写法; 实物 = VbEclipse
