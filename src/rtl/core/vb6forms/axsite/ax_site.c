@@ -118,6 +118,11 @@ static HRESULT STDMETHODCALLTYPE axSite_IPS_GetWindowContext(IOleInPlaceSite* Th
 static HRESULT STDMETHODCALLTYPE axSite_IPS_Scroll(IOleInPlaceSite* This, SIZE s) { return S_OK; }
 static HRESULT STDMETHODCALLTYPE axSite_IPS_OnUIDeactivate(IOleInPlaceSite* This, BOOL f) { return S_OK; }
 static HRESULT STDMETHODCALLTYPE axSite_IPS_OnInPlaceDeactivate(IOleInPlaceSite* This) { return S_OK; }
+/* 账 (Outlook2013 frmPaneCalendar.SetFlatStyle): 这张表以前**漏了 DiscardUndoState**
+ * (IOleInPlaceSite 的第 13 槽), 于是 DeactivateAndUndo / OnPosRectChange 各前移一格、
+ * 末槽 OnPosRectChange 留空 —— 控件按真实槽位调 OnPosRectChange 就是调 NULL。
+ * 槽位必须与 oleidl.h 的声明**逐格对齐**, 少一格不是"少一个功能", 是整条尾巴错位。 */
+static HRESULT STDMETHODCALLTYPE axSite_IPS_DiscardUndoState(IOleInPlaceSite* This) { return S_OK; }
 static HRESULT STDMETHODCALLTYPE axSite_IPS_DeactivateAndUndo(IOleInPlaceSite* This) { return S_OK; }
 static HRESULT STDMETHODCALLTYPE axSite_IPS_OnPosRectChange(IOleInPlaceSite* This, LPCRECT lprc) { return S_OK; }
 
@@ -127,6 +132,7 @@ const IOleInPlaceSiteVtbl g_axSiteInPlaceSiteVtbl = {
     axSite_IPS_CanInPlaceActivate, axSite_IPS_OnInPlaceActivate, axSite_IPS_OnUIActivate,
     axSite_IPS_GetWindowContext, axSite_IPS_Scroll,
     axSite_IPS_OnUIDeactivate, axSite_IPS_OnInPlaceDeactivate,
+    axSite_IPS_DiscardUndoState,
     axSite_IPS_DeactivateAndUndo, axSite_IPS_OnPosRectChange
 };
 

@@ -186,8 +186,22 @@ static HRESULT STDMETHODCALLTYPE axSite_IPSW_OnUIDeactivate(IOleInPlaceSiteWindo
 static HRESULT STDMETHODCALLTYPE axSite_IPSW_OnInPlaceDeactivate(IOleInPlaceSiteWindowless* This) {
     Vb6AxSite* s = SITE_OF(This, lpVtblInPlaceSiteWindowless); s->inPlaceActive = 0; return S_OK;
 }
+static HRESULT STDMETHODCALLTYPE axSite_IPSW_DiscardUndoState(IOleInPlaceSiteWindowless* This) { (void)This; return S_OK; }
 static HRESULT STDMETHODCALLTYPE axSite_IPSW_DeactivateAndUndo(IOleInPlaceSiteWindowless* This) { (void)This; return S_OK; }
 static HRESULT STDMETHODCALLTYPE axSite_IPSW_OnPosRectChange(IOleInPlaceSiteWindowless* This, LPCRECT r) { (void)This; (void)r; return S_OK; }
+/* --- IOleInPlaceSiteEx 三格 (窗口无窗口站点继承它, 槽位必须补齐) --- */
+static HRESULT STDMETHODCALLTYPE axSite_IPSW_OnInPlaceActivateEx(IOleInPlaceSiteWindowless* This, BOOL* pfNoRedraw, DWORD dwFlags) {
+    Vb6AxSite* s = SITE_OF(This, lpVtblInPlaceSiteWindowless);
+    s->inPlaceActive = 1;
+    if (pfNoRedraw) *pfNoRedraw = FALSE;   /* 要重画: 控件自己画, 宿主不代劳 */
+    (void)dwFlags;
+    return S_OK;
+}
+static HRESULT STDMETHODCALLTYPE axSite_IPSW_OnInPlaceDeactivateEx(IOleInPlaceSiteWindowless* This, BOOL fNoRedraw) {
+    Vb6AxSite* s = SITE_OF(This, lpVtblInPlaceSiteWindowless);
+    s->inPlaceActive = 0; (void)fNoRedraw; return S_OK;
+}
+static HRESULT STDMETHODCALLTYPE axSite_IPSW_RequestUIActivate(IOleInPlaceSiteWindowless* This) { (void)This; return S_OK; }
 
 /* ---- windowless 扩展 ---- */
 static HRESULT STDMETHODCALLTYPE axSite_IPSW_CanWindowlessActivate(IOleInPlaceSiteWindowless* This) {
@@ -252,13 +266,24 @@ static HRESULT STDMETHODCALLTYPE axSite_IPSW_OnDefWindowMessage(IOleInPlaceSiteW
     return S_OK;
 }
 
+/* 槽位与 oleidl.h 的 IOleInPlaceSiteWindowless 逐格对齐 (3 IUnknown + 12
+ * IOleInPlaceSite + 3 IOleInPlaceSiteEx + 12 windowless 扩展 = 30 格)。
+ *
+ * 账 (Outlook2013 frmPaneCalendar.SetFlatStyle): 这张表以前只有 26 格 —— 漏了
+ * DiscardUndoState / OnInPlaceActivateEx / OnInPlaceDeactivateEx / RequestUIActivate,
+ * 于是从第 13 格起**整条尾巴错位四格**: 控件改完属性要 InvalidateRect (真槽 26)
+ * 时落到的正是本表的第 26 项 OnDefWindowMessage —— 三个形参 (prc, fErase) 被当成
+ * (msg, wp, lp, pl) 读, pl 拿到 0x13, 一句 `*pl = ...` 当场 AV (WRITE 0x13)。
+ * 少一格不是"少一个功能", 是让后面每一格都去执行别人的函数。 */
 const IOleInPlaceSiteWindowlessVtbl g_axSiteInPlaceSiteWindowlessVtbl = {
     axSite_IPSW_QueryInterface, axSite_IPSW_AddRef, axSite_IPSW_Release,
     axSite_IPSW_GetWindow, axSite_IPSW_ContextSensitiveHelp,
     axSite_IPSW_CanInPlaceActivate, axSite_IPSW_OnInPlaceActivate, axSite_IPSW_OnUIActivate,
     axSite_IPSW_GetWindowContext, axSite_IPSW_Scroll,
     axSite_IPSW_OnUIDeactivate, axSite_IPSW_OnInPlaceDeactivate,
+    axSite_IPSW_DiscardUndoState,
     axSite_IPSW_DeactivateAndUndo, axSite_IPSW_OnPosRectChange,
+    axSite_IPSW_OnInPlaceActivateEx, axSite_IPSW_OnInPlaceDeactivateEx, axSite_IPSW_RequestUIActivate,
     axSite_IPSW_CanWindowlessActivate, axSite_IPSW_GetCapture, axSite_IPSW_SetCapture,
     axSite_IPSW_GetFocus, axSite_IPSW_SetFocus, axSite_IPSW_GetDC, axSite_IPSW_ReleaseDC,
     axSite_IPSW_InvalidateRect, axSite_IPSW_InvalidateRgn, axSite_IPSW_ScrollRect,
