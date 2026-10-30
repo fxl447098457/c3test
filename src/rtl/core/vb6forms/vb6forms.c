@@ -603,6 +603,13 @@ void* vb6_CreateControl(const char* win32Class, const char* controlName,
        SetPropW(…, 0) 等于删属性（账 #107 那一课）。 */
     if (hwnd) SetPropW(hwnd, L"VB6_TabStop", (HANDLE)(DWORD_PTR)((style & WS_TABSTOP) ? 1 : 2));
 
+    /* 账 #305 第299刀: hParent = 这枚控件 authored 的那一层容器 (窗体 / 窗体上的容器控件 /
+       .ctl 的宿主窗口)。VB6 的几何单位跟的就是**这一层**, 运行期谁把 HWND 搬走都不改它,
+       所以在这里留住 (窗体自己那发 hParent 为空 => 不戳)。嵌进 OCX 实例 Begin 块的那一族
+       (.frm:33 ImageCombo1 / :44 Command4) 创建期的 hParent 是那枚 UC 的宿主窗口, 而它们的
+       authored 容器按 298 读④ 是那扇窗体 ⇒ 交 vb6_GeomAuthoredOwner 跳过 UC 宿主层再戳。 */
+    vb6_GeomOwnerStamp(hwnd, vb6_GeomAuthoredOwner(hParent));
+
     /* 账 #230: 设计期那四个数一起存进 VB 侧读数，**单位记成缇**。
        .frm 的 Left/Top/Width/Height 恒按缇写，与容器自己声明的 ScaleMode 无关 ——
        实证 tests/czUI-main/frmDemo.frm：那枚窗体写 `ScaleMode = 3  'Pixel`，同时写

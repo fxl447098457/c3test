@@ -19,7 +19,6 @@
 #include <olectl.h>   /* IPicture, OleLoadPicture, OLE_HANDLE */
 
 
-
 // ============================================================
 // 控件属性读写 (P7.5)
 // ============================================================
@@ -124,7 +123,8 @@ int vb6_RadioClickCounts(void* hwndFrom) {
 // 窗体 → 窗体的 VB6_ScaleMode 属性 (缺省 1=缇); 非窗口 (NULL) → 1。
 // 账 #305 第297刀: 「**哪一窗算容器**」不再由调用方拿 GetParent 现答, 改问
 // vb6_UC_ContainerWindowOf (实测漂过: band 里的控件父窗有两种答案 ⇒ 同一发四档数
-// 一会按像素折、一会按缇折; 读数与那条未结的「档」问一起在 uc_host.c 那位主人头上)。
+// 一会按像素折、一会按缇折)。第299刀起那位主人第一问**创建期戳下的 authored 容器**,
+// 不再凭运行时的名册或现父窗猜; 读数与那条未结的「档」问一起在 uc_host.c 那位主人头上)。
 int32_t vb6_ContainerScaleMode(void* hwndParent) {
     int32_t m = vb6_UC_WindowScaleMode(hwndParent);
     if (m) return m;

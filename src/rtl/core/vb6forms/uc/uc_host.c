@@ -773,6 +773,7 @@ void* vb6_UC_CreateDesignEdit(int32_t left, int32_t top, int32_t width, int32_t 
     if (edit) {
         HFONT f = (HFONT)GetStockObject(DEFAULT_GUI_FONT);
         SendMessageW(edit, WM_SETFONT, (WPARAM)f, TRUE);
+        vb6_GeomOwnerStamp(edit, parent);   /* 账 #305 299 */
     }
     return edit;
 }
@@ -790,6 +791,7 @@ void* vb6_UC_CreateDesignPicture(int32_t left, int32_t top, int32_t width, int32
                                vb6_TwipToX(left), vb6_TwipToY(top),
                                vb6_TwipToX(width), vb6_TwipToY(height),
                                parent, NULL, hInst, NULL);
+    vb6_GeomOwnerStamp(pic, parent);        /* 账 #305 299 */
     return pic;
 }
 
@@ -804,19 +806,23 @@ void* vb6_UC_CreateDesignLabel(int32_t left, int32_t top, int32_t width, int32_t
     HWND parent = (HWND)vb6_UserControl_hWnd;
     if (!parent) return NULL;
     HINSTANCE hInst = (HINSTANCE)GetWindowLongPtrW(parent, GWLP_HINSTANCE);
-    return CreateWindowExW(0, L"STATIC", L"", WS_CHILD | WS_VISIBLE | SS_LEFT,
-                           vb6_TwipToX(left), vb6_TwipToY(top),
-                           vb6_TwipToX(width), vb6_TwipToY(height),
-                           parent, NULL, hInst, NULL);
+    HWND lbl = CreateWindowExW(0, L"STATIC", L"", WS_CHILD | WS_VISIBLE | SS_LEFT,
+                               vb6_TwipToX(left), vb6_TwipToY(top),
+                               vb6_TwipToX(width), vb6_TwipToY(height),
+                               parent, NULL, hInst, NULL);
+    vb6_GeomOwnerStamp(lbl, parent);        /* 账 #305 299 */
+    return lbl;
 }
 void* vb6_UC_CreateDesignImage(int32_t left, int32_t top, int32_t width, int32_t height) {
     HWND parent = (HWND)vb6_UserControl_hWnd;
     if (!parent) return NULL;
     HINSTANCE hInst = (HINSTANCE)GetWindowLongPtrW(parent, GWLP_HINSTANCE);
-    return CreateWindowExW(0, L"STATIC", L"", WS_CHILD | WS_VISIBLE | SS_NOTIFY,
-                           vb6_TwipToX(left), vb6_TwipToY(top),
-                           vb6_TwipToX(width), vb6_TwipToY(height),
-                           parent, NULL, hInst, NULL);
+    HWND img = CreateWindowExW(0, L"STATIC", L"", WS_CHILD | WS_VISIBLE | SS_NOTIFY,
+                               vb6_TwipToX(left), vb6_TwipToY(top),
+                               vb6_TwipToX(width), vb6_TwipToY(height),
+                               parent, NULL, hInst, NULL);
+    vb6_GeomOwnerStamp(img, parent);        /* 账 #305 299 */
+    return img;
 }
 
 // ---- Fix <vbeclipse>: 设计器子控件里"工程内 UserControl" → 每实例一个宿主子窗口 ----
@@ -829,7 +835,12 @@ void* vb6_UC_CreateDesignUserControl(const char* typeName, const char* ctrlName,
     HWND parent = (HWND)vb6_UserControl_hWnd;
     if (!parent || !typeName) return NULL;
     HINSTANCE hInst = (HINSTANCE)GetWindowLongPtrW(parent, GWLP_HINSTANCE);
-    return vb6_UC_HostCreate(typeName, left, top, width, height, parent, hInst, ctrlName, -1);
+    void* hw = vb6_UC_HostCreate(typeName, left, top, width, height, parent, hInst, ctrlName, -1);
+    /* 账 #305 第299刀: HostCreate 里那一戳按 `.frm` 口径跳过了 UC 宿主层, 而**这一路**是
+       `.ctl` 设计面 (ucFolder 的 ViewTabs = ucTabStrip authored 在 ucFolder 自己身上),
+       authored 容器就是 parent ⇒ 按精确容器覆盖回来。后写的那一戳赢。 */
+    vb6_GeomOwnerStamp(hw, parent);
+    return hw;
 }
 // 隐藏窗口 + 真实 SetTimer; WM_TIMER 时按 VB6_TimerEnabled/Interval 属性决定
 // 是否回调 (vb6_SetTimerEnabled/Interval 已把这些值写进窗口属性)。
@@ -937,6 +948,48 @@ int32_t vb6_UC_DesignCtrlOwner(const void* hwnd, void** outInst, const char** ou
     return 0;
 }
 
+/* 账 #305 第299刀: 「这枚窗口 authored 在哪一层容器」在**创建期**就戳在窗口上。
+   第297刀把「哪一窗算容器」收成一位主人, 但那位主人只能凭运行时现问 (名册 / GetParent)。
+   第298刀的混合尺 (411 raw : 19 conv) 证明「档」随 authored 的那一层容器走, 而两族的
+   authored 容器不同:
+     - .frm 的孩子 authored 在**窗体**, 运行期却被 UC 内部搬进 band (CoolBar.ctl:3632
+       `SetParent .hWndChild, UserControl.hWnd`) => 现问 GetParent 交出的是那枚 UC 宿主
+       => 窗体那一档的缇被当像素摆 (296 那发的 3672x324);
+     - .ctl 设计面的孩子 authored 在**那枚 UC** => 必须答 UC 自己声明的像素档。
+   这句话创建期**本来就知道** (形参 hParent / 那四枚 CreateDesign* 里的 parent), 所以把它
+   留住: 一处戳、一处问, 两族各有自己的答案, 也不靠名册那张 8 格的表 (语料实测 41 份 .ctl
+   的顶层设计孩子 > 8 => 名册本身就装不下, 溢出那几枚静默落回现问)。
+   只答「哪一窗算容器」, 不改「按哪种档」: 那一问仍在 vb6_ContainerScaleMode 里。
+   顶层窗口 (窗体自己) 没有 authored 容器 => 不戳, 交回 297 那三条档。 */
+void vb6_GeomOwnerStamp(void* hwndChild, void* hwndOwner) {
+    if (!hwndChild || !hwndOwner) return;
+    /* 值 = 裸 HWND。owner 为空时不写: SetPropW(…, 0) 等于删属性 (账 #107)。 */
+    SetPropW((HWND)hwndChild, L"VB6_AuthoredOwner", (HANDLE)(INT_PTR)hwndOwner);
+}
+
+/* 账 #305 第299刀: `.frm` 那一路创建期的 hParent **不总是** authored 容器 —— 嵌进
+   OCX 实例 Begin 块的孩子 (MainForm.frm:33 ImageCombo1 / :44 Command4 / :51 CheckBoxW1
+   都在 `Begin ComCtlsDemo.CoolBar CoolBar1` 里面) 创建期拿到的父窗是那枚 UC 的宿主窗口,
+   而它们的单位容器按 298 读④ 是**那扇窗体**: CoolBar.ctl 声明 `ScaleMode = 3 像素`,
+   可它自己代码里 `ScaleX(.Left, vbPixels, vbTwips)` 之后才交给 band 排版, 参考那台
+   每枚 band 实测 29 像素高 (孩子 20~24) ⇒ 孩子交回的 `.Height` 是缇。⇒ 戳之前先跳过
+   UC 宿主那几层, 停在第一个**非 UC 宿主**的祖先上 (Frame/PictureBox/窗体都算停)。
+   `.ctl` 设计面那一路不走这里: 那四枚 CreateDesign* 与 CreateDesignUserControl 按
+   精确容器戳, 因为它们的孩子 authored 在那枚 UC 自己身上 (298 读⑤: Charts/Animation
+   体内孩子必须拿像素档)。 */
+void* vb6_GeomAuthoredOwner(void* hwndParent) {
+    HWND h = (HWND)hwndParent;
+    while (h) {
+        vb6_UCRec* r = vb6_uc_findByHwnd(h);
+        if (!r) break;                                  /* 不是 UC 宿主 ⇒ 就是 authored 那一层 */
+        HWND up = (r->parent && IsWindow(r->parent)) ? (HWND)r->parent : GetParent(h);
+        if (!up || up == h) break;                      /* 保险丝: 答不出上一层就停在本层 */
+        h = up;
+    }
+    return (void*)h;
+}
+
+
 /* 账 #305 第二百九十七刀: 「这枚窗口的几何该按谁的 ScaleMode 折」收成一位主人。
    第296刀的读数 (C3_K296 埋点, 台账那一行有全表): 靶工程 15 秒 38 发摆位里,
    **同一枚窗口、同一发四档数**拿到过两种单位答案 —— ImageCombo1 的宿主一发 `cm=3`
@@ -961,19 +1014,26 @@ int32_t vb6_UC_DesignCtrlOwner(const void* hwnd, void** outInst, const char** ou
    ⚠ 这一位只答**单位**; 摆位的坐标空间 (ScreenToClient 那一头) 仍是现父窗, 不在这一问里。 */
 void* vb6_UC_ContainerWindowOf(const void* hwnd) {
     if (!hwnd) return NULL;
+    /* 账 #305 第299刀: 第一问 = 创建期戳下的那一枚 authored 容器 (那扇窗已销毁才落回现问)。
+       这一问在先, 是因为名册那一条只覆盖 .ctl 设计面的孩子 (且只有 8 格), 而 .frm 的孩子被
+       SetParent 搬进 band 之后 GetParent 会漂 —— 戳不会漂, 它记的就是 authored 那一句。 */
+    {
+        HWND ho = (HWND)(INT_PTR)GetPropW((HWND)hwnd, L"VB6_AuthoredOwner");
+        if (ho && IsWindow(ho)) { return (void*)ho; }
+    }
     vb6_UCRec* r = vb6_uc_findByHwnd(hwnd);
     if (r) {
-        if (r->parent && IsWindow(r->parent)) return (void*)r->parent;
-        return (void*)GetParent((HWND)hwnd);
+        if (r->parent && IsWindow(r->parent)) { return (void*)r->parent; }
+        { HWND gp = (HWND)GetParent((HWND)hwnd); return (void*)gp; }
     }
     {
         void* inst = NULL;
         if (vb6_UC_DesignCtrlOwner(hwnd, &inst, NULL) && inst) {
             vb6_UCRec* o = vb6_uc_findByInstance(inst);
-            if (o && o->hwnd && IsWindow(o->hwnd)) return (void*)o->hwnd;
+            if (o && o->hwnd && IsWindow(o->hwnd)) { return (void*)o->hwnd; }
         }
     }
-    return (void*)GetParent((HWND)hwnd);
+    { HWND gp = (HWND)GetParent((HWND)hwnd); return (void*)gp; }
 }
 
 // Fix <vbeclipse> rev22: 在**正确**的宿主上下文里跑一次设计期子控件的 Resize 事件。

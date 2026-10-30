@@ -977,3 +977,11 @@
  *   (band 里的控件被 SetParent 进 CoolBar 宿主、又被 rebar 搬进 ReBarWindow32 ⇒ 同一发
  *   四档数拿到过两种单位), uc_controls.c 的 vb6_UC_ContainerScaleModeCurrent 并进同一位。
  *   touch 本文件 = 让 RCDATA 重包一次 (§B99②)。 */
+
+/* 账 #305 第二百九十九刀: 「这枚窗口 authored 在哪一层容器」改成创建期戳在窗口上
+ *   (新 RTL 出口 vb6_GeomOwnerStamp → 窗口属性 VB6_AuthoredOwner)。上面那位主人的第一问
+ *   改读这一枚戳, 名册与 GetParent 退成落回 —— .frm 的孩子被 CoolBar 搬进 band 之后
+ *   仍答**窗体**那一档 (296 那发的 3672x324 瞬态), 而 .ctl 设计面的孩子仍答**那枚 UC**
+ *   声明的像素档 (Charts/Animation 体内摆位不变)。写侧 = vb6_CreateControl (两条创建路
+ *   共用) + 四枚 vb6_UC_CreateDesign* + CtrlArr_Load + CreateWebView 共七处。
+ *   touch 本文件 = 让 RCDATA 重包一次 (§B99②)。 */
