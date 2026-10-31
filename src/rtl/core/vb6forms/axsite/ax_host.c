@@ -261,6 +261,7 @@ void vb6_OcxHost_InvalidateAll(void* hwndForm) {
 void vb6_OcxHost_PaintAll(void* hwndForm, void* hdc) {
     HDC dc = (HDC)hdc;
     if (!dc) return;
+    const int paintTrace = (GetEnvironmentVariableW(L"C3_OCX_TRACE", NULL, 0) > 0);
     for (int i = 0; i < vb6_axSiteCount; i++) {
         Vb6AxSite* s = g_axSites[i];
         if (!s || s->hwndForm != (HWND)hwndForm || !s->pViewObj) continue;
@@ -277,7 +278,13 @@ void vb6_OcxHost_PaintAll(void* hwndForm, void* hdc) {
         rc.bottom = s->rcCtrl.bottom;
         int saved = SaveDC(dc);
         IntersectClipRect(dc, (int)rc.left, (int)rc.top, (int)rc.right, (int)rc.bottom);
-        pView->lpVtbl->Draw(pView, DVASPECT_CONTENT, -1, NULL, NULL, NULL, dc, &rc, NULL, NULL, 0);
+        HRESULT dhr = pView->lpVtbl->Draw(pView, DVASPECT_CONTENT, -1, NULL, NULL, NULL, dc, &rc, NULL, NULL, 0);
+        if (paintTrace) {
+            fprintf(stderr, "[C3_OCX] PaintAll ctrl='%ls' rect=(%ld,%ld)-(%ld,%ld) hr=0x%08lX\n",
+                    s->ctrlName, (long)rc.left, (long)rc.top, (long)rc.right, (long)rc.bottom,
+                    (unsigned long)dhr);
+            fflush(stderr);
+        }
         RestoreDC(dc, saved);
     }
 }

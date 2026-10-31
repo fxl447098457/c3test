@@ -622,6 +622,26 @@ void CCodeGen::visit(CallStmt& node) {
                 bareArgList = "0.0";
             }
             callExpr += "(" + bareArgList + ")";
+            // 窗体裸名 `ZOrder` (= `Me.ZOrder`): `.frm` 里不带接收者写 `ZOrder` 是窗体自己
+            // 的方法 (Outlook2013 frmInbox:753/895/964, 弹菜单前提到最前), 而这个名字在符号表
+            // 里查不到 —— 从前发成裸 `ZOrder()`。事件连接点接上后处理器第一次被引用, 这条未解析
+            // 外部符号才浮出水面 (frmInbox.obj: LNK2019 _ZOrder)。RTL 出口见 vb6forms_prop.h。
+            if (isFormModule_ && !knownFormName_.empty()
+                && node.callee && node.callee->kind == ASTNodeKind::IdentifierExpr
+                && Symbol::toLower(static_cast<IdentifierExpr&>(*node.callee).name) == "zorder"
+                && !symTab_.lookupModule("zorder")) {
+                // 本窗体的 hwnd 槽名取原大小写 (knownFormName_ 是小写键; 与
+                // cgen_expr_ident_symbol.inc 同一取法, 否则发成 vb6_hwnd_frminbox ⇒ C2065)
+                std::string zoSelfHwnd;
+                auto itZo = knownFormControlOriginalNames_.find(knownFormName_);
+                if (itZo != knownFormControlOriginalNames_.end()) {
+                    zoSelfHwnd = "vb6_hwnd_" + cIdent(itZo->second);
+                } else {
+                    zoSelfHwnd = "vb6_hwnd_" + moduleName_;
+                }
+                callExpr = "vb6_FormZOrder(" + zoSelfHwnd + ", "
+                         + (bareArgList.empty() ? "0" : bareArgList) + ")";
+            }
         }
 
         // Fix 090g: fallback 合成 (visit MemberAccessExpr asCallCallee_ → func(obj)

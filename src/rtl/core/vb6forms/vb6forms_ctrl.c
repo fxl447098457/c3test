@@ -106,6 +106,15 @@ void vb6_SetControlFocus(void* hwnd) {
     SetFocus((HWND)hwnd);
 }
 
+// 窗体裸名 `ZOrder`（= `Me.ZOrder`，见 vb6forms_prop.h 的声明注释）：只动 z 序。
+// HWND_TOP / HWND_BOTTOM 分别在"同属非置顶"的一档里插到最前/最后；SWP_NOACTIVATE 保证
+// 不提窗体的激活态 —— VB6 的 Form.ZOrder 也不改变焦点。
+void vb6_FormZOrder(void* hwnd, int position) {
+    if (!hwnd) return;
+    SetWindowPos((HWND)hwnd, position == 1 ? HWND_BOTTOM : HWND_TOP,
+                 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+}
+
 /* 账 #171（C29-FS-h）：单选钮的 `Click` 只在「这一枚真被选中」时才算数。见 vb6forms_prop.h 的注释。
    非单选钮一律放行 —— 这一处是那条口径的**唯一**落点，发码侧只对 OptionButton 的 arm 调它。 */
 int vb6_RadioClickCounts(void* hwndFrom) {

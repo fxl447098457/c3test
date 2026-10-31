@@ -675,13 +675,38 @@ static void* vb6_ComCallByDispidRcv(void* disp, int32_t dispid,
 // 口径: 名字 "Item" 能解析就仍按名走 (RTL 伪集合 —— ListImages/Panels/Nodes 一族 ——
 // 只登记名字, 没有 0 号成员); 解析不到才按 VB6 语义发 DISPID 0。
 // ============================================================
+/* 账 (Outlook2013 frmMain:207 运行错误 87): 先按类型信息认**默认成员** (memid 0),
+   认得到就直发 DISPID_VALUE, 不再按名 "Item" 找。实测 Codejock ICommandBarActions
+   只有 memid {0(Action),1,2,5,6,-4}, 但它的 GetIDsOfNames 在 LOCALE_NEUTRAL(0) 上
+   把并不存在的 "Item" 映射成 dispid 3 (USER/SYSTEM 两档才是 DISP_E_UNKNOWNNAME);
+   照名走 ⇒ Invoke 3 ⇒ Codejock 抛 helpContext 87「属性名称无效」, 未接住的运行错误
+   直接把进程带走。VB6 里 `obj(args)` 本来就编成 DISPID_VALUE, 名字 "Item" 只在
+   认不出类型信息 (RTL 伪集合只登记名字) 时兜底。 */
+static int vb6_ComHasDefaultMemid(IDispatch* pDisp) {
+    ITypeInfo* ti = vb6_ComTypeInfoOf(pDisp);
+    if (!ti) return -1;                       /* 无类型信息: 认不出, 交回老口径 */
+    TYPEATTR* ta = NULL;
+    if (FAILED(ti->lpVtbl->GetTypeAttr(ti, &ta)) || !ta) return -1;
+    int has = 0;
+    for (UINT f = 0; f < ta->cFuncs; f++) {
+        FUNCDESC* fd = NULL;
+        if (FAILED(ti->lpVtbl->GetFuncDesc(ti, f, &fd)) || !fd) continue;
+        if (fd->memid == DISPID_VALUE) has = 1;
+        ti->lpVtbl->ReleaseFuncDesc(ti, fd);
+        if (has) break;
+    }
+    ti->lpVtbl->ReleaseTypeAttr(ti, ta);
+    return has;
+}
+
 static void* vb6_ComCallObjectDefaultRcv(void* disp, void* args_void, int32_t argc) {
     if (!disp) return NULL;
     DISPID d = DISPID_UNKNOWN;
     /* 宿主对象 (窗体/控件槽/Controls 集合) 不是真 IDispatch: 交给 vb6_ComCallByDispid
      * 的宿主分派 (它内部转 vb6_ComCall(…, L"Item", …)), 这里不碰 vtable。 */
     if (!vb6_Host_IsHostObject(disp) && vb6_ComIsDispatchable(disp)) {
-        d = vb6_getDispid((IDispatch*)disp, L"Item");
+        int hasDefault = vb6_ComHasDefaultMemid((IDispatch*)disp);
+        if (hasDefault != 1) d = vb6_getDispid((IDispatch*)disp, L"Item");
     }
     if (d == DISPID_UNKNOWN) d = DISPID_VALUE;
 

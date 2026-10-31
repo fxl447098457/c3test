@@ -34,10 +34,17 @@
                     std::cerr << "[ST-OBJ] member=" << node.memberName
                               << " flag=" << inMemberObjectEmit_ << std::endl;
                 }
-                // 链中对象求值 (inMemberObjectEmit_) 时成员名留空 —— "成员"其实是被调
-                // 函数名, 对象值已就绪 (resolveComValue 的空成员守卫同批); 左值/成员
-                // 读上下文保持原名供 SetProp/GetIntProp 消费。
-                comMemberName_ = inMemberObjectEmit_ ? std::string() : node.memberName;
+                // 这一支的 node.object 是标识符、node.memberName 是「函数返回值上的
+                // 真成员」, 所以链中对象求值 (inMemberObjectEmit_) 也必须留名:
+                //   `RibbonBar.Controls.Add(...)`  (frmMain:1421, RibbonBar = 自类型
+                //   函数 RibbonBar() As RibbonBar) 若把 "Controls" 抹掉, 外层 Add
+                //   会直接打到 RibbonBar 本体上 —— getDispid("Add") 0x80020006 ⇒
+                //   Nothing ⇒ 整条 Options/Styles 弹出菜单链全空 ⇒ FindControl(2900)
+                //   交空 ⇒ Execute 空转 ⇒ Office2013 主题没设上, 资源主题又没加载
+                //   ⇒ ribbon/状态栏画成黑片。
+                // (跨模块 `frmMain.RibbonBar` 那种「成员其实是函数名」的形态在
+                //  form_builtin 的 xfSym 支, 不在这里。)
+                comMemberName_ = node.memberName;
                 isComMarker_ = true;
                 isEarlyBoundCom_ = false;
                 earlyBoundSym_ = nullptr;
