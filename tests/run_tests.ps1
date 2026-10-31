@@ -786,6 +786,23 @@ function Test-HostPseudoTableCensus {
 # 账 #188: 浮点字面量的形状只有一个出口 (src/common/float_literal.hpp)。
 # 手拼 "f" 后缀这件事在 x86/x64 都不会有运行期症状 —— 它是**编不过**, 而带小数点的设计值 (8.25)
 # 恰好躲过, 所以必须静态钉。同一份脚本在 HEAD 的树上 R1~R3 全红 (R1 当场点出那 6 个手拼点)。
+# 账 #305 第313刀 (§B239): 无后缀进制字面量的档位与值只有一个主人 (radixTierOf + makeRadixToken)。
+# 这一族的病**没有编译症状** —— &HBF32 折成 +48946 在 C 里只是个合法正数, 要等用户点下 Command2
+# 才由 vb6_ChkInt 抛运行期错误 6 打死进程, 所以必须静态钉 (R1~R5 逐条对应一个假改动, 见脚本头)。
+function Test-RadixTierSites {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] radix_tier_sites ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\check_radix_tier_sites.ps1" 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        $out | Select-Object -First 6 | ForEach-Object { Write-Host "  $_" }
+    }
+}
+
 function Test-IntSuffixSites {
     $script:total++
     Write-Host -NoNewline "  [STATIC] int_suffix_sites ... "
@@ -3580,6 +3597,22 @@ if ($Category -in @("all", "run", "bas")) {
         "ADDnum=2026/01/09", "ADDdate=2026/01/08", "FDT-ok=1", "B434-DONE")
     Add-BasTest "b434_numfold" "$Tests\b434_numfold.bas" $b434Needles
     Add-BasTest "b434_numfold_x86" "$Tests\b434_numfold.bas" $b434Needles -Arch "x86"
+
+    # 账 #305 第313刀 (§B239, 任务 #591) = 无后缀进制字面量的**位模式**按写下的那一档补码读:
+    # &HBF32 = -16590、&HFFFF = -1、&O177777 = -1 (&B 是 C3 的扩展, VB6 与 VBScript 都不认它)。
+    # 病灶由第312刀符号化打在**一条语句**上: ComCtlsDemo 点 Command2 → Common.PictureFromHandle 的
+    # `CLSID.Data2 = &HBF32` 发成 vb6_ChkInt(48946) ⇒ 运行期错误 6 打死进程。BASE 负控就是本夹具自己:
+    # 改前两台 (x64 与 x86) 都是 rc=0x00000006 且 stdout **零行** —— 第一条 Debug.Print 都跑不到。
+    # 分界量的是数值位宽、不是位数: 证人 RT-w-above16 (&H10000=+65536) 与 RT-w-o200000 钉住 16 位档
+    # **以上**不许动; RT-w-h32 (&HFFFFFFFF=-1) 钉住 32 位档那条老规矩; RT-w-amp / RT-w-pct 钉住显式
+    # % 与 & 两枚后缀各自的规矩 (&HFFFF& = 65535 由同机 cscript 引擎实测, 它**不**跟着折叠)。
+    # RT-mask 是这一族最宽的那一格: 255 Or &HFF00 在 VB 里 = -1 (掩码按 16 位补码自己符号扩展)。
+    $rtNeedles = @("RT-store=-16590", "RT-h8000=-32768", "RT-hffff=-1", "RT-h8def=-29201",
+        "RT-hf082=-3966", "RT-o177777=-1", "RT-o100000=-32768", "RT-b16ones=-1", "RT-mask=-1",
+        "RT-w-low=255", "RT-w-above16=65536", "RT-w-o200000=65536", "RT-w-h32=-1",
+        "RT-w-max=2147483647", "RT-w-amp=65535", "RT-w-pct=255", "RT-DONE")
+    Add-BasTest "b591_radixtier" "$Tests\b591_radixtier.bas" $rtNeedles
+    Add-BasTest "b591_radixtier_x86" "$Tests\b591_radixtier.bas" $rtNeedles -Arch "x86"
 
     # 账 #440 (§B209，第一百零七刀) = #420 (§B194) + #421 (§B195) 一次结掉:
     # 「一枚序列号拆成日期 + 日内秒」原本**两处各答一半**。
@@ -10251,6 +10284,7 @@ if ($Category -in @("all", "compile")) {
     if (Enter-StaticShard) { Test-FloatLiteralShape }
     if (Enter-StaticShard) { Test-IntLiteralShape }
     if (Enter-StaticShard) { Test-IntSuffixSites }
+    if (Enter-StaticShard) { Test-RadixTierSites }
     if (Enter-StaticShard) { Test-ScaleModeWriters }
     if (Enter-StaticShard) { Test-VbpSourceExt }
     if (Enter-StaticShard) { Test-ExtenderEmitChannel }
@@ -10879,6 +10913,22 @@ if ($Category -in @("all", "syntax")) {
         "z = vb6_ChkInt(5);",
         "if (!_has_a) a = 3;") @(
         "a = 3%")
+
+    # 账 #305 第313刀的发码形状针: 16 位那一档要在**发码之前**折进值里 (发码侧只按数值重打)。
+    # absent 五条全是从 BASE 那台的 --emit-c 逐条抄来的旧形状 —— 正面针每一条都先在改前二进制上
+    # 数过「它当时是红的」, 免得钉成假绿针 (第294刀那条教训)。mask 那条钉的是位运算操作数带的是
+    # 折叠后的负数; w-amp / w-h32 两条是**证人**, 改前后都在, 拦「把后缀那两支也一起折了」这种过头。
+    Test-CodegenNote "radix_tier_shape" @("$Tests\b591_radixtier.bas") @(
+        "i = vb6_ChkInt(-16590);",
+        'L"RT-hffff="), vb6_CStrLong(-1)',
+        'L"RT-mask="), vb6_CStrLong(((int32_t)(255) | (int32_t)(-256))))',
+        'L"RT-w-h32="), vb6_CStrLong(-1)',
+        'L"RT-w-amp="), vb6_CStrLong(65535L)') @(
+        "vb6_ChkInt(48946)",
+        'L"RT-hffff="), vb6_CStrLong(65535)',
+        'L"RT-mask="), vb6_CStrLong(((int32_t)(255) | (int32_t)(65280)))',
+        'L"RT-o177777="), vb6_CStrLong(65535)',
+        'L"RT-b16ones="), vb6_CStrLong(65535)')
 
     # 边界负例: 显式 `%` 就是 Integer 档 (-32768..32767)，超出必须报 —— 按 int32 收下再让 int16
     # 去截是把值改错 (2147483648 静默回绕成 -2147483648)。针取消息里的 ASCII 片段 (GBK 口径)。
