@@ -147,6 +147,14 @@ $invCode = Strip-Comments262 $invRaw
 $invLines = $invCode -split "`r?`n"
 
 # ---- R1: 七个出口一个都不许漏护栏 (出口名单从文件里自动枚举) ----
+# 第三百十七刀把形状分成两层: 公开出口 `vb6_Com<X>` 只做「换到接收者的 IDispatch 视图 /
+# 出去还引用」, 全部语义与护栏住在 `vb6_Com<X>Rcv`。于是这一条钉三件:
+#   ① 公开出口恰好 7 枚, 每枚体内恰好一处 `vb6_Com<X>Rcv(vb6_ComDispViewIn(disp, &owned)`,
+#      且唯一的 `vb6_ComDispViewOut(owned);` 排在它之后 —— 少了视图入口就是第三百十七刀之前
+#      那发 AV (IPicture 指针被当 IDispatch 用), 少了 Out 就是借来的那枚引用漏；
+#      公开层自己不许再出现护栏调用 (否则「响亮」有了第二份口径)。
+#   ② 每一枚 `...Rcv` 体内护栏数 (ComCall 2, 其余 1) 紧跟 IsMiss if-line, 且在第一条 return 之前。
+#   ③ ComCall 的 Extender 臂次序 (Move 支 → 计数丢弃) 与 Move 支的清点。
 $exitRx = '^(?:void\*|void|HRESULT|int32_t)\s+vb6_Com(Call|CallByDispid|GetProp|GetPropArg|SetProp|SetPropArg|SetRef)\s*\('
 $exits = @()
 for ($i = 0; $i -lt $invLines.Count; $i++) {
@@ -159,13 +167,28 @@ if ($exits.Count -ne 7) {
 }
 foreach ($e in $exits) {
     $name = 'vb6_Com' + $e[0]
-    $body = Get-Body262 $invLines ('^(?:void\*|void|HRESULT|int32_t)\s+' + [regex]::Escape($name) + '\s*\(')
-    if ($body.Count -lt 5) { $fail += ("R1 cannot locate the body of " + $name); continue }
+    $rvName = $name + 'Rcv'
+    $pubBody = Get-Body262 $invLines ('^(?:void\*|void|HRESULT|int32_t)\s+' + [regex]::Escape($name) + '\s*\(')
+    if ($pubBody.Count -lt 3) { $fail += ("R1 cannot locate the public outlet of " + $name); continue }
+    $entryNeedle = $rvName + '(vb6_ComDispViewIn(disp, &owned)'
+    $nEntry   = Count-In262 $pubBody $entryNeedle
+    $nOut     = Count-In262 $pubBody 'vb6_ComDispViewOut(owned);'
+    $iEntry   = Index-Of262 $pubBody $entryNeedle
+    $iOut     = Index-Of262 $pubBody 'vb6_ComDispViewOut(owned);'
+    $nGuardPub = Count-In262 $pubBody 'vb6_ComLateBindMiss('
+    if ($nEntry -ne 1 -or $nOut -ne 1 -or $iOut -le $iEntry -or $nGuardPub -ne 0) {
+        $fail += ("R1 public outlet " + $name + " must be one '" + $rvName +
+                  "(vb6_ComDispViewIn(disp, &owned)' followed by one 'vb6_ComDispViewOut(owned);'" +
+                  " (entry=" + $nEntry + " out=" + $nOut + " entryAt=" + $iEntry + " outAt=" + $iOut +
+                  " guards=" + $nGuardPub + ") - 绕开视图入口就是第三百十七刀之前那发 AV")
+    }
+    $body = Get-Body262 $invLines ('^static\s+(?:void\*|void)\s+' + [regex]::Escape($rvName) + '\s*\(')
+    if ($body.Count -lt 5) { $fail += ("R1 cannot locate the working body of " + $rvName); continue }
     $wantGuard = 1
     if ($name -eq 'vb6_ComCall') { $wantGuard = 2 }
     $nGuard = Count-In262 $body 'vb6_ComLateBindMiss('
     if ($nGuard -ne $wantGuard) {
-        $fail += ("R1 guard calls inside " + $name + " = " + $nGuard +
+        $fail += ("R1 guard calls inside " + $rvName + " = " + $nGuard +
                   " (want exactly " + $wantGuard + ") - 接收者不是真 IDispatch 时这一族必须响亮")
         continue
     }
@@ -179,27 +202,27 @@ foreach ($e in $exits) {
         $iExtRep = Index-Of262 $body 'vb6_ComLateBindMiss(L"ExtenderCall", methodName, disp);'
         if ($iExtArm -lt 0 -or $iExtMove -lt 0 -or $iExtRep -lt 0 -or
             $iExtMove -le $iExtArm -or $iExtRep -le $iExtMove -or ($iExtRep - $iExtArm) -gt 40) {
-            $fail += ("R1 vb6_ComCall Extender arm must answer Move, then count-drop the rest " +
+            $fail += ("R1 vb6_ComCallRcv Extender arm must answer Move, then count-drop the rest " +
                       "(arm " + $iExtArm + ", move " + $iExtMove + ", report " + $iExtRep + ") - " +
                       "撤掉报告那一处, 靶工程实测那 26 发 Extender 方法调用就又回到「护栏数不到」(第二百九十五刀读数)")
         }
         $nMoveApply = Count-In262 $body 'vb6_UC_ExtenderMoveApply(v4[0]'
         $nMoveDrop  = Count-In262 $body 'vb6_ComDropPackedArgs(args, argc);'
         if ($nMoveApply -ne 1 -or $nMoveDrop -ne 3) {
-            $fail += ("R1 vb6_ComCall Move arm: apply=" + $nMoveApply + " drop=" + $nMoveDrop +
+            $fail += ("R1 vb6_ComCallRcv Move arm: apply=" + $nMoveApply + " drop=" + $nMoveDrop +
                       " (want 1 + 3: Move 支、Extender 丢弃支、dispid 认不出支 各清点一次)")
         }
     }
     $iGuard = Index-Of262 $body 'vb6_ComLateBindMiss('
     $iIf    = Index-Of262 $body 'if (vb6_ComLateBindIsMiss(disp)) {'
     if ($iIf -lt 0 -or $iIf -ne ($iGuard - 1)) {
-        $fail += ("R1 in " + $name + " the guard call must sit right under the IsMiss if-line" +
+        $fail += ("R1 in " + $rvName + " the guard call must sit right under the IsMiss if-line" +
                   " (if at " + $iIf + ", call at " + $iGuard + ")")
     }
     $iRet = -1
     for ($k = 0; $k -lt $body.Count; $k++) { if ($body[$k] -match '\breturn\b') { $iRet = $k; break } }
     if ($iRet -ge 0 -and $iGuard -gt $iRet) {
-        $fail += ("R1 in " + $name + " the guard runs after the first return (guard " + $iGuard +
+        $fail += ("R1 in " + $rvName + " the guard runs after the first return (guard " + $iGuard +
                   ", return " + $iRet + ") - 护栏必须赶在早退之前, 否则 NULL 接收者永远静默")
     }
 }
