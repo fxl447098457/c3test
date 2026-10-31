@@ -1106,8 +1106,10 @@ void vb6_SetAppInstance(void* hInstance) {
 // Test.exe 自己的代码抛的, 还是逃出第三方 OCX (NewTab01.ocx) 的 VB6 代码。
 static LONG WINAPI vb6_crashFilter(EXCEPTION_POINTERS* ep) {
     FILE* f;
-    /* 账 #181: 第三道槽位 (过滤器天然只跑一次, 这里只是把口径收全)。 */
-    if (!vb6_CrashTraceClaim(VB6_CRASH_CLAIM_FILTER)) return EXCEPTION_EXECUTE_HANDLER;
+    /* 账 #181: 第三道槽位 (过滤器天然只跑一次, 这里只是把口径收全)。
+     * 第三百十五刀: 故障地址照递 —— 与另外两出口同一个问法, 不在这里另答一遍。 */
+    if (!vb6_CrashTraceClaim(VB6_CRASH_CLAIM_FILTER, ep->ExceptionRecord->ExceptionAddress))
+        return EXCEPTION_EXECUTE_HANDLER;
     f = fopen("c3_crash.txt", "a");
     if (!f) return EXCEPTION_EXECUTE_HANDLER;
     fprintf(f, "=== EXCEPTION code=0x%08lX addr=%p ===\n",
@@ -1199,8 +1201,11 @@ static LONG WINAPI vb6_heapCorruptVEH(EXCEPTION_POINTERS* ep) {
     if (!isCorrupt && !isAV)
         return EXCEPTION_CONTINUE_SEARCH;
     /* 账 #181: 这个出口以前无闸 —— 栈溢出时它自己会再 fault (CreateFileA/栈扫描),
-     * 于是同一份递归栈被写 4 遍、真正的第一现场排在最后。每进程只记第一次。 */
-    if (!vb6_CrashTraceClaim(VB6_CRASH_CLAIM_FILE)) return EXCEPTION_CONTINUE_SEARCH;
+     * 于是同一份递归栈被写 4 遍、真正的第一现场排在最后 ⇒ 同一个故障地址只记一次。
+     * 账 #305 第三百十五刀: 旧口径"每进程只记一次"让 IsBadReadPtr 那发受守卫的 first-chance
+     * AV 吃掉唯一名额, 真打死进程的那一发只剩 filter 帧 (靶工程 Command2 / 账 #599)。 */
+    if (!vb6_CrashTraceClaim(VB6_CRASH_CLAIM_FILE, ep->ExceptionRecord->ExceptionAddress))
+        return EXCEPTION_CONTINUE_SEARCH;
     HANDLE h = CreateFileA("c3_crash.txt", FILE_APPEND_DATA,
                            FILE_SHARE_READ | FILE_SHARE_WRITE, NULL,
                            OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
