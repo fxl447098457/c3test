@@ -102,7 +102,10 @@ Private Function ByTag(v As Variant) As String
     End Select
 End Function
 
-' 混合标签（串 + 数）刻意不放开：那一形要逐项 VarCmp，本刀按读数留在现状（不翻承载档）。
+' 账 #305 第319刀: 混合标签（串 + 数）—— 311 的两条整档出口都不成立，只有逐项 VarCmp 才对。
+' 改前发成 `int32_t _vb6_select = vb6_VariantToLong(v)` 再拿它跟 `vb6_BSTR_FromStr(L"s")` 的指针比，
+' 每一档都假 ⇒ 恒落 Case Else（本夹具第一格 CI-mixtag 的旧期望 else/num 就是这毛病，VB6 答 str）。
+' 现在承载档是整枚槽、每项按该标签自己那一档走 vb6_VarCmp*（与 `If a = b` 同一份比较出口）。
 Private Function MixedTag(v As Variant) As String
     Select Case v
         Case "s"
@@ -114,6 +117,32 @@ Private Function MixedTag(v As Variant) As String
     End Select
 End Function
 
+' 同一混合档的另两种条件形状：范围（VarCmpGe && VarCmpLe）与 Case Is（VarCmp<Op>）。
+' 串标签取可数值化的 "5"/"9"：串数跨档比较落的是数值档（本机 VB-family 运行期实测
+' Select Case "7" 能命中 Case 7）；不可数值化的串对数值会报 13，那是账 #416 那一族
+' 在比较出口上的既有缺口，不在这枚夹具里钉。
+Private Function MixRange(v As Variant) As String
+    Select Case v
+        Case "5" To "9"
+            MixRange = "srng"
+        Case 20 To 30
+            MixRange = "nrng"
+        Case Else
+            MixRange = "else"
+    End Select
+End Function
+
+Private Function MixIs(v As Variant) As String
+    Select Case v
+        Case Is > 100
+            MixIs = "gt100"
+        Case Is >= "5"
+            MixIs = "ge5"
+        Case Else
+            MixIs = "lo"
+    End Select
+End Function
+
 Public Sub Main()
     Debug.Print "CI-rel=" & Rel(3) & "/" & Rel(5) & "/" & Rel(6) & "/" & Rel(9) & "/" & Rel(7) & "/" & Rel(8)
     Debug.Print "CI-ne=" & Ne(4) & "/" & Ne(5)
@@ -122,8 +151,9 @@ Public Sub Main()
     Debug.Print "CI-half=" & Half(0.7) & "/" & Half(0.1) & "/" & Half(0.5)
     Debug.Print "CI-var=" & VarCase(9) & "/" & VarCase(2) & "/" & VarCase(CDbl(7))
     Debug.Print "CI-vartag=" & ByTag("b") & "/" & ByTag("bb") & "/" & ByTag("a") & "/" & ByTag("z")
-    ' 混合标签那一形: 第一格 **"else" 是已知错的** (VB6 答 "str") —— 钉在这是要「按档逐项 VarCmp」
-    ' 那一刀来把它改成 str/num，不许悄悄当正确读数放过。第二格 (数值主语) 本来就对。
+    ' 混合标签那一形（第319刀已修）: 串标签命中串、数值标签命中数；改前第一格恒答 else。
     Debug.Print "CI-mixtag=" & MixedTag("s") & "/" & MixedTag(7)
+    Debug.Print "CI-mixrng=" & MixRange(7) & "/" & MixRange(25) & "/" & MixRange(1)
+    Debug.Print "CI-mixis=" & MixIs(200) & "/" & MixIs(50) & "/" & MixIs(1)
     Debug.Print "CI-DONE"
 End Sub

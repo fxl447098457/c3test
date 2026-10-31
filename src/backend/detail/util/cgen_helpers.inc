@@ -770,11 +770,13 @@
     Vb6Type inferExprTypeImpl(Expr& expr) const;
     static void bumpInferEpoch();
 
-    // 账 #305 第311刀: 「一条 Select Case 的 Case 标签是不是**全部**落在串档」的**唯一**
-    // 回答处（主语静态答 Variant 时，承载档由这里回答，见 cgen_select.cpp 的契约注释）。
+    // 账 #305 第311刀: 「一条 Select Case 的 Case 标签落在哪一档」的**唯一**回答处
+    // （主语静态答 Variant 时，承载档由这里回答，见 cgen_select.cpp 的契约注释）。
     // 一个标签都不许漏：`Case Is` 的右操作数、`Case a To b` 的两端都算标签；`Case Else`
-    // 不在这张表里（它在 SelectCaseStmt::elseCase）。空表答 false —— 没有标签就没有证据。
-    bool selectCaseLabelsAllString(SelectCaseStmt& node) const;
+    // 不在这张表里（它在 SelectCaseStmt::elseCase）。空表答 NoString —— 没有标签就没有证据。
+    // 第319刀多一档：Mixed = 至少一枚 String 且并非全是 ⇒ 主语是槽时逐项 VarCmp。
+    enum class SelectCaseLabelClass { AllString, Mixed, NoString };
+    SelectCaseLabelClass selectCaseLabelClass(SelectCaseStmt& node) const;
 
     // ai/009 §5.10 (P3): 给**窄整型目标**的赋值右值套上溢出检查 (vb6_ChkByte/
     // ChkInt/ChkLong), 越界即 run-time error 6。原先这类赋值是裸 `t = v;`, 由 C

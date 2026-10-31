@@ -3783,11 +3783,24 @@ if ($Category -in @("all", "run", "bas")) {
     # 值一直是对的，所以这里钉的是「形状换了、判定没换」: 六个关系符各自的分档(CI-rel/CI-ne)、
     # Is 与普通值混写同一形(CI-mixed，优先级不能把 `, 1` 吃进右操作数)、字符串 Select(CI-word)、
     # Single Select(CI-half，Fix 136 那一档的 Case 侧)、Variant 测试表达式(CI-var)。
+    # 第319刀：混合标签（串+数）的 Variant Select Case 走逐项 vb6_VarCmp*，CI-mixtag 从
+    # 旧期望 else/num 翻成 str/num（VB6 答 str），另两格钉范围与 Case Is 两种条件形状。
     $ciNeedles = @("CI-rel=lt/le/eq/gt/ge/ge", "CI-ne=is4/ne4", "CI-mixed=big/big/two/rest",
         "CI-word=beq/gtm/rest", "CI-half=hi/lo/mid", "CI-var=hi/lo/hi",
-        "CI-vartag=bbb/bbb/aaa/else", "CI-mixtag=else/num", "CI-DONE")
+        "CI-vartag=bbb/bbb/aaa/else", "CI-mixtag=str/num",
+        "CI-mixrng=srng/nrng/else", "CI-mixis=gt100/ge5/lo", "CI-DONE")
     Add-BasTest "test_caseis" "$Tests\test_caseis.bas" $ciNeedles
     Add-BasTest "test_caseis_x86" "$Tests\test_caseis.bas" $ciNeedles -Arch "x86"
+    # 发码形状：混合档的三条出口各钉一枚；反面钉「拿 ToLong 解包出来的 int32 去比串指针」那一形
+    # （311 以前的病灶）不许再出现，同时整档 Long 解包（全数值标签那一形）必须还在。
+    Test-EmitcShape 'test_caseis_mixvar_shape' @("$Tests\test_caseis.bas") @(
+        'vb6_VarCmpEq(&_vb6_select_',
+        'vb6_VarCmpGe(&_vb6_select_',
+        'vb6_VarCmpLe(&_vb6_select_',
+        'vb6_VarCmpGt(&_vb6_select_',
+        'int32_t _vb6_select_')
+    Test-EmitcAbsent 'test_caseis_mixvar_lesion' @("$Tests\test_caseis.bas") @(
+        '== vb6_BSTR_FromStr(')
     # <vbeclipse> Fix 2026-10-06: Err.LastDllError 必须是"Declare 调用那一刻的快照"。
     # VB6 每次由 Declare 发起的 DLL 调用: 1) 先 SetLastError(0), 2) 调 API,
     # 3) 返回后立刻 GetLastError() 存进 Err.LastDllError (MSDN ErrObject.LastDllError +
