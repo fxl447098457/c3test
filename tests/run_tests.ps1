@@ -816,6 +816,22 @@ function Test-IntSuffixSites {
         $out | Select-Object -First 6 | ForEach-Object { Write-Host "  $_" }
     }
 }
+# 账 #305 第320刀（账 #592）：App.Title 与 MsgBox 默认题头的唯一一格（RTL 那一枚 setter/getter/borrow）。
+# 这一族的病三面：读折成 EXE 名、写发成 `vb6_App_EXEName() = ...`（cl C2106 整棵工程编不过）、
+# MsgBox 省略题头递空串 ⇒ 必须有静态哨兵把「只有一个主人」钉住（见脚本头 R1~R9）。
+function Test-AppTitleAuthority {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] app_title_authority ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\check_app_title_authority.ps1" 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        $out | Select-Object -First 6 | ForEach-Object { Write-Host "  $_" }
+    }
+}
 function Test-ScaleModeWriters {
     $script:total++
     Write-Host -NoNewline "  [STATIC] scalemode_writers ... "
@@ -4493,6 +4509,31 @@ if ($Category -in @("all", "run", "bas")) {
         'BSTR _vb6_select_0 = vb6_VPick();',
         'int32_t _vb6_select_1 = vb6_NPick();',
         'BSTR _vb6_select_2 = vb6_PPick();'
+    )
+
+    # <vbeclipse> 账 #305 第320刀（账 #592）：`App.Title` 的真值是 .vbp 的 Title（VB6 允许运行期改），
+    # 不是 EXE 名；MsgBox 省略题头时 VB6 也用它。改前三面各错各的：读折 `vb6_App_EXEName()`、
+    # 写发成 `vb6_App_EXEName() = ...`（cl C2106，整棵工程编不过）、省略题头递空串。
+    # 修法 = 运行期真值只住 RTL 一格，入口点在 vb6_Init() 之后播种；读写各一处出口；MsgBox 借同一格。
+    # 单文件夹具（无 .vbp）钉住旧口径：未播种时读回 EXEName。
+    $b592Needles = @("APT-seed=B592 Title", "APT-set=renamed", "APT-empty=[]", "APT-exe=B592AppTitle", "APT-done")
+    Test-Vbp "b592_app_title" "$Tests\b592_apptitle\B592.vbp" $b592Needles
+    Test-Vbp "b592_app_title_x86" "$Tests\b592_apptitle\B592.vbp" $b592Needles -Arch "x86"
+    $b592FbNeedles = @("APT-fallback=b592_apptitle_fallback", "APT-fallback-exe=b592_apptitle_fallback", "APT-fallback-done")
+    Add-BasTest "b592_app_title_fallback" "$Tests\b592_apptitle_fallback.bas" $b592FbNeedles
+    Add-BasTest "b592_app_title_fallback_x86" "$Tests\b592_apptitle_fallback.bas" $b592FbNeedles -Arch "x86"
+    # 发码针：播种（.vbp 的 Title）、读、两种写都要走同一格。
+    Test-EmitcShape "b592_app_title_shape" @(
+        "$Tests\b592_apptitle\B592.vbp") @(
+        'vb6_SetAppTitle(L"B592 Title");',
+        'vb6_App_Title()',
+        'vb6_SetAppTitle(vb6_BSTR_FromStr(L"renamed"));',
+        'vb6_SetAppTitle(vb6_BSTR_FromStr(L""));'
+    )
+    # 反针：旧左值形本体（`vb6_App_EXEName() = …`）一律不许在场。
+    Test-EmitcAbsent "b592_app_title_lesion" @(
+        "$Tests\b592_apptitle\B592.vbp") @(
+        'vb6_App_EXEName() = '
     )
 
     # <vbeclipse> 账 #305 §B180（第六十九刀）：`StrPtr(<Variant>)` 曾经发
@@ -10344,6 +10385,7 @@ if ($Category -in @("all", "compile")) {
     if (Enter-StaticShard) { Test-IntLiteralShape }
     if (Enter-StaticShard) { Test-IntSuffixSites }
     if (Enter-StaticShard) { Test-RadixTierSites }
+    if (Enter-StaticShard) { Test-AppTitleAuthority }
     if (Enter-StaticShard) { Test-ScaleModeWriters }
     if (Enter-StaticShard) { Test-VbpSourceExt }
     if (Enter-StaticShard) { Test-ExtenderEmitChannel }

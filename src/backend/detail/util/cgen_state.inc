@@ -1121,6 +1121,11 @@
     // driver_codegen_voidfield_scan.inc)。
     const std::unordered_set<std::string>* projImplementedNames_ = nullptr;
 
+    // 账 #305 第320刀 (账 #592): .vbp 的 Title（空则 Name）—— 生成的入口点把它播种进
+    // RTL 那一格运行期真值（`vb6_SetAppTitle(L"...")`），MsgBox 的默认题头与
+    // `App.Title` 读取都只问那一格。单文件编译（无 .vbp）时为空 ⇒ 入口点一行不发。
+    std::string projectTitle_;
+
     // CoClass 身份 (tB, ai/022 B13b): stage 2.7 Pass E 求出的唯一出口 (coclassIds_)。
     // 只有 generateDllEntry 读它 —— 产品里的 CLSID / 默认接口 IID / 组名 ProgID 一律
     // 从这里取，prelude 里那两枚 lambda 退成"读不到块的类"的兜底路径。

@@ -223,7 +223,7 @@ void CCodeGen::visit(BinaryExpr& node) {
     // 指针相加 (C2110)。左 BSTR 回值 + 右 String 同样按拼接处理。
     if (!addIsConcat092i && inferExprType(*node.right) == Vb6Type::String) {
         static const char* bstrReturnLefts092i[] = {
-            "vb6_App_Path(", "vb6_App_EXEName(", "vb6_App_HelpFile(",
+            "vb6_App_Path(", "vb6_App_EXEName(", "vb6_App_Title(", "vb6_App_HelpFile(",
             "vb6_Chr(", "vb6_ChrW(", "vb6_Mid(", "vb6_Left(", "vb6_Right(",
             "vb6_Trim(", "vb6_LTrim(", "vb6_RTrim(", "vb6_UCase(", "vb6_LCase(",
             "vb6_Replace(", "vb6_String(", "vb6_Space(", "vb6_StrConv(",

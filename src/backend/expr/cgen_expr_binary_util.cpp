@@ -24,7 +24,7 @@ static const char* kBstrReturningCalls[] = {
     "vb6_Dir(", "vb6_Command(", "vb6_Environ(", "vb6_CurDir(", "vb6_InputBox(",
     "vb6_Console_ReadLine(", "vb6_Console_ReadKey(",  // Fix 161: Console 输入返回 BSTR
     "vb6_ErrDescription(", "vb6_ErrSource(",
-    "vb6_App_Path(", "vb6_App_EXEName(", "vb6_App_HelpFile(",
+    "vb6_App_Path(", "vb6_App_EXEName(", "vb6_App_Title(", "vb6_App_HelpFile(",
     "vb6_GetControlText(", "vb6_GetControlCaption(",
     // Fix 194: 下列 RTL 取值函数的 C 声明是 `void*`(RTL 统一风格), **语义上是 BSTR**。
     // 漏登记会被判成 Variant → `vb6_CStr(vb6_VariantFromValue(void*))` → _Generic 无

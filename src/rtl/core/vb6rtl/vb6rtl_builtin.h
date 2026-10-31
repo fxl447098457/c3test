@@ -378,6 +378,12 @@ BSTR vb6_App_Path(void);     // App.Path - EXE所在目录
 BSTR vb6_App_EXEName(void);  // App.EXEName - EXE文件名(不含扩展名)
 intptr_t vb6_App_hInstance(void); // App.hInstance - 模块实例句柄 (Fix 179: 必须是指针宽度)
 BSTR vb6_App_HelpFile(void); // App.HelpFile - 帮助文件名(无App COM对象, 返回空串)
+// 账 #305 第320刀 (账 #592): App.Title 的运行期真值只有一格 (vb6rtl_system.c) ——
+// 生成的入口点在 vb6_Init 之后把 .vbp 的 Title 播种进来; `App.Title = v` (VB6 允许运行期改)
+// 也只走这一枚 setter。setter **借入** (内部复制一份, 调用方不必交出所有权)。
+void vb6_SetAppTitle(const wchar_t* title);
+BSTR vb6_App_Title(void);                  // App.Title 读取 (返回副本; 未播种时退 EXEName)
+const wchar_t* vb6_AppTitleBorrow(void);   // 内部: MsgBox 默认题头 (借用, 勿释放; 未播种 = NULL)
 // 账 #305 第二百六十四刀: App.PrevInstance 的定义在 vb6rtl_system.c, 此前**任何头里都没有声明**
 // ⇒ 生成代码那发走 C4013 隐式声明。这一枚恰好返回 int32_t, 隐式「extern 返回 int」同型,
 // 所以两架构都出不了错 —— 但它是 §B202 那条规则该抓而没抓到的活样本, 补上以自证规则问对了问题。

@@ -103,6 +103,9 @@
         CCodeGen cgen(*diag_, analyzer->symbolTable(), analyzer->typeSystem(),
                       &classVoidFieldMap, &classTypedFieldMap, &variantReturnFuncs, options.verbose);
         cgen.setFormModuleNames(formModuleNames);  // Fix 086: 跨模块窗体默认实例引用
+        // 账 #305 第320刀 (账 #592): App.Title 真值 = .vbp 的 Title（空则工程 Name）。
+        // 单文件编译（无 .vbp）时为空 ⇒ 入口点一行不发，读取侧退 EXEName（旧口径）。
+        cgen.setProjectTitle(!verTitle_.empty() ? verTitle_ : vbpProjectName_);
         cgen.setStartupObject(startupObject);      // Fix 142: 启动对象 (入口点归属模块)
         cgen.setModulePublicConsts(&modulePublicConsts);  // Fix 086: 跨模块常量内联
         cgen.setDesignerFiles(&frmFiles_);  // Fix 112: 工程内 UserControl 设计器描述

@@ -60,7 +60,11 @@ int32_t vb6_MsgBox(BSTR prompt, int32_t buttons, BSTR title, BSTR helpfile, int3
     /* Win32 MessageBox */
     (void)helpfile;
     (void)context;
-    return (int32_t)MessageBoxW(NULL, prompt ? prompt : L"", title ? title : L"", (UINT)buttons);
+    /* 账 #305 第320刀 (账 #592): 省略 title (含 vb6_MsgBox1 的两参形) 时 VB6 用 App.Title,
+       不是空串。真值住 vb6rtl_system.c 那一格 (入口点按 .vbp 的 Title 播种; App.Title 写亦落那里)。 */
+    const wchar_t* dfltTitle = vb6_AppTitleBorrow();
+    return (int32_t)MessageBoxW(NULL, prompt ? prompt : L"",
+                                title ? title : (dfltTitle ? dfltTitle : L""), (UINT)buttons);
 }
 
 // ============================================================

@@ -1033,3 +1033,11 @@
    满了 `vb6_UC_Register` 静默 return ⇒ `vb6_uc_findDesc` 找不到 ⇒ HostCreate 交 NULL ⇒
    发码侧那发 `((cls*)vb6_UC_InstanceOf(hwnd))->events = …` 写 NULL+0x88 (0xC000041D)。
    vb6forms_uc_internal.h。touch 本文件 = 让 RCDATA 重包一次 (§B99②)。 */
+
+/* 账 #305 第320刀 (账 #592): App.Title 的运行期真值 = .vbp 的 Title（空则 Name）——
+   vb6rtl_system.c 新增 vb6_SetAppTitle / vb6_App_Title / vb6_AppTitleBorrow 三个出口：
+   生成的入口点在 vb6_Init 之后把工程标题播种进去；`App.Title = v`（VB6 允许运行期改，
+   语料 17 行写、1181 处读，落在 13 份文件里）落同一枚 setter；读取交一份新副本（与 vb6_App_EXEName 同一
+   所有权约定）。vb6rtl_conv.c 的 vb6_MsgBox 在 title 省略时借用那一格 —— 改前交空串，
+   所以 MsgBox 的默认题头一直是空的（ComCtlsDemo Command3 的现场）。
+   touch 本文件 = 让 RCDATA 重包一次 (§B99②)。 */

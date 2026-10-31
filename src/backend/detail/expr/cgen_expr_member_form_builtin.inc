@@ -121,7 +121,9 @@
             if (memLower == "hinstance") { lastExpr_ = "vb6_App_hInstance()"; return; }
             if (memLower == "hinstancehnd") { lastExpr_ = "vb6_App_hInstance()"; return; }  // VB6别名
             if (memLower == "previnstance") { lastExpr_ = "vb6_App_PrevInstance()"; return; }  // Fix 158k: 此前落到 (void*)0.PrevInstance → C2059
-            if (memLower == "title") { lastExpr_ = "vb6_App_EXEName()"; return; }  // 简化
+            // 账 #305 第320刀 (账 #592): App.Title 是 .vbp 的 Title（VB6 里运行期还可写），
+            // 不是 EXE 名。真值住在 RTL 那一格 `vb6_SetAppTitle`（入口点按本工程标题播种）。
+            if (memLower == "title") { lastExpr_ = "vb6_App_Title()"; return; }
             if (memLower == "major") { lastExpr_ = "0"; return; }
             if (memLower == "minor") { lastExpr_ = "0"; return; }
             if (memLower == "revision") { lastExpr_ = "0"; return; }
