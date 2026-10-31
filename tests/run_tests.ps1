@@ -4458,6 +4458,30 @@ if ($Category -in @("all", "run", "bas")) {
         'vb6_VariantToString(vb6_VariantToString',
         'vb6_InStrC(wNum, wHay, vb6_VariantToString(wVar), '
     )
+    # <vbeclipse> 账 #305 第318刀（账 #594）：单模块工程里用户函数返回 Variant 时，发码用的是
+    # **裸名** `vb6_<proc>`（只有多模块工程才带模块前缀）。驱动预扫描只登记了
+    # `vb6_<模块>_<proc>` 与 `vb6_pv_<proc>` 两形 ⇒ cExprIsVariant 把它答成裸标量，
+    # `Select Case Fn()` 于是发 `BSTR _vb6_select_0 = vb6_VPick();`（cl C2440；这份夹具的
+    # --emit-c 在 x64 与 x86 上逐字节相同，所以两个架构同一个病）。修法 = 驱动补登裸名，
+    # 条件与 cProcName 同一条（externalModules 为空且不是类模块）。
+    $b594Needles = @("B594-VS-1=abc", "B594-VS-2=2", "B594-VS-3=pv", "B594-DONE")
+    Add-BasTest "b594_variantselect" "$Tests\b594_variantselect.bas" $b594Needles
+    Add-BasTest "b594_variantselect_x86" "$Tests\b594_variantselect.bas" $b594Needles -Arch "x86"
+    # 发码针：三种返回档（String / 数值 / Private）都进同一枚 Variant 解包出口。
+    Test-EmitcShape 'b594_variantselect_shape' @(
+        "$Tests\b594_variantselect.bas") @(
+        'BSTR _vb6_select_0 = vb6_VariantToString(vb6_VPick());',
+        'int32_t _vb6_select_1 = vb6_VariantToLong(vb6_NPick());',
+        'BSTR _vb6_select_2 = vb6_VariantToString(vb6_PPick());'
+    )
+    # 反针：病形本体 = 三枚裸调用赋值（修复前那台的产物逐枚对得上这里）。
+    Test-EmitcAbsent 'b594_variantselect_lesion' @(
+        "$Tests\b594_variantselect.bas") @(
+        'BSTR _vb6_select_0 = vb6_VPick();',
+        'int32_t _vb6_select_1 = vb6_NPick();',
+        'BSTR _vb6_select_2 = vb6_PPick();'
+    )
+
     # <vbeclipse> 账 #305 §B180（第六十九刀）：`StrPtr(<Variant>)` 曾经发
     # `vb6_StrPtr(vb6_VariantToString(v))` —— 而 `vb6_VariantToString` 的定义就一句 `return vb6_CStr(v)`
     # (= `vb6_Format(...)`) ⇒ **每次调用现造一枚 BSTR**，地址交给 Win32 之后那枚串没人回收。
