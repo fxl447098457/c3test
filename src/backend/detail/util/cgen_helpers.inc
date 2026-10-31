@@ -471,6 +471,19 @@
     void emitClassSlotRefSet(const std::string& target, const std::string& className,
                              const std::string& valueExpr, bool rhsTransferred, bool outSlot,
                              const std::string& slotElemType = std::string());
+    // 账 #305 §B218 第三百十四刀: 「这格 C 存储是不是一枚**指针形**对象槽」= 第二百七十一刀那枚
+    // 站点内 lambda 的原文提到成员位, 当唯一问句 (两位读者: ByRef 对象出参的取址闸 + 下面那位
+    // 泛对象返回槽的主人)。vb6_VARIANT / vb6_ivref_X 两档**值**结构体刻意不算 (原判语照搬)。
+    bool ctypeIsObjectSlotPtr(const std::string& t) const;
+    // 账 #305 §B218 (甲) 腿②″: 「覆写一枚**泛对象**槽」的一位主人。工程类那一档由上面 腿② 铸
+    // `vb6_cls_<X>_AddRef`、视图那一档由 emitIvref* 接手, 剩下 C 档 = void* 这一族从没主人 ⇒
+    // 被调方交出去的指针**不带对价**, 而调用方按契约 (见 rhsTransfersProjectRef 那段) 认定它自带
+    // 一枚、不再 claim ⇒ 两下都不取 ⇒ 原主 `Set x = Nothing` 一退就散 (= 靶工程 Command2 的 AV)。
+    // 只 claim、不退旧值 = 与 腿②' 同一条口径: 这一族今天整个在计数系统外, 退它 = 多退一次。
+    void emitLateSlotRefClaim(const std::string& target, const std::string& valueExpr);
+    // 账 #305 §B218 (甲) 腿②″ 的第二问: 右值那一格是不是**本过程的局部** (它的引用今天靠裸拷贝
+    // 交出去, 站点不许再取; 模块级槽 / me-> 字段那一档计数系统自己会放手 ⇒ 必须 claim)。
+    bool localSlotHandsOverRef(const std::string& rhsText, const ASTNode* rhs) const;
     // 账 #305 §B218 (甲) 刀3: 「这一发右值是不是**已经带着一枚移交过来的引用**」—— 上面那位
     // 主人手上「不 claim」那条臂的全部成因共用这一条问句（**三形**：裸名调用 / 成员调用 /
     // 无括号的属性读；`New <类>` 那一发仍由调用点自己答）。问句只此一位，别在别处再答一遍。

@@ -1,5 +1,5 @@
 ﻿# check_class_refcount_authority.ps1 - 账 #305 §B218 (甲)：工程类实例的引用计数只许有一位主人。
-# 三十条钉（每条都能单独红，红了就说明同一问长出了第二位主人）：
+# 三十二条钉（每条都能单独红，红了就说明同一问长出了第二位主人）：
 #   ① 出入口那一对的 mint 各恰好 1 处，且住在 module/cgen_com.cpp（每条腿只许转调它）。
 #   ② 计数头 `int32_t __refcount;` 的 mint 恰好 1 处，且住在 cgen_iface_vtbl.cpp 的
 #      emitIfaceClassFields 里 —— 它必须紧跟 __comObj 那一句（ai/022 D19：偏移 0 恒是 __comObj）。
@@ -27,7 +27,7 @@
 #   ⑮ Static 那道闸 `!var.isStatic && !inStaticProc_` 全仓恰好 3 处、且全住在一份文件 (cgen_localdecl.cpp)：登记「出口放手」的三条腿 (两条工程类 + 一条接口视图) 共用同一道闸 —— 第一百三十三刀补的就是视图那条腿缺的那半。视图注册口 `trackIvrefLocalForRelease(cIdent(var.name));` 恰好 1 处。
 #   ⑰ 第一百三十七刀: 实参那一站「交回进站那一枚」只许住在 registerClassArgRefHandback 里 (注释串全仓 1 处、文件 = cgen_com.cpp)，两位站点 (ByVal 那一档 + ByRef 092r 那一档) 都只调它，谁也不许自己补一行 Release。问句 `argHandsOverProjectRef` = 契约问句 + New 那一形的合起来答一次: 声明 + 定义 + 两处调用 = 4 处 / 4 份文件。
 #   ⑯ 第一百三十四刀: 视图腿② 的「交回接管来的那一枚」只许住在 emitIvrefQiSet 里 (全仓 1 处、文件 = cgen_iface_vtbl.cpp)，而它的**按名**调用点两位都住在 cgen_setlet_set_prop.inc；第二百零三刀起第三位消费者住在 cgen_setlet_set_rhs.inc (字段槽那一臂，转调同一位主人) —— 移交那一问 (⑬/⑭) 现在是两站四处：工程类站 1 处 (forViewSlot=false) + 视图站 3 处 (true)；再冒出一处自己补 Release 的站点就是第二套判据。
-# 退出码：0 = 三十条都过；1 = 任一条红；2 = 找不到 src/backend。
+# 退出码：0 = 三十二条都过；1 = 任一条红；2 = 找不到 src/backend。
 param(
     [string]$Root = ""
 )
@@ -732,10 +732,55 @@ $ndTrFiles = @(FilesOf 'vb6_SafeArrayReDimPreserveND_Tr(')
 if ($ndTrFiles.Count -ne 3) {
     $fail += ("ND Preserve-with-release export files = " + ($ndTrFiles -join ", ") + " (want exactly 3 files: .h + .c + cgen_redim.cpp)")
 }
+# ㉜ 第三百十四刀 (腿②″ = 泛对象档的**返回槽**从没主人): 这一档的三条问句与那一发形状各只许一位主人
+#    (钉法镜像 ⑨ = 出参槽那一档)。病灶形状 = ComCtlsDemo Builds/ImageList/ImageList.ctl:562
+#    `Set FListImageExtractIcon = UserControl.Picture` 发成裸拷贝 = 交出去一枚借用, 原主紧接着 563
+#    `Set UserControl.Picture = Nothing` 把唯一那一枚退掉 ⇒ 调用方接手的是已回收的 IPictureDisp,
+#    运行期一点 Command2 就 0xC0000005 (写进 ole32 的 GetIDsOfNames)。
+#    · emitLateSlotRefClaim = 那一发 claim 的唯一发码处: 声明 + 定义 + 站点 = 3 处 / 3 份文件,
+#      且站点必须住在 Set 的 RHS 那一档 (cgen_setlet_set_rhs.inc) —— 别处再站一位主人 = 第二套判据。
+#    · 注释串「腿②″: Set 泛对象槽」全仓恰好 1 处且住在 cgen_com.cpp ⇒ 没有站点自己补一行 AddRef。
+#    · ctypeIsObjectSlotPtr = 「这一档 C 存储是不是对象指针槽」: 声明 + 定义 + 两位消费者 = 4 处 / 4 份文件
+#      (第三百十四刀把 cgen_expr_call_com_bind.inc 里那枚站点级 lambda 改成转调, 从此两站同一个答案)。
+#    · localSlotHandsOverRef = 「右值那一格是不是本过程的局部(它把唯一那一枚按裸拷贝移交)」= 3 处 / 3 份文件。
+#      这一问刻意不并进 ⑬ 的 rhsTransfersProjectRef: 那条答「被调方自带对价交回来」, 这条答「C3 不在过程
+#      出口放手局部对象格」(§B164 那族在册) —— 同一个「不 claim」的结论, 两条不同的口径, 不许合成一条。
+$lateClaimHelp = CountOf 'emitLateSlotRefClaim('
+if ($lateClaimHelp -ne 3) {
+    $fail += ("late-bound return-slot claim sites = " + $lateClaimHelp + " (want exactly 3: declaration + definition + 站点)")
+}
+$lateClaimHelpFiles = @(FilesOf 'emitLateSlotRefClaim(')
+if ($lateClaimHelpFiles.Count -ne 3 -or -not ($lateClaimHelpFiles -contains 'cgen_setlet_set_rhs.inc')) {
+    $fail += ("late-bound return-slot claim files = " + ($lateClaimHelpFiles -join ', ') + " (want exactly 3 files incl. cgen_setlet_set_rhs.inc)")
+}
+$lateClaimShape = CountOf '腿②″: Set 泛对象槽'
+if ($lateClaimShape -ne 1) {
+    $fail += ("late-bound return-slot claim shape sites = " + $lateClaimShape + " (want exactly 1, inside emitLateSlotRefClaim)")
+}
+$lateClaimShapeFiles = @(FilesOf '腿②″: Set 泛对象槽')
+if ($lateClaimShapeFiles.Count -ne 1 -or $lateClaimShapeFiles[0] -ne 'cgen_com.cpp') {
+    $fail += ("late-bound return-slot claim shape files = " + ($lateClaimShapeFiles -join ', ') + " (want exactly cgen_com.cpp)")
+}
+$slotKindAsk = CountOf 'ctypeIsObjectSlotPtr('
+if ($slotKindAsk -ne 4) {
+    $fail += ("object-pointer-slot question sites = " + $slotKindAsk + " (want exactly 4: declaration + definition + 两位消费者)")
+}
+$slotKindAskFiles = @(FilesOf 'ctypeIsObjectSlotPtr(')
+if ($slotKindAskFiles.Count -ne 4) {
+    $fail += ("object-pointer-slot question files = " + ($slotKindAskFiles -join ', ') + " (want exactly 4 files)")
+}
+$localHandAsk = CountOf 'localSlotHandsOverRef('
+if ($localHandAsk -ne 3) {
+    $fail += ("local-handover question sites = " + $localHandAsk + " (want exactly 3: declaration + definition + 站点)")
+}
+$localHandAskFiles = @(FilesOf 'localSlotHandsOverRef(')
+if ($localHandAskFiles.Count -ne 3) {
+    $fail += ("local-handover question files = " + ($localHandAskFiles -join ', ') + " (want exactly 3 files)")
+}
 if ($fail.Count -gt 0) {
     Write-Host "CLASS-REFCOUNT-AUTHORITY FAIL"
     foreach ($f in $fail) { Write-Host ("  - " + $f) }
     exit 1
 }
-Write-Host "CLASS-REFCOUNT-AUTHORITY OK (1 pair mint / 1 header / 2 leg consumers / 3+9 formals / 10 roster files / 6 literal files / 0 stale / 5 registry files + 2 registrants / 1+1 out-slot / 1+1 foreign-write drop / 1 field-teardown shape + file / 6 field-type questions (标量 + 数组两档) / 7 transfer-question sites in 2 files (第二百零三刀给字段槽那一臂加了第 4 处站点问句) / 1 view-leg hand-back + 2 QiSet calls / 1+2+1 transfer-arm questions / 3 static-gate sites in 1 file + 1 ivref registration / 1 arg-station hand-back + 4+4 helper sites in 4 files / 4+4 index-slot + project-class questions / 1 address-temp mint / 3 element-teardown sites + 4+4 carrier-destroy questions + 4 preserve-with-release sites in 4 files / 4+4 形A questions (out-slot class + owner pass) + 5 copy-in claim sites in 4 files / 3+4 carrier-destroy sites in 3 files / 8 hand-back stations (5 in cgen_redim.cpp + 过程出口) + 4 shape questions + 3 multidim export sites + 4+2 carrier-scope registrar + flag sites / 7+3 carrier-free flag + 5+5 escape pre-pass + 6 roster sites in 4 files + 1 LHS + 1 RHS exemption + 1 dst gate + 7+3 declaration-scope roster / 5 static gates / 4+3 ND Preserve-with-release export sites / 6 legacyViewBoxExpr sites in 4 files + 7 rtl-name sites in 6 files + 9 wrap-name sites in 6 files + 6 view-slot sites in 5 files (㉘㉚，第一百七十二刀三站) + 14 view-name sites in 9 files + 5 view_from-name sites + 3 mint sites + 1 name-ruler (㉛，第一百七十四刀站A)"
+Write-Host "CLASS-REFCOUNT-AUTHORITY OK (1 pair mint / 1 header / 2 leg consumers / 3+9 formals / 10 roster files / 6 literal files / 0 stale / 5 registry files + 2 registrants / 1+1 out-slot / 1+1 foreign-write drop / 1 field-teardown shape + file / 6 field-type questions (标量 + 数组两档) / 7 transfer-question sites in 2 files (第二百零三刀给字段槽那一臂加了第 4 处站点问句) / 1 view-leg hand-back + 2 QiSet calls / 1+2+1 transfer-arm questions / 3 static-gate sites in 1 file + 1 ivref registration / 1 arg-station hand-back + 4+4 helper sites in 4 files / 4+4 index-slot + project-class questions / 1 address-temp mint / 3 element-teardown sites + 4+4 carrier-destroy questions + 4 preserve-with-release sites in 4 files / 4+4 形A questions (out-slot class + owner pass) + 5 copy-in claim sites in 4 files / 3+4 carrier-destroy sites in 3 files / 8 hand-back stations (5 in cgen_redim.cpp + 过程出口) + 4 shape questions + 3 multidim export sites + 4+2 carrier-scope registrar + flag sites / 7+3 carrier-free flag + 5+5 escape pre-pass + 6 roster sites in 4 files + 1 LHS + 1 RHS exemption + 1 dst gate + 7+3 declaration-scope roster / 5 static gates / 4+3 ND Preserve-with-release export sites / 6 legacyViewBoxExpr sites in 4 files + 7 rtl-name sites in 6 files + 9 wrap-name sites in 6 files + 6 view-slot sites in 5 files (㉘㉚，第一百七十二刀三站) + 14 view-name sites in 9 files + 5 view_from-name sites + 3 mint sites + 1 name-ruler (㉛，第一百七十四刀站A) / 3+3 late-return-slot claim sites (站点在 cgen_setlet_set_rhs.inc) + 1 shape in cgen_com.cpp + 4+4 object-pointer-slot questions + 3+3 local-handover questions (㉜，第三百十四刀)"
 exit 0

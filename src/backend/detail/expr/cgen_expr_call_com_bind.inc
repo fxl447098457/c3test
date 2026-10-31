@@ -629,11 +629,10 @@
                 // IDispatch* 写进标签区 (§B190 那格 C2172 的同一个坑); legacy 接口视图
                 // (vb6_iface_X) 也是**值**结构体, 所以这一族**刻意不放进来** —— 视图那一路
                 // 有自己的适配器 (§B215 写侧视图适配器), 不在这里混档。
-                auto ctypeIsObjectSlot271 = [](const std::string& t) -> bool {
-                    if (t.empty() || t.back() != '*') return false;
-                    return t == "void*"                              // As Object
-                        || t.rfind("vb6_cls_", 0) == 0               // 工程类实例指针
-                        || t.rfind("vb6_ComIface_", 0) == 0;         // 前期绑定接口指针 (IFont/StdFont)
+                // 账 #305 §B218 第三百十四刀: 这一问提到成员位 `ctypeIsObjectSlotPtr` (答案一字未动),
+                // 因为泛对象返回槽那位新主人问的是同一句 —— 一位定义, 两处问。
+                auto ctypeIsObjectSlot271 = [this](const std::string& t) -> bool {
+                    return ctypeIsObjectSlotPtr(t);
                 };
                 auto isKnownObjectVarName = [&](const std::string& e) -> bool {
                     std::string l = e;

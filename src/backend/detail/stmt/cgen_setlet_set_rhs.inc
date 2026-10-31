@@ -448,6 +448,24 @@
                 emitClassSlotRefSet(target, outCls144, value, rhsTransferred, false);
             } else if (outSlotClaim) {
                 emitClassSlotRefSet(target, clsOfRhs, value, rhsTransferred, true);
+            } else if (clsOfSlot.empty() && !currentReturnVar_.empty()
+                       && target == currentReturnVar_
+                       && ctypeIsObjectSlotPtr(currentReturnCType_)
+                       && !rhsTransferred && value.size() > 1 && value != "NULL"
+                       && value.find('(') == std::string::npos
+                       && !localSlotHandsOverRef(value, node.value.get())) {
+                // 账 #305 §B218 (甲) 腿②″ (第三百十四刀): 泛对象档的**返回槽**从没主人 ——
+                // 靶工程 ImageList.ctl:562 `Set FListImageExtractIcon = UserControl.Picture` 发成裸拷贝,
+                // 紧跟着 563 `Set UserControl.Picture = Nothing` 把唯一那一枚退掉 ⇒ 交出去的是已回收的
+                // IPictureDisp ⇒ Command2 一点就 0xC0000005 (写进 oleaut32 的 GetIDsOfNames)。
+                // 两道负条件各是一个**在册的口径**, 都不在这一站另答一遍:
+                //   不带括号 = 右值是一次调用 (`Set ret = MakeOne()`) 时, 被调方按 腿②″/腿② 已经自带
+                //     一枚对价 ⇒ 再 claim = 每调用净 +1 (与 rhsTransfersProjectRef 那段同一契约);
+                //   !localSlotHandsOverRef = 右值是**本过程的局部**时, 那一枚引用今天靠裸拷贝移交
+                //     (C3 不在过程出口放手局部对象格 = §B164 那族账), claim 就是净 +1
+                //     (实测 Common.bas PictureFromHandle: 每发图片漏一只 IPicture)。
+                // `New` / 工程类返回 / 视图 / Nothing 四形各归各的主人, 这里都不接手。
+                emitLateSlotRefClaim(target, value);
             } else {
                 c_.emitLine(target + " = " + value + ";  /* Set */");
             }

@@ -9247,6 +9247,7 @@ if ($Category -in @("all", "run", "vbp")) {
                     "W35-terms=2 kept=True",
                     "W36-terms=12",
                     "W37-terms=2 kept=True",
+                    "W38-alive-terms=0", "W39-terms=0 null=False",
                     "B445-DONE")
     Test-Vbp 'b445_class_slot_refcount' "$Tests\b445_refcount\B445.vbp" $b445Needles
     Test-Vbp 'b445_class_slot_refcount_x86' "$Tests\b445_refcount\B445.vbp" $b445Needles -Arch "x86"
@@ -9400,6 +9401,27 @@ if ($Category -in @("all", "run", "vbp")) {
         "$Tests\b445_refcount\B445.vbp") @(
         'vb6_SafeArrayReDimPreserve1D_Tr(vb6_sa_long',
         'vb6_SafeArrayReDimPreserve1D_Tr(vb6_sa_variant')
+    # 账 #305 §B218 (甲) 第三百十四刀 = 腿②″: 泛对象档的**返回槽**从没主人 —— ComCtlsDemo
+    #   Builds/ImageList/ImageList.ctl:562 `Set FListImageExtractIcon = UserControl.Picture` 发成裸拷贝
+    #   = 交出去一枚借用, 原主紧接着 563 `Set UserControl.Picture = Nothing` 退掉唯一那一枚 ⇒ 调用方
+    #   接手的是已回收的 IPictureDisp (运行期一点 Command2 就 0xC0000005, 写进 ole32 的 GetIDsOfNames)。
+    #   行为针 W38 = 原主放手之后调用方手里那一枚还活着 (terms 差 0 枚)。负控 = 拿**关掉这一臂**的编译器
+    #   编同一份夹具复跑 (本机 x86): 49 行读数里只有 W38 这一行翻成 1, 其余一字不动
+    #   (尺 .local/k314/out314_neg_x86.txt 对 out314_fixed_x86.txt; 修后两台 x64/x86 都答 0)。
+    #   W39 = 反面那一形 (右值是本过程**局部**那格对象, 见 localSlotHandsOverRef): 那一枚今天靠裸拷贝移交
+    #   (§B164 那族在册) ⇒ claim = 每调用净 +1 且永远没人退 (实测 Common.bas PictureFromHandle 每发一张图
+    #   漏一只 IPicture)。两态行为一字相同 (terms=0 null=False), 所以它的判据只在下面那两枚发码针上。
+    Test-EmitcShape 'b445_late_return_slot_claims_a_slot_read' @(
+        "$Tests\b445_refcount\B445.vbp") @(
+        '{  /* 账 #305 (甲) 腿②″: Set 泛对象槽 vb6_ret_HandOff38 */',
+        'vb6_ComAddRefDispatch((void*)vb6_ret_HandOff38);',
+        'vb6_ret_PassThru39 = l39;  /* Set */')
+    Test-EmitcAbsent 'b445_late_return_slot_never_bare_writes_or_claims_a_local' @(
+        "$Tests\b445_refcount\B445.vbp") @(
+        'vb6_ret_HandOff38 = mSlot38;  /* Set */',
+        'vb6_ComAddRefDispatch((void*)vb6_ret_PassThru39)',
+        '腿②″: Set 泛对象槽 vb6_ret_PassThru39')
+
     # 账 #305 §B218 (甲) 第一百五十六刀 = 局部数组**载体本身**在过程出口销毁 (腿⑤ 补完)。
     #   尺 = tests/test_local_array_carrier.bas: 该收的六档 (定长 / 动态 / 多维 / 第一百五十八刀起
     #   加上整数组赋值的左值 —— `l = mg` 那一发现走复制, 槽里握的是自己新克隆的那一枚 / 第一百五十九刀

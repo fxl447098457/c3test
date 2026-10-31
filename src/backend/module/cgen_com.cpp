@@ -429,6 +429,50 @@ void CCodeGen::emitClassSlotRefSet(const std::string& target, const std::string&
     c_.emitLine("}");
 }
 
+// 账 #305 §B218 第三百十四刀: 「这格 C 存储是不是一枚指针形对象槽」的唯一问句。原文是第二百七十一刀
+// 长在 cgen_expr_call_com_bind.inc 站点里的 lambda; 本刀第二位读者 (泛对象返回槽的主人) 问的是同一句,
+// 于是提到成员位 —— 一处定义, 两处问, 不再手抄第三份。
+bool CCodeGen::ctypeIsObjectSlotPtr(const std::string& t) const {
+    if (t.empty() || t.back() != '*') return false;
+    return t == "void*"                              // As Object
+        || t.rfind("vb6_cls_", 0) == 0               // 工程类实例指针
+        || t.rfind("vb6_ComIface_", 0) == 0;         // 前期绑定接口指针 (IFont/StdFont)
+}
+
+// 账 #305 §B218 (甲) 腿②″: 泛对象槽 (void* 档) 的覆写主人 —— 与 vb6_ReleaseObject (`Set x = Nothing`
+// 那一站, 早就在放这一格) **成对**: 一头只退不取, 另一头只取不退, 两半合起来才是 VB 的 `Set a = b`。
+// claim 走 vb6_ComAddRefDispatch 而不是裸 AddRef: 它内含 vb6_ComIsDispatchable 那道闸, 对裸工程类实例
+// (`vb6_cls_X*`, 首格是 __comObj 而非 vtable) 与 HWND 一律判否 ⇒ 与退那一头同一个安全口径, 不会新造野调用。
+void CCodeGen::emitLateSlotRefClaim(const std::string& target, const std::string& valueExpr) {
+    c_.emitLine("{  /* 账 #305 (甲) 腿②″: Set 泛对象槽 " + target + " */");
+    c_.indent();
+    c_.emitLine(target + " = " + valueExpr + ";");
+    c_.emitLine("vb6_ComAddRefDispatch((void*)" + target + ");");
+    c_.dedent();
+    c_.emitLine("}");
+}
+
+// 账 #305 §B218 (甲) 腿②″ 的第二问: 「右值那一格是不是**本过程的局部**」。
+// VB 里 `Set ret = 局部` 也是取走一枚 —— 但紧接着**过程出口把那枚局部放手**, 一进一出相抵。
+// C3 的局部对象格从没进计数系统 (既不 claim 也不在出口 Release, = §B164 那族泄漏账的同一格),
+// 所以那一枚引用今天就是**靠裸拷贝交出去**的: 实测 `Common.bas PictureFromHandle`:
+//     Dim NewPicture As IPicture                  ' OleCreatePictureIndirect 给它 1 枚
+//     Set PictureFromHandle = NewPicture          ' VB: +1, 出口 Release 局部 -1 ⇒ 交出去 1
+// 若在这一格也 claim ⇒ 每次调用净 +1, 那一枚永不有人退 (本机实测: 状态条那一路每点一次留一只活 IPicture)。
+// 反过来, **模块级槽 / me-> 字段**是计数系统自己会放手的 (源码里明写的 `Set x = Nothing`、
+// 字段出厂 腿⑤) ⇒ 不 claim 就变成把别人还要用的那一枚交出去 (= ImageList.ctl:562 那发 AV)。
+// 判据 = AST 认标识符 + 发码文本认「裸名」+ knownLocalVars_ (每过程开头清一次的那张表, 与形参同生命周期)。
+bool CCodeGen::localSlotHandsOverRef(const std::string& rhsText, const ASTNode* rhs) const {
+    if (!rhs || rhs->kind != ASTNodeKind::IdentifierExpr) return false;
+    if (rhsText.empty()) return false;
+    if (rhsText.find_first_of("(.-[") != std::string::npos) return false;   // 成员 / 下标 / 调用形态不算
+    if (!std::isalpha(static_cast<unsigned char>(rhsText[0]))
+        && rhsText[0] != '_') return false;
+    std::string lower = rhsText;
+    std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+    return knownLocalVars_.count(lower) > 0;
+}
+
 // 账 #305 §B218 (甲) 刀3: 「这一发右值是不是自带一枚移交过来的引用」—— 上面那位主人「不 claim」
 // 那条臂的第二个成因, 与 `New` 同一条契约, 所以只在这一处问, 不在站点各抄一遍。
 // 契约的实物 (三台工程同形, 尺 `.build/k1081_proj_emit.c`): 被调方 `Set <返回槽> = <局部/字段>`
