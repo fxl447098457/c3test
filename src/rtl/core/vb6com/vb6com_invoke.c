@@ -102,6 +102,64 @@ static void vb6_ComLateBindMiss(const wchar_t* site, const wchar_t* name, void* 
     fflush(stderr);
 }
 
+/* 账 #305 第三百十七刀 (#600 的实测收口): 晚绑定的接收者可能是**另一张接口视图**。
+ * 实证 (ComCtlsDemo Command2): Common.bas 的 PictureFromHandle 用
+ *   OleCreatePictureIndirect(&PICD, IID_IPicture, ...) 造出 IPicture*, 而 VB6 在
+ *   `Set <IPictureDisp 槽> = <IPicture>` 那一站做一次 QI; 我们照抄指针 ⇒ 下游
+ *   `.Handle` 晚绑定把 IPicture 的 vtable 当 IDispatch 用, 第 5 槽 GetIDsOfNames
+ *   落到 IPicture::get_Type 上, 把 `&IID_NULL` (只读) 当 short* 写 ⇒ 0xC0000005。
+ * 独立探针 (本机 .local/k317/probe_pic.c, x64): QI(IID_IPictureDisp) ==
+ *   QI(IID_IDispatch) == p+0x10 (换指针!), 在该指针上 GetIDsOfNames("Handle")
+ *   得 dispid=0, Invoke 得 65579 = 图标的 hIcon。
+ *
+ * 修法 = VB6 那条规则本身: 晚绑定前先换到 IDispatch 视图。逐调用一发 QI 太贵,
+ * 而「同一 vtable ⇒ 同一布局 ⇒ 同一偏移」是 COM 的硬性质 ⇒ 按 **vtable** 缓存
+ * 「本指针到它 IDispatch 视图的字节偏移」: 真 IDispatch 缓存 0 (原路零改动);
+ * QI 不认的伪 vtable (VTableHandle 那种手写表) 缓存 -1 (同样原路, 不能把它们
+ * 当野指针拒掉); 只有异视图才真付一次 QI。取出的视图 AddRef、用完 Release
+ * (IUnknown 三槽在所有视图里同址), 所以调用期间视图一定活着。 */
+typedef struct { void* vtbl; int32_t off; } Vb6DispViewEnt;
+#define VB6_DISPVIEW_CACHE 64
+static Vb6DispViewEnt g_dispView[VB6_DISPVIEW_CACHE];
+static int32_t g_dispViewCount = 0;
+static int32_t g_dispViewNext = 0;
+
+static int32_t vb6_ComDispViewOffset(void* disp) {
+    if (!disp) return -1;
+    if (!vb6_ComIsDispatchable(disp)) return -1;
+    void* vtbl = *(void**)disp;
+    for (int32_t i = 0; i < g_dispViewCount; i++)
+        if (g_dispView[i].vtbl == vtbl) return g_dispView[i].off;
+    int32_t off = -1;
+    void* d = NULL;
+    if (SUCCEEDED(((IUnknown*)disp)->lpVtbl->QueryInterface((IUnknown*)disp, &IID_IDispatch, &d)) && d) {
+        off = (int32_t)((char*)d - (char*)disp);
+        ((IUnknown*)d)->lpVtbl->Release((IUnknown*)d);
+        if (off < 0) off = -1;   /* 负偏移理论上不存在; 当「不动」处理 */
+    }
+    Vb6DispViewEnt ent;
+    ent.vtbl = vtbl; ent.off = off;
+    if (g_dispViewCount < VB6_DISPVIEW_CACHE) g_dispView[g_dispViewCount++] = ent;
+    else { g_dispView[g_dispViewNext] = ent;
+           g_dispViewNext = (g_dispViewNext + 1) % VB6_DISPVIEW_CACHE; }
+    return off;
+}
+
+/* 交回本次调用该用的接收者; *owned 非空 = 借出的一枚引用, 用完交给 ...Out。 */
+static void* vb6_ComDispViewIn(void* disp, void** owned) {
+    *owned = NULL;
+    int32_t off = vb6_ComDispViewOffset(disp);
+    if (off <= 0) return disp;
+    void* d = (char*)disp + off;
+    ((IUnknown*)d)->lpVtbl->AddRef((IUnknown*)d);
+    *owned = d;
+    return d;
+}
+
+static void vb6_ComDispViewOut(void* owned) {
+    if (owned) ((IUnknown*)owned)->lpVtbl->Release((IUnknown*)owned);
+}
+
 /* 账 #305 第二百八十九刀 (§B164 新形): 「认不出这个名字」那一支的统一清点。
    打包来的实参 (vb6_ComPackVariant 每次一发一枚堆上 VARIANT) 交进这七个出口后就只有本文件
    那几条 clear 路接手 —— 早退不接, 就是整批发漏。空跑靶工程 8 秒 29 发 `Move`, 每发四枚。
@@ -363,8 +421,8 @@ static void vb6_ComNarrowArgs(IDispatch* pDisp, DISPID dispid, VARIANT** args, i
 
 // COM方法调用 (返回VARIANT*, 调用方需vb6_ComVarClear释放)
 // args_void: VARIANT*[] (指向已分配VARIANT的指针数组), 每个元素由vb6_ComPackXxx分配
-void* vb6_ComCall(void* disp, const wchar_t* methodName,
-                  void* args_void, int32_t argc) {
+static void* vb6_ComCallRcv(void* disp, const wchar_t* methodName,
+                            void* args_void, int32_t argc) {
     VARIANT** args = (VARIANT**)args_void;
     /* 账 #305 第二百六十二刀 (丙): 非 IDispatch 接收者 —— 响亮 + 计数 (行为不变) */
     if (vb6_ComLateBindIsMiss(disp)) {
@@ -544,8 +602,8 @@ void* vb6_ComCall(void* disp, const wchar_t* methodName,
 // 宿主对象 (窗体/控件 HWND, Controls 集合, Font 代理) 不是 IDispatch, 与
 // vb6_ComCall 的 Fix 112 同口径应答 —— 旧路径按名 L"Item" 走 vb6_Host_Call,
 // 这里保持完全一致的宿主分派语义 (DISPID_VALUE 对宿主无意义)。
-void* vb6_ComCallByDispid(void* disp, int32_t dispid,
-                          void* args_void, int32_t argc) {
+static void* vb6_ComCallByDispidRcv(void* disp, int32_t dispid,
+                                    void* args_void, int32_t argc) {
     VARIANT** args = (VARIANT**)args_void;
     /* 账 #305 第二百六十二刀 (丙): 非 IDispatch 接收者 —— 响亮 + 计数 (行为不变) */
     if (vb6_ComLateBindIsMiss(disp)) {
@@ -617,7 +675,7 @@ void* vb6_ComCallByDispid(void* disp, int32_t dispid,
 // 口径: 名字 "Item" 能解析就仍按名走 (RTL 伪集合 —— ListImages/Panels/Nodes 一族 ——
 // 只登记名字, 没有 0 号成员); 解析不到才按 VB6 语义发 DISPID 0。
 // ============================================================
-void* vb6_ComCallObjectDefault(void* disp, void* args_void, int32_t argc) {
+static void* vb6_ComCallObjectDefaultRcv(void* disp, void* args_void, int32_t argc) {
     if (!disp) return NULL;
     DISPID d = DISPID_UNKNOWN;
     /* 宿主对象 (窗体/控件槽/Controls 集合) 不是真 IDispatch: 交给 vb6_ComCallByDispid
@@ -648,7 +706,7 @@ void* vb6_ComCallObjectDefault(void* disp, void* args_void, int32_t argc) {
     return obj;
 }
 // COM属性Get (返回VARIANT*)
-void* vb6_ComGetProp(void* disp, const wchar_t* propName) {
+static void* vb6_ComGetPropRcv(void* disp, const wchar_t* propName) {
     /* 账 #305 第二百六十二刀 (丙): 非 IDispatch 接收者 —— 响亮 + 计数 (行为不变) */
     if (vb6_ComLateBindIsMiss(disp)) {
         vb6_ComLateBindMiss(L"ComGetProp", propName, disp);
@@ -758,8 +816,8 @@ void* vb6_ComGetProp(void* disp, const wchar_t* propName) {
 // COM属性Get带参数 (参数化属性读取, 如Dictionary.Item(key))
 // 使用DISPATCH_METHOD|DISPATCH_PROPERTYGET组合标志
 // 返回VARIANT* (调用方需vb6_ComVarClear释放)
-void* vb6_ComGetPropArg(void* disp, const wchar_t* propName,
-                        void* args_void, int32_t argc) {
+static void* vb6_ComGetPropArgRcv(void* disp, const wchar_t* propName,
+                                  void* args_void, int32_t argc) {
     VARIANT** args = (VARIANT**)args_void;
     /* 账 #305 第二百六十二刀 (丙): 非 IDispatch 接收者 —— 响亮 + 计数 (行为不变) */
     if (vb6_ComLateBindIsMiss(disp)) {
@@ -815,7 +873,7 @@ void* vb6_ComGetPropArg(void* disp, const wchar_t* propName,
 
 // COM属性Set (值类型)
 // COM属性Set (值类型)
-void vb6_ComSetProp(void* disp, const wchar_t* propName, void* value_void) {
+static void vb6_ComSetPropRcv(void* disp, const wchar_t* propName, void* value_void) {
     /* 账 #305 第二百六十二刀 (丙): 非 IDispatch 接收者 —— 响亮 + 计数 (行为不变) */
     if (vb6_ComLateBindIsMiss(disp)) {
         vb6_ComLateBindMiss(L"ComSetProp", propName, disp);
@@ -931,7 +989,7 @@ void vb6_ComSetProp(void* disp, const wchar_t* propName, void* value_void) {
 // P25: COM参数化属性Put (如dic.Item(key) = value)
 // propName: 属性名 (如"Item"), args: 索引参数数组, argc: 索引参数个数
 // value: 新值(已打包为堆VARIANT*, 同ComSetProp)
-void vb6_ComSetPropArg(void* disp, const wchar_t* propName, void** args, int32_t argc, void* value_void) {
+static void vb6_ComSetPropArgRcv(void* disp, const wchar_t* propName, void** args, int32_t argc, void* value_void) {
     VARIANT varValue;
     VariantInit(&varValue);
     if (value_void) varValue = *(VARIANT*)value_void;
@@ -983,7 +1041,7 @@ void vb6_ComSetPropArg(void* disp, const wchar_t* propName, void** args, int32_t
 }
 
 // COM属性SetRef (对象引用 -- PROPERTYPUTREF)
-void vb6_ComSetRef(void* disp, const wchar_t* propName, void* objRef) {
+static void vb6_ComSetRefRcv(void* disp, const wchar_t* propName, void* objRef) {
     /* 账 #305 第二百六十二刀 (丙): 非 IDispatch 接收者 —— 响亮 + 计数 (行为不变) */
     if (vb6_ComLateBindIsMiss(disp)) {
         vb6_ComLateBindMiss(L"ComSetRef", propName, disp);
@@ -1037,4 +1095,66 @@ void vb6_ComSetRef(void* disp, const wchar_t* propName, void* objRef) {
     if (FAILED(hr)) {
         vb6_ComCheckError(hr, &excep, L"ComSetRef");
     }
+}
+
+/* ============================================================
+ * 账 #305 第三百十七刀: 八个晚绑定出口的**唯一入口** —— 先换到 IDispatch 视图
+ * (vb6_ComDispViewIn 的判据与代价见文件头)。原函数体改名 ...Rcv 后原样保留;
+ * 这一层只做「进来换视图 / 出去还引用」, 不改任何出口自己的语义。
+ * ============================================================ */
+void* vb6_ComCall(void* disp, const wchar_t* methodName,
+                  void* args_void, int32_t argc) {
+    void* owned = NULL;
+    void* r = vb6_ComCallRcv(vb6_ComDispViewIn(disp, &owned), methodName, args_void, argc);
+    vb6_ComDispViewOut(owned);
+    return r;
+}
+
+void* vb6_ComCallByDispid(void* disp, int32_t dispid,
+                          void* args_void, int32_t argc) {
+    void* owned = NULL;
+    void* r = vb6_ComCallByDispidRcv(vb6_ComDispViewIn(disp, &owned), dispid, args_void, argc);
+    vb6_ComDispViewOut(owned);
+    return r;
+}
+
+void* vb6_ComCallObjectDefault(void* disp, void* args_void, int32_t argc) {
+    void* owned = NULL;
+    void* r = vb6_ComCallObjectDefaultRcv(vb6_ComDispViewIn(disp, &owned), args_void, argc);
+    vb6_ComDispViewOut(owned);
+    return r;
+}
+
+void* vb6_ComGetProp(void* disp, const wchar_t* propName) {
+    void* owned = NULL;
+    void* r = vb6_ComGetPropRcv(vb6_ComDispViewIn(disp, &owned), propName);
+    vb6_ComDispViewOut(owned);
+    return r;
+}
+
+void* vb6_ComGetPropArg(void* disp, const wchar_t* propName,
+                        void* args_void, int32_t argc) {
+    void* owned = NULL;
+    void* r = vb6_ComGetPropArgRcv(vb6_ComDispViewIn(disp, &owned), propName, args_void, argc);
+    vb6_ComDispViewOut(owned);
+    return r;
+}
+
+void vb6_ComSetProp(void* disp, const wchar_t* propName, void* value_void) {
+    void* owned = NULL;
+    vb6_ComSetPropRcv(vb6_ComDispViewIn(disp, &owned), propName, value_void);
+    vb6_ComDispViewOut(owned);
+}
+
+void vb6_ComSetPropArg(void* disp, const wchar_t* propName, void** args,
+                       int32_t argc, void* value_void) {
+    void* owned = NULL;
+    vb6_ComSetPropArgRcv(vb6_ComDispViewIn(disp, &owned), propName, args, argc, value_void);
+    vb6_ComDispViewOut(owned);
+}
+
+void vb6_ComSetRef(void* disp, const wchar_t* propName, void* objRef) {
+    void* owned = NULL;
+    vb6_ComSetRefRcv(vb6_ComDispViewIn(disp, &owned), propName, objRef);
+    vb6_ComDispViewOut(owned);
 }

@@ -1,4 +1,16 @@
 // c3rtl.rc - RTL runtime library embedded as resources
+// 2026-10-31 (ledger #305, knife 317): vb6com_invoke.c gained the late-binding
+//   receiver view switch -- a receiver that is a *different interface view* of a
+//   real COM object (measured: IPicture obtained from OleCreatePictureIndirect with
+//   IID_IPicture, whose vtable slot 5 is get_Type, not GetIDsOfNames) used to be
+//   dispatched as if it were IDispatch: GetIDsOfNames landed on get_Type and wrote
+//   through the read-only IID_NULL (0xC0000005 in ComCtlsDemo Command2). The eight
+//   late-binding exits now enter through vb6_ComDispViewIn, which QIs for
+//   IID_IDispatch and caches the byte offset per vtable (0 = already IDispatch,
+//   -1 = unknown/pseudo vtable = unchanged path). Probe: .local/k317/probe_pic.c
+//   (QI(IID_IPictureDisp) == QI(IID_IDispatch) == p+0x10 on x64).
+//   This touch exists only so rc.exe re-embeds src/rtl/** into C3.exe --
+//   check_rtl_embedded R1 catches the stale embed.
 // 2026-10-27 (ledger #305, knife 262): vb6com_invoke.c gained the late-binding exit
 //   guard -- a receiver that is neither a real IDispatch nor a host pseudo-object
 //   (Font / Extender / host table entry) used to fall through the exits silently and
