@@ -832,6 +832,22 @@ function Test-AppTitleAuthority {
         $out | Select-Object -First 6 | ForEach-Object { Write-Host "  $_" }
     }
 }
+# 账 #604（第321刀）：混合标签 Select Case 的标签箱谁放 —— 319 刀发的 `_vb6_select_lbl_N`
+# 从不 VariantClear（每执行一次漏一枚 BSTR）；漏与"把借来的那几枚也清掉"两侧都要静态钉住，
+# 见脚本头 R1~R7。
+function Test-SelectLabelOwner {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] select_label_owner ... "
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\check_select_label_owner.ps1" 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        $out | Select-Object -First 6 | ForEach-Object { Write-Host "  $_" }
+    }
+}
 function Test-ScaleModeWriters {
     $script:total++
     Write-Host -NoNewline "  [STATIC] scalemode_writers ... "
@@ -4534,6 +4550,25 @@ if ($Category -in @("all", "run", "bas")) {
     Test-EmitcAbsent "b592_app_title_lesion" @(
         "$Tests\b592_apptitle\B592.vbp") @(
         'vb6_App_EXEName() = '
+    )
+
+    # <vbeclipse> 账 #604（第321刀）：319 刀给混合标签的 Variant Select 发的每一枚标签箱是
+    # `vb6_VARIANT _vb6_select_lbl_N = vb6_VariantString(vb6_BSTR_FromStr(L"…"));`，那枚临时 VARIANT
+    # 从不 VariantClear ⇒ 每执行一次这条 Select，每枚**串字面量标签**现造的那只 BSTR 就漏掉。
+    # 实测（同一夹具 + 同一份产物形状，20 万轮 × 3 枚字面标签的 PagefileUsage 增量）：
+    #   BASE x64 +31014912 B / x86 +15118336 B（S604-leak-ok=N）；修复后两台都是 0（=Y）。
+    # 修法 = 「这枚箱有没有拿下所有权」只问 variantRhsOwnsValue，owns 的在 if 链之后清；
+    # borrowed（裸串变量 / Variant 槽的浅别名）一个都不清 —— 清下去放的就是别人还活着的块。
+    # 后四条是所有权护栏：借用/槽两形各看「Select 之后改一次再读回」，清错当场踩已释放块。
+    $b604Needles = @("S604-lit=1", "S604-borrow=1", "S604-borrow-after=omega", "S604-slot=1",
+        "S604-slot-after=zzz", "S604-num=2", "S604-range=3", "S604-warm=50",
+        "S604-api1=1", "S604-api2=1", "S604-leak-ok=Y", "S604-acc=200050", "S604-DONE")
+    Add-BasTest "b604_select_label_owner" "$Tests\b604_select_label_owner.bas" $b604Needles
+    Add-BasTest "b604_select_label_owner_x86" "$Tests\b604_select_label_owner.bas" $b604Needles -Arch "x86"
+    # 发码针：字面标签的箱有 VariantClear，借来的那两枚（裸串变量 / Variant 槽）**没有**。
+    Test-EmitcShape "b604_select_label_owner_shape" @("$Tests\b604_select_label_owner.bas") @(
+        'vb6_VariantClear(&_vb6_select_lbl_',
+        'vb6_VARIANT _vb6_select_lbl_'
     )
 
     # <vbeclipse> 账 #305 §B180（第六十九刀）：`StrPtr(<Variant>)` 曾经发
@@ -10386,6 +10421,7 @@ if ($Category -in @("all", "compile")) {
     if (Enter-StaticShard) { Test-IntSuffixSites }
     if (Enter-StaticShard) { Test-RadixTierSites }
     if (Enter-StaticShard) { Test-AppTitleAuthority }
+    if (Enter-StaticShard) { Test-SelectLabelOwner }
     if (Enter-StaticShard) { Test-ScaleModeWriters }
     if (Enter-StaticShard) { Test-VbpSourceExt }
     if (Enter-StaticShard) { Test-ExtenderEmitChannel }

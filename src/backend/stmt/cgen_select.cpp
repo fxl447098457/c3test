@@ -158,10 +158,17 @@ void CCodeGen::visit(SelectCaseStmt& node) {
         };
         std::vector<std::string> clauseConds;
         std::vector<std::string> labelDecls;
+        // 账 #604: 「这枚标签箱收下了所有权没有」只问 variantRhsOwnsValue 一处（§B164/§B167
+        // 那位主人）—— 它说 owns 的（字面量 / 现造的调用 / 对象档取了引用）在 if 链尾部
+        // vb6_VariantClear 放掉；它说 borrowed 的（裸串变量、Variant 槽的浅别名）**一个都不许清**
+        // —— wrapVariantValue 对它们是 vb6_VariantString(s) / vb6_VariantFromValue(v) 这类
+        // 别名箱，清下去放的就是别人还活着的那只 BSTR / 那个 Dispatch。
+        std::vector<std::string> labelClears;
         const std::string subjAddr = "&" + tempVar;
         auto labelVariantAddr = [&](Expr* ast, const std::string& expr) -> std::string {
             std::string lbl = "_vb6_select_lbl_" + std::to_string(tempCounter_++);
             labelDecls.push_back("vb6_VARIANT " + lbl + " = " + wrapVariantValue(ast, expr) + ";");
+            if (variantRhsOwnsValue(ast, expr)) labelClears.push_back(lbl);
             return "&" + lbl;
         };
 
@@ -222,6 +229,13 @@ void CCodeGen::visit(SelectCaseStmt& node) {
         }
         if (!firstVariant) {
             c_.emitLine("}");
+        }
+        // 账 #604: 收回上面那几枚「自己拿下了所有权」的标签箱（放掉的只是箱里那只 BSTR /
+        // 那枚 Dispatch 引用）。放在 if 链之后 = 每一枚标签都求过值、都过了比较；
+        // Case 体里 Exit Sub / GoTo 跳出去的那条路会跳过这里（与 §B164 ①②③⑤ 同一族，
+        // 宁可不收也不许把收尾发成悬空 —— 本处不欠新账）。借来的那几枚（见上）不在此列。
+        for (auto& lblClear : labelClears) {
+            c_.emitLine("vb6_VariantClear(&" + lblClear + ");");
         }
         c_.dedent();
         c_.emitLine("}");
