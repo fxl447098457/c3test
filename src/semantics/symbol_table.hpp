@@ -267,6 +267,10 @@ struct Symbol {
     int32_t comVtblBase = 7;         // vtable起始偏移 (IDispatch=7, IUnknown=3)
     int32_t comDispid = 0;           // M29: 方法的TypeLib DISPID (由driver在TypeLib阶段回写, 供cgen生成dll_entry.c方法表用, 确保两边dispid一致; 0=未分配)
     bool comIsDual = false;           // 双重接口 (dispinterface + vtable)
+    // typelib appobject (TYPEFLAG_FAPPOBJECT): 裸类名 = 进程级全局单例 (Codejock
+    // *GlobalSettings 家族、VB6 GlobalMultiUse)。cgen 见位即发 vb6_ComGlobalInstance
+    // (首次 CoCreate, 之后复用), 成员访问沿既有 IDispatch 晚绑定链走。
+    bool comIsAppObject = false;
     // P13.23: COM event source interface (for WithEvents on external COM objects)
     std::string comSourceIfaceName;    // 默认事件源接口名
     std::string comSourceIfaceIid;     // 事件源接口IID

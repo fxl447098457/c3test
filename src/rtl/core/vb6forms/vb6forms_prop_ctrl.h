@@ -525,6 +525,11 @@ int32_t vb6_TreeView_GetHideSelection(void* hwnd);
 void    vb6_TreeView_SetHideSelection(void* hwnd, int32_t val);
 int32_t vb6_TreeView_GetIndentation(void* hwnd);
 void    vb6_TreeView_SetIndentation(void* hwnd, int32_t twips);
+// IconSize (XtremeSuiteControls.TreeView 的扩展, 像素) —— 原生 SysTreeView32 没有这一格。
+// 实现手法: 挂一张该尺寸的**空 ImageList**（TVSIL_NORMAL）。comctl32 的行为是"挂了图列,
+// 每个条目的文字都从图宽之后起排, 即使 iImage=-1"，于是这一格等价于"预留图标列"。
+int32_t vb6_TreeView_GetIconSize(void* hwnd);
+void    vb6_TreeView_SetIconSize(void* hwnd, int32_t px);
 
 // ===================== Toolbar (ai/029 C29-5a) =====================
 //   VB6 Toolbar 的窗口 + 标量属性 + 设计期按钮，原生 ToolbarWindow32（不加载 OCX）。
@@ -563,6 +568,9 @@ void            vb6_TreeView_SetNodeKey(void* hwnd, int32_t idx, const wchar_t* 
 void            vb6_TreeView_SetNodeTag(void* hwnd, int32_t idx, const wchar_t* v);
 int32_t         vb6_TreeView_GetNodeChecked(void* hwnd, int32_t idx);
 void            vb6_TreeView_SetNodeChecked(void* hwnd, int32_t idx, int32_t v);
+/* 账 #305 第三百四十九刀: Node.Bold (原生 TVIS_BOLD) */
+int32_t         vb6_TreeView_GetNodeBold(void* hwnd, int32_t idx);
+void            vb6_TreeView_SetNodeBold(void* hwnd, int32_t idx, int32_t v);
 int32_t         vb6_TreeView_GetNodeExpanded(void* hwnd, int32_t idx);
 void            vb6_TreeView_SetNodeExpanded(void* hwnd, int32_t idx, int32_t v);
 int32_t         vb6_TreeView_GetNodeParent(void* hwnd, int32_t idx);

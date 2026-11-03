@@ -460,7 +460,21 @@ void CCodeGen::visit(FunctionDecl& node) {
                     if (pi.type == Vb6Type::String) {
                         c_.emitLine("if (!" + hasFlag + ") vb6_BSTR_Assign(" + pName + ", " + pi.defaultValueExpr + ");");
                     } else if (pi.type == Vb6Type::Variant) {
-                        c_.emitLine("if (!" + hasFlag + ") (*" + pName + ") = " + pi.defaultValueExpr + ";");
+                        // Variant ByRef 缺省回填: vb6_VARIANT 是结构体, 裸数值直接
+                        // `(*p) = -1` 赋不上 (C2440, Outlook2013 frmInbox GetDate
+                        //   `Optional Week = -1` ×6)。整数字面量折 vb6_VariantLong;
+                        // 其余维持旧形状 (语料暂无)。
+                        std::string dv462 = pi.defaultValueExpr;
+                        while (dv462.size() >= 2 && dv462.front() == '(' && dv462.back() == ')')
+                            dv462 = dv462.substr(1, dv462.size() - 2);
+                        bool isIntLit462 = !dv462.empty()
+                            && dv462.find_first_not_of("0123456789-") == std::string::npos;
+                        if (isIntLit462) {
+                            c_.emitLine("if (!" + hasFlag + ") vb6_VariantAssign(" + pName
+                                      + ", vb6_VariantLong(" + dv462 + "));");
+                        } else {
+                            c_.emitLine("if (!" + hasFlag + ") (*" + pName + ") = " + pi.defaultValueExpr + ";");
+                        }
                     } else {
                         c_.emitLine("if (!" + hasFlag + ") (*" + pName + ") = " + pi.defaultValueExpr + ";");
                     }

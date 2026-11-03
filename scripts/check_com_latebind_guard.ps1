@@ -20,8 +20,9 @@
 #       加第八个出口 / 撤掉一处调用 ⇒ 这条立刻红。
 #       第二百九十五刀给 vb6_ComCall 加了第二处 (Extender 伪接收者的**方法形**): 那一支不走
 #       IsMiss 那道门 (伪对象被 IsPseudo 豁免了), 所以「豁免句名副其实」这件事只能由这一处
-#       报告兜住 ⇒ ComCall 的期望从 1 改成 2, 且第二处必须紧跟
-#       `if (vb6_UC_IsExtender(disp)) {` 那一行。
+#       报告兜住 ⇒ ComCall 的期望从 1 改成 2。第三百零一刀把 `.Extender.Move` 接成真应答,
+#       于是第二处不再紧跟 if: 钉的是「臂 → Move 支 → 计数丢弃」这个次序, 且 Move 支自己
+#       也把打包实参交回清点。
 #   R2  伪接收者豁免三族 (字体 / Extender / 宿主对象) 都在 vb6_ComLateBindIsPseudo
 #       体内各恰好一次; 且 vb6_ComLateBindIsMiss 必须**先问 pseudo 再问
 #       vb6_ComIsDispatchable** —— 顺序反了会把合法宿主对象判成漏 (判据就永远红)。
@@ -133,7 +134,7 @@ function Index-Of262([string[]]$body, [string]$needle) {
     return -1
 }
 
-$missing = @($invPath, $comH, $clsH, $hostC, $ctrlH, $incCall, $incGet, $incSet, $rtPath, $ucC, $rtlC, $formsC, $ctrlC, $hostWinC, $ucCreateC, $formWpInc) |
+$missing = @($invPath, $comH, $clsH, $hostC, $ctrlH, $incCall, $incGet, $incSet, $rtPath, $ucC, $rtlC, $formsC, $ctrlC, $hostWinC, $ucCreateC, $ucHostC, $formWpInc) |
            Where-Object { -not (Test-Path $_) }
 if ($missing) {
     foreach ($m in $missing) { $fail += ("missing file " + $m) }
@@ -146,6 +147,14 @@ $invCode = Strip-Comments262 $invRaw
 $invLines = $invCode -split "`r?`n"
 
 # ---- R1: 七个出口一个都不许漏护栏 (出口名单从文件里自动枚举) ----
+# 第三百十七刀把形状分成两层: 公开出口 `vb6_Com<X>` 只做「换到接收者的 IDispatch 视图 /
+# 出去还引用」, 全部语义与护栏住在 `vb6_Com<X>Rcv`。于是这一条钉三件:
+#   ① 公开出口恰好 7 枚, 每枚体内恰好一处 `vb6_Com<X>Rcv(vb6_ComDispViewIn(disp, &owned)`,
+#      且唯一的 `vb6_ComDispViewOut(owned);` 排在它之后 —— 少了视图入口就是第三百十七刀之前
+#      那发 AV (IPicture 指针被当 IDispatch 用), 少了 Out 就是借来的那枚引用漏；
+#      公开层自己不许再出现护栏调用 (否则「响亮」有了第二份口径)。
+#   ② 每一枚 `...Rcv` 体内护栏数 (ComCall 2, 其余 1) 紧跟 IsMiss if-line, 且在第一条 return 之前。
+#   ③ ComCall 的 Extender 臂次序 (Move 支 → 计数丢弃) 与 Move 支的清点。
 $exitRx = '^(?:void\*|void|HRESULT|int32_t)\s+vb6_Com(Call|CallByDispid|GetProp|GetPropArg|SetProp|SetPropArg|SetRef)\s*\('
 $exits = @()
 for ($i = 0; $i -lt $invLines.Count; $i++) {
@@ -158,35 +167,62 @@ if ($exits.Count -ne 7) {
 }
 foreach ($e in $exits) {
     $name = 'vb6_Com' + $e[0]
-    $body = Get-Body262 $invLines ('^(?:void\*|void|HRESULT|int32_t)\s+' + [regex]::Escape($name) + '\s*\(')
-    if ($body.Count -lt 5) { $fail += ("R1 cannot locate the body of " + $name); continue }
+    $rvName = $name + 'Rcv'
+    $pubBody = Get-Body262 $invLines ('^(?:void\*|void|HRESULT|int32_t)\s+' + [regex]::Escape($name) + '\s*\(')
+    if ($pubBody.Count -lt 3) { $fail += ("R1 cannot locate the public outlet of " + $name); continue }
+    $entryNeedle = $rvName + '(vb6_ComDispViewIn(disp, &owned)'
+    $nEntry   = Count-In262 $pubBody $entryNeedle
+    $nOut     = Count-In262 $pubBody 'vb6_ComDispViewOut(owned);'
+    $iEntry   = Index-Of262 $pubBody $entryNeedle
+    $iOut     = Index-Of262 $pubBody 'vb6_ComDispViewOut(owned);'
+    $nGuardPub = Count-In262 $pubBody 'vb6_ComLateBindMiss('
+    if ($nEntry -ne 1 -or $nOut -ne 1 -or $iOut -le $iEntry -or $nGuardPub -ne 0) {
+        $fail += ("R1 public outlet " + $name + " must be one '" + $rvName +
+                  "(vb6_ComDispViewIn(disp, &owned)' followed by one 'vb6_ComDispViewOut(owned);'" +
+                  " (entry=" + $nEntry + " out=" + $nOut + " entryAt=" + $iEntry + " outAt=" + $iOut +
+                  " guards=" + $nGuardPub + ") - 绕开视图入口就是第三百十七刀之前那发 AV")
+    }
+    $body = Get-Body262 $invLines ('^static\s+(?:void\*|void)\s+' + [regex]::Escape($rvName) + '\s*\(')
+    if ($body.Count -lt 5) { $fail += ("R1 cannot locate the working body of " + $rvName); continue }
     $wantGuard = 1
     if ($name -eq 'vb6_ComCall') { $wantGuard = 2 }
     $nGuard = Count-In262 $body 'vb6_ComLateBindMiss('
     if ($nGuard -ne $wantGuard) {
-        $fail += ("R1 guard calls inside " + $name + " = " + $nGuard +
+        $fail += ("R1 guard calls inside " + $rvName + " = " + $nGuard +
                   " (want exactly " + $wantGuard + ") - 接收者不是真 IDispatch 时这一族必须响亮")
         continue
     }
     if ($name -eq 'vb6_ComCall') {
+        # 第二百九十五刀: Extender 臂 = 「响亮地丢」; 第三百零一刀: 同一臂里先答 `Move`
+        # (交 vb6_UC_ExtenderMoveApply → vb6_ControlMove), 其余成员仍走那一行计数丢弃。
+        # 于是「报告行紧跟 if」不再成立 —— 钉的是: 臂在 → Move 分支在臂之后 → 报告在分支之后,
+        # 且分支自己把打包实参交回清点 (早退不清就是 §B164 那一形)。
         $iExtArm = Index-Of262 $body 'if (vb6_UC_IsExtender(disp)) {'
+        $iExtMove = Index-Of262 $body 'if (methodName && wcscmp(methodName, L"Move") == 0) {'
         $iExtRep = Index-Of262 $body 'vb6_ComLateBindMiss(L"ExtenderCall", methodName, disp);'
-        if ($iExtArm -lt 0 -or $iExtRep -ne ($iExtArm + 1)) {
-            $fail += ("R1 vb6_ComCall must answer the Extender pseudo-receiver with a counted drop " +
-                      "(arm at " + $iExtArm + ", report at " + $iExtRep + ") - 撤掉这一处, 靶工程实测那 26 发 " +
-                      "Extender 方法调用就又回到「护栏数不到」(第二百九十五刀读数)")
+        if ($iExtArm -lt 0 -or $iExtMove -lt 0 -or $iExtRep -lt 0 -or
+            $iExtMove -le $iExtArm -or $iExtRep -le $iExtMove -or ($iExtRep - $iExtArm) -gt 40) {
+            $fail += ("R1 vb6_ComCallRcv Extender arm must answer Move, then count-drop the rest " +
+                      "(arm " + $iExtArm + ", move " + $iExtMove + ", report " + $iExtRep + ") - " +
+                      "撤掉报告那一处, 靶工程实测那 26 发 Extender 方法调用就又回到「护栏数不到」(第二百九十五刀读数)")
+        }
+        $nMoveApply = Count-In262 $body 'vb6_UC_ExtenderMoveApply(v4[0]'
+        $nMoveDrop  = Count-In262 $body 'vb6_ComDropPackedArgs(args, argc);'
+        if ($nMoveApply -ne 1 -or $nMoveDrop -ne 3) {
+            $fail += ("R1 vb6_ComCallRcv Move arm: apply=" + $nMoveApply + " drop=" + $nMoveDrop +
+                      " (want 1 + 3: Move 支、Extender 丢弃支、dispid 认不出支 各清点一次)")
         }
     }
     $iGuard = Index-Of262 $body 'vb6_ComLateBindMiss('
     $iIf    = Index-Of262 $body 'if (vb6_ComLateBindIsMiss(disp)) {'
     if ($iIf -lt 0 -or $iIf -ne ($iGuard - 1)) {
-        $fail += ("R1 in " + $name + " the guard call must sit right under the IsMiss if-line" +
+        $fail += ("R1 in " + $rvName + " the guard call must sit right under the IsMiss if-line" +
                   " (if at " + $iIf + ", call at " + $iGuard + ")")
     }
     $iRet = -1
     for ($k = 0; $k -lt $body.Count; $k++) { if ($body[$k] -match '\breturn\b') { $iRet = $k; break } }
     if ($iRet -ge 0 -and $iGuard -gt $iRet) {
-        $fail += ("R1 in " + $name + " the guard runs after the first return (guard " + $iGuard +
+        $fail += ("R1 in " + $rvName + " the guard runs after the first return (guard " + $iGuard +
                   ", return " + $iRet + ") - 护栏必须赶在早退之前, 否则 NULL 接收者永远静默")
     }
 }
@@ -213,6 +249,26 @@ else {
         $fail += ("R2 vb6_ComLateBindIsMiss asks dispatchability before the pseudo predicate (pseudo at " + $iPseudo +
                   ", dispatchable at " + $iDisp + ") - 顺序反了会把合法宿主对象判成漏")
     }
+    # 账 (438 语义刀): 被 On Error Resume Next 吞掉的 438 之后, 链尾那一发是在**空接收者**上
+    # 求值 —— VB6 不求值它, 也就不该记 [C3_LATEBIND_MISS]。吸收这一格只许住在判定谓词里
+    # (护栏 R3 要求是纯 void 出口, 不许带 return), 且必须**先于**伪对象豁免问:
+    # 顺序反了不影响结果, 但先问伪对象会让「空接收者」永远走不到吸收那一格。
+    $iAbsorb = $missText.IndexOf('vb6_ComAbsorb438(')
+    if ($iAbsorb -lt 0) {
+        $fail += 'R2 the swallowed-438 tail (empty receiver) must be absorbed inside vb6_ComLateBindIsMiss - 少了这一格, GUISample 每读一次 ActiveForm.rtfText 就多一条假漏'
+    } elseif ($iAbsorb -gt $iPseudo) {
+        $fail += ("R2 the 438-absorption leg must come before the pseudo-exempt question (absorb at " + $iAbsorb + ", pseudo at " + $iPseudo + ")")
+    }
+}
+$absorbBody = Get-Body262 $invLines '^static int32_t vb6_ComAbsorb438\s*\('
+if ($absorbBody.Count -lt 3) { $fail += 'R2 cannot locate vb6_ComAbsorb438' }
+else {
+    $nReset = Count-In262 $absorbBody 'g_com_438_dangling = 0;'
+    if ($nReset -ne 1) { $fail += ('R2 the 438 flag must be cleared exactly once inside the absorb leg (' + $nReset + ') - 不清就不会只吸收一枚') }
+    $nAbsUses = ([regex]::Matches($invCode, 'vb6_ComAbsorb438\s*\(')).Count
+    if ($nAbsUses -ne 2) { $fail += ('R2 vb6_ComAbsorb438 sites (1 def + 1 call) = ' + $nAbsUses + ' (want 2) - 第二处调用就是第二份「谁算漏」的口径') }
+    $nFlagDef = ([regex]::Matches($invCode, 'static int32_t g_com_438_dangling\s*=')).Count
+    if ($nFlagDef -ne 1) { $fail += ('R2 definitions of g_com_438_dangling = ' + $nFlagDef + ' (want 1)') }
 }
 
 # ---- R3: 护栏不改行为 ----
@@ -266,13 +322,41 @@ if ($nHostDec -ne 1) { $fail += ("R5 declaration of vb6_Host_UnknownMemberCount 
 $nReporter = ([regex]::Matches($hostCode, 'static\s+void\s+vb6_ho_reportUnknown\s*\(')).Count
 if ($nReporter -ne 1) { $fail += ("R5 definitions of vb6_ho_reportUnknown = " + $nReporter + " (want exactly 1)") }
 $markerAll = ([regex]::Matches($hostCode, '\[C3_HOST_MEMBER_MISS #')).Count
-$wantSites = @{ $incCall = 2; $incGet = 2; $incSet = 2 }
+# 账 (438 语义刀): 各 .inc **尾部**那一处「不认识的成员」从 reportUnknown 改答 -1 + report438
+# (VB6 语义: 读侧成员不存在 = error 438, 交 On Error Resume Next 吞掉), 于是真缺口
+# 只剩原来那几处: Call=字体臂 1 / GetProp=hFont 那一臂 1 / SetProp=2 (写侧本刀未接 438,
+# 那 3 发 Icons 仍按真缺口记账)。
+# ⚠ 改这几个数必须同时改这里与台账: 「少了一处报告」= 又回到静默丢, 正是这块要防的形状。
+$wantSites = @{ $incCall = 1; $incGet = 1; $incSet = 2 }
 foreach ($inc in @($incCall, $incGet, $incSet)) {
     $ic = Strip-Comments262 ((Read-Lines262 $inc) -join "`n")
     $markerAll += ([regex]::Matches($ic, '\[C3_HOST_MEMBER_MISS #')).Count
     $n = ([regex]::Matches($ic, 'vb6_ho_reportUnknown\s*\(')).Count
     if ($n -ne $wantSites[$inc]) {
         $fail += ("R5 calls of vb6_ho_reportUnknown in " + (Split-Path -Leaf $inc) + " = " + $n + " (want " + $wantSites[$inc] + ")")
+    }
+}
+# 438 那一档的格式同样只许有一位主人, 且站点钉死 (Call / GetProp 各 1; SetProp 本刀未接 = 0)。
+# 少一枚 = 438 又变成静默 Empty; 多一枚 = 有人把真缺口也改记成 438 把缺口藏起来。
+$nRep438 = ([regex]::Matches($hostCode, 'static\s+void\s+vb6_ho_report438\s*\(')).Count
+if ($nRep438 -ne 1) { $fail += ("R5 definitions of vb6_ho_report438 = " + $nRep438 + " (want exactly 1)") }
+$marker438 = ([regex]::Matches($hostCode, '\[C3_HOST_438 #')).Count
+$want438 = @{ $incCall = 1; $incGet = 1; $incSet = 0 }
+foreach ($inc in @($incCall, $incGet, $incSet)) {
+    $ic2 = Strip-Comments262 ((Read-Lines262 $inc) -join "`n")
+    $marker438 += ([regex]::Matches($ic2, '\[C3_HOST_438 #')).Count
+    $n2 = ([regex]::Matches($ic2, 'vb6_ho_report438\s*\(')).Count
+    if ($n2 -ne $want438[$inc]) {
+        $fail += ("R5 calls of vb6_ho_report438 in " + (Split-Path -Leaf $inc) + " = " + $n2 + " (want " + $want438[$inc] + ")")
+    }
+}
+if ($marker438 -ne 1) { $fail += ("R5 the [C3_HOST_438 #] marker across uc_hostmodel.c + the three .inc = " + $marker438 + " (want exactly 1 -- the format has one owner)") }
+# 读侧那两处「成员不存在」的**返回口径**必须是 -1 (宿主模型出口据此抛 438); 仍答 1 就退化成
+# 本刀之前的「静默 Empty + 链尾假漏」。
+foreach ($inc in @($incCall, $incGet)) {
+    $ic3 = Strip-Comments262 ((Read-Lines262 $inc) -join "`n")
+    if (-not $ic3.Contains('return -1;')) {
+        $fail += ("R5 " + (Split-Path -Leaf $inc) + " no longer answers -1 for an unknown member - 调用方就分不出「认得但没值」与「没这个成员」")
     }
 }
 if ($markerAll -ne 1) { $fail += ("R5 the [C3_HOST_MEMBER_MISS #] marker across uc_hostmodel.c + the three .inc = " + $markerAll + " (want exactly 1 -- the format has one owner)") }
@@ -417,6 +501,20 @@ if ($nASet -ne 0) {
     $fail += ("R11 hand-written WM_SETFONT senders in uc_controls.c = " + $nASet +
               " (want 0) - 发信人要抄第二份, 作废那本账就有人对不上")
 }
+# 账 #305 第332刀 (账 #611 / 台账 §B12): `.ctl` 设计面那批 EDIT 也是这位发信人的住户 —— 从前这一站
+# 自己 `GetStockObject(DEFAULT_GUI_FONT)` + WM_SETFONT，交出去的是**这台机器的 GDI 缺省** (本机实测
+# SimSun -12)，而同一棵窗口树里它的宿主早就问这位主人拿了 MS Sans Serif -11 ⇒ 一棵树两套字体。
+$designEditCode = Strip-Comments262 ((Read-Lines262 $ucHostC) -join "`n")
+$nADesign = ([regex]::Matches($designEditCode, 'vb6_UC_ApplyFontToWindow\(edit, NULL\)')).Count
+if ($nADesign -ne 1) {
+    $fail += ("R11 design-edit send site (VB6 default arm) = " + $nADesign +
+              " (want 1 in uc_host.c) - 那一户退回 stock 默认字体就是第二套答案 (同树两套字体)")
+}
+$nASetHost = ([regex]::Matches($designEditCode, 'WM_SETFONT')).Count
+if ($nASetHost -ne 0) {
+    $fail += ("R11 hand-written WM_SETFONT senders in uc_host.c = " + $nASetHost +
+              " (want 0) - 发信人要抄第二份, 作废那本账就有人对不上")
+}
 
 # ---- R12: 第二百八十刀那一档 (窗体顶层**本人**答字体那一问) 的形状 ----
 # 第二百七十九刀让自注册的 UC 宿主类本人答，这一刀管**发码发出来的**那枚窗体顶层。规矩同一条:
@@ -538,6 +636,10 @@ if ($nVG2old -ne 0) { $fail += ('R16 the blanket "no value" drop is back = ' + $
 #     ScaleMode 答不出 UC 自己声明的那一档 (第二百八十八刀顺序里的第一格)。
 # 所以这一块把「写侧名字一个都不许出现」也钉住 —— 谁想接写, 必须同时把下面的 geom-writes 改成
 # 2、geom-methods 那一条改成非 0, 并带上「单位那一问已按**容器**而不是 GetParent 答」的读数。
+# 第三百零一刀按这个前提把方法形接回: 三个前置 (容器单位 / authored 容器戳 / band 行高输入)
+# 都已由二百九十七 / 二百九十九 / 二百九十刀补齐, 实测 MonthView 宿主 172x156 → 160x161 (与参考
+# 同形), ReBar 257x60 → 257x55, band 245x22 → 245x20, 且每格墨量与参考逐像素相同。
+# 方法形今天钉的是「1 个 apply 主人 + 1 处调用 → vb6_ControlMove」, 不再是 0。
 $nVG3mask = ([regex]::Matches($collCode, 'vb6_ucExtGeomMask\(')).Count
 if ($nVG3mask -ne 3) { $fail += ('R17 geometry mask owner (1 def + reader arm + write outlet) = ' + $nVG3mask + ' (want 3)') }
 $nVG3read = ([regex]::Matches($collCode, 'vb6_ucExtGeomRefresh\(rc\);')).Count
@@ -554,10 +656,18 @@ $nVG3win = ([regex]::Matches($collCode, 'MoveWindow\(|SetWindowPos\(')).Count
 if ($nVG3win -ne 0) { $fail += ('R17 hand-written window placement in uc_controls.c = ' + $nVG3win + ' (want 0; vb6_ControlMove 是唯一的摆位收口)') }
 $nVG3writes = ([regex]::Matches($collCode + $vg2Inv, 'vb6_UC_ExtenderGeomApplied')).Count
 if ($nVG3writes -ne 3) { $fail += ('R17 geometry write side (属性形) = ' + $nVG3writes + ' (want 3 = 1 def + 2 outlets; 少一枚 = 又一户只存字段不摆窗)') }
-$nVG3meth = ([regex]::Matches($collCode + $vg2Inv, 'vb6_UC_ExtenderMethod|vb6_UC_ExtenderMoveGeom')).Count
-if ($nVG3meth -ne 0) { $fail += ('R17 the Move method side is still deliberately NOT wired = ' + $nVG3meth + ' (want 0; 第二百九十五刀读数: 三种塌法, 各欠 band 行高 / itemHeight / 容器单位)') }
+$nVG3methOld = ([regex]::Matches($collCode + $vg2Inv, 'vb6_UC_ExtenderMethod|vb6_UC_ExtenderMoveGeom')).Count
+if ($nVG3methOld -ne 0) { $fail += ('R17 the withdrawn Move helpers are back = ' + $nVG3methOld + ' (want 0)') }
+# 第三百零一刀: 方法形接回, 但只许走「一个 apply 主人 + 一处调用」, 且 apply 体内只许转调
+# vb6_ControlMove (摆位的唯一收口; uc_controls.c 里手写 MoveWindow/SetWindowPos 仍钉 0)。
+$nVG3meth = ([regex]::Matches($collCode + $vg2Inv, 'vb6_UC_ExtenderMoveApply')).Count
+if ($nVG3meth -ne 3) { $fail += ('R17 the Move method side (1 def + 1 extern + 1 call site) = ' + $nVG3meth + ' (want 3; 0 = .Extender.Move 又回到「响亮地丢」，MonthView 宿主停在设计期尺寸)') }
+$nVG3moveDef = ([regex]::Matches($collCode, 'int32_t vb6_UC_ExtenderMoveApply\(double L')).Count
+if ($nVG3moveDef -ne 1) { $fail += ('R17 definition of vb6_UC_ExtenderMoveApply = ' + $nVG3moveDef + ' (want 1)') }
+$nVG3moveBody = ([regex]::Matches($collCode, 'vb6_UC_ExtenderMoveApply\(double L[\s\S]{0,600}?vb6_ControlMove\(')).Count
+if ($nVG3moveBody -ne 1) { $fail += ('R17 the Move apply hands the four slots to vb6_ControlMove = ' + $nVG3moveBody + ' (want 1; 0 = 又自己摆窗, 单位/缓存两本账)') }
 $nVG3drop = ([regex]::Matches($vg2Inv, 'vb6_ComDropPackedArgs\(args, argc\);')).Count
-if ($nVG3drop -ne 3) { $fail += ('R17 stations that drop the packed args before leaving = ' + $nVG3drop + ' (want 3 = ComCall 认不出名字那一支 + ComGetPropArg + 第二百九十五刀的 Extender 臂; 少一枚 = §B164 那一形又漏)') }
+if ($nVG3drop -ne 4) { $fail += ('R17 stations that drop the packed args before leaving = ' + $nVG3drop + ' (want 4 = ComCall 认不出名字 + ComCall 的 Move 支 + ComGetPropArg + Extender 丢弃臂; 少一枚 = §B164 那一形又漏)') }
 $nVG3dropdef = ([regex]::Matches($vg2Inv, 'static void vb6_ComDropPackedArgs\(')).Count
 if ($nVG3dropdef -ne 1) { $fail += ('R17 definition of vb6_ComDropPackedArgs = ' + $nVG3dropdef + ' (want 1)') }
 # ---- R18: 第二百九十刀那一档 (带实参的晚绑定调用: 旗标 + 按形参档收窄) 的形状 ----
@@ -600,5 +710,5 @@ if ($fail.Count -gt 0) {
     foreach ($f in $fail) { Write-Host ("FAIL " + $f) }
     exit 1
 }
-Write-Host ("PASS check_com_latebind_guard: exits=7 guarded=7 pseudo-exempt=3 order=pseudo-first guard=behavior-preserving counter-outlets=2 host-sibling=3 runner-sites=3 inline-counters=2 negative-control=2 hfont-owner=1 hfont-kind5=2 height-owner=1 height-consumers=3 name-default=ms-sans-serif apply-owner=1 apply-senders=2 self-registered=1") form-ans-owner=1 form-ans-body=1 form-ans-decl=1 form-ans-emit=1 windowless-owner=1 windowless-outlets=2 windowless-arms=2 mask-owner=1 mask-arms=2 vg-owner=1 vg-decl=1 vg-outlet=1 vg-radio-gate=3 vg-truth-guard=1 vg-sibling-setter=1 vis-owner=1 vis-window=1 vis-decl=1 vis-outlets=2 vis-zero-guard=1 vis-old-drop=0 geom-mask=3 geom-read=1 geom-units=5 geom-route=2 geom-cdecl=1 geom-cdef=1 geom-nowindow=0 geom-writes=3 geom-method=0 latebind-drop=3 call-flags=1 flag-owner=1 invoke-func-only=1 propget-hedge=1 blanket-flags=2 narrow-def=1 narrow-call=1 narrow-before-copy=1 himetric-typedef=1 ti-lcid0=1
+Write-Host ("PASS check_com_latebind_guard: exits=7 guarded=7 pseudo-exempt=3 order=pseudo-first guard=behavior-preserving counter-outlets=2 host-sibling=3 runner-sites=3 inline-counters=2 negative-control=2 hfont-owner=1 hfont-kind5=2 height-owner=1 height-consumers=3 name-default=ms-sans-serif apply-owner=1 apply-senders=3 self-registered=1") form-ans-owner=1 form-ans-body=1 form-ans-decl=1 form-ans-emit=1 windowless-owner=1 windowless-outlets=2 windowless-arms=2 mask-owner=1 mask-arms=2 vg-owner=1 vg-decl=1 vg-outlet=1 vg-radio-gate=3 vg-truth-guard=1 vg-sibling-setter=1 vis-owner=1 vis-window=1 vis-decl=1 vis-outlets=2 vis-zero-guard=1 vis-old-drop=0 geom-mask=3 geom-read=1 geom-units=5 geom-route=2 geom-cdecl=1 geom-cdef=1 geom-nowindow=0 geom-writes=3 geom-method=3 latebind-drop=4 call-flags=1 flag-owner=1 invoke-func-only=1 propget-hedge=1 blanket-flags=2 narrow-def=1 narrow-call=1 narrow-before-copy=1 himetric-typedef=1 ti-lcid0=1
 exit 0

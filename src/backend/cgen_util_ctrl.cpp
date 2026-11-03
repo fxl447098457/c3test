@@ -139,6 +139,12 @@ Vb6Type CCodeGen::controlPropType(FrmControlType ctrlType, const std::string& pr
         if (p == "linestyle" || p == "indentation") {
             return Vb6Type::Long;
         }
+        // IconSize 是 XtremeSuiteControls.TreeView 的扩展 (像素), RTL getter 给 int32_t。
+        // 原生 SysTreeView32 没有这一格 —— RTL 拿它当"预留图标列"的宽度 (挂 16x16
+        // ImageList)，见 vb6forms_treeview.c 的 SetIconSize。
+        if (p == "iconsize") {
+            return Vb6Type::Long;
+        }
         // 账 #128: 这三条 getter 走 `vb6_TvBitAsVbBool` ⇒ 答的就是 VB6 的 -1/0，
         // 所以它们与 #124 那两条同档（以前跟着"全是 int32_t"那一句一起吃 Long）。
         if (p == "checkboxes" || p == "hottracking" || p == "hideselection") {
@@ -580,6 +586,7 @@ std::string CCodeGen::getControlPropReadFn(FrmControlType ctrlType, const std::s
     case FrmControlType::TreeView:
         if (propLower == "linestyle") return "vb6_TreeView_GetLineStyle";
         if (propLower == "indentation") return "vb6_TreeView_GetIndentation";
+        if (propLower == "iconsize") return "vb6_TreeView_GetIconSize";
         if (propLower == "checkboxes") return "vb6_TreeView_GetCheckBoxes";
         if (propLower == "hottracking") return "vb6_TreeView_GetHotTracking";
         if (propLower == "hideselection") return "vb6_TreeView_GetHideSelection";
@@ -997,6 +1004,7 @@ if (propLower == "currentx") return "vb6_SetCurrentX";
     case FrmControlType::TreeView:
         if (propLower == "linestyle") return "vb6_TreeView_SetLineStyle";
         if (propLower == "indentation") return "vb6_TreeView_SetIndentation";
+        if (propLower == "iconsize") return "vb6_TreeView_SetIconSize";
         if (propLower == "checkboxes") return "vb6_TreeView_SetCheckBoxes";
         if (propLower == "hottracking") return "vb6_TreeView_SetHotTracking";
         if (propLower == "hideselection") return "vb6_TreeView_SetHideSelection";
@@ -2405,10 +2413,15 @@ void CCodeGen::emitBstrSlotStore(const std::string& target, Expr* rhs,
     if (!valueIsVariant) {
         bool comResBstr = value.compare(0, 12, "vb6_ComCall(") == 0
             || value.compare(0, 20, "vb6_ComCallByDispid(") == 0
-            || value.compare(0, 15, "vb6_ComGetProp(") == 0
-            || value.compare(0, 21, "vb6_ComGetObjectProp(") == 0;
+            || value.compare(0, 15, "vb6_ComGetProp(") == 0;
         if (comResBstr) {
             value = "vb6_VariantToString(vb6_VariantFromComResult(" + value + "))";
+        } else if (value.compare(0, 21, "vb6_ComGetObjectProp(") == 0) {
+            // 账 (M3 身份刀): 对象读交回 IDispatch* 本体, 不能当堆上 VARIANT* 解引用。
+            // 换到同一成员的值孪生 (vb6_ComGetProp) 再按字符串提取 —— 成员名一字不动。
+            std::string twinObjStr = comValueTwinForObjectReadExpr(value);
+            if (!twinObjStr.empty())
+                value = "vb6_VariantToString(vb6_VariantFromComResult(" + twinObjStr + "))";
         }
     }
     // Fix 140: RHS 是 Byte() 数组 (类成员 m_Caption 或已知字节数组变量) 且目标是
@@ -3041,16 +3054,19 @@ std::string CCodeGen::boxToVariant(Expr* expr, const std::string& cExpr) const {
     // 与 conv_cstr (Fix 121) / arg_variant (Fix 113) 既有口径一致.
     {
         // 精确匹配裸 vb6_ComCall( / vb6_ComCallByDispid( / vb6_ComGetProp(
-        // / vb6_ComGetObjectProp( (12/20/15/21 字符含左括号);
-        // 不误伤 vb6_ComCallInt/BSTR/Double/Object。
+        // (12/20/15 字符含左括号); 不误伤 vb6_ComCallInt/BSTR/Double/Object。
+        // 账 (M3 身份刀): vb6_ComGetObjectProp 交回的是 **IDispatch* 本体** (vb6com_wrap.c:129),
+        // 不是堆上 VARIANT*; 把它喂给 vb6_VariantFromComResult 是类型混淆 (读 vtable 首字当
+        // vt、再把代码地址 free 掉)。实测 tests/ctlident 的 TypeName(ActiveForm) 即崩在此。
+        // 对象指针交给 vb6_VariantFromValue 的 _Generic default 档 = vb6_VariantObject
+        // (VT_DISPATCH, 且 vb6_ComIsDispatchable 对 HWND 判否, 安全)。
         size_t cs = 0;
         while (cs < cExpr.size()
                && (cExpr[cs] == '(' || cExpr[cs] == ' ' || cExpr[cs] == '\t'
                    || cExpr[cs] == '\n' || cExpr[cs] == '\r')) cs++;
         bool comRes = (cExpr.compare(cs, 12, "vb6_ComCall(") == 0)
                    || (cExpr.compare(cs, 20, "vb6_ComCallByDispid(") == 0)
-                   || (cExpr.compare(cs, 15, "vb6_ComGetProp(") == 0)
-                   || (cExpr.compare(cs, 21, "vb6_ComGetObjectProp(") == 0);
+                   || (cExpr.compare(cs, 15, "vb6_ComGetProp(") == 0);
         if (comRes) return "vb6_VariantFromComResult(" + cExpr + ")";
     }
     // 账 #305 新账 #407 第一百七十一刀: 与上面 wrapVariantValue 同一问、同一出口 (视图值进装箱站)。

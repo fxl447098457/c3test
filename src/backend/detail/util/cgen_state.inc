@@ -524,9 +524,18 @@
     // 读上下文 (普通表达式里的 `Me.f.Level`) 不受影响, 照旧派发。
     bool suppressVirtDispatch_ = false;
 
+    // 链中对象求值旗标: visit(MemberAccessExpr) 的 generic_access 在 emitExpr(对象)
+    // 期间置 true —— 自类型过程作链中接收者 (frmMain.RibbonBar.FindTab) 的那几处
+    // 发码分支据此把 comMemberName_ 留空 (对象值已就绪, 成员名其实是被调函数名,
+    // 不能再交给 resolveComValue 解一层); 左值/成员读上下文保持原名。
+    bool inMemberObjectEmit_ = false;
+
     // 类模块标志
     bool isClassModule_ = false;
     bool isFormModule_ = false;
+    // 账 #305 第三百三十刀: 当前窗体是否 VB.MDIForm (frmDesc.formControl.controlType)。
+    // 裸 ActiveForm 只在 MDIForm 模块里合法 (MDI 活动子窗体), 用它挡普通窗体误认。
+    bool currentFormIsMDI_ = false;
 
     // Fix 010: 类模块变量注册模式 — 只填充tracking set, 不生成变量声明(已在结构体中)
     bool trackOnly_ = false;
@@ -613,6 +622,11 @@
 
     // P7.9: Window control name mapping (lowercase -> original casing for HWND vars)
     std::unordered_map<std::string, std::string> knownFormControlOriginalNames_;
+
+    // 控件名 (小写) → 设计期类型名 (如 "DockingPaneManager" → "XtremeDockingPane.DockingPane")。
+    // 控件变量名与 typelib coclass 名不一定同名 (CommandBars 同名, DockingPaneManager 不同名),
+    // 晚绑定"成员是方法还是属性"的判据必须先按类型名找回 coclass。
+    std::unordered_map<std::string, std::string> knownFormControlTypeNames_;
 
     // P20-36: 菜单项ID映射 (小写菜单名 → menuId, 与emitMenuItem/emitMenuClickDispatch一致)
     std::unordered_map<std::string, int> knownMenuIds_;
@@ -1109,6 +1123,11 @@
     // Symbol::implementsNames 注入)。 TypeName 按声明档折叠那一刀用它挡掉接口视图 (注释见
     // driver_codegen_voidfield_scan.inc)。
     const std::unordered_set<std::string>* projImplementedNames_ = nullptr;
+
+    // 账 #305 第320刀 (账 #592): .vbp 的 Title（空则 Name）—— 生成的入口点把它播种进
+    // RTL 那一格运行期真值（`vb6_SetAppTitle(L"...")`），MsgBox 的默认题头与
+    // `App.Title` 读取都只问那一格。单文件编译（无 .vbp）时为空 ⇒ 入口点一行不发。
+    std::string projectTitle_;
 
     // CoClass 身份 (tB, ai/022 B13b): stage 2.7 Pass E 求出的唯一出口 (coclassIds_)。
     // 只有 generateDllEntry 读它 —— 产品里的 CLSID / 默认接口 IID / 组名 ProgID 一律

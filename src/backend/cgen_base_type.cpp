@@ -787,6 +787,8 @@ std::string CCodeGen::mapTypeRef(ASTNode* typeRef) {
             }
             // 检查是否是枚举类型 → 基础类型int32_t (VB6枚举底层是Long)
             if (udtSym && udtSym->kind == SymbolKind::EnumType) {
+                if (std::getenv("C3_DBG_TYPEREF") && typeName.find("Docking") != std::string::npos)
+                    std::cerr << "[TYPEREF] enum name='" << typeName << "' -> int32_t\n";
                 return "int32_t";
             }
             // Delegate 类型 (tB 扩展) → intptr_t: 委托值 = 生成调用桩的地址,
@@ -873,6 +875,8 @@ std::string CCodeGen::mapTypeRef(ASTNode* typeRef) {
             // 兜底: 未知类型 (如窗体模块名、外部COM类型别名等) → void*
             // Fix 010c: 窗体模块(.frm)未注册为Class符号, 但VB6中可作为类型使用
             // 任何不是内置类型/UDT/枚举/类/COM类型的名称都视为通用对象指针
+            if (std::getenv("C3_DBG_TYPEREF"))
+                std::cerr << "[TYPEREF] unresolved name='" << typeName << "' lookup='" << lookupName << "'\n";
             return "void*";
         }
         case ASTNodeKind::ArrayTypeRef:

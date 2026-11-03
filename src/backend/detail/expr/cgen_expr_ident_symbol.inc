@@ -31,6 +31,19 @@
             lastExpr_ = readFn + "(" + formHwnd + ")";
             return;
         }
+        // 账 #305 第三百三十刀: MDIForm 的裸 ActiveForm (GUISample frmMain
+        // `ActiveForm Is Nothing` / `TypeName(ActiveForm)` / `ActiveForm.rtfText.SelRTF`,
+        // 隐式 Me.ActiveForm = MDI 活动子窗体)。Form 伪属性表里没有 activeform ——
+        // 它是 MDIForm 的对象型内建属性, 不能发 vb6_GetControlXxx。与 form_builtin
+        // 的 Me 分支同格发 COM 成员读 (vb6_ComGetObjectProp), 链式成员 (.rtfText.SelRTF)
+        // 由 generic_access 的接收者白名单 (vb6_ComGetObjectProp( 前缀) 续链;
+        // `Is Nothing` 的 == NULL 比较与 Me.ActiveForm 那条已验证路一致。
+        // MDIForm 身份闸 (currentFormIsMDI_) + 局部变量遮蔽闸。
+        if (readFn.empty() && currentFormIsMDI_ && lower == "activeform"
+            && !knownLocalVars_.count(lower)) {
+            lastExpr_ = "vb6_ComGetObjectProp(" + formHwnd + ", L\"ActiveForm\")";
+            return;
+        }
     }
 
     // Fix <vbeclipse> rev27: `Dim X As New <窗体名>` 的自动实例化守卫由
@@ -65,6 +78,15 @@
         std::string progIdWide = "L\"" + foundSym->comProgId + "\"";
         std::string methodName = foundSym->comGlobalNsMethodName;
         lastExpr_ = "vb6_ComCallObject(vb6_CreateObject(" + progIdWide + "), L\"" + methodName + "\", NULL, 0)";
+        return;
+    }
+
+    // typelib appobject 全局单例 (Codejock *GlobalSettings 家族): 裸类名作值
+    // (`Set x = CommandBarsGlobalSettings`) → 进程级单例访问器。成员访问不走
+    // 这里 (由 form_builtin 的成员分支先行接管)。
+    if (foundSym && foundSym->kind == SymbolKind::ComClass && foundSym->comIsAppObject
+        && !knownObjectVars_.count(lower) && !knownTypedComVars_.count(lower)) {
+        lastExpr_ = std::string("vb6_ComGlobalInstance(L\"") + foundSym->comProgId + "\")";
         return;
     }
 

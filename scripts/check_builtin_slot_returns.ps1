@@ -1,8 +1,9 @@
 ﻿# check_builtin_slot_returns.ps1 —— 「内置出口交出来的 C 是不是整只槽」这张表与 RTL 对账（账 #305 §B146，第三十九刀）
 #
-# 为什么要有这一道：src/backend/cgen_util_type.cpp 的 variantPrefixes 是一枚**手写清单**，
-# 而它回答的那个问句（「vb6_X(...) 交回来的是 vb6_VARIANT 槽还是裸标量」）的答案**住在 RTL 的
-# 声明里**。两份从不汇合 ⇒ 两个方向都会走散，且都贵：
+# 为什么要有这一道：variantPrefixes（名单本体在 checked-in 生成物
+# src/backend/detail/expr/cgen_variant_slot_prefixes.inc，由 scripts/gen_variant_slot_prefixes.ps1
+# 从 RTL 派生）回答的那个问句（「vb6_X(...) 交回来的是 vb6_VARIANT 槽还是裸标量」）的答案
+# **住在 RTL 的声明里**。这份表与 RTL 两个方向都会走散，且都贵：
 #   少一名 = 消费点按裸标量发码。实物（第三十九刀量到，BASE 真编译 6 条错）：
 #          `CDec(1234567) + 1` 发成 (int32_t)(vb6_CDec(...) + 1) => C2088「+ 对于 struct 非法」，
 #          `d = CDec("2.5")` => C2440。整条夹具编不过。
@@ -31,6 +32,9 @@ $ErrorActionPreference = 'Stop'
 $Root = Split-Path -Parent $PSScriptRoot
 $typeCpp = Join-Path $Root 'src\backend\cgen_util_type.cpp'
 if (-not (Test-Path -LiteralPath $typeCpp)) { Write-Host ('FAIL: 读不到 ' + $typeCpp); exit 1 }
+# 名单本体已是 checked-in 生成物 (scripts/gen_variant_slot_prefixes.ps1 从 RTL 派生)。
+$tblInc = Join-Path $Root 'src\backend\detail\expr\cgen_variant_slot_prefixes.inc'
+if (-not (Test-Path -LiteralPath $tblInc)) { Write-Host ('FAIL: 读不到 ' + $tblInc); exit 1 }
 
 function Strip-CComments([string]$t) {
     $t = [regex]::Replace($t, '/\*[\s\S]*?\*/', ' ')
@@ -38,10 +42,10 @@ function Strip-CComments([string]$t) {
     return $t
 }
 
-# ---- 1) 那张手写的表 ----
-$srcRaw = [IO.File]::ReadAllText($typeCpp)
-$m = [regex]::Match($srcRaw, '(?s)static const std::vector<std::string> variantPrefixes = \{(?<body>.*?)\n    \};')
-if (-not $m.Success) { Write-Host 'FAIL: 在 cgen_util_type.cpp 里找不到 variantPrefixes 的初始化块（表被改名/挪走了？）'; exit 1 }
+# ---- 1) 那张表（生成物 .inc） ----
+$srcRaw = [IO.File]::ReadAllText($tblInc)
+$m = [regex]::Match($srcRaw, '(?s)static const std::vector<std::string> variantPrefixes = \{(?<body>.*?)\};')
+if (-not $m.Success) { Write-Host 'FAIL: 在 cgen_variant_slot_prefixes.inc 里找不到 variantPrefixes 的初始化块（表被改名/挪走了？）'; exit 1 }
 $tbl = @{}
 foreach ($q in [regex]::Matches($m.Groups['body'].Value, '"(vb6_[A-Za-z0-9_]+)\("')) { $tbl[$q.Groups[1].Value] = $true }
 $tableNames = @($tbl.Keys | Sort-Object)
@@ -104,9 +108,12 @@ foreach ($n in @($rtlPtr.Keys | Sort-Object)) {
 # ---- 5) R5: 槽元素读的「认文本」那一问只许住在权威那张文件里 ----
 $slotLit = 'vb6_VariantArray(?:Get|GetND|Set|SetND|ElemPtr|ElemPtrND)\('
 $typeFull = (Resolve-Path -LiteralPath $typeCpp).Path
+# 名单生成物 (.inc) 不是「第二份抄法」: 它只是槽前缀数据, 不回答「是不是元素读」那一问。
+$tblFull = (Resolve-Path -LiteralPath $tblInc).Path
 $authHits = 0
 $litRe = '"(?:[^"\\]|\\.)*"'
 foreach ($f in $beFiles) {
+    if ($f.FullName -eq $tblFull) { continue }
     $t = Strip-CComments ([IO.File]::ReadAllText($f.FullName))
     foreach ($lit in [regex]::Matches($t, $litRe)) {
         if (-not [regex]::IsMatch($lit.Value, $slotLit)) { continue }
@@ -116,6 +123,31 @@ foreach ($f in $beFiles) {
     }
 }
 if ($authHits -lt 3) { Write-Host ('FAIL R5: 权威文件里只数出 ' + $authHits + ' 处槽元素读字面量 (<3) —— 扫描读空, R5 是一条绿着的假判据'); exit 1 }
+
+# ---- 6) R6/R7: Print#/Write# 的字符串分流**不许再养名字名单**（第二步的删除不可回潮） ----
+# 旧实现是 34 名 C 出口名表 (bstrFuncs + isBstrExpr)，两份 visitor 各抄一遍。删掉之后
+# 判据只剩两问：inferExprType==String，以及发射形状（BSTR 槽/IIf 串支/数组元素/静态变量）。
+# 名字表一旦回来，类型推断再退化也不会红 —— 那正是本刀要防的回潮。
+$fileIoCpp = Join-Path $Root 'src\backend\stmt\cgen_file_io.cpp'
+if (-not (Test-Path -LiteralPath $fileIoCpp)) { Write-Host ('FAIL R6: 读不到 ' + $fileIoCpp); exit 1 }
+$fileIo = Strip-CComments ([IO.File]::ReadAllText($fileIoCpp))
+if ($fileIo -match 'bstrFuncs|isBstrExpr') { $viol += 'R6 名字名单回潮: cgen_file_io.cpp 里又出现了 bstrFuncs / isBstrExpr（第二步已删；分流只许走两问）' }
+# 第三刀 (账 #608/第331刀) 把两份 visitor 的 lambda 收成一位主人 fileOutArgIsBstr:
+#   ① 语义类型 (inferExprType==String) 是主判据，形状只作补充，knownBstrVars_ 只兜底裸标识符;
+#   ② 两条 visitor (Print#/Write#) 与窗体面 Print 必须都转调这一位主人 —— 各自再抄一份就是
+#      第二个判据，名字/形状会重新变成主判据。
+$ownerHits = [regex]::Matches($fileIo, 'bool\s+CCodeGen::fileOutArgIsBstr\(').Count
+if ($ownerHits -ne 1) { $viol += ('R7 「这枚实参是不是 BSTR」的主人应为 1 枚，实测 ' + $ownerHits) }
+$isStringItemHits = [regex]::Matches($fileIo, 'auto\s+isStringItem\s*=').Count
+if ($isStringItemHits -ne 0) { $viol += ('R7 isStringItem 抄本回潮: ' + $isStringItemHits + ' 处 (分流口只许住 fileOutArgIsBstr)') }
+if ($fileIo -notmatch 'inferExprType\(argNode\)\s*==\s*Vb6Type::String') { $viol += 'R7 主人不再问 inferExprType（类型那一问被拆掉，只剩形状猜测）' }
+foreach ($needle in @('vb6_BSTR', 'vb6_IIfBSTR', 'VB6_SA_AT(BSTR,', 'knownBstrVars_')) {
+    if ($fileIo -notmatch [regex]::Escape($needle)) { $viol += ('R7 主人缺发射形状判据: ' + $needle) }
+}
+$siteHits = [regex]::Matches($fileIo, 'fileOutArgIsBstr\(val,\s*\*expr\)').Count
+if ($siteHits -ne 2) { $viol += ('R7 Print#/Write# 转调主人的站点应为 2 处，实测 ' + $siteHits) }
+$formHits = [regex]::Matches($fileIo, 'fileOutArgBstrExpr\(val,\s*\*expr\)').Count
+if ($formHits -ne 1) { $viol += ('R7 窗体面 Print 转调主人的站点应为 1 处，实测 ' + $formHits) }
 
 Write-Host ('census: table=' + $tableNames.Count + ' rtlSlot=' + $rtlSlot.Keys.Count +
             ' rtlPtr=' + $rtlPtr.Keys.Count + ' rtlMacro=' + $rtlMacro.Keys.Count +
@@ -128,5 +160,5 @@ if ($viol.Count -gt 0) {
     Write-Host ('FAIL builtin_slot_returns: ' + $viol.Count + ' 条违规 —— 修法是把表与 RTL 对账 (补名/撤名), 不是往白名单里加名字; 真要走例外请连带写清理由并重跑 §B146 那把 400 份 A/B')
     exit 1
 }
-Write-Host 'PASS builtin_slot_returns (R1..R5)'
+Write-Host 'PASS builtin_slot_returns (R1..R7)'
 exit 0

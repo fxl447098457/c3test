@@ -121,7 +121,14 @@
             c_.emitLine("vb6_SetMinButton((void*)hwnd, 0);");
         }
         auto wsIt = frmDesc.formControl.properties.find("WindowState");
-        if (wsIt != frmDesc.formControl.properties.end() && wsIt->second.intValue != 0) {
+        /* 账 (MDI 布局刀): MDI 子窗的设计期 WindowState 只**登记**, 由 vb6_ShowForm
+         * 在子窗上屏之后落地 —— 这一趟是 WM_CREATE, 子窗此刻还没归入 MDICLIENT
+         * (WM_MDICREATE 尚未返回), ShowWindow(SW_SHOWMAXIMIZED) 只会把它变成 0×0
+         * (夹具 tests/guisample/mdimax 实测)。非 MDI 窗体保持原有的建窗即发。 */
+        if (isMDIChild) {
+            if (wsIt != frmDesc.formControl.properties.end() && wsIt->second.intValue != 0)
+                c_.emitLine("vb6_SetDesignWindowState((void*)hwnd, " + std::to_string((int)wsIt->second.intValue) + ");");
+        } else if (wsIt != frmDesc.formControl.properties.end() && wsIt->second.intValue != 0) {
             c_.emitLine("vb6_SetWindowState((void*)hwnd, " + std::to_string((int)wsIt->second.intValue) + ");");
         }
         // 账 #197: 窗体自己那一档走同一个出口 —— `ScaleMode = 3  'Pixel` 的窗体里控件几何、
@@ -153,8 +160,8 @@
     // Fix 058: Form_Load 用 PostMessage 延迟执行, 避免在 WM_CREATE 中
     // 执行 COM 操作 (如 Controls.Add) 导致消息死锁
     // 调用VB6 Form_Load事件 (仅当存在时调用)
-    std::string formLoadFn = cProcName("Form_Load", AccessLevel::Private);
-    auto* formLoadSym = symTab_.lookup("Form_Load");
+    std::string formLoadFn = cProcName(std::string(formEvtBase334) + "_Load", AccessLevel::Private);
+    auto* formLoadSym = symTab_.lookup(std::string(formEvtBase334) + "_Load");
     if (formLoadSym) {
         c_.emitLine("PostMessageW(hwnd, 0x7FF0, 0, 0);  /* defer Form_Load */");
     }
@@ -268,7 +275,7 @@
         // 用 static 标志保证整个进程只走一次 (0x7FF0 理论上只会到一次, 保险起见)。
         {
             auto* initSym43 = symTab_.lookup(formName + "_Initialize");
-            if (!initSym43) initSym43 = symTab_.lookup("Form_Initialize");
+            if (!initSym43) initSym43 = symTab_.lookup(std::string(formEvtBase334) + "_Initialize");
             if (initSym43) {
                 std::string initFn = cProcName(initSym43->name, AccessLevel::Private);
                 c_.emitLine("static int vb6_formInited_" + cIdent(formName) + " = 0;");
@@ -284,8 +291,15 @@
         // Fix 112: Load 完成后再触发首次 Form_Resize (与 VB6 的 Load→Resize 顺序一致)
         c_.emitLine("vb6_formLoaded_" + cIdent(formName) + " = 1;");
         {
-            std::string resizeFnLoad = cProcName("Form_Resize", AccessLevel::Private);
-            if (symTab_.lookup(formName + "_Resize") || symTab_.lookup("Form_Resize")) {
+            std::string resizeFnLoad = cProcName(std::string(formEvtBase334) + "_Resize", AccessLevel::Private);
+            // 守卫只认**本模块自有**的处理器 (与 show/dispatch 两处同批) ——
+            // 裸名 lookup 命中跨模块注入的别家 Form_Resize ⇒ LNK2019。
+            auto hasOwnResizeCr = [&](const char* nm) -> bool {
+                Symbol* sCr = symTab_.lookupModule(nm);
+                return sCr && !sCr->isExternal;
+            };
+            if (hasOwnResizeCr((formName + "_Resize").c_str()) || hasOwnResizeCr("Form_Resize")
+                || hasOwnResizeCr((std::string(formEvtBase334) + "_Resize").c_str())) {
                 c_.emitLine("{ extern void " + resizeFnLoad + "(); " + resizeFnLoad + "(); }");
             }
         }
@@ -540,22 +554,40 @@
     }
     // Fix 142: 容器(Frame/PictureBox)内子控件 — ID 从 200 起, DFS 顺序与
     // cgen_form_frame_menu.inc 的创建循环完全一致 (跳过 Menu 与无 Win32 类控件).
+    //
+    // 账 #305 第三百六刀 (第二格): 这一趟的「谁算容器 / 谁占一个号」必须与创建那一趟
+    // **逐格对齐**, 否则 id 会错位、UC 容器里的按钮干脆没有派发。实测 ComCtlsDemo
+    // MainForm 的 CoolBar1 是**工程内 UserControl 容器**, 里面的原生按钮 Command4
+    // ("Pager Demo") 由创建侧照常给了 id=201, 而这里原来只认 Frame/PictureBox/SSTab
+    // ⇒ 既不进 CoolBar1, 也不给 UC 子控件占号 ⇒ Command4_Click 定义了却无人调用,
+    // 点下去什么也不发生 (参考那台弹 "Pager Demo")。
+    // 口径与创建侧同源 (账 #167 那条): 容器 = controlIsContainerType || findUserControlSpec;
+    // 占号 = UC 子控件也占 (创建侧同样 childCtrlId++)。
     {
+        auto isContainerLike306 = [&](const FrmControl& c) {
+            return controlIsContainerType(c) || findUserControlSpec(c.controlTypeName) != nullptr;
+        };
         int childCmdId142 = 200;
         auto walkCmdChildren142 = [&](auto&& self, const FrmControl& container) -> void {
             for (const auto& child : container.children) {
                 if (child.controlType == FrmControlType::Menu) continue;
+                // 工程内 UserControl 子控件: 创建侧占号, 事件走 UC 自己那条 sink。
+                if (findUserControlSpec(child.controlTypeName)) {
+                    childCmdId142++;
+                    if (!child.children.empty()) self(self, child);
+                    continue;
+                }
                 const char* childClass142 = FrmParser::controlTypeToWin32Class(child.controlType);
                 if (!childClass142) continue;
                 emitCommandDispatch142(child, childCmdId142);
                 childCmdId142++;
-                if (!child.children.empty() && controlIsContainerType(child)) {   // 账 #167: 原来少认 SSTab
+                if (!child.children.empty() && isContainerLike306(child)) {   // 账 #167: 原来少认 SSTab
                     self(self, child);
                 }
             }
         };
         for (const auto& ctrl : frmDesc.formControl.children) {
-            if (!ctrl.children.empty() && controlIsContainerType(ctrl)) {   // 账 #167: 原来少认 SSTab
+            if (!ctrl.children.empty() && isContainerLike306(ctrl)) {   // 账 #167/#305-306: 含 UC 容器
                 walkCmdChildren142(walkCmdChildren142, ctrl);
             }
         }

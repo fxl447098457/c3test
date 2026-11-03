@@ -3,6 +3,90 @@
 // 内容 = 原文件第 12~405 行，逐行未改。
 
     if (!node.target || !node.value) return;
+    // 账 #305 第三百三十三刀: 对象变量默认属性 Let (GUISample frmPropertyGrid:60
+    // `Item = Item + 6`, Item 是 Dim As PropertyGridItem 的局部对象变量, 无 Set)。
+    // VB6 语义: 两端都走 DISPID 0 默认属性 —— Item.<Def> = Item.<Def> + 6。
+    // 此前裸发 C `Item = (Item + 6);` —— iface 指针只前向声明, 算术取 sizeof
+    // → C2036 (未知大小)。窄匹配: 目标是带默认成员名的 typed COM 变量且 RHS 是
+    // 二目 `+`; 两臂中"带默认成员的对象裸名"折 vb6_ComGetProp 默认读, 标量臂
+    // vb6_VariantFromValue 包; 求和 vb6_VarAddV, 回写 vb6_ComSetProp。
+    if (node.target->kind == ASTNodeKind::IdentifierExpr
+        && node.value->kind == ASTNodeKind::BinaryExpr) {
+        auto& tgtDef333 = static_cast<IdentifierExpr&>(*node.target);
+        std::string tgtLower333 = Symbol::toLower(tgtDef333.name);
+        bool isRetSlot333 = currentProc_
+                            && Symbol::toLower(currentProc_->name) == tgtLower333;
+        auto itDef333 = knownTypedComVars_.find(tgtLower333);
+        auto& bin333 = static_cast<BinaryExpr&>(*node.value);
+        if (!isRetSlot333 && itDef333 != knownTypedComVars_.end() && itDef333->second
+            && !itDef333->second->comDefaultMemberRealName.empty()) {
+            // 臂折叠: 裸名 typed COM 变量 (带默认成员) → 默认属性读; 返回空串 = 标量
+            auto armFold333 = [&](ASTNode* opNode) -> std::string {
+                if (!opNode) return "";
+                if (opNode->kind != ASTNodeKind::IdentifierExpr) return "";
+                auto& opId = static_cast<IdentifierExpr&>(*opNode);
+                auto itOp = knownTypedComVars_.find(Symbol::toLower(opId.name));
+                if (itOp == knownTypedComVars_.end() || !itOp->second
+                    || itOp->second->comDefaultMemberRealName.empty()) return "";
+                return "vb6_VariantFromComResult(vb6_ComGetProp((void*)" + cIdent(opId.name)
+                     + ", L\"" + itOp->second->comDefaultMemberRealName + "\"))";
+            };
+            std::string a333 = armFold333(bin333.left.get());
+            std::string b333 = armFold333(bin333.right.get());
+            if (a333.empty()) {
+                emitExpr(*bin333.left);
+                a333 = "vb6_VariantFromValue(" + std::move(lastExpr_) + ")";
+            }
+            if (b333.empty()) {
+                emitExpr(*bin333.right);
+                b333 = "vb6_VariantFromValue(" + std::move(lastExpr_) + ")";
+            }
+            c_.emitLine("vb6_ComSetProp((void*)" + cIdent(tgtDef333.name) + ", L\""
+                        + itDef333->second->comDefaultMemberRealName
+                        + "\", vb6_ComPackVariant(vb6_VarAddV(" + a333 + ", " + b333 + ")));  /* default prop let (obj arith) */");
+            return;
+        }
+    }
+    // 账 #305 第M刀: typed COM 变量 + **标量 RHS** 的默认属性 Let。
+    // 上面那格只接 `Item = Item + 6`(二目 +); GUISample frmPropertyGrid:72 的
+    // `Item = "2.0.0"` 仍落普通赋值 ⇒ `Item = vb6_BSTR_FromStr(L"2.0.0")`
+    // 把 `vb6_ComIface_IPropertyGridItem*` 指针覆盖成 BSTR 指针, 下游
+    // `Item.Parent` / `Item.Tag` / `Item.Parent.Caption` 全部变成
+    // kind=notdispatchable / null 的晚绑定 miss(实测 out_before: 4 发)。
+    // VB6 语义: 无 Set 的对象变量赋值就是写 DISPID 0 默认成员
+    // (PropertyGridItem 的默认成员 = Value)。RHS 若也是带默认成员的 typed COM
+    // 裸名, 先折默认属性读, 否则按普通表达式发, 统一装箱回写。
+    if (node.target->kind == ASTNodeKind::IdentifierExpr) {
+        auto& tgtScalar = static_cast<IdentifierExpr&>(*node.target);
+        std::string tgtLowerScalar = Symbol::toLower(tgtScalar.name);
+        bool isRetSlotScalar = currentProc_
+                               && Symbol::toLower(currentProc_->name) == tgtLowerScalar;
+        auto itDefScalar = knownTypedComVars_.find(tgtLowerScalar);
+        if (!isRetSlotScalar && itDefScalar != knownTypedComVars_.end()
+            && itDefScalar->second
+            && !itDefScalar->second->comDefaultMemberRealName.empty()) {
+            std::string rhsScalar;
+            if (node.value->kind == ASTNodeKind::IdentifierExpr) {
+                auto& rhsId = static_cast<IdentifierExpr&>(*node.value);
+                auto itRhs = knownTypedComVars_.find(Symbol::toLower(rhsId.name));
+                if (itRhs != knownTypedComVars_.end() && itRhs->second
+                    && !itRhs->second->comDefaultMemberRealName.empty()) {
+                    rhsScalar = "vb6_VariantFromComResult(vb6_ComGetProp((void*)"
+                              + cIdent(rhsId.name) + ", L\""
+                              + itRhs->second->comDefaultMemberRealName + "\"))";
+                }
+            }
+            if (rhsScalar.empty()) {
+                emitExpr(*node.value);
+                rhsScalar = "vb6_VariantFromValue(" + std::move(lastExpr_) + ")";
+            }
+            c_.emitLine("vb6_ComSetProp((void*)" + cIdent(tgtScalar.name) + ", L\""
+                        + itDefScalar->second->comDefaultMemberRealName
+                        + "\", vb6_ComPackVariant(" + rhsScalar
+                        + "));  /* default prop let (obj scalar) */");
+            return;
+        }
+    }
     // P22: Date$/Time$ statement interception (Date$ = "12-31-2025" / Time$ = "23:59:59")
     if (node.target->kind == ASTNodeKind::IdentifierExpr) {
         auto& _tgtId22 = static_cast<IdentifierExpr&>(*node.target);
@@ -401,6 +485,23 @@
             // Check if object is NOT a known variable → assume module name
             auto* objSym = symTab_.lookup(objIdent.name);
             if (!objSym) objSym = symTab_.lookupModule(objIdent.name);
+            // 跨模块窗体**内建属性写** (`frmEditEvent.BorderStyle = 3`, frmInbox:1170):
+            // 读侧 (form_builtin external-form) 交 vb6_GetBorderStyle(hwnd), 写侧
+            // 必须走配对的 vb6_SetBorderStyle(hwnd, v) —— 此前落 Module.var 回退发
+            // `vb6_GetBorderStyle(hwnd) = 3` (C2106 非左值)。
+            if (objLower != Symbol::toLower(moduleName_)
+                && knownFormModuleNames_.count(objLower)) {
+                std::string wfEf = getControlPropWriteFn(FrmControlType::Form, maExpr.memberName);
+                if (!wfEf.empty()) {
+                    std::string hwndEf = "vb6_form_hwnd_" + cIdent(objIdent.name) + "()";
+                    emitExpr(*node.value);
+                    std::string valEf = std::move(lastExpr_);
+                    valEf = controlPropValueExpr(wfEf, valEf, *node.value);
+                    c_.emitLine(wfEf + "(" + hwndEf + ", " + valEf + ");  /* external form prop write */");
+                    return;
+                }
+            }
+
             bool isVarName = (objSym && (objSym->kind == SymbolKind::Variable || objSym->kind == SymbolKind::Parameter));
             // M22-fix: 补充检查cgen层跟踪集合，防止过程级UDT/类变量被误判为模块名
             if (!isVarName && knownUdtVars_.count(objLower)) isVarName = true;
@@ -412,6 +513,37 @@
             if (!isVarName && knownObjectVars_.count(objLower)) isVarName = true;
             if (!isVarName && knownTypedComVars_.count(objLower)) isVarName = true;
             if (!isVarName && knownIfaceVars_.count(objLower)) isVarName = true;
+            // 自类型过程作赋值目标 (`RibbonBar.Minimized = ...` / `RibbonBar.FontHeight = n`,
+            // frmMain:426/434/1042 — `Public Function RibbonBar() As RibbonBar` 过程名=
+            // 返回的 typelib 类名)。先调过程得 IDispatch, 属性按 COM SetProp 写。
+            // 此前这里 objSym(Function) 只认"objLower==当前过程名"的 FnRet 形状,
+            // 其余落 Module.var 回退/FnRetObj 发 vb6_ComSetProp((void*), ...) 空接收者。
+            if (!isVarName) {
+                // 模块作用域查找 (认 $pg 键) —— 全表 lookup 先命中同名 typelib ComClass。
+                Symbol* stSymAs0 = symTab_.lookupModuleByKind(objIdent.name, SymbolKind::Function);
+                if (!stSymAs0) stSymAs0 = symTab_.lookupModuleByKind(objIdent.name, SymbolKind::PropertyGet);
+                objSym = stSymAs0;
+            }
+            if (!isVarName && objSym
+                && (objSym->kind == SymbolKind::Function || objSym->kind == SymbolKind::PropertyGet)
+                && !objSym->variableTypeName.empty()
+                && Symbol::toLower(objSym->variableTypeName) == objLower
+                && !knownLocalVars_.count(objLower)
+                && !(currentProc_ && Symbol::toLower(currentProc_->name) == objLower)) {
+                std::string stModAs0 = objSym->isExternal ? objSym->sourceModule : moduleName_;
+                std::string stNameAs0 = objSym->name;
+                if (objSym->kind == SymbolKind::PropertyGet)
+                    stNameAs0 = "prop_get_" + stNameAs0;
+                std::string stCallAs0 = cProcName(stNameAs0, objSym->access, stModAs0)
+                                      + (isClassModule_ ? "((void*)me)" : "()");
+                emitExpr(*node.value);
+                std::string valAs0 = std::move(lastExpr_);
+                std::string packAs0 = comPackExpr(*node.value);
+                valAs0 = comUnpackForPack(packAs0, valAs0);
+                c_.emitLine("vb6_ComSetProp(" + stCallAs0 + ", L\"" + maExpr.memberName
+                            + "\", " + packAs0 + "(" + valAs0 + "));  /* self-typed proc SetProp */");
+                return;
+            }
             // Fix <vbeclipse>: 本模块自己的 Property Get 也是合法"对象表达式"
             // (ucSplitBar.ctl:161 `Folder.Relationship` / :176
             //   `Folder.Ratio = NewRatio` — Folder 是 Property Get 返回 Folder 类)。
@@ -575,6 +707,81 @@
             }
 
             if (!isVarName && !knownFormControls_.count(objLower)) {
+                if (std::getenv("C3_DBG_ST")) {
+                std::cerr << "[ST-M22] obj=" << objIdent.name << " mem=" << maExpr.memberName
+                          << " isVar=" << isVarName << " forms=" << knownFormModuleNames_.count(objLower)
+                          << " wf=" << getControlPropWriteFn(FrmControlType::Form, maExpr.memberName) << std::endl;
+            }
+            // typelib appobject 全局单例的属性写 (`CommandBarsGlobalSettings.App = App`):
+                // 与读取侧 (cgen_expr_member_form_builtin) 同一判定, 走 COM SetProp。
+                // 此前落 Module.var 回退发成 vb6_X_GlobalSettings_App (C2065, frmMain:793)。
+                {
+                    Symbol* aoSymAs = symTab_.lookup(objIdent.name);
+                    if (aoSymAs && aoSymAs->kind == SymbolKind::ComClass && aoSymAs->comIsAppObject
+                        && !knownObjectVars_.count(objLower) && !knownTypedComVars_.count(objLower)) {
+                        // `GlobalSettings.App = App` 特形: RHS 是 VB6 App 伪对象 — 编译版
+                        // 没有 App 的 COM 对象 (ident_dispatch 发 (void*)0 哨兵)。NULL 塞进
+                        // Codejock 的 put_App ⇒ 对方答类型不匹配 (Run-time error 13, 启动即弹)。
+                        // 整句跳过 (对方内部有默认 App 解析)。
+                        if (node.value->kind == ASTNodeKind::IdentifierExpr
+                            && Symbol::toLower(static_cast<IdentifierExpr&>(*node.value).name) == "app"
+                            && !knownLocalVars_.count("app") && !knownObjectVars_.count("app")) {
+                            c_.emitLine("/* appobject .App = App skipped (no App COM object in compiled exe) */");
+                            return;
+                        }
+                        std::string instAs = std::string("vb6_ComGlobalInstance(L\"") + aoSymAs->comProgId + "\")";
+                        emitExpr(*node.value);
+                        std::string valAs = std::move(lastExpr_);
+                        Vb6Type valTAs = inferExprType(*node.value);
+                        std::string packAs = "vb6_ComPackValue";
+                        if (valTAs == Vb6Type::Object || valTAs == Vb6Type::Variant) {
+                            packAs = "vb6_ComPackValue";
+                        } else if (valTAs == Vb6Type::String) {
+                            packAs = "vb6_ComPackBSTR";
+                        } else if (valTAs == Vb6Type::Long || valTAs == Vb6Type::Integer
+                                || valTAs == Vb6Type::Boolean) {
+                            packAs = "vb6_ComPackInt";
+                        } else if (valTAs == Vb6Type::Double || valTAs == Vb6Type::Single
+                                || valTAs == Vb6Type::Date) {
+                            packAs = "vb6_ComPackDouble";
+                        }
+                        valAs = comUnpackForPack(packAs, valAs);
+                        c_.emitLine("vb6_ComSetProp(" + instAs + ", L\"" + maExpr.memberName
+                                    + "\", " + packAs + "(" + valAs + "));  /* appobject SetProp */");
+                        return;
+                    }
+                }
+                // 账 #305 第M刀: MDIForm 的裸 `ActiveForm.Caption = v` 写侧。
+                // 读侧 (cgen_expr_member_form_builtin / cgen_expr_ident_symbol) 已按
+                // Me.ActiveForm 发 COM 读, 写侧这里此前落到 Module.var 回退,
+                // 发出 `vb6_ActiveForm_Caption = ...` (C2065 未声明标识符, 实测
+                // tests\ctlident 编译失败)。与读侧同一判定 (currentFormIsMDI_ +
+                // 局部变量遮蔽闸), 接收者取当前窗体 HWND, 成员走 COM SetProp。
+                if (currentFormIsMDI_ && objLower == "activeform"
+                    && !knownLocalVars_.count(objLower)) {
+                    std::string formHwndLhs = "vb6_hwnd_" + moduleName_;
+                    auto itOrigLhs = knownFormControlOriginalNames_.find(knownFormName_);
+                    if (itOrigLhs != knownFormControlOriginalNames_.end())
+                        formHwndLhs = "vb6_hwnd_" + cIdent(itOrigLhs->second);
+                    emitExpr(*node.value);
+                    std::string valLhs = std::move(lastExpr_);
+                    Vb6Type valTLhs = inferExprType(*node.value);
+                    std::string packLhs = "vb6_ComPackValue";
+                    if (valTLhs == Vb6Type::String) {
+                        packLhs = "vb6_ComPackBSTR";
+                    } else if (valTLhs == Vb6Type::Long || valTLhs == Vb6Type::Integer
+                            || valTLhs == Vb6Type::Boolean) {
+                        packLhs = "vb6_ComPackInt";
+                    } else if (valTLhs == Vb6Type::Double || valTLhs == Vb6Type::Single
+                            || valTLhs == Vb6Type::Date) {
+                        packLhs = "vb6_ComPackDouble";
+                    }
+                    valLhs = comUnpackForPack(packLhs, valLhs);
+                    c_.emitLine("vb6_ComSetProp((void*)vb6_ComGetObjectProp(" + formHwndLhs
+                                + ", L\"ActiveForm\"), L\"" + maExpr.memberName + "\", "
+                                + packLhs + "(" + valLhs + "));  /* MDIForm.ActiveForm SetProp */");
+                    return;
+                }
                 // Module.varName = expr
                 // When module is #included, use unprefixed name
                 std::string modName = objIdent.name;

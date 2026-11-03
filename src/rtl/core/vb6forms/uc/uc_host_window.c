@@ -37,6 +37,23 @@ static void vb6_uc_fillAmbient(HDC dc, int32_t w, int32_t h) {
     DeleteObject(b);
 }
 
+/* 账 #305 第三百刀: VB6 交给 VB 代码的那张 hDC 上**选着的字体 = 这枚控件自己的 Font**。
+   我方那两张离屏位图 DC 是 CreateCompatibleDC 造的, 缺省选着的是 GDI 的 SYSTEM_FONT
+   (120 DPI 下 "FrameW1" 墨迹 70x12 像素) —— 于是用户代码里不经我方出口、直接拿 DC 落笔
+   的写法就整块换字: ComCtlsDemo 第二页 FrameW 的题头又粗又大, 而参考那台同一枚
+   = MS Sans Serif -13 常规体 (墨迹 55x12; .local/k306/render2.py 把 SYSTEM_FONT 那一档
+   单独量出来正好 70x12 才定性的)。
+   ⚠ 这里只许读那一格存储 (vb6_ControlFontStored), **不许**换成 vb6_ControlFont:
+   后者要 SendMessage(WM_GETFONT), 而本站是从 vb6_uc_push/paint 里进来的 —— 实发过一发,
+   进程当场 0xC0000409 (fastfail)。那两格答案本来就同源 (宿主窗口的 WM_GETFONT 只答这一格)。
+   没交字体 (答空) 时不动 DC, 老行为不变。 */
+static void vb6_uc_selectOwnFont(HDC dc, HWND hwnd) {
+    HFONT hf;
+    if (!dc || !hwnd) return;
+    hf = vb6_ControlFontStored(hwnd);   /* 只读那一格存储: 宿主窗口 WM_GETFONT 本就走这一格, 不进消息面 */
+    if (hf) SelectObject(dc, hf);
+}
+
 // ============================================================
 // 账 #305 第二百九十二刀: AutoRedraw 持久表面
 //
@@ -65,7 +82,9 @@ static void vb6_uc_adEnsure(vb6_UCRec* r) {
 
 HDC vb6_uc_autoRedrawDC(vb6_UCRec* r) {
     vb6_uc_adEnsure(r);
-    return (r && r->adSurf.memDC) ? r->adSurf.memDC : NULL;
+    if (!r || !r->adSurf.memDC) return NULL;
+    vb6_uc_selectOwnFont(r->adSurf.memDC, r->hwnd);   /* 账 #305 300: 交出去的那张 DC 得带自己的字体 */
+    return r->adSurf.memDC;
 }
 
 void vb6_uc_autoRedrawSet(vb6_UCRec* r, int32_t on) {
@@ -144,6 +163,7 @@ static void vb6_uc_paintInto(HWND hwnd, vb6_UCRec* r, HDC target,
     vb6_UCDib dib;
     memset(&dib, 0, sizeof(dib));
     if (!adc) vb6_uc_dibCreate(&dib, target, cw, ch);
+    if (!adc) vb6_uc_selectOwnFont(dib.memDC, hwnd);  /* 账 #305 300: 同上, 非 AutoRedraw 那一档 */
     const int useDib = (dib.memDC && dib.bits);
     HDC dc = adc ? adc : (useDib ? dib.memDC : target);
 
@@ -315,6 +335,21 @@ static LRESULT CALLBACK vb6_uc_wndproc(HWND hwnd, UINT msg, WPARAM wParam, LPARA
 
         case WM_CAPTURECHANGED:
             break;
+        /* 账 #305 第三百七刀: 宿主窗口里那批**属于容器窗体**的设计期子控件, 通知发给
+           直接父窗口 = 本 UC 宿主。ComCtlsDemo 的 MainForm 就把 `Command4`("Pager Demo")
+           authored 在 `ComCtlsDemo.CoolBar CoolBar1` 的 Begin 块里 —— 它的事件处理器
+           (Command4_Click) 住在**窗体模块**, 而 BN_CLICKED 只送到宿主窗口; 以前这条
+           走 DefWindowProc 被静默丢掉 (实测: 鼠标点与程序发 WM_COMMAND 都到过宿主,
+           窗体那张 id 派发表从没看见 201)。
+           VB6 的 UserControl 宿主对"不属于自己"的子控件通知就是原样上抛, 这里照做。
+           不会误伤 UC 自己的设计期子控件: 那些由 CreateDesign* 建, 控件 id 恒 0
+           (hMenu 传 NULL), 窗体派发表里没有 0 这一格。 */
+        case WM_COMMAND:
+        case WM_NOTIFY: {
+            HWND parent = GetParent(hwnd);
+            if (parent) return SendMessageW(parent, msg, wParam, lParam);
+            break;
+        }
         case WM_PAINT: {
             if (!r || !r->ready) break;
             if (!r->desc || !r->desc->paint) break;

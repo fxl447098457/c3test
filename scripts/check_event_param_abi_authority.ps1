@@ -21,7 +21,10 @@
 #   R4 那张表: 声明 1 处 + 语义层填 1 处 + 跨模块复制 1 处 (复制漏了 = 包装站永远读不到答案)。
 #   R5 三处发形参表的站点里 `pi.isByVal = true;` 必须为 0, `pi.isByVal = !byAddr256;` 各 1;
 #      模块级包装里 Fix 084k 那枚类形参临时地址只许挂在**按值那一臂**。
-#   R6 判据面: 夹具里那一枚出参事件 + 处理器 + runner 的真跑期望与两头发码针各登记一处。
+#   R6 判据面: 夹具里那一枚出参事件 + 处理器 + runner 的真跑期望 (x64 与 x86 各一处 = 2)
+#      与两头发码针各登记一处。
+#   R7 第三百八刀: 形参那一档声明的是 Variant 槽、而实参在 C 侧不是槽 —— 「要不要装箱」
+#      那一问只许在发码站问一次; 装箱临时量 / 出站回写 / 清槽三件事各只住这一处。
 #
 # 用法: powershell -File scripts\check_event_param_abi_authority.ps1
 # 退出码: 0 = 全绿; 1 = 红
@@ -95,10 +98,23 @@ Expect 'R6 夹具: 出参事件声明' (Count-Pattern $fixC 'Public Event GetEmp
 Expect 'R6 夹具: 递出后读回'   (Count-Pattern $fixC 'RaiseEvent GetEmptyMarkup\(T, C\)') 1 '紧跟着读 T 与 C —— 值回不来就是空串'
 Expect 'R6 夹具: 处理器写回'   (Count-Pattern $fixB 'Sub btn_GetEmptyMarkup\(ByRef Text As String, ByRef Center As Boolean\)') 1 '模块级 Dim WithEvents 那一路'
 $h = [System.IO.File]::ReadAllText($harn)
-Expect 'R6 真跑期望'   ([regex]::Matches($h, 'EvtRef test PASSED')).Count 1 'runner 里登记一处'
+# 第三百八刀的判据把同一枚夹具在**两台**各跑一遍 (x64 + x86 —— 20B 槽写穿 4B 存储那一档
+# 只在 x86 现形, 而门只跑默认架构), 三条期望串因此各登记两处。钉成 2 而不是放宽成 >=1:
+# 少一台红 (曾经就是这样漏的), 多一台也红 (同一枚夹具不许再抄第三遍)。
+Expect 'R6 真跑期望(两台)' ([regex]::Matches($h, 'EvtRef test PASSED')).Count 2 'x64 + x86 各一处'
+Expect 'R6 x64 那台在场' ([regex]::Matches($h, 'Test-Vbp "test_events" ')).Count 1 '默认架构那一发'
+Expect 'R6 x86 那台在场' ([regex]::Matches($h, 'Test-Vbp "test_events_x86" ')).Count 1 '20B-into-4B 那一档只在这台现形'
 Expect 'R6 发码正针'   ([regex]::Matches($h, 'Test-EmitcShape "b256_evt_byref_shape"')).Count 1 '三枚同形状针'
 Expect 'R6 发码反面针' ([regex]::Matches($h, 'Test-EmitcAbsent "b256_evt_byref_lesion"')).Count 1 '修复前那两行原样, 一枚不许少'
 
+# R7 —— 槽 vs 标量: 装箱那一问与它配套的三件事 (账 #305 第三百八刀)
+Expect 'R7 槽那一问只在一处' (Count-Pattern $cev 'prmBase256 == "vb6_VARIANT"') 1 '形参声明档是 vb6_VARIANT 才谈装箱'
+Expect 'R7 AST 那条槽判据'  (Count-Pattern $cev 'argTy308 != Vb6Type::Variant') 1 'inferExprType 答 Variant 就留在直递'
+Expect 'R7 文本槽判据两处'  (Count-Pattern $cev 'cExprIsVariant\(argVal\)') 2 '新臂一处 + Fix 228 按值臂一处'
+Expect 'R7 装箱临时量一枚'  (Count-Pattern $cev '_evt_box_') 1 '那枚槽的名字只在这里拼'
+Expect 'R7 回写只住一处'    (Count-Pattern $cev 'evtVariantWriteBack') 2 '文件内定义 1 + 站点调用 1'
+Expect 'R7 装与撤成对 A'    (Count-Pattern $cev 'vb6_VariantAssign\(&') 1 '深拷贝进槽 (BSTR 另分配)'
+Expect 'R7 装与撤成对 B'    (Count-Pattern $cev 'vb6_VariantClear\(&') 1 '回写搬完就收槽'
 if ($fails.Count -gt 0) {
     Write-Host ('RED: ' + $fails.Count + ' guard(s) broken') -ForegroundColor Red
     exit 1

@@ -148,11 +148,51 @@ int32_t vb6_GetWindowState(void* hwnd) {
 
 void vb6_SetWindowState(void* hwnd, int32_t val) {
     if (!hwnd) return;
-    switch (val) {
-        case 0: ShowWindow((HWND)hwnd, SW_SHOWNORMAL); break;
-        case 1: ShowWindow((HWND)hwnd, SW_MINIMIZE); break;
-        case 2: ShowWindow((HWND)hwnd, SW_SHOWMAXIMIZED); break;
+    HWND h = (HWND)hwnd;
+    /* 账 (MDI 布局刀): MDI 子窗的 WindowState **不走 ShowWindow** —— 实测
+     * `ShowWindow(child, SW_SHOWMAXIMIZED)` 对 MDI 子窗是空操作: 样式里没有
+     * WS_MAXIMIZE (0x54000000 只有 CHILD|VISIBLE|CLIPSIBLINGS), showCmd 仍为 1,
+     * 子窗停在创建时那点尺寸 (夹具 mdimax 实测 604x465, MDIClient client 750x500,
+     * 右侧/底部各留一条灰带)。MDI 最大化必须发给 MDICLIENT: WM_MDIMAXIMIZE
+     * (恢复那一档是 WM_MDIRESTORE), 它才会把子窗铺满客户区并接管标题。 */
+    HWND par = GetParent(h);
+    wchar_t clsPar[32] = {0};
+    if (par) GetClassNameW(par, clsPar, 31);
+    int isMdi = (par && _wcsicmp(clsPar, L"MDICLIENT") == 0);
+    /* 子窗在自己 Show 里设 Maximized 时, MDI 父窗体通常还没上屏 (VB6 的
+     * MDIForm_Load 里 Show 子窗就是这一档) —— MDICLIENT 对不可见客户区里的
+     * 子窗不回 WM_MDIMAXIMIZE (实测样式已补齐仍无效)。这里把目标状态挂到子窗
+     * 属性上, 父窗体 Show 完之后由 vb6_MDIApplyPendingChildStates 补发。 */
+    if (isMdi && val != 0 && !IsWindowVisible(par)) {
+        SetPropW(h, L"VB6_PendingWindowState", (HANDLE)(intptr_t)(val + 1));
+        return;
     }
+    switch (val) {
+        case 0:
+            if (isMdi) SendMessageW(par, WM_MDIRESTORE, (WPARAM)h, 0);
+            else ShowWindow(h, SW_SHOWNORMAL);
+            break;
+        case 1: ShowWindow(h, SW_MINIMIZE); break;
+        case 2:
+            if (isMdi) SendMessageW(par, WM_MDIMAXIMIZE, (WPARAM)h, 0);
+            else ShowWindow(h, SW_SHOWMAXIMIZED);
+            break;
+    }
+}
+
+void vb6_SetDesignWindowState(void* hwnd, int32_t val) {
+    if (!hwnd) return;
+    /* val+1 存属性 (0 = 无属性). 设计期那一档只记不发 —— 建窗那一刻 MDI 子窗
+     * 还没归入 MDICLIENT, 发 SW_SHOWMAXIMIZED 会把它按成 0x0 (见 mdimax 夹具)。 */
+    SetPropW((HWND)hwnd, L"VB6_DesignWindowState", (HANDLE)(intptr_t)(val + 1));
+}
+
+void vb6_ApplyDesignWindowState(void* hwnd) {
+    if (!hwnd) return;
+    HANDLE v = GetPropW((HWND)hwnd, L"VB6_DesignWindowState");
+    if (!v) return;
+    int32_t val = (int32_t)(intptr_t)v - 1;
+    if (val > 0) vb6_SetWindowState(hwnd, val);
 }
 
 int32_t vb6_GetScaleWidth(void* hwnd) {
@@ -168,8 +208,14 @@ int32_t vb6_GetScaleWidth(void* hwnd) {
         /* VB6 ScaleWidth: 客户区宽度, 单位 = 该窗口自己的 ScaleMode (账 #175)。
            Fix 184: 缇那一档仍走同一个 DPI 源 (vb6_ScalePxToUser 的 mode==1 分支
            就是 vb6_XToTwipX), 所以窗体 (缺省 1=缇) 的读数与改动前逐字节相同。 */
-        return (int32_t)vb6_ScalePxToUser((double)(rc.right - rc.left),
-                                          vb6_WindowScaleModeSelf(hwnd), 0);
+        int32_t m = vb6_WindowScaleModeSelf(hwnd);
+        int32_t v = (int32_t)vb6_ScalePxToUser((double)(rc.right - rc.left), m, 0);
+        if (GetEnvironmentVariableW(L"C3_GEOM_TRACE", NULL, 0) > 0) {
+            fprintf(stderr, "[C3_GEOM] ScaleWidth win=%p mode=%d px=%ld val=%d\n",
+                    (void*)hwnd, (int)m, (long)(rc.right - rc.left), (int)v);
+            fflush(stderr);
+        }
+        return v;
     }
     return 0;
 }

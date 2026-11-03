@@ -148,7 +148,47 @@
         // vb6_ComCall(vb6_hwnd_MainForm, L"ScaleX", …))。ScaleX/ScaleY 不可能是集合。
         const std::string axMemLower = Symbol::toLower(comMemberName_);
         const bool axIsScaleMethod = (axMemLower == "scalex" || axMemLower == "scaley");
-        if (axSlotObj && !node.positional.empty() && !axIsScaleMethod) {
+        // 账 (Outlook2013 frmMain:1204 `CommandBars.DoPropExchange a, b`): 成员是
+        // **方法** (typelib invkind=METHOD) 时不能走"取属性 + Item 下标"档 ——
+        // Codejock 的 DoPropExchange 属性读 0 实参 ⇒ DISP_E_PARAMNOTOPTIONAL
+        // (Run-time error 449)。判据: 控件名与 typelib coclass 同名
+        // (vb6_hwnd_CommandBars → ComClass "CommandBars") 且该成员在
+        // comMethods 里是非 PropertyGet 的条目。
+        bool axMemberIsMethod237 = false;
+        // 前缀 "vb6_hwnd_" 是 9 个字符 (v b 6 _ h w n d _) —— 这里原先写的 10/substr(10)
+        // 多切一位: compare 恒假 ⇒ 整段判据是死代码, AddRibbonBar 照样落进
+        // "取属性 + Item" 那一档, 运行期 DISP_E_PARAMNOTOPTIONAL = Run-time error 449。
+        // 无窗口的 AX 控件槽是 vb6_com_<名> (8 字符前缀), 同样要认。
+        if (axSlotObj) {
+            std::string ctrlAx;
+            if (comObjExpr_.compare(0, 9, "vb6_hwnd_") == 0) {
+                ctrlAx = comObjExpr_.substr(9);
+            } else if (comObjExpr_.compare(0, 8, "vb6_com_") == 0) {
+                ctrlAx = comObjExpr_.substr(8);
+            }
+            size_t parenAx = ctrlAx.find('(');
+            if (parenAx != std::string::npos) ctrlAx = ctrlAx.substr(0, parenAx);
+            Symbol* clsAx = ctrlAx.empty() ? nullptr : symTab_.lookup(ctrlAx);
+            // 控件变量名不一定等于 coclass 名 (DockingPaneManager → DockingPane):
+            // 按设计期类型名再找一次, 找不到才放弃。
+            if ((!clsAx || clsAx->kind != SymbolKind::ComClass) && !ctrlAx.empty()) {
+                auto itTypeAx = knownFormControlTypeNames_.find(Symbol::toLower(ctrlAx));
+                if (itTypeAx != knownFormControlTypeNames_.end()) {
+                    clsAx = lookupDotted(itTypeAx->second);
+                }
+            }
+            if (clsAx && clsAx->kind == SymbolKind::ComClass) {
+                // 账 #245/§B94: `Symbol::comMethods` 只许 cgen_util_com.cpp 里读 ——
+                // 这里问唯一那位主人 (comSigViewOf), 别自己 find 一遍 (静态普查 C4 钉着)。
+                const ComSigView svAx = comSigViewOf(clsAx, axMemLower);
+                if (svAx.found && !svAx.isGet
+                    && !svAx.sig->isPropertyPut && !svAx.sig->isPropertyPutRef) {
+                    axMemberIsMethod237 = true;
+                }
+            }
+        }
+        if (axSlotObj && !node.positional.empty() && !axIsScaleMethod
+            && !axMemberIsMethod237) {
             std::string axObjExpr = std::move(comObjExpr_);
             std::string axMember = std::move(comMemberName_);
             isComMarker_ = false;
@@ -161,7 +201,8 @@
             // `With SB.Panels(1)` 的头一直发成拿 HWND 当 IDispatch。现在问唯一那一处，
             // 认不出来才兜底。
             std::string collectionExpr = memberCollectionObjectExpr(axObjExpr, axMember);
-            if (collectionExpr.empty())
+            const bool collectionIsGenericFallback = collectionExpr.empty();
+            if (collectionIsGenericFallback)
                 collectionExpr = "vb6_ComGetObjectProp(" + axObjExpr + ", L\"" + axMember + "\")";
             // Step 2: 调用 Item(idx) 获取集合中的元素
             std::vector<std::string> packedArgs;
@@ -169,7 +210,7 @@
                 std::string packFn = comPackExpr(*node.positional[i]);
                 emitExpr(*node.positional[i]);
                 { std::string resolved = resolveComMarkerForPack(packFn); if (!resolved.empty()) lastExpr_ = resolved; }
-                packedArgs.push_back(packArgValue(packFn, lastExpr_));
+                packedArgs.push_back(packArgValue(packFn, lastExpr_, node.positional[i].get()));
             }
             int32_t argc = (int32_t)packedArgs.size();
             std::string argsArray = "(void*[]){";
@@ -179,12 +220,39 @@
             }
             argsArray += "}";
             // 返回对象类型 (用于后续 .Picture 等链式访问)
-            lastExpr_ = "vb6_ComCallObject(" + collectionExpr + ", L\"Item\", " + argsArray + ", " + std::to_string(argc) + ")";
+            // 账 (Outlook2013 frmInbox:331): 默认成员名**不许猜 "Item"**。VB6 把
+            // `coll(idx)` 编到 DISPID_VALUE(0), 而 Codejock 的集合默认成员叫
+            // Column / Action 之类 ⇒ 按名 "Item" 一律 DISPID_UNKNOWN ⇒ 交回 NULL
+            // ⇒ `GroupsOrder.Add <NULL>` 报 Run-time error 13。
+            // 方法名交 NULL = "按默认成员调用": vb6_ComCallObject 见 NULL 转
+            // vb6_ComCallObjectDefault (名字优先、名字不在才走 DISPID 0)。名字仍叫
+            // ComCallObject 是有意的 —— 后端有八处按这个前缀认「结果是 IDispatch*」。
+            //
+            // 只对**兜底那一支**发 NULL: 上面 memberCollectionObjectExpr 认得出来的
+            // 那几族 (Nodes / Buttons / ListImages / Panels / ListItems) 是 RTL 原生
+            // 复刻的伪集合, 名字表里就只有 "Item" (没有 0 号成员), 发 NULL 等于让
+            // vb6_ComCallObjectDefault 多绕一圈去问名 —— 形状也别动, 一批哨兵钉着
+            // `L"Item"` 这一行 (tv_emitc_shape / tb_emitc_shape)。
+            if (collectionIsGenericFallback) {
+                lastExpr_ = "vb6_ComCallObject(" + collectionExpr + ", NULL, " + argsArray + ", " + std::to_string(argc) + ")";
+            } else {
+                lastExpr_ = "vb6_ComCallObject(" + collectionExpr + ", L\"Item\", " + argsArray + ", " + std::to_string(argc) + ")";
+            }
             return;
         }
         isComMarker_ = false;  // 消费标记
         std::string objExpr = std::move(comObjExpr_);
         std::string memberName = std::move(comMemberName_);
+        // 接收者是**已知 Variant 变量**时先取对象指针: C 侧那枚槽是 `vb6_VARIANT`
+        // 结构体, 直接当 IDispatch* 交出去是 C2172 (实参不是指针) —— b216_slot 的
+        // `v1.Twice(21)` 实测两发。与 arm (C) / comObjectRefFromCallExpr 同一句口径。
+        {
+            const std::string recvLow = Symbol::toLower(objExpr);
+            if (knownVariantVars_.count(recvLow) && !knownObjectVars_.count(recvLow)
+                && !knownTypedComVars_.count(recvLow)) {
+                objExpr = "vb6_VariantToObjectVal(" + objExpr + ")";
+            }
+        }
 
         // 账 #278 §B124: 这一格 (`vb6_Data_Self(` 透传形态的直译) 与 §B124 列的那几格同代、
         // 同样恒假，撤掉；顺带带走里面那台把日志路径写死在本机用户目录上的 getenv 探针。
@@ -561,11 +629,10 @@
                 // IDispatch* 写进标签区 (§B190 那格 C2172 的同一个坑); legacy 接口视图
                 // (vb6_iface_X) 也是**值**结构体, 所以这一族**刻意不放进来** —— 视图那一路
                 // 有自己的适配器 (§B215 写侧视图适配器), 不在这里混档。
-                auto ctypeIsObjectSlot271 = [](const std::string& t) -> bool {
-                    if (t.empty() || t.back() != '*') return false;
-                    return t == "void*"                              // As Object
-                        || t.rfind("vb6_cls_", 0) == 0               // 工程类实例指针
-                        || t.rfind("vb6_ComIface_", 0) == 0;         // 前期绑定接口指针 (IFont/StdFont)
+                // 账 #305 §B218 第三百十四刀: 这一问提到成员位 `ctypeIsObjectSlotPtr` (答案一字未动),
+                // 因为泛对象返回槽那位新主人问的是同一句 —— 一位定义, 两处问。
+                auto ctypeIsObjectSlot271 = [this](const std::string& t) -> bool {
+                    return ctypeIsObjectSlotPtr(t);
                 };
                 auto isKnownObjectVarName = [&](const std::string& e) -> bool {
                     std::string l = e;
@@ -628,7 +695,7 @@
                         && isKnownObjectVarName(lastExpr_)) {
                         packedArgs.push_back("vb6_ComPackObjectRef((void**)&" + lastExpr_ + ")");
                     } else {
-                        packedArgs.push_back(packArgValue(packFn, lastExpr_));
+                        packedArgs.push_back(packArgValue(packFn, lastExpr_, node.positional[i].get()));
                     }
                 }
                 for (auto& named : node.named) {
@@ -644,7 +711,7 @@
                         && isKnownObjectVarName(lastExpr_)) {
                         packedArgs.push_back("vb6_ComPackObjectRef((void**)&" + lastExpr_ + ")");
                     } else {
-                        packedArgs.push_back(packArgValue(packFn, lastExpr_));
+                        packedArgs.push_back(packArgValue(packFn, lastExpr_, named.value.get()));
                     }
                 }
                 int32_t argc = (int32_t)packedArgs.size();
@@ -709,7 +776,7 @@
                 if (argIsVariantPtr && packFn == "vb6_ComPackObject") {
                     packedArgs.push_back(lastExpr_);   // 已是 VARIANT*, 直接作实参 (ComCall 会 VariantClear+free)
                 } else {
-                    packedArgs.push_back(packArgValue(packFn, lastExpr_));
+                    packedArgs.push_back(packArgValue(packFn, lastExpr_, argExpr.get()));
                 }
             };
             for (size_t pos = 0; pos < node.positional.size(); pos++) {
@@ -777,6 +844,20 @@
         }
     }
 
+    // 账 #305 第三百零九刀: 窗体 Show 转发子**一律**走下面的拆包路 —— 形参表由唯一作者
+    // (formShowForwarderParams) 回答，缺的 mode 由 opt_pad 补 0、多写的 OwnerForm 由
+    // named_args 的 Fix 041b 截掉。以前这里是两条各写各的：无实参那一形由下面那一格
+    // (Fix 146) 手拼 ", 0"，带实参那一形走通用拆包把 VB 的 Show(Mode, OwnerForm) 两发
+    // 全追加进去 —— 转发子只有两个槽 (hMDIClient, modal)，第三发没人管：实测
+    // VBFlexGridDemo MainForm.frm:846/861/1138 `With New InputForm … .Show vbModal, Me`
+    // → vb6_form_show_InputForm(NULL, 1, vb6_hwnd_MainForm) → runner 那台 cl 报
+    // C2197 参数太多（本机 14.29 只给 C4020 警告，所以本地绿、门红 FlexGridX86）。
+    bool needsSplitFormShow = false;
+    if (!needsSplitForOptionalPad && !needsSplitForMissingArgs) {
+        std::vector<ParameterInfo> fsParams309;
+        needsSplitFormShow = formShowForwarderParams(callee, fsParams309);
+    }
+
     // 如果callee已经是func(args)形式(如类方法调用 vb6_Counter_GetCount(c)),
     // 且IndexOrCallExpr没有额外参数, 直接使用callee避免双重括号
     if (callee.size() >= 2 && callee.back() == ')' && node.positional.empty() && node.named.empty()) {
@@ -790,16 +871,8 @@
                 depth--;
             }
         }
-        if (isCompleteCall && !needsSplitForOptionalPad && !needsSplitForMissingArgs) {
-            // Fix 146 回归 (vbman cLogs C2198 / T2 ExtShow): external form show 转发
-            // (cgen_expr_member_form_builtin.inc) 只交付 vb6_form_show_<Form>(NULL),
-            // modal 实参原本只由本文件的"有参拆包"路径追加; 无参调用 (Frm.Show) 走
-            // 这里直接复用 callee, 会缺 modal 形参 -> C2198. 无参即补默认 modal=0
-            // (VB6 语义: 无参 Show = modeless).
-            if (callee.compare(0, 14, "vb6_form_show_") == 0) {
-                lastExpr_ = callee.substr(0, callee.size() - 1) + ", 0)";
-                return;
-            }
+        if (isCompleteCall && !needsSplitForOptionalPad && !needsSplitForMissingArgs
+            && !needsSplitFormShow) {
             lastExpr_ = callee;
             return;
         }
@@ -873,7 +946,8 @@
 
     if (callee.size() >= 2 && callee.back() == ')'
         && ((!node.positional.empty() || !node.named.empty())
-            || needsSplitForOptionalPad || needsSplitForMissingArgs)) {
+            || needsSplitForOptionalPad || needsSplitForMissingArgs
+            || needsSplitFormShow)) {
         // 检查是否是完整的函数调用（以右括号结尾且匹配左括号）
         int depth = 0;
         int openPos = -1;
@@ -1027,7 +1101,7 @@
                     std::string packFn86 = comPackExpr(*node.positional[i]);
                     emitExpr(*node.positional[i]);
                     { std::string resolved86 = resolveComMarkerForPack(packFn86); if (!resolved86.empty()) lastExpr_ = resolved86; }
-                    packedArgs86.push_back(packArgValue(packFn86, lastExpr_));
+                    packedArgs86.push_back(packArgValue(packFn86, lastExpr_, node.positional[i].get()));
                 }
                 int32_t argc86 = (int32_t)packedArgs86.size();
                 std::string argsArray86 = "(void*[]){";

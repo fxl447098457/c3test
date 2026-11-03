@@ -70,6 +70,46 @@ if ($nSite -ne 9) {
     $viol += ("container-window sites in vb6forms_ctrl.c = " + $nSite + " (want 9: 8 对属性 + Move 那一收口)")
 }
 
+# 账 #305 第299刀: 「这枚窗口 authored 在哪一层容器」也只有一个主人 —— 创建期由
+# vb6_GeomOwnerStamp 把它戳进窗口属性 VB6_AuthoredOwner, 读只许在 vb6_UC_ContainerWindowOf 那一处。
+# 新增一条控件创建路就得加一次戳 (下面那把计数会红); 也别在站点上抄第二份 GetPropW。
+$files299 = @("src/rtl/core/vb6forms/uc/uc_host.c",
+              "src/rtl/core/vb6forms/vb6forms.c",
+              "src/rtl/core/vb6forms/vb6forms_ctrlarr.c",
+              "src/rtl/core/vb6forms/vb6forms_webview.c",
+              "src/rtl/core/vb6forms/uc/detail/uc_host_create.inc",
+              "src/rtl/core/vb6forms/vb6forms_window.h")
+$nStamp299 = 0
+$nAuth299 = 0
+foreach ($f299 in $files299) {
+    $p299 = Join-Path $Root $f299
+    if (-not (Test-Path $p299)) { $viol += ("MISSING " + $f299); continue }
+    $t299 = Get-Content -Raw -LiteralPath $p299
+    $nStamp299 += ([regex]::Matches($t299, "vb6_GeomOwnerStamp\(")).Count
+    $nAuth299 += ([regex]::Matches($t299, "vb6_GeomAuthoredOwner\(")).Count
+}
+# uc_host.c: 1 定义 + 4 枚 CreateDesign* + CreateDesignUserControl = 6;
+# vb6forms.c / ctrlarr / webview / uc_host_create.inc 各 1 处落戳 = 4; window.h 1 声明 ⇒ 11
+if ($nStamp299 -ne 11) {
+    $viol += ("geom-owner stamps = " + $nStamp299 + " (want 11: 1 定义 + 1 声明 + 9 处创建落戳)")
+}
+# 「.frm 那一族该跳过 UC 宿主层」也只许一位主人: 1 定义 (uc_host.c) + 4 个 .frm 落点
+# (vb6forms.c / ctrlarr / webview / uc_host_create.inc) + 1 声明 (window.h) = 6。
+# `.ctl` 设计面那五枚 CreateDesign* 不许调它 —— 那一路按精确容器直戳。
+if ($nAuth299 -ne 6) {
+    $viol += ("geom-authored-owner 主人 = " + $nAuth299 + " (want 6: 1 定义 + 4 个 .frm 落点 + 1 声明)")
+}
+# 那枚窗口属性名只许在 uc_host.c 里出现两次 (写一次 + 读一次); 别处出现 = 第二问
+$nProp299 = 0
+$nProp299InOwner = 0
+foreach ($f299 in (Get-ChildItem -LiteralPath (Join-Path $Root "src/rtl") -Recurse -File -Include *.c,*.h,*.inc)) {
+    $n299 = ([regex]::Matches((Get-Content -Raw -LiteralPath $f299.FullName), "VB6_AuthoredOwner")).Count
+    $nProp299 += $n299
+    if ($f299.Name -eq "uc_host.c") { $nProp299InOwner = $n299 }
+}
+if ($nProp299 -ne 2 -or $nProp299InOwner -ne 2) {
+    $viol += ("VB6_AuthoredOwner 名字的出现 = " + $nProp299 + " (want 2) / 在 uc_host.c 里 = " + $nProp299InOwner + " (want 2: 一处写 + 一处读)")
+}
 if ($viol.Count -gt 0) {
     Write-Host ("FAIL uc_scale_units ({0} 处)" -f $viol.Count)
     $viol | ForEach-Object { Write-Host ("  " + $_) }

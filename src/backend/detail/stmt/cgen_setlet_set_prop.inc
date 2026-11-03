@@ -18,6 +18,21 @@
         }
     }
 
+    // Set <跨模块窗体名> = New <窗体名> —— 窗体默认实例是 C3 的全局单例
+    // (vb6_form_hwnd_<F>() 访问器, 非左值)。VB6 语义里 `Set F = New F` 让 F 指向
+    // 新实例; C3 的默认实例模型下等价于继续用单例 (先到先建), 不支持重绑。
+    // 此前发 `vb6_form_hwnd_F() = vb6_NewObject(...)` → C2106 (函数调用做左值)。
+    // (Outlook2013 frmInbox:306 Set frmEditEvent = New frmEditEvent, frmMain:3 处)
+    if (node.target->kind == ASTNodeKind::IdentifierExpr) {
+        auto& tgtFormSi = static_cast<IdentifierExpr&>(*node.target);
+        std::string tgtFormLowerSi = Symbol::toLower(tgtFormSi.name);
+        if (tgtFormLowerSi != knownFormName_ && knownFormModuleNames_.count(tgtFormLowerSi)) {
+            emitSetObjectRhs(node.value);  // 保留 RHS 副作用 (New 无副作用, 仅求值)
+            c_.emitLine("/* Set " + tgtFormSi.name + " = New (form default instance, auto-managed) */");
+            return;
+        }
+    }
+
     // 检测 Set obj = Nothing → vb6_ReleaseObject(&obj)
     if (node.value->kind == ASTNodeKind::LiteralExpr) {
         auto& lit = static_cast<LiteralExpr&>(*node.value);
@@ -555,21 +570,56 @@
     suppressVirtDispatch_ = savedVirtLhs;
     std::string target = std::move(lastExpr_);
 
+    // 账 #305 第三百三十五刀: `Set <裸对象变量> = ...` 的目标发射 (typed COM 变量
+    // → 裸名) 不立也不清 COM marker; 但**前文残留**的 marker (With 目标求值
+    // `_vb6_with_N = GetObjectProp(obj, L"Member")` / 上一条链式语句) 会让
+    // isComMarker_ 此处仍为真 ⇒ 把普通对象引用赋值误发成
+    // `vb6_ComSetRef(<残留接收者>, <残留成员名>, value)` —— GUISample frmMain
+    // `Set ControlNew = .Add(...)` (With ControlFile.CommandBar 块内首条) 实测:
+    // 接收者=With 目标、成员=残留的 "Controls" ⇒ Codejock 答 0x80020005 ⇒
+    // 未处理错误 13 启动即崩。Set 语义 = 对象引用赋给变量, 永不走默认属性写,
+    // 裸标识符目标下的 marker 必然是残留, 直接清。
+    if (node.target->kind == ASTNodeKind::IdentifierExpr && isComMarker_) {
+        isComMarker_ = false;
+        comObjExpr_.clear();
+        comMemberName_.clear();
+    }
+
     // 账 #257 第十九层 · 注: `Set .Picture = .Image` 这一形**不在这里另开分支** ——
     // 上面 WithMemberExpr 的读取已经把 target 交成内建全局 (且不打 COM 标记),
     // 于是下方 isComMarker_ 为假, 自然落到本函数末尾那条通用的 `target = value;`
     // 路径, 发出的就是 `vb6_UserControl_Picture = vb6_ComGetObjectProp(...)`。
     // 刻意不再调 emitSetObjectRhs: scripts/check_set_rhs_object_context.ps1 钉着
-    // "emitSetObjectRhs 调用点恰好 7 处", 新增一处即红 (实测踩到过)。
+    // "emitSetObjectRhs 总站点 9 处 = 声明 + 定义 + 7 个发码点", 新增一处即红 (实测踩到过)。
 
     // COM属性SetRef: Set obj.Property = objRef → vb6_ComSetRef(obj, L"Property", objRef)
     if (isComMarker_) {
         isComMarker_ = false;
         std::string objExpr = std::move(comObjExpr_);
         std::string memberName = std::move(comMemberName_);
+        /* 账 #305 第三百四十四刀: 窗体接收者上的 **Public 变量写** (GUISample
+         * frmMain:973 `Set frmD.fMain = Me`, frmDocument 声明 Public fMain As frmMain)。
+         * 窗体 Public 变量的 C 存储是**裸全局** (frmDocument.c `void* fMain`),
+         * 直接赋值; 走 COM SetRef 是拿窗体 HWND 当 IDispatch 派发 —— 宿主 miss
+         * 静默丢, 事后对空/garbage 的成员链把进程带走 (实测)。 */
+        {
+            Symbol* pvVar344 = symTab_.lookupModule(memberName);
+            if (!pvVar344) pvVar344 = symTab_.lookup(memberName);
+            if (pvVar344 && pvVar344->kind == SymbolKind::Variable && pvVar344->isExternal
+                && knownFormModuleNames_.count(Symbol::toLower(pvVar344->sourceModule))) {
+                emitSetObjectRhs(node.value);
+                if (isComMarker_) resolveComValue("Object");
+                std::string v344 = std::move(lastExpr_);
+                c_.emitLine(cIdent(pvVar344->name) + " = (void*)" + v344 + ";  /* form Public var Set */");
+                return;
+            }
+        }
     emitSetObjectRhs(node.value);
     // COM属性值: 如果右侧是COM属性, 解析为值
-    if (isComMarker_) resolveComValue();
+    // 账 (Outlook2013 frmMain:830): Set 的右值是**对象** —— 默认档 String 会发
+    // vb6_ComGetStringProp (Icons 集合被当 BSTR 取) 再塞进 vb6_ComSetRef ⇒
+    // Codejock 答类型不匹配 (Run-time error 13, 启动即弹)。强制 Object 档。
+    if (isComMarker_) resolveComValue("Object");
     std::string value = std::move(lastExpr_);
     // Fix <vbeclipse>: SetRef 的第3参是 void* (对象指针), 右侧若是 Variant 表达式
     // (如 .Item(i) — vb6_List_Item 返回 vb6_VARIANT 结构体, SubClass.cls:56

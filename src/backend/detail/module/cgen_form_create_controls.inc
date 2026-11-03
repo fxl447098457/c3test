@@ -1032,6 +1032,70 @@
                     } else {
                         c_.emitLine("vb6_hwnd_" + cIdent(ctrl.controlName) + " = " + call143
                                   + ";  /* Fix 143: OCX 真宿主 */");
+                        // 设计器 OCX 控件的事件连接点 (见 cgen_form_ctrl_registry.inc 的登记)。
+                        // VB6 在控件创建后对控件的事件源接口 Advise, `<控件>_<事件>` 处理器
+                        // 才收得到 (CommandBars.Execute ⇒ CommandBars_Execute 一类)。
+                        // 只有登记过 (有事件源接口 + 本模块写了处理器) 的控件才发这段。
+                        {
+                            std::string evtCtrlLower = Symbol::toLower(ctrl.controlName);
+                            auto itOcxEvt = knownWithEventsVars_.find(evtCtrlLower);
+                            if (itOcxEvt != knownWithEventsVars_.end()) {
+                                Symbol* evtCls = symTab_.lookup(itOcxEvt->second);
+                                if (evtCls && evtCls->kind == SymbolKind::ComClass
+                                    && evtCls->comHasSourceIface
+                                    && !evtCls->comSourceIfaceIid.empty()) {
+                                    std::string iidStr = evtCls->comSourceIfaceIid;
+                                    std::string iidInit = emitGuidInitializer(iidStr);
+                                    std::string evtVar = "vb6_evt_" + cIdent(ctrl.controlName);
+                                    std::string hwndSlot = "vb6_hwnd_" + cIdent(ctrl.controlName);
+                                    if (!iidInit.empty()) {
+                                        c_.emitLine("/* 设计器控件事件连接点: " + ctrl.controlName + " */");
+                                        c_.emitLine("static int " + evtVar + "_cookie = 0;");
+                                        c_.emitLine("static const char* " + evtVar + "_iid = \"" + iidStr + "\";");
+                                        c_.emitLine("static const IID " + evtVar + "_iid_struct = " + iidInit + ";");
+                                        c_.emitLine("if (" + hwndSlot + ") {");
+                                        c_.indent();
+                                        if (evtCls->comSourceIfaceIsDispOnly) {
+                                            std::vector<std::string> dispids;
+                                            std::vector<std::string> callbacks;
+                                            for (const auto& evtName : evtCls->eventNames) {
+                                                if (!symTab_.lookup(ctrl.controlName + "_" + evtName)) continue;
+                                                std::string evtLower = Symbol::toLower(evtName);
+                                                auto itDispId = evtCls->comEventDispids.find(evtLower);
+                                                int dispid = (itDispId != evtCls->comEventDispids.end()) ? itDispId->second : 0;
+                                                dispids.push_back(std::to_string(dispid));
+                                                callbacks.push_back(comEvtWrapperName(evtCtrlLower, evtName));
+                                            }
+                                            if (!dispids.empty()) {
+                                                std::string dispidsInit;
+                                                for (size_t di = 0; di < dispids.size(); di++) {
+                                                    if (di > 0) dispidsInit += ", ";
+                                                    dispidsInit += dispids[di];
+                                                }
+                                                std::string cbsInit;
+                                                for (size_t ci = 0; ci < callbacks.size(); ci++) {
+                                                    if (ci > 0) cbsInit += ", ";
+                                                    cbsInit += "(void(*)(void*,VARIANT*,int,VARIANT*))" + callbacks[ci];
+                                                }
+                                                c_.emitLine("static int " + evtVar + "_dispids[] = {" + dispidsInit + "};");
+                                                c_.emitLine("static void (*" + evtVar + "_cbs[])(void*,VARIANT*,int,VARIANT*) = {" + cbsInit + "};");
+                                                c_.emitLine("void* " + evtVar + "_sink = vb6_CreateEventSink(" + evtVar + "_dispids, (void**)"
+                                                          + evtVar + "_cbs, " + std::to_string(dispids.size())
+                                                          + ", &" + evtVar + "_iid_struct, NULL);");
+                                                c_.emitLine("vb6_ComAdvise((IUnknown*)" + hwndSlot + ", " + evtVar + "_iid, "
+                                                          + evtVar + "_sink, &" + evtVar + "_cookie);");
+                                            }
+                                        } else {
+                                            c_.emitLine("void* " + evtVar + "_sink = vb6_vsink_" + evtCtrlLower + "_create(NULL);");
+                                            c_.emitLine("vb6_ComAdvise((IUnknown*)" + hwndSlot + ", " + evtVar + "_iid, "
+                                                      + evtVar + "_sink, &" + evtVar + "_cookie);");
+                                        }
+                                        c_.dedent();
+                                        c_.emitLine("}");
+                                    }
+                                }
+                            }
+                        }
                     }
                     ctrlId++;
                     continue;

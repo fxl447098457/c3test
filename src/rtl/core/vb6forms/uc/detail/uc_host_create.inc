@@ -85,6 +85,9 @@
     vb6_UC_ApplyFontToWindow(hwnd, r->font);
     }
     r->hwnd = hwnd;
+    /* 账 #305 第299刀: UC 实例也要被戳 (它可能是 `.frm` 嵌进 OCX 块那一族)。无窗宿主
+       (windowless, 第二百五十八刀) 时 hwnd 为 NULL ⇒ vb6_GeomOwnerStamp 自己早退。 */
+    vb6_GeomOwnerStamp(hwnd, vb6_GeomAuthoredOwner(hParent));
     vb6_ucRecCount++;
 
     // Fix 122: 修正 VB6 z 序 (先声明者在上)

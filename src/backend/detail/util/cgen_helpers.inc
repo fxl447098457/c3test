@@ -471,6 +471,19 @@
     void emitClassSlotRefSet(const std::string& target, const std::string& className,
                              const std::string& valueExpr, bool rhsTransferred, bool outSlot,
                              const std::string& slotElemType = std::string());
+    // 账 #305 §B218 第三百十四刀: 「这格 C 存储是不是一枚**指针形**对象槽」= 第二百七十一刀那枚
+    // 站点内 lambda 的原文提到成员位, 当唯一问句 (两位读者: ByRef 对象出参的取址闸 + 下面那位
+    // 泛对象返回槽的主人)。vb6_VARIANT / vb6_ivref_X 两档**值**结构体刻意不算 (原判语照搬)。
+    bool ctypeIsObjectSlotPtr(const std::string& t) const;
+    // 账 #305 §B218 (甲) 腿②″: 「覆写一枚**泛对象**槽」的一位主人。工程类那一档由上面 腿② 铸
+    // `vb6_cls_<X>_AddRef`、视图那一档由 emitIvref* 接手, 剩下 C 档 = void* 这一族从没主人 ⇒
+    // 被调方交出去的指针**不带对价**, 而调用方按契约 (见 rhsTransfersProjectRef 那段) 认定它自带
+    // 一枚、不再 claim ⇒ 两下都不取 ⇒ 原主 `Set x = Nothing` 一退就散 (= 靶工程 Command2 的 AV)。
+    // 只 claim、不退旧值 = 与 腿②' 同一条口径: 这一族今天整个在计数系统外, 退它 = 多退一次。
+    void emitLateSlotRefClaim(const std::string& target, const std::string& valueExpr);
+    // 账 #305 §B218 (甲) 腿②″ 的第二问: 右值那一格是不是**本过程的局部** (它的引用今天靠裸拷贝
+    // 交出去, 站点不许再取; 模块级槽 / me-> 字段那一档计数系统自己会放手 ⇒ 必须 claim)。
+    bool localSlotHandsOverRef(const std::string& rhsText, const ASTNode* rhs) const;
     // 账 #305 §B218 (甲) 刀3: 「这一发右值是不是**已经带着一枚移交过来的引用**」—— 上面那位
     // 主人手上「不 claim」那条臂的全部成因共用这一条问句（**三形**：裸名调用 / 成员调用 /
     // 无括号的属性读；`New <类>` 那一发仍由调用点自己答）。问句只此一位，别在别处再答一遍。
@@ -521,6 +534,11 @@
     // M22: 将非BSTR表达式包装为BSTR (用于字符串连接运算)
     std::string wrapToBSTR(const std::string& expr, Expr& node);
 
+    // B11 第三批: Print # / Write # 的**单项文本**出口 (按真 VB6 实测字节)。
+    // writeMode=false → " " + CStr + " " (Print #); true → Str 去前导 0/空格 (Write #)。
+    // 返回的 C 表达式是 BSTR; 类型判不准时回退旧数值路径 (vb6_Str(int32_t))。
+    std::string printWriteTextExpr(Expr& expr, const std::string& val, bool writeMode);
+
     // Fix 194: 字符串型控件属性写入的**唯一**取值入口。RTL 的
     // vb6_SetControlText(hwnd, void* bstr) / vb6_SetMenuCaption 第二参是 BSTR 指针,
     // RHS 若是数值就会被当成指针 —— 必须在此统一转 BSTR, 否则每个属性写入点都得
@@ -549,6 +567,20 @@
     std::string ctrlArrWriteCalleeArgs(const std::string& writeFn,
                                        const std::string& arrOrigName,
                                        const std::string& idxArg) const;
+    // 账 #305 第三百零九刀: 「这条 callee 是不是窗体 Show 转发子、它还欠哪几枚形参」的
+    //   唯一作者。原型住在 cgen_form_ctrl_registry.inc —— 两参 (void* hMDIClient, int modal)。
+    //   两条发码路交出的 callee 都已自带 hMDIClient: 半成品 `vb6_form_show_<F>(NULL)`
+    //   (cgen_expr_with.cpp 的 With 体内 / cgen_expr_member_form_builtin.inc 的外部窗体),
+    //   以及被 cgen_expr_call_com_bind.inc 拆包后剩下的裸名 `vb6_form_show_<F>` (NULL 进了
+    //   classMethodObjArg)。两种形状都问得到同一个答案, 所以键按前缀认, 不看尾巴。
+    //   交回的表**只列还欠的那一枚** (mode) ⇒ 省略时由 opt_pad 补 0、写多了由 named_args
+    //   的 Fix 041b 截断, 两头都不再有各自的特判。
+    //   VB 的 Form.Show(Mode, OwnerForm) 里 OwnerForm 没有槽 —— 窗体归属从没建模,
+    //   多写那一发按形参表丢掉 (实测 VBFlexGridDemo MainForm.frm:846/861/1138
+    //   `.Show vbModal, Me`; 丢掉之前它被一并追加 ⇒ 三参打二参原型, runner 那台新 cl
+    //   报 C2197 参数太多, 门红 FlexGridX86)。
+    bool formShowForwarderParams(const std::string& calleeText,
+                                 std::vector<ParameterInfo>& out) const;
     // Fix <vbeclipse>: 在其他窗体的设计器描述里找控件 (frmViewViews.tvwViews)。
     // 命中返回该控件描述, 否则 nullptr。designerFiles_ 未设 / 非窗体名都返回 nullptr。
     const FrmControl* findExternalFormControl(const std::string& formName,
@@ -742,6 +774,17 @@
     // bumpInferEpoch 推进 (过程入口 / emitStmtList 的语句边界), 见 cgen_util_type.cpp。
     Vb6Type inferExprTypeImpl(Expr& expr) const;
     static void bumpInferEpoch();
+
+    // 账 #305 第311刀: 「一条 Select Case 的 Case 标签落在哪一档」的**唯一**回答处
+    // （主语静态答 Variant 时，承载档由这里回答，见 cgen_select.cpp 的契约注释）。
+    // 一个标签都不许漏：`Case Is` 的右操作数、`Case a To b` 的两端都算标签；`Case Else`
+    // 不在这张表里（它在 SelectCaseStmt::elseCase）。空表答 NoString —— 没有标签就没有证据。
+    // 第319刀多一档：Mixed = 至少一枚 String 且并非全是 ⇒ 主语是槽时逐项 VarCmp。
+    enum class SelectCaseLabelClass { AllString, Mixed, NoString };
+    // 账 #305 第324刀: 同一次遍历顺带回答「有没有一枚标签**本身就是整枚 Variant 槽**」。
+    // 传 *outSlotLabel 即写；不开第二处问句 —— 承载档由标签回答这条口径只有一个主人。
+    SelectCaseLabelClass selectCaseLabelClass(SelectCaseStmt& node,
+                                              bool* outSlotLabel = nullptr) const;
 
     // ai/009 §5.10 (P3): 给**窄整型目标**的赋值右值套上溢出检查 (vb6_ChkByte/
     // ChkInt/ChkLong), 越界即 run-time error 6。原先这类赋值是裸 `t = v;`, 由 C
@@ -1053,6 +1096,10 @@
     std::set<const ASTNode*> hoistedLocalDeclSet_;
     // Fix 086: 工程内窗体模块名集合 (小写), driver预扫描填充
     std::unordered_set<std::string> knownFormModuleNames_;
+    // 账 #305 第三百三十一刀: As <窗体类型> 的变量 (小写变量名 → 窗体名, 原大小写)。
+    // `Public fMainForm As frmMain` 这类跨模块窗体引用变量 —— C3 单实例模型下
+    // 即窗体默认实例, 成员访问/裸值引用改道 form_builtin 的外部窗体支。
+    std::unordered_map<std::string, std::string> knownFormTypeVars_;
     // Fix 086: For方向拆分的循环体副本索引 (0=首份, 1=第二份); Label/GoTo配对加后缀
     int labelCopyIdx_ = 0;
     // Fix 090o: For方向拆分期间各被拆 body 内定义的标签名栈 (嵌套层)。
@@ -1166,7 +1213,8 @@
     // 为什么要收成一处: 组装 `packFn(expr)` 的站点在 com_bind / callee_member /
     // callee_ident 三个片段里共 8 处, 只堵一处就等于没堵 (实测 Pager.c 2079/2080
     // 走的是另一个站点)。
-    std::string packArgValue(const std::string& packFn, const std::string& expr) const;
+    std::string packArgValue(const std::string& packFn, const std::string& expr,
+                             const ASTNode* argAst = nullptr) const;
 
     // 账 #245/§B94: `Symbol::comMethods` 的**唯一读出口**。这张表以前在后端被读五遍
     // （四份文件），每份自己写一遍「按 mapType(returnType) 挑哪一条 vb6_Com*」，其中两处还把

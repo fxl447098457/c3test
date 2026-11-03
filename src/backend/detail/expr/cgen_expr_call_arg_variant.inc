@@ -517,7 +517,20 @@
                             argVal = "vb6_VariantToString(" + argVal + ")";
                         }
                     } else if (rtParamType == "void*") {
-                        argVal = "vb6_VariantToObjectVal(" + argVal + ")";
+                        // 账 (Outlook2013): `Unload <外部窗体名>` 的实参站在 call_arg_emit
+                        // 已交出 vb6_form_hwnd_X() (裸 HWND 指针, 非 Variant 槽); 实参名是
+                        // 窗体符号会被 argIsVariant 判真 → 旧路再包 vb6_VariantToObjectVal
+                        // ⇒ void* 进 vb6_VARIANT* 形参 (C2440, frmMain:1504 ×3)。
+                        bool formArg264u = false;
+                        if (node.positional[i]
+                            && node.positional[i]->kind == ASTNodeKind::IdentifierExpr
+                            && (callee == "vb6_UnloadForm" || callee == "vb6_LoadForm")) {
+                            formArg264u = knownFormModuleNames_.count(Symbol::toLower(
+                                static_cast<IdentifierExpr&>(*node.positional[i]).name)) != 0;
+                        }
+                        if (!formArg264u) {
+                            argVal = "vb6_VariantToObjectVal(" + argVal + ")";
+                        }
                     } else if (rtParamType == "vb6_SafeArray1D*") {
                         argVal = "vb6_VariantToSafeArray1D(" + argVal + ")";
                     }

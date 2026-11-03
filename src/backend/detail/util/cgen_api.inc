@@ -150,6 +150,11 @@
     std::string wrapConstArgForByRef(const std::string& argVal, Vb6Type paramVb6Type) const;
     // Fix 189: 当前函数的 ByRef 具体类型形参作为 ByRef Variant 实参 → 字段式 VARIANT 包装
     std::string wrapByRefVariantParamArg(const std::string& paramName, Vb6Type curParamType) const;
+    // 账 #608: Print # 与 Write # 那句「这枚实参是不是已经是一枚 BSTR」收成一位主人
+    // (原先两条语句各抄一份名单+闸门，两份都只问**局部**那张表)。
+    bool fileOutArgIsBstr(const std::string& expr, Expr& argNode) const;
+    // 账 #305 第331刀: 上面那道闸 + 非 BSTR 那半的取值出口，合起来是「实参形状」这一问的主人。
+    std::string fileOutArgBstrExpr(const std::string& expr, Expr& argNode);
     void visit(OpenStmt& node) override;
     void visit(CloseStmt& node) override;
     void visit(PrintStmt& node) override;
@@ -251,6 +256,10 @@
         auto it = projClassNames_->find(Symbol::toLower(name));
         return it == projClassNames_->end() ? std::string() : it->second;
     }
+    // 账 #305 第320刀 (账 #592): 工程标题（.vbp 的 Title，空则 Name），driver 在模块循环前
+    // 算好注入。入口点把它播种给 RTL 的 `vb6_SetAppTitle` —— App.Title 与 MsgBox 默认题头
+    // 都只问那一格（见 vb6rtl_system.c 的所有权注释）。
+    void setProjectTitle(std::string t) { projectTitle_ = std::move(t); }
     // 账 #305 §B187 第二腿: 注入"在运行期 coclass 描述表里占一行"的类名名单 (小写)。
     void setProjectCoclassNames(const std::unordered_set<std::string>* s) {
         projCoclassNames_ = s;

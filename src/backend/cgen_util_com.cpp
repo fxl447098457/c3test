@@ -150,6 +150,16 @@ std::string CCodeGen::resolveComValue(const std::string& unpackType) {
     std::string objExpr = std::move(comObjExpr_);
     std::string memberName = std::move(comMemberName_);
 
+    // 空 memberName = 「对象值已就绪」标记 (自类型过程调用作链中接收者:
+    // frmMain.RibbonBar().FindTab(...) 的内层)。没有成员要解 —— 直接把对象
+    // 表达式交回去, 复位旗标; 外层 (generic_access 的链式分支) 会拿它当接收者
+    // 重新立标记。若不设这道闸, "函数名"会被当成员名再解一层
+    // (GetObjectProp(调用, L"RibbonBar") ⇒ 运行期必错)。
+    if (memberName.empty()) {
+        isComMarker_ = false;
+        return lastExpr_ = objExpr;
+    }
+
     // 账 #299 第二十一刀: 这里原来还有一份 `Toolbar1.Buttons` 的抄本 (C29-5b 当时只
     // 有这一处)。现在由下面 memberCollectionObjectExpr 那一处统一答 —— 那条同样排在
     // P24-07 的 early-bound 决策之前，顺序与原意一致。
@@ -681,7 +691,11 @@ std::string CCodeGen::canonicalClassMemberName(const std::string& className,
 
 
 std::string CCodeGen::comPackExpr(Expr& expr) {
-    // Fix <vbeclipse>: **UDT (Type ... End Type) 实参**必须走字节数组编组。
+    if (std::getenv("C3_DBG_ST") && expr.kind == ASTNodeKind::IdentifierExpr
+        && (Symbol::toLower(static_cast<IdentifierExpr&>(expr).name) == "propertygridtheme"
+            || Symbol::toLower(static_cast<IdentifierExpr&>(expr).name) == "taskpaneltheme")) {
+        std::cerr << "[ST-PACK2] " << static_cast<IdentifierExpr&>(expr).name << std::endl;
+    }    // Fix <vbeclipse>: **UDT (Type ... End Type) 实参**必须走字节数组编组。
     // `m_Rect As RECT` 传给 COM 方法时, inferExprType 推不出标量类型 → 落
     // default 分支 → vb6_ComPackInt(me->m_Rect) → C2440 "无法从 vb6_type_RECT
     // 转换为 int32_t" (ucSplitBar.ctl:149 `.SplitterMouseDown UserControl.hWnd,
@@ -748,6 +762,37 @@ std::string CCodeGen::comPackExpr(Expr& expr) {
             auto it50 = arrayDimCounts_.find(lower);
             if (it50 != arrayDimCounts_.end() && it50->second <= 1) return "vb6_ComPackValue";
         }
+        // 账 #305 第三百三十九刀: 跨模块注入的**标量全局** (Definitions.bas 的
+        // , 消费侧 frmMain) —— 前端在消费模块
+        // 没解析到 (警告 VB3001), 该名又不在任何 known*Vars_ 表里 ⇒ inferExprType
+        // 答 Object ⇒ 发 vb6_ComPackObject(int32 全局) ⇒ 运行期对整数 AddRef ⇒
+        // 0xD 处 AV (GUISample CommandBars_Update 事件里的
+        //  实测)。
+        // 按符号声明 的类型名打包。
+        {
+            Symbol* cmSym339 = symTab_.lookupModule(id.name);
+            if (!cmSym339) cmSym339 = symTab_.lookup(id.name);
+            if (std::getenv("C3_DBG_ST")) { if (cmSym339) std::cerr << "[ST-PACK3] " << id.name << " kind=" << (int)cmSym339->kind << " vtn=[" << cmSym339->variableTypeName << "] type=" << (int)cmSym339->type << std::endl; else std::cerr << "[ST-PACK3] " << id.name << " NOSYM" << std::endl; }
+            if (cmSym339 && cmSym339->kind == SymbolKind::Variable
+                && !cmSym339->variableTypeName.empty() && !cmSym339->isArray) {
+                const std::string vt339 = Symbol::toLower(cmSym339->variableTypeName);
+                if (vt339 == "long" || vt339 == "integer" || vt339 == "byte"
+                    || vt339 == "boolean") return "vb6_ComPackInt";
+                // typelib 枚举 (As XTPPropertyGridVisualTheme) —— VB6 枚举一律是
+                // 32 位值; 符号 type 被填成 Object (枚举类型名在前端不可解析), 但
+                // 声明侧 C 类型是 int32_t (Definitions.h extern int32_t)。查得到
+                // EnumType/枚举成员符号即按 Long 打包。
+                {
+                    Symbol* enSym339 = lookupModuleDotted(cmSym339->variableTypeName);
+                    if (!enSym339) enSym339 = symTab_.lookupModule(cmSym339->variableTypeName);
+                    if (!enSym339) enSym339 = symTab_.lookup(cmSym339->variableTypeName);
+                    if (std::getenv("C3_DBG_ST")) { std::cerr << "[ST-PACK4] enum " << cmSym339->variableTypeName << " -> " << (enSym339 ? (int)enSym339->kind : -1) << std::endl; }
+                    if (enSym339 && enSym339->kind == SymbolKind::EnumType) return "vb6_ComPackInt";
+                }
+                if (vt339 == "double" || vt339 == "single" || vt339 == "currency") return "vb6_ComPackDouble";
+                if (vt339 == "string") return "vb6_ComPackBSTR";
+            }
+
         // Fix 110v: knownVariantVars_ 先于 knownObjectVars_ 判定. `Dim Value As Variant`
         // 的局部变量在 For Each 语境下同时被登记进 knownObjectVars_ (旧代码把
         // For-Each 元素一律当对象), 使 Variant 变量走 vb6_ComPackObject →
@@ -760,6 +805,7 @@ std::string CCodeGen::comPackExpr(Expr& expr) {
         if (knownBstrVars_.count(lower)) return "vb6_ComPackBSTR";
         if (knownDoubleVars_.count(lower)) return "vb6_ComPackDouble";
         if (knownLongVars_.count(lower)) return "vb6_ComPackInt";
+        }
     }
     // ExeComBridge 03: 本工程类的 `New <类>` 实参.
     //   cgen_expr.cpp visit(NewExpr) 对它生成裸实例指针 (vb6_cls_X_New()); 通用
@@ -970,7 +1016,37 @@ std::string CCodeGen::comUnpackForPack(const std::string& packFn,
 }
 
 std::string CCodeGen::packArgValue(const std::string& packFn,
-                                   const std::string& expr) const {
+                                   const std::string& expr,
+                                   const ASTNode* argAst) const {
+    // B5: 带型本工程类实例**变量**当晚绑定 COM 实参. 变量槽里是裸 vb6_cls_X*
+    // (`Set h = New X` 对 typed 槽发的是 X_New() 的裸指针), 而 ComPackValue 的
+    // _Generic 把它当 VT_DISPATCH 原样交出去, 对端 AddRef 时把结构体首字段
+    // __comObj 当 vtable ⇒ 0xC0000005 (实测 B5b: `Dim h As bHello: d.Add "x", h`
+    // → exit 0xC0000005, 崩在 Add 那一句).
+    // 出口**不能**复用 `New` 实参那条 vb6_ComPack_<类>: 那一条经 FromInstance,
+    // 把实例销毁权一起交给 VARIANT; 变量还活着, 对端释放后再用就是 UAF.
+    // 借用型: FromBorrowedInstance 加一枚引用交给 VARIANT, 宿主销毁权不动.
+    // 闸门: "裸标识符 (局部/模块级变量、ByVal 形参)" 或 "ByRef 形参的解引用形态
+    // `(*obj)`", 且类型占 coclass 表. 表外类 (§B187 EXE 不登记 / Private) 交回原路.
+    // ByRef 传参语义: 晚绑定对端拿到的是**当时的引用** (AddRef 后存进 VARIANT),
+    // 不会反向改写宿主槽; 形参自身被 `Set obj = ...` 改写时写的是宿主槽, 与已
+    // 交给对端的那枚引用无关 —— 故先解一层再借用打包是安全的 (§B5 同源缺口).
+    if (argAst && argAst->kind == ASTNodeKind::IdentifierExpr
+        && (packFn == "vb6_ComPackValue" || packFn == "vb6_ComPackObject")) {
+        auto& id5 = static_cast<const IdentifierExpr&>(*argAst);
+        const std::string lower5 = Symbol::toLower(id5.name);
+        const bool bareIdent5 = expr == id5.name && !expr.empty()
+            && (std::isalpha((unsigned char)expr[0]) || expr[0] == '_')
+            && std::all_of(expr.begin() + 1, expr.end(), [](char ch) {
+                   return std::isalnum((unsigned char)ch) || ch == '_'; });
+        const bool isByRef5 = knownByRefParams_.count(lower5) > 0;
+        const bool derefByRef5 = isByRef5 && expr == "(*" + id5.name + ")";
+        if ((bareIdent5 && !isByRef5) || derefByRef5) {
+            const std::string cls5 = inferClassTypeOfExpr(*argAst);
+            if (!cls5.empty() && classHasCoClassDesc(cls5))
+                return "vb6_ComPackVB6InstanceBorrowed(\"" + cls5 + "\", " + expr + ")";
+        }
+    }
     // ⚠ 长度字面量必须与整串长度相等 —— `std::string::compare(pos, count, str)` 拿
     // [pos, pos+count) 去比**整条** str, count 小于 str.size() 时恒不相等 (静默恒假)。
     // 这里直接用 rfind(..., 0) 前缀判定, 不数长度。
@@ -1017,15 +1093,19 @@ std::string CCodeGen::resolveComMarkerForPack(const std::string& packFnHint) {
     // 本体** (vb6com_wrap.c:126 只认 VT_DISPATCH/VT_UNKNOWN, 且 vb6_ComVarFree 只 free
     // 结构体), 而 vb6_VariantFromComResult 的契约是把入参**当堆上 VARIANT 解引用再 free**
     // —— 拿对象指针喂它是类型混淆 (读 vtable 首字当 vt 标签, 然后把代码地址 free 掉)。
-    // 这两条前缀留在表里只因为 isComMarker_ 为假时它们本来就落 `return ""` 那一路,
-    // 由 packArgValue 原样打包; 本刀不动它们, 只把 marker 在场那一头闸住。
+    // 账 (Outlook2013 frmInbox:331): 这里**只许**列交回 VARIANT* 的三个出口。
+    // vb6_ComGetObjectProp / vb6_ComCallObject 交回的是 **IDispatch\* 本体**, 把它喂给
+    // vb6_VariantFromComResult (= 当堆上 VARIANT 解引用再 free) 是类型混淆 —— 读对象
+    // vtable 首字当 vt 标签, 再把代码地址 free 掉。以前这两条前缀也在这张表里, 只因
+    // 默认成员调用一律失败 (返回 NULL) 才没炸; 修好默认成员 (vb6_ComCallObjectDefault)
+    // 之后对象真的回来了, `GroupsOrder.Add <对象>` 当场把进程打死。
+    // 正确形状: 交给 packArgValue 原样打包 —— vb6_ComPackValue 的 _Generic 把 void*
+    // 落到 vb6_VariantObject (VT_DISPATCH + AddRef), 正是这里要的语义。
     if ((packFnHint == "vb6_ComPackVariant" || packFnHint == "vb6_ComPackValue")
         && !isComMarker_) {
         if (lastExpr_.find("vb6_ComCall(") == 0 ||
             lastExpr_.find("vb6_ComCallByDispid(") == 0 ||
-            lastExpr_.find("vb6_ComGetProp(") == 0 ||
-            lastExpr_.find("vb6_ComGetObjectProp(") == 0 ||
-            lastExpr_.find("vb6_ComCallObject(") == 0) {
+            lastExpr_.find("vb6_ComGetProp(") == 0) {
             return "vb6_VariantFromComResult(" + lastExpr_ + ")";
         }
     }
