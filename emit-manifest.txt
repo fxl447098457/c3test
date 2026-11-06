@@ -1,5 +1,5 @@
-# c3-exe sha256=106b6ac6e5f240f70445602f66f73bd74aa31ed4e6c93e1a43d07bcee912f8b9 size=7833600
-# toolset pe-lnk=14.51 vs=18.11.12328.437 msvc-installed=14.29.30133+14.44.35207+14.51.36231 runner=runnervmhao91
+# c3-exe sha256=c28f703a89eaacf7a780c5b3f2f855904cb28736df9029bde8618e5afe968e61 size=7833600
+# toolset pe-lnk=14.51 vs=18.11.12328.437 msvc-installed=14.29.30133+14.44.35207+14.51.36231 runner=runnervmm7ud1
 # arch=x64 inputs=595
 # columns: sha256=<normalized全文> ascii256=<仅ASCII行> rc=<退出码> bytes=<归一化字节> <relpath>
 sha256=ae7714fafb0d0bf6c5d21168b29a025c64ca767dbaf3ae005eff4055eac7f56b ascii256=edbd5f9e20588a9a9860824c75cf8a589c9c9c11f47ce0a890833a9fe2a75aaa rc=0 bytes=1773 tests/acc/acc_fam_main.bas
@@ -597,4 +597,4 @@ sha256=63cbbdb445139a6dcc20cf829a1634f026f51f12c58944a4bd8f0f51277fadba ascii256
 sha256=f84e4f81bb36add3120be9d173e35e01055ab493a72fce269d7d7710adee6ab1 ascii256=b0845e865c93f4df0ee7f685e662ea349a9499fd188a7d5cea984df47e9d4a10 rc=0 bytes=51559 tests/ve_list/VeList.vbp
 sha256=182b24266c6df3008c0d3d9518301752f5b3babe23b2eaffcb444a280a503f6a ascii256=78931f24aff2ed46cadfb83d0dd21424077d88fb633a360d081b961d74642072 rc=0 bytes=14913 tests/ve_list/VeListMain.bas
 sha256=62e3e2e4b1b0e6816fda0e6113f7391a5089a11f7cf3ec6d1a93cc1c779d4a21 ascii256=fb2c27421800047827b4c715c45d13f2a9cb50da7afdb25e527f194fb923d15d rc=0 bytes=53143 tests/ve_units/Units.vbp
-# expectation-check=FAIL rc=1
+# expectation-check=PASS
