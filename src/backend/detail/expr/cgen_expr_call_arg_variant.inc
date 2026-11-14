@@ -368,18 +368,16 @@
                     std::string twin249b = comValueTwinForObjectReadExpr(argVal);
                     if (!twin249b.empty()) argVal = twin249b;
                 }
-                // 账 (prjNewAniGif ucGIF.LoadGIF): 定长串 (`String * N` —— C 侧是内联
-                // `char[N]`) 交进 BSTR 形参。裸传 = char* → wchar_t*, C 只报 warning;
-                // 运行期把 ASCII 字节按 UTF-16 解 ⇒ 越界。实测 `vb6_LCase(p.Version)`
-                // 直接把进程带走, 而 ucGIF 的 `On Error Resume Next` 把它吞成"不是 GIF"
-                // ⇒ LoadGIF 立即退出、帧数 0、控件一片背景色。
-                // 口径与读侧一致: vb6_FixedStrToBSTR(buf, cap)（cap 来自唯一那本长度账）。
+                // 账 (prjNewAniGif ucGIF.LoadGIF): 定长串交进 BSTR 形参要换算 —— 但只能走
+                // wrapToBSTR 那本账: 它**只认成员访问** (UDT 定长串字段的 C 类型是 char[N])。
+                // 裸定长串变量 (`Dim s As String * 255`) 在 C 侧仍是 BSTR 模型, 再包一次就是
+                // 把 BSTR 当 char* 解 —— tests/strnul_drive 的 InStr(strDrives, Chr$(0)) 立刻
+                // 变 False, ClsTreeExplorer 的驱动器列表也跟着空。
                 if (rtParamType == "BSTR" && node.positional[i]
-                    && argVal.find("vb6_FixedStrToBSTR(") == std::string::npos) {
-                    const std::string fsLen474 = fixedStrLenOfExpr(*node.positional[i], "");
-                    if (!fsLen474.empty()) {
-                        argVal = "vb6_FixedStrToBSTR(" + argVal + ", " + fsLen474 + ")";
-                    }
+                    && (node.positional[i]->kind == ASTNodeKind::MemberAccessExpr
+                        || node.positional[i]->kind == ASTNodeKind::WithMemberExpr)) {
+                    std::string wrapped474 = wrapToBSTR(argVal, *node.positional[i]);
+                    if (!wrapped474.empty()) argVal = wrapped474;
                 }
                 // P2 (A7): 本臂的提取/退让只对整只槽成立 (数组本体由 !isArr 排除)。
                 bool argIsVariant = isVariantSlot(argVal, node.positional[i].get());

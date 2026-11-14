@@ -405,12 +405,13 @@
                     callee, node.positional.size(), i, first175);
             }
             if (strSlot175 && (typeTakesImplicitCStr(inferExprType(*node.positional[i]))
-                    // 账 (prjNewAniGif ucGIF.LoadGIF): UDT 定长串字段 (`String * N`) 的
-                    // **静态**类型就是 String, 但 C 侧是内联 `char[N]`。上面那条按「需要隐式
-                    // 转串」判定的闸对它答 false ⇒ `vb6_LCase(p.Version)` 把 char* 交进
-                    // wchar_t* 形参, 运行期按 UTF-16 解 ASCII 字节直接崩; ucGIF 的
-                    // `On Error Resume Next` 把它吞成「不是 GIF」⇒ 帧数 0、什么都不画。
-                    || !fixedStrLenOfExpr(*node.positional[i], "").empty())) {
+                    // 账 (prjNewAniGif ucGIF.LoadGIF): 定长串实参要换算 —— 但**只限成员访问**
+                    // (UDT 定长串字段的 C ABI 才是 char[N])。裸定长串变量
+                    // (`Dim s As String * 255`) 在 C 侧仍是 BSTR 模型, 再包一次就把 BSTR
+                    // 当 char* 解 —— tests/strnul_drive 的 InStr(strDrives, Chr$(0)) 变 False。
+                    || ((node.positional[i]->kind == ASTNodeKind::MemberAccessExpr
+                         || node.positional[i]->kind == ASTNodeKind::WithMemberExpr)
+                        && !fixedStrLenOfExpr(*node.positional[i], "").empty()))) {
                 argVal = wrapToBSTR(argVal, *node.positional[i]);
             }
         }
