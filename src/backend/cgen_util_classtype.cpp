@@ -1770,6 +1770,20 @@ std::string CCodeGen::emitUdtCopyBlock() const {
                        "    }\n";
                 continue;
             }
+            {
+                // 账 (prjNewAniGif ucGIF): UDT 定长串字段 (`Type T: Version As String * 6`)
+                // 的 C ABI 是内联 `char[6]`, **不是** BSTR。平米深拷会发
+                // `d->Version = SysAllocString(s->Version)` ⇒ C2106 (char[6] 不可赋值)。
+                // 定长串没有所有权, 拷字节就是全部语义 (源侧已按 N 右补空格)。
+                auto fsIt = udtFixedStrFieldLen_.find(udtCType);
+                if (fsIt != udtFixedStrFieldLen_.end()) {
+                    auto fIt = fsIt->second.find(Symbol::toLower(mi.name));
+                    if (fIt != fsIt->second.end() && !fIt->second.empty()) {
+                        out += "    memcpy(d->" + fn + ", s->" + fn + ", " + fIt->second + ");\n";
+                        continue;
+                    }
+                }
+            }
             if (bt == Vb6Type::String) {
                 out += "    { BSTR _o = d->" + fn + "; d->" + fn
                      + " = s->" + fn + " ? SysAllocString(s->" + fn + ") : NULL;\n"

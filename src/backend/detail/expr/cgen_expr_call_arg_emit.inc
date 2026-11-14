@@ -404,7 +404,13 @@
                 strSlot175 = builtinNoParamTableStringSlot(
                     callee, node.positional.size(), i, first175);
             }
-            if (strSlot175 && typeTakesImplicitCStr(inferExprType(*node.positional[i]))) {
+            if (strSlot175 && (typeTakesImplicitCStr(inferExprType(*node.positional[i]))
+                    // 账 (prjNewAniGif ucGIF.LoadGIF): UDT 定长串字段 (`String * N`) 的
+                    // **静态**类型就是 String, 但 C 侧是内联 `char[N]`。上面那条按「需要隐式
+                    // 转串」判定的闸对它答 false ⇒ `vb6_LCase(p.Version)` 把 char* 交进
+                    // wchar_t* 形参, 运行期按 UTF-16 解 ASCII 字节直接崩; ucGIF 的
+                    // `On Error Resume Next` 把它吞成「不是 GIF」⇒ 帧数 0、什么都不画。
+                    || !fixedStrLenOfExpr(*node.positional[i], "").empty())) {
                 argVal = wrapToBSTR(argVal, *node.positional[i]);
             }
         }

@@ -368,6 +368,19 @@
                     std::string twin249b = comValueTwinForObjectReadExpr(argVal);
                     if (!twin249b.empty()) argVal = twin249b;
                 }
+                // 账 (prjNewAniGif ucGIF.LoadGIF): 定长串 (`String * N` —— C 侧是内联
+                // `char[N]`) 交进 BSTR 形参。裸传 = char* → wchar_t*, C 只报 warning;
+                // 运行期把 ASCII 字节按 UTF-16 解 ⇒ 越界。实测 `vb6_LCase(p.Version)`
+                // 直接把进程带走, 而 ucGIF 的 `On Error Resume Next` 把它吞成"不是 GIF"
+                // ⇒ LoadGIF 立即退出、帧数 0、控件一片背景色。
+                // 口径与读侧一致: vb6_FixedStrToBSTR(buf, cap)（cap 来自唯一那本长度账）。
+                if (rtParamType == "BSTR" && node.positional[i]
+                    && argVal.find("vb6_FixedStrToBSTR(") == std::string::npos) {
+                    const std::string fsLen474 = fixedStrLenOfExpr(*node.positional[i], "");
+                    if (!fsLen474.empty()) {
+                        argVal = "vb6_FixedStrToBSTR(" + argVal + ", " + fsLen474 + ")";
+                    }
+                }
                 // P2 (A7): 本臂的提取/退让只对整只槽成立 (数组本体由 !isArr 排除)。
                 bool argIsVariant = isVariantSlot(argVal, node.positional[i].get());
                 // Fix 113c: 实参是裸 COM 结果 (void* 承载 COM VARIANT*) 时, 语义即
