@@ -1,12 +1,12 @@
 VERSION 5.00
 Begin VB.Form LvFrame 
    Caption         =   "LvFrame"
-   ClientHeight    =   4200
+   ClientHeight    =   3000
    ClientLeft      =   120
    ClientTop       =   465
    ClientWidth     =   6600
    LinkTopic       =   "Form1"
-   ScaleHeight     =   4200
+   ScaleHeight     =   3000
    ScaleWidth      =   6600
    Begin VB.Timer Timer1 
       Enabled         =   -1  'True
@@ -18,7 +18,7 @@ Begin VB.Form LvFrame
       Caption         =   "COUT"
       Height          =   375
       Left            =   4560
-      TabIndex        =   4
+      TabIndex        =   3
       Top             =   120
       Width           =   1000
    End
@@ -48,19 +48,6 @@ Begin VB.Form LvFrame
          Width           =   1200
       End
    End
-   Begin ComctlLib.ListView ListView1 
-      Height          =   1800
-      Left            =   120
-      TabIndex        =   3
-      Top             =   1200
-      Width           =   6300
-      _ExtentX        =   11113
-      _ExtentY        =   3175
-      LabelWrap       =   -1  'True
-      HideSelection   =   -1  'True
-      _Version        =   327682
-      View            =   3
-   End
 End
 Attribute VB_Name = "LvFrame"
 Attribute VB_GlobalNameSpace = False
@@ -69,16 +56,17 @@ Attribute VB_PredeclaredId = True
 Attribute VB_Exposed = False
 Option Explicit
 
+' No ActiveX control in this fixture on purpose: CI has no VB6 OCX installed, and
+' C3 falls back to a bare identifier when the typelib is missing (VB4001 -> C2065),
+' so anything that declares ComctlLib.ListView can only build on a dev box.
+' The list-view side of the enum bug is covered by tests/extlist (dev box only);
+' what is gated here is the enum evaluation itself plus control events through a Frame.
+
 Private Declare Function SendMessage Lib "user32" Alias "SendMessageA" (ByVal hWnd As Long, ByVal wMsg As Long, ByVal wParam As Long, lParam As Any) As Long
+Private Const BM_CLICK_MSG As Long = 245
 
-Private Const LVM_SETEXTENDEDLISTVIEWSTYLE As Long = 4150
-Private Const LVM_GETEXTENDEDLISTVIEWSTYLE As Long = 4151
-Private Const LVS_EX_GRIDLINES As Long = 1
-Private Const LVS_EX_FULLROWSELECT As Long = 32
-Private Const BM_CLICK As Long = 245
-
-' Regression for enum members referencing module-level Consts: they must be
-' evaluated, not fall back to the declaration ordinal.
+' Intra-module: enum members referencing module-level Consts must be evaluated,
+' not fall back to the declaration ordinal.
 Private Const LSX_FULL As Long = &H20
 Private Const LSX_TRACK As Long = &H8
 Private Enum LvFlag
@@ -87,24 +75,7 @@ Private Enum LvFlag
     FlagBoth = FlagFull Or FlagTrack
 End Enum
 
-Private Function GetEx() As Long
-    GetEx = SendMessage(ListView1.hWnd, LVM_GETEXTENDEDLISTVIEWSTYLE, 0&, ByVal 0&)
-End Function
-
-Private Function ToggleEx(lv As ListView, ByVal NewStyle As Long, ByVal NewVal As Boolean) As Boolean
-    ' Same shape as LVSetStyleEx: object parameter -> .hWnd -> GET/Or/Xor/SET
-    Dim nStyle As Long
-    nStyle = SendMessage(lv.hWnd, LVM_GETEXTENDEDLISTVIEWSTYLE, 0&, ByVal 0&)
-    If NewVal Then
-        nStyle = nStyle Or NewStyle
-    Else
-        nStyle = nStyle Xor NewStyle
-    End If
-    ToggleEx = CBool(SendMessage(lv.hWnd, LVM_SETEXTENDEDLISTVIEWSTYLE, 0&, ByVal nStyle))
-End Function
-
 Private Sub Form_Load()
-    Debug.Print "STYLE0=" & GetEx()
     ' Expect 32/8/40; ordinal fallback would print 0/1/1
     Debug.Print "ENUM=" & LvFlag.FlagFull & "/" & LvFlag.FlagTrack & "/" & LvFlag.FlagBoth
     ' Cross-module: defined in LvMod.bas, referenced here
@@ -128,25 +99,14 @@ Private Sub Timer1_Timer()
     step = step + 1
     Select Case step
     Case 1
-        ' Native path: BM_CLICK is what a real mouse click ends up sending
-        SendMessage Check1(0).hWnd, BM_CLICK, 0&, ByVal 0&
+        ' Native path: this is what a real mouse click ends up sending to the parent
+        SendMessage Check1(0).hWnd, BM_CLICK_MSG, 0&, ByVal 0&
         Debug.Print "AFTER_BMCLICK chk=" & Check1(0).Value
         Check1(0).Value = 1
         Debug.Print "AFTER_PROG chk=" & Check1(0).Value
-        Command1(0).Value = True
-        Command2.Value = True
-    Case 2
-        Debug.Print "STYLE_A=" & GetEx()
-        SendMessage ListView1.hWnd, LVM_SETEXTENDEDLISTVIEWSTYLE, 0&, ByVal LVS_EX_GRIDLINES
-        Debug.Print "STYLE_B=" & GetEx()
-        SendMessage ListView1.hWnd, LVM_SETEXTENDEDLISTVIEWSTYLE, 0&, ByVal LVS_EX_FULLROWSELECT
-        Debug.Print "STYLE_C=" & GetEx()
+        SendMessage Command1(0).hWnd, BM_CLICK_MSG, 0&, ByVal 0&
+        SendMessage Command2.hWnd, BM_CLICK_MSG, 0&, ByVal 0&
     Case 4
-        Debug.Print "WRAP_ON=" & ToggleEx(ListView1, LVS_EX_GRIDLINES, True)
-        Debug.Print "WRAP_A=" & GetEx()
-        Debug.Print "WRAP_OFF=" & ToggleEx(ListView1, LVS_EX_GRIDLINES, False)
-        Debug.Print "WRAP_B=" & GetEx()
-    Case 5
         Debug.Print "LVFRAME-DONE"
         Unload Me
     End Select
