@@ -79,14 +79,17 @@ jobs:
         uses: actions/cache@v6
         with:
           path: .build/C3.exe
-          key: c3exe-${{ hashFiles('src/**', 'CMakeLists.txt', 'cmake/**') }}
+          # v2: 这枚 key 曾把「旧二进制」当成本轮产物服回去 —— d82efb0a 与 dbbc2026 的 src 相同，
+          # 清单却给出两组不同的发码哈希（aff4cf7e vs 9d4240bc）。血统不干净就永远分不清
+          # 「发码真的变了」与「跑的不是这棵树的编译器」，所以整体换代一次。
+          key: c3exe-v2-${{ hashFiles('src/**', 'CMakeLists.txt', 'cmake/**') }}
 
       - name: Cache C3.exe build dir (fast path when src/ untouched)
         uses: actions/cache@v6
         with:
           path: ${{ runner.temp }}/c3build
-          key: c3build-${{ hashFiles('src/**', 'CMakeLists.txt', 'cmake/**') }}
-          restore-keys: c3build-
+          key: c3build-v2-${{ hashFiles('src/**', 'CMakeLists.txt', 'cmake/**') }}
+          restore-keys: c3build-v2-
 
       # sccache: 编译缓存。构建每次 src 变更都要全编 128 个 TU（实测门 #881 Build=253s），
       # 而多数 TU 在两次提交间不变 —— sccache 按「预处理后源 + 编译器身份 + flags」做键，命中即
