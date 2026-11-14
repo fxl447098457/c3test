@@ -411,6 +411,7 @@
                     // 当 char* 解 —— tests/strnul_drive 的 InStr(strDrives, Chr$(0)) 变 False。
                     || ((node.positional[i]->kind == ASTNodeKind::MemberAccessExpr
                          || node.positional[i]->kind == ASTNodeKind::WithMemberExpr)
+                        && inferExprType(*node.positional[i]) == Vb6Type::String
                         && !fixedStrLenOfExpr(*node.positional[i], "").empty()))) {
                 argVal = wrapToBSTR(argVal, *node.positional[i]);
             }

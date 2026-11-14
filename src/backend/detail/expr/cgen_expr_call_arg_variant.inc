@@ -375,7 +375,8 @@
                 // 变 False, ClsTreeExplorer 的驱动器列表也跟着空。
                 if (rtParamType == "BSTR" && node.positional[i]
                     && (node.positional[i]->kind == ASTNodeKind::MemberAccessExpr
-                        || node.positional[i]->kind == ASTNodeKind::WithMemberExpr)) {
+                        || node.positional[i]->kind == ASTNodeKind::WithMemberExpr)
+                    && inferExprType(*node.positional[i]) == Vb6Type::String) {
                     std::string wrapped474 = wrapToBSTR(argVal, *node.positional[i]);
                     if (!wrapped474.empty()) argVal = wrapped474;
                 }
