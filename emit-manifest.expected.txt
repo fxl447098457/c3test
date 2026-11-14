@@ -36,7 +36,6 @@
 #   ����������嵥�Ǽǣ�C3.exe = �� HEAD ���������һ̨������ CI ��̨��������֤����������
 # 2026-10-28 �ڶ�����ʮ�ߵ��Ǽǣ�5 �������ƶ� = ���޶�����һ��`As VBRUN.ParentControls` һ�岻�ٱ���������ĸ vb ? Long���۳ɱ������������𲻳�ʱ�� leaf ���ʡ�leaf Ҳδ֪���ض��󵵣������й���tests/test_alias_spellings.bas �Ǳ����о�����ö�¹��̣�2145��3159����VTableHandle.bas �� Common.bas �� VBFlexGridDemo.vbp = `OleGuids.*`/`VBRUN.ParentControlsType` �ĵ��� Unknown/Long �ĵ����󵵣��� `vb6_ComPackInt(`��`vb6_ComPackObject(` ��������mdQRCodegen.bas 260438��259249 = `stdole.IUnknown` ����󵵺�`DispCallByVtbl(pUnk, ��)` ��һ�岻��ʵ��λװ�䡢ֱ�ӵ�ָ���ַ��ͬ�� 19 ������ȫ�� = ��Щ���������Թ�����MSDATASRC �� `VB.`/`VBA.` ��������һ�� 21 ������**��������**��ס��δ�����ڲ����
 sha256=ae7714fafb0d0bf6c5d21168b29a025c64ca767dbaf3ae005eff4055eac7f56b ascii256=edbd5f9e20588a9a9860824c75cf8a589c9c9c11f47ce0a890833a9fe2a75aaa rc=0 bytes=1773 tests/acc/acc_fam_main.bas
-sha256=ae7714fafb0d0bf6c5d21168b29a025c64ca767dbaf3ae005eff4055eac7f56b ascii256=edbd5f9e20588a9a9860824c75cf8a589c9c9c11f47ce0a890833a9fe2a75aaa rc=0 bytes=1773 tests/acc/acc_fam_main.bas
 sha256=4ef2ff0f3d949c34c992c995c0369f74b400f7550b7a754100cc284688fe6e58 ascii256=59697ca02251a3769a6f4335bd4cb180e9613fa1bbc0308cd841bd172647a32b rc=0 bytes=9920 tests/acc/acc_fam.vbp
 sha256=64ca3fee78a5a527ff6433d36f32bcc19fd81618d6a16379479007b79c7fc3d6 ascii256=4f779f832dd9588e83d6f6f4458ecf49c443b3d5d9e66d7fac3f2ca02369d801 rc=0 bytes=1785 tests/acc/acc_main.bas
 sha256=4f3905ae2384508821373195af910bc2461a5d52dfe8baed31eabe908cd6b4a8 ascii256=68da85f48ef297bbb9f00c8596ed08f42a3ebf9db2fcab5fa36a7bc173ce6d70 rc=0 bytes=1574 tests/acc/acc_neg_main.bas
@@ -224,8 +223,8 @@ sha256=435a8b15023ea49eb63b5590f7e0e8bb025b7847b23137e5b43cbfc1bee13e12 ascii256
 sha256=4673aaa97d5617d677941845e319c1752ad3ac1d1c7ad849c3b20023d6ae7cc3 ascii256=903a508939d6df091968c27b0b8ffdd125a24d847029eb78de9407bc416642c8 rc=0 bytes=8723 tests/itf_via/ViaMain.bas
 sha256=956142904129118ec08f78cf306601673d6137d28f9cd130b78ccd7bb85894d7 ascii256=f7b78a4ab361d1a5410622d4802d15315f22c5e7fcc4a577ae46a08fe6340495 rc=0 bytes=10871 tests/itf_xmod/XMain.bas
 sha256=5235f4fac47a3a43ec55068ed254e85c65c885509cdfe99ca273f1547be151b6 ascii256=fbf3b86bd6990bc9f1b5525ceb908cda440589c10baeecfed1bcb2b9248c5ad1 rc=0 bytes=49764 tests/itf_xmod/XWriter.vbp
-sha256=39a27fc599f78bd558225321ff540f10760a5f4d1d7d88d9277fefc2eee258a0 ascii256=1ff8f56d301a5823173d67d4c936ac502ca0d4f86437e11f265bebb10d074aae rc=0 bytes=15762 tests/lvframecb/LvFrame.vbp
-sha256=712303c56d41274278413a7bf8a6fb88a61e3a06a78af1a9eeeaabcab100fc9c ascii256=0b6bbcd195b1de8d58178bfacac30d9a4447910928ab058131aa9b5d3b6875fe rc=0 bytes=1328 tests/lvframecb/LvMod.bas
+sha256=555665bccd6cc9121caae859c500bd7f5275558d3a3d0e24d017a4b90b2c6cb6 ascii256=b567d9a6692620a3f26e8a180e286854e47c06201b2d06b7fb4c2e92ecf1c4f9 rc=0 bytes=16198 tests/lvframecb/LvFrame.vbp
+sha256=bd784d239a730044e1322b9e075565627bc36c0876ce76f4d1d99981afa443a9 ascii256=e5a31a9a251bff4df11a6c87a91b66fe51a2e80246cf5f6d5eaf21a40081c7c5 rc=0 bytes=1399 tests/lvframecb/LvMod.bas
 sha256=dcb45b43b3746a71fe11368dfbd38f87a98c04a1342ef4510377d95d20168b04 ascii256=76db44ed15f3eec519223166339934caadfad268fce15465841100794d2d4aa9 rc=0 bytes=7354 tests/m6_main.bas
 sha256=85e782d9bda9670d8aa6c8b76298fb93a98f46da4657343df18d030f24849160 ascii256=d7042128dda0dc85c74524f080251db0c097b641ffe4ba00f3566aec7e286cf4 rc=0 bytes=1936 tests/m6_main2.bas
 sha256=12abb6af932bdc3dd9c9b6ebd2ac9b9d4a1ebdb16dfa02616fed9fa0fe848cea ascii256=1545e5bd64bc8638c42360623b5e78f267f69f6a4d8e340829c5fae456aa6e24 rc=0 bytes=2474 tests/m6_math.bas
