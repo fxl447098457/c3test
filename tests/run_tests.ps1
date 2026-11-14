@@ -7398,7 +7398,7 @@ if ($Category -in @("all", "run", "vbp")) {
     # 账 #612: 枚举成员引用**模块级 Const** 时必须真求值。回落成声明序号时
     # 这里会是 ENUM=0/1/1, 连带 LVStyles 的 FullRowSelect(32) 被当成 GridLines(1)
     # → 勾 HighlightRow 后整行选中永不生效。
-    $lvFrameNeedles = @("LVFRAME-DONE", "STYLE0=0", "ENUM=32/8/40", "CB=0",
+    $lvFrameNeedles = @("LVFRAME-DONE", "STYLE0=0", "ENUM=32/8/40", "ENUM.X=32/8/40", "CB=0",
                         "AFTER_BMCLICK chk=1", "STYLE_B=1", "STYLE_C=32",
                         "WRAP_ON=True", "WRAP_A=33", "WRAP_B=32")
     Test-Vbp "lvframecb" "$Tests\lvframecb\LvFrame.vbp" $lvFrameNeedles

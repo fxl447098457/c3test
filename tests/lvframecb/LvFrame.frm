@@ -106,6 +106,8 @@ Private Sub Form_Load()
     Debug.Print "STYLE0=" & GetEx()
     ' 期望 32/8/40; 回落成序号时会是 0/1/2
     Debug.Print "ENUM=" & LvFlag.FlagFull & "/" & LvFlag.FlagTrack & "/" & LvFlag.FlagBoth
+    ' 跨模块 (.bas 定义 / .frm 引用) 同口径
+    Debug.Print "ENUM.X=" & LvFlag2.Flag2Full & "/" & LvFlag2.Flag2Track & "/" & LvFlag2.Flag2Both
 End Sub
 
 Private Sub Check1_Click(Index As Integer)

@@ -1,5 +1,6 @@
 Type=Exe
 Form=LvFrame.frm
+Module=LvMod; LvMod.bas
 Startup="LvFrame"
 Command32=""
 Name="LvFrame"
