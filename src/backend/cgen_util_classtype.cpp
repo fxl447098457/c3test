@@ -1770,20 +1770,6 @@ std::string CCodeGen::emitUdtCopyBlock() const {
                        "    }\n";
                 continue;
             }
-            // 定长串成员 (`Version As String * 6`): C 侧载体仍是 BSTR, 长度只记在
-            // udtFixedStrFieldLen_ 里。裸 `d->X = s->X` 会二份共享同一块 BSTR (释放时双
-            // free); 而 SysAllocString 那条分支会丢掉定长填充/截断语义 ⇒ 统一走赋值路入口。
-            if (bt == Vb6Type::String) {
-                auto fsUdt = udtFixedStrFieldLen_.find("vb6_type_" + n);
-                if (fsUdt != udtFixedStrFieldLen_.end()) {
-                    auto fsFld = fsUdt->second.find(Symbol::toLower(mi.name));
-                    if (fsFld != fsUdt->second.end()) {
-                        out += "    vb6_FixedStrAssignFree(" + dl + ", " + fsFld->second
-                             + ", " + sl + ");\n";
-                        continue;
-                    }
-                }
-            }
             if (bt == Vb6Type::String) {
                 out += "    { BSTR _o = d->" + fn + "; d->" + fn
                      + " = s->" + fn + " ? SysAllocString(s->" + fn + ") : NULL;\n"

@@ -2,28 +2,6 @@
 // 由 src/backend/expr/cgen_expr_call.cpp 拆出（2026-09-17），在函数体内被 #include，非独立编译单元。
 // 内容 = 原文件第 806~1009 行，逐行未改。
 
-    // ---- 账 (prjNewAniGif): `With <工程内 UserControl 实例> : .Move l,t,w,h` ——
-    // .ctl 类自己没有 Move ⇒ 它是**容器 Extender** 方法。此处直接拼成一次完整调用
-    // (位置参自己发; 不走 pendingChainObj 协议 —— 那条路会把首参当 this)。
-    if (node.callee && node.callee->kind == ASTNodeKind::WithMemberExpr
-        && Symbol::toLower(static_cast<WithMemberExpr&>(*node.callee).memberName) == "move"
-        && node.named.empty() && node.positional.size() <= 4
-        && !withObjectInfoStack_.empty() && !withObjectVars_.empty()) {
-        const auto& infoMVc = withObjectInfoStack_.back();
-        if (infoMVc.kind == WithObjKind::ClassInstance && !infoMVc.designerCtrlName.empty()) {
-            std::string aMVc[4] = { "0", "0", "0", "0" };
-            for (size_t i = 0; i < node.positional.size(); i++) {
-                emitExpr(*node.positional[i]);
-                if (isComMarker_) lastExpr_ = resolveComValue("Double");
-                aMVc[i] = std::move(lastExpr_);
-            }
-            lastExpr_ = "{ vb6_UCInstMove(vb6_hwnd_" + infoMVc.designerCtrlName + ", "
-                      + aMVc[0] + ", " + aMVc[1] + ", " + aMVc[2] + ", " + aMVc[3]
-                      + "); (void)0; }";
-            return;
-        }
-    }
-
     // 账 (Outlook2013): **自类型过程/局部 COM 变量作链基的多级调用** —
     //   同窗体:  `RibbonBar.RedrawBar` / `RibbonBar.Controls.Add(...)` (frmMain:1421)
     //   跨窗体:  `frmMain.RibbonBar.FindTab(12000)` (frmShortcutBar:83)

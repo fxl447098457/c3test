@@ -282,35 +282,6 @@
                             if (!lastP091n.isByVal && lastP091n.type == Vb6Type::String) {
                                 valExpr = "&(BSTR){" + valExpr + "}";
                             }
-                            /* 写方向**标量**形参默认 ByRef (VB6 参数缺省 ByRef ⇒ C 形参 int16_t* 等),
-                               而右值是表达式 (函数调用/算式/字面量) 时按值递 → C2440。
-                               实测本工程: `ucGIF1.gifMinFrameDelay = Val(cboMinDelay.Text)` 发成
-                               vb6_ucGIF_prop_let_gifMinFrameDelay(inst, double), 形参是 int16_t*。
-                               同型且是纯左值时才直接取址 (保留 VB6 的写回语义), 其余一律
-                               复合字面量取址 —— 与上面 String/工程类指针槽同一模板。 */
-                            if (!lastP091n.isByVal) {
-                                const Vb6Type pt091s = lastP091n.type;
-                                const bool scalarByRef =
-                                    pt091s == Vb6Type::Integer || pt091s == Vb6Type::Long
-                                    || pt091s == Vb6Type::LongLong || pt091s == Vb6Type::Byte
-                                    || pt091s == Vb6Type::Boolean || pt091s == Vb6Type::Single
-                                    || pt091s == Vb6Type::Double || pt091s == Vb6Type::Currency
-                                    || pt091s == Vb6Type::Date || pt091s == Vb6Type::SByte
-                                    || pt091s == Vb6Type::UInteger || pt091s == Vb6Type::ULong;
-                                if (scalarByRef) {
-                                    const Vb6Type vt091s = node.value ? inferExprType(*node.value)
-                                                                      : Vb6Type::Empty;
-                                    const bool pureLValue091s = node.value
-                                        && (node.value->kind == ASTNodeKind::IdentifierExpr
-                                            || node.value->kind == ASTNodeKind::MemberAccessExpr
-                                            || node.value->kind == ASTNodeKind::WithMemberExpr);
-                                    if (!(vt091s == pt091s && pureLValue091s)) {
-                                        const std::string ct091s = mapType(pt091s);
-                                        valExpr = "&(" + ct091s + "){(" + ct091s + ")("
-                                                  + valExpr + ")}";
-                                    }
-                                }
-                            }
                         }
                         // Fix 158h: 属性 Let/Set 写方向的**入口参数** (Optional ByRef
                         // After 等前置参数) 缺失 → 生成的 prop_let_ 调用 C2198 参数太少
@@ -370,46 +341,6 @@
                         if (!vSet091n.empty()) {
                             c_.emitLine(vSet091n + ";  /* Property Let (视图直槽) */");
                         } else {
-                            // 写方向 ByRef 形参: 上面那几支只处理了 工程类指针槽/String/Variant,
-                            // 标量档 (Integer/Long/Single/… ) 一直按值递 → C2440。
-                            // 实测本工程: `ucGIF1.gifMinFrameDelay = Val(cboMinDelay.Text)`
-                            // 发成 vb6_ucGIF_prop_let_gifMinFrameDelay(inst, double), 形参 int16_t*。
-                            // 已包过 (`&(…)`) 的不再包第二层。
-                            if (propLetSym && valExpr.compare(0, 2, "&(") != 0) {
-                                std::vector<ParameterInfo> wpE474;
-                                bool gotE474 = false;
-                                if (!sourceModule.empty()) {
-                                    gotE474 = findClassMemberWriteParams(
-                                        sourceModule, maExpr.memberName,
-                                        propLetSym->kind == SymbolKind::PropertySet, wpE474);
-                                }
-                                // sourceModule 是**调用方**模块 (frmUCtest), 属性主人是 ucGIF ⇒
-                                // 那个方向答不出。改从发码函数名里取主人: vb6_<cls>_prop_let_<M>。
-                                if (!gotE474 || wpE474.empty()) {
-                                    const char* tagL474 = "_prop_let_";
-                                    size_t pL474 = funcName.find(tagL474);
-                                    if (pL474 == std::string::npos) {
-                                        tagL474 = "_prop_set_";
-                                        pL474 = funcName.find(tagL474);
-                                    }
-                                    if (pL474 != std::string::npos && funcName.rfind("vb6_", 0) == 0) {
-                                        std::string cls474 = funcName.substr(4, pL474 - 4);
-                                        gotE474 = findClassMemberWriteParams(
-                                            cls474, maExpr.memberName,
-                                            propLetSym->kind == SymbolKind::PropertySet, wpE474);
-                                    }
-                                }
-                                // sourceModule 答不出时 (UC 实例 / 跨模块别名) 用符号自己那张表 ——
-                                // 只取末参的**类型**来定打包形状, 不再按名做二次解析。
-                                if ((!gotE474 || wpE474.empty())
-                                    && !propLetSym->P().params.empty()) {
-                                    wpE474 = propLetSym->P().params;
-                                    gotE474 = true;
-                                }
-                                if (gotE474 && !wpE474.empty()) {
-                                    valExpr = packLetValueArg(wpE474.back(), node.value.get(), valExpr);
-                                }
-                            }
                             c_.emitLine(funcName + "(" + objExpr + ", " + valExpr
                                         + ");  /* Property Let */");
                         }
@@ -687,20 +618,6 @@
             return;
         }
         case WithObjKind::ClassInstance: {
-            // 账 (prjNewAniGif `With ucGIF1`): Left/Top/Width/Height 在 VB6 是 **Extender(控件)**
-            // 属性 —— .ctl 类里没有同名字段/属性, 类路径只能发成 `_vb6_with->Left` (C2039
-            // "Left 不是 vb6_cls_ucGIF 的成员")。类里答不出该成员时改落到实例窗口的 setter。
-            if (!info.designerCtrlName.empty()
-                && resolveClassMemberCall(info.className, wmExpr.memberName).empty()) {
-                std::string extW = getControlPropWriteFn(info.ctrlType, wmExpr.memberName);
-                if (!extW.empty()) {
-                    emitExpr(*node.value);
-                    std::string extV = controlPropValueExpr(extW, lastExpr_, *node.value);
-                    c_.emitLine(extW + "((void*)vb6_hwnd_" + info.designerCtrlName + ", "
-                                + extV + ");  /* With UC Extender prop */");
-                    return;
-                }
-            }
             // Fix 011r-1: 优先用 info.className 精确查找该类的 Property Let/Set
             // (原 symTab_.lookupModule 会捡错模块, 导致 Pattern A2 在 With 块赋值时出错)
             // Fix 011r-1b: VB6 case-insensitive — 类名匹配与函数名输出均用规范类名 (来自符号表)
