@@ -585,12 +585,20 @@ static LRESULT CALLBACK vb6_GroupBoxSubclassProc(HWND hwnd, UINT msg, WPARAM wp,
                 TEXTMETRICW tm; ZeroMemory(&tm, sizeof(tm));
                 GetTextMetricsW(hdc, &tm);
                 int th = tm.tmHeight + 2;
-                // 标题起点: 经典 groupbox 标题缩进 ~7px (含 3px 蚀刻间距)。
-                int tx = 7;
+                // 标题起点: 经典 groupbox 标题缩进 ~8px (含 3px 蚀刻间距)。
+                //
+                // 账 (LVStyles Frame1 "Extended ListView Styles" 末尾看起来多一个冒号):
+                // 那不是字面冒号 —— 把 Caption 换成 "IIIII" 只剩五根竖杠, 换回原串又"冒出"
+                // 两点。真相是**两遍绘制没对齐**: BUTTON 自己画在 x=8, 本覆盖层画在 x=7,
+                // 于是原绘文字的最右 1px 落在擦除带 (`tx+sz.cx+1`) 之外; 末字形是 's' 时
+                // 那 1px 竖切正好只余上下两段弧 ⇒ 看着就是个冒号。
+                // 所以 tx 必须取**系统组框的同一格** (8), 两遍绘制才逐像素重合;
+                // 擦除右界再 +3 吃掉末端抗锯齿与标题白底的尾巴。
+                int tx = 8;
                 SIZE sz = {0, 0};
                 GetTextExtentPoint32W(hdc, cap, lstrlenW(cap), &sz);
                 COLORREF bg = vb6_GBoxTitleBg(hwnd);
-                RECT trc = { tx - 1, 0, tx + sz.cx + 1, th };
+                RECT trc = { tx - 2, 0, tx + sz.cx + 3, th };
                 // 先擦掉白色底 + 白底上画的文字, 再以灰底重画文字。
                 HBRUSH br = CreateSolidBrush(bg);
                 if (br) { FillRect(hdc, &trc, br); DeleteObject(br); }
