@@ -77,7 +77,8 @@ Private Const LVS_EX_GRIDLINES As Long = 1
 Private Const LVS_EX_FULLROWSELECT As Long = 32
 Private Const BM_CLICK As Long = 245
 
-' 账 #612 回归: 枚举成员引用模块级 Const 时必须真求值, 不能回落成声明序号
+' Regression for enum members referencing module-level Consts: they must be
+' evaluated, not fall back to the declaration ordinal.
 Private Const LSX_FULL As Long = &H20
 Private Const LSX_TRACK As Long = &H8
 Private Enum LvFlag
@@ -91,7 +92,7 @@ Private Function GetEx() As Long
 End Function
 
 Private Function ToggleEx(lv As ListView, ByVal NewStyle As Long, ByVal NewVal As Boolean) As Boolean
-    ' 与 MListViewEx.bas 的 LVSetStyleEx 逐句对等: 对象形参取 .hWnd + GET/Xor/SET
+    ' Same shape as LVSetStyleEx: object parameter -> .hWnd -> GET/Or/Xor/SET
     Dim nStyle As Long
     nStyle = SendMessage(lv.hWnd, LVM_GETEXTENDEDLISTVIEWSTYLE, 0&, ByVal 0&)
     If NewVal Then
@@ -104,9 +105,9 @@ End Function
 
 Private Sub Form_Load()
     Debug.Print "STYLE0=" & GetEx()
-    ' 期望 32/8/40; 回落成序号时会是 0/1/2
+    ' Expect 32/8/40; ordinal fallback would print 0/1/1
     Debug.Print "ENUM=" & LvFlag.FlagFull & "/" & LvFlag.FlagTrack & "/" & LvFlag.FlagBoth
-    ' 跨模块 (.bas 定义 / .frm 引用) 同口径
+    ' Cross-module: defined in LvMod.bas, referenced here
     Debug.Print "ENUM.X=" & LvFlag2.Flag2Full & "/" & LvFlag2.Flag2Track & "/" & LvFlag2.Flag2Both
 End Sub
 
@@ -127,7 +128,7 @@ Private Sub Timer1_Timer()
     step = step + 1
     Select Case step
     Case 1
-        ' 原生通路: BM_CLICK = 鼠标点击后按钮给父窗发的 BN_CLICKED (与 SetCheckValue 的合成通告不同)
+        ' Native path: BM_CLICK is what a real mouse click ends up sending
         SendMessage Check1(0).hWnd, BM_CLICK, 0&, ByVal 0&
         Debug.Print "AFTER_BMCLICK chk=" & Check1(0).Value
         Check1(0).Value = 1

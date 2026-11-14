@@ -3773,6 +3773,12 @@ function Test-Vbp {
     if ($LASTEXITCODE -ne 0) {
         $script:fail++
         Write-Host "FAIL (compile)" -ForegroundColor Red
+        # 账 #612: 编译失败时把编译器自己的最后几行贴出来 —— 否则 CI 上只看得到
+        # 「FAIL (compile)」一个词，本地又复现不了（本机编得过、CI 红），无从下手。
+        # 只加日志，不改判据。
+        if ($compileResult) {
+            $compileResult | Select-Object -Last 8 | ForEach-Object { Write-Host ("    " + $_) }
+        }
         if ($Verbose) { Write-Host ($compileResult | Out-String) }
         return
     }
