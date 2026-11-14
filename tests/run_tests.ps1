@@ -7395,6 +7395,14 @@ if ($Category -in @("all", "run", "vbp")) {
                     "BF-in=1/1", "BF-intx=1/1", "BF-both=Y", "BF-noclick=Y", "BF-each=Y")
     Test-Vbp "btnfocus" "$Tests\btnfocus\BfApp.vbp" $bfNeedles
     Test-Vbp "btnfocus_x86" "$Tests\btnfocus\BfApp.vbp" $bfNeedles -Arch "x86"
+    # 账 #612: 枚举成员引用**模块级 Const** 时必须真求值。回落成声明序号时
+    # 这里会是 ENUM=0/1/1, 连带 LVStyles 的 FullRowSelect(32) 被当成 GridLines(1)
+    # → 勾 HighlightRow 后整行选中永不生效。
+    $lvFrameNeedles = @("LVFRAME-DONE", "STYLE0=0", "ENUM=32/8/40", "CB=0",
+                        "AFTER_BMCLICK chk=1", "STYLE_B=1", "STYLE_C=32",
+                        "WRAP_ON=True", "WRAP_A=33", "WRAP_B=32")
+    Test-Vbp "lvframecb" "$Tests\lvframecb\LvFrame.vbp" $lvFrameNeedles
+    Test-Vbp "lvframecb_x86" "$Tests\lvframecb\LvFrame.vbp" $lvFrameNeedles -Arch "x86"
     Test-EmitcShape "bf_emitc_bothroads" @("$Tests\btnfocus\BfApp.vbp") @(
         'if (id == 106 && code == 6) { extern void vb6_cmdA_GotFocus();',
         'if (id == 200 && code == 6) { extern void vb6_cmdIn_GotFocus();',
