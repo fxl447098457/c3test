@@ -131,6 +131,18 @@ ExprPtr Parser::parsePostfix(ExprPtr expr) {
     }
 
             case TokenKind::LeftParen: {
+                // 账 (prjNewAniGif ppGIFpreview): `.Move (a) \ 2 + b, c, d` ——
+                // 语句级方法的实参可以是**带分组括号的表达式**, 这枚 `(` 不是整张实参表。
+                // 原先在这里当"完整调用"吃掉 ⇒ `.Move (a)` 成一个调用、`\ 2 + b` 变二元式、
+                // 剩下三个实参再被当成对它的二次调用 ⇒ C2143/C2059。
+                // 这两个语言级方法一律交给语句侧无括号实参解析 (逗号分隔, 它自己会吃 `(...)`)。
+                if (expr->kind == ASTNodeKind::WithMemberExpr) {
+                    const std::string& memLp = static_cast<WithMemberExpr&>(*expr).memberName;
+                    std::string memLowerLp = toLower(memLp);
+                    if (memLowerLp == "move" || memLowerLp == "zorder") {
+                        return expr;
+                    }
+                }
                 // VB6 不区分数组索引和函数调用 → IndexOrCallExpr
                 auto loc = currentLoc();
                 advance(); // consume '('

@@ -34,6 +34,11 @@ intptr_t __stdcall vb6_di_GetStockObject(intptr_t a) {
 intptr_t __stdcall vb6_di_SelectObject(intptr_t a, intptr_t b) {
     return (intptr_t)(uintptr_t)SelectObject((HDC)(uintptr_t)a, (HGDIOBJ)(uintptr_t)b);
 }
+// gdi32: GetMapMode —— 账 (prjNewAniGif modTileBlt: SetMapMode lHDCMem, GetMapMode(lHDCdest))
+// 不在生成器目录里, 手写补上; 调用约定必须是 __stdcall (VB6 Declare 默认 StdCall)。
+intptr_t __stdcall vb6_di_GetMapMode(intptr_t a) {
+    return (intptr_t)(uintptr_t)GetMapMode((HDC)(uintptr_t)a);
+}
 intptr_t __stdcall vb6_di_DeleteObject(intptr_t a) {
     return (intptr_t)DeleteObject((HGDIOBJ)(uintptr_t)a);
 }
