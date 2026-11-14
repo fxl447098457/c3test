@@ -617,14 +617,10 @@ static LRESULT CALLBACK vb6_GroupBoxSubclassProc(HWND hwnd, UINT msg, WPARAM wp,
         }
         return 0;
     }
-    // 控件事件上转: Frame 是子控件的**父窗口**, BUTTON/EDIT 的 BN_CLICKED 按 Win32
-    // 规矩只会送到父窗口 (这里就是 Frame), 而 VB6 语义里这些事件仍归窗体
-    // (`Check1_Click(Index)` 这类控件数组事件)。不转就是"点了没反应":
-    // LVStyles 的 Check1(0)=HighlightRow 勾选后 FullRowSelect 没生效、GridLines 同样失效。
-    if (msg == WM_COMMAND || msg == WM_NOTIFY) {
-        HWND parent = GetParent(hwnd);
-        if (parent) return SendMessageW(parent, msg, wp, lp);
-    }
+    // 注: 这里**不要**把子控件的 WM_COMMAND 上转窗体。曾试过转一道来救
+    // LVStyles 的 Check1_Click, 实测会与既有的窗体派发路径重叠 → 事件发两次
+    // (btnfocus: BF-in=2/2、BF-both=N)。真因是 ListView 槽参数取 hWnd 未解引用
+    // (见 cgen_expr_member_form_builtin.inc), 与本处无关。
     return orig ? CallWindowProcW(orig, hwnd, msg, wp, lp)
                 : DefWindowProcW(hwnd, msg, wp, lp);
 }
