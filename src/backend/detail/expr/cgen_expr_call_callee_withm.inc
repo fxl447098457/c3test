@@ -2,6 +2,29 @@
 // 由 src/backend/expr/cgen_expr_call.cpp 拆出（2026-09-17），在函数体内被 #include，非独立编译单元。
 // 内容 = 原文件第 1010~1167 行，逐行未改。
 
+    // ---- 账 (prjNewAniGif): `With <工程内 UserControl 实例> : .Move l,t,w,h` ——
+    // .ctl 类自己没有 Move ⇒ 它是**容器 Extender** 方法。此处直接拼成一次完整调用
+    // (四个位置参数自己发, 不走 callee/pendingChainObj 协议 —— 那条路会把首参
+    // 当成 this 拼进去)。缺省参数按 0 处理。
+    if (node.callee && node.callee->kind == ASTNodeKind::WithMemberExpr
+        && Symbol::toLower(static_cast<WithMemberExpr&>(*node.callee).memberName) == "move"
+        && node.named.empty() && !node.positional.empty() && node.positional.size() <= 4
+        && !withObjectVars_.empty() && !withObjectInfoStack_.empty()) {
+        const auto& infoMw = withObjectInfoStack_.back();
+        if (infoMw.kind == WithObjKind::ClassInstance && !infoMw.designerCtrlName.empty()) {
+            std::string amw[4] = { "0", "0", "0", "0" };
+            for (size_t i = 0; i < node.positional.size(); i++) {
+                emitExpr(*node.positional[i]);
+                if (isComMarker_) lastExpr_ = resolveComValue("Double");
+                amw[i] = std::move(lastExpr_);
+            }
+            lastExpr_ = "{ vb6_UCInstMove(vb6_hwnd_" + infoMw.designerCtrlName + ", "
+                      + amw[0] + ", " + amw[1] + ", " + amw[2] + ", " + amw[3]
+                      + "); (void)0; }";
+            return;
+        }
+    }
+
     // ---- Fix 158c: WithMemberExpr callee 带 **空括号** — With 块 UDT 动态/固定
     // 数组成员整体引用 .member() → 裸数组表达式 tempVar->member (不带调用括号).
     // 与下方 Fix 060 Pattern B 相同判定, 但不消费 positional (空).

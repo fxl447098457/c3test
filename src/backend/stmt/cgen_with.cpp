@@ -236,6 +236,10 @@ void CCodeGen::visit(WithStmt& node) {
                         withInfo.kind = WithObjKind::ClassInstance;
                         withInfo.className = cIdent(itUCw->second);
                         withInfo.ctrlOrigName = withInfo.className;
+                        // 账 (prjNewAniGif `With ucGIF1`): 类实例档里查不到的
+                        // Left/Top/Width/Height/Move 是 VB6 的 **Extender(控件)** 属性,
+                        // 落在实例窗口上。记下控件名, 供写侧/调用侧回退到 vb6_hwnd_<控件>。
+                        withInfo.designerCtrlName = cIdent(objOrigName);
                         tempType = "vb6_cls_" + withInfo.className + "*";
                     }
                     // ucSlider (Proyecto1.vbp): `.pag` 设计期放的工程内 UserControl 也走上面
