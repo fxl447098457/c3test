@@ -265,7 +265,15 @@ std::string CCodeGen::wrapToBSTR(const std::string& expr, Expr& node) {
 std::string CCodeGen::controlPropValueExpr(const std::string& writeFn,
                                            const std::string& valExpr, Expr& valueNode) {
     if (writeFn.find("SetControlText") != std::string::npos
-        || writeFn.find("SetMenuCaption") != std::string::npos) {
+        || writeFn.find("SetMenuCaption") != std::string::npos
+        // 账 (LVStyles FLVStyles.frm Option1_Click): `Frame1.Tag = Index` 的 RHS 是
+        // **Integer**，Tag 在 VB6 里是 String ⇒ 必须 CStr 后传 BSTR。此前 Tag/
+        // ToolTipText 不在本表内，值原样当指针透传，`vb6_SetControlTag(hwnd, 2)`
+        // 里 SysAllocString((BSTR)2) 直接解引用地址 2 → 访问违例，进程无提示退出
+        // (点「Collection Lookup Sort」/「IListItem Hack」两个单选即复现)。
+        // 两支 setter 的第二形参都是 void* bstrText/bstrTag，语义同为 BSTR。
+        || writeFn.find("SetControlTag") != std::string::npos
+        || writeFn.find("SetToolTipText") != std::string::npos) {
         return wrapToBSTR(valExpr, valueNode);
     }
     // Fix <vbeclipse> 2026-10-06: Picture 属性写遇到 Variant 载体实参 (如
