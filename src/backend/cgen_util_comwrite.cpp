@@ -642,8 +642,10 @@ std::string CCodeGen::packLetValueArg(const ParameterInfo& lastP, Expr* valueExp
                 case Vb6Type::String:
                     return "vb6_VariantToString(" + varVal091x + ")";
                 case Vb6Type::Integer:
-                case Vb6Type::Boolean:
                     return "(int16_t)vb6_VariantToLong(" + varVal091x + ")";
+                case Vb6Type::Boolean:
+                    // VB6 的 Boolean 只有 -1/0; 共享 Integer 那一档会把 1 原样存下。
+                    return "(int16_t)vb6_CBool((double)vb6_VariantToLong(" + varVal091x + "))";
                 case Vb6Type::Long:
                     return "vb6_VariantToLong(" + varVal091x + ")";
                 case Vb6Type::Byte:
@@ -665,8 +667,11 @@ std::string CCodeGen::packLetValueArg(const ParameterInfo& lastP, Expr* valueExp
                 }
                 return "(&(BSTR){(" + val + ")})";
             case Vb6Type::Integer:
-            case Vb6Type::Boolean:
                 return "(&(int16_t){(" + val + ")})";
+            case Vb6Type::Boolean:
+                // VB6 的 Boolean 真值恒为 -1 (算术里直接参与运算, 例: `Seek + 2 + .isTransparent`),
+                // 与 Integer 共用一格会把 1 原样递进去 ⇒ 位置多推 2 字节。
+                return "(&(int16_t){(vb6_CBool((double)(" + val + "))) })";
             case Vb6Type::Long:
                 return "(&(int32_t){(" + val + ")})";
             case Vb6Type::Byte:

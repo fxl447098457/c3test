@@ -282,6 +282,22 @@
                             if (!lastP091n.isByVal && lastP091n.type == Vb6Type::String) {
                                 valExpr = "&(BSTR){" + valExpr + "}";
                             }
+                            /* 写方向**数值形参默认 ByRef** (VB6 参数缺省 ByRef ⇒ C 形参
+                               int16_t* / int32_t* / double*), 而右值常是 `Val(...)` 这类
+                               另一档的表达式 —— 裸传即 C2440。与上面 BSTR 同模板: 复合
+                               字面量取址, 先按形参档收窄。
+                               实测 prjNewAniGif frmUCtest.frm:403
+                                 `ucGIF1.gifMinFrameDelay = Val(cboMinDelay.Text)`
+                               (Property Let gifMinFrameDelay(newDelay As Integer))
+                               ⇒ C2440 double → int16_t*。 */
+                            if (!lastP091n.isByVal && !lastP091n.isParamArray) {
+                                const std::string ctW = mapType(lastP091n.type);
+                                if (ctW == "int8_t" || ctW == "uint8_t" || ctW == "int16_t"
+                                    || ctW == "uint16_t" || ctW == "int32_t" || ctW == "uint32_t"
+                                    || ctW == "int64_t" || ctW == "float" || ctW == "double") {
+                                    valExpr = "&(" + ctW + "){(" + ctW + ")(" + valExpr + ")}";
+                                }
+                            }
                         }
                         // Fix 158h: 属性 Let/Set 写方向的**入口参数** (Optional ByRef
                         // After 等前置参数) 缺失 → 生成的 prop_let_ 调用 C2198 参数太少
@@ -618,6 +634,24 @@
             return;
         }
         case WithObjKind::ClassInstance: {
+            // 账 (prjNewAniGif frmUCtest): 工程内 **UserControl 实例**作 With 目标时,
+            // `.Left/.Top/.Width/.Height/.Visible/.Enabled` 是**容器 Extender** 成员
+            // (由窗体/容器提供), `.ctl` 类自己没定义。落回类属性那一支就发
+            // `vb6_ucGIF_prop_let_Width(...)` —— 那函数只有声明没有定义 (LNK2019),
+            // 整棵工程连不出 exe。按控件属性写那一族落到 vb6_SetControl*(hwnd, v)。
+            if (!info.designerCtrlName.empty()
+                && classFieldKind(info.className, wmExpr.memberName) == Vb6Type::Unknown
+                && resolveClassMemberCall(info.className, wmExpr.memberName).empty()) {
+                const std::string wfnExt = getControlPropWriteFn(info.ctrlType,
+                                                                 wmExpr.memberName);
+                if (!wfnExt.empty()) {
+                    emitExpr(*node.value);
+                    c_.emitLine(wfnExt + "(vb6_hwnd_" + info.designerCtrlName + ", "
+                                + controlPropValueExpr(wfnExt, lastExpr_, *node.value)
+                                + ");  /* With UC Extender write */");
+                    return;
+                }
+            }
             // Fix 011r-1: 优先用 info.className 精确查找该类的 Property Let/Set
             // (原 symTab_.lookupModule 会捡错模块, 导致 Pattern A2 在 With 块赋值时出错)
             // Fix 011r-1b: VB6 case-insensitive — 类名匹配与函数名输出均用规范类名 (来自符号表)

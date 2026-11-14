@@ -1455,6 +1455,24 @@ std::string CCodeGen::fixedStrLenOfExpr(const ASTNode& expr,
         if (mit == uit->second.end()) return "";
         return mit->second;
     }
+    // ③ With 块成员: `.f` (WithMemberExpr) —— 对象是 With 临时指针, 其类型由
+    //    knownUdtVars_ 按临时名查到 (与 visit(WithMemberExpr&) 的 Unknown 档同一把尺),
+    //    再查该 UDT 的定长字段表。
+    //    不认这一档的后果 (prjNewAniGif 实测): `With tmpProps: .Version = ReadGifFile(6, True)`
+    //    发成 vb6_BSTR_AssignMove(&with->Version, ...) —— 把 BSTR 指针写进 6 字节内联数组,
+    //    紧接着的 `LCase(.Version) <> "gif89a"` 又把 char[6] 当 BSTR 读 ⇒ 版本校验永远失败,
+    //    GoTo ExitReadRoutine ⇒ gifFrameCount=0 (GIF 不显示)。
+    if (expr.kind == ASTNodeKind::WithMemberExpr) {
+        if (withObjectVars_.empty()) return "";
+        auto& wmFs = static_cast<const WithMemberExpr&>(expr);
+        auto vit = knownUdtVars_.find(Symbol::toLower(withObjectVars_.back()));
+        if (vit == knownUdtVars_.end()) return "";
+        auto uit = udtFixedStrFieldLen_.find(vit->second);
+        if (uit == udtFixedStrFieldLen_.end()) return "";
+        auto mit = uit->second.find(Symbol::toLower(wmFs.memberName));
+        if (mit == uit->second.end()) return "";
+        return mit->second;
+    }
     return "";
 }
 
