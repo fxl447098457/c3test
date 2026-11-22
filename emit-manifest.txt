@@ -1,4 +1,4 @@
-# c3-exe sha256=e9fb4e220e08a914fb3edb11ffcfbe8da4daac66fb1e8f818334a0d90e9f85ae size=9249280
+# c3-exe sha256=94058dc0115e607191f53093224347ecdc7f0372fb6494be227deaef32c5bb8d size=9249280
 # toolset pe-lnk=14.52 vs=18.12.12405.243 msvc-installed=14.29.30133+14.44.35207+14.52.37025 runner=runnervmbpeip
 # arch=x64 inputs=763
 # columns: sha256=<normalized全文> ascii256=<仅ASCII行> rc=<退出码> bytes=<归一化字节> <relpath>
@@ -765,4 +765,4 @@ sha256=2cd2c8f94d315a94310b0b6b0e948560ed97d7e2a2aa2b3bebea51e0e002dcf9 ascii256
 sha256=f6cd17c7a4b003f15c1e2d5e245d32bdde76a0341e8ab4ea344c7cc04926992d ascii256=ac67859b56bd32d8e090b6833f479d9418d67e297a0ed002f05bfee17d4589eb rc=0 bytes=53786 tests/ve_list/VeList.vbp
 sha256=86e957e43807dfdeca8ce21f9c90f3f9f1a7b72015fae2cff577712b23d0ef6f ascii256=e2f3ff13194ccdbbe96c0fa4aa639d2e06865253dba843ff725d350c5032e5c6 rc=0 bytes=15781 tests/ve_list/VeListMain.bas
 sha256=329676fc97971bb75383a88b85076ba0f266b500e579a1b8eb8076b93836f5b7 ascii256=0167804389a4d896c511794983807068af385c23f43cdfbf1b14291c74b5eaf7 rc=0 bytes=54004 tests/ve_units/Units.vbp
-# expectation-check=FAIL rc=1
+# expectation-check=PASS
